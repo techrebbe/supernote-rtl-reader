@@ -8,7 +8,10 @@ import com.facebook.react.uimanager.ViewManager
 class PdfRendererPackage : ReactPackage {
     override fun createNativeModules(
         reactContext: ReactApplicationContext,
-    ): List<NativeModule> = listOf(PdfRendererModule(reactContext))
+    ): List<NativeModule> = listOf(
+        PdfRendererModule(reactContext),
+        ReaderPreferencesModule(reactContext),
+    )
 
     override fun createViewManagers(
         reactContext: ReactApplicationContext,

@@ -16,11 +16,12 @@ import {
 } from 'react-native';
 import {PluginCommAPI, PluginDocAPI, PluginManager} from 'sn-plugin-lib';
 
-const {PdfRendererModule} = NativeModules;
+const {PdfRendererModule, ReaderPreferencesModule} = NativeModules;
 const SWIPE_THRESHOLD = 56;
 const TAP_SLOP = 18;
 const EDGE_ZONE = 0.28;
 const CACHE_LIMIT = 8;
+const PREFERENCES_SAVE_DELAY_MS = 350;
 
 async function requireResult(promise, label) {
   const response = await promise;
@@ -115,11 +116,47 @@ function viewModeLabel(mode) {
   return 'Auto';
 }
 
+function decodePreferences(raw, context) {
+  let saved = null;
+  if (typeof raw === 'string' && raw.length > 0) {
+    try {
+      saved = JSON.parse(raw);
+    } catch (error) {
+      console.warn('RTL_READER_PREFS_PARSE_FAILED', error);
+    }
+  }
+
+  const direction = saved?.direction === 'ltr' ? 'ltr' : 'rtl';
+  const viewMode = ['auto', 'single', 'spread'].includes(saved?.viewMode)
+    ? saved.viewMode
+    : 'auto';
+  const coverSeparate = saved?.coverSeparate === true;
+
+  const hasSavedPage = Number.isInteger(saved?.lastPageIndex);
+  const hasPriorNativeAnchor = Number.isInteger(saved?.nativePageIndexAtOpen);
+  const nativePositionChanged =
+    hasPriorNativeAnchor && saved.nativePageIndexAtOpen !== context.pageIndex;
+
+  const useSavedPage = hasSavedPage && !nativePositionChanged;
+  const pageIndex = useSavedPage
+    ? clampPage(saved.lastPageIndex, context.totalPages)
+    : clampPage(context.pageIndex, context.totalPages);
+
+  return {
+    direction,
+    viewMode,
+    coverSeparate,
+    pageIndex,
+    source: useSavedPage ? 'saved' : nativePositionChanged ? 'native-changed' : 'native',
+  };
+}
+
 export default function App() {
   const window = useWindowDimensions();
   const isLandscape = window.width > window.height;
 
   const [documentContext, setDocumentContext] = useState(null);
+  const [preferencesReady, setPreferencesReady] = useState(false);
   const [pageIndex, setPageIndex] = useState(null);
   const [totalPages, setTotalPages] = useState(null);
   const [display, setDisplay] = useState({kind: 'single', single: null});
@@ -140,17 +177,37 @@ export default function App() {
   const pageAreaWidthRef = useRef(Math.max(1, window.width));
   const pageAreaLeftRef = useRef(0);
   const directionRef = useRef(direction);
+  const viewModeRef = useRef(viewMode);
+  const pageIndexRef = useRef(pageIndex);
   const totalPagesRef = useRef(totalPages);
   const effectiveModeRef = useRef(effectiveMode);
   const coverSeparateRef = useRef(coverSeparate);
+  const filePathRef = useRef(null);
+  const nativePageIndexAtOpenRef = useRef(null);
+  const latestPreferencesRef = useRef(null);
+  const preferencesSaveTimerRef = useRef(null);
   const cacheRef = useRef(new Map());
   const prefetchingRef = useRef(new Set());
 
   directionRef.current = direction;
+  viewModeRef.current = viewMode;
+  pageIndexRef.current = pageIndex;
   totalPagesRef.current = totalPages;
   effectiveModeRef.current = effectiveMode;
   coverSeparateRef.current = coverSeparate;
   pageAreaWidthRef.current = Math.max(1, window.width);
+
+  if (preferencesReady && documentContext && Number.isInteger(pageIndex)) {
+    latestPreferencesRef.current = {
+      version: 1,
+      direction,
+      viewMode,
+      coverSeparate,
+      lastPageIndex: pageIndex,
+      nativePageIndexAtOpen: nativePageIndexAtOpenRef.current,
+      updatedAt: Date.now(),
+    };
+  }
 
   const putCache = (key, value) => {
     const cache = cacheRef.current;
@@ -254,6 +311,16 @@ export default function App() {
     }
   };
 
+  const savePreferences = async (reason, payload = latestPreferencesRef.current) => {
+    const filePath = filePathRef.current;
+    if (!filePath || !payload || !ReaderPreferencesModule?.save) return;
+
+    await ReaderPreferencesModule.save(filePath, JSON.stringify(payload));
+    console.log(
+      `RTL_READER_PREFS_SAVED reason=${reason} page=${payload.lastPageIndex + 1} direction=${payload.direction} view=${payload.viewMode} cover=${payload.coverSeparate}`,
+    );
+  };
+
   useEffect(() => {
     mountedRef.current = true;
 
@@ -262,18 +329,40 @@ export default function App() {
         if (!PdfRendererModule?.renderPage) {
           throw new Error('Native PDF renderer is not registered.');
         }
+        if (!ReaderPreferencesModule?.load || !ReaderPreferencesModule?.save) {
+          throw new Error('Native reader preferences storage is not registered.');
+        }
 
         const context = await getDocumentContext();
         if (!context.filePath?.toLowerCase().endsWith('.pdf')) {
-          throw new Error('RTL Reader v0.0.5 currently supports PDF documents only.');
+          throw new Error('RTL Reader v0.0.6 currently supports PDF documents only.');
         }
 
+        const rawPreferences = await ReaderPreferencesModule.load(context.filePath);
+        const restored = decodePreferences(rawPreferences, context);
+
         if (!mountedRef.current) return;
+
+        filePathRef.current = context.filePath;
+        nativePageIndexAtOpenRef.current = context.pageIndex;
+        directionRef.current = restored.direction;
+        viewModeRef.current = restored.viewMode;
+        coverSeparateRef.current = restored.coverSeparate;
+        pageIndexRef.current = restored.pageIndex;
+
         setDocumentContext(context);
-        setPageIndex(context.pageIndex);
+        setDirection(restored.direction);
+        setViewMode(restored.viewMode);
+        setCoverSeparate(restored.coverSeparate);
+        setPageIndex(restored.pageIndex);
         setTotalPages(context.totalPages);
+        setPreferencesReady(true);
+
         console.log(
-          `RTL_READER_OPENED file=${context.filePath} page=${context.pageIndex + 1}`,
+          `RTL_READER_PREFS_LOADED source=${restored.source} page=${restored.pageIndex + 1} direction=${restored.direction} view=${restored.viewMode} cover=${restored.coverSeparate}`,
+        );
+        console.log(
+          `RTL_READER_OPENED file=${context.filePath} nativePage=${context.pageIndex + 1} readerPage=${restored.pageIndex + 1}`,
         );
       } catch (error) {
         console.error('RTL_READER_INIT_FAILED', error);
@@ -290,11 +379,55 @@ export default function App() {
       renderTokenRef.current += 1;
       cacheRef.current.clear();
       prefetchingRef.current.clear();
+      if (preferencesSaveTimerRef.current) {
+        clearTimeout(preferencesSaveTimerRef.current);
+      }
+      const payload = latestPreferencesRef.current;
+      if (filePathRef.current && payload && ReaderPreferencesModule?.save) {
+        ReaderPreferencesModule.save(
+          filePathRef.current,
+          JSON.stringify(payload),
+        ).catch(error => console.warn('RTL_READER_PREFS_UNMOUNT_SAVE_FAILED', error));
+      }
     };
   }, []);
 
   useEffect(() => {
-    if (!documentContext || !Number.isInteger(pageIndex)) return;
+    if (
+      !preferencesReady ||
+      !documentContext ||
+      !Number.isInteger(pageIndex) ||
+      !latestPreferencesRef.current
+    ) {
+      return undefined;
+    }
+
+    if (preferencesSaveTimerRef.current) {
+      clearTimeout(preferencesSaveTimerRef.current);
+    }
+    preferencesSaveTimerRef.current = setTimeout(() => {
+      savePreferences('debounced').catch(error =>
+        console.warn('RTL_READER_PREFS_SAVE_FAILED', error),
+      );
+    }, PREFERENCES_SAVE_DELAY_MS);
+
+    return () => {
+      if (preferencesSaveTimerRef.current) {
+        clearTimeout(preferencesSaveTimerRef.current);
+        preferencesSaveTimerRef.current = null;
+      }
+    };
+  }, [
+    preferencesReady,
+    documentContext,
+    pageIndex,
+    direction,
+    viewMode,
+    coverSeparate,
+  ]);
+
+  useEffect(() => {
+    if (!preferencesReady || !documentContext || !Number.isInteger(pageIndex)) return;
 
     const token = ++renderTokenRef.current;
 
@@ -401,6 +534,7 @@ export default function App() {
 
     renderCurrentView();
   }, [
+    preferencesReady,
     documentContext,
     pageIndex,
     effectiveMode,
@@ -409,7 +543,18 @@ export default function App() {
     window.width,
   ]);
 
-  const close = () => {
+  const close = async () => {
+    if (preferencesSaveTimerRef.current) {
+      clearTimeout(preferencesSaveTimerRef.current);
+      preferencesSaveTimerRef.current = null;
+    }
+
+    try {
+      await savePreferences('close');
+    } catch (error) {
+      console.warn('RTL_READER_PREFS_CLOSE_SAVE_FAILED', error);
+    }
+
     PluginManager.closePluginView().catch(error =>
       console.error('RTL_READER_CLOSE_FAILED', error),
     );
@@ -420,6 +565,7 @@ export default function App() {
       if (!Number.isInteger(current)) return current;
       const next = clampPage(current + delta, totalPagesRef.current);
       if (next !== current) {
+        pageIndexRef.current = next;
         console.log(
           `RTL_READER_NAV from=${current + 1} to=${next + 1} direction=${directionRef.current} mode=${effectiveModeRef.current}`,
         );
@@ -500,6 +646,7 @@ export default function App() {
   const toggleViewMode = () => {
     setViewMode(current => {
       const next = cycleViewMode(current);
+      viewModeRef.current = next;
       console.log(`RTL_READER_VIEW_MODE ${next}`);
       return next;
     });
@@ -528,6 +675,7 @@ export default function App() {
     const requested = Number.parseInt(jumpText, 10);
     if (!Number.isFinite(requested)) return;
     const target = clampPage(requested - 1, totalPagesRef.current);
+    pageIndexRef.current = target;
     console.log(`RTL_READER_JUMP requested=${requested} target=${target + 1}`);
     setPageIndex(target);
     Keyboard.dismiss();

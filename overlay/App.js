@@ -335,7 +335,7 @@ export default function App() {
 
         const context = await getDocumentContext();
         if (!context.filePath?.toLowerCase().endsWith('.pdf')) {
-          throw new Error('RTL Reader v0.0.6 currently supports PDF documents only.');
+          throw new Error('RTL Reader v0.0.9 currently supports PDF documents only.');
         }
 
         const rawPreferences = await ReaderPreferencesModule.load(context.filePath);

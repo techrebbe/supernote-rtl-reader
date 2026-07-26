@@ -798,15 +798,23 @@ export default function App() {
           </View>
 
           <View style={styles.footer}>
-            <Pressable onPress={previousLogicalPage} style={styles.navButton}>
-              <Text style={styles.navButtonText}>Prev</Text>
+            <Pressable
+              onPress={direction === 'rtl' ? nextLogicalPage : previousLogicalPage}
+              style={styles.navButton}>
+              <Text style={styles.navButtonText}>
+                {direction === 'rtl' ? 'Next' : 'Prev'}
+              </Text>
             </Pressable>
             <Pressable onPress={openJump} style={styles.pageButton}>
               <Text style={styles.pageLabel}>{footerLabel}</Text>
               <Text style={styles.pageHint}>Tap to jump</Text>
             </Pressable>
-            <Pressable onPress={nextLogicalPage} style={styles.navButton}>
-              <Text style={styles.navButtonText}>Next</Text>
+            <Pressable
+              onPress={direction === 'rtl' ? previousLogicalPage : nextLogicalPage}
+              style={styles.navButton}>
+              <Text style={styles.navButtonText}>
+                {direction === 'rtl' ? 'Prev' : 'Next'}
+              </Text>
             </Pressable>
           </View>
         </>

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the RTL Reader native PdfRenderer bridge into a generated RN template."""
+"""Install RTL Reader native bridges into a generated React Native template."""
 
 from __future__ import annotations
 
@@ -36,6 +36,7 @@ def main() -> None:
 
     for source_name, output_name in (
         ("PdfRendererModule.kt.template", "PdfRendererModule.kt"),
+        ("ReaderPreferencesModule.kt.template", "ReaderPreferencesModule.kt"),
         ("PdfRendererPackage.kt.template", "PdfRendererPackage.kt"),
     ):
         source = repo_root / "native" / source_name
@@ -63,7 +64,7 @@ def main() -> None:
         )
         main_application.write_text(text, encoding="utf-8")
 
-    print(f"Installed PdfRendererModule in Android package {package_name}")
+    print(f"Installed PdfRendererModule + ReaderPreferencesModule in Android package {package_name}")
     print(f"Patched {main_application}")
 
 

@@ -55,6 +55,7 @@ The current build intentionally does not yet synchronize the new page position b
 6. Switch to LTR and verify the physical swipe/tap directions reverse.
 7. Tap the page counter and jump to a known page.
 8. Tap the center of the page and verify the controls hide/show.
+9. Confirm `-` and `+` always decrement/increment the PDF page number, independent of RTL/LTR.
 
 Once this passes, the next milestone is landscape two-page spreads plus **Treat Cover Page Separately**.
 

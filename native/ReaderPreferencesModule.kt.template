@@ -1,10 +1,20 @@
 package __PACKAGE__
 
 import android.content.Context
+import android.net.Uri
+import android.system.Os
+import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.ObjectInputStream
+import java.io.ObjectOutputStream
 
 class ReaderPreferencesModule(
     reactContext: ReactApplicationContext,
@@ -12,11 +22,22 @@ class ReaderPreferencesModule(
 
     companion object {
         private const val STORE_NAME = "supernote_rtl_reader_preferences"
+        private const val DOCUMENT_PACKAGE = "com.supernote.document"
+        private const val DOCUMENT_COMPONENT =
+            "com.supernote.document/.document.DocumentActivity"
+
+        private val DOCUMENT_CACHE_ROOTS = arrayOf(
+            "/data/data/com.supernote.document/document_internal_cache",
+            "/data/data/com.supernote.document/document_external_cache",
+        )
     }
 
     private val preferences by lazy {
         reactApplicationContext.getSharedPreferences(STORE_NAME, Context.MODE_PRIVATE)
     }
+
+    @Volatile
+    private var lastSavedFilePath: String? = null
 
     override fun getName(): String = "ReaderPreferencesModule"
 
@@ -36,6 +57,7 @@ class ReaderPreferencesModule(
             if (!saved) {
                 throw IllegalStateException("SharedPreferences commit returned false")
             }
+            lastSavedFilePath = filePath
             promise.resolve(true)
         } catch (error: Throwable) {
             promise.reject("READER_PREFS_SAVE_FAILED", error.message, error)
@@ -49,9 +71,204 @@ class ReaderPreferencesModule(
             if (!removed) {
                 throw IllegalStateException("SharedPreferences commit returned false")
             }
+            if (lastSavedFilePath == filePath) {
+                lastSavedFilePath = null
+            }
             promise.resolve(true)
         } catch (error: Throwable) {
             promise.reject("READER_PREFS_REMOVE_FAILED", error.message, error)
         }
+    }
+
+    /**
+     * Experimental Nomad handoff used by v0.0.8.
+     *
+     * The tested firmware stores each DOC/PDF's native reading position in a
+     * Java-serialized HashMap under com.supernote.document's per-document cache.
+     * PluginHost and SupernoteDocument both run as system UID 1000 on the test
+     * device, so this bridge attempts the handoff without invoking su.
+     */
+    @ReactMethod
+    fun handoffLastSavedPage(promise: Promise) {
+        var configFile: File? = null
+        var originalBytes: ByteArray? = null
+        var wroteConfig = false
+
+        try {
+            val filePath = lastSavedFilePath
+                ?: throw IllegalStateException("No PDF has been saved in this reader session")
+            val savedJson = preferences.getString(filePath, null)
+                ?: throw IllegalStateException("No saved reader preferences for current PDF")
+            val pageIndex = JSONObject(savedJson).optInt("lastPageIndex", -1)
+            if (pageIndex < 0) {
+                throw IllegalStateException("Saved reader state has no valid lastPageIndex")
+            }
+
+            val pdfFile = File(filePath)
+            if (!pdfFile.isFile) {
+                throw IllegalStateException("Current PDF is not accessible: $filePath")
+            }
+
+            val inode = Os.stat(pdfFile.absolutePath).st_ino.toString()
+            configFile = findMatchingConfig(pdfFile, inode)
+            originalBytes = configFile.readBytes()
+
+            val configMap = readConfigMap(configFile)
+            val oldPage = configMap["currentPage"] as? String
+                ?: throw IllegalStateException("Native config currentPage is not a String")
+
+            configMap["currentPage"] = pageIndex.toString()
+            val updatedBytes = serializeConfigMap(configMap)
+            writeBytesSynced(configFile, updatedBytes)
+            wroteConfig = true
+
+            val verifiedMap = readConfigMap(configFile)
+            val verifiedPage = verifiedMap["currentPage"] as? String
+            if (verifiedPage != pageIndex.toString()) {
+                throw IllegalStateException(
+                    "Native config verification failed: expected $pageIndex, found $verifiedPage",
+                )
+            }
+            verifyConfigIdentity(verifiedMap, pdfFile, inode)
+
+            scheduleDocumentRestart()
+
+            val result = Arguments.createMap().apply {
+                putString("filePath", pdfFile.absolutePath)
+                putString("configPath", configFile.absolutePath)
+                putString("inode", inode)
+                putInt("pageIndex", pageIndex)
+                putString("oldPage", oldPage)
+                putInt("uid", android.os.Process.myUid())
+            }
+            promise.resolve(result)
+        } catch (error: Throwable) {
+            if (wroteConfig && configFile != null && originalBytes != null) {
+                try {
+                    writeBytesSynced(configFile, originalBytes)
+                } catch (_: Throwable) {
+                    // Preserve the original failure; recovery is best-effort.
+                }
+            }
+            promise.reject("READER_HANDOFF_FAILED", error.message, error)
+        }
+    }
+
+    private fun findMatchingConfig(pdfFile: File, inode: String): File {
+        var sawReadableRoot = false
+        var sawCandidate = false
+
+        for (rootPath in DOCUMENT_CACHE_ROOTS) {
+            val root = File(rootPath)
+            val children = root.listFiles()
+            if (children == null) {
+                continue
+            }
+            sawReadableRoot = true
+
+            for (directory in children) {
+                if (!directory.isDirectory || !directory.name.startsWith("${inode}_")) {
+                    continue
+                }
+                val candidate = File(directory, "CONFIG/config.data")
+                if (!candidate.isFile) {
+                    continue
+                }
+                sawCandidate = true
+
+                try {
+                    val map = readConfigMap(candidate)
+                    verifyConfigIdentity(map, pdfFile, inode)
+                    return candidate
+                } catch (_: Throwable) {
+                    // A matching inode prefix is not enough; keep looking until
+                    // both the serialized inode and URI identify this exact PDF.
+                }
+            }
+        }
+
+        if (!sawReadableRoot) {
+            throw IllegalStateException(
+                "PluginHost cannot read Supernote document cache as UID ${android.os.Process.myUid()}",
+            )
+        }
+        if (sawCandidate) {
+            throw IllegalStateException("Found inode candidate, but its URI did not match current PDF")
+        }
+        throw IllegalStateException("No native config found for PDF inode $inode")
+    }
+
+    private fun verifyConfigIdentity(
+        map: MutableMap<Any?, Any?>,
+        pdfFile: File,
+        inode: String,
+    ) {
+        val storedInode = map["file_inode"] as? String
+            ?: throw IllegalStateException("Native config file_inode is missing")
+        if (storedInode != inode) {
+            throw IllegalStateException(
+                "Native config inode mismatch: expected $inode, found $storedInode",
+            )
+        }
+
+        val storedUri = map["uri"] as? String
+            ?: throw IllegalStateException("Native config URI is missing")
+        val storedPath = Uri.parse(storedUri).path
+            ?: throw IllegalStateException("Native config URI has no file path")
+
+        val expectedPath = pdfFile.canonicalPath
+        val actualPath = File(storedPath).canonicalPath
+        if (expectedPath != actualPath) {
+            throw IllegalStateException(
+                "Native config URI mismatch: expected $expectedPath, found $actualPath",
+            )
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun readConfigMap(file: File): MutableMap<Any?, Any?> {
+        FileInputStream(file).use { stream ->
+            ObjectInputStream(stream).use { input ->
+                val value = input.readObject()
+                if (value !is MutableMap<*, *>) {
+                    throw IllegalStateException(
+                        "Native config is ${value.javaClass.name}, expected MutableMap",
+                    )
+                }
+                return value as MutableMap<Any?, Any?>
+            }
+        }
+    }
+
+    private fun serializeConfigMap(map: MutableMap<Any?, Any?>): ByteArray {
+        val buffer = ByteArrayOutputStream()
+        ObjectOutputStream(buffer).use { output ->
+            output.writeObject(map)
+            output.flush()
+        }
+        return buffer.toByteArray()
+    }
+
+    private fun writeBytesSynced(file: File, bytes: ByteArray) {
+        FileOutputStream(file, false).use { output ->
+            output.write(bytes)
+            output.flush()
+            output.fd.sync()
+        }
+    }
+
+    private fun scheduleDocumentRestart() {
+        val command = buildString {
+            append("sleep 1; ")
+            append("/system/bin/am force-stop ")
+            append(DOCUMENT_PACKAGE)
+            append(" >/dev/null 2>&1; ")
+            append("sleep 1; ")
+            append("/system/bin/am start -n ")
+            append(DOCUMENT_COMPONENT)
+            append(" >/dev/null 2>&1")
+        }
+
+        ProcessBuilder("/system/bin/sh", "-c", command).start()
     }
 }

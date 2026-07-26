@@ -12,12 +12,10 @@ const icon = Image.resolveAssetSource(require('./assets/icon.png')).uri;
 const originalClosePluginView = PluginManager.closePluginView.bind(PluginManager);
 let handoffAttemptedThisActivation = false;
 
-// v0.0.8 hardware test: App.js already flushes ReaderPreferencesModule.save()
-// immediately before closePluginView(). Intercept that final close call so the
-// native bridge can copy the just-saved lastPageIndex into Supernote's native
-// per-document config and schedule a system-UID document-reader restart.
-// Regardless of handoff success/failure, we still perform the normal plugin
-// close so an experimental restart failure cannot trap the user in PluginHost.
+// App.js already flushes ReaderPreferencesModule.save() immediately before
+// closePluginView(). Intercept that final close call so the native bridge can
+// synchronize the just-saved lastPageIndex with Supernote's native reader.
+// Regardless of handoff success/failure, still perform the normal plugin close.
 PluginManager.closePluginView = async (...args) => {
   if (!handoffAttemptedThisActivation) {
     handoffAttemptedThisActivation = true;
@@ -55,10 +53,6 @@ function ReaderRoot() {
     return () => subscription.remove();
   }, []);
 
-  // PluginHost keeps the React Native view alive after closePluginView().
-  // Changing the key forces the actual reader App to unmount/remount on every
-  // toolbar activation, so it re-reads the currently open DOC/PDF and loads
-  // that document's own persisted settings instead of retaining stale state.
   return <App key={activation} />;
 }
 
@@ -76,7 +70,7 @@ PluginManager.registerButtonListener({
   onButtonPress: event => {
     if (event?.id === RTL_READER_BUTTON_ID) {
       handoffAttemptedThisActivation = false;
-      console.log('RTL_READER_OPEN v0.0.8');
+      console.log('RTL_READER_OPEN v0.0.9');
       DeviceEventEmitter.emit(RTL_READER_ACTIVATE_EVENT);
     }
   },

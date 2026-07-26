@@ -1,0 +1,57 @@
+package __PACKAGE__
+
+import android.content.Context
+import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReactContextBaseJavaModule
+import com.facebook.react.bridge.ReactMethod
+
+class ReaderPreferencesModule(
+    reactContext: ReactApplicationContext,
+) : ReactContextBaseJavaModule(reactContext) {
+
+    companion object {
+        private const val STORE_NAME = "supernote_rtl_reader_preferences"
+    }
+
+    private val preferences by lazy {
+        reactApplicationContext.getSharedPreferences(STORE_NAME, Context.MODE_PRIVATE)
+    }
+
+    override fun getName(): String = "ReaderPreferencesModule"
+
+    @ReactMethod
+    fun load(filePath: String, promise: Promise) {
+        try {
+            promise.resolve(preferences.getString(filePath, null))
+        } catch (error: Throwable) {
+            promise.reject("READER_PREFS_LOAD_FAILED", error.message, error)
+        }
+    }
+
+    @ReactMethod
+    fun save(filePath: String, json: String, promise: Promise) {
+        try {
+            val saved = preferences.edit().putString(filePath, json).commit()
+            if (!saved) {
+                throw IllegalStateException("SharedPreferences commit returned false")
+            }
+            promise.resolve(true)
+        } catch (error: Throwable) {
+            promise.reject("READER_PREFS_SAVE_FAILED", error.message, error)
+        }
+    }
+
+    @ReactMethod
+    fun remove(filePath: String, promise: Promise) {
+        try {
+            val removed = preferences.edit().remove(filePath).commit()
+            if (!removed) {
+                throw IllegalStateException("SharedPreferences commit returned false")
+            }
+            promise.resolve(true)
+        } catch (error: Throwable) {
+            promise.reject("READER_PREFS_REMOVE_FAILED", error.message, error)
+        }
+    }
+}

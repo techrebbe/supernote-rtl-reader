@@ -3,6 +3,7 @@ package __PACKAGE__
 import android.content.Context
 import android.net.Uri
 import android.system.Os
+import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -22,6 +23,7 @@ class ReaderPreferencesModule(
 
     companion object {
         private const val STORE_NAME = "supernote_rtl_reader_preferences"
+        private const val LOG_TAG = "RTL_READER"
         private const val DOCUMENT_PACKAGE = "com.supernote.document"
         private const val DOCUMENT_COMPONENT =
             "com.supernote.document/.document.DocumentActivity"
@@ -97,6 +99,10 @@ class ReaderPreferencesModule(
         try {
             val filePath = lastSavedFilePath
                 ?: throw IllegalStateException("No PDF has been saved in this reader session")
+            // Consume the session path immediately. A later activation must save
+            // its own path before another handoff can occur.
+            lastSavedFilePath = null
+
             val savedJson = preferences.getString(filePath, null)
                 ?: throw IllegalStateException("No saved reader preferences for current PDF")
             val pageIndex = JSONObject(savedJson).optInt("lastPageIndex", -1)
@@ -131,6 +137,11 @@ class ReaderPreferencesModule(
             }
             verifyConfigIdentity(verifiedMap, pdfFile, inode)
 
+            Log.i(
+                LOG_TAG,
+                "RTL_READER_HANDOFF_CONFIG_WRITTEN page=${pageIndex + 1} uid=${android.os.Process.myUid()} config=${configFile.absolutePath}",
+            )
+
             scheduleDocumentRestart()
 
             val result = Arguments.createMap().apply {
@@ -146,10 +157,16 @@ class ReaderPreferencesModule(
             if (wroteConfig && configFile != null && originalBytes != null) {
                 try {
                     writeBytesSynced(configFile, originalBytes)
-                } catch (_: Throwable) {
-                    // Preserve the original failure; recovery is best-effort.
+                    Log.w(LOG_TAG, "RTL_READER_HANDOFF_CONFIG_RESTORED_AFTER_FAILURE")
+                } catch (restoreError: Throwable) {
+                    Log.e(
+                        LOG_TAG,
+                        "RTL_READER_HANDOFF_RESTORE_FAILED: ${restoreError.message}",
+                        restoreError,
+                    )
                 }
             }
+            Log.e(LOG_TAG, "RTL_READER_HANDOFF_FAILED: ${error.message}", error)
             promise.reject("READER_HANDOFF_FAILED", error.message, error)
         }
     }
@@ -259,14 +276,29 @@ class ReaderPreferencesModule(
 
     private fun scheduleDocumentRestart() {
         val command = buildString {
+            append("/system/bin/log -t ")
+            append(LOG_TAG)
+            append(" RTL_READER_HANDOFF_WORKER_START; ")
             append("sleep 1; ")
-            append("/system/bin/am force-stop ")
+            append("if /system/bin/am force-stop ")
             append(DOCUMENT_PACKAGE)
-            append(" >/dev/null 2>&1; ")
+            append(" >/dev/null 2>&1; then ")
+            append("/system/bin/log -t ")
+            append(LOG_TAG)
+            append(" RTL_READER_HANDOFF_FORCE_STOP_OK; else ")
+            append("/system/bin/log -t ")
+            append(LOG_TAG)
+            append(" RTL_READER_HANDOFF_FORCE_STOP_FAILED; fi; ")
             append("sleep 1; ")
-            append("/system/bin/am start -n ")
+            append("if /system/bin/am start -n ")
             append(DOCUMENT_COMPONENT)
-            append(" >/dev/null 2>&1")
+            append(" >/dev/null 2>&1; then ")
+            append("/system/bin/log -t ")
+            append(LOG_TAG)
+            append(" RTL_READER_HANDOFF_START_OK; else ")
+            append("/system/bin/log -t ")
+            append(LOG_TAG)
+            append(" RTL_READER_HANDOFF_START_FAILED; fi")
         }
 
         ProcessBuilder("/system/bin/sh", "-c", command).start()

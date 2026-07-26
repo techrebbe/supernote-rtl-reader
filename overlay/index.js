@@ -19,7 +19,7 @@ PluginManager.registerButton(1, ['DOC'], {
 PluginManager.registerButtonListener({
   onButtonPress: event => {
     if (event?.id === RTL_READER_BUTTON_ID) {
-      console.log('RTL_READER_OPEN v0.0.5');
+      console.log('RTL_READER_OPEN v0.0.6');
     }
   },
 });

@@ -1,8 +1,12 @@
 package __PACKAGE__
 
+import android.app.ActivityManager
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import android.os.SystemClock
 import android.system.Os
+import android.system.OsConstants
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
@@ -25,8 +29,8 @@ class ReaderPreferencesModule(
         private const val STORE_NAME = "supernote_rtl_reader_preferences"
         private const val LOG_TAG = "RTL_READER"
         private const val DOCUMENT_PACKAGE = "com.supernote.document"
-        private const val DOCUMENT_COMPONENT =
-            "com.supernote.document/.document.DocumentActivity"
+        private const val DOCUMENT_ACTIVITY =
+            "com.supernote.document.document.DocumentActivity"
 
         private val DOCUMENT_CACHE_ROOTS = arrayOf(
             "/data/data/com.supernote.document/document_internal_cache",
@@ -83,12 +87,14 @@ class ReaderPreferencesModule(
     }
 
     /**
-     * Experimental Nomad handoff used by v0.0.8.
+     * Experimental native-reader handoff.
      *
-     * The tested firmware stores each DOC/PDF's native reading position in a
-     * Java-serialized HashMap under com.supernote.document's per-document cache.
-     * PluginHost and SupernoteDocument both run as system UID 1000 on the test
-     * device, so this bridge attempts the handoff without invoking su.
+     * Hardware testing established that Supernote stores the native PDF position
+     * in a Java-serialized HashMap and that PluginHost and SupernoteDocument both
+     * run as UID 1000. The config update therefore needs no su access. v0.0.9
+     * also avoids invoking the `am` shell utility: after PluginHost closes, a
+     * background worker signals only the com.supernote.document PID and then
+     * starts its private DocumentActivity directly through Android APIs.
      */
     @ReactMethod
     fun handoffLastSavedPage(promise: Promise) {
@@ -274,33 +280,86 @@ class ReaderPreferencesModule(
         }
     }
 
-    private fun scheduleDocumentRestart() {
-        val command = buildString {
-            append("/system/bin/log -t ")
-            append(LOG_TAG)
-            append(" RTL_READER_HANDOFF_WORKER_START; ")
-            append("sleep 1; ")
-            append("if /system/bin/am force-stop ")
-            append(DOCUMENT_PACKAGE)
-            append(" >/dev/null 2>&1; then ")
-            append("/system/bin/log -t ")
-            append(LOG_TAG)
-            append(" RTL_READER_HANDOFF_FORCE_STOP_OK; else ")
-            append("/system/bin/log -t ")
-            append(LOG_TAG)
-            append(" RTL_READER_HANDOFF_FORCE_STOP_FAILED; fi; ")
-            append("sleep 1; ")
-            append("if /system/bin/am start -n ")
-            append(DOCUMENT_COMPONENT)
-            append(" >/dev/null 2>&1; then ")
-            append("/system/bin/log -t ")
-            append(LOG_TAG)
-            append(" RTL_READER_HANDOFF_START_OK; else ")
-            append("/system/bin/log -t ")
-            append(LOG_TAG)
-            append(" RTL_READER_HANDOFF_START_FAILED; fi")
-        }
+    private fun documentPids(activityManager: ActivityManager): List<Int> =
+        activityManager.runningAppProcesses
+            ?.asSequence()
+            ?.filter { process -> process.processName == DOCUMENT_PACKAGE }
+            ?.map { process -> process.pid }
+            ?.filter { pid -> pid != android.os.Process.myPid() }
+            ?.toList()
+            ?: emptyList()
 
-        ProcessBuilder("/system/bin/sh", "-c", command).start()
+    private fun scheduleDocumentRestart() {
+        Thread {
+            try {
+                Log.i(
+                    LOG_TAG,
+                    "RTL_READER_HANDOFF_WORKER_START uid=${android.os.Process.myUid()} pluginPid=${android.os.Process.myPid()}",
+                )
+
+                // Give closePluginView() time to return the native reader to the
+                // foreground before replacing its process.
+                SystemClock.sleep(900)
+
+                val activityManager = reactApplicationContext.getSystemService(
+                    Context.ACTIVITY_SERVICE,
+                ) as ActivityManager
+                val pids = documentPids(activityManager)
+                Log.i(LOG_TAG, "RTL_READER_HANDOFF_DOCUMENT_PIDS ${pids.joinToString(",")}")
+
+                for (pid in pids) {
+                    try {
+                        Os.kill(pid, OsConstants.SIGKILL)
+                        Log.i(LOG_TAG, "RTL_READER_HANDOFF_KILL_SENT pid=$pid")
+                    } catch (error: Throwable) {
+                        Log.e(
+                            LOG_TAG,
+                            "RTL_READER_HANDOFF_KILL_FAILED pid=$pid: ${error.message}",
+                            error,
+                        )
+                        throw error
+                    }
+                }
+
+                if (pids.isNotEmpty()) {
+                    val deadline = SystemClock.elapsedRealtime() + 2500L
+                    var remaining = pids
+                    while (remaining.isNotEmpty() && SystemClock.elapsedRealtime() < deadline) {
+                        SystemClock.sleep(100)
+                        val running = documentPids(activityManager).toSet()
+                        remaining = pids.filter { pid -> pid in running }
+                    }
+                    if (remaining.isEmpty()) {
+                        Log.i(LOG_TAG, "RTL_READER_HANDOFF_KILL_CONFIRMED")
+                    } else {
+                        Log.w(
+                            LOG_TAG,
+                            "RTL_READER_HANDOFF_KILL_NOT_CONFIRMED pids=${remaining.joinToString(",")}",
+                        )
+                    }
+                } else {
+                    Log.w(LOG_TAG, "RTL_READER_HANDOFF_NO_DOCUMENT_PID")
+                }
+
+                SystemClock.sleep(450)
+
+                val intent = Intent().apply {
+                    setClassName(DOCUMENT_PACKAGE, DOCUMENT_ACTIVITY)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                }
+                reactApplicationContext.startActivity(intent)
+                Log.i(LOG_TAG, "RTL_READER_HANDOFF_START_REQUESTED_DIRECT")
+            } catch (error: Throwable) {
+                Log.e(
+                    LOG_TAG,
+                    "RTL_READER_HANDOFF_WORKER_FAILED: ${error.message}",
+                    error,
+                )
+            }
+        }.apply {
+            name = "RtlReaderNativeHandoff"
+            isDaemon = true
+            start()
+        }
     }
 }

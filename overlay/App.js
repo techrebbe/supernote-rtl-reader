@@ -518,9 +518,11 @@ export default function App() {
         setRendering(false);
 
         console.log(
-          `RTL_READER_RENDERED mode=spread left=$
-{visual.left === null ? 'blank' : visual.left + 1} right=$
-{visual.right === null ? 'blank' : visual.right + 1} cached=${allCached}`.replace(/\n/g, ''),
+          `RTL_READER_RENDERED mode=spread left=${
+            visual.left === null ? 'blank' : visual.left + 1
+          } right=${
+            visual.right === null ? 'blank' : visual.right + 1
+          } cached=${allCached}`,
         );
 
         void prefetchAround(

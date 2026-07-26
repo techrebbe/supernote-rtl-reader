@@ -15,27 +15,29 @@ The core reader has been validated on a Supernote Nomad running the plugin beta 
 
 Root is not required for the core reading path.
 
-## v0.0.8 hardware test
-
-v0.0.8 tests native-reader page handoff on Close.
+## v0.0.9 native-reader handoff test
 
 Hardware investigation on the Nomad established that:
 
 - Supernote stores the native document position in `CONFIG/config.data` as a Java-serialized `HashMap`;
 - `currentPage` is a zero-based String;
 - manually changing `currentPage` and restarting `DocumentActivity` reopens the PDF at that page;
-- PluginHost and `com.supernote.document` are separate processes, but both run as `system` UID 1000 on the tested firmware.
+- PluginHost and `com.supernote.document` are separate processes, but both run as `system` UID 1000 on the tested firmware;
+- v0.0.8 proved that PluginHost itself can locate, deserialize, rewrite, and verify the native `config.data` without root;
+- v0.0.8's remaining failure was specifically the use of the `am` shell command from a PluginHost child process.
 
-On Close, v0.0.8 therefore attempts to:
+On Close, v0.0.9 therefore attempts to:
 
 1. flush RTL Reader's normal per-PDF preferences;
 2. locate the native per-document config by PDF inode;
 3. verify both the stored inode and file URI;
 4. change only `currentPage` and verify the serialized write;
-5. schedule a UID-1000 document-reader restart without invoking `su`;
-6. perform the ordinary PluginHost Close regardless, so a failed experimental handoff cannot trap the user.
+5. perform the ordinary PluginHost Close;
+6. from a delayed PluginHost worker, locate the `com.supernote.document` PID;
+7. signal only that process using Android's direct `Os.kill()` API;
+8. start the private `DocumentActivity` directly using an explicit Android `Intent`, rather than invoking the `am` shell utility.
 
-The native-reader handoff is still a hardware test until confirmed on-device. The reader itself remains usable if handoff preparation fails.
+The handoff remains an experimental hardware test until this final process-restart path is confirmed on-device. Config access itself has already been confirmed to work as UID 1000 without `su`.
 
 ## View modes
 
@@ -99,7 +101,7 @@ Page 4 | Page 5
 - Tap the center to hide/show controls.
 - `-` / `+` move one page in Single mode or one spread in Spread mode.
 - Tap the page/spread counter to jump to a PDF page.
-- `Close` returns to Supernote's native reader; v0.0.8 experimentally attempts to synchronize that native page first.
+- `Close` returns to Supernote's native reader; v0.0.9 experimentally attempts to synchronize that native page first.
 
 ## Build
 
@@ -116,7 +118,7 @@ The resulting package is written to:
 out/*.snplg
 ```
 
-GitHub Actions uploads it as the `supernote-rtl-reader-v0.0.8` artifact.
+GitHub Actions uploads it as the `supernote-rtl-reader-v0.0.9` artifact.
 
 ## Install and diagnostics
 
@@ -131,12 +133,15 @@ ADB diagnostics:
 .\adb logcat -v raw | Select-String RTL_READER
 ```
 
-Useful v0.0.8 handoff markers include:
+Useful v0.0.9 handoff markers include:
 
 - `RTL_READER_HANDOFF_CONFIG_WRITTEN`
 - `RTL_READER_HANDOFF_PREPARED`
 - `RTL_READER_HANDOFF_WORKER_START`
-- `RTL_READER_HANDOFF_FORCE_STOP_OK` / `...FAILED`
-- `RTL_READER_HANDOFF_START_OK` / `...FAILED`
+- `RTL_READER_HANDOFF_DOCUMENT_PIDS`
+- `RTL_READER_HANDOFF_KILL_SENT`
+- `RTL_READER_HANDOFF_KILL_CONFIRMED` / `...KILL_FAILED`
+- `RTL_READER_HANDOFF_START_REQUESTED_DIRECT`
+- `RTL_READER_HANDOFF_WORKER_FAILED`
 - `RTL_READER_HANDOFF_SKIPPED`
 - `RTL_READER_HANDOFF_FAILED`

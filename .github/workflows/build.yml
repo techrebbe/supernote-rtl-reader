@@ -1,0 +1,41 @@
+name: Build Supernote RTL Reader
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - reader-v0.0.1
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build plugin
+        run: |
+          chmod +x build.sh
+          ./build.sh
+
+      - name: Verify package
+        run: |
+          test -n "$(find out -maxdepth 1 -name '*.snplg' -print -quit)"
+          ls -lh out/*.snplg
+
+      - name: Upload plugin package
+        uses: actions/upload-artifact@v4
+        with:
+          name: supernote-rtl-reader-v0.0.1
+          path: out/*.snplg
+          if-no-files-found: error
+          retention-days: 7

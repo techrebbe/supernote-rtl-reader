@@ -6,27 +6,27 @@ v0.0.9 has already passed the core native-reader handoff test: closing RTL Reade
 
 Use one long PDF with a normal cover for most tests. Clear logcat before a failing case only; routine passes do not need logs.
 
-## 1. Portrait single-page RTL
+## 1. Portrait single-page RTL — PASS
 
-- [ ] Open a PDF natively on a known page and launch RTL Reader.
-- [ ] Portrait / Auto shows one page.
-- [ ] Right swipe advances one PDF page.
-- [ ] Left swipe goes back one PDF page.
-- [ ] Right-edge tap advances one PDF page.
-- [ ] Left-edge tap goes back one PDF page.
-- [ ] Center tap hides/shows chrome.
-- [ ] Page counter jump opens the requested physical PDF page.
-- [ ] Close reopens native reader on the RTL Reader page.
+- [x] Open a PDF natively on a known page and launch RTL Reader.
+- [x] Portrait / Auto shows one page.
+- [x] Right swipe advances one PDF page.
+- [x] Left swipe goes back one PDF page.
+- [x] Right-edge tap advances one PDF page.
+- [x] Left-edge tap goes back one PDF page.
+- [x] Center tap hides/shows chrome.
+- [x] Page counter jump opens the requested physical PDF page.
+- [x] Close reopens native reader on the RTL Reader page.
 
-## 2. Landscape Auto spread, RTL
+## 2. Landscape Auto spread, RTL — PASS
 
-- [ ] Rotate to landscape while View = Auto; display changes to a two-page spread.
-- [ ] Earlier/lower page is on the RIGHT; later/higher page is on the LEFT.
-- [ ] Right swipe / right-edge tap advances exactly one spread.
-- [ ] Left swipe / left-edge tap goes back exactly one spread.
-- [ ] Footer labels match the two visible physical PDF pages.
-- [ ] Rotate back to portrait; the focused PDF page is retained.
-- [ ] Close from landscape/spread mode reopens native reader at the focused RTL Reader page.
+- [x] Rotate to landscape while View = Auto; display changes to a two-page spread.
+- [x] Earlier/lower page is on the RIGHT; later/higher page is on the LEFT.
+- [x] Right swipe / right-edge tap advances exactly one spread.
+- [x] Left swipe / left-edge tap goes back exactly one spread.
+- [x] Footer labels match the two visible physical PDF pages.
+- [x] Rotate back to portrait; the focused PDF page is retained.
+- [x] Close from landscape/spread mode reopens native reader at the focused RTL Reader page.
 
 ## 3. Treat Cover Page Separately
 

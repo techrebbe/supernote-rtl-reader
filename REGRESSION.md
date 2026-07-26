@@ -28,23 +28,23 @@ Use one long PDF with a normal cover for most tests. Clear logcat before a faili
 - [x] Rotate back to portrait; the focused PDF page is retained.
 - [x] Close from landscape/spread mode reopens native reader at the focused RTL Reader page.
 
-## 3. Treat Cover Page Separately
+## 3. Treat Cover Page Separately — PASS
 
 With RTL + Spread + `Cover: On`:
 
-- [ ] First spread is `Blank | Cover 1`.
-- [ ] Next spread is `Page 3 | Page 2`.
-- [ ] Next spread is `Page 5 | Page 4`.
-- [ ] Turning `Cover: Off` returns to ordinary pairing (`Page 2 | Page 1`, then `Page 4 | Page 3`, etc.).
-- [ ] The setting persists after Close/reopen for this PDF.
+- [x] First spread is `Blank | Cover 1`.
+- [x] Next spread is `Page 3 | Page 2`.
+- [x] Next spread is `Page 5 | Page 4`.
+- [x] Turning `Cover: Off` returns to ordinary pairing (`Page 2 | Page 1`, then `Page 4 | Page 3`, etc.).
+- [x] The setting persists after Close/reopen for this PDF.
 
-## 4. LTR sanity check
+## 4. LTR sanity check — PASS
 
-- [ ] Switch direction to LTR.
-- [ ] Single-page swipe/tap directions reverse correctly.
-- [ ] Spread order becomes earlier page LEFT, later page RIGHT.
-- [ ] With `Cover: On`, first spread is `Cover | Blank`.
-- [ ] Direction persists after Close/reopen for this PDF.
+- [x] Switch direction to LTR.
+- [x] Single-page swipe/tap directions reverse correctly.
+- [x] Spread order becomes earlier page LEFT, later page RIGHT.
+- [x] With `Cover: On`, first spread is `Cover | Blank`.
+- [x] Direction persists after Close/reopen for this PDF.
 
 ## 5. Native/RTL position and per-document persistence
 

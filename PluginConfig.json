@@ -1,0 +1,11 @@
+{
+  "name": "RTL Reader",
+  "pluginKey": "SupernoteRtlReader",
+  "pluginID": "snrtl20260726001",
+  "iconPath": "assets/icon.png",
+  "desc": "Right-to-left PDF reader proof for Supernote",
+  "versionCode": "1",
+  "versionName": "0.0.1",
+  "jsMainPath": "index",
+  "author": "techrebbe"
+}

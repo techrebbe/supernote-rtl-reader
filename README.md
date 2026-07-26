@@ -4,40 +4,43 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 
 ## Proven hardware foundation
 
-The core reader has been validated on a Supernote Nomad running the plugin beta firmware:
+The reader has been validated on a Supernote Nomad running the plugin beta firmware:
 
 - the official SDK supplies the currently open PDF path and page index;
 - Android `PdfRenderer` renders that PDF inside PluginHost without root;
 - RTL swipes and edge taps work on-device;
 - a bounded render cache improves ordinary sequential page turns;
 - landscape two-page spreads and **Treat Cover Page Separately** work;
-- per-PDF RTL Reader settings and position can be persisted independently of the source PDF.
+- per-PDF RTL Reader settings and position persist independently of the source PDF;
+- on Close, RTL Reader can synchronize its current PDF page back into Supernote's native document reader and return there automatically.
 
-Root is not required for the core reading path.
+**Root is not required for the reading path or the native-reader page handoff on the tested Nomad firmware.**
 
-## v0.0.9 native-reader handoff test
+## v0.0.9 — hardware-validated native-reader handoff
 
-Hardware investigation on the Nomad established that:
+Hardware investigation established that:
 
 - Supernote stores the native document position in `CONFIG/config.data` as a Java-serialized `HashMap`;
 - `currentPage` is a zero-based String;
 - manually changing `currentPage` and restarting `DocumentActivity` reopens the PDF at that page;
 - PluginHost and `com.supernote.document` are separate processes, but both run as `system` UID 1000 on the tested firmware;
 - v0.0.8 proved that PluginHost itself can locate, deserialize, rewrite, and verify the native `config.data` without root;
-- v0.0.8's remaining failure was specifically the use of the `am` shell command from a PluginHost child process.
+- v0.0.8's remaining failure was specifically the use of the `am` shell command from a PluginHost child process;
+- v0.0.9 replaced that shell path with direct Android process and Activity APIs, and the complete handoff was confirmed on real hardware.
 
-On Close, v0.0.9 therefore attempts to:
+On Close, v0.0.9:
 
-1. flush RTL Reader's normal per-PDF preferences;
-2. locate the native per-document config by PDF inode;
-3. verify both the stored inode and file URI;
-4. change only `currentPage` and verify the serialized write;
-5. perform the ordinary PluginHost Close;
-6. from a delayed PluginHost worker, locate the `com.supernote.document` PID;
-7. signal only that process using Android's direct `Os.kill()` API;
-8. start the private `DocumentActivity` directly using an explicit Android `Intent`, rather than invoking the `am` shell utility.
+1. flushes RTL Reader's normal per-PDF preferences;
+2. locates the native per-document config by PDF inode;
+3. verifies both the stored inode and file URI;
+4. changes only `currentPage` and verifies the serialized write;
+5. performs the ordinary PluginHost Close;
+6. from a delayed PluginHost worker, locates the `com.supernote.document` PID;
+7. signals only that process using Android's direct `Os.kill()` API;
+8. starts the private `DocumentActivity` directly using an explicit Android `Intent`;
+9. the native reader reopens the same PDF at the page where RTL Reader was closed.
 
-The handoff remains an experimental hardware test until this final process-restart path is confirmed on-device. Config access itself has already been confirmed to work as UID 1000 without `su`.
+This full sequence has been confirmed on the test Nomad without `su`.
 
 ## View modes
 
@@ -101,7 +104,7 @@ Page 4 | Page 5
 - Tap the center to hide/show controls.
 - `-` / `+` move one page in Single mode or one spread in Spread mode.
 - Tap the page/spread counter to jump to a PDF page.
-- `Close` returns to Supernote's native reader; v0.0.9 experimentally attempts to synchronize that native page first.
+- `Close` synchronizes the current PDF page back to Supernote's native reader and returns there.
 
 ## Build
 

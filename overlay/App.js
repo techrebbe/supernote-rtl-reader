@@ -20,6 +20,7 @@ const {PdfRendererModule} = NativeModules;
 const SWIPE_THRESHOLD = 56;
 const TAP_SLOP = 18;
 const EDGE_ZONE = 0.28;
+const CACHE_LIMIT = 5;
 
 async function requireResult(promise, label) {
   const response = await promise;
@@ -59,6 +60,10 @@ function clampPage(pageIndex, totalPages) {
   return Math.max(0, Math.min(totalPages - 1, pageIndex));
 }
 
+function cacheKey(pageIndex, width) {
+  return `${pageIndex}:${width}`;
+}
+
 export default function App() {
   const [documentContext, setDocumentContext] = useState(null);
   const [pageIndex, setPageIndex] = useState(null);
@@ -74,10 +79,89 @@ export default function App() {
   const mountedRef = useRef(true);
   const renderTokenRef = useRef(0);
   const pageAreaWidthRef = useRef(Math.max(1, Dimensions.get('window').width));
+  const pageAreaLeftRef = useRef(0);
   const directionRef = useRef(direction);
   const totalPagesRef = useRef(totalPages);
+  const cacheRef = useRef(new Map());
+  const prefetchingRef = useRef(new Set());
   directionRef.current = direction;
   totalPagesRef.current = totalPages;
+
+  const putCache = (key, value) => {
+    const cache = cacheRef.current;
+    if (cache.has(key)) cache.delete(key);
+    cache.set(key, value);
+    while (cache.size > CACHE_LIMIT) {
+      const oldestKey = cache.keys().next().value;
+      cache.delete(oldestKey);
+    }
+  };
+
+  const renderPdfPage = async (targetPage, viewportWidth) => {
+    const key = cacheKey(targetPage, viewportWidth);
+    const cached = cacheRef.current.get(key);
+    if (cached) {
+      cacheRef.current.delete(key);
+      cacheRef.current.set(key, cached);
+      console.log(`RTL_READER_CACHE_HIT page=${targetPage + 1}`);
+      return cached;
+    }
+
+    const rendered = await PdfRendererModule.renderPage(
+      documentContext.filePath,
+      targetPage,
+      viewportWidth,
+    );
+    if (!rendered?.base64) {
+      throw new Error('Native PDF renderer returned no image data.');
+    }
+
+    const result = {
+      imageUri: `data:image/png;base64,${rendered.base64}`,
+      width: rendered.width,
+      height: rendered.height,
+      pageCount: rendered.pageCount,
+    };
+    putCache(key, result);
+    return result;
+  };
+
+  const prefetchAdjacent = async (currentPage, viewportWidth, knownPageCount) => {
+    const pageCount = Number.isInteger(knownPageCount)
+      ? knownPageCount
+      : totalPagesRef.current;
+    const candidates = [currentPage + 1, currentPage - 1];
+
+    for (const candidate of candidates) {
+      if (candidate < 0) continue;
+      if (Number.isInteger(pageCount) && candidate >= pageCount) continue;
+
+      const key = cacheKey(candidate, viewportWidth);
+      if (cacheRef.current.has(key) || prefetchingRef.current.has(key)) continue;
+
+      prefetchingRef.current.add(key);
+      try {
+        const rendered = await PdfRendererModule.renderPage(
+          documentContext.filePath,
+          candidate,
+          viewportWidth,
+        );
+        if (rendered?.base64 && mountedRef.current) {
+          putCache(key, {
+            imageUri: `data:image/png;base64,${rendered.base64}`,
+            width: rendered.width,
+            height: rendered.height,
+            pageCount: rendered.pageCount,
+          });
+          console.log(`RTL_READER_PREFETCHED page=${candidate + 1}`);
+        }
+      } catch (error) {
+        console.warn(`RTL_READER_PREFETCH_FAILED page=${candidate + 1}`, error);
+      } finally {
+        prefetchingRef.current.delete(key);
+      }
+    }
+  };
 
   useEffect(() => {
     mountedRef.current = true;
@@ -90,7 +174,7 @@ export default function App() {
 
         const context = await getDocumentContext();
         if (!context.filePath?.toLowerCase().endsWith('.pdf')) {
-          throw new Error('RTL Reader v0.0.2 currently supports PDF documents only.');
+          throw new Error('RTL Reader v0.0.3 currently supports PDF documents only.');
         }
 
         if (!mountedRef.current) return;
@@ -113,6 +197,8 @@ export default function App() {
     return () => {
       mountedRef.current = false;
       renderTokenRef.current += 1;
+      cacheRef.current.clear();
+      prefetchingRef.current.clear();
     };
   }, []);
 
@@ -122,24 +208,20 @@ export default function App() {
     const token = ++renderTokenRef.current;
 
     async function renderPage() {
+      const viewportWidth = Math.max(
+        600,
+        Math.round(pageAreaWidthRef.current || Dimensions.get('window').width),
+      );
+      const key = cacheKey(pageIndex, viewportWidth);
+      const hadCachedPage = cacheRef.current.has(key);
+
       try {
-        setRendering(true);
-        const viewportWidth = Math.max(
-          600,
-          Math.round(pageAreaWidthRef.current || Dimensions.get('window').width),
-        );
-        const rendered = await PdfRendererModule.renderPage(
-          documentContext.filePath,
-          pageIndex,
-          viewportWidth,
-        );
+        setRendering(!hadCachedPage);
+        const rendered = await renderPdfPage(pageIndex, viewportWidth);
 
         if (!mountedRef.current || token !== renderTokenRef.current) return;
-        if (!rendered?.base64) {
-          throw new Error('Native PDF renderer returned no image data.');
-        }
 
-        setImageUri(`data:image/png;base64,${rendered.base64}`);
+        setImageUri(rendered.imageUri);
         if (Number.isInteger(rendered.pageCount)) {
           setTotalPages(rendered.pageCount);
         }
@@ -147,8 +229,10 @@ export default function App() {
         setRendering(false);
 
         console.log(
-          `RTL_READER_RENDERED file=${documentContext.filePath} page=${pageIndex + 1} size=${rendered.width}x${rendered.height}`,
+          `RTL_READER_RENDERED file=${documentContext.filePath} page=${pageIndex + 1} size=${rendered.width}x${rendered.height} cached=${hadCachedPage}`,
         );
+
+        void prefetchAdjacent(pageIndex, viewportWidth, rendered.pageCount);
       } catch (error) {
         console.error('RTL_READER_RENDER_FAILED', error);
         if (mountedRef.current && token === renderTokenRef.current) {
@@ -197,9 +281,10 @@ export default function App() {
     return false;
   };
 
-  const handleEdgeTap = locationX => {
+  const handlePhysicalTap = absoluteX => {
     const width = Math.max(1, pageAreaWidthRef.current);
-    const fraction = locationX / width;
+    const localPhysicalX = absoluteX - pageAreaLeftRef.current;
+    const fraction = localPhysicalX / width;
 
     if (fraction <= EDGE_ZONE) {
       if (directionRef.current === 'rtl') previousLogicalPage();
@@ -222,10 +307,16 @@ export default function App() {
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderRelease: (event, gestureState) => {
-        const {dx, dy} = gestureState;
+        const {dx, dy, x0} = gestureState;
         if (handlePhysicalSwipe(dx)) return;
         if (Math.abs(dx) <= TAP_SLOP && Math.abs(dy) <= TAP_SLOP) {
-          handleEdgeTap(event.nativeEvent.locationX);
+          // locationX is mirrored by PluginHost on the test Nomad. pageX/x0
+          // tracks the physical screen coordinate, which keeps taps aligned
+          // with the already-correct physical swipe directions.
+          const absoluteX = Number.isFinite(event.nativeEvent.pageX)
+            ? event.nativeEvent.pageX
+            : x0;
+          handlePhysicalTap(absoluteX);
         }
       },
       onPanResponderTerminate: () => {},
@@ -269,6 +360,7 @@ export default function App() {
         style={styles.pageArea}
         onLayout={event => {
           pageAreaWidthRef.current = Math.max(1, event.nativeEvent.layout.width);
+          pageAreaLeftRef.current = event.nativeEvent.layout.x ?? 0;
         }}
         {...panResponderRef.current.panHandlers}>
         {imageUri ? (

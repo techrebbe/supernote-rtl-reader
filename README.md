@@ -13,22 +13,50 @@ The intended reader behavior is:
 - **Treat Cover Page Separately**, implemented as a virtual blank after the cover so later spreads stay aligned with the physical book;
 - remembered reading settings and position per document.
 
-## v0.0.1 hardware proof
+## Proven hardware foundation
 
-The first build is intentionally much smaller. It tests the one architectural dependency that everything else needs:
+v0.0.1 was validated on a Supernote Nomad running the plugin beta firmware. The official SDK successfully supplied the currently open PDF path and page index, and a small Kotlin bridge rendered that exact page through Android `PdfRenderer` inside PluginHost.
 
-1. Open a PDF in Supernote's native DOC reader.
-2. Navigate to any page.
-3. Tap **RTL Reader** in the DOC toolbar.
-4. The plugin asks the official Supernote SDK for the current file path and page index.
-5. A small Kotlin native module opens that same PDF with Android `PdfRenderer`.
-6. The current page is rendered into the full-screen plugin UI.
+That proof established that the reader can stay entirely within the supported plugin architecture for its core PDF rendering path; root was not required.
 
-### Pass criteria
+## v0.0.2 navigation build
 
-The page shown inside RTL Reader matches the PDF and page that were open in Supernote, at readable quality, without crashing PluginHost.
+This build turns the rendering proof into a basic single-page reader.
 
-No RTL navigation, two-page layout, cover offset, zoom, or annotation support is included yet. Those come only after this rendering proof passes on real hardware.
+### Reading direction
+
+The reader starts in **RTL** mode. Tap the `RTL` button at the top to switch between RTL and LTR.
+
+In RTL mode:
+
+- swipe **right** -> next PDF page;
+- swipe **left** -> previous PDF page;
+- tap the **right edge** -> next PDF page;
+- tap the **left edge** -> previous PDF page.
+
+LTR mode reverses those physical gestures while keeping PDF page numbers increasing normally.
+
+### Reader controls
+
+- Tap the center of the page to hide/show the reader controls.
+- `-` and `+` move one PDF page backward/forward regardless of reading direction.
+- Tap the page counter to enter a PDF page number and jump directly to it.
+- `Close` returns to Supernote's native document reader.
+
+The current build intentionally does not yet synchronize the new page position back into the native reader when closing.
+
+### Hardware acceptance test
+
+1. Open a PDF in native Supernote DOC and launch **RTL Reader**.
+2. Confirm it starts on the same page.
+3. In RTL mode, swipe right several times and verify the PDF page number increases.
+4. Swipe left and verify it decreases.
+5. Test both right/left edge taps.
+6. Switch to LTR and verify the physical swipe/tap directions reverse.
+7. Tap the page counter and jump to a known page.
+8. Tap the center of the page and verify the controls hide/show.
+
+Once this passes, the next milestone is landscape two-page spreads plus **Treat Cover Page Separately**.
 
 ## Build
 
@@ -45,16 +73,14 @@ The resulting package is written to:
 out/*.snplg
 ```
 
-GitHub Actions also uploads the package as the `supernote-rtl-reader-v0.0.1` artifact.
+GitHub Actions also uploads the package as the `supernote-rtl-reader-v0.0.2` artifact.
 
-## Install and test
+## Install and diagnostics
 
 1. Download the `.snplg` build artifact.
 2. Copy it to the Supernote `MyStyle` directory.
-3. Open **Settings → Apps → Plugins** and install/update **RTL Reader**.
-4. Open a PDF in the native document reader.
-5. Navigate to a distinctive page.
-6. Tap **RTL Reader**.
+3. Open **Settings -> Apps -> Plugins** and install/update **RTL Reader**.
+4. Open a PDF in the native document reader and tap **RTL Reader**.
 
 For diagnostics over ADB:
 
@@ -63,10 +89,12 @@ For diagnostics over ADB:
 .\adb logcat -v raw | Select-String RTL_READER
 ```
 
-Expected success output includes a line similar to:
+Useful log markers include:
 
 ```text
-RTL_READER_RENDERED file=/storage/emulated/0/.../book.pdf page=42 size=1404x1986
+RTL_READER_OPENED
+RTL_READER_RENDERED
+RTL_READER_NAV
+RTL_READER_DIRECTION
+RTL_READER_JUMP
 ```
-
-If the plugin UI reports that the PDF file is inaccessible, that specifically tells us the beta PluginHost cannot directly read the DOC file path. Since the test Nomad is rooted, the next fallback would be an Android-side privileged/file-descriptor bridge rather than changing the reader design.

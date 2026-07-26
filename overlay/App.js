@@ -1,7 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {
   ActivityIndicator,
-  Dimensions,
   Image,
   Keyboard,
   NativeModules,
@@ -13,6 +12,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import {PluginCommAPI, PluginDocAPI, PluginManager} from 'sn-plugin-lib';
 
@@ -20,7 +20,7 @@ const {PdfRendererModule} = NativeModules;
 const SWIPE_THRESHOLD = 56;
 const TAP_SLOP = 18;
 const EDGE_ZONE = 0.28;
-const CACHE_LIMIT = 5;
+const CACHE_LIMIT = 8;
 
 async function requireResult(promise, label) {
   const response = await promise;
@@ -64,28 +64,93 @@ function cacheKey(pageIndex, width) {
   return `${pageIndex}:${width}`;
 }
 
+function normalizePage(pageIndex, totalPages) {
+  if (!Number.isInteger(pageIndex) || pageIndex < 0) return null;
+  if (Number.isInteger(totalPages) && pageIndex >= totalPages) return null;
+  return pageIndex;
+}
+
+function getSpreadPair(pageIndex, coverSeparate, totalPages) {
+  let earlier;
+  let later;
+
+  if (coverSeparate) {
+    if (pageIndex <= 0) {
+      earlier = 0;
+      later = null;
+    } else {
+      const start = 1 + Math.floor((pageIndex - 1) / 2) * 2;
+      earlier = start;
+      later = start + 1;
+    }
+  } else {
+    const start = Math.floor(pageIndex / 2) * 2;
+    earlier = start;
+    later = start + 1;
+  }
+
+  return {
+    earlier: normalizePage(earlier, totalPages),
+    later: normalizePage(later, totalPages),
+  };
+}
+
+function getVisualSpread(pageIndex, coverSeparate, totalPages, direction) {
+  const {earlier, later} = getSpreadPair(pageIndex, coverSeparate, totalPages);
+  if (direction === 'rtl') {
+    return {left: later, right: earlier};
+  }
+  return {left: earlier, right: later};
+}
+
+function cycleViewMode(current) {
+  if (current === 'auto') return 'single';
+  if (current === 'single') return 'spread';
+  return 'auto';
+}
+
+function viewModeLabel(mode) {
+  if (mode === 'single') return 'Single';
+  if (mode === 'spread') return 'Spread';
+  return 'Auto';
+}
+
 export default function App() {
+  const window = useWindowDimensions();
+  const isLandscape = window.width > window.height;
+
   const [documentContext, setDocumentContext] = useState(null);
   const [pageIndex, setPageIndex] = useState(null);
   const [totalPages, setTotalPages] = useState(null);
-  const [imageUri, setImageUri] = useState(null);
+  const [display, setDisplay] = useState({kind: 'single', single: null});
   const [rendering, setRendering] = useState(true);
   const [fatalError, setFatalError] = useState(null);
   const [direction, setDirection] = useState('rtl');
+  const [viewMode, setViewMode] = useState('auto');
+  const [coverSeparate, setCoverSeparate] = useState(false);
   const [chromeVisible, setChromeVisible] = useState(true);
   const [jumpOpen, setJumpOpen] = useState(false);
   const [jumpText, setJumpText] = useState('');
 
+  const effectiveMode =
+    viewMode === 'auto' ? (isLandscape ? 'spread' : 'single') : viewMode;
+
   const mountedRef = useRef(true);
   const renderTokenRef = useRef(0);
-  const pageAreaWidthRef = useRef(Math.max(1, Dimensions.get('window').width));
+  const pageAreaWidthRef = useRef(Math.max(1, window.width));
   const pageAreaLeftRef = useRef(0);
   const directionRef = useRef(direction);
   const totalPagesRef = useRef(totalPages);
+  const effectiveModeRef = useRef(effectiveMode);
+  const coverSeparateRef = useRef(coverSeparate);
   const cacheRef = useRef(new Map());
   const prefetchingRef = useRef(new Set());
+
   directionRef.current = direction;
   totalPagesRef.current = totalPages;
+  effectiveModeRef.current = effectiveMode;
+  coverSeparateRef.current = coverSeparate;
+  pageAreaWidthRef.current = Math.max(1, window.width);
 
   const putCache = (key, value) => {
     const cache = cacheRef.current;
@@ -126,39 +191,65 @@ export default function App() {
     return result;
   };
 
-  const prefetchAdjacent = async (currentPage, viewportWidth, knownPageCount) => {
+  const prefetchPage = async (targetPage, viewportWidth, pageCount) => {
+    const normalized = normalizePage(targetPage, pageCount);
+    if (normalized === null) return;
+
+    const key = cacheKey(normalized, viewportWidth);
+    if (cacheRef.current.has(key) || prefetchingRef.current.has(key)) return;
+
+    prefetchingRef.current.add(key);
+    try {
+      const rendered = await PdfRendererModule.renderPage(
+        documentContext.filePath,
+        normalized,
+        viewportWidth,
+      );
+      if (rendered?.base64 && mountedRef.current) {
+        putCache(key, {
+          imageUri: `data:image/png;base64,${rendered.base64}`,
+          width: rendered.width,
+          height: rendered.height,
+          pageCount: rendered.pageCount,
+        });
+        console.log(`RTL_READER_PREFETCHED page=${normalized + 1}`);
+      }
+    } catch (error) {
+      console.warn(`RTL_READER_PREFETCH_FAILED page=${normalized + 1}`, error);
+    } finally {
+      prefetchingRef.current.delete(key);
+    }
+  };
+
+  const prefetchAround = async (
+    currentPage,
+    viewportWidth,
+    mode,
+    coverIsSeparate,
+    knownPageCount,
+  ) => {
     const pageCount = Number.isInteger(knownPageCount)
       ? knownPageCount
       : totalPagesRef.current;
-    const candidates = [currentPage + 1, currentPage - 1];
+
+    if (mode === 'single') {
+      await prefetchPage(currentPage + 1, viewportWidth, pageCount);
+      await prefetchPage(currentPage - 1, viewportWidth, pageCount);
+      return;
+    }
+
+    const nextPair = getSpreadPair(currentPage + 2, coverIsSeparate, pageCount);
+    const previousPair = getSpreadPair(currentPage - 2, coverIsSeparate, pageCount);
+    const candidates = [
+      nextPair.earlier,
+      nextPair.later,
+      previousPair.earlier,
+      previousPair.later,
+    ];
 
     for (const candidate of candidates) {
-      if (candidate < 0) continue;
-      if (Number.isInteger(pageCount) && candidate >= pageCount) continue;
-
-      const key = cacheKey(candidate, viewportWidth);
-      if (cacheRef.current.has(key) || prefetchingRef.current.has(key)) continue;
-
-      prefetchingRef.current.add(key);
-      try {
-        const rendered = await PdfRendererModule.renderPage(
-          documentContext.filePath,
-          candidate,
-          viewportWidth,
-        );
-        if (rendered?.base64 && mountedRef.current) {
-          putCache(key, {
-            imageUri: `data:image/png;base64,${rendered.base64}`,
-            width: rendered.width,
-            height: rendered.height,
-            pageCount: rendered.pageCount,
-          });
-          console.log(`RTL_READER_PREFETCHED page=${candidate + 1}`);
-        }
-      } catch (error) {
-        console.warn(`RTL_READER_PREFETCH_FAILED page=${candidate + 1}`, error);
-      } finally {
-        prefetchingRef.current.delete(key);
+      if (candidate !== null) {
+        await prefetchPage(candidate, viewportWidth, pageCount);
       }
     }
   };
@@ -174,7 +265,7 @@ export default function App() {
 
         const context = await getDocumentContext();
         if (!context.filePath?.toLowerCase().endsWith('.pdf')) {
-          throw new Error('RTL Reader v0.0.3 currently supports PDF documents only.');
+          throw new Error('RTL Reader v0.0.5 currently supports PDF documents only.');
         }
 
         if (!mountedRef.current) return;
@@ -207,32 +298,98 @@ export default function App() {
 
     const token = ++renderTokenRef.current;
 
-    async function renderPage() {
-      const viewportWidth = Math.max(
-        600,
-        Math.round(pageAreaWidthRef.current || Dimensions.get('window').width),
-      );
-      const key = cacheKey(pageIndex, viewportWidth);
-      const hadCachedPage = cacheRef.current.has(key);
+    async function renderCurrentView() {
+      const pageCount = totalPagesRef.current;
 
       try {
-        setRendering(!hadCachedPage);
-        const rendered = await renderPdfPage(pageIndex, viewportWidth);
+        if (effectiveMode === 'single') {
+          const viewportWidth = Math.max(600, Math.round(window.width));
+          const key = cacheKey(pageIndex, viewportWidth);
+          const hadCachedPage = cacheRef.current.has(key);
+          setRendering(!hadCachedPage);
+
+          const rendered = await renderPdfPage(pageIndex, viewportWidth);
+          if (!mountedRef.current || token !== renderTokenRef.current) return;
+
+          setDisplay({
+            kind: 'single',
+            single: rendered.imageUri,
+            singlePageIndex: pageIndex,
+          });
+          if (Number.isInteger(rendered.pageCount)) {
+            setTotalPages(rendered.pageCount);
+          }
+          setFatalError(null);
+          setRendering(false);
+
+          console.log(
+            `RTL_READER_RENDERED mode=single page=${pageIndex + 1} cached=${hadCachedPage}`,
+          );
+
+          void prefetchAround(
+            pageIndex,
+            viewportWidth,
+            'single',
+            coverSeparate,
+            rendered.pageCount,
+          );
+          return;
+        }
+
+        const viewportWidth = Math.max(360, Math.floor(window.width / 2));
+        const visual = getVisualSpread(
+          pageIndex,
+          coverSeparate,
+          pageCount,
+          direction,
+        );
+        const visibleIndexes = [visual.left, visual.right].filter(
+          candidate => candidate !== null,
+        );
+        const allCached = visibleIndexes.every(candidate =>
+          cacheRef.current.has(cacheKey(candidate, viewportWidth)),
+        );
+        setRendering(!allCached);
+
+        const leftRendered =
+          visual.left === null
+            ? null
+            : await renderPdfPage(visual.left, viewportWidth);
+        const rightRendered =
+          visual.right === null
+            ? null
+            : await renderPdfPage(visual.right, viewportWidth);
 
         if (!mountedRef.current || token !== renderTokenRef.current) return;
 
-        setImageUri(rendered.imageUri);
-        if (Number.isInteger(rendered.pageCount)) {
-          setTotalPages(rendered.pageCount);
+        const renderedPageCount =
+          leftRendered?.pageCount ?? rightRendered?.pageCount ?? pageCount;
+        setDisplay({
+          kind: 'spread',
+          left: leftRendered?.imageUri ?? null,
+          right: rightRendered?.imageUri ?? null,
+          leftPageIndex: visual.left,
+          rightPageIndex: visual.right,
+        });
+        if (Number.isInteger(renderedPageCount)) {
+          setTotalPages(renderedPageCount);
         }
         setFatalError(null);
         setRendering(false);
 
         console.log(
-          `RTL_READER_RENDERED file=${documentContext.filePath} page=${pageIndex + 1} size=${rendered.width}x${rendered.height} cached=${hadCachedPage}`,
+          `RTL_READER_RENDERED mode=spread left=${
+            visual.left === null ? 'blank' : visual.left + 1
+          } right=${visual.right === null ? 'blank' : visual.right + 1} cached=${allCached}`,
         );
 
-        void prefetchAdjacent(pageIndex, viewportWidth, rendered.pageCount);
+        void prefetchAround(
+          pageIndex,
+          viewportWidth,
+          'spread',
+          coverSeparate,
+          renderedPageCount,
+        );
       } catch (error) {
         console.error('RTL_READER_RENDER_FAILED', error);
         if (mountedRef.current && token === renderTokenRef.current) {
@@ -242,8 +399,15 @@ export default function App() {
       }
     }
 
-    renderPage();
-  }, [documentContext, pageIndex]);
+    renderCurrentView();
+  }, [
+    documentContext,
+    pageIndex,
+    effectiveMode,
+    direction,
+    coverSeparate,
+    window.width,
+  ]);
 
   const close = () => {
     PluginManager.closePluginView().catch(error =>
@@ -257,15 +421,16 @@ export default function App() {
       const next = clampPage(current + delta, totalPagesRef.current);
       if (next !== current) {
         console.log(
-          `RTL_READER_NAV from=${current + 1} to=${next + 1} direction=${directionRef.current}`,
+          `RTL_READER_NAV from=${current + 1} to=${next + 1} direction=${directionRef.current} mode=${effectiveModeRef.current}`,
         );
       }
       return next;
     });
   };
 
-  const nextLogicalPage = () => goBy(1);
-  const previousLogicalPage = () => goBy(-1);
+  const pageStep = () => (effectiveModeRef.current === 'spread' ? 2 : 1);
+  const nextLogicalPage = () => goBy(pageStep());
+  const previousLogicalPage = () => goBy(-pageStep());
 
   const handlePhysicalSwipe = dx => {
     if (dx > SWIPE_THRESHOLD) {
@@ -283,8 +448,11 @@ export default function App() {
 
   const handlePhysicalTap = absoluteX => {
     const width = Math.max(1, pageAreaWidthRef.current);
-    const localPhysicalX = absoluteX - pageAreaLeftRef.current;
-    const fraction = localPhysicalX / width;
+    const rawFraction = (absoluteX - pageAreaLeftRef.current) / width;
+
+    // PluginHost reports horizontal tap coordinates mirrored on the test Nomad.
+    // Convert that coordinate back into physical left-to-right screen space.
+    const fraction = 1 - rawFraction;
 
     if (fraction <= EDGE_ZONE) {
       if (directionRef.current === 'rtl') previousLogicalPage();
@@ -310,9 +478,6 @@ export default function App() {
         const {dx, dy, x0} = gestureState;
         if (handlePhysicalSwipe(dx)) return;
         if (Math.abs(dx) <= TAP_SLOP && Math.abs(dy) <= TAP_SLOP) {
-          // locationX is mirrored by PluginHost on the test Nomad. pageX/x0
-          // tracks the physical screen coordinate, which keeps taps aligned
-          // with the already-correct physical swipe directions.
           const absoluteX = Number.isFinite(event.nativeEvent.pageX)
             ? event.nativeEvent.pageX
             : x0;
@@ -328,6 +493,23 @@ export default function App() {
       const next = current === 'rtl' ? 'ltr' : 'rtl';
       directionRef.current = next;
       console.log(`RTL_READER_DIRECTION ${next}`);
+      return next;
+    });
+  };
+
+  const toggleViewMode = () => {
+    setViewMode(current => {
+      const next = cycleViewMode(current);
+      console.log(`RTL_READER_VIEW_MODE ${next}`);
+      return next;
+    });
+  };
+
+  const toggleCoverSeparate = () => {
+    setCoverSeparate(current => {
+      const next = !current;
+      coverSeparateRef.current = next;
+      console.log(`RTL_READER_COVER_SEPARATE ${next}`);
       return next;
     });
   };
@@ -352,6 +534,26 @@ export default function App() {
     setJumpOpen(false);
   };
 
+  const footerLabel = (() => {
+    if (display.kind !== 'spread') {
+      return `Page ${Number.isInteger(pageIndex) ? pageIndex + 1 : '—'}${
+        Number.isInteger(totalPages) ? ` / ${totalPages}` : ''
+      }`;
+    }
+
+    const left =
+      display.leftPageIndex === null || display.leftPageIndex === undefined
+        ? 'Blank'
+        : String(display.leftPageIndex + 1);
+    const right =
+      display.rightPageIndex === null || display.rightPageIndex === undefined
+        ? 'Blank'
+        : String(display.rightPageIndex + 1);
+    return `${left} | ${right}${
+      Number.isInteger(totalPages) ? ` / ${totalPages}` : ''
+    }`;
+  })();
+
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar hidden />
@@ -363,9 +565,35 @@ export default function App() {
           pageAreaLeftRef.current = event.nativeEvent.layout.x ?? 0;
         }}
         {...panResponderRef.current.panHandlers}>
-        {imageUri ? (
+        {display.kind === 'spread' ? (
+          <View style={styles.spread}>
+            <View style={styles.spreadPage}>
+              {display.left ? (
+                <Image
+                  source={{uri: display.left}}
+                  resizeMode="contain"
+                  style={styles.pageImage}
+                />
+              ) : (
+                <View style={styles.blankPage} />
+              )}
+            </View>
+            <View style={styles.spreadDivider} />
+            <View style={styles.spreadPage}>
+              {display.right ? (
+                <Image
+                  source={{uri: display.right}}
+                  resizeMode="contain"
+                  style={styles.pageImage}
+                />
+              ) : (
+                <View style={styles.blankPage} />
+              )}
+            </View>
+          </View>
+        ) : display.single ? (
           <Image
-            source={{uri: imageUri}}
+            source={{uri: display.single}}
             resizeMode="contain"
             style={styles.pageImage}
           />
@@ -399,7 +627,14 @@ export default function App() {
                 {direction === 'rtl' ? 'RTL' : 'LTR'}
               </Text>
             </Pressable>
-            <Text style={styles.title}>RTL Reader</Text>
+            <Pressable onPress={toggleViewMode} style={styles.compactButton}>
+              <Text style={styles.compactButtonText}>{viewModeLabel(viewMode)}</Text>
+            </Pressable>
+            <Pressable onPress={toggleCoverSeparate} style={styles.compactButton}>
+              <Text style={styles.compactButtonText}>
+                {coverSeparate ? 'Cover: On' : 'Cover: Off'}
+              </Text>
+            </Pressable>
             <Pressable onPress={close} style={styles.compactButton}>
               <Text style={styles.compactButtonText}>Close</Text>
             </Pressable>
@@ -410,10 +645,7 @@ export default function App() {
               <Text style={styles.navButtonText}>−</Text>
             </Pressable>
             <Pressable onPress={openJump} style={styles.pageButton}>
-              <Text style={styles.pageLabel}>
-                Page {Number.isInteger(pageIndex) ? pageIndex + 1 : '—'}
-                {Number.isInteger(totalPages) ? ` / ${totalPages}` : ''}
-              </Text>
+              <Text style={styles.pageLabel}>{footerLabel}</Text>
             </Pressable>
             <Pressable onPress={nextLogicalPage} style={styles.navButton}>
               <Text style={styles.navButtonText}>+</Text>
@@ -437,7 +669,9 @@ export default function App() {
               value={jumpText}
             />
             <Text style={styles.jumpHint}>
-              {Number.isInteger(totalPages) ? `1–${totalPages}` : 'Enter a page number'}
+              {Number.isInteger(totalPages)
+                ? `1–${totalPages}`
+                : 'Enter a page number'}
             </Text>
             <View style={styles.jumpButtons}>
               <Pressable onPress={cancelJump} style={styles.panelButton}>
@@ -466,7 +700,25 @@ const styles = StyleSheet.create({
   pageImage: {
     flex: 1,
     width: '100%',
+    height: '100%',
     backgroundColor: '#ffffff',
+  },
+  spread: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: '#ffffff',
+  },
+  spreadPage: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+  },
+  blankPage: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+  },
+  spreadDivider: {
+    width: 1,
+    backgroundColor: '#999999',
   },
   center: {
     flex: 1,
@@ -477,7 +729,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     minHeight: 48,
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -485,13 +737,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#777777',
   },
-  title: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#000000',
-  },
   compactButton: {
-    minWidth: 58,
+    minWidth: 72,
     paddingHorizontal: 10,
     paddingVertical: 8,
     alignItems: 'center',
@@ -501,7 +748,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
   },
   compactButtonText: {
-    fontSize: 16,
+    fontSize: 15,
     color: '#000000',
   },
   footer: {
@@ -529,7 +776,7 @@ const styles = StyleSheet.create({
     color: '#000000',
   },
   pageButton: {
-    minWidth: 190,
+    minWidth: 210,
     paddingHorizontal: 16,
     paddingVertical: 10,
     alignItems: 'center',

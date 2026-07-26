@@ -2,6 +2,12 @@
 
 A Supernote plugin focused on right-to-left PDF reading and landscape two-page spreads, designed especially for Hebrew books.
 
+## Status
+
+**v0.0.9 is the current hardware-validated release candidate.**
+
+The complete regression matrix has passed on a Supernote Nomad running the plugin beta firmware, including portrait and landscape reading, RTL/LTR navigation, cover parity, per-document persistence, boundary cases, and root-free handoff back to the native reader.
+
 ## Proven hardware foundation
 
 The reader has been validated on a Supernote Nomad running the plugin beta firmware:
@@ -41,6 +47,17 @@ On Close, v0.0.9:
 9. the native reader reopens the same PDF at the page where RTL Reader was closed.
 
 This full sequence has been confirmed on the test Nomad without `su`.
+
+## Regression status
+
+All sections in [`REGRESSION.md`](REGRESSION.md) pass on hardware:
+
+- portrait single-page RTL;
+- landscape Auto spreads and rotation;
+- **Treat Cover Page Separately** parity;
+- LTR navigation and spread order;
+- per-document settings/position isolation and native-position override;
+- beginning/end boundary behavior and final-page handoff.
 
 ## View modes
 

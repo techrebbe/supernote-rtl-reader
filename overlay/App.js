@@ -74,6 +74,10 @@ export default function App() {
   const mountedRef = useRef(true);
   const renderTokenRef = useRef(0);
   const pageAreaWidthRef = useRef(Math.max(1, Dimensions.get('window').width));
+  const directionRef = useRef(direction);
+  const totalPagesRef = useRef(totalPages);
+  directionRef.current = direction;
+  totalPagesRef.current = totalPages;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -166,10 +170,10 @@ export default function App() {
   const goBy = delta => {
     setPageIndex(current => {
       if (!Number.isInteger(current)) return current;
-      const next = clampPage(current + delta, totalPages);
+      const next = clampPage(current + delta, totalPagesRef.current);
       if (next !== current) {
         console.log(
-          `RTL_READER_NAV from=${current + 1} to=${next + 1} direction=${direction}`,
+          `RTL_READER_NAV from=${current + 1} to=${next + 1} direction=${directionRef.current}`,
         );
       }
       return next;
@@ -181,12 +185,12 @@ export default function App() {
 
   const handlePhysicalSwipe = dx => {
     if (dx > SWIPE_THRESHOLD) {
-      if (direction === 'rtl') nextLogicalPage();
+      if (directionRef.current === 'rtl') nextLogicalPage();
       else previousLogicalPage();
       return true;
     }
     if (dx < -SWIPE_THRESHOLD) {
-      if (direction === 'rtl') previousLogicalPage();
+      if (directionRef.current === 'rtl') previousLogicalPage();
       else nextLogicalPage();
       return true;
     }
@@ -198,13 +202,13 @@ export default function App() {
     const fraction = locationX / width;
 
     if (fraction <= EDGE_ZONE) {
-      if (direction === 'rtl') previousLogicalPage();
+      if (directionRef.current === 'rtl') previousLogicalPage();
       else nextLogicalPage();
       return;
     }
 
     if (fraction >= 1 - EDGE_ZONE) {
-      if (direction === 'rtl') nextLogicalPage();
+      if (directionRef.current === 'rtl') nextLogicalPage();
       else previousLogicalPage();
       return;
     }
@@ -231,6 +235,7 @@ export default function App() {
   const toggleDirection = () => {
     setDirection(current => {
       const next = current === 'rtl' ? 'ltr' : 'rtl';
+      directionRef.current = next;
       console.log(`RTL_READER_DIRECTION ${next}`);
       return next;
     });
@@ -249,7 +254,7 @@ export default function App() {
   const submitJump = () => {
     const requested = Number.parseInt(jumpText, 10);
     if (!Number.isFinite(requested)) return;
-    const target = clampPage(requested - 1, totalPages);
+    const target = clampPage(requested - 1, totalPagesRef.current);
     console.log(`RTL_READER_JUMP requested=${requested} target=${target + 1}`);
     setPageIndex(target);
     Keyboard.dismiss();

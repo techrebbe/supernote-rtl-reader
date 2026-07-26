@@ -104,12 +104,6 @@ function getVisualSpread(pageIndex, coverSeparate, totalPages, direction) {
   return {left: earlier, right: later};
 }
 
-function cycleViewMode(current) {
-  if (current === 'auto') return 'single';
-  if (current === 'single') return 'spread';
-  return 'auto';
-}
-
 function viewModeLabel(mode) {
   if (mode === 'single') return 'Single';
   if (mode === 'spread') return 'Spread';
@@ -151,6 +145,18 @@ function decodePreferences(raw, context) {
   };
 }
 
+function SegmentedButton({active, label, onPress, style}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[styles.segmentButton, active && styles.segmentButtonActive, style]}>
+      <Text style={[styles.segmentButtonText, active && styles.segmentButtonTextActive]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 export default function App() {
   const window = useWindowDimensions();
   const isLandscape = window.width > window.height;
@@ -166,6 +172,7 @@ export default function App() {
   const [viewMode, setViewMode] = useState('auto');
   const [coverSeparate, setCoverSeparate] = useState(false);
   const [chromeVisible, setChromeVisible] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [jumpOpen, setJumpOpen] = useState(false);
   const [jumpText, setJumpText] = useState('');
 
@@ -335,7 +342,7 @@ export default function App() {
 
         const context = await getDocumentContext();
         if (!context.filePath?.toLowerCase().endsWith('.pdf')) {
-          throw new Error('RTL Reader v0.0.9 currently supports PDF documents only.');
+          throw new Error('RTL Reader v0.1.0 currently supports PDF documents only.');
         }
 
         const rawPreferences = await ReaderPreferencesModule.load(context.filePath);
@@ -511,9 +518,9 @@ export default function App() {
         setRendering(false);
 
         console.log(
-          `RTL_READER_RENDERED mode=spread left=${
-            visual.left === null ? 'blank' : visual.left + 1
-          } right=${visual.right === null ? 'blank' : visual.right + 1} cached=${allCached}`,
+          `RTL_READER_RENDERED mode=spread left=$
+{visual.left === null ? 'blank' : visual.left + 1} right=$
+{visual.right === null ? 'blank' : visual.right + 1} cached=${allCached}`.replace(/\n/g, ''),
         );
 
         void prefetchAround(
@@ -634,31 +641,25 @@ export default function App() {
     });
   }
 
-  const toggleDirection = () => {
-    setDirection(current => {
-      const next = current === 'rtl' ? 'ltr' : 'rtl';
-      directionRef.current = next;
-      console.log(`RTL_READER_DIRECTION ${next}`);
-      return next;
-    });
+  const setDirectionValue = next => {
+    if (next !== 'rtl' && next !== 'ltr') return;
+    directionRef.current = next;
+    setDirection(next);
+    console.log(`RTL_READER_DIRECTION ${next}`);
   };
 
-  const toggleViewMode = () => {
-    setViewMode(current => {
-      const next = cycleViewMode(current);
-      viewModeRef.current = next;
-      console.log(`RTL_READER_VIEW_MODE ${next}`);
-      return next;
-    });
+  const setViewModeValue = next => {
+    if (!['auto', 'single', 'spread'].includes(next)) return;
+    viewModeRef.current = next;
+    setViewMode(next);
+    console.log(`RTL_READER_VIEW_MODE ${next}`);
   };
 
-  const toggleCoverSeparate = () => {
-    setCoverSeparate(current => {
-      const next = !current;
-      coverSeparateRef.current = next;
-      console.log(`RTL_READER_COVER_SEPARATE ${next}`);
-      return next;
-    });
+  const setCoverSeparateValue = next => {
+    const normalized = next === true;
+    coverSeparateRef.current = normalized;
+    setCoverSeparate(normalized);
+    console.log(`RTL_READER_COVER_SEPARATE ${normalized}`);
   };
 
   const openJump = () => {
@@ -684,7 +685,7 @@ export default function App() {
 
   const footerLabel = (() => {
     if (display.kind !== 'spread') {
-      return `Page ${Number.isInteger(pageIndex) ? pageIndex + 1 : '—'}${
+      return `${Number.isInteger(pageIndex) ? pageIndex + 1 : '—'}${
         Number.isInteger(totalPages) ? ` / ${totalPages}` : ''
       }`;
     }
@@ -701,6 +702,12 @@ export default function App() {
       Number.isInteger(totalPages) ? ` / ${totalPages}` : ''
     }`;
   })();
+
+  const statusLayout =
+    viewMode === 'auto'
+      ? `Auto → ${viewModeLabel(effectiveMode)}`
+      : viewModeLabel(viewMode);
+  const statusCover = coverSeparate ? 'Cover separate' : 'Cover paired';
 
   return (
     <SafeAreaView style={styles.root}>
@@ -770,40 +777,121 @@ export default function App() {
       {chromeVisible && !fatalError && (
         <>
           <View style={styles.header}>
-            <Pressable onPress={toggleDirection} style={styles.compactButton}>
-              <Text style={styles.compactButtonText}>
-                {direction === 'rtl' ? 'RTL' : 'LTR'}
+            <View style={styles.statusBlock}>
+              <Text style={styles.statusPrimary}>
+                {direction.toUpperCase()} · {statusLayout}
               </Text>
-            </Pressable>
-            <Pressable onPress={toggleViewMode} style={styles.compactButton}>
-              <Text style={styles.compactButtonText}>{viewModeLabel(viewMode)}</Text>
-            </Pressable>
-            <Pressable onPress={toggleCoverSeparate} style={styles.compactButton}>
-              <Text style={styles.compactButtonText}>
-                {coverSeparate ? 'Cover: On' : 'Cover: Off'}
-              </Text>
-            </Pressable>
-            <Pressable onPress={close} style={styles.compactButton}>
-              <Text style={styles.compactButtonText}>Close</Text>
-            </Pressable>
+              <Text style={styles.statusSecondary}>{statusCover}</Text>
+            </View>
+            <View style={styles.headerActions}>
+              <Pressable
+                onPress={() => setSettingsOpen(true)}
+                style={styles.headerButton}>
+                <Text style={styles.headerButtonText}>Settings</Text>
+              </Pressable>
+              <Pressable onPress={close} style={styles.headerButton}>
+                <Text style={styles.headerButtonText}>Close</Text>
+              </Pressable>
+            </View>
           </View>
 
           <View style={styles.footer}>
             <Pressable onPress={previousLogicalPage} style={styles.navButton}>
-              <Text style={styles.navButtonText}>−</Text>
+              <Text style={styles.navButtonText}>Prev</Text>
             </Pressable>
             <Pressable onPress={openJump} style={styles.pageButton}>
               <Text style={styles.pageLabel}>{footerLabel}</Text>
+              <Text style={styles.pageHint}>Tap to jump</Text>
             </Pressable>
             <Pressable onPress={nextLogicalPage} style={styles.navButton}>
-              <Text style={styles.navButtonText}>+</Text>
+              <Text style={styles.navButtonText}>Next</Text>
             </Pressable>
           </View>
         </>
       )}
 
+      {settingsOpen && !fatalError && (
+        <View style={styles.modalBackdrop}>
+          <View style={styles.settingsPanel}>
+            <View style={styles.settingsHeader}>
+              <View>
+                <Text style={styles.settingsTitle}>Reading settings</Text>
+                <Text style={styles.settingsSummary}>
+                  {direction.toUpperCase()} · {statusLayout}
+                </Text>
+              </View>
+              <Pressable
+                onPress={() => setSettingsOpen(false)}
+                style={styles.doneButton}>
+                <Text style={styles.doneButtonText}>Done</Text>
+              </Pressable>
+            </View>
+
+            <Text style={styles.settingLabel}>Reading direction</Text>
+            <View style={styles.segmentRow}>
+              <SegmentedButton
+                active={direction === 'rtl'}
+                label="RTL"
+                onPress={() => setDirectionValue('rtl')}
+                style={styles.segmentHalf}
+              />
+              <SegmentedButton
+                active={direction === 'ltr'}
+                label="LTR"
+                onPress={() => setDirectionValue('ltr')}
+                style={styles.segmentHalfLast}
+              />
+            </View>
+
+            <Text style={styles.settingLabel}>Page layout</Text>
+            <View style={styles.segmentRow}>
+              <SegmentedButton
+                active={viewMode === 'auto'}
+                label="Auto"
+                onPress={() => setViewModeValue('auto')}
+                style={styles.segmentThird}
+              />
+              <SegmentedButton
+                active={viewMode === 'single'}
+                label="Single"
+                onPress={() => setViewModeValue('single')}
+                style={styles.segmentThird}
+              />
+              <SegmentedButton
+                active={viewMode === 'spread'}
+                label="Spread"
+                onPress={() => setViewModeValue('spread')}
+                style={styles.segmentThirdLast}
+              />
+            </View>
+            <Text style={styles.settingHint}>
+              Auto uses Single in portrait and Spread in landscape.
+            </Text>
+
+            <Text style={styles.settingLabel}>Treat Cover Page Separately</Text>
+            <View style={styles.segmentRow}>
+              <SegmentedButton
+                active={!coverSeparate}
+                label="Off"
+                onPress={() => setCoverSeparateValue(false)}
+                style={styles.segmentHalf}
+              />
+              <SegmentedButton
+                active={coverSeparate}
+                label="On"
+                onPress={() => setCoverSeparateValue(true)}
+                style={styles.segmentHalfLast}
+              />
+            </View>
+            <Text style={styles.settingHint}>
+              On inserts a virtual blank beside the cover; the PDF is not changed.
+            </Text>
+          </View>
+        </View>
+      )}
+
       {jumpOpen && (
-        <View style={styles.jumpBackdrop}>
+        <View style={styles.modalBackdrop}>
           <View style={styles.jumpPanel}>
             <Text style={styles.jumpTitle}>Jump to PDF page</Text>
             <TextInput
@@ -876,8 +964,9 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    minHeight: 48,
-    paddingHorizontal: 8,
+    minHeight: 54,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -885,8 +974,27 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#777777',
   },
-  compactButton: {
-    minWidth: 72,
+  statusBlock: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  statusPrimary: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#000000',
+  },
+  statusSecondary: {
+    marginTop: 2,
+    fontSize: 12,
+    color: '#333333',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerButton: {
+    minWidth: 76,
+    marginLeft: 7,
     paddingHorizontal: 10,
     paddingVertical: 8,
     alignItems: 'center',
@@ -895,7 +1003,7 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: '#ffffff',
   },
-  compactButtonText: {
+  headerButtonText: {
     fontSize: 15,
     color: '#000000',
   },
@@ -904,7 +1012,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    minHeight: 48,
+    minHeight: 54,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -913,29 +1021,35 @@ const styles = StyleSheet.create({
     borderTopColor: '#777777',
   },
   navButton: {
-    width: 64,
-    height: 46,
+    minWidth: 76,
+    height: 52,
     alignItems: 'center',
     justifyContent: 'center',
   },
   navButtonText: {
-    fontSize: 28,
-    lineHeight: 30,
+    fontSize: 16,
+    fontWeight: '600',
     color: '#000000',
   },
   pageButton: {
     minWidth: 210,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 18,
+    paddingVertical: 7,
     alignItems: 'center',
   },
   pageLabel: {
-    fontSize: 16,
+    fontSize: 17,
+    fontWeight: '600',
     color: '#000000',
+  },
+  pageHint: {
+    marginTop: 1,
+    fontSize: 10,
+    color: '#555555',
   },
   renderBadge: {
     position: 'absolute',
-    top: 58,
+    top: 64,
     alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
@@ -974,7 +1088,7 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   panelButton: {
-    minWidth: 90,
+    minWidth: 94,
     paddingHorizontal: 16,
     paddingVertical: 10,
     alignItems: 'center',
@@ -987,7 +1101,7 @@ const styles = StyleSheet.create({
     fontSize: 17,
     color: '#000000',
   },
-  jumpBackdrop: {
+  modalBackdrop: {
     position: 'absolute',
     top: 0,
     left: 0,
@@ -995,7 +1109,99 @@ const styles = StyleSheet.create({
     bottom: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.86)',
+    backgroundColor: 'rgba(255,255,255,0.9)',
+  },
+  settingsPanel: {
+    width: 520,
+    maxWidth: '90%',
+    padding: 20,
+    borderWidth: 2,
+    borderColor: '#000000',
+    backgroundColor: '#ffffff',
+  },
+  settingsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  settingsTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#000000',
+  },
+  settingsSummary: {
+    marginTop: 2,
+    fontSize: 13,
+    color: '#444444',
+  },
+  doneButton: {
+    minWidth: 72,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#000000',
+    borderRadius: 3,
+    backgroundColor: '#000000',
+  },
+  doneButtonText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  settingLabel: {
+    marginTop: 4,
+    marginBottom: 7,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#000000',
+  },
+  settingHint: {
+    marginTop: 6,
+    marginBottom: 16,
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#444444',
+  },
+  segmentRow: {
+    flexDirection: 'row',
+    width: '100%',
+  },
+  segmentButton: {
+    minHeight: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#000000',
+    backgroundColor: '#ffffff',
+  },
+  segmentButtonActive: {
+    backgroundColor: '#000000',
+  },
+  segmentButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#000000',
+  },
+  segmentButtonTextActive: {
+    color: '#ffffff',
+  },
+  segmentHalf: {
+    flex: 1,
+    marginRight: 4,
+  },
+  segmentHalfLast: {
+    flex: 1,
+    marginLeft: 4,
+  },
+  segmentThird: {
+    flex: 1,
+    marginRight: 4,
+  },
+  segmentThirdLast: {
+    flex: 1,
+    marginLeft: 4,
   },
   jumpPanel: {
     width: 330,

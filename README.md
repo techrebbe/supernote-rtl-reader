@@ -21,25 +21,29 @@ The stable baseline covers:
 
 The v0.2.x development branch is focused on page-turn responsiveness while preserving v0.1.1 behavior.
 
-### v0.2.0 renderer reuse
+### Renderer reuse
 
-The first performance build changes the native render lifecycle:
+The native renderer keeps the active PDF file descriptor and Android `PdfRenderer` open across sequential page renders. It reuses that renderer while the PDF path, file size, and modification time are unchanged, and automatically reopens it when the document changes.
 
-- keep the active PDF file descriptor and Android `PdfRenderer` open across sequential page renders;
-- reuse that renderer while the PDF path, file size, and modification time are unchanged;
-- automatically reopen it when the document changes;
-- serialize page access so only one `PdfRenderer.Page` is open at a time;
-- log native timing for document-open/reuse, raster rendering, PNG compression, base64 encoding, and total render time.
+Hardware timing on the test Nomad with a 738-page, approximately 378 MB PDF showed that, after the first page, renderer-open overhead falls to about 0–1 ms. Median native timing in the v0.2.0 capture was approximately:
 
-Hardware timing on a 738-page, approximately 378 MB PDF confirmed renderer reuse works. After the first render, native document-open time drops from about 85 ms to essentially 0–1 ms. Across the captured run, median timings were approximately:
-
-- document open/reuse: 1 ms;
 - PDF rasterization: 138 ms;
 - PNG encoding: 265 ms;
 - Base64 encoding: 8 ms;
 - total native render: 426 ms.
 
-PNG encoding is therefore the dominant remaining native cost, accounting for roughly 62% of median render time. The same capture also showed repeated requests for several pages during rapid navigation, consistent with foreground/prefetch overlap.
+This establishes PNG encoding as the dominant native cost.
+
+### v0.2.1 recent-render cache
+
+v0.2.1 adds a small four-page native LRU cache of already-compressed PNG results. This catches duplicate foreground/prefetch requests that arrive shortly after a page has just been rendered.
+
+The v0.2.1 hardware capture contained 107 native render requests, including 14 cache hits (about 13.1%). Median native timing was:
+
+- cache miss: about 419 ms;
+- cache hit: about 16 ms.
+
+On a hit, `renderMs=0` and `pngMs=0`, so the expensive rasterization and PNG-compression stages are skipped. Image format and visual quality remain unchanged.
 
 Diagnostic marker:
 
@@ -47,18 +51,7 @@ Diagnostic marker:
 RTL_READER_NATIVE_RENDER page=... reused=... cacheHit=... openMs=... renderMs=... pngMs=... base64Ms=... totalMs=...
 ```
 
-### v0.2.1 recent-render cache
-
-v0.2.1 adds a small native LRU cache of the four most recent rendered PNG byte arrays. Because `PdfRenderer` access is serialized, a duplicate request arriving behind a just-completed render can now reuse the compressed page instead of repeating rasterization and PNG compression. A cache hit only repeats the much cheaper Base64 conversion.
-
-The v0.2.1 hardware check should confirm two things:
-
-- ordinary reading behavior and native-reader handoff remain unchanged;
-- repeated requests now appear as `cacheHit=true` with `renderMs=0` and `pngMs=0`.
-
-This deliberately preserves the existing image format and visual quality while reducing duplicate work before considering a larger native-display redesign that could remove PNG encoding from the page-turn path entirely.
-
-CI build artifact: `supernote-rtl-reader-v0.2.1`.
+The next major performance target is removing PNG compression from the foreground page-turn path, likely by displaying the rendered bitmap through a native Android view instead of transporting every page as PNG/base64 through React Native.
 
 ## Proven hardware foundation
 
@@ -178,7 +171,7 @@ The resulting package is written to:
 out/*.snplg
 ```
 
-GitHub Actions uploads the current performance test build as the `supernote-rtl-reader-v0.2.1` artifact.
+GitHub Actions uploads the current performance build as the `supernote-rtl-reader-v0.2.1` artifact.
 
 ## Install and diagnostics
 

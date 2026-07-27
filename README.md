@@ -4,7 +4,7 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 
 ## Stable baseline
 
-v0.1.1 is the current hardware-validated stable baseline on Supernote Nomad. It includes the v0.0.9 reading engine plus the validated UI/settings pass and direction-aware footer.
+v0.2.1 is the current merged hardware-validated stable baseline on Supernote Nomad. It includes the v0.0.9 reading engine, the v0.1.1 UI/settings pass, renderer reuse, and the validated recent-render cache.
 
 The stable baseline covers:
 
@@ -15,11 +15,12 @@ The stable baseline covers:
 - per-PDF settings and page persistence;
 - boundary cases;
 - direction-aware Prev/Next footer placement;
+- renderer reuse and a recent-render cache;
 - root-free native-reader page handoff on Close.
 
 ## v0.2.1 performance work — hardware validated
 
-The v0.2.x performance branch improves page-turn responsiveness while preserving the v0.1.1 reader behavior.
+The v0.2.x performance phase improves page-turn responsiveness while preserving the v0.1.1 reader behavior.
 
 v0.2.0 changes the native render lifecycle:
 
@@ -48,7 +49,25 @@ Diagnostic marker:
 RTL_READER_NATIVE_RENDER page=... reused=... cacheHit=... openMs=... renderMs=... pngMs=... base64Ms=... totalMs=...
 ```
 
-The major remaining performance target is PNG compression. A future optimization may move foreground page display to a native Android view so the rendered bitmap can be displayed directly instead of PNG-compressing and Base64-transporting every uncached page.
+## v0.3.0 direct native rendering — experimental, hardware measured
+
+v0.3.0 replaces the foreground `Bitmap -> PNG -> Base64 -> React Native Image` path with a native Android `PdfPageView` that draws the `PdfRenderer` bitmap directly.
+
+The first Nomad timing capture confirms the intended bottleneck is gone:
+
+- `pngMs=0` on every captured direct-view render;
+- `base64Ms=0` on every captured direct-view render;
+- renderer reuse remains active, normally `openMs=0–1` after initial open;
+- steady-state completed page renders are typically around 140–145 ms total;
+- v0.2.1 uncached native renders were about 419 ms median, so the direct foreground path is roughly 3× faster at the native-render stage.
+
+Diagnostic marker:
+
+```text
+RTL_READER_NATIVE_VIEW_RENDER page=... reused=... openMs=... renderMs=... pngMs=0 base64Ms=0 totalMs=...
+```
+
+The native view also uses a generation counter so a superseded render result is recycled and discarded rather than displayed after a newer page request. Full visual/navigation/handoff hardware validation is tracked separately in `REGRESSION.md`; the timing mechanism itself is now confirmed on the test Nomad.
 
 ## Proven hardware foundation
 
@@ -168,7 +187,7 @@ The resulting package is written to:
 out/*.snplg
 ```
 
-GitHub Actions uploads the current performance build as the `supernote-rtl-reader-v0.2.1` artifact.
+GitHub Actions uploads the current experimental direct-render build as the `supernote-rtl-reader-v0.3.0` artifact.
 
 ## Install and diagnostics
 

@@ -25,7 +25,7 @@ PluginManager.closePluginView = async (...args) => {
       }
       const result = await ReaderPreferencesModule.handoffLastSavedPage();
       console.log(
-        `RTL_READER_HANDOFF_PREPARED page=$${
+        `RTL_READER_HANDOFF_PREPARED page=${
           Number.isInteger(result?.pageIndex) ? result.pageIndex + 1 : 'unknown'
         } uid=${result?.uid ?? 'unknown'} config=${result?.configPath ?? 'unknown'}`,
       );

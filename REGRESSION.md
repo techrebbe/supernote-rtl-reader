@@ -86,8 +86,10 @@ With RTL + Spread + `Cover: On`:
 - [ ] Normal portrait and landscape reading still looks identical to v0.1.1/v0.2.0.
 - [ ] Rapid sequential turns do not crash, blank, or show stale pages.
 - [ ] Close/native-reader handoff still lands on the focused page.
-- [ ] Native logs continue to show renderer reuse (`reused=true`) after the initial open.
-- [ ] At least some repeated page requests, when they occur, show `cacheHit=true` with `renderMs=0` and `pngMs=0`.
+- [x] Native logs continue to show renderer reuse (`reused=true`) after the initial open.
+- [x] Repeated requests show `cacheHit=true` with `renderMs=0` and `pngMs=0`; captured cache-hit median total was about 16 ms versus about 419 ms for cache misses.
+
+Hardware timing capture for v0.2.1 contained 107 native render requests: 14 cache hits (about 13.1%). Cache-hit median total time was 16 ms; cache-miss median was 419 ms. Cache hits therefore avoided roughly 403 ms of native work per hit in this test while preserving the same PNG output path.
 
 ## Failure capture
 

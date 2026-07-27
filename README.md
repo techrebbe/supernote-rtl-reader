@@ -4,9 +4,9 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 
 ## Stable baseline
 
-v0.2.1 is the current merged hardware-validated stable baseline on Supernote Nomad. It includes the v0.0.9 reading engine, the v0.1.1 UI/settings pass, renderer reuse, and the validated recent-render cache.
+v0.2.1 is the current merged hardware-validated stable baseline on Supernote Nomad. v0.3.0 is the next hardware-validated direct-render candidate and is pending merge.
 
-The stable baseline covers:
+The validated reader behavior covers:
 
 - portrait and landscape reading;
 - RTL/LTR navigation;
@@ -15,7 +15,7 @@ The stable baseline covers:
 - per-PDF settings and page persistence;
 - boundary cases;
 - direction-aware Prev/Next footer placement;
-- renderer reuse and a recent-render cache;
+- renderer reuse;
 - root-free native-reader page handoff on Close.
 
 ## v0.2.1 performance work — hardware validated
@@ -49,11 +49,11 @@ Diagnostic marker:
 RTL_READER_NATIVE_RENDER page=... reused=... cacheHit=... openMs=... renderMs=... pngMs=... base64Ms=... totalMs=...
 ```
 
-## v0.3.0 direct native rendering — experimental, hardware measured
+## v0.3.0 direct native rendering — hardware validated candidate
 
 v0.3.0 replaces the foreground `Bitmap -> PNG -> Base64 -> React Native Image` path with a native Android `PdfPageView` that draws the `PdfRenderer` bitmap directly.
 
-The first Nomad timing capture confirms the intended bottleneck is gone:
+The Nomad timing capture confirms the intended bottleneck is gone:
 
 - `pngMs=0` on every captured direct-view render;
 - `base64Ms=0` on every captured direct-view render;
@@ -61,13 +61,22 @@ The first Nomad timing capture confirms the intended bottleneck is gone:
 - steady-state completed page renders are typically around 140–145 ms total;
 - v0.2.1 uncached native renders were about 419 ms median, so the direct foreground path is roughly 3× faster at the native-render stage.
 
+The hardware behavioral pass also confirmed:
+
+- no stale, blank, or out-of-order completed pages during rapid turns;
+- portrait and landscape rendering remain correct;
+- RTL/LTR spread order remains correct;
+- **Treat Cover Page Separately** still preserves the expected virtual-blank parity;
+- page jump still lands on the requested physical PDF page;
+- Close still returns Supernote's native reader to the focused page.
+
 Diagnostic marker:
 
 ```text
 RTL_READER_NATIVE_VIEW_RENDER page=... reused=... openMs=... renderMs=... pngMs=0 base64Ms=0 totalMs=...
 ```
 
-The native view also uses a generation counter so a superseded render result is recycled and discarded rather than displayed after a newer page request. Full visual/navigation/handoff hardware validation is tracked separately in `REGRESSION.md`; the timing mechanism itself is now confirmed on the test Nomad.
+The native view uses a generation counter so a superseded render result is recycled and discarded rather than displayed after a newer page request. Full validation details are recorded in `REGRESSION.md`.
 
 ## Proven hardware foundation
 
@@ -76,7 +85,6 @@ The reader has been validated on a Supernote Nomad running the plugin beta firmw
 - the official SDK supplies the currently open PDF path and page index;
 - Android `PdfRenderer` renders that PDF inside PluginHost without root;
 - RTL swipes and edge taps work on-device;
-- a bounded render cache improves ordinary sequential page turns;
 - landscape two-page spreads and **Treat Cover Page Separately** work;
 - per-PDF RTL Reader settings and position persist independently of the source PDF;
 - on Close, RTL Reader can synchronize its current PDF page back into Supernote's native document reader and return there automatically.
@@ -187,7 +195,7 @@ The resulting package is written to:
 out/*.snplg
 ```
 
-GitHub Actions uploads the current experimental direct-render build as the `supernote-rtl-reader-v0.3.0` artifact.
+GitHub Actions uploads the current direct-render build as the `supernote-rtl-reader-v0.3.0` artifact.
 
 ## Install and diagnostics
 

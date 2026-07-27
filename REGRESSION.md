@@ -1,18 +1,8 @@
-# RTL Reader hardware regression — v0.0.9 baseline
+# RTL Reader hardware regression
 
 Device baseline: Supernote Nomad, plugin beta firmware.
 
-v0.0.9 passed the complete regression suite and remains the stable baseline.
-
-## v0.1.0 UI-polish spot check
-
-The v0.1.0 branch changes reader chrome only. The first hardware pass was reported as visually good. One requested adjustment remains to verify after the latest build:
-
-- [ ] RTL footer order: `Next | page | Prev` (Next LEFT, Previous RIGHT).
-- [ ] LTR footer order: `Prev | page | Next` (Previous LEFT, Next RIGHT).
-- [ ] Both footer buttons still perform the correct logical navigation.
-- [ ] Switching RTL/LTR updates the footer immediately without reopening the reader.
-- [ ] Close/native page handoff still works after the footer-only change.
+v0.0.9 established the hardware-validated reading-engine baseline. v0.1.1 subsequently validated the polished UI and direction-aware footer. The v0.2.x branch adds performance optimizations and preserves all of that behavior.
 
 ## v0.0.9 full regression — PASS
 
@@ -71,6 +61,35 @@ With RTL + Spread + `Cover: On`:
 - [x] At the final spread with `Cover: On`, Next does nothing after the true last spread/page.
 - [x] Closing from the final spread hands off the page that RTL Reader actually considers focused.
 - [x] Jump to PDF page 1 and to the final PDF page works without crash or blank unintended pages.
+
+## v0.1.1 UI validation — PASS
+
+- [x] Settings panel fits and works in portrait and landscape.
+- [x] RTL/LTR, Auto/Single/Spread, and Cover On/Off selected states are clear.
+- [x] Auto still switches between portrait Single and landscape Spread.
+- [x] Center tap still hides/shows chrome.
+- [x] RTL footer is physically `Next | page | Prev` left-to-right.
+- [x] LTR footer is physically `Prev | page | Next` left-to-right.
+- [x] Close/native page handoff remains working.
+
+## v0.2.0 renderer-reuse validation — PASS
+
+- [x] Ordinary navigation remains working.
+- [x] Portrait and landscape reading remain working.
+- [x] Rapid page turns do not expose an obvious regression.
+- [x] Existing UI remains correct.
+- [x] Close/native-reader handoff remains working.
+- [x] Native logs confirm renderer reuse: after the initial open, `reused=true` and `openMs` is normally 0–1 ms.
+
+## v0.2.1 recent-render-cache spot check — PASS
+
+- [x] Normal portrait and landscape reading still looks identical to v0.1.1/v0.2.0.
+- [x] Rapid sequential turns do not crash, blank, show stale pages, or show pages out of order.
+- [x] Close/native-reader handoff lands on the focused page.
+- [x] Native logs continue to show renderer reuse (`reused=true`) after the initial open.
+- [x] Repeated requests show `cacheHit=true` with `renderMs=0` and `pngMs=0`; captured cache-hit median total was about 16 ms versus about 419 ms for cache misses.
+
+Hardware timing capture for v0.2.1 contained 107 native render requests: 14 cache hits (about 13.1%). Cache-hit median total time was 16 ms; cache-miss median was 419 ms. Cache hits therefore avoided roughly 403 ms of native work per hit in this test while preserving the same PNG output path.
 
 ## Failure capture
 

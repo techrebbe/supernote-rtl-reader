@@ -4,24 +4,51 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 
 ## Stable baseline
 
-v0.0.9 is the hardware-validated reading-engine baseline on Supernote Nomad. It passed the complete regression suite covering portrait and landscape reading, RTL/LTR navigation, cover parity, persistence, boundary cases, and root-free native-reader page handoff.
+v0.1.1 is the current hardware-validated stable baseline on Supernote Nomad. It includes the v0.0.9 reading engine plus the validated UI/settings pass and direction-aware footer.
 
-## v0.1.1 UI polish — hardware validated
+The stable baseline covers:
 
-v0.1.1 keeps the v0.0.9 reading engine intact while refining the reader controls. The complete UI pass, including the direction-aware footer, has been validated on the test Supernote Nomad.
+- portrait and landscape reading;
+- RTL/LTR navigation;
+- Auto / Single / Spread modes;
+- **Treat Cover Page Separately** parity;
+- per-PDF settings and page persistence;
+- boundary cases;
+- direction-aware Prev/Next footer placement;
+- root-free native-reader page handoff on Close.
 
-- compact status bar showing direction, selected layout, effective Auto layout, and cover behavior;
-- dedicated e-ink-friendly Settings panel;
-- explicit RTL / LTR choices;
-- explicit Auto / Single / Spread choices;
-- exact **Treat Cover Page Separately** option with On / Off controls;
-- clearer page/spread indicator with tap-to-jump hint;
-- Prev/Next footer buttons follow the selected reading direction:
-  - RTL: Next on the physical LEFT, Previous on the physical RIGHT;
-  - LTR: Previous on the physical LEFT, Next on the physical RIGHT;
-- footer positioning is forced to physical left-to-right layout so Android RTL UI inheritance cannot reverse the slots;
-- center tap still hides/shows all chrome for distraction-free reading;
-- no animations.
+## v0.2.1 performance work — hardware validated
+
+The v0.2.x performance branch improves page-turn responsiveness while preserving the v0.1.1 reader behavior.
+
+v0.2.0 changes the native render lifecycle:
+
+- keeps the active PDF file descriptor and Android `PdfRenderer` open across sequential page renders;
+- reuses that renderer while the PDF path, file size, and modification time are unchanged;
+- automatically reopens it when the document changes;
+- serializes page access so only one `PdfRenderer.Page` is open at a time;
+- logs native timing for document-open/reuse, raster rendering, PNG compression, Base64 encoding, and total render time.
+
+Hardware timing on the test Nomad showed that after the initial document open, renderer reuse reduces open/reuse overhead to about 0–1 ms. Typical native rendering was then dominated by PNG compression rather than document opening or Base64 conversion.
+
+v0.2.1 adds a four-page native LRU cache of recently compressed PNG page results. In the captured hardware run:
+
+- 107 native render requests were recorded;
+- 14 were native cache hits (about 13.1%);
+- cache-hit median total time was about 16 ms;
+- cache-miss median total time was about 419 ms;
+- cache hits therefore avoided roughly 403 ms of native render work per hit;
+- cache-hit logs showed `renderMs=0` and `pngMs=0` as intended.
+
+The v0.2.1 hardware spot check also confirmed that rapid page turns produced no stale, blank, or out-of-order pages and that Close still returned the native reader to the correct focused page.
+
+Diagnostic marker:
+
+```text
+RTL_READER_NATIVE_RENDER page=... reused=... cacheHit=... openMs=... renderMs=... pngMs=... base64Ms=... totalMs=...
+```
+
+The major remaining performance target is PNG compression. A future optimization may move foreground page display to a native Android view so the rendered bitmap can be displayed directly instead of PNG-compressing and Base64-transporting every uncached page.
 
 ## Proven hardware foundation
 
@@ -141,7 +168,7 @@ The resulting package is written to:
 out/*.snplg
 ```
 
-GitHub Actions uploads the current hardware-validated UI build as the `supernote-rtl-reader-v0.1.1` artifact.
+GitHub Actions uploads the current performance build as the `supernote-rtl-reader-v0.2.1` artifact.
 
 ## Install and diagnostics
 

@@ -4,7 +4,9 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
 import android.util.Base64
+import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -12,6 +14,7 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.util.LinkedHashMap
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -19,7 +22,92 @@ class PdfRendererModule(
     reactContext: ReactApplicationContext,
 ) : ReactContextBaseJavaModule(reactContext) {
 
+    companion object {
+        private const val LOG_TAG = "RTL_READER"
+        private const val RENDER_CACHE_LIMIT = 4
+    }
+
+    private data class CachedRender(
+        val pngBytes: ByteArray,
+        val width: Int,
+        val height: Int,
+        val pageCount: Int,
+    )
+
+    private val rendererLock = Any()
+    private var activePath: String? = null
+    private var activeLength: Long = -1L
+    private var activeModified: Long = -1L
+    private var activeDescriptor: ParcelFileDescriptor? = null
+    private var activeRenderer: PdfRenderer? = null
+    private val renderCache = object : LinkedHashMap<String, CachedRender>(RENDER_CACHE_LIMIT, 0.75f, true) {
+        override fun removeEldestEntry(
+            eldest: MutableMap.MutableEntry<String, CachedRender>?,
+        ): Boolean = size > RENDER_CACHE_LIMIT
+    }
+
     override fun getName(): String = "PdfRendererModule"
+
+    private fun closeRendererLocked() {
+        renderCache.clear()
+
+        try {
+            activeRenderer?.close()
+        } catch (_: Throwable) {
+        }
+        activeRenderer = null
+
+        try {
+            activeDescriptor?.close()
+        } catch (_: Throwable) {
+        }
+        activeDescriptor = null
+
+        activePath = null
+        activeLength = -1L
+        activeModified = -1L
+    }
+
+    private fun ensureRendererLocked(file: File): Pair<PdfRenderer, Boolean> {
+        val canonicalPath = file.canonicalPath
+        val length = file.length()
+        val modified = file.lastModified()
+        val existing = activeRenderer
+        val canReuse =
+            existing != null &&
+                activePath == canonicalPath &&
+                activeLength == length &&
+                activeModified == modified
+
+        if (canReuse) {
+            return Pair(existing!!, true)
+        }
+
+        closeRendererLocked()
+
+        val descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        val renderer = try {
+            PdfRenderer(descriptor)
+        } catch (error: Throwable) {
+            try {
+                descriptor.close()
+            } catch (_: Throwable) {
+            }
+            throw error
+        }
+
+        activePath = canonicalPath
+        activeLength = length
+        activeModified = modified
+        activeDescriptor = descriptor
+        activeRenderer = renderer
+
+        Log.i(
+            LOG_TAG,
+            "RTL_READER_NATIVE_RENDERER_OPEN path=$canonicalPath pages=${renderer.pageCount}",
+        )
+        return Pair(renderer, false)
+    }
 
     @ReactMethod
     fun renderPage(
@@ -28,72 +116,123 @@ class PdfRendererModule(
         requestedWidth: Int,
         promise: Promise,
     ) {
-        var descriptor: ParcelFileDescriptor? = null
-        var renderer: PdfRenderer? = null
-        var page: PdfRenderer.Page? = null
-        var bitmap: Bitmap? = null
+        val totalStarted = SystemClock.elapsedRealtime()
+        var reusedRenderer = false
+        var cacheHit = false
+        var openMs = 0L
+        var renderMs = 0L
+        var pngMs = 0L
+        var base64Ms = 0L
 
         try {
-            val file = File(filePath)
-            if (!file.exists() || !file.isFile) {
-                throw IllegalArgumentException("PDF file is not accessible: $filePath")
-            }
-            if (pageIndex < 0) {
-                throw IllegalArgumentException("Invalid PDF page index: $pageIndex")
+            val result = synchronized(rendererLock) {
+                val file = File(filePath)
+                if (!file.exists() || !file.isFile) {
+                    throw IllegalArgumentException("PDF file is not accessible: $filePath")
+                }
+                if (pageIndex < 0) {
+                    throw IllegalArgumentException("Invalid PDF page index: $pageIndex")
+                }
+
+                val openStarted = SystemClock.elapsedRealtime()
+                val (renderer, reused) = ensureRendererLocked(file)
+                reusedRenderer = reused
+                openMs = SystemClock.elapsedRealtime() - openStarted
+
+                if (pageIndex >= renderer.pageCount) {
+                    throw IllegalArgumentException(
+                        "PDF page ${pageIndex + 1} is outside the document (${renderer.pageCount} pages).",
+                    )
+                }
+
+                val width = requestedWidth.coerceIn(320, 2200)
+                val cacheKey = "$pageIndex:$width"
+                val cached = renderCache[cacheKey]
+                if (cached != null) {
+                    cacheHit = true
+                    val base64Started = SystemClock.elapsedRealtime()
+                    val encoded = Base64.encodeToString(cached.pngBytes, Base64.NO_WRAP)
+                    base64Ms = SystemClock.elapsedRealtime() - base64Started
+
+                    Arguments.createMap().apply {
+                        putString("base64", encoded)
+                        putInt("width", cached.width)
+                        putInt("height", cached.height)
+                        putInt("pageCount", cached.pageCount)
+                    }
+                } else {
+                    var page: PdfRenderer.Page? = null
+                    var bitmap: Bitmap? = null
+                    try {
+                        page = renderer.openPage(pageIndex)
+                        val height = max(
+                            1,
+                            (width.toDouble() * page.height.toDouble() / page.width.toDouble()).roundToInt(),
+                        )
+
+                        bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                        bitmap.eraseColor(Color.WHITE)
+
+                        val renderStarted = SystemClock.elapsedRealtime()
+                        page.render(
+                            bitmap,
+                            null,
+                            null,
+                            PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY,
+                        )
+                        renderMs = SystemClock.elapsedRealtime() - renderStarted
+
+                        val pngStarted = SystemClock.elapsedRealtime()
+                        val pngBytes = ByteArrayOutputStream().use { output ->
+                            if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
+                                throw IllegalStateException("Could not encode rendered PDF page as PNG.")
+                            }
+                            output.toByteArray()
+                        }
+                        pngMs = SystemClock.elapsedRealtime() - pngStarted
+
+                        renderCache[cacheKey] = CachedRender(
+                            pngBytes = pngBytes,
+                            width = width,
+                            height = height,
+                            pageCount = renderer.pageCount,
+                        )
+
+                        val base64Started = SystemClock.elapsedRealtime()
+                        val encoded = Base64.encodeToString(pngBytes, Base64.NO_WRAP)
+                        base64Ms = SystemClock.elapsedRealtime() - base64Started
+
+                        Arguments.createMap().apply {
+                            putString("base64", encoded)
+                            putInt("width", width)
+                            putInt("height", height)
+                            putInt("pageCount", renderer.pageCount)
+                        }
+                    } finally {
+                        bitmap?.recycle()
+                        try {
+                            page?.close()
+                        } catch (_: Throwable) {
+                        }
+                    }
+                }
             }
 
-            descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-            renderer = PdfRenderer(descriptor)
-            if (pageIndex >= renderer.pageCount) {
-                throw IllegalArgumentException(
-                    "PDF page ${pageIndex + 1} is outside the document (${renderer.pageCount} pages).",
-                )
-            }
-
-            page = renderer.openPage(pageIndex)
-            val width = requestedWidth.coerceIn(320, 2200)
-            val height = max(
-                1,
-                (width.toDouble() * page.height.toDouble() / page.width.toDouble()).roundToInt(),
+            val totalMs = SystemClock.elapsedRealtime() - totalStarted
+            Log.i(
+                LOG_TAG,
+                "RTL_READER_NATIVE_RENDER page=${pageIndex + 1} reused=$reusedRenderer cacheHit=$cacheHit " +
+                    "openMs=$openMs renderMs=$renderMs pngMs=$pngMs base64Ms=$base64Ms totalMs=$totalMs",
             )
-
-            bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-            bitmap.eraseColor(Color.WHITE)
-            page.render(
-                bitmap,
-                null,
-                null,
-                PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY,
-            )
-
-            val output = ByteArrayOutputStream()
-            if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
-                throw IllegalStateException("Could not encode rendered PDF page as PNG.")
-            }
-
-            val result = Arguments.createMap().apply {
-                putString("base64", Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP))
-                putInt("width", width)
-                putInt("height", height)
-                putInt("pageCount", renderer.pageCount)
-            }
             promise.resolve(result)
         } catch (error: Throwable) {
+            val totalMs = SystemClock.elapsedRealtime() - totalStarted
+            Log.e(
+                LOG_TAG,
+                "RTL_READER_NATIVE_RENDER_FAILED page=${pageIndex + 1} totalMs=$totalMs",
+                error,
+            )
             promise.reject("PDF_RENDER_FAILED", error.message, error)
-        } finally {
-            bitmap?.recycle()
-            try {
-                page?.close()
-            } catch (_: Throwable) {
-            }
-            try {
-                renderer?.close()
-            } catch (_: Throwable) {
-            }
-            try {
-                descriptor?.close()
-            } catch (_: Throwable) {
-            }
         }
     }
 }

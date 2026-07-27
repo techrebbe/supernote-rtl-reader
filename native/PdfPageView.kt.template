@@ -1,0 +1,293 @@
+package __PACKAGE__
+
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.pdf.PdfRenderer
+import android.os.ParcelFileDescriptor
+import android.os.SystemClock
+import android.util.Log
+import android.view.View
+import com.facebook.react.bridge.Arguments
+import com.facebook.react.uimanager.ThemedReactContext
+import com.facebook.react.uimanager.events.RCTEventEmitter
+import java.io.File
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
+
+private data class DirectRenderResult(
+    val bitmap: Bitmap,
+    val pageCount: Int,
+    val reusedRenderer: Boolean,
+    val openMs: Long,
+    val renderMs: Long,
+    val totalMs: Long,
+)
+
+private object PdfDirectRenderEngine {
+    private const val LOG_TAG = "RTL_READER"
+
+    private val rendererLock = Any()
+    private var activePath: String? = null
+    private var activeLength: Long = -1L
+    private var activeModified: Long = -1L
+    private var activeDescriptor: ParcelFileDescriptor? = null
+    private var activeRenderer: PdfRenderer? = null
+
+    private fun closeRendererLocked() {
+        try {
+            activeRenderer?.close()
+        } catch (_: Throwable) {
+        }
+        activeRenderer = null
+
+        try {
+            activeDescriptor?.close()
+        } catch (_: Throwable) {
+        }
+        activeDescriptor = null
+
+        activePath = null
+        activeLength = -1L
+        activeModified = -1L
+    }
+
+    private fun ensureRendererLocked(file: File): Pair<PdfRenderer, Boolean> {
+        val canonicalPath = file.canonicalPath
+        val length = file.length()
+        val modified = file.lastModified()
+        val existing = activeRenderer
+        val canReuse =
+            existing != null &&
+                activePath == canonicalPath &&
+                activeLength == length &&
+                activeModified == modified
+
+        if (canReuse) {
+            return Pair(existing!!, true)
+        }
+
+        closeRendererLocked()
+
+        val descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        val renderer = try {
+            PdfRenderer(descriptor)
+        } catch (error: Throwable) {
+            try {
+                descriptor.close()
+            } catch (_: Throwable) {
+            }
+            throw error
+        }
+
+        activePath = canonicalPath
+        activeLength = length
+        activeModified = modified
+        activeDescriptor = descriptor
+        activeRenderer = renderer
+
+        Log.i(
+            LOG_TAG,
+            "RTL_READER_NATIVE_VIEW_RENDERER_OPEN path=$canonicalPath pages=${renderer.pageCount}",
+        )
+        return Pair(renderer, false)
+    }
+
+    fun render(filePath: String, pageIndex: Int, requestedWidth: Int): DirectRenderResult {
+        val totalStarted = SystemClock.elapsedRealtime()
+
+        return synchronized(rendererLock) {
+            val file = File(filePath)
+            if (!file.exists() || !file.isFile) {
+                throw IllegalArgumentException("PDF file is not accessible: $filePath")
+            }
+            if (pageIndex < 0) {
+                throw IllegalArgumentException("Invalid PDF page index: $pageIndex")
+            }
+
+            val openStarted = SystemClock.elapsedRealtime()
+            val (renderer, reusedRenderer) = ensureRendererLocked(file)
+            val openMs = SystemClock.elapsedRealtime() - openStarted
+
+            if (pageIndex >= renderer.pageCount) {
+                throw IllegalArgumentException(
+                    "PDF page ${pageIndex + 1} is outside the document (${renderer.pageCount} pages).",
+                )
+            }
+
+            var page: PdfRenderer.Page? = null
+            var bitmap: Bitmap? = null
+            try {
+                page = renderer.openPage(pageIndex)
+                val width = requestedWidth.coerceIn(320, 2200)
+                val height = max(
+                    1,
+                    (width.toDouble() * page.height.toDouble() / page.width.toDouble()).roundToInt(),
+                )
+
+                bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                bitmap.eraseColor(Color.WHITE)
+
+                val renderStarted = SystemClock.elapsedRealtime()
+                page.render(
+                    bitmap,
+                    null,
+                    null,
+                    PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY,
+                )
+                val renderMs = SystemClock.elapsedRealtime() - renderStarted
+                val totalMs = SystemClock.elapsedRealtime() - totalStarted
+
+                val result = DirectRenderResult(
+                    bitmap = bitmap,
+                    pageCount = renderer.pageCount,
+                    reusedRenderer = reusedRenderer,
+                    openMs = openMs,
+                    renderMs = renderMs,
+                    totalMs = totalMs,
+                )
+                bitmap = null
+
+                Log.i(
+                    LOG_TAG,
+                    "RTL_READER_NATIVE_VIEW_RENDER page=${pageIndex + 1} reused=$reusedRenderer " +
+                        "openMs=$openMs renderMs=$renderMs pngMs=0 base64Ms=0 totalMs=$totalMs",
+                )
+                result
+            } finally {
+                bitmap?.recycle()
+                try {
+                    page?.close()
+                } catch (_: Throwable) {
+                }
+            }
+        }
+    }
+}
+
+class PdfPageView(
+    private val reactContext: ThemedReactContext,
+) : View(reactContext) {
+
+    companion object {
+        private const val EVENT_RENDERED = "topPdfRendered"
+        private const val EVENT_ERROR = "topPdfError"
+        private val renderExecutor = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "rtl-reader-direct-render").apply { isDaemon = true }
+        }
+    }
+
+    var pendingFilePath: String? = null
+    var pendingPageIndex: Int = -1
+    var pendingRequestedWidth: Int = 0
+
+    private val renderGeneration = AtomicLong(0L)
+    private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private var committedSignature: String? = null
+    private var pageBitmap: Bitmap? = null
+
+    init {
+        setWillNotDraw(false)
+        setBackgroundColor(Color.WHITE)
+    }
+
+    fun commitProps() {
+        val filePath = pendingFilePath
+        val pageIndex = pendingPageIndex
+        val requestedWidth = pendingRequestedWidth
+        val signature = "$filePath|$pageIndex|$requestedWidth"
+        if (signature == committedSignature) return
+        committedSignature = signature
+
+        val generation = renderGeneration.incrementAndGet()
+        if (filePath.isNullOrBlank() || pageIndex < 0 || requestedWidth <= 0) {
+            replaceBitmap(null)
+            invalidate()
+            return
+        }
+
+        renderExecutor.execute {
+            try {
+                val result = PdfDirectRenderEngine.render(filePath, pageIndex, requestedWidth)
+                post {
+                    if (generation != renderGeneration.get()) {
+                        result.bitmap.recycle()
+                        return@post
+                    }
+
+                    replaceBitmap(result.bitmap)
+                    invalidate()
+
+                    val event = Arguments.createMap().apply {
+                        putInt("pageIndex", pageIndex)
+                        putInt("pageCount", result.pageCount)
+                        putBoolean("reusedRenderer", result.reusedRenderer)
+                        putDouble("openMs", result.openMs.toDouble())
+                        putDouble("renderMs", result.renderMs.toDouble())
+                        putDouble("totalMs", result.totalMs.toDouble())
+                    }
+                    reactContext
+                        .getJSModule(RCTEventEmitter::class.java)
+                        .receiveEvent(id, EVENT_RENDERED, event)
+                }
+            } catch (error: Throwable) {
+                Log.e(
+                    "RTL_READER",
+                    "RTL_READER_NATIVE_VIEW_FAILED page=${pageIndex + 1}",
+                    error,
+                )
+                post {
+                    if (generation != renderGeneration.get()) return@post
+                    val event = Arguments.createMap().apply {
+                        putInt("pageIndex", pageIndex)
+                        putString("message", error.message ?: error.toString())
+                    }
+                    reactContext
+                        .getJSModule(RCTEventEmitter::class.java)
+                        .receiveEvent(id, EVENT_ERROR, event)
+                }
+            }
+        }
+    }
+
+    fun dispose() {
+        renderGeneration.incrementAndGet()
+        committedSignature = null
+        replaceBitmap(null)
+    }
+
+    private fun replaceBitmap(next: Bitmap?) {
+        val previous = pageBitmap
+        pageBitmap = next
+        if (previous != null && previous !== next && !previous.isRecycled) {
+            previous.recycle()
+        }
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val bitmap = pageBitmap ?: return
+        if (bitmap.isRecycled || width <= 0 || height <= 0) return
+
+        val scale = min(
+            width.toFloat() / bitmap.width.toFloat(),
+            height.toFloat() / bitmap.height.toFloat(),
+        )
+        val drawWidth = bitmap.width * scale
+        val drawHeight = bitmap.height * scale
+        val left = (width - drawWidth) / 2f
+        val top = (height - drawHeight) / 2f
+        val destination = RectF(left, top, left + drawWidth, top + drawHeight)
+        canvas.drawBitmap(bitmap, null, destination, bitmapPaint)
+    }
+
+    override fun onDetachedFromWindow() {
+        dispose()
+        super.onDetachedFromWindow()
+    }
+}

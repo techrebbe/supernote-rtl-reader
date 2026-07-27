@@ -51,6 +51,11 @@ RTL_READER_NATIVE_RENDER page=... reused=... cacheHit=... openMs=... renderMs=..
 
 v0.2.1 adds a small native LRU cache of the four most recent rendered PNG byte arrays. Because `PdfRenderer` access is serialized, a duplicate request arriving behind a just-completed render can now reuse the compressed page instead of repeating rasterization and PNG compression. A cache hit only repeats the much cheaper Base64 conversion.
 
+The v0.2.1 hardware check should confirm two things:
+
+- ordinary reading behavior and native-reader handoff remain unchanged;
+- repeated requests now appear as `cacheHit=true` with `renderMs=0` and `pngMs=0`.
+
 This deliberately preserves the existing image format and visual quality while reducing duplicate work before considering a larger native-display redesign that could remove PNG encoding from the page-turn path entirely.
 
 ## Proven hardware foundation

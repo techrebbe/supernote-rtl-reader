@@ -2,7 +2,7 @@
 
 Device baseline: Supernote Nomad, plugin beta firmware.
 
-v0.0.9 established the hardware-validated reading-engine baseline. v0.1.1 subsequently validated the polished UI and direction-aware footer. The v0.2.x branch adds performance optimizations and should preserve all of that behavior.
+v0.0.9 established the hardware-validated reading-engine baseline. v0.1.1 subsequently validated the polished UI and direction-aware footer. The v0.2.x branch adds performance optimizations and preserves all of that behavior.
 
 ## v0.0.9 full regression — PASS
 
@@ -81,11 +81,11 @@ With RTL + Spread + `Cover: On`:
 - [x] Close/native-reader handoff remains working.
 - [x] Native logs confirm renderer reuse: after the initial open, `reused=true` and `openMs` is normally 0–1 ms.
 
-## v0.2.1 recent-render-cache spot check
+## v0.2.1 recent-render-cache spot check — PASS
 
-- [ ] Normal portrait and landscape reading still looks identical to v0.1.1/v0.2.0.
-- [ ] Rapid sequential turns do not crash, blank, or show stale pages.
-- [ ] Close/native-reader handoff still lands on the focused page.
+- [x] Normal portrait and landscape reading still looks identical to v0.1.1/v0.2.0.
+- [x] Rapid sequential turns do not crash, blank, show stale pages, or show pages out of order.
+- [x] Close/native-reader handoff lands on the focused page.
 - [x] Native logs continue to show renderer reuse (`reused=true`) after the initial open.
 - [x] Repeated requests show `cacheHit=true` with `renderMs=0` and `pngMs=0`; captured cache-hit median total was about 16 ms versus about 419 ms for cache misses.
 

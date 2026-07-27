@@ -17,33 +17,30 @@ The stable baseline covers:
 - direction-aware Prev/Next footer placement;
 - root-free native-reader page handoff on Close.
 
-## v0.2.x performance work — experimental
+## v0.2.1 performance work — hardware validated
 
-The v0.2.x development branch is focused on page-turn responsiveness while preserving v0.1.1 behavior.
+The v0.2.x performance branch improves page-turn responsiveness while preserving the v0.1.1 reader behavior.
 
-### Renderer reuse
+v0.2.0 changes the native render lifecycle:
 
-The native renderer keeps the active PDF file descriptor and Android `PdfRenderer` open across sequential page renders. It reuses that renderer while the PDF path, file size, and modification time are unchanged, and automatically reopens it when the document changes.
+- keeps the active PDF file descriptor and Android `PdfRenderer` open across sequential page renders;
+- reuses that renderer while the PDF path, file size, and modification time are unchanged;
+- automatically reopens it when the document changes;
+- serializes page access so only one `PdfRenderer.Page` is open at a time;
+- logs native timing for document-open/reuse, raster rendering, PNG compression, Base64 encoding, and total render time.
 
-Hardware timing on the test Nomad with a 738-page, approximately 378 MB PDF showed that, after the first page, renderer-open overhead falls to about 0–1 ms. Median native timing in the v0.2.0 capture was approximately:
+Hardware timing on the test Nomad showed that after the initial document open, renderer reuse reduces open/reuse overhead to about 0–1 ms. Typical native rendering was then dominated by PNG compression rather than document opening or Base64 conversion.
 
-- PDF rasterization: 138 ms;
-- PNG encoding: 265 ms;
-- Base64 encoding: 8 ms;
-- total native render: 426 ms.
+v0.2.1 adds a four-page native LRU cache of recently compressed PNG page results. In the captured hardware run:
 
-This establishes PNG encoding as the dominant native cost.
+- 107 native render requests were recorded;
+- 14 were native cache hits (about 13.1%);
+- cache-hit median total time was about 16 ms;
+- cache-miss median total time was about 419 ms;
+- cache hits therefore avoided roughly 403 ms of native render work per hit;
+- cache-hit logs showed `renderMs=0` and `pngMs=0` as intended.
 
-### v0.2.1 recent-render cache
-
-v0.2.1 adds a small four-page native LRU cache of already-compressed PNG results. This catches duplicate foreground/prefetch requests that arrive shortly after a page has just been rendered.
-
-The v0.2.1 hardware capture contained 107 native render requests, including 14 cache hits (about 13.1%). Median native timing was:
-
-- cache miss: about 419 ms;
-- cache hit: about 16 ms.
-
-On a hit, `renderMs=0` and `pngMs=0`, so the expensive rasterization and PNG-compression stages are skipped. Image format and visual quality remain unchanged.
+The v0.2.1 hardware spot check also confirmed that rapid page turns produced no stale, blank, or out-of-order pages and that Close still returned the native reader to the correct focused page.
 
 Diagnostic marker:
 
@@ -51,7 +48,7 @@ Diagnostic marker:
 RTL_READER_NATIVE_RENDER page=... reused=... cacheHit=... openMs=... renderMs=... pngMs=... base64Ms=... totalMs=...
 ```
 
-The next major performance target is removing PNG compression from the foreground page-turn path, likely by displaying the rendered bitmap through a native Android view instead of transporting every page as PNG/base64 through React Native.
+The major remaining performance target is PNG compression. A future optimization may move foreground page display to a native Android view so the rendered bitmap can be displayed directly instead of PNG-compressing and Base64-transporting every uncached page.
 
 ## Proven hardware foundation
 

@@ -2,7 +2,7 @@
 
 Device baseline: Supernote Nomad, plugin beta firmware.
 
-v0.0.9 established the hardware-validated reading-engine baseline. v0.1.1 subsequently validated the polished UI and direction-aware footer. v0.2.1 is the current merged hardware-validated performance baseline. v0.3.0 is an experimental direct-native rendering phase.
+v0.0.9 established the hardware-validated reading-engine baseline. v0.1.1 subsequently validated the polished UI and direction-aware footer. v0.2.1 is the current merged hardware-validated performance baseline. v0.3.0 is now hardware-validated for direct-native rendering.
 
 ## v0.0.9 full regression — PASS
 
@@ -91,19 +91,19 @@ With RTL + Spread + `Cover: On`:
 
 Hardware timing capture for v0.2.1 contained 107 native render requests: 14 cache hits (about 13.1%). Cache-hit median total time was 16 ms; cache-miss median was 419 ms. Cache hits therefore avoided roughly 403 ms of native work per hit in this test while preserving the same PNG output path.
 
-## v0.3.0 direct-native-render spot check
+## v0.3.0 direct-native-render validation — PASS
 
 - [x] Native direct-render path launches and produces completed page renders.
 - [x] `PdfRenderer` reuse remains active after the initial open (`reused=true`, normally `openMs=0–1`).
 - [x] Foreground direct renders report `pngMs=0` and `base64Ms=0` throughout the capture.
 - [x] Steady-state completed renders are typically about 140–145 ms total, versus the v0.2.1 uncached median of about 419 ms (roughly 3× faster native foreground rendering).
-- [ ] Normal portrait and landscape pages display correctly with no stale/blank/out-of-order completed pages.
-- [ ] Landscape Auto/Spread preserves RTL/LTR visual page order.
-- [ ] Treat Cover Page Separately still produces the correct virtual-blank parity.
-- [ ] Jump still lands on the requested PDF page.
-- [ ] Close/native-reader handoff still lands on the focused page.
+- [x] Normal portrait and landscape pages display correctly with no stale/blank/out-of-order completed pages.
+- [x] Landscape Auto/Spread preserves RTL/LTR visual page order.
+- [x] Treat Cover Page Separately still produces the correct virtual-blank parity.
+- [x] Jump still lands on the requested PDF page.
+- [x] Close/native-reader handoff still lands on the focused page.
 
-The hardware timing run confirms that the intended architectural bottleneck has been removed: foreground renders no longer perform PNG compression or Base64 transport. Most steady-state totals cluster around 140–145 ms, with a few expected content/load outliers. Final visual/navigation/handoff confirmation remains separate from timing validation.
+The v0.3.0 hardware run confirms that the intended architectural bottleneck has been removed: foreground renders no longer perform PNG compression or Base64 transport, steady-state direct renders cluster around 140–145 ms, and the existing visual, navigation, parity, jump, and native-reader handoff behavior remains correct on the test Nomad.
 
 ## Failure capture
 

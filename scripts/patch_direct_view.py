@@ -152,11 +152,11 @@ def main() -> None:
     setFatalError(null);
     setRendering(expected.length > 0);
     console.log(
-      `RTL_READER_NATIVE_VIEW_REQUEST mode=spread left=$
-        {visual.left === null ? 'blank' : visual.left + 1} right=$
-        {visual.right === null ? 'blank' : visual.right + 1} prefetch=${prefetchPageIndexes
-          .map(candidate => candidate + 1)
-          .join(',')}`.replace(/\$\s+\{/g, '${'),
+      `RTL_READER_NATIVE_VIEW_REQUEST mode=spread left=${
+        visual.left === null ? 'blank' : visual.left + 1
+      } right=${
+        visual.right === null ? 'blank' : visual.right + 1
+      } prefetch=${prefetchPageIndexes.map(candidate => candidate + 1).join(',')}`,
     );
   }, [
     preferencesReady,

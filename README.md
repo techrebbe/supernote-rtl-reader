@@ -4,11 +4,11 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 
 ## Stable baseline
 
-v0.0.9 is the hardware-validated stable baseline on Supernote Nomad. It passed the complete regression suite covering portrait and landscape reading, RTL/LTR navigation, cover parity, persistence, boundary cases, and root-free native-reader page handoff.
+v0.0.9 is the hardware-validated reading-engine baseline on Supernote Nomad. It passed the complete regression suite covering portrait and landscape reading, RTL/LTR navigation, cover parity, persistence, boundary cases, and root-free native-reader page handoff.
 
-## v0.1.0 UI polish
+## v0.1.1 UI polish — hardware validated
 
-The v0.1.0 development branch keeps the v0.0.9 reading engine intact while refining the reader controls:
+v0.1.1 keeps the v0.0.9 reading engine intact while refining the reader controls. The complete UI pass, including the direction-aware footer, has been validated on the test Supernote Nomad.
 
 - compact status bar showing direction, selected layout, effective Auto layout, and cover behavior;
 - dedicated e-ink-friendly Settings panel;
@@ -17,8 +17,9 @@ The v0.1.0 development branch keeps the v0.0.9 reading engine intact while refin
 - exact **Treat Cover Page Separately** option with On / Off controls;
 - clearer page/spread indicator with tap-to-jump hint;
 - Prev/Next footer buttons follow the selected reading direction:
-  - RTL: Next on the LEFT, Previous on the RIGHT;
-  - LTR: Previous on the LEFT, Next on the RIGHT;
+  - RTL: Next on the physical LEFT, Previous on the physical RIGHT;
+  - LTR: Previous on the physical LEFT, Next on the physical RIGHT;
+- footer positioning is forced to physical left-to-right layout so Android RTL UI inheritance cannot reverse the slots;
 - center tap still hides/shows all chrome for distraction-free reading;
 - no animations.
 
@@ -140,7 +141,7 @@ The resulting package is written to:
 out/*.snplg
 ```
 
-GitHub Actions uploads the v0.1.0 development build as the `supernote-rtl-reader-v0.1.0` artifact.
+GitHub Actions uploads the current hardware-validated UI build as the `supernote-rtl-reader-v0.1.1` artifact.
 
 ## Install and diagnostics
 

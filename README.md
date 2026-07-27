@@ -2,11 +2,26 @@
 
 A Supernote plugin focused on right-to-left PDF reading and landscape two-page spreads, designed especially for Hebrew books.
 
-## Status
+## Stable baseline
 
-**v0.0.9 is the current hardware-validated release candidate.**
+v0.0.9 is the hardware-validated reading-engine baseline on Supernote Nomad. It passed the complete regression suite covering portrait and landscape reading, RTL/LTR navigation, cover parity, persistence, boundary cases, and root-free native-reader page handoff.
 
-The complete regression matrix has passed on a Supernote Nomad running the plugin beta firmware, including portrait and landscape reading, RTL/LTR navigation, cover parity, per-document persistence, boundary cases, and root-free handoff back to the native reader.
+## v0.1.1 UI polish — hardware validated
+
+v0.1.1 keeps the v0.0.9 reading engine intact while refining the reader controls. The complete UI pass, including the direction-aware footer, has been validated on the test Supernote Nomad.
+
+- compact status bar showing direction, selected layout, effective Auto layout, and cover behavior;
+- dedicated e-ink-friendly Settings panel;
+- explicit RTL / LTR choices;
+- explicit Auto / Single / Spread choices;
+- exact **Treat Cover Page Separately** option with On / Off controls;
+- clearer page/spread indicator with tap-to-jump hint;
+- Prev/Next footer buttons follow the selected reading direction:
+  - RTL: Next on the physical LEFT, Previous on the physical RIGHT;
+  - LTR: Previous on the physical LEFT, Next on the physical RIGHT;
+- footer positioning is forced to physical left-to-right layout so Android RTL UI inheritance cannot reverse the slots;
+- center tap still hides/shows all chrome for distraction-free reading;
+- no animations.
 
 ## Proven hardware foundation
 
@@ -22,7 +37,7 @@ The reader has been validated on a Supernote Nomad running the plugin beta firmw
 
 **Root is not required for the reading path or the native-reader page handoff on the tested Nomad firmware.**
 
-## v0.0.9 — hardware-validated native-reader handoff
+## Native-reader handoff
 
 Hardware investigation established that:
 
@@ -30,11 +45,10 @@ Hardware investigation established that:
 - `currentPage` is a zero-based String;
 - manually changing `currentPage` and restarting `DocumentActivity` reopens the PDF at that page;
 - PluginHost and `com.supernote.document` are separate processes, but both run as `system` UID 1000 on the tested firmware;
-- v0.0.8 proved that PluginHost itself can locate, deserialize, rewrite, and verify the native `config.data` without root;
-- v0.0.8's remaining failure was specifically the use of the `am` shell command from a PluginHost child process;
-- v0.0.9 replaced that shell path with direct Android process and Activity APIs, and the complete handoff was confirmed on real hardware.
+- PluginHost itself can locate, deserialize, rewrite, and verify the native `config.data` without root;
+- the working implementation uses direct Android process and Activity APIs rather than shell `am` commands.
 
-On Close, v0.0.9:
+On Close, RTL Reader:
 
 1. flushes RTL Reader's normal per-PDF preferences;
 2. locates the native per-document config by PDF inode;
@@ -48,20 +62,9 @@ On Close, v0.0.9:
 
 This full sequence has been confirmed on the test Nomad without `su`.
 
-## Regression status
-
-All sections in [`REGRESSION.md`](REGRESSION.md) pass on hardware:
-
-- portrait single-page RTL;
-- landscape Auto spreads and rotation;
-- **Treat Cover Page Separately** parity;
-- LTR navigation and spread order;
-- per-document settings/position isolation and native-position override;
-- beginning/end boundary behavior and final-page handoff.
-
 ## View modes
 
-The top `Auto` button cycles through:
+The Settings panel offers:
 
 - **Auto**: portrait = single page, landscape = two-page spread;
 - **Single**: force one page regardless of orientation;
@@ -119,7 +122,7 @@ Page 4 | Page 5
 ## Reader controls
 
 - Tap the center to hide/show controls.
-- `-` / `+` move one page in Single mode or one spread in Spread mode.
+- Prev / Next follow the selected RTL/LTR physical reading orientation.
 - Tap the page/spread counter to jump to a PDF page.
 - `Close` synchronizes the current PDF page back to Supernote's native reader and returns there.
 
@@ -138,7 +141,7 @@ The resulting package is written to:
 out/*.snplg
 ```
 
-GitHub Actions uploads it as the `supernote-rtl-reader-v0.0.9` artifact.
+GitHub Actions uploads the current hardware-validated UI build as the `supernote-rtl-reader-v0.1.1` artifact.
 
 ## Install and diagnostics
 
@@ -152,16 +155,3 @@ ADB diagnostics:
 .\adb logcat -c
 .\adb logcat -v raw | Select-String RTL_READER
 ```
-
-Useful v0.0.9 handoff markers include:
-
-- `RTL_READER_HANDOFF_CONFIG_WRITTEN`
-- `RTL_READER_HANDOFF_PREPARED`
-- `RTL_READER_HANDOFF_WORKER_START`
-- `RTL_READER_HANDOFF_DOCUMENT_PIDS`
-- `RTL_READER_HANDOFF_KILL_SENT`
-- `RTL_READER_HANDOFF_KILL_CONFIRMED` / `...KILL_FAILED`
-- `RTL_READER_HANDOFF_START_REQUESTED_DIRECT`
-- `RTL_READER_HANDOFF_WORKER_FAILED`
-- `RTL_READER_HANDOFF_SKIPPED`
-- `RTL_READER_HANDOFF_FAILED`

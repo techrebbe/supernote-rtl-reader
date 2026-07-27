@@ -17,6 +17,22 @@ cp "$ROOT/overlay/index.js" "$PROJECT/index.js"
 cp "$ROOT/overlay/app.json" "$PROJECT/app.json"
 cp "$ROOT/PluginConfig.json" "$PROJECT/PluginConfig.json"
 
+# Keep the footer's visual slots tied to physical screen left/right even when
+# PluginHost/Android inherits an RTL UI layout direction. The button labels and
+# actions are still selected dynamically by App.js according to reader direction.
+python3 - "$PROJECT/App.js" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = "<View style={styles.footer}>"
+new = "<View style={[styles.footer, {direction: 'ltr'}]}>"
+if old not in text:
+    raise SystemExit("Footer layout marker not found in App.js")
+path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
+
 python3 "$ROOT/scripts/install_native.py" "$PROJECT" "$ROOT"
 
 mkdir -p "$PROJECT/assets"

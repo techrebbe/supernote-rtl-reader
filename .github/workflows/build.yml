@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - main
-      - reader-v0.0.1
+      - v0.1.0
   workflow_dispatch:
 
 jobs:
@@ -35,7 +35,7 @@ jobs:
       - name: Upload plugin package
         uses: actions/upload-artifact@v4
         with:
-          name: supernote-rtl-reader-v0.0.9
+          name: supernote-rtl-reader-v0.1.1
           path: out/*.snplg
           if-no-files-found: error
           retention-days: 7

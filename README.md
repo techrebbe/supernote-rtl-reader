@@ -17,11 +17,13 @@ The stable baseline covers:
 - direction-aware Prev/Next footer placement;
 - root-free native-reader page handoff on Close.
 
-## v0.2.0 performance work — experimental
+## v0.2.x performance work — experimental
 
-The v0.2.0 development branch is focused on page-turn responsiveness while preserving v0.1.1 behavior.
+The v0.2.x development branch is focused on page-turn responsiveness while preserving v0.1.1 behavior.
 
-The first measurement build changes the native render lifecycle:
+### v0.2.0 renderer reuse
+
+The first performance build changes the native render lifecycle:
 
 - keep the active PDF file descriptor and Android `PdfRenderer` open across sequential page renders;
 - reuse that renderer while the PDF path, file size, and modification time are unchanged;
@@ -29,13 +31,27 @@ The first measurement build changes the native render lifecycle:
 - serialize page access so only one `PdfRenderer.Page` is open at a time;
 - log native timing for document-open/reuse, raster rendering, PNG compression, base64 encoding, and total render time.
 
+Hardware timing on a 738-page, approximately 378 MB PDF confirmed renderer reuse works. After the first render, native document-open time drops from about 85 ms to essentially 0–1 ms. Across the captured run, median timings were approximately:
+
+- document open/reuse: 1 ms;
+- PDF rasterization: 138 ms;
+- PNG encoding: 265 ms;
+- Base64 encoding: 8 ms;
+- total native render: 426 ms.
+
+PNG encoding is therefore the dominant remaining native cost, accounting for roughly 62% of median render time. The same capture also showed repeated requests for several pages during rapid navigation, consistent with foreground/prefetch overlap.
+
 Diagnostic marker:
 
 ```text
-RTL_READER_NATIVE_RENDER page=... reused=... openMs=... renderMs=... pngMs=... base64Ms=... totalMs=...
+RTL_READER_NATIVE_RENDER page=... reused=... cacheHit=... openMs=... renderMs=... pngMs=... base64Ms=... totalMs=...
 ```
 
-This first v0.2.0 build intentionally leaves the existing JavaScript cache/prefetch strategy unchanged so hardware timing can show where the next optimization will have the most value.
+### v0.2.1 recent-render cache
+
+v0.2.1 adds a small native LRU cache of the four most recent rendered PNG byte arrays. Because `PdfRenderer` access is serialized, a duplicate request arriving behind a just-completed render can now reuse the compressed page instead of repeating rasterization and PNG compression. A cache hit only repeats the much cheaper Base64 conversion.
+
+This deliberately preserves the existing image format and visual quality while reducing duplicate work before considering a larger native-display redesign that could remove PNG encoding from the page-turn path entirely.
 
 ## Proven hardware foundation
 
@@ -155,7 +171,7 @@ The resulting package is written to:
 out/*.snplg
 ```
 
-GitHub Actions uploads the current performance build as the `supernote-rtl-reader-v0.2.0` artifact.
+GitHub Actions uploads the current performance test build as the `supernote-rtl-reader-v0.2.1` artifact.
 
 ## Install and diagnostics
 

@@ -1,0 +1,44 @@
+package __PACKAGE__
+
+import com.facebook.react.uimanager.SimpleViewManager
+import com.facebook.react.uimanager.ThemedReactContext
+import com.facebook.react.uimanager.annotations.ReactProp
+
+class PdfPageViewManager : SimpleViewManager<PdfPageView>() {
+
+    override fun getName(): String = "PdfPageView"
+
+    override fun createViewInstance(reactContext: ThemedReactContext): PdfPageView =
+        PdfPageView(reactContext)
+
+    @ReactProp(name = "filePath")
+    fun setFilePath(view: PdfPageView, filePath: String?) {
+        view.pendingFilePath = filePath
+    }
+
+    @ReactProp(name = "pageIndex", defaultInt = -1)
+    fun setPageIndex(view: PdfPageView, pageIndex: Int) {
+        view.pendingPageIndex = pageIndex
+    }
+
+    @ReactProp(name = "requestedWidth", defaultInt = 0)
+    fun setRequestedWidth(view: PdfPageView, requestedWidth: Int) {
+        view.pendingRequestedWidth = requestedWidth
+    }
+
+    override fun onAfterUpdateTransaction(view: PdfPageView) {
+        super.onAfterUpdateTransaction(view)
+        view.commitProps()
+    }
+
+    override fun onDropViewInstance(view: PdfPageView) {
+        view.dispose()
+        super.onDropViewInstance(view)
+    }
+
+    override fun getExportedCustomDirectEventTypeConstants(): MutableMap<String, Any> =
+        mutableMapOf(
+            "topPdfRendered" to mutableMapOf("registrationName" to "onPdfRendered"),
+            "topPdfError" to mutableMapOf("registrationName" to "onPdfError"),
+        )
+}

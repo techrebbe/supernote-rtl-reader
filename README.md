@@ -58,6 +58,8 @@ The v0.2.1 hardware check should confirm two things:
 
 This deliberately preserves the existing image format and visual quality while reducing duplicate work before considering a larger native-display redesign that could remove PNG encoding from the page-turn path entirely.
 
+CI build artifact: `supernote-rtl-reader-v0.2.1`.
+
 ## Proven hardware foundation
 
 The reader has been validated on a Supernote Nomad running the plugin beta firmware:

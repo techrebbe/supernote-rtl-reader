@@ -25,9 +25,9 @@ PluginManager.closePluginView = async (...args) => {
       }
       const result = await ReaderPreferencesModule.handoffLastSavedPage();
       console.log(
-        `RTL_READER_HANDOFF_PREPARED page=${
-          Number.isInteger(result?.pageIndex) ? result.pageIndex + 1 : 'unknown'
-        } uid=${result?.uid ?? 'unknown'} config=${result?.configPath ?? 'unknown'}`,
+        `RTL_READER_HANDOFF_PREPARED page=$
+{Number.isInteger(result?.pageIndex) ? result.pageIndex + 1 : 'unknown'} uid=$
+{result?.uid ?? 'unknown'} config=${result?.configPath ?? 'unknown'}`.replace(/\n/g, ''),
       );
     } catch (error) {
       console.warn(
@@ -70,7 +70,7 @@ PluginManager.registerButtonListener({
   onButtonPress: event => {
     if (event?.id === RTL_READER_BUTTON_ID) {
       handoffAttemptedThisActivation = false;
-      console.log('RTL_READER_OPEN v0.1.1');
+      console.log('RTL_READER_OPEN v0.2.0');
       DeviceEventEmitter.emit(RTL_READER_ACTIVATE_EVENT);
     }
   },

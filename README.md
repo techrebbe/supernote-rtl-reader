@@ -4,24 +4,38 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 
 ## Stable baseline
 
-v0.0.9 is the hardware-validated reading-engine baseline on Supernote Nomad. It passed the complete regression suite covering portrait and landscape reading, RTL/LTR navigation, cover parity, persistence, boundary cases, and root-free native-reader page handoff.
+v0.1.1 is the current hardware-validated stable baseline on Supernote Nomad. It includes the v0.0.9 reading engine plus the validated UI/settings pass and direction-aware footer.
 
-## v0.1.1 UI polish — hardware validated
+The stable baseline covers:
 
-v0.1.1 keeps the v0.0.9 reading engine intact while refining the reader controls. The complete UI pass, including the direction-aware footer, has been validated on the test Supernote Nomad.
+- portrait and landscape reading;
+- RTL/LTR navigation;
+- Auto / Single / Spread modes;
+- **Treat Cover Page Separately** parity;
+- per-PDF settings and page persistence;
+- boundary cases;
+- direction-aware Prev/Next footer placement;
+- root-free native-reader page handoff on Close.
 
-- compact status bar showing direction, selected layout, effective Auto layout, and cover behavior;
-- dedicated e-ink-friendly Settings panel;
-- explicit RTL / LTR choices;
-- explicit Auto / Single / Spread choices;
-- exact **Treat Cover Page Separately** option with On / Off controls;
-- clearer page/spread indicator with tap-to-jump hint;
-- Prev/Next footer buttons follow the selected reading direction:
-  - RTL: Next on the physical LEFT, Previous on the physical RIGHT;
-  - LTR: Previous on the physical LEFT, Next on the physical RIGHT;
-- footer positioning is forced to physical left-to-right layout so Android RTL UI inheritance cannot reverse the slots;
-- center tap still hides/shows all chrome for distraction-free reading;
-- no animations.
+## v0.2.0 performance work — experimental
+
+The v0.2.0 development branch is focused on page-turn responsiveness while preserving v0.1.1 behavior.
+
+The first measurement build changes the native render lifecycle:
+
+- keep the active PDF file descriptor and Android `PdfRenderer` open across sequential page renders;
+- reuse that renderer while the PDF path, file size, and modification time are unchanged;
+- automatically reopen it when the document changes;
+- serialize page access so only one `PdfRenderer.Page` is open at a time;
+- log native timing for document-open/reuse, raster rendering, PNG compression, base64 encoding, and total render time.
+
+Diagnostic marker:
+
+```text
+RTL_READER_NATIVE_RENDER page=... reused=... openMs=... renderMs=... pngMs=... base64Ms=... totalMs=...
+```
+
+This first v0.2.0 build intentionally leaves the existing JavaScript cache/prefetch strategy unchanged so hardware timing can show where the next optimization will have the most value.
 
 ## Proven hardware foundation
 
@@ -141,7 +155,7 @@ The resulting package is written to:
 out/*.snplg
 ```
 
-GitHub Actions uploads the current hardware-validated UI build as the `supernote-rtl-reader-v0.1.1` artifact.
+GitHub Actions uploads the current performance build as the `supernote-rtl-reader-v0.2.0` artifact.
 
 ## Install and diagnostics
 

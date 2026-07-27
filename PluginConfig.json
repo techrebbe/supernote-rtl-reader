@@ -4,8 +4,8 @@
   "pluginID": "snrtl20260726001",
   "iconPath": "assets/icon.png",
   "desc": "Right-to-left PDF reader for Supernote",
-  "versionCode": "11",
-  "versionName": "0.1.1",
+  "versionCode": "12",
+  "versionName": "0.2.0",
   "jsMainPath": "index",
   "author": "techrebbe"
 }

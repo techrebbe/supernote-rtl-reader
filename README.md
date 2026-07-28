@@ -4,7 +4,7 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 
 ## Stable baseline
 
-v0.4.2 is the current merged hardware-validated stable baseline on Supernote Nomad. v0.4.3 is a behavior-preserving source-consolidation and lifecycle-hardening candidate.
+v0.4.2 is the current merged hardware-validated stable baseline on Supernote Nomad. v0.4.3 is a stabilization release candidate that preserves the v0.4.2 renderer while consolidating its source/build path and hardening initial layout handling.
 
 The validated reader behavior covers:
 
@@ -111,20 +111,19 @@ RTL_READER_NATIVE_VIEW_DISPLAY ... interactionMs=...
 RTL_READER_NATIVE_VIEW_READY ... interactionMs=...
 ```
 
+## v0.4.3 stabilization
+
+v0.4.3 makes the tested v0.4.2 renderer the canonical native source instead of generating it through layered Kotlin string rewrites. The installer now copies and registers that source directly, and every build verifies the cache-key, foreground-priority, stale-request, and generated-source invariants.
+
+The initial smoke build also exposed an orientation cold-start issue: PluginHost may initially report stale portrait window dimensions when RTL Reader is opened while the Nomad is already in landscape. The revised v0.4.3 candidate waits for the actual plugin page-area layout before:
+
+- choosing Auto Single versus Spread mode;
+- calculating native render width;
+- mounting the first `PdfPageView`.
+
+This prevents the initial landscape spread from being mounted against stale or incomplete dimensions. The focused hardware smoke test is recorded in `REGRESSION.md`.
+
 Full validation details are recorded in `REGRESSION.md`.
-
-## v0.4.3 source consolidation — stabilization candidate
-
-v0.4.3 intentionally preserves the v0.4.2 reader behavior and performance while simplifying the maintenance path.
-
-- the exact generated and hardware-tested v0.4.2 `PdfPageView` is now the canonical `native/PdfPageView.kt.template` source;
-- the temporary `install_native_v042.py` wrapper and layered Kotlin string-rewrite pipeline are removed;
-- `install_native.py` now copies canonical native templates, registers the package, and performs only the direction-aware JavaScript prefetch adjustment;
-- every build verifies that the generated `PdfPageView.kt`, after package normalization, exactly matches the canonical template;
-- invariant checks protect renderer file identity, render-time `RenderKey` preservation, visible-bitmap return, foreground priority, stale-request cancellation, and document-change invalidation;
-- the Codex file-replacement fix remains part of the canonical source: old pixels cannot be returned under metadata from a newly replaced PDF.
-
-The intended hardware validation is a focused smoke test because the rendered implementation itself is unchanged from v0.4.2.
 
 ## Proven hardware foundation
 

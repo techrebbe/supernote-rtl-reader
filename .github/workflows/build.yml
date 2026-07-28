@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - main
-      - v0.3.0
+      - v0.4.0
   workflow_dispatch:
 
 jobs:
@@ -25,7 +25,21 @@ jobs:
       - name: Build plugin
         run: |
           chmod +x build.sh
-          ./build.sh
+          set +e
+          ./build.sh > build.log 2>&1
+          status=$?
+          tail -n 100 build.log > build-tail.log
+          cat build-tail.log
+          exit $status
+
+      - name: Upload failed build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supernote-rtl-reader-build-failure
+          path: build-tail.log
+          if-no-files-found: error
+          retention-days: 2
 
       - name: Verify package
         run: |
@@ -35,7 +49,7 @@ jobs:
       - name: Upload plugin package
         uses: actions/upload-artifact@v4
         with:
-          name: supernote-rtl-reader-v0.3.0
+          name: supernote-rtl-reader-v0.4.2
           path: out/*.snplg
           if-no-files-found: error
           retention-days: 7

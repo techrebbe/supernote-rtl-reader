@@ -4,7 +4,7 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 
 ## Stable baseline
 
-v0.2.1 is the current merged hardware-validated stable baseline on Supernote Nomad. v0.3.0 is the next hardware-validated direct-render candidate and is pending merge.
+v0.3.0 is the current merged hardware-validated stable baseline on Supernote Nomad. v0.4.2 is the next hardware-validated bitmap-prefetch candidate and is pending merge.
 
 The validated reader behavior covers:
 
@@ -49,7 +49,7 @@ Diagnostic marker:
 RTL_READER_NATIVE_RENDER page=... reused=... cacheHit=... openMs=... renderMs=... pngMs=... base64Ms=... totalMs=...
 ```
 
-## v0.3.0 direct native rendering — hardware validated candidate
+## v0.3.0 direct native rendering — hardware validated
 
 v0.3.0 replaces the foreground `Bitmap -> PNG -> Base64 -> React Native Image` path with a native Android `PdfPageView` that draws the `PdfRenderer` bitmap directly.
 
@@ -76,7 +76,42 @@ Diagnostic marker:
 RTL_READER_NATIVE_VIEW_RENDER page=... reused=... openMs=... renderMs=... pngMs=0 base64Ms=0 totalMs=...
 ```
 
-The native view uses a generation counter so a superseded render result is recycled and discarded rather than displayed after a newer page request. Full validation details are recorded in `REGRESSION.md`.
+## v0.4.2 direction-aware bitmap prefetch — hardware validated candidate
+
+v0.4.2 adds a four-entry native bitmap LRU on top of the v0.3.0 direct renderer.
+
+- only the page or spread in the most likely reading direction is pre-rendered;
+- the bitmap leaving the screen is returned to the same native cache instead of being recycled immediately;
+- one-step reversals therefore reuse the page or spread that was just visible;
+- foreground navigation takes priority over speculative background rendering;
+- queued stale foreground work is skipped after lock acquisition;
+- stale rendered results are returned to cache instead of being displayed;
+- PNG and Base64 remain absent from the foreground path.
+
+The final Nomad validation produced:
+
+- 43 completed Single-mode turns with a median interaction latency of about **50 ms**;
+- Single-mode minimum/maximum interaction latency of **43/51 ms** in the captured run;
+- normal and one-step-reversal spreads generally around **47–67 ms** with both pages served from cache;
+- native cache-hit work normally around **0–4 ms**;
+- consistent `RTL_READER_NATIVE_VIEW_VISIBLE_CACHED` handoff when a page left the screen;
+- no stale, blank, or out-of-order pages;
+- correct Close/native-reader handoff.
+
+Very rapid spread bursts can still take roughly 200–350 ms when the reader advances faster than Android can rasterize two entirely new pages. That is now the expected two-page rendering limit rather than speculative work blocking the foreground.
+
+Diagnostic markers:
+
+```text
+RTL_READER_NATIVE_VIEW_PREFETCH ...
+RTL_READER_NATIVE_VIEW_PREFETCH_SKIPPED ...
+RTL_READER_NATIVE_VIEW_VISIBLE_CACHED page=...
+RTL_READER_NATIVE_VIEW_RENDER ... cacheHit=true|false ...
+RTL_READER_NATIVE_VIEW_DISPLAY ... interactionMs=...
+RTL_READER_NATIVE_VIEW_READY ... interactionMs=...
+```
+
+Full validation details are recorded in `REGRESSION.md`.
 
 ## Proven hardware foundation
 
@@ -195,7 +230,7 @@ The resulting package is written to:
 out/*.snplg
 ```
 
-GitHub Actions uploads the current direct-render build as the `supernote-rtl-reader-v0.3.0` artifact.
+GitHub Actions uploads the current bitmap-prefetch build as the `supernote-rtl-reader-v0.4.2` artifact.
 
 ## Install and diagnostics
 

@@ -7,6 +7,8 @@ import re
 import sys
 from pathlib import Path
 
+from check_native_invariants import check
+
 
 def fail(message: str) -> None:
     raise SystemExit(f"install_native.py: {message}")
@@ -108,6 +110,8 @@ def main() -> None:
             + text[insert_at + 1 :]
         )
         main_application.write_text(text, encoding="utf-8")
+
+    check(repo_root, project)
 
     print(
         "Installed canonical PdfRendererModule + ReaderPreferencesModule + "

@@ -2,7 +2,7 @@
 
 Device baseline: Supernote Nomad, plugin beta firmware.
 
-v0.0.9 established the hardware-validated reading-engine baseline. v0.1.1 subsequently validated the polished UI and direction-aware footer. v0.2.1 is the current merged hardware-validated performance baseline. v0.3.0 is now hardware-validated for direct-native rendering.
+v0.0.9 established the hardware-validated reading-engine baseline. v0.1.1 subsequently validated the polished UI and direction-aware footer. v0.3.0 is the current merged hardware-validated direct-render baseline. v0.4.2 is now hardware-validated for direction-aware native bitmap prefetch.
 
 ## v0.0.9 full regression — PASS
 
@@ -104,6 +104,27 @@ Hardware timing capture for v0.2.1 contained 107 native render requests: 14 cach
 - [x] Close/native-reader handoff still lands on the focused page.
 
 The v0.3.0 hardware run confirms that the intended architectural bottleneck has been removed: foreground renders no longer perform PNG compression or Base64 transport, steady-state direct renders cluster around 140–145 ms, and the existing visual, navigation, parity, jump, and native-reader handoff behavior remains correct on the test Nomad.
+
+## v0.4.2 direction-aware native bitmap prefetch — PASS
+
+- [x] Native bitmap prefetch produces cache hits for normal Single-mode forward turns.
+- [x] The visible page bitmap is returned to the four-entry native LRU when it leaves the screen.
+- [x] One-step Single-mode reversals reuse the page just returned from the visible view.
+- [x] Normal and one-step-reversal spreads reuse both pages from cache.
+- [x] Foreground-priority and stale-request guards remain active during bursts.
+- [x] No stale, blank, or out-of-order pages were observed.
+- [x] Close/native-reader handoff still lands on the focused page.
+- [x] Existing navigation, spread order, Cover parity, and page-jump behavior remain correct.
+
+Final v0.4.2 timing capture:
+
+- 43 completed Single-mode interactions had a median of about 50 ms;
+- the captured Single-mode range was 43–51 ms;
+- normal and one-step-reversal spreads generally completed in about 47–67 ms;
+- cache-hit native work was normally about 0–4 ms;
+- `RTL_READER_NATIVE_VIEW_VISIBLE_CACHED` appeared consistently as pages/spreads left the screen.
+
+Very rapid spread bursts can still take roughly 200–350 ms when navigation outruns the time required to rasterize two new pages. The final completed pages remain ordered and correct, and speculative background work no longer creates a long queue ahead of the latest foreground request. This is accepted as the current Android `PdfRenderer` two-page throughput limit.
 
 ## Failure capture
 

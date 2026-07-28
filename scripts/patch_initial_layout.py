@@ -2,9 +2,9 @@
 """Make the first native page request wait for the measured plugin content area.
 
 PluginHost can initially report stale portrait window dimensions when the plugin is
-opened while the device is already in landscape.  Mounting PdfPageView before the
+opened while the device is already in landscape. Mounting PdfPageView before the
 page area has completed its first layout can leave the initial spread blank until a
-later prop change.  This strict transform makes layout measurement the source of
+later prop change. This strict transform makes layout measurement the source of
 truth for initial mode selection and render width.
 """
 
@@ -127,6 +127,26 @@ def main() -> None:
         "        }}",
         "page-area onLayout measurement",
     )
+
+    required_markers = (
+        "const pageAreaReady = pageAreaLayout.width > 0 && pageAreaLayout.height > 0;",
+        "? pageAreaLayout.width > pageAreaLayout.height",
+        "!pageAreaReady",
+        "requestedWidth={Math.max(360, Math.floor(measuredPageWidth / 2))}",
+        "requestedWidth={Math.max(600, measuredPageWidth)}",
+        "setPageAreaLayout(current =>",
+    )
+    for marker in required_markers:
+        if marker not in text:
+            fail(f"missing final measured-layout marker: {marker}")
+
+    forbidden_markers = (
+        "requestedWidth={Math.max(360, Math.floor(window.width / 2))}",
+        "requestedWidth={Math.max(600, Math.round(window.width))}",
+    )
+    for marker in forbidden_markers:
+        if marker in text:
+            fail(f"stale window-width render marker remains: {marker}")
 
     path.write_text(text, encoding="utf-8")
     print("Patched generated App.js to wait for measured page-area layout")

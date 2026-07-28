@@ -33,12 +33,10 @@ if old not in text:
 path.write_text(text.replace(old, new, 1), encoding="utf-8")
 PY
 
-# v0.3.0 experimental path: foreground PDF pages are drawn by a native Android
-# View directly from PdfRenderer bitmaps. The strict patch script fails the build
-# if the expected v0.2.1 App.js markers no longer match.
+# Direct native foreground rendering plus the current bitmap prefetch/cache path.
+# Strict patch scripts fail CI if their expected stable source markers drift.
 python3 "$ROOT/scripts/patch_direct_view.py" "$PROJECT/App.js"
-
-python3 "$ROOT/scripts/install_native.py" "$PROJECT" "$ROOT"
+python3 "$ROOT/scripts/install_native_v042.py" "$PROJECT" "$ROOT"
 
 mkdir -p "$PROJECT/assets"
 cat > "$PROJECT/assets/icon.png.b64" <<'B64'

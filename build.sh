@@ -37,6 +37,7 @@ PY
 # Strict patch scripts fail CI if their expected stable source markers drift.
 python3 "$ROOT/scripts/patch_direct_view.py" "$PROJECT/App.js"
 python3 "$ROOT/scripts/install_native.py" "$PROJECT" "$ROOT"
+python3 "$ROOT/scripts/patch_initial_layout.py" "$PROJECT/App.js"
 
 mkdir -p "$PROJECT/assets"
 cat > "$PROJECT/assets/icon.png.b64" <<'B64'

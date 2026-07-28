@@ -2,7 +2,7 @@
 
 Device baseline: Supernote Nomad, plugin beta firmware.
 
-v0.0.9 established the hardware-validated reading-engine baseline. v0.1.1 subsequently validated the polished UI and direction-aware footer. v0.3.0 established direct native rendering. v0.4.2 is the current merged hardware-validated direction-aware bitmap-prefetch baseline.
+v0.0.9 established the hardware-validated reading-engine baseline. v0.1.1 subsequently validated the polished UI and direction-aware footer. v0.4.2 is the current merged hardware-validated direct-render and direction-aware native bitmap-prefetch baseline.
 
 ## v0.0.9 full regression — PASS
 
@@ -126,16 +126,17 @@ Final v0.4.2 timing capture:
 
 Very rapid spread bursts can still take roughly 200–350 ms when navigation outruns the time required to rasterize two new pages. The final completed pages remain ordered and correct, and speculative background work no longer creates a long queue ahead of the latest foreground request. This is accepted as the current Android `PdfRenderer` two-page throughput limit.
 
-## v0.4.3 stabilization smoke test — IN PROGRESS
+## v0.4.3 source consolidation and landscape cold start — IN PROGRESS
 
-The first smoke build exposed a cold-start layout issue: opening the plugin while the Nomad was already in landscape could leave the initial spread blank until navigation changed the page props. The revised build waits for the measured plugin page-area width and height before selecting Auto Single/Spread mode or mounting the first native page view.
+- [x] Canonical native renderer source replaces the layered v0.4.2 Kotlin patch pipeline.
+- [x] Build-time invariants protect exact render-key reuse, file replacement, foreground priority, stale cancellation, and generated-source equality.
+- [x] Initial native request waits for measured page-area dimensions.
+- [ ] Launch while already in landscape displays the initial spread without navigation.
+- [ ] Launch while already in portrait displays the initial page normally.
+- [ ] Rotation after launch remains correct.
+- [ ] Page jump, Cover parity, RTL/LTR ordering, and Close handoff remain correct.
 
-- [ ] Launch RTL Reader while the Nomad is already in landscape; the initial spread appears without turning a page.
-- [ ] Launch RTL Reader while already in portrait; the initial page still appears normally.
-- [ ] Rotate portrait ↔ landscape after launch; the focused page and correct mode are retained.
-- [ ] No stale, blank, or out-of-order pages during normal turns and a brief reversal.
-- [ ] Page jump, Cover On/Off, and RTL/LTR ordering remain correct.
-- [ ] Close/native-reader handoff still lands on the focused page.
+The measured-layout candidate still reproduced a blank initial landscape spread. The r2 candidate adds native `onSizeChanged()` and `onAttachedToWindow()` redraw hooks so a bitmap completed before final native view sizing is drawn when the view receives a valid frame. Diagnostic marker: `RTL_READER_NATIVE_VIEW_SIZE_REDRAW`.
 
 ## Failure capture
 

@@ -25,7 +25,12 @@ jobs:
       - name: Build plugin
         run: |
           chmod +x build.sh
-          ./build.sh
+          if ! ./build.sh > build.log 2>&1; then
+            echo "Build failed; showing the final 80 lines:"
+            tail -n 80 build.log
+            exit 1
+          fi
+          tail -n 20 build.log
 
       - name: Verify package
         run: |

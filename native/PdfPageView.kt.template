@@ -606,7 +606,30 @@ class PdfPageView(
         }
     }
 
-    override fun onDraw(canvas: Canvas) {
+    private fun requestBitmapRedraw(reason: String) {
+    val bitmap = pageBitmap ?: return
+    if (bitmap.isRecycled || width <= 0 || height <= 0) return
+    val pageNumber = pageBitmapMetadata?.key?.pageIndex?.plus(1) ?: -1
+    Log.i(
+        "RTL_READER",
+        "RTL_READER_NATIVE_VIEW_SIZE_REDRAW page=$pageNumber reason=$reason size=${width}x${height}",
+    )
+    postInvalidate()
+}
+
+override fun onAttachedToWindow() {
+    super.onAttachedToWindow()
+    requestBitmapRedraw("attached")
+}
+
+override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+    super.onSizeChanged(w, h, oldw, oldh)
+    if (w > 0 && h > 0 && (w != oldw || h != oldh)) {
+        requestBitmapRedraw("size_changed")
+    }
+}
+
+override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val bitmap = pageBitmap ?: return
         if (bitmap.isRecycled || width <= 0 || height <= 0) return

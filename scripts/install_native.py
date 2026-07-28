@@ -88,6 +88,14 @@ def main() -> None:
     ):
         source = repo_root / "native" / source_name
         rendered = source.read_text(encoding="utf-8").replace("__PACKAGE__", package_name)
+        if source_name == "PdfPageView.kt.template":
+            for marker in (
+                "override fun onSizeChanged",
+                "override fun onAttachedToWindow",
+                "RTL_READER_NATIVE_VIEW_SIZE_REDRAW",
+            ):
+                if marker not in rendered:
+                    fail(f"canonical PdfPageView missing lifecycle marker: {marker}")
         (package_dir / output_name).write_text(rendered, encoding="utf-8")
 
     registration = "add(PdfRendererPackage())"

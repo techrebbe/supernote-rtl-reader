@@ -4,7 +4,7 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 
 ## Stable baseline
 
-v0.3.0 is the current merged hardware-validated stable baseline on Supernote Nomad. v0.4.2 is the next hardware-validated bitmap-prefetch candidate and is pending merge.
+v0.4.2 is the current merged hardware-validated stable baseline on Supernote Nomad. v0.4.3 is a behavior-preserving source-consolidation and lifecycle-hardening candidate.
 
 The validated reader behavior covers:
 
@@ -76,7 +76,7 @@ Diagnostic marker:
 RTL_READER_NATIVE_VIEW_RENDER page=... reused=... openMs=... renderMs=... pngMs=0 base64Ms=0 totalMs=...
 ```
 
-## v0.4.2 direction-aware bitmap prefetch — hardware validated candidate
+## v0.4.2 direction-aware bitmap prefetch — hardware validated
 
 v0.4.2 adds a four-entry native bitmap LRU on top of the v0.3.0 direct renderer.
 
@@ -112,6 +112,19 @@ RTL_READER_NATIVE_VIEW_READY ... interactionMs=...
 ```
 
 Full validation details are recorded in `REGRESSION.md`.
+
+## v0.4.3 source consolidation — stabilization candidate
+
+v0.4.3 intentionally preserves the v0.4.2 reader behavior and performance while simplifying the maintenance path.
+
+- the exact generated and hardware-tested v0.4.2 `PdfPageView` is now the canonical `native/PdfPageView.kt.template` source;
+- the temporary `install_native_v042.py` wrapper and layered Kotlin string-rewrite pipeline are removed;
+- `install_native.py` now copies canonical native templates, registers the package, and performs only the direction-aware JavaScript prefetch adjustment;
+- every build verifies that the generated `PdfPageView.kt`, after package normalization, exactly matches the canonical template;
+- invariant checks protect renderer file identity, render-time `RenderKey` preservation, visible-bitmap return, foreground priority, stale-request cancellation, and document-change invalidation;
+- the Codex file-replacement fix remains part of the canonical source: old pixels cannot be returned under metadata from a newly replaced PDF.
+
+The intended hardware validation is a focused smoke test because the rendered implementation itself is unchanged from v0.4.2.
 
 ## Proven hardware foundation
 
@@ -230,7 +243,7 @@ The resulting package is written to:
 out/*.snplg
 ```
 
-GitHub Actions uploads the current bitmap-prefetch build as the `supernote-rtl-reader-v0.4.2` artifact.
+GitHub Actions uploads the current stabilization build as the `supernote-rtl-reader-v0.4.3` artifact.
 
 ## Install and diagnostics
 

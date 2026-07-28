@@ -2,7 +2,7 @@
 
 Device baseline: Supernote Nomad, plugin beta firmware.
 
-v0.0.9 established the hardware-validated reading-engine baseline. v0.1.1 subsequently validated the polished UI and direction-aware footer. v0.3.0 established direct native rendering. v0.4.2 is the current merged hardware-validated direction-aware bitmap-prefetch baseline. v0.4.3 is a behavior-preserving source-consolidation candidate.
+v0.0.9 established the hardware-validated reading-engine baseline. v0.1.1 subsequently validated the polished UI and direction-aware footer. v0.3.0 established direct native rendering. v0.4.2 is the current merged hardware-validated direction-aware bitmap-prefetch baseline.
 
 ## v0.0.9 full regression — PASS
 
@@ -126,28 +126,16 @@ Final v0.4.2 timing capture:
 
 Very rapid spread bursts can still take roughly 200–350 ms when navigation outruns the time required to rasterize two new pages. The final completed pages remain ordered and correct, and speculative background work no longer creates a long queue ahead of the latest foreground request. This is accepted as the current Android `PdfRenderer` two-page throughput limit.
 
-## v0.4.3 source-consolidation smoke test — PENDING
+## v0.4.3 stabilization smoke test — IN PROGRESS
 
-Automated source/build checks:
+The first smoke build exposed a cold-start layout issue: opening the plugin while the Nomad was already in landscape could leave the initial spread blank until navigation changed the page props. The revised build waits for the measured plugin page-area width and height before selecting Auto Single/Spread mode or mounting the first native page view.
 
-- [x] The generated and hardware-tested v0.4.2 `PdfPageView` is the canonical repository template.
-- [x] The temporary v0.4.2 installer wrapper and one-time canonicalization workflow are removed.
-- [x] Every build compares the generated native view with the canonical template after package normalization.
-- [x] Automated invariants protect the full file identity (`path`, `length`, `modified`, page, width).
-- [x] Automated invariants require the original render-time `RenderKey` for visible and stale bitmap returns.
-- [x] Automated invariants protect foreground priority, stale-request cancellation, and renderer invalidation.
-
-Focused Nomad smoke test:
-
-- [ ] Portrait Single/Auto turns several pages normally.
-- [ ] Landscape Auto/Spread advances and reverses at least two spreads.
-- [ ] No stale, blank, or out-of-order pages appear.
-- [ ] Page jump still lands correctly.
-- [ ] Cover On/Off and RTL/LTR ordering remain correct.
-- [ ] Close returns the native reader to the focused page.
-- [ ] Runtime log contains `RTL_READER_OPEN v0.4.3`.
-
-A full performance recapture is not required unless the smoke test shows a behavioral or timing change; the canonical Kotlin implementation is the same implementation validated as v0.4.2.
+- [ ] Launch RTL Reader while the Nomad is already in landscape; the initial spread appears without turning a page.
+- [ ] Launch RTL Reader while already in portrait; the initial page still appears normally.
+- [ ] Rotate portrait ↔ landscape after launch; the focused page and correct mode are retained.
+- [ ] No stale, blank, or out-of-order pages during normal turns and a brief reversal.
+- [ ] Page jump, Cover On/Off, and RTL/LTR ordering remain correct.
+- [ ] Close/native-reader handoff still lands on the focused page.
 
 ## Failure capture
 

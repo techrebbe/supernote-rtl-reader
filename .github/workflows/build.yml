@@ -35,7 +35,7 @@ jobs:
       - name: Upload plugin package
         uses: actions/upload-artifact@v4
         with:
-          name: supernote-rtl-reader-v0.4.1
+          name: supernote-rtl-reader-v0.4.2
           path: out/*.snplg
           if-no-files-found: error
           retention-days: 7

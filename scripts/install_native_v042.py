@@ -25,13 +25,6 @@ def _replace_once(text: str, old: str, new: str, label: str) -> str:
     return _original_replace_once(text, old, new, label)
 
 
-def _replace_count(text: str, old: str, new: str, expected: int, label: str) -> str:
-    count = text.count(old)
-    if count != expected:
-        install_native.fail(f"expected {expected} {label} markers, found {count}")
-    return text.replace(old, new)
-
-
 def _patch_visible_bitmap_reuse(text: str) -> str:
     text = _original_patch_visible_bitmap_reuse(text)
 
@@ -59,15 +52,24 @@ def _patch_visible_bitmap_reuse(text: str) -> str:
         "rendered bitmap key assignment",
     )
 
-    text = _replace_count(
+    text = _replace_once(
         text,
         "                bitmap = cached.bitmap,\n"
         "                pageCount = cached.pageCount,",
         "                bitmap = cached.bitmap,\n"
         "                key = key,\n"
         "                pageCount = cached.pageCount,",
-        2,
-        "cached bitmap key assignment",
+        "first cached bitmap key assignment",
+    )
+
+    text = _replace_once(
+        text,
+        "                    bitmap = cached.bitmap,\n"
+        "                    pageCount = cached.pageCount,",
+        "                    bitmap = cached.bitmap,\n"
+        "                    key = key,\n"
+        "                    pageCount = cached.pageCount,",
+        "second cached bitmap key assignment",
     )
 
     text = _replace_once(

@@ -1,0 +1,149 @@
+name: Apply transient detach fix
+
+on:
+  push:
+    branches:
+      - v0.4.3
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout v0.4.3
+        uses: actions/checkout@v4
+        with:
+          ref: v0.4.3
+          fetch-depth: 0
+
+      - name: Fold lifecycle fix into canonical source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected one {label}, found {count}")
+              return text.replace(old, new, 1)
+
+          native = Path("native/PdfPageView.kt.template")
+          text = native.read_text(encoding="utf-8")
+          text = replace_once(
+              text,
+              '''override fun onAttachedToWindow() {
+    super.onAttachedToWindow()
+    requestBitmapRedraw("attached")
+}''',
+              '''override fun onAttachedToWindow() {
+    super.onAttachedToWindow()
+    val hasValidRequest =
+        !pendingFilePath.isNullOrBlank() &&
+            pendingPageIndex >= 0 &&
+            pendingRequestedWidth > 0
+    if (pageBitmap == null && hasValidRequest) {
+        Log.i(
+            "RTL_READER",
+            "RTL_READER_NATIVE_VIEW_ATTACHED_RECOMMIT page=${pendingPageIndex + 1}",
+        )
+        committedSignature = null
+        commitProps()
+    } else {
+        requestBitmapRedraw("attached")
+    }
+}''',
+              "attached lifecycle block",
+          )
+          text = replace_once(
+              text,
+              '''    override fun onDetachedFromWindow() {
+        dispose()
+        super.onDetachedFromWindow()
+    }''',
+              '''    override fun onDetachedFromWindow() {
+        Log.i(
+            "RTL_READER",
+            "RTL_READER_NATIVE_VIEW_TRANSIENT_DETACH page=${pendingPageIndex + 1} preserve=true",
+        )
+        super.onDetachedFromWindow()
+    }''',
+              "detached lifecycle block",
+          )
+          native.write_text(text, encoding="utf-8")
+
+          invariants = Path("scripts/check_native_invariants.py")
+          text = invariants.read_text(encoding="utf-8")
+          text = replace_once(
+              text,
+              '    "RTL_READER_NATIVE_VIEW_VISIBLE_CACHED",\n',
+              '    "RTL_READER_NATIVE_VIEW_VISIBLE_CACHED",\n'
+              '    "RTL_READER_NATIVE_VIEW_ATTACHED_RECOMMIT",\n'
+              '    "RTL_READER_NATIVE_VIEW_TRANSIENT_DETACH",\n',
+              "lifecycle required markers",
+          )
+          text = replace_once(
+              text,
+              '    "previousMetadata.requestedWidth",\n',
+              '    "previousMetadata.requestedWidth",\n'
+              '    "override fun onDetachedFromWindow() {\\n        dispose()",\n',
+              "transient detach forbidden marker",
+          )
+          invariants.write_text(text, encoding="utf-8")
+
+          installer = Path("scripts/install_native.py")
+          text = installer.read_text(encoding="utf-8")
+          text = replace_once(
+              text,
+              '                "RTL_READER_NATIVE_VIEW_SIZE_REDRAW",\n',
+              '                "RTL_READER_NATIVE_VIEW_SIZE_REDRAW",\n'
+              '                "RTL_READER_NATIVE_VIEW_ATTACHED_RECOMMIT",\n'
+              '                "RTL_READER_NATIVE_VIEW_TRANSIENT_DETACH",\n',
+              "installer lifecycle markers",
+          )
+          installer.write_text(text, encoding="utf-8")
+
+          config_path = Path("PluginConfig.json")
+          config = json.loads(config_path.read_text(encoding="utf-8"))
+          config["versionCode"] = "20"
+          config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+          index = Path("overlay/index.js")
+          text = index.read_text(encoding="utf-8")
+          text = replace_once(
+              text,
+              "RTL_READER_OPEN v0.4.3-r2",
+              "RTL_READER_OPEN v0.4.3-r3",
+              "runtime marker",
+          )
+          index.write_text(text, encoding="utf-8")
+
+          workflow = Path(".github/workflows/build.yml")
+          text = workflow.read_text(encoding="utf-8")
+          text = replace_once(
+              text,
+              "supernote-rtl-reader-v0.4.3-r2",
+              "supernote-rtl-reader-v0.4.3-r3",
+              "artifact name",
+          )
+          workflow.write_text(text, encoding="utf-8")
+
+          Path(".github/workflows/apply-transient-detach-fix.yml").unlink()
+          PY
+
+      - name: Commit canonical lifecycle fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Preserve native page views across transient landscape detach"
+          git push origin HEAD:v0.4.3

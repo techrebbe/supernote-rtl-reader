@@ -5,8 +5,11 @@ on:
   push:
     branches:
       - main
-      - v0.4.3
   workflow_dispatch:
+
+concurrency:
+  group: supernote-build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -47,9 +50,10 @@ jobs:
           ls -lh out/*.snplg
 
       - name: Upload plugin package
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: supernote-rtl-reader-v0.4.3-r3
           path: out/*.snplg
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 3

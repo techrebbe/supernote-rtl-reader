@@ -4,7 +4,7 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 
 ## Stable baseline
 
-v0.3.0 is the current merged hardware-validated stable baseline on Supernote Nomad. v0.4.2 is the next hardware-validated bitmap-prefetch candidate and is pending merge.
+v0.4.2 is the current merged hardware-validated stable baseline on Supernote Nomad. v0.4.3 is a stabilization release candidate that preserves the v0.4.2 renderer while consolidating its source/build path and hardening initial layout handling.
 
 The validated reader behavior covers:
 
@@ -76,7 +76,7 @@ Diagnostic marker:
 RTL_READER_NATIVE_VIEW_RENDER page=... reused=... openMs=... renderMs=... pngMs=0 base64Ms=0 totalMs=...
 ```
 
-## v0.4.2 direction-aware bitmap prefetch — hardware validated candidate
+## v0.4.2 direction-aware bitmap prefetch — hardware validated
 
 v0.4.2 adds a four-entry native bitmap LRU on top of the v0.3.0 direct renderer.
 
@@ -110,6 +110,18 @@ RTL_READER_NATIVE_VIEW_RENDER ... cacheHit=true|false ...
 RTL_READER_NATIVE_VIEW_DISPLAY ... interactionMs=...
 RTL_READER_NATIVE_VIEW_READY ... interactionMs=...
 ```
+
+## v0.4.3 stabilization
+
+v0.4.3 makes the tested v0.4.2 renderer the canonical native source instead of generating it through layered Kotlin string rewrites. The installer now copies and registers that source directly, and every build verifies the cache-key, foreground-priority, stale-request, and generated-source invariants.
+
+The initial smoke build also exposed an orientation cold-start issue: PluginHost may initially report stale portrait window dimensions when RTL Reader is opened while the Nomad is already in landscape. The revised v0.4.3 candidate waits for the actual plugin page-area layout before:
+
+- choosing Auto Single versus Spread mode;
+- calculating native render width;
+- mounting the first `PdfPageView`.
+
+This prevents the initial landscape spread from being mounted against stale or incomplete dimensions. The focused hardware smoke test is recorded in `REGRESSION.md`.
 
 Full validation details are recorded in `REGRESSION.md`.
 
@@ -230,7 +242,7 @@ The resulting package is written to:
 out/*.snplg
 ```
 
-GitHub Actions uploads the current bitmap-prefetch build as the `supernote-rtl-reader-v0.4.2` artifact.
+GitHub Actions uploads the current stabilization build as the `supernote-rtl-reader-v0.4.3` artifact.
 
 ## Install and diagnostics
 

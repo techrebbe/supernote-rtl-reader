@@ -1,5 +1,4 @@
 package __PACKAGE__
-
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -18,6 +17,7 @@ import java.util.LinkedHashMap
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.math.max
@@ -39,6 +39,7 @@ private data class CachedBitmap(
 
 private data class DirectRenderResult(
     val bitmap: Bitmap,
+    val key: RenderKey,
     val pageCount: Int,
     val reusedRenderer: Boolean,
     val cacheHit: Boolean,
@@ -57,16 +58,23 @@ private data class PendingRenderedEvent(
     val result: DirectRenderResult,
 )
 
+private data class VisibleBitmapMetadata(
+    val key: RenderKey,
+    val pageCount: Int,
+)
+
 private object PdfDirectRenderEngine {
     private const val LOG_TAG = "RTL_READER"
     private const val CACHE_LIMIT = 4
 
-    private val rendererLock = ReentrantLock(true)
+    private val rendererLock = ReentrantLock()
     private val cacheLock = Any()
     private val prefetchExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "rtl-reader-direct-prefetch").apply { isDaemon = true }
     }
     private val pendingPrefetch = ConcurrentHashMap.newKeySet<RenderKey>()
+    private val activePrefetch = ConcurrentHashMap.newKeySet<RenderKey>()
+    private val foregroundDemand = AtomicInteger(0)
     private val bitmapCache = LinkedHashMap<RenderKey, CachedBitmap>(8, 0.75f, true)
 
     private var activePath: String? = null
@@ -107,6 +115,16 @@ private object PdfDirectRenderEngine {
                 recycleCached(bitmapCache.remove(eldestKey))
             }
         }
+    }
+
+    fun returnVisibleBitmap(
+        key: RenderKey,
+        pageCount: Int,
+        bitmap: Bitmap,
+    ) {
+        if (bitmap.isRecycled) return
+        putCached(key, CachedBitmap(bitmap = bitmap, pageCount = pageCount))
+        Log.i(LOG_TAG, "RTL_READER_NATIVE_VIEW_VISIBLE_CACHED page=${key.pageIndex + 1}")
     }
 
     private fun makeKey(filePath: String, pageIndex: Int, requestedWidth: Int): Pair<File, RenderKey> {
@@ -226,6 +244,7 @@ private object PdfDirectRenderEngine {
 
             val result = DirectRenderResult(
                 bitmap = bitmap,
+                key = key,
                 pageCount = renderer.pageCount,
                 reusedRenderer = reusedRenderer,
                 cacheHit = false,
@@ -244,11 +263,21 @@ private object PdfDirectRenderEngine {
         }
     }
 
-    fun renderForeground(filePath: String, pageIndex: Int, requestedWidth: Int): DirectRenderResult {
+    fun renderForeground(
+        filePath: String,
+        pageIndex: Int,
+        requestedWidth: Int,
+        isCurrent: () -> Boolean,
+    ): DirectRenderResult? {
         val totalStarted = SystemClock.elapsedRealtime()
+        if (!isCurrent()) return null
         val (file, key) = makeKey(filePath, pageIndex, requestedWidth)
 
         takeCached(key)?.let { cached ->
+            if (!isCurrent()) {
+                putCached(key, cached)
+                return null
+            }
             val totalMs = SystemClock.elapsedRealtime() - totalStarted
             Log.i(
                 LOG_TAG,
@@ -257,6 +286,7 @@ private object PdfDirectRenderEngine {
             )
             return DirectRenderResult(
                 bitmap = cached.bitmap,
+                key = key,
                 pageCount = cached.pageCount,
                 reusedRenderer = true,
                 cacheHit = true,
@@ -266,9 +296,20 @@ private object PdfDirectRenderEngine {
             )
         }
 
+        // Cancel queued speculative work for this exact page before foreground waits.
+        // An already-running PdfRenderer page cannot be preempted, but no later prefetch
+        // may jump ahead of this foreground request.
+        if (!isCurrent()) return null
+        pendingPrefetch.remove(key)
+        foregroundDemand.incrementAndGet()
         rendererLock.lock()
         try {
+            if (!isCurrent()) return null
             takeCached(key)?.let { cached ->
+                if (!isCurrent()) {
+                    putCached(key, cached)
+                    return null
+                }
                 val totalMs = SystemClock.elapsedRealtime() - totalStarted
                 Log.i(
                     LOG_TAG,
@@ -277,6 +318,7 @@ private object PdfDirectRenderEngine {
                 )
                 return DirectRenderResult(
                     bitmap = cached.bitmap,
+                    key = key,
                     pageCount = cached.pageCount,
                     reusedRenderer = true,
                     cacheHit = true,
@@ -286,6 +328,7 @@ private object PdfDirectRenderEngine {
                 )
             }
 
+            if (!isCurrent()) return null
             val result = renderLocked(file, key, totalStarted)
             Log.i(
                 LOG_TAG,
@@ -295,6 +338,7 @@ private object PdfDirectRenderEngine {
             return result
         } finally {
             rendererLock.unlock()
+            foregroundDemand.decrementAndGet()
         }
     }
 
@@ -307,15 +351,47 @@ private object PdfDirectRenderEngine {
             }
             val file = pair.first
             val key = pair.second
-            if (hasCached(key) || !pendingPrefetch.add(key)) return@forEach
+            if (
+                hasCached(key) ||
+                activePrefetch.contains(key) ||
+                !pendingPrefetch.add(key)
+            ) {
+                return@forEach
+            }
 
             prefetchExecutor.execute {
+                // Claim this queued request. Foreground rendering cancels it by removing the key
+                // before the task starts.
+                if (!pendingPrefetch.remove(key)) return@execute
+                if (!activePrefetch.add(key)) return@execute
+
                 try {
-                    if (hasCached(key)) return@execute
+                    if (hasCached(key) || foregroundDemand.get() > 0) {
+                        Log.i(
+                            LOG_TAG,
+                            "RTL_READER_NATIVE_VIEW_PREFETCH_SKIPPED page=${pageIndex + 1} reason=foreground_or_cached",
+                        )
+                        return@execute
+                    }
+
                     val totalStarted = SystemClock.elapsedRealtime()
-                    rendererLock.lock()
+                    if (!rendererLock.tryLock(10L, TimeUnit.MILLISECONDS)) {
+                        Log.i(
+                            LOG_TAG,
+                            "RTL_READER_NATIVE_VIEW_PREFETCH_SKIPPED page=${pageIndex + 1} reason=renderer_busy",
+                        )
+                        return@execute
+                    }
+
                     try {
-                        if (hasCached(key)) return@execute
+                        if (hasCached(key) || foregroundDemand.get() > 0) {
+                            Log.i(
+                                LOG_TAG,
+                                "RTL_READER_NATIVE_VIEW_PREFETCH_SKIPPED page=${pageIndex + 1} reason=foreground_after_lock",
+                            )
+                            return@execute
+                        }
+
                         val result = renderLocked(file, key, totalStarted)
                         putCached(
                             key,
@@ -339,7 +415,7 @@ private object PdfDirectRenderEngine {
                         error,
                     )
                 } finally {
-                    pendingPrefetch.remove(key)
+                    activePrefetch.remove(key)
                 }
             }
         }
@@ -373,6 +449,7 @@ class PdfPageView(
     private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private var committedSignature: String? = null
     private var pageBitmap: Bitmap? = null
+    private var pageBitmapMetadata: VisibleBitmapMetadata? = null
     private var pendingRenderedEvent: PendingRenderedEvent? = null
 
     init {
@@ -393,7 +470,7 @@ class PdfPageView(
         val generation = renderGeneration.incrementAndGet()
         pendingRenderedEvent = null
         if (filePath.isNullOrBlank() || pageIndex < 0 || requestedWidth <= 0) {
-            replaceBitmap(null)
+            replaceBitmap(null, null, cachePrevious = false)
             invalidate()
             return
         }
@@ -401,15 +478,22 @@ class PdfPageView(
         foregroundExecutor.execute {
             if (generation != renderGeneration.get()) return@execute
             try {
-                val result = PdfDirectRenderEngine.renderForeground(filePath, pageIndex, requestedWidth)
+                val result = PdfDirectRenderEngine.renderForeground(
+                    filePath,
+                    pageIndex,
+                    requestedWidth,
+                ) { generation == renderGeneration.get() } ?: return@execute
                 post {
                     if (generation != renderGeneration.get()) {
-                        result.bitmap.recycle()
+                        PdfDirectRenderEngine.returnVisibleBitmap(
+                            result.key,
+                            result.pageCount,
+                            result.bitmap,
+                        )
                         return@post
                     }
 
-                    replaceBitmap(result.bitmap)
-                    pendingRenderedEvent = PendingRenderedEvent(
+                    val renderedEvent = PendingRenderedEvent(
                         generation = generation,
                         filePath = filePath,
                         pageIndex = pageIndex,
@@ -418,6 +502,14 @@ class PdfPageView(
                         requestStartedAtMs = requestStartedAtMs,
                         result = result,
                     )
+                    replaceBitmap(
+                        result.bitmap,
+                        VisibleBitmapMetadata(
+                            key = result.key,
+                            pageCount = result.pageCount,
+                        ),
+                    )
+                    pendingRenderedEvent = renderedEvent
                     invalidate()
                 }
             } catch (error: Throwable) {
@@ -444,14 +536,28 @@ class PdfPageView(
         renderGeneration.incrementAndGet()
         committedSignature = null
         pendingRenderedEvent = null
-        replaceBitmap(null)
+        replaceBitmap(null, null, cachePrevious = false)
     }
 
-    private fun replaceBitmap(next: Bitmap?) {
+    private fun replaceBitmap(
+        next: Bitmap?,
+        nextMetadata: VisibleBitmapMetadata?,
+        cachePrevious: Boolean = true,
+    ) {
         val previous = pageBitmap
+        val previousMetadata = pageBitmapMetadata
         pageBitmap = next
+        pageBitmapMetadata = nextMetadata
         if (previous != null && previous !== next && !previous.isRecycled) {
-            previous.recycle()
+            if (cachePrevious && previousMetadata != null) {
+                PdfDirectRenderEngine.returnVisibleBitmap(
+                    previousMetadata.key,
+                    previousMetadata.pageCount,
+                    previous,
+                )
+            } else {
+                previous.recycle()
+            }
         }
     }
 
@@ -500,7 +606,30 @@ class PdfPageView(
         }
     }
 
-    override fun onDraw(canvas: Canvas) {
+    private fun requestBitmapRedraw(reason: String) {
+    val bitmap = pageBitmap ?: return
+    if (bitmap.isRecycled || width <= 0 || height <= 0) return
+    val pageNumber = pageBitmapMetadata?.key?.pageIndex?.plus(1) ?: -1
+    Log.i(
+        "RTL_READER",
+        "RTL_READER_NATIVE_VIEW_SIZE_REDRAW page=$pageNumber reason=$reason size=${width}x${height}",
+    )
+    postInvalidate()
+}
+
+override fun onAttachedToWindow() {
+    super.onAttachedToWindow()
+    requestBitmapRedraw("attached")
+}
+
+override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+    super.onSizeChanged(w, h, oldw, oldh)
+    if (w > 0 && h > 0 && (w != oldw || h != oldh)) {
+        requestBitmapRedraw("size_changed")
+    }
+}
+
+override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val bitmap = pageBitmap ?: return
         if (bitmap.isRecycled || width <= 0 || height <= 0) return

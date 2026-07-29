@@ -2,7 +2,7 @@
 
 Device baseline: Supernote Nomad, plugin beta firmware.
 
-v0.0.9 established the hardware-validated reading-engine baseline. v0.1.1 subsequently validated the polished UI and direction-aware footer. v0.3.0 is the current merged hardware-validated direct-render baseline. v0.4.2 is now hardware-validated for direction-aware native bitmap prefetch.
+v0.0.9 established the hardware-validated reading-engine baseline. v0.1.1 subsequently validated the polished UI and direction-aware footer. v0.4.2 is the current merged hardware-validated direct-render and direction-aware native bitmap-prefetch baseline.
 
 ## v0.0.9 full regression — PASS
 
@@ -125,6 +125,18 @@ Final v0.4.2 timing capture:
 - `RTL_READER_NATIVE_VIEW_VISIBLE_CACHED` appeared consistently as pages/spreads left the screen.
 
 Very rapid spread bursts can still take roughly 200–350 ms when navigation outruns the time required to rasterize two new pages. The final completed pages remain ordered and correct, and speculative background work no longer creates a long queue ahead of the latest foreground request. This is accepted as the current Android `PdfRenderer` two-page throughput limit.
+
+## v0.4.3 source consolidation and landscape cold start — IN PROGRESS
+
+- [x] Canonical native renderer source replaces the layered v0.4.2 Kotlin patch pipeline.
+- [x] Build-time invariants protect exact render-key reuse, file replacement, foreground priority, stale cancellation, and generated-source equality.
+- [x] Initial native request waits for measured page-area dimensions.
+- [ ] Launch while already in landscape displays the initial spread without navigation.
+- [ ] Launch while already in portrait displays the initial page normally.
+- [ ] Rotation after launch remains correct.
+- [ ] Page jump, Cover parity, RTL/LTR ordering, and Close handoff remain correct.
+
+The measured-layout candidate still reproduced a blank initial landscape spread. The r2 candidate adds native `onSizeChanged()` and `onAttachedToWindow()` redraw hooks so a bitmap completed before final native view sizing is drawn when the view receives a valid frame. Diagnostic marker: `RTL_READER_NATIVE_VIEW_SIZE_REDRAW`.
 
 ## Failure capture
 

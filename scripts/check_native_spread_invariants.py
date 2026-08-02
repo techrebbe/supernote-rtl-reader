@@ -31,10 +31,12 @@ def check(repo_root: Path) -> None:
         / "SpreadProbe.java"
     )
     manifest_path = repo_root / "native-spread-module" / "AndroidManifest.xml"
+    app_path = repo_root / "overlay" / "App.js"
 
     plugin = plugin_path.read_text(encoding="utf-8")
     module = module_path.read_text(encoding="utf-8")
     manifest = manifest_path.read_text(encoding="utf-8")
+    app = app_path.read_text(encoding="utf-8")
 
     require_markers(
         plugin,
@@ -49,8 +51,26 @@ def check(repo_root: Path) -> None:
             "canonicalReportedPath == expectedPath",
             "documentApkLength == SUPPORTED_DOCUMENT_APK_LENGTH",
             "RTL_READER_NATIVE_SPREAD_HANDSHAKE_REQUEST",
+            'putBoolean("configured", configured)',
+            'putBoolean("configuredEditable", configuredEditable)',
+            'putBoolean("enabled", configured && runtimeCompatible)',
         ),
         "plugin handshake",
+    )
+    require_markers(
+        app,
+        (
+            "const [nativeSpreadConfigured, setNativeSpreadConfigured]",
+            "nativeSpread?.configured === true",
+            "nativeSpread?.configuredEditable === true",
+            "next === 'ltr' &&",
+            "nativeSpreadConfigured &&",
+            "!nativeSpreadConfiguredEditable",
+            "setNativeSpreadConfigured(enabled);",
+            "active={!nativeSpreadConfigured}",
+            "RTL read-only remains configured, but the compatible hooks are inactive.",
+        ),
+        "configured/runtime Native Spread state separation",
     )
     configure_start = plugin.find("fun configureNativeSpreadReadOnly(")
     marker_writer_start = plugin.find(

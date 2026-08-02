@@ -187,6 +187,9 @@ export default function App() {
 
   const [nativeSpreadEnabled, setNativeSpreadEnabled] = useState(false);
   const [nativeSpreadEditable, setNativeSpreadEditable] = useState(false);
+  const [nativeSpreadConfigured, setNativeSpreadConfigured] = useState(false);
+  const [nativeSpreadConfiguredEditable, setNativeSpreadConfiguredEditable] =
+    useState(false);
   const [nativeSpreadCompatible, setNativeSpreadCompatible] = useState(false);
   const [nativeSpreadBusy, setNativeSpreadBusy] = useState(false);
   const [nativeSpreadError, setNativeSpreadError] = useState(null);
@@ -386,6 +389,10 @@ export default function App() {
         setPageIndex(restored.pageIndex);
         setTotalPages(context.totalPages);
         setPreferencesReady(true);
+        setNativeSpreadConfigured(nativeSpread?.configured === true);
+        setNativeSpreadConfiguredEditable(
+          nativeSpread?.configuredEditable === true,
+        );
         setNativeSpreadEnabled(nativeSpread?.enabled === true);
         setNativeSpreadEditable(nativeSpread?.editable === true);
         setNativeSpreadCompatible(nativeSpread?.compatible === true);
@@ -670,7 +677,11 @@ export default function App() {
 
   const setDirectionValue = next => {
     if (next !== 'rtl' && next !== 'ltr') return;
-    if (next === 'ltr' && nativeSpreadEnabled && !nativeSpreadEditable) {
+    if (
+      next === 'ltr' &&
+      nativeSpreadConfigured &&
+      !nativeSpreadConfiguredEditable
+    ) {
       void setNativeSpreadReadOnly(false);
     }
     directionRef.current = next;
@@ -727,6 +738,8 @@ export default function App() {
         enabled,
         coverSeparateRef.current,
       );
+      setNativeSpreadConfigured(enabled);
+      setNativeSpreadConfiguredEditable(false);
       setNativeSpreadEnabled(enabled);
       setNativeSpreadEditable(false);
       console.log(
@@ -976,14 +989,16 @@ export default function App() {
             <Text style={styles.settingLabel}>Supernote native reader</Text>
             <View style={styles.segmentRow}>
               <SegmentedButton
-                active={!nativeSpreadEnabled}
+                active={!nativeSpreadConfigured}
                 disabled={nativeSpreadBusy}
                 label="Off"
                 onPress={() => setNativeSpreadReadOnly(false)}
                 style={styles.segmentHalf}
               />
               <SegmentedButton
-                active={nativeSpreadEnabled && !nativeSpreadEditable}
+                active={
+                  nativeSpreadConfigured && !nativeSpreadConfiguredEditable
+                }
                 disabled={
                   nativeSpreadBusy ||
                   direction !== 'rtl' ||
@@ -995,9 +1010,11 @@ export default function App() {
               />
             </View>
             <Text style={styles.settingHint}>
-              {nativeSpreadEditable
-                ? 'Experimental native writing is already enabled by an external test setting.'
-                : !nativeSpreadCompatible
+              {nativeSpreadConfiguredEditable
+                ? 'Experimental native writing is configured by an external test setting.'
+                : nativeSpreadConfigured && !nativeSpreadCompatible
+                  ? 'RTL read-only remains configured, but the compatible hooks are inactive. Select Off to remove it.'
+                  : !nativeSpreadCompatible
                   ? 'Requires the compatible rooted Native Spread module.'
                   : direction !== 'rtl'
                     ? 'Select RTL direction to enable the native-reader pilot.'

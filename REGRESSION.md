@@ -214,6 +214,21 @@ SHA-256 remained
 `c2155e51a686a3ba7066c8ef7d859c19053019e85d23d1414fa1a69dc9de2c21`
 throughout.
 
+### Codex P1 configured-state follow-up - PENDING HARDWARE
+
+- [x] Marker configuration is tracked separately from live hook availability.
+- [x] Read-only and externally configured editable markers remain distinct while
+  the live handshake is unavailable.
+- [x] The settings UI shows a configured read-only marker instead of falsely
+  showing **Off** while the hooks are unavailable.
+- [x] Switching to LTR removes a configured read-only marker even when the live
+  handshake is unavailable.
+- [x] Build invariants cover configured/runtime state separation.
+- [ ] With the module disabled, the configured read-only choice remains visible
+  and **Off** removes its marker.
+- [ ] With the module disabled, switching to LTR removes its marker; re-enabling
+  the module does not silently restore read-only mode.
+
 ## Failure capture
 
 Before reproducing a failure:

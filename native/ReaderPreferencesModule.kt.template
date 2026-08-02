@@ -126,11 +126,11 @@ class ReaderPreferencesModule(
                 FileInputStream(marker).use { input -> properties.load(input) }
             }
 
-            val enabled = properties.getProperty("enabled", "false")
+            val configured = properties.getProperty("enabled", "false")
                 .equals("true", ignoreCase = true) &&
                 properties.getProperty("direction", "")
                     .equals("rtl", ignoreCase = true)
-            val editable = enabled && properties.getProperty("editable", "false")
+            val configuredEditable = configured && properties.getProperty("editable", "false")
                 .equals("true", ignoreCase = true)
             val coverSeparate = properties.getProperty("coverSeparate", "false")
                 .equals("true", ignoreCase = true)
@@ -139,8 +139,8 @@ class ReaderPreferencesModule(
             if (!capability.compatible) {
                 resolveNativeSpreadMode(
                     promise,
-                    enabled,
-                    editable,
+                    configured,
+                    configuredEditable,
                     coverSeparate,
                     marker,
                     capability,
@@ -152,8 +152,8 @@ class ReaderPreferencesModule(
             requestNativeSpreadHandshake(pdfFile) { handshake ->
                 resolveNativeSpreadMode(
                     promise,
-                    enabled,
-                    editable,
+                    configured,
+                    configuredEditable,
                     coverSeparate,
                     marker,
                     capability,
@@ -289,8 +289,8 @@ class ReaderPreferencesModule(
 
     private fun resolveNativeSpreadMode(
         promise: Promise,
-        enabled: Boolean,
-        editable: Boolean,
+        configured: Boolean,
+        configuredEditable: Boolean,
         coverSeparate: Boolean,
         marker: File,
         capability: NativeSpreadCapability,
@@ -298,9 +298,10 @@ class ReaderPreferencesModule(
     ) {
         val runtimeCompatible = capability.compatible && handshake.active
         val result = Arguments.createMap().apply {
-            putBoolean("configured", enabled)
-            putBoolean("enabled", enabled && runtimeCompatible)
-            putBoolean("editable", editable && runtimeCompatible)
+            putBoolean("configured", configured)
+            putBoolean("configuredEditable", configuredEditable)
+            putBoolean("enabled", configured && runtimeCompatible)
+            putBoolean("editable", configuredEditable && runtimeCompatible)
             putBoolean("coverSeparate", coverSeparate)
             putString("markerPath", marker.absolutePath)
             putBoolean("compatible", runtimeCompatible)

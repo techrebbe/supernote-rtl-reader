@@ -147,6 +147,11 @@ restarts Supernote's native reader on the same page, where the LSPosed module
 reads the per-document setting. Switching the plug-in to LTR automatically
 turns the native RTL setting off.
 
+The full disposable-PDF hardware pass is complete: enable/disable, portrait RTL
+navigation, automatic landscape spreads, Cover Separate parity, and ordinary
+native behavior after disabling all passed. In read-only mode, pen input
+produced no visible trace and created no `.mark` file.
+
 ## Proven hardware foundation
 
 The reader has been validated on a Supernote Nomad running the plugin beta firmware:

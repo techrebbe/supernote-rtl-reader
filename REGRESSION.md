@@ -177,7 +177,7 @@ renders canonical saved ink for both visible pages, suppresses non-edge native
 tap turns, and preserves the active spread side. The v0.0.60 hardware writer
 and annotation-commit blocks remain unchanged.
 
-## v0.4.7 / Native Spread v0.0.62 review hardening - PENDING HARDWARE
+## v0.4.7 / Native Spread v0.0.62 review hardening - PASS
 
 - [x] Package compatibility floor is raised to Native Spread v0.0.62.
 - [x] Marker creation requires a nonce-based response from the actively hooked
@@ -192,12 +192,27 @@ and annotation-commit blocks remain unchanged.
 - [x] Native PDF renderer invariants pass.
 - [x] Native Spread v0.0.62 compiles, signs, and verifies successfully.
 - [x] RTL Reader v0.4.7 compiles and packages successfully.
-- [ ] On-device live handshake succeeds for the protected pilot copy.
-- [ ] Disabling or de-scoping the LSPosed module makes the control fail closed.
-- [ ] Repeated native-reader close/reopen logs complete resource release without
+- [x] On-device live handshake succeeds for the protected pilot copy.
+- [x] Disabling the LSPosed module and restarting the document process makes the
+  RTL read-only control unavailable; the handshake times out with no response.
+- [x] Re-enabling the module and restarting the document process restores the
+  live handshake and RTL read-only spread without reinstalling either package.
+- [x] Repeated native-reader close/reopen logs complete resource release without
   stale document state or regressions.
-- [ ] Existing read-only navigation, annotation display, and unchanged `.mark`
+- [x] Existing read-only navigation, annotation display, and unchanged `.mark`
   checksum smoke tests still pass.
+
+The protected-pilot hardware run exercised the complete safety sequence. With
+Native Spread v0.0.62 enabled, RTL Reader received a protocol-1 response from
+the live `com.supernote.document` process for the exact protected PDF. After
+the LSPosed module was disabled and the process restarted, the response timed
+out and **RTL read-only** was grayed out. Re-enabling the module and restarting
+restored the handshake and spread. Removing the paused document task invoked
+`DocumentActivity.onDestroy()` and logged
+`activity_resources_released active_cleared=true`. The protected `.mark`
+SHA-256 remained
+`c2155e51a686a3ba7066c8ef7d859c19053019e85d23d1414fa1a69dc9de2c21`
+throughout.
 
 ## Failure capture
 

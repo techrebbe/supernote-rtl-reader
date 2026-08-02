@@ -4,7 +4,9 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 
 ## Stable baseline
 
-v0.4.2 is the current merged hardware-validated stable baseline on Supernote Nomad. v0.4.3 is a stabilization release candidate that preserves the v0.4.2 renderer while consolidating its source/build path and hardening initial layout handling.
+v0.4.6 is the current merged hardware-validated stable baseline on Supernote
+Nomad. v0.4.7 is a hardware-validated safety-hardening candidate for the native
+reader pilot, paired with Native Spread v0.0.62.
 
 The validated reader behavior covers:
 
@@ -165,6 +167,15 @@ turned pages, outer-edge taps and swipes turned one spread in RTL order, and the
 active side was preserved. The protected copy's `.mark` SHA-256 remained
 `c2155e51a686a3ba7066c8ef7d859c19053019e85d23d1414fa1a69dc9de2c21`
 before and after the test.
+
+The v0.4.7 / Native Spread v0.0.62 safety pass is also hardware validated. The
+live document-process handshake succeeds only while the LSPosed module is
+enabled and scoped to `com.supernote.document`; disabling the module and
+restarting the document process makes **RTL read-only** unavailable, and
+re-enabling it restores the feature. The native activity cleanup path clears
+its retained activity reference and cached bitmaps on destruction. The same
+protected `.mark` checksum remained unchanged throughout the enabled,
+fail-closed, cleanup, and re-enabled smoke tests.
 
 The exact v0.0.62 LSPosed companion source and its Windows build wrapper are
 tracked in [`native-spread-module/`](native-spread-module/README.md). Generated

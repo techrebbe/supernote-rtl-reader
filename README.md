@@ -125,9 +125,9 @@ This prevents the initial landscape spread from being mounted against stale or i
 
 Full validation details are recorded in `REGRESSION.md`.
 
-## v0.4.4 native-reader pilot control
+## v0.4.5 native-reader pilot control
 
-v0.4.4 adds a safe per-document control for the rooted Native Spread module.
+v0.4.5 adds a safe per-document control for the rooted Native Spread module.
 In Reading settings, **Supernote native reader** offers:
 
 - **Off** — remove this PDF's hidden native-spread setting;
@@ -135,10 +135,12 @@ In Reading settings, **Supernote native reader** offers:
   spreads, and the current cover-separate parity in Supernote's native reader.
 
 The plug-in verifies the exact supported firmware, SupernoteDocument build,
-and Native Spread module version before enabling the setting. The first pilot
-is deliberately read-only. Experimental native writing remains available only
+and Native Spread module version before enabling the setting. It requires
+Native Spread v0.0.60 or newer, whose read-only mode forces a full-screen
+handwriting-disabled region and blocks the native annotation commit callback as
+a persistence fail-safe. Experimental native writing remains available only
 through the disposable test marker until the read-only control is validated on
-hardware and on a backed-up real document copy.
+a backed-up real document copy.
 
 After enabling the pilot, close RTL Reader normally. Its existing page handoff
 restarts Supernote's native reader on the same page, where the LSPosed module

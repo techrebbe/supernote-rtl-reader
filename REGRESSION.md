@@ -138,16 +138,24 @@ Very rapid spread bursts can still take roughly 200–350 ms when navigation out
 
 The measured-layout candidate still reproduced a blank initial landscape spread. The r2 candidate adds native `onSizeChanged()` and `onAttachedToWindow()` redraw hooks so a bitmap completed before final native view sizing is drawn when the view receives a valid frame. Diagnostic marker: `RTL_READER_NATIVE_VIEW_SIZE_REDRAW`.
 
-## v0.4.4 native-reader pilot control - PENDING
+## v0.4.5 native-reader pilot control - IN PROGRESS
 
-- [ ] Compatible Native Spread v0.0.59 is detected on the Nomad.
-- [ ] `RTL read-only` can be enabled for an ordinary PDF from Settings.
-- [ ] Close returns to the same native page and opens the correct RTL spread.
-- [ ] Portrait swipes and edge taps follow RTL direction.
+- [x] Compatible Native Spread v0.0.60 is detected on the Nomad.
+- [x] `RTL read-only` can be enabled for an ordinary PDF from Settings.
+- [x] Close returns to the same native page and opens the correct RTL spread.
+- [x] Portrait swipes and edge taps follow RTL direction.
 - [ ] Landscape cover parity and spread navigation match plug-in settings.
-- [ ] Native writing is blocked in the read-only pilot.
-- [ ] Returning to Settings and choosing `Off` restores the unmodified native reader.
-- [ ] An unmarked PDF remains completely unaffected.
+- [x] Native writing is blocked visibly and no `.mark` file is created.
+- [x] Returning to Settings and choosing `Off` restores the unmodified native reader, including writing.
+- [x] An unmarked PDF remains completely unaffected.
+
+The first v0.4.4 pilot exposed a safety gap in Native Spread v0.0.59: the
+activity-level stylus guard did not see Supernote's low-latency pen path, so a
+stroke could still be committed. Native Spread v0.0.60 fixes this below the
+activity layer by forcing every `HandWriteClient.sendDisableAreaInfo` request
+to a full-page disabled rectangle and blocking `HandWritePresenter.receiveTrials`
+as a persistence fail-safe. The disposable failure `.mark` was preserved for
+analysis and removed from the device before the successful v0.0.60 retest.
 
 ## Failure capture
 

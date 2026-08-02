@@ -35,7 +35,7 @@ class ReaderPreferencesModule(
             "com.supernote.document.document.DocumentActivity"
         private const val NATIVE_SPREAD_PACKAGE =
             "com.techrebbe.supernote.spreadprobe"
-        private const val NATIVE_SPREAD_MIN_VERSION_CODE = 59L
+        private const val NATIVE_SPREAD_MIN_VERSION_CODE = 60L
         private const val NATIVE_SPREAD_MARKER_SUFFIX = ".snspread"
         private const val SUPPORTED_FINGERPRINT =
             "Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys"

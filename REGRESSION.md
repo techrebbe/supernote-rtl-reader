@@ -177,6 +177,28 @@ renders canonical saved ink for both visible pages, suppresses non-edge native
 tap turns, and preserves the active spread side. The v0.0.60 hardware writer
 and annotation-commit blocks remain unchanged.
 
+## v0.4.7 / Native Spread v0.0.62 review hardening - PENDING HARDWARE
+
+- [x] Package compatibility floor is raised to Native Spread v0.0.62.
+- [x] Marker creation requires a nonce-based response from the actively hooked
+  `DocumentActivity` for the exact currently open PDF.
+- [x] The response verifies protocol, module version, document APK length, and
+  live document-process PID.
+- [x] An installed module without an active handshake is reported as inactive.
+- [x] `DocumentActivity.onDestroy()` clears `activeActivity`, all per-activity
+  geometry/touch/config maps, and recycles page, committed-ink, full-ink, and
+  digest bitmap caches.
+- [x] Native Spread safety invariants pass.
+- [x] Native PDF renderer invariants pass.
+- [x] Native Spread v0.0.62 compiles, signs, and verifies successfully.
+- [x] RTL Reader v0.4.7 compiles and packages successfully.
+- [ ] On-device live handshake succeeds for the protected pilot copy.
+- [ ] Disabling or de-scoping the LSPosed module makes the control fail closed.
+- [ ] Repeated native-reader close/reopen logs complete resource release without
+  stale document state or regressions.
+- [ ] Existing read-only navigation, annotation display, and unchanged `.mark`
+  checksum smoke tests still pass.
+
 ## Failure capture
 
 Before reproducing a failure:

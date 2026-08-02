@@ -3,6 +3,7 @@ package __PACKAGE__
 import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.net.Uri
 import android.os.SystemClock
 import android.system.Os
@@ -20,6 +21,7 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.ObjectInputStream
 import java.io.ObjectOutputStream
+import java.util.Properties
 
 class ReaderPreferencesModule(
     reactContext: ReactApplicationContext,
@@ -31,6 +33,13 @@ class ReaderPreferencesModule(
         private const val DOCUMENT_PACKAGE = "com.supernote.document"
         private const val DOCUMENT_ACTIVITY =
             "com.supernote.document.document.DocumentActivity"
+        private const val NATIVE_SPREAD_PACKAGE =
+            "com.techrebbe.supernote.spreadprobe"
+        private const val NATIVE_SPREAD_MIN_VERSION_CODE = 59L
+        private const val NATIVE_SPREAD_MARKER_SUFFIX = ".snspread"
+        private const val SUPPORTED_FINGERPRINT =
+            "Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys"
+        private const val SUPPORTED_DOCUMENT_VERSION_CODE = 102446L
 
         private val DOCUMENT_CACHE_ROOTS = arrayOf(
             "/data/data/com.supernote.document/document_internal_cache",
@@ -84,6 +93,177 @@ class ReaderPreferencesModule(
         } catch (error: Throwable) {
             promise.reject("READER_PREFS_REMOVE_FAILED", error.message, error)
         }
+    }
+
+    @ReactMethod
+    fun loadNativeSpreadMode(filePath: String, promise: Promise) {
+        try {
+            val pdfFile = requirePdf(filePath)
+            val marker = nativeSpreadMarker(pdfFile)
+            val properties = Properties()
+            if (marker.isFile) {
+                FileInputStream(marker).use { input -> properties.load(input) }
+            }
+
+            val enabled = properties.getProperty("enabled", "false")
+                .equals("true", ignoreCase = true) &&
+                properties.getProperty("direction", "")
+                    .equals("rtl", ignoreCase = true)
+            val editable = enabled && properties.getProperty("editable", "false")
+                .equals("true", ignoreCase = true)
+            val coverSeparate = properties.getProperty("coverSeparate", "false")
+                .equals("true", ignoreCase = true)
+            val capability = nativeSpreadCapability()
+
+            val result = Arguments.createMap().apply {
+                putBoolean("enabled", enabled)
+                putBoolean("editable", editable)
+                putBoolean("coverSeparate", coverSeparate)
+                putString("markerPath", marker.absolutePath)
+                putBoolean("compatible", capability.compatible)
+                putBoolean("moduleInstalled", capability.moduleVersionCode >= 0L)
+                putDouble("moduleVersionCode", capability.moduleVersionCode.toDouble())
+                putString("moduleVersionName", capability.moduleVersionName)
+                putDouble(
+                    "documentVersionCode",
+                    capability.documentVersionCode.toDouble(),
+                )
+                putString("firmwareFingerprint", Build.FINGERPRINT)
+            }
+            promise.resolve(result)
+        } catch (error: Throwable) {
+            promise.reject("NATIVE_SPREAD_LOAD_FAILED", error.message, error)
+        }
+    }
+
+    @ReactMethod
+    fun configureNativeSpreadReadOnly(
+        filePath: String,
+        enabled: Boolean,
+        coverSeparate: Boolean,
+        promise: Promise,
+    ) {
+        try {
+            val pdfFile = requirePdf(filePath)
+            val marker = nativeSpreadMarker(pdfFile)
+            val capability = nativeSpreadCapability()
+
+            if (enabled && !capability.compatible) {
+                throw IllegalStateException(
+                    "Compatible Native Spread module is not active for this firmware",
+                )
+            }
+
+            if (!enabled) {
+                if (marker.exists() && !marker.delete()) {
+                    throw IllegalStateException(
+                        "Could not remove native spread setting: ${marker.absolutePath}",
+                    )
+                }
+                Log.i(LOG_TAG, "RTL_READER_NATIVE_SPREAD_CONFIG enabled=false marker=${marker.absolutePath}")
+                promise.resolve(false)
+                return
+            }
+
+            val properties = Properties().apply {
+                setProperty("enabled", "true")
+                setProperty("direction", "rtl")
+                setProperty("coverSeparate", coverSeparate.toString())
+                setProperty("editable", "false")
+                setProperty("disposable", "false")
+                setProperty("managedBy", "supernote-rtl-reader")
+                setProperty("mode", "read-only-pilot")
+            }
+            val temporary = File(
+                marker.parentFile,
+                "${marker.name}.tmp-${android.os.Process.myPid()}",
+            )
+            try {
+                FileOutputStream(temporary, false).use { output ->
+                    properties.store(output, "Supernote RTL native reader settings")
+                    output.flush()
+                    output.fd.sync()
+                }
+                Os.rename(temporary.absolutePath, marker.absolutePath)
+            } finally {
+                if (temporary.exists()) temporary.delete()
+            }
+
+            val verified = Properties()
+            FileInputStream(marker).use { input -> verified.load(input) }
+            if (!verified.getProperty("enabled", "false")
+                    .equals("true", ignoreCase = true) ||
+                !verified.getProperty("direction", "")
+                    .equals("rtl", ignoreCase = true) ||
+                !verified.getProperty("editable", "true")
+                    .equals("false", ignoreCase = true)
+            ) {
+                throw IllegalStateException("Native spread setting verification failed")
+            }
+
+            Log.i(
+                LOG_TAG,
+                "RTL_READER_NATIVE_SPREAD_CONFIG enabled=true editable=false cover=$coverSeparate marker=${marker.absolutePath}",
+            )
+            promise.resolve(true)
+        } catch (error: Throwable) {
+            Log.e(LOG_TAG, "RTL_READER_NATIVE_SPREAD_CONFIG_FAILED: ${error.message}", error)
+            promise.reject("NATIVE_SPREAD_CONFIG_FAILED", error.message, error)
+        }
+    }
+
+    private data class NativeSpreadCapability(
+        val compatible: Boolean,
+        val moduleVersionCode: Long,
+        val moduleVersionName: String?,
+        val documentVersionCode: Long,
+    )
+
+    @Suppress("DEPRECATION")
+    private fun packageVersionCode(packageName: String): Pair<Long, String?> {
+        val info = reactApplicationContext.packageManager.getPackageInfo(packageName, 0)
+        val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.longVersionCode
+        } else {
+            info.versionCode.toLong()
+        }
+        return code to info.versionName
+    }
+
+    private fun nativeSpreadCapability(): NativeSpreadCapability {
+        val module = try {
+            packageVersionCode(NATIVE_SPREAD_PACKAGE)
+        } catch (_: Throwable) {
+            -1L to null
+        }
+        val document = try {
+            packageVersionCode(DOCUMENT_PACKAGE).first
+        } catch (_: Throwable) {
+            -1L
+        }
+        val compatible = Build.FINGERPRINT == SUPPORTED_FINGERPRINT &&
+            document == SUPPORTED_DOCUMENT_VERSION_CODE &&
+            module.first >= NATIVE_SPREAD_MIN_VERSION_CODE
+        return NativeSpreadCapability(
+            compatible,
+            module.first,
+            module.second,
+            document,
+        )
+    }
+
+    private fun requirePdf(filePath: String): File {
+        val file = File(filePath)
+        if (!file.isFile || !file.name.endsWith(".pdf", ignoreCase = true)) {
+            throw IllegalStateException("Current PDF is not accessible: $filePath")
+        }
+        return file
+    }
+
+    private fun nativeSpreadMarker(pdfFile: File): File {
+        val parent = pdfFile.parentFile
+            ?: throw IllegalStateException("Current PDF has no parent directory")
+        return File(parent, ".${pdfFile.name}$NATIVE_SPREAD_MARKER_SUFFIX")
     }
 
     /**

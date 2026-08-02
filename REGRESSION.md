@@ -138,6 +138,17 @@ Very rapid spread bursts can still take roughly 200–350 ms when navigation out
 
 The measured-layout candidate still reproduced a blank initial landscape spread. The r2 candidate adds native `onSizeChanged()` and `onAttachedToWindow()` redraw hooks so a bitmap completed before final native view sizing is drawn when the view receives a valid frame. Diagnostic marker: `RTL_READER_NATIVE_VIEW_SIZE_REDRAW`.
 
+## v0.4.4 native-reader pilot control - PENDING
+
+- [ ] Compatible Native Spread v0.0.59 is detected on the Nomad.
+- [ ] `RTL read-only` can be enabled for an ordinary PDF from Settings.
+- [ ] Close returns to the same native page and opens the correct RTL spread.
+- [ ] Portrait swipes and edge taps follow RTL direction.
+- [ ] Landscape cover parity and spread navigation match plug-in settings.
+- [ ] Native writing is blocked in the read-only pilot.
+- [ ] Returning to Settings and choosing `Off` restores the unmodified native reader.
+- [ ] An unmarked PDF remains completely unaffected.
+
 ## Failure capture
 
 Before reproducing a failure:

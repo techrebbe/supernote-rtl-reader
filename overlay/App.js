@@ -145,11 +145,17 @@ function decodePreferences(raw, context) {
   };
 }
 
-function SegmentedButton({active, label, onPress, style}) {
+function SegmentedButton({active, disabled = false, label, onPress, style}) {
   return (
     <Pressable
+      disabled={disabled}
       onPress={onPress}
-      style={[styles.segmentButton, active && styles.segmentButtonActive, style]}>
+      style={[
+        styles.segmentButton,
+        active && styles.segmentButtonActive,
+        disabled && styles.segmentButtonDisabled,
+        style,
+      ]}>
       <Text style={[styles.segmentButtonText, active && styles.segmentButtonTextActive]}>
         {label}
       </Text>
@@ -178,6 +184,12 @@ export default function App() {
 
   const effectiveMode =
     viewMode === 'auto' ? (isLandscape ? 'spread' : 'single') : viewMode;
+
+  const [nativeSpreadEnabled, setNativeSpreadEnabled] = useState(false);
+  const [nativeSpreadEditable, setNativeSpreadEditable] = useState(false);
+  const [nativeSpreadCompatible, setNativeSpreadCompatible] = useState(false);
+  const [nativeSpreadBusy, setNativeSpreadBusy] = useState(false);
+  const [nativeSpreadError, setNativeSpreadError] = useState(null);
 
   const mountedRef = useRef(true);
   const renderTokenRef = useRef(0);
@@ -347,6 +359,16 @@ export default function App() {
 
         const rawPreferences = await ReaderPreferencesModule.load(context.filePath);
         const restored = decodePreferences(rawPreferences, context);
+        let nativeSpread = null;
+        if (ReaderPreferencesModule?.loadNativeSpreadMode) {
+          try {
+            nativeSpread = await ReaderPreferencesModule.loadNativeSpreadMode(
+              context.filePath,
+            );
+          } catch (error) {
+            console.warn('RTL_READER_NATIVE_SPREAD_LOAD_FAILED', error);
+          }
+        }
 
         if (!mountedRef.current) return;
 
@@ -364,6 +386,9 @@ export default function App() {
         setPageIndex(restored.pageIndex);
         setTotalPages(context.totalPages);
         setPreferencesReady(true);
+        setNativeSpreadEnabled(nativeSpread?.enabled === true);
+        setNativeSpreadEditable(nativeSpread?.editable === true);
+        setNativeSpreadCompatible(nativeSpread?.compatible === true);
 
         console.log(
           `RTL_READER_PREFS_LOADED source=${restored.source} page=${restored.pageIndex + 1} direction=${restored.direction} view=${restored.viewMode} cover=${restored.coverSeparate}`,
@@ -645,6 +670,9 @@ export default function App() {
 
   const setDirectionValue = next => {
     if (next !== 'rtl' && next !== 'ltr') return;
+    if (next === 'ltr' && nativeSpreadEnabled && !nativeSpreadEditable) {
+      void setNativeSpreadReadOnly(false);
+    }
     directionRef.current = next;
     setDirection(next);
     console.log(`RTL_READER_DIRECTION ${next}`);
@@ -662,6 +690,54 @@ export default function App() {
     coverSeparateRef.current = normalized;
     setCoverSeparate(normalized);
     console.log(`RTL_READER_COVER_SEPARATE ${normalized}`);
+    if (
+      nativeSpreadEnabled &&
+      !nativeSpreadEditable &&
+      ReaderPreferencesModule?.configureNativeSpreadReadOnly
+    ) {
+      ReaderPreferencesModule.configureNativeSpreadReadOnly(
+        filePathRef.current,
+        true,
+        normalized,
+      ).catch(error => {
+        console.warn('RTL_READER_NATIVE_SPREAD_COVER_SYNC_FAILED', error);
+        setNativeSpreadError(error?.message ?? String(error));
+      });
+    }
+  };
+
+  const setNativeSpreadReadOnly = async enabled => {
+    const filePath = filePathRef.current;
+    if (
+      !filePath ||
+      nativeSpreadBusy ||
+      !ReaderPreferencesModule?.configureNativeSpreadReadOnly
+    ) {
+      return;
+    }
+    if (enabled && (directionRef.current !== 'rtl' || !nativeSpreadCompatible)) {
+      return;
+    }
+
+    setNativeSpreadBusy(true);
+    setNativeSpreadError(null);
+    try {
+      await ReaderPreferencesModule.configureNativeSpreadReadOnly(
+        filePath,
+        enabled,
+        coverSeparateRef.current,
+      );
+      setNativeSpreadEnabled(enabled);
+      setNativeSpreadEditable(false);
+      console.log(
+        `RTL_READER_NATIVE_SPREAD enabled=${enabled} editable=false cover=${coverSeparateRef.current}`,
+      );
+    } catch (error) {
+      console.error('RTL_READER_NATIVE_SPREAD_CONFIG_FAILED', error);
+      setNativeSpreadError(error?.message ?? String(error));
+    } finally {
+      setNativeSpreadBusy(false);
+    }
   };
 
   const openJump = () => {
@@ -896,6 +972,42 @@ export default function App() {
             <Text style={styles.settingHint}>
               On inserts a virtual blank beside the cover; the PDF is not changed.
             </Text>
+
+            <Text style={styles.settingLabel}>Supernote native reader</Text>
+            <View style={styles.segmentRow}>
+              <SegmentedButton
+                active={!nativeSpreadEnabled}
+                disabled={nativeSpreadBusy}
+                label="Off"
+                onPress={() => setNativeSpreadReadOnly(false)}
+                style={styles.segmentHalf}
+              />
+              <SegmentedButton
+                active={nativeSpreadEnabled && !nativeSpreadEditable}
+                disabled={
+                  nativeSpreadBusy ||
+                  direction !== 'rtl' ||
+                  !nativeSpreadCompatible
+                }
+                label={nativeSpreadBusy ? 'Applying...' : 'RTL read-only'}
+                onPress={() => setNativeSpreadReadOnly(true)}
+                style={styles.segmentHalfLast}
+              />
+            </View>
+            <Text style={styles.settingHint}>
+              {nativeSpreadEditable
+                ? 'Experimental native writing is already enabled by an external test setting.'
+                : !nativeSpreadCompatible
+                  ? 'Requires the compatible rooted Native Spread module.'
+                  : direction !== 'rtl'
+                    ? 'Select RTL direction to enable the native-reader pilot.'
+                    : nativeSpreadEnabled
+                      ? "Close RTL Reader to reopen this PDF in Supernote's native RTL spread mode. Writing remains disabled for this pilot."
+                      : "Enables RTL portrait turns and landscape spreads in Supernote's native reader. This first pilot is read-only."}
+            </Text>
+            {nativeSpreadError && (
+              <Text style={styles.settingError}>{nativeSpreadError}</Text>
+            )}
           </View>
         </View>
       )}
@@ -1177,6 +1289,16 @@ const styles = StyleSheet.create({
   segmentRow: {
     flexDirection: 'row',
     width: '100%',
+  },
+  segmentButtonDisabled: {
+    opacity: 0.35,
+  },
+  settingError: {
+    marginTop: -8,
+    marginBottom: 12,
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#000000',
   },
   segmentButton: {
     minHeight: 42,

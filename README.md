@@ -125,9 +125,11 @@ This prevents the initial landscape spread from being mounted against stale or i
 
 Full validation details are recorded in `REGRESSION.md`.
 
-## v0.4.5 native-reader pilot control
+## v0.4.6 native-reader pilot control
 
-v0.4.5 adds a safe per-document control for the rooted Native Spread module.
+v0.4.5 added a safe per-document control for the rooted Native Spread module.
+v0.4.6 raises the compatibility floor to the real-document-validated Native
+Spread v0.0.61 module.
 In Reading settings, **Supernote native reader** offers:
 
 - **Off** — remove this PDF's hidden native-spread setting;
@@ -136,11 +138,13 @@ In Reading settings, **Supernote native reader** offers:
 
 The plug-in verifies the exact supported firmware, SupernoteDocument build,
 and Native Spread module version before enabling the setting. It requires
-Native Spread v0.0.60 or newer, whose read-only mode forces a full-screen
+Native Spread v0.0.61 or newer. Its read-only mode forces a full-screen
 handwriting-disabled region and blocks the native annotation commit callback as
-a persistence fail-safe. Experimental native writing remains available only
-through the disposable test marker until the read-only control is validated on
-a backed-up real document copy.
+a persistence fail-safe. v0.0.61 also composites saved `.mark` ink for both
+visible pages, preserves the active left/right side while turning spreads, and
+limits tap navigation to the outer edges. Experimental native writing remains
+available only through the disposable test marker until a separate protected
+editable-document pilot is explicitly enabled and validated.
 
 After enabling the pilot, close RTL Reader normally. Its existing page handoff
 restarts Supernote's native reader on the same page, where the LSPosed module
@@ -151,6 +155,17 @@ The full disposable-PDF hardware pass is complete: enable/disable, portrait RTL
 navigation, automatic landscape spreads, Cover Separate parity, and ordinary
 native behavior after disabling all passed. In read-only mode, pen input
 produced no visible trace and created no `.mark` file.
+
+A protected copy of a 738-page annotated Hebrew PDF also passed the real-document
+pilot. Saved ink remained visible on inactive spread pages, center taps no longer
+turned pages, outer-edge taps and swipes turned one spread in RTL order, and the
+active side was preserved. The protected copy's `.mark` SHA-256 remained
+`c2155e51a686a3ba7066c8ef7d859c19053019e85d23d1414fa1a69dc9de2c21`
+before and after the test.
+
+The exact v0.0.61 LSPosed companion source and its Windows build wrapper are
+tracked in [`native-spread-module/`](native-spread-module/README.md). Generated
+APKs remain build artifacts and are not committed.
 
 ## Proven hardware foundation
 

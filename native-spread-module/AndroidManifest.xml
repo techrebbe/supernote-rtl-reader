@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.techrebbe.supernote.spreadprobe"
+    android:versionCode="61"
+    android:versionName="0.0.61">
+
+    <uses-sdk
+        android:minSdkVersion="27"
+        android:targetSdkVersion="28" />
+
+    <application
+        android:allowBackup="false"
+        android:extractNativeLibs="false"
+        android:hasCode="true"
+        android:label="Supernote Native Spread Probe"
+        android:supportsRtl="true">
+        <meta-data
+            android:name="xposedmodule"
+            android:value="true" />
+        <meta-data
+            android:name="xposeddescription"
+            android:value="Opt-in RTL native-reader spreads with guarded disposable-document editing" />
+        <meta-data
+            android:name="xposedminversion"
+            android:value="82" />
+    </application>
+</manifest>

@@ -157,6 +157,26 @@ to a full-page disabled rectangle and blocking `HandWritePresenter.receiveTrials
 as a persistence fail-safe. The disposable failure `.mark` was preserved for
 analysis and removed from the device before the successful v0.0.60 retest.
 
+## v0.4.6 protected real-document pilot - PASS
+
+- [x] Native Spread v0.0.61 is detected as the minimum compatible module.
+- [x] A protected copy of an existing 738-page Hebrew PDF opens with its copied
+  `.mark` file intact.
+- [x] Saved ink on pages 141 and 143 remains visible when the opposite page is
+  active.
+- [x] Center taps activate a spread page without turning the spread.
+- [x] Outer-left and outer-right edge taps turn exactly one RTL spread.
+- [x] Swipes continue to turn one RTL spread without requiring page activation.
+- [x] The active left/right side is preserved across forward and backward turns.
+- [x] No stale, blank, misplaced, or out-of-order annotation overlay was seen.
+- [x] The protected `.mark` SHA-256 remained
+  `c2155e51a686a3ba7066c8ef7d859c19053019e85d23d1414fa1a69dc9de2c21`.
+
+v0.0.61 removes read-only mode's former editable-only committed-ink gate,
+renders canonical saved ink for both visible pages, suppresses non-edge native
+tap turns, and preserves the active spread side. The v0.0.60 hardware writer
+and annotation-commit blocks remain unchanged.
+
 ## Failure capture
 
 Before reproducing a failure:

@@ -138,6 +138,45 @@ Very rapid spread bursts can still take roughly 200–350 ms when navigation out
 
 The measured-layout candidate still reproduced a blank initial landscape spread. The r2 candidate adds native `onSizeChanged()` and `onAttachedToWindow()` redraw hooks so a bitmap completed before final native view sizing is drawn when the view receives a valid frame. Diagnostic marker: `RTL_READER_NATIVE_VIEW_SIZE_REDRAW`.
 
+## v0.4.5 native-reader pilot control - PASS
+
+- [x] Compatible Native Spread v0.0.60 is detected on the Nomad.
+- [x] `RTL read-only` can be enabled for an ordinary PDF from Settings.
+- [x] Close returns to the same native page and opens the correct RTL spread.
+- [x] Portrait swipes and edge taps follow RTL direction.
+- [x] Landscape cover parity and spread navigation match plug-in settings.
+- [x] Native writing is blocked visibly and no `.mark` file is created.
+- [x] Returning to Settings and choosing `Off` restores the unmodified native reader, including writing.
+- [x] An unmarked PDF remains completely unaffected.
+
+The first v0.4.4 pilot exposed a safety gap in Native Spread v0.0.59: the
+activity-level stylus guard did not see Supernote's low-latency pen path, so a
+stroke could still be committed. Native Spread v0.0.60 fixes this below the
+activity layer by forcing every `HandWriteClient.sendDisableAreaInfo` request
+to a full-page disabled rectangle and blocking `HandWritePresenter.receiveTrials`
+as a persistence fail-safe. The disposable failure `.mark` was preserved for
+analysis and removed from the device before the successful v0.0.60 retest.
+
+## v0.4.6 protected real-document pilot - PASS
+
+- [x] Native Spread v0.0.61 is detected as the minimum compatible module.
+- [x] A protected copy of an existing 738-page Hebrew PDF opens with its copied
+  `.mark` file intact.
+- [x] Saved ink on pages 141 and 143 remains visible when the opposite page is
+  active.
+- [x] Center taps activate a spread page without turning the spread.
+- [x] Outer-left and outer-right edge taps turn exactly one RTL spread.
+- [x] Swipes continue to turn one RTL spread without requiring page activation.
+- [x] The active left/right side is preserved across forward and backward turns.
+- [x] No stale, blank, misplaced, or out-of-order annotation overlay was seen.
+- [x] The protected `.mark` SHA-256 remained
+  `c2155e51a686a3ba7066c8ef7d859c19053019e85d23d1414fa1a69dc9de2c21`.
+
+v0.0.61 removes read-only mode's former editable-only committed-ink gate,
+renders canonical saved ink for both visible pages, suppresses non-edge native
+tap turns, and preserves the active spread side. The v0.0.60 hardware writer
+and annotation-commit blocks remain unchanged.
+
 ## Failure capture
 
 Before reproducing a failure:

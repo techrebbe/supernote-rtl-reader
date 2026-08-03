@@ -189,6 +189,8 @@ class ReaderPreferencesModule(
             val pdfFile = requirePdf(filePath)
             val marker = nativeSpreadMarker(pdfFile)
             val capability = nativeSpreadCapability()
+            val previousMarkerProperties = readPropertiesIfFile(marker)
+            val previousBackup = readNativeAnnotationBackup(pdfFile)
 
             if (enabled && !capability.compatible) {
                 throw IllegalStateException(
@@ -202,6 +204,11 @@ class ReaderPreferencesModule(
                         "Could not remove native spread setting: ${marker.absolutePath}",
                     )
                 }
+                retireNativeAnnotationBackup(
+                    pdfFile,
+                    previousMarkerProperties,
+                    previousBackup,
+                )
                 Log.i(LOG_TAG, "RTL_READER_NATIVE_SPREAD_CONFIG enabled=false marker=${marker.absolutePath}")
                 promise.resolve(false)
                 return
@@ -230,6 +237,11 @@ class ReaderPreferencesModule(
                         marker,
                         coverSeparate,
                         handshake,
+                    )
+                    retireNativeAnnotationBackup(
+                        pdfFile,
+                        previousMarkerProperties,
+                        previousBackup,
                     )
                     promise.resolve(true)
                 } catch (error: Throwable) {
@@ -676,9 +688,45 @@ class ReaderPreferencesModule(
         return File(parent, ".${pdfFile.name}$NATIVE_SPREAD_BACKUP_MARK_SUFFIX")
     }
 
+    private fun readPropertiesIfFile(file: File): Properties = Properties().apply {
+        if (file.isFile) {
+            FileInputStream(file).use { input -> load(input) }
+        }
+    }
+
+    private fun retireNativeAnnotationBackup(
+        pdfFile: File,
+        markerProperties: Properties,
+        backupResult: NativeAnnotationBackupResult,
+    ) {
+        val backup = backupResult.backup ?: return
+        if (!protectedEditableMarkerValid(pdfFile, markerProperties, backup)) return
+
+        // Removing or downgrading the editable marker ends that protected
+        // session. Retire its recovery baseline so a later "Back up & enable"
+        // starts from the current .mark instead of silently reusing stale bytes
+        // from before an ordinary, unprotected annotation interval.
+        if (backup.manifest.exists() && !backup.manifest.delete()) {
+            throw IllegalStateException("Could not retire the completed annotation backup manifest")
+        }
+        if (backup.snapshot.exists() && !backup.snapshot.delete()) {
+            throw IllegalStateException("Could not retire the completed annotation backup snapshot")
+        }
+        Log.i(
+            LOG_TAG,
+            "RTL_READER_NATIVE_BACKUP_RETIRED createdAt=${backup.createdAt}",
+        )
+    }
+
     private fun ensureNativeAnnotationBackup(pdfFile: File): NativeAnnotationBackup {
         val existing = readNativeAnnotationBackup(pdfFile)
         if (existing.backup != null) {
+            val markerProperties = readPropertiesIfFile(nativeSpreadMarker(pdfFile))
+            if (!protectedEditableMarkerValid(pdfFile, markerProperties, existing.backup)) {
+                throw IllegalStateException(
+                    "A verified annotation backup belongs to an inactive protected session; restore it before starting a new editable session",
+                )
+            }
             Log.i(
                 LOG_TAG,
                 "RTL_READER_NATIVE_BACKUP_REUSED manifest=${existing.backup.manifest.absolutePath}",
@@ -1198,18 +1246,32 @@ class ReaderPreferencesModule(
                 val activityManager = reactApplicationContext.getSystemService(
                     Context.ACTIVITY_SERVICE,
                 ) as ActivityManager
-                val pids = documentPids(activityManager)
-                for (pid in pids) {
-                    Os.kill(pid, OsConstants.SIGKILL)
-                    Log.i(LOG_TAG, "RTL_READER_NATIVE_BACKUP_RESTORE_KILL_SENT pid=$pid")
-                }
-                if (pids.isNotEmpty()) {
-                    val deadline = SystemClock.elapsedRealtime() + 2500L
-                    while (SystemClock.elapsedRealtime() < deadline) {
-                        val running = documentPids(activityManager).toSet()
-                        if (pids.none { it in running }) break
-                        SystemClock.sleep(100)
+                val deadline = SystemClock.elapsedRealtime() + 2500L
+                val signaled = mutableSetOf<Int>()
+                var running = documentPids(activityManager)
+                val initialPids = running.toSet()
+                while (running.isNotEmpty() && SystemClock.elapsedRealtime() < deadline) {
+                    for (pid in running) {
+                        if (signaled.add(pid)) {
+                            Os.kill(pid, OsConstants.SIGKILL)
+                            Log.i(
+                                LOG_TAG,
+                                "RTL_READER_NATIVE_BACKUP_RESTORE_KILL_SENT pid=$pid replacement=${pid !in initialPids}",
+                            )
+                        }
                     }
+                    SystemClock.sleep(100)
+                    running = documentPids(activityManager)
+                }
+                val remaining = documentPids(activityManager)
+                if (remaining.isNotEmpty()) {
+                    Log.e(
+                        LOG_TAG,
+                        "RTL_READER_NATIVE_BACKUP_RESTORE_ABORTED_ACTIVE_PROCESS pids=${remaining.joinToString(",")}",
+                    )
+                    throw IllegalStateException(
+                        "Native document process remained active; annotation recovery was not written",
+                    )
                 }
 
                 val currentMark = nativeAnnotationMark(pdfFile)

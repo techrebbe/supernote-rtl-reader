@@ -155,10 +155,17 @@ pilot confirmed that the moved X kept its size and position through a spread
 turn and a cold native-reader restart.
 
 **Restore snapshot** disables the marker, terminates the native document
-process before touching `.mark`, atomically restores and verifies the original
-bytes (or the original no-`.mark` state), removes the completed recovery files,
-and reopens the native reader. This prevents an in-memory native annotation
-model from overwriting the recovered state.
+process before touching `.mark`, re-enumerates the process list to catch a
+replacement PID, and aborts unless every document process has exited. It then
+atomically restores and verifies the original bytes (or the original no-`.mark`
+state), removes the completed recovery files, and reopens the native reader.
+This prevents an in-memory native annotation model from overwriting the
+recovered state.
+
+Selecting **Off** or downgrading to read-only retires the completed editable
+session's recovery baseline. A later **Back up & enable** therefore snapshots
+the current `.mark`, including legitimate annotations made during the ordinary
+native-reader interval, rather than silently reusing an older baseline.
 
 The protected pilot validated that full rollback on hardware: an edited
 147,752-byte `.mark` was restored byte-for-byte to its original 89,801-byte

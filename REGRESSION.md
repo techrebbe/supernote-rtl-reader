@@ -248,6 +248,11 @@ Safety and setup:
 - [x] **RTL editable** requires a separate confirmation and reports a verified
   recovery snapshot before it becomes selected.
 - [x] An existing `.mark` snapshot matches the pre-test byte length and SHA-256.
+- [x] Leaving a protected editable session retires that session's recovery
+  baseline; a later **Back up & enable** cannot reuse it after an unprotected
+  interval.
+- [x] Recovery re-enumerates every native document PID and aborts before
+  touching `.mark` unless all original or replacement processes have exited.
 - [ ] A document with no `.mark` records and can restore the original absent state.
 - [ ] Removing or modifying a backup file makes editable mode fail closed.
 - [ ] Read-only mode and **Off** retain their v0.4.7-r1 behavior.

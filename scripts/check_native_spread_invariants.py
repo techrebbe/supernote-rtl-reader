@@ -58,11 +58,15 @@ def check(repo_root: Path) -> None:
             'putBoolean("enabled", configured && runtimeCompatible)',
             "fun configureNativeSpreadEditable(",
             "ensureNativeAnnotationBackup(pdfFile)",
+            "retireNativeAnnotationBackup(",
+            "A verified annotation backup belongs to an inactive protected session",
             "writeNativeSpreadEditableMarker(",
             "fun restoreNativeAnnotationBackup(",
             "scheduleAnnotationRestore(pdfFile, backup)",
             "Recovery snapshot changed before restore",
             "copyFileAtomically(backup.snapshot, currentMark)",
+            "RTL_READER_NATIVE_BACKUP_RESTORE_ABORTED_ACTIVE_PROCESS",
+            "Native document process remained active; annotation recovery was not written",
             'putBoolean("backupAvailable", backupResult.backup != null)',
         ),
         "plugin handshake",
@@ -108,6 +112,29 @@ def check(repo_root: Path) -> None:
     editable_marker = editable_configure.find("writeNativeSpreadEditableMarker(")
     if not (0 <= editable_handshake < editable_backup < editable_marker):
         fail("editable marker is not gated by handshake then verified backup")
+
+    ensure_start = plugin.find("private fun ensureNativeAnnotationBackup(")
+    read_backup_start = plugin.find("private fun readNativeAnnotationBackup(", ensure_start)
+    if ensure_start < 0 or read_backup_start < 0:
+        fail("could not isolate annotation backup creation/reuse method")
+    ensure_backup = plugin[ensure_start:read_backup_start]
+    inactive_guard = ensure_backup.find("protectedEditableMarkerValid(")
+    reuse_log = ensure_backup.find("RTL_READER_NATIVE_BACKUP_REUSED")
+    if inactive_guard < 0 or reuse_log < 0 or inactive_guard > reuse_log:
+        fail("a verified backup can be reused without an active protected session")
+
+    restore_worker_start = plugin.find("private fun scheduleAnnotationRestore(")
+    restore_worker_end = plugin.find("\n    }\n}", restore_worker_start)
+    if restore_worker_start < 0 or restore_worker_end < 0:
+        fail("could not isolate annotation restore worker")
+    restore_worker = plugin[restore_worker_start:restore_worker_end]
+    remaining_check = restore_worker.find("val remaining = documentPids(activityManager)")
+    active_abort = restore_worker.find(
+        "RTL_READER_NATIVE_BACKUP_RESTORE_ABORTED_ACTIVE_PROCESS"
+    )
+    mark_write = restore_worker.find("copyFileAtomically(backup.snapshot, currentMark)")
+    if not (0 <= remaining_check < active_abort < mark_write):
+        fail("annotation restore can touch .mark before all document processes exit")
 
     require_markers(
         module,

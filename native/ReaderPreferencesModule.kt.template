@@ -43,7 +43,7 @@ class ReaderPreferencesModule(
         private const val NATIVE_SPREAD_PACKAGE =
             "com.techrebbe.supernote.spreadprobe"
         private const val PLUGIN_HOST_PACKAGE = "com.ratta.supernote.pluginhost"
-        private const val NATIVE_SPREAD_MIN_VERSION_CODE = 63L
+        private const val NATIVE_SPREAD_MIN_VERSION_CODE = 64L
         private const val NATIVE_SPREAD_MARKER_SUFFIX = ".snspread"
         private const val NATIVE_SPREAD_BACKUP_SUFFIX = ".snspread-backup.properties"
         private const val NATIVE_SPREAD_BACKUP_MARK_SUFFIX = ".snspread-backup.mark"
@@ -719,6 +719,9 @@ class ReaderPreferencesModule(
             setProperty("managedBy", "supernote-rtl-reader")
             setProperty("documentPath", pdfFile.canonicalPath)
             setProperty("documentLength", pdfFile.length().toString())
+            setProperty("documentSha256", sha256(pdfFile))
+            // Supernote updates the PDF mtime when DocumentActivity reopens.
+            // Retain it for diagnostics, but bind recovery to the PDF bytes.
             setProperty("documentModified", pdfFile.lastModified().toString())
             setProperty("markPath", mark.canonicalPath)
             setProperty("originalMarkPresent", originalPresent.toString())
@@ -756,7 +759,7 @@ class ReaderPreferencesModule(
             if (File(properties.getProperty("documentPath", "")).canonicalPath !=
                 pdfFile.canonicalPath ||
                 properties.getProperty("documentLength")?.toLongOrNull() != pdfFile.length() ||
-                properties.getProperty("documentModified")?.toLongOrNull() != pdfFile.lastModified()
+                properties.getProperty("documentSha256", "") != sha256(pdfFile)
             ) {
                 throw IllegalStateException("document_identity_changed")
             }

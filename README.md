@@ -127,19 +127,21 @@ This prevents the initial landscape spread from being mounted against stale or i
 
 Full validation details are recorded in `REGRESSION.md`.
 
-## v0.4.8 protected native editing pilot
+## v0.4.9 protected native editing pilot
 
-v0.4.8 adds an explicitly confirmed **RTL editable** choice alongside **Off**
+v0.4.9 adds an explicitly confirmed **RTL editable** choice alongside **Off**
 and **RTL read-only**. Before an ordinary PDF can become editable, the plugin:
 
 1. completes the live, document-bound Native Spread handshake;
 2. preserves the current `.mark` state byte-for-byte (including the original
    absence of a `.mark` file);
-3. writes and rereads a document-identity recovery manifest;
+3. writes and rereads a recovery manifest bound to the PDF path, length, and
+   full-file SHA-256 (the native reader changes the PDF modification time when
+   it reopens, so mtime is recorded only for diagnostics);
 4. verifies the snapshot length and SHA-256; and
 5. creates an editable marker bound to the recovery-manifest SHA-256.
 
-Native Spread v0.0.63 independently verifies that attestation. A missing,
+Native Spread v0.0.64 independently verifies that attestation. A missing,
 changed, mismatched, or orphaned recovery file fails closed to read-only. The
 module also notices backup-file metadata changes during a running session
 instead of trusting a stale editable configuration cache.

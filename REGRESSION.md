@@ -238,11 +238,13 @@ re-enabled and the document process restarted, the protected PDF remained in
 ordinary native landscape view rather than silently restoring RTL spread mode.
 The protected `.mark` SHA-256 remained unchanged throughout.
 
-## v0.4.8 protected native editing pilot
+## v0.4.9 protected native editing pilot
 
 Safety and setup:
 
-- [ ] v0.4.8 identifies Native Spread v0.0.63 through the live handshake.
+- [ ] v0.4.9 identifies Native Spread v0.0.64 through the live handshake.
+- [ ] The recovery manifest's full PDF SHA-256 remains valid after Supernote
+  changes the PDF modification time during a native-reader restart.
 - [ ] **RTL editable** requires a separate confirmation and reports a verified
   recovery snapshot before it becomes selected.
 - [ ] An existing `.mark` snapshot matches the pre-test byte length and SHA-256.

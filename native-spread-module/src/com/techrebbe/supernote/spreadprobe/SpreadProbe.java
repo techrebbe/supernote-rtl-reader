@@ -78,7 +78,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         "documentApkLength";
     private static final String HANDSHAKE_EXTRA_PROCESS_ID = "processId";
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 63L;
+    private static final long MODULE_VERSION_CODE = 64L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -1787,10 +1787,20 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 )
                 || Long.parseLong(backup.getProperty("documentLength", "-1"))
                     != document.length()
-                || Long.parseLong(backup.getProperty("documentModified", "-1"))
-                    != document.lastModified()) {
+                || !backup.getProperty("documentSha256", "").trim().equals(
+                    sha256(document)
+                )) {
                 log("protected_editable_backup_rejected reason=document_identity");
                 return false;
+            }
+
+            long backedUpModified = Long.parseLong(
+                backup.getProperty("documentModified", "-1")
+            );
+            if (backedUpModified != document.lastModified()) {
+                log("protected_editable_document_mtime_changed original="
+                    + backedUpModified + " current=" + document.lastModified()
+                    + " content_sha256_verified=true");
             }
 
             File expectedMark = new File(document.getAbsolutePath() + ".mark");

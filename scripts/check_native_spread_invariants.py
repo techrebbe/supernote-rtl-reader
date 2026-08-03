@@ -41,7 +41,9 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 63L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 64L",
+            'setProperty("documentSha256", sha256(pdfFile))',
+            'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
             "NATIVE_SPREAD_HANDSHAKE_RESPONSE",
             "requestNativeSpreadHandshake(pdfFile) { handshake ->",
@@ -133,6 +135,8 @@ def check(repo_root: Path) -> None:
             "protectedEditableBackupValid(document, properties)",
             '"protected-editable-pilot"',
             "expectedManifestHash.equals(sha256(expectedManifest))",
+            'backup.getProperty("documentSha256", "").trim().equals(',
+            "protected_editable_document_mtime_changed",
             "protected_editable_backup_verified",
             "cached.backupModified == backupModified",
             "cached.snapshotModified == snapshotModified",
@@ -166,10 +170,10 @@ def check(repo_root: Path) -> None:
     if "releaseActivityResources(activity);" not in destroy:
         fail("onDestroy does not release all per-activity resources")
 
-    if 'android:versionCode="63"' not in manifest:
-        fail("companion manifest must use versionCode 63 for protected editing")
-    if 'android:versionName="0.0.63"' not in manifest:
-        fail("companion manifest must use versionName 0.0.63")
+    if 'android:versionCode="64"' not in manifest:
+        fail("companion manifest must use versionCode 64 for protected editing")
+    if 'android:versionName="0.0.64"' not in manifest:
+        fail("companion manifest must use versionName 0.0.64")
 
     print("Native Spread safety invariants: PASS")
 

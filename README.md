@@ -127,6 +127,36 @@ This prevents the initial landscape spread from being mounted against stale or i
 
 Full validation details are recorded in `REGRESSION.md`.
 
+## v0.4.8 protected native editing pilot
+
+v0.4.8 adds an explicitly confirmed **RTL editable** choice alongside **Off**
+and **RTL read-only**. Before an ordinary PDF can become editable, the plugin:
+
+1. completes the live, document-bound Native Spread handshake;
+2. preserves the current `.mark` state byte-for-byte (including the original
+   absence of a `.mark` file);
+3. writes and rereads a document-identity recovery manifest;
+4. verifies the snapshot length and SHA-256; and
+5. creates an editable marker bound to the recovery-manifest SHA-256.
+
+Native Spread v0.0.63 independently verifies that attestation. A missing,
+changed, mismatched, or orphaned recovery file fails closed to read-only. The
+module also notices backup-file metadata changes during a running session
+instead of trusting a stale editable configuration cache.
+
+**Restore snapshot** disables the marker, terminates the native document
+process before touching `.mark`, atomically restores and verifies the original
+bytes (or the original no-`.mark` state), removes the completed recovery files,
+and reopens the native reader. This prevents an in-memory native annotation
+model from overwriting the recovered state.
+
+Editable mode exposes the writing, eraser, lasso, text-highlight, embedded-link,
+and active-page geometry paths previously proven on disposable calibration
+documents. Native handwriting remains ordinary Supernote element data, so it
+continues to work with InkBridge's validated schema-v2 page snapshot/export
+path. Native text highlights are a separate PDF-annotation stream and still
+need InkBridge's planned annotation adapter.
+
 ## v0.4.7 native-reader pilot control
 
 v0.4.5 added a safe per-document control for the rooted Native Spread module.

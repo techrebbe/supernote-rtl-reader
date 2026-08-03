@@ -238,6 +238,37 @@ re-enabled and the document process restarted, the protected PDF remained in
 ordinary native landscape view rather than silently restoring RTL spread mode.
 The protected `.mark` SHA-256 remained unchanged throughout.
 
+## v0.4.8 protected native editing pilot
+
+Safety and setup:
+
+- [ ] v0.4.8 identifies Native Spread v0.0.63 through the live handshake.
+- [ ] **RTL editable** requires a separate confirmation and reports a verified
+  recovery snapshot before it becomes selected.
+- [ ] An existing `.mark` snapshot matches the pre-test byte length and SHA-256.
+- [ ] A document with no `.mark` records and can restore the original absent state.
+- [ ] Removing or modifying a backup file makes editable mode fail closed.
+- [ ] Read-only mode and **Off** retain their v0.4.7-r1 behavior.
+
+Protected duplicate editing:
+
+- [ ] Native writing persists on the active left and right pages.
+- [ ] Saved ink remains visible on the inactive page and after spread turns.
+- [ ] Eraser changes persist and do not affect the other spread page.
+- [ ] Lasso selection/movement persists in canonical page coordinates.
+- [ ] Text highlight/underline selection and final annotations remain aligned.
+- [ ] Embedded document links, swipes, and outer-edge taps retain RTL behavior.
+- [ ] Portrait RTL navigation and landscape active-page switching remain correct.
+
+Recovery and portability:
+
+- [ ] **Restore snapshot** reopens the native reader with the exact original
+  `.mark` SHA-256 (or removes the pilot-created `.mark` when none existed).
+- [ ] Completed recovery files are removed so a later pilot takes a fresh baseline.
+- [ ] InkBridge's existing Supernote page export sees pilot-created handwriting,
+  lasso moves, and erasures as ordinary schema-v2 elements/tombstones.
+- [ ] No stale/blank/out-of-order spread, crash, or native handoff regression occurs.
+
 ## Failure capture
 
 Before reproducing a failure:

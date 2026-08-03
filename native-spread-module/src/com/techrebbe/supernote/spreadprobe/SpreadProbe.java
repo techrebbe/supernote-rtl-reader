@@ -35,6 +35,7 @@ import android.widget.TextView;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -77,7 +78,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         "documentApkLength";
     private static final String HANDSHAKE_EXTRA_PROCESS_ID = "processId";
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 62L;
+    private static final long MODULE_VERSION_CODE = 63L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -132,6 +133,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         final String markerPath;
         final long markerModified;
         final long markerLength;
+        final long backupModified;
+        final long backupLength;
+        final long snapshotModified;
+        final long snapshotLength;
         final boolean enabled;
         final boolean coverSeparate;
         final boolean editable;
@@ -142,6 +147,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             String markerPath,
             long markerModified,
             long markerLength,
+            long backupModified,
+            long backupLength,
+            long snapshotModified,
+            long snapshotLength,
             boolean enabled,
             boolean coverSeparate,
             boolean editable,
@@ -151,6 +160,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             this.markerPath = markerPath;
             this.markerModified = markerModified;
             this.markerLength = markerLength;
+            this.backupModified = backupModified;
+            this.backupLength = backupLength;
+            this.snapshotModified = snapshotModified;
+            this.snapshotLength = snapshotLength;
             this.enabled = enabled;
             this.coverSeparate = coverSeparate;
             this.editable = editable;
@@ -1708,6 +1721,143 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
     }
 
+    private static boolean protectedEditableBackupValid(
+        File document,
+        Properties markerProperties
+    ) {
+        try {
+            if (!"supernote-rtl-reader".equals(
+                    markerProperties.getProperty("managedBy", "").trim()
+                )
+                || !"protected-editable-pilot".equals(
+                    markerProperties.getProperty("mode", "").trim()
+                )
+                || !"true".equalsIgnoreCase(
+                    markerProperties.getProperty("backupVerified", "false").trim()
+                )
+                || !sameCanonicalPath(
+                    markerProperties.getProperty("documentPath"),
+                    document.getCanonicalPath()
+                )) {
+                log("protected_editable_backup_rejected reason=marker_attestation");
+                return false;
+            }
+
+            File parent = document.getParentFile();
+            if (parent == null) {
+                return false;
+            }
+            File expectedManifest = new File(
+                parent,
+                "." + document.getName() + ".snspread-backup.properties"
+            );
+            String markerManifestPath = markerProperties.getProperty(
+                "backupManifestPath",
+                ""
+            );
+            if (!expectedManifest.isFile()
+                || !sameCanonicalPath(
+                    markerManifestPath,
+                    expectedManifest.getCanonicalPath()
+                )) {
+                log("protected_editable_backup_rejected reason=manifest_path");
+                return false;
+            }
+            String expectedManifestHash = markerProperties.getProperty(
+                "backupManifestSha256",
+                ""
+            ).trim();
+            if (expectedManifestHash.length() != 64
+                || !expectedManifestHash.equals(sha256(expectedManifest))) {
+                log("protected_editable_backup_rejected reason=manifest_hash");
+                return false;
+            }
+
+            Properties backup = new Properties();
+            try (FileInputStream input = new FileInputStream(expectedManifest)) {
+                backup.load(input);
+            }
+            if (!"1".equals(backup.getProperty("version", "").trim())
+                || !"supernote-rtl-reader".equals(
+                    backup.getProperty("managedBy", "").trim()
+                )
+                || !sameCanonicalPath(
+                    backup.getProperty("documentPath"),
+                    document.getCanonicalPath()
+                )
+                || Long.parseLong(backup.getProperty("documentLength", "-1"))
+                    != document.length()
+                || Long.parseLong(backup.getProperty("documentModified", "-1"))
+                    != document.lastModified()) {
+                log("protected_editable_backup_rejected reason=document_identity");
+                return false;
+            }
+
+            File expectedMark = new File(document.getAbsolutePath() + ".mark");
+            File expectedSnapshot = new File(
+                parent,
+                "." + document.getName() + ".snspread-backup.mark"
+            );
+            if (!sameCanonicalPath(
+                    backup.getProperty("markPath"),
+                    expectedMark.getCanonicalPath()
+                )
+                || !sameCanonicalPath(
+                    backup.getProperty("snapshotPath"),
+                    expectedSnapshot.getCanonicalPath()
+                )) {
+                log("protected_editable_backup_rejected reason=annotation_path");
+                return false;
+            }
+
+            boolean originalPresent = "true".equalsIgnoreCase(
+                backup.getProperty("originalMarkPresent", "false").trim()
+            );
+            long markLength = Long.parseLong(
+                backup.getProperty("markLength", "-1")
+            );
+            String markHash = backup.getProperty("markSha256", "").trim();
+            if (originalPresent) {
+                if (!expectedSnapshot.isFile()
+                    || expectedSnapshot.length() != markLength
+                    || !markHash.equals(sha256(expectedSnapshot))) {
+                    log("protected_editable_backup_rejected reason=snapshot_bytes");
+                    return false;
+                }
+            } else if (markLength != 0L
+                || !"ABSENT".equals(markHash)
+                || expectedSnapshot.exists()) {
+                log("protected_editable_backup_rejected reason=absent_snapshot");
+                return false;
+            }
+            log("protected_editable_backup_verified manifest="
+                + expectedManifest.getAbsolutePath()
+                + " original_mark_present=" + originalPresent);
+            return true;
+        } catch (Throwable throwable) {
+            log("protected_editable_backup_rejected reason=exception " + throwable);
+            return false;
+        }
+    }
+
+    private static String sha256(File file) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] buffer = new byte[64 * 1024];
+        try (FileInputStream input = new FileInputStream(file)) {
+            int count;
+            while ((count = input.read(buffer)) >= 0) {
+                if (count > 0) {
+                    digest.update(buffer, 0, count);
+                }
+            }
+        }
+        StringBuilder value = new StringBuilder(64);
+        for (byte item : digest.digest()) {
+            value.append(String.format("%02x", item & 0xff));
+        }
+        return value.toString();
+    }
+
     private static boolean prepareNativeSpreadLasso(
         Object superNoteNote,
         List<?> operationTrails
@@ -3260,6 +3410,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     null,
                     0L,
                     0L,
+                    0L,
+                    0L,
+                    0L,
+                    0L,
                     true,
                     false,
                     true,
@@ -3280,11 +3434,31 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             );
             long modified = marker.isFile() ? marker.lastModified() : -1L;
             long length = marker.isFile() ? marker.length() : -1L;
+            File backupManifest = new File(
+                parent,
+                "." + document.getName() + ".snspread-backup.properties"
+            );
+            File backupSnapshot = new File(
+                parent,
+                "." + document.getName() + ".snspread-backup.mark"
+            );
+            long backupModified = backupManifest.isFile()
+                ? backupManifest.lastModified() : -1L;
+            long backupLength = backupManifest.isFile()
+                ? backupManifest.length() : -1L;
+            long snapshotModified = backupSnapshot.isFile()
+                ? backupSnapshot.lastModified() : -1L;
+            long snapshotLength = backupSnapshot.isFile()
+                ? backupSnapshot.length() : -1L;
             SpreadConfig cached = SPREAD_CONFIGS.get(activity);
             if (cached != null && path.equals(cached.documentPath)
                 && marker.getAbsolutePath().equals(cached.markerPath)
                 && cached.markerModified == modified
-                && cached.markerLength == length) {
+                && cached.markerLength == length
+                && cached.backupModified == backupModified
+                && cached.backupLength == backupLength
+                && cached.snapshotModified == snapshotModified
+                && cached.snapshotLength == snapshotLength) {
                 return cached;
             }
 
@@ -3294,6 +3468,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     marker.getAbsolutePath(),
                     modified,
                     length,
+                    backupModified,
+                    backupLength,
+                    snapshotModified,
+                    snapshotLength,
                     false,
                     false,
                     false,
@@ -3318,15 +3496,23 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             boolean disposable = "true".equalsIgnoreCase(
                 properties.getProperty("disposable", "false").trim()
             );
-            boolean editable = enabled && disposable
-                && "true".equalsIgnoreCase(
-                    properties.getProperty("editable", "false").trim()
-                );
+            boolean requestedEditable = "true".equalsIgnoreCase(
+                properties.getProperty("editable", "false").trim()
+            );
+            boolean protectedEditable = enabled && requestedEditable
+                && !disposable
+                && protectedEditableBackupValid(document, properties);
+            boolean editable = enabled && requestedEditable
+                && (disposable || protectedEditable);
             SpreadConfig loaded = new SpreadConfig(
                 path,
                 marker.getAbsolutePath(),
                 modified,
                 length,
+                backupModified,
+                backupLength,
+                snapshotModified,
+                snapshotLength,
                 enabled,
                 coverSeparate,
                 editable,
@@ -3338,6 +3524,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 + " enabled=" + enabled
                 + " cover_separate=" + coverSeparate
                 + " editable=" + editable
+                + " requested_editable=" + requestedEditable
+                + " protected_editable=" + protectedEditable
                 + " disposable=" + disposable);
             return loaded;
         } catch (Throwable throwable) {

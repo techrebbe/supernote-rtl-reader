@@ -193,6 +193,12 @@ export default function App() {
   const [nativeSpreadCompatible, setNativeSpreadCompatible] = useState(false);
   const [nativeSpreadBusy, setNativeSpreadBusy] = useState(false);
   const [nativeSpreadError, setNativeSpreadError] = useState(null);
+  const [nativeBackupAvailable, setNativeBackupAvailable] = useState(false);
+  const [nativeBackupOriginalMarkPresent, setNativeBackupOriginalMarkPresent] =
+    useState(false);
+  const [nativeBackupStatus, setNativeBackupStatus] = useState('missing');
+  const [nativeEditableConfirmOpen, setNativeEditableConfirmOpen] =
+    useState(false);
 
   const mountedRef = useRef(true);
   const renderTokenRef = useRef(0);
@@ -396,6 +402,11 @@ export default function App() {
         setNativeSpreadEnabled(nativeSpread?.enabled === true);
         setNativeSpreadEditable(nativeSpread?.editable === true);
         setNativeSpreadCompatible(nativeSpread?.compatible === true);
+        setNativeBackupAvailable(nativeSpread?.backupAvailable === true);
+        setNativeBackupOriginalMarkPresent(
+          nativeSpread?.backupOriginalMarkPresent === true,
+        );
+        setNativeBackupStatus(nativeSpread?.backupStatus ?? 'missing');
 
         console.log(
           `RTL_READER_PREFS_LOADED source=${restored.source} page=${restored.pageIndex + 1} direction=${restored.direction} view=${restored.viewMode} cover=${restored.coverSeparate}`,
@@ -678,9 +689,7 @@ export default function App() {
   const setDirectionValue = next => {
     if (next !== 'rtl' && next !== 'ltr') return;
     if (
-      next === 'ltr' &&
-      nativeSpreadConfigured &&
-      !nativeSpreadConfiguredEditable
+      next === 'ltr' && nativeSpreadConfigured
     ) {
       void setNativeSpreadReadOnly(false);
     }
@@ -701,16 +710,18 @@ export default function App() {
     coverSeparateRef.current = normalized;
     setCoverSeparate(normalized);
     console.log(`RTL_READER_COVER_SEPARATE ${normalized}`);
-    if (
-      nativeSpreadEnabled &&
-      !nativeSpreadEditable &&
-      ReaderPreferencesModule?.configureNativeSpreadReadOnly
-    ) {
-      ReaderPreferencesModule.configureNativeSpreadReadOnly(
-        filePathRef.current,
-        true,
-        normalized,
-      ).catch(error => {
+    if (nativeSpreadEnabled) {
+      const syncPromise = nativeSpreadEditable
+        ? ReaderPreferencesModule?.configureNativeSpreadEditable?.(
+            filePathRef.current,
+            normalized,
+          )
+        : ReaderPreferencesModule?.configureNativeSpreadReadOnly?.(
+            filePathRef.current,
+            true,
+            normalized,
+          );
+      syncPromise?.catch(error => {
         console.warn('RTL_READER_NATIVE_SPREAD_COVER_SYNC_FAILED', error);
         setNativeSpreadError(error?.message ?? String(error));
       });
@@ -742,6 +753,7 @@ export default function App() {
       setNativeSpreadConfiguredEditable(false);
       setNativeSpreadEnabled(enabled);
       setNativeSpreadEditable(false);
+      setNativeEditableConfirmOpen(false);
       console.log(
         `RTL_READER_NATIVE_SPREAD enabled=${enabled} editable=false cover=${coverSeparateRef.current}`,
       );
@@ -749,6 +761,73 @@ export default function App() {
       console.error('RTL_READER_NATIVE_SPREAD_CONFIG_FAILED', error);
       setNativeSpreadError(error?.message ?? String(error));
     } finally {
+      setNativeSpreadBusy(false);
+    }
+  };
+
+  const setNativeSpreadEditableMode = async () => {
+    const filePath = filePathRef.current;
+    if (
+      !filePath ||
+      nativeSpreadBusy ||
+      directionRef.current !== 'rtl' ||
+      !nativeSpreadCompatible ||
+      !ReaderPreferencesModule?.configureNativeSpreadEditable
+    ) {
+      return;
+    }
+
+    setNativeSpreadBusy(true);
+    setNativeSpreadError(null);
+    try {
+      const backup = await ReaderPreferencesModule.configureNativeSpreadEditable(
+        filePath,
+        coverSeparateRef.current,
+      );
+      setNativeSpreadConfigured(true);
+      setNativeSpreadConfiguredEditable(true);
+      setNativeSpreadEnabled(true);
+      setNativeSpreadEditable(true);
+      setNativeBackupAvailable(backup?.backupAvailable === true);
+      setNativeBackupOriginalMarkPresent(
+        backup?.backupOriginalMarkPresent === true,
+      );
+      setNativeBackupStatus(backup?.backupStatus ?? 'verified');
+      setNativeEditableConfirmOpen(false);
+      console.log(
+        `RTL_READER_NATIVE_SPREAD enabled=true editable=true cover=${coverSeparateRef.current} backup=verified`,
+      );
+    } catch (error) {
+      console.error('RTL_READER_NATIVE_EDITABLE_CONFIG_FAILED', error);
+      setNativeSpreadError(error?.message ?? String(error));
+    } finally {
+      setNativeSpreadBusy(false);
+    }
+  };
+
+  const restoreNativeBackup = async () => {
+    const filePath = filePathRef.current;
+    if (
+      !filePath ||
+      nativeSpreadBusy ||
+      !nativeBackupAvailable ||
+      !ReaderPreferencesModule?.restoreNativeAnnotationBackup
+    ) {
+      return;
+    }
+    setNativeSpreadBusy(true);
+    setNativeSpreadError(null);
+    try {
+      await ReaderPreferencesModule.restoreNativeAnnotationBackup(filePath);
+      setNativeSpreadConfigured(false);
+      setNativeSpreadConfiguredEditable(false);
+      setNativeSpreadEnabled(false);
+      setNativeSpreadEditable(false);
+      setNativeEditableConfirmOpen(false);
+      await close();
+    } catch (error) {
+      console.error('RTL_READER_NATIVE_BACKUP_RESTORE_FAILED', error);
+      setNativeSpreadError(error?.message ?? String(error));
       setNativeSpreadBusy(false);
     }
   };
@@ -993,7 +1072,7 @@ export default function App() {
                 disabled={nativeSpreadBusy}
                 label="Off"
                 onPress={() => setNativeSpreadReadOnly(false)}
-                style={styles.segmentHalf}
+                style={styles.segmentThird}
               />
               <SegmentedButton
                 active={
@@ -1006,12 +1085,27 @@ export default function App() {
                 }
                 label={nativeSpreadBusy ? 'Applying...' : 'RTL read-only'}
                 onPress={() => setNativeSpreadReadOnly(true)}
-                style={styles.segmentHalfLast}
+                style={styles.segmentThird}
+              />
+              <SegmentedButton
+                active={
+                  nativeSpreadConfigured && nativeSpreadConfiguredEditable
+                }
+                disabled={
+                  nativeSpreadBusy ||
+                  direction !== 'rtl' ||
+                  !nativeSpreadCompatible
+                }
+                label="RTL editable"
+                onPress={() => setNativeEditableConfirmOpen(true)}
+                style={styles.segmentThirdLast}
               />
             </View>
             <Text style={styles.settingHint}>
-              {nativeSpreadConfiguredEditable
-                ? 'Experimental native writing is configured by an external test setting.'
+              {nativeSpreadConfiguredEditable && nativeSpreadEditable
+                ? 'Native writing is enabled for this PDF. A verified recovery snapshot protects the annotation state from before editing.'
+                : nativeSpreadConfiguredEditable
+                  ? 'RTL editable remains configured, but its verified hooks are inactive. Select Off or restore the annotation snapshot.'
                 : nativeSpreadConfigured && !nativeSpreadCompatible
                   ? 'RTL read-only remains configured, but the compatible hooks are inactive. Select Off to remove it.'
                   : !nativeSpreadCompatible
@@ -1020,8 +1114,54 @@ export default function App() {
                     ? 'Select RTL direction to enable the native-reader pilot.'
                     : nativeSpreadEnabled
                       ? "Close RTL Reader to reopen this PDF in Supernote's native RTL spread mode. Writing remains disabled for this pilot."
-                      : "Enables RTL portrait turns and landscape spreads in Supernote's native reader. This first pilot is read-only."}
+                      : "Read-only preserves annotations. Editable creates and verifies a per-document recovery snapshot before native writing is enabled."}
             </Text>
+            {nativeEditableConfirmOpen && (
+              <View style={styles.nativeWarningPanel}>
+                <Text style={styles.nativeWarningTitle}>
+                  Enable native editing for this PDF?
+                </Text>
+                <Text style={styles.settingHint}>
+                  RTL Reader will preserve the current Supernote annotation file byte-for-byte before enabling writing, erasing, lasso, highlighting, and links. This remains an experimental rooted-device feature.
+                </Text>
+                <View style={styles.nativeWarningActions}>
+                  <Pressable
+                    disabled={nativeSpreadBusy}
+                    onPress={() => setNativeEditableConfirmOpen(false)}
+                    style={styles.panelButton}>
+                    <Text style={styles.panelButtonText}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={nativeSpreadBusy}
+                    onPress={setNativeSpreadEditableMode}
+                    style={styles.panelButton}>
+                    <Text style={styles.panelButtonText}>
+                      {nativeSpreadBusy ? 'Backing up...' : 'Back up & enable'}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
+            {nativeBackupAvailable && (
+              <View style={styles.nativeRecoveryRow}>
+                <Text style={styles.settingHint}>
+                  Recovery snapshot verified ({nativeBackupOriginalMarkPresent
+                    ? 'existing annotations preserved'
+                    : 'originally no annotation file'}).
+                </Text>
+                <Pressable
+                  disabled={nativeSpreadBusy}
+                  onPress={restoreNativeBackup}
+                  style={styles.recoveryButton}>
+                  <Text style={styles.panelButtonText}>Restore snapshot</Text>
+                </Pressable>
+              </View>
+            )}
+            {!nativeBackupAvailable && nativeBackupStatus.startsWith('invalid:') && (
+              <Text style={styles.settingError}>
+                Annotation recovery files need attention: {nativeBackupStatus}
+              </Text>
+            )}
             {nativeSpreadError && (
               <Text style={styles.settingError}>{nativeSpreadError}</Text>
             )}
@@ -1316,6 +1456,38 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     color: '#000000',
+  },
+  nativeWarningPanel: {
+    marginTop: -6,
+    marginBottom: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#000000',
+    backgroundColor: '#ffffff',
+  },
+  nativeWarningTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#000000',
+  },
+  nativeWarningActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  nativeRecoveryRow: {
+    marginTop: -8,
+    marginBottom: 12,
+  },
+  recoveryButton: {
+    alignSelf: 'flex-start',
+    minWidth: 150,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#000000',
+    borderRadius: 3,
+    backgroundColor: '#ffffff',
   },
   segmentButton: {
     minHeight: 42,

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.techrebbe.supernote.spreadprobe"
-    android:versionCode="62"
-    android:versionName="0.0.62">
+    android:versionCode="63"
+    android:versionName="0.0.63">
 
     <uses-sdk
         android:minSdkVersion="27"
@@ -19,7 +19,7 @@
             android:value="true" />
         <meta-data
             android:name="xposeddescription"
-            android:value="Opt-in RTL native-reader spreads with guarded disposable-document editing" />
+            android:value="Opt-in RTL native-reader spreads with verified annotation recovery" />
         <meta-data
             android:name="xposedminversion"
             android:value="82" />

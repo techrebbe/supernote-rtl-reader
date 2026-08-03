@@ -41,7 +41,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 62L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 63L",
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
             "NATIVE_SPREAD_HANDSHAKE_RESPONSE",
             "requestNativeSpreadHandshake(pdfFile) { handshake ->",
@@ -54,6 +54,14 @@ def check(repo_root: Path) -> None:
             'putBoolean("configured", configured)',
             'putBoolean("configuredEditable", configuredEditable)',
             'putBoolean("enabled", configured && runtimeCompatible)',
+            "fun configureNativeSpreadEditable(",
+            "ensureNativeAnnotationBackup(pdfFile)",
+            "writeNativeSpreadEditableMarker(",
+            "fun restoreNativeAnnotationBackup(",
+            "scheduleAnnotationRestore(pdfFile, backup)",
+            "Recovery snapshot changed before restore",
+            "copyFileAtomically(backup.snapshot, currentMark)",
+            'putBoolean("backupAvailable", backupResult.backup != null)',
         ),
         "plugin handshake",
     )
@@ -69,6 +77,9 @@ def check(repo_root: Path) -> None:
             "setNativeSpreadConfigured(enabled);",
             "active={!nativeSpreadConfigured}",
             "RTL read-only remains configured, but the compatible hooks are inactive.",
+            "RTL editable",
+            "Back up & enable",
+            "restoreNativeAnnotationBackup",
         ),
         "configured/runtime Native Spread state separation",
     )
@@ -84,6 +95,17 @@ def check(repo_root: Path) -> None:
     marker_write = configure.find("writeNativeSpreadReadOnlyMarker(")
     if rejection < 0 or marker_write < 0 or rejection > marker_write:
         fail("marker creation is not gated by a successful live handshake")
+
+    editable_start = plugin.find("fun configureNativeSpreadEditable(")
+    restore_start = plugin.find("fun restoreNativeAnnotationBackup(", editable_start)
+    if editable_start < 0 or restore_start < 0:
+        fail("could not isolate protected editable configuration method")
+    editable_configure = plugin[editable_start:restore_start]
+    editable_handshake = editable_configure.find("if (!handshake.active)")
+    editable_backup = editable_configure.find("ensureNativeAnnotationBackup(pdfFile)")
+    editable_marker = editable_configure.find("writeNativeSpreadEditableMarker(")
+    if not (0 <= editable_handshake < editable_backup < editable_marker):
+        fail("editable marker is not gated by handshake then verified backup")
 
     require_markers(
         module,
@@ -108,6 +130,12 @@ def check(repo_root: Path) -> None:
             "RIGHT_DESTINATIONS.remove(activity);",
             "SPREAD_CONFIGS.remove(activity);",
             "activity_resources_released",
+            "protectedEditableBackupValid(document, properties)",
+            '"protected-editable-pilot"',
+            "expectedManifestHash.equals(sha256(expectedManifest))",
+            "protected_editable_backup_verified",
+            "cached.backupModified == backupModified",
+            "cached.snapshotModified == snapshotModified",
         ),
         "companion handshake/lifecycle",
     )
@@ -138,10 +166,10 @@ def check(repo_root: Path) -> None:
     if "releaseActivityResources(activity);" not in destroy:
         fail("onDestroy does not release all per-activity resources")
 
-    if 'android:versionCode="62"' not in manifest:
-        fail("companion manifest must use versionCode 62 for handshake support")
-    if 'android:versionName="0.0.62"' not in manifest:
-        fail("companion manifest must use versionName 0.0.62")
+    if 'android:versionCode="63"' not in manifest:
+        fail("companion manifest must use versionCode 63 for protected editing")
+    if 'android:versionName="0.0.63"' not in manifest:
+        fail("companion manifest must use versionName 0.0.63")
 
     print("Native Spread safety invariants: PASS")
 

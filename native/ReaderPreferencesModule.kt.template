@@ -25,6 +25,7 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.ObjectInputStream
 import java.io.ObjectOutputStream
+import java.security.MessageDigest
 import java.util.Properties
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
@@ -42,8 +43,11 @@ class ReaderPreferencesModule(
         private const val NATIVE_SPREAD_PACKAGE =
             "com.techrebbe.supernote.spreadprobe"
         private const val PLUGIN_HOST_PACKAGE = "com.ratta.supernote.pluginhost"
-        private const val NATIVE_SPREAD_MIN_VERSION_CODE = 62L
+        private const val NATIVE_SPREAD_MIN_VERSION_CODE = 63L
         private const val NATIVE_SPREAD_MARKER_SUFFIX = ".snspread"
+        private const val NATIVE_SPREAD_BACKUP_SUFFIX = ".snspread-backup.properties"
+        private const val NATIVE_SPREAD_BACKUP_MARK_SUFFIX = ".snspread-backup.mark"
+        private const val NATIVE_SPREAD_BACKUP_VERSION = 1
         private const val NATIVE_SPREAD_HANDSHAKE_PROTOCOL = 1
         private const val NATIVE_SPREAD_HANDSHAKE_TIMEOUT_MS = 1500L
         private const val NATIVE_SPREAD_HANDSHAKE_REQUEST =
@@ -74,6 +78,8 @@ class ReaderPreferencesModule(
 
     @Volatile
     private var lastSavedFilePath: String? = null
+
+    private val annotationRecoveryPending = AtomicBoolean(false)
 
     override fun getName(): String = "ReaderPreferencesModule"
 
@@ -130,8 +136,13 @@ class ReaderPreferencesModule(
                 .equals("true", ignoreCase = true) &&
                 properties.getProperty("direction", "")
                     .equals("rtl", ignoreCase = true)
-            val configuredEditable = configured && properties.getProperty("editable", "false")
-                .equals("true", ignoreCase = true)
+            val backupResult = readNativeAnnotationBackup(pdfFile)
+            val configuredEditable = configured &&
+                protectedEditableMarkerValid(
+                    pdfFile,
+                    properties,
+                    backupResult.backup,
+                )
             val coverSeparate = properties.getProperty("coverSeparate", "false")
                 .equals("true", ignoreCase = true)
             val capability = nativeSpreadCapability()
@@ -145,6 +156,7 @@ class ReaderPreferencesModule(
                     marker,
                     capability,
                     NativeSpreadHandshake(false, "package_incompatible"),
+                    backupResult,
                 )
                 return
             }
@@ -158,6 +170,7 @@ class ReaderPreferencesModule(
                     marker,
                     capability,
                     handshake,
+                    backupResult,
                 )
             }
         } catch (error: Throwable) {
@@ -238,6 +251,79 @@ class ReaderPreferencesModule(
         }
     }
 
+    @ReactMethod
+    fun configureNativeSpreadEditable(
+        filePath: String,
+        coverSeparate: Boolean,
+        promise: Promise,
+    ) {
+        try {
+            val pdfFile = requirePdf(filePath)
+            val marker = nativeSpreadMarker(pdfFile)
+            val capability = nativeSpreadCapability()
+            if (!capability.compatible) {
+                throw IllegalStateException(
+                    "Compatible Native Spread module is not active for this firmware",
+                )
+            }
+
+            requestNativeSpreadHandshake(pdfFile) { handshake ->
+                if (!handshake.active) {
+                    val error = IllegalStateException(
+                        "Native Spread hooks did not answer the live safety check: ${handshake.reason}",
+                    )
+                    promise.reject("NATIVE_SPREAD_HANDSHAKE_FAILED", error.message, error)
+                    return@requestNativeSpreadHandshake
+                }
+
+                try {
+                    val backup = ensureNativeAnnotationBackup(pdfFile)
+                    writeNativeSpreadEditableMarker(
+                        pdfFile,
+                        marker,
+                        coverSeparate,
+                        handshake,
+                        backup,
+                    )
+                    promise.resolve(nativeAnnotationBackupMap(backup, "verified"))
+                } catch (error: Throwable) {
+                    Log.e(LOG_TAG, "RTL_READER_NATIVE_EDITABLE_CONFIG_FAILED: ${error.message}", error)
+                    promise.reject("NATIVE_SPREAD_EDITABLE_CONFIG_FAILED", error.message, error)
+                }
+            }
+        } catch (error: Throwable) {
+            Log.e(LOG_TAG, "RTL_READER_NATIVE_EDITABLE_CONFIG_FAILED: ${error.message}", error)
+            promise.reject("NATIVE_SPREAD_EDITABLE_CONFIG_FAILED", error.message, error)
+        }
+    }
+
+    @ReactMethod
+    fun restoreNativeAnnotationBackup(filePath: String, promise: Promise) {
+        try {
+            val pdfFile = requirePdf(filePath)
+            val result = readNativeAnnotationBackup(pdfFile)
+            val backup = result.backup
+                ?: throw IllegalStateException(
+                    "No verified annotation recovery snapshot is available: ${result.status}",
+                )
+            val marker = nativeSpreadMarker(pdfFile)
+            if (marker.exists() && !marker.delete()) {
+                throw IllegalStateException("Could not disable Native Spread before recovery")
+            }
+            annotationRecoveryPending.set(true)
+            scheduleAnnotationRestore(pdfFile, backup)
+            Log.i(
+                LOG_TAG,
+                "RTL_READER_NATIVE_BACKUP_RESTORE_PREPARED originalPresent=${backup.originalMarkPresent} backup=${backup.manifest.absolutePath}",
+            )
+            promise.resolve(nativeAnnotationBackupMap(backup, "restore_scheduled"))
+        } catch (error: Throwable) {
+            annotationRecoveryPending.set(false)
+            Log.e(LOG_TAG, "RTL_READER_NATIVE_BACKUP_RESTORE_FAILED: ${error.message}", error)
+            promise.reject("NATIVE_SPREAD_BACKUP_RESTORE_FAILED", error.message, error)
+        }
+    }
+
     private fun writeNativeSpreadReadOnlyMarker(
         marker: File,
         coverSeparate: Boolean,
@@ -287,6 +373,45 @@ class ReaderPreferencesModule(
         )
     }
 
+    private fun writeNativeSpreadEditableMarker(
+        pdfFile: File,
+        marker: File,
+        coverSeparate: Boolean,
+        handshake: NativeSpreadHandshake,
+        backup: NativeAnnotationBackup,
+    ) {
+        check(handshake.active) { "Native Spread live safety check was not active" }
+        val manifestHash = sha256(backup.manifest)
+        val properties = Properties().apply {
+            setProperty("enabled", "true")
+            setProperty("direction", "rtl")
+            setProperty("coverSeparate", coverSeparate.toString())
+            setProperty("editable", "true")
+            setProperty("disposable", "false")
+            setProperty("managedBy", "supernote-rtl-reader")
+            setProperty("mode", "protected-editable-pilot")
+            setProperty("documentPath", pdfFile.canonicalPath)
+            setProperty("backupVerified", "true")
+            setProperty("backupManifestPath", backup.manifest.canonicalPath)
+            setProperty("backupManifestSha256", manifestHash)
+        }
+        writePropertiesAtomically(marker, properties, "Supernote RTL protected editable settings")
+
+        val verified = Properties().apply {
+            FileInputStream(marker).use { input -> load(input) }
+        }
+        if (!verified.getProperty("editable", "false").equals("true", true) ||
+            verified.getProperty("mode", "") != "protected-editable-pilot" ||
+            verified.getProperty("backupManifestSha256", "") != manifestHash
+        ) {
+            throw IllegalStateException("Protected editable marker verification failed")
+        }
+        Log.i(
+            LOG_TAG,
+            "RTL_READER_NATIVE_SPREAD_CONFIG enabled=true editable=true cover=$coverSeparate backupVerified=true marker=${marker.absolutePath}",
+        )
+    }
+
     private fun resolveNativeSpreadMode(
         promise: Promise,
         configured: Boolean,
@@ -295,6 +420,7 @@ class ReaderPreferencesModule(
         marker: File,
         capability: NativeSpreadCapability,
         handshake: NativeSpreadHandshake,
+        backupResult: NativeAnnotationBackupResult,
     ) {
         val runtimeCompatible = capability.compatible && handshake.active
         val result = Arguments.createMap().apply {
@@ -317,6 +443,16 @@ class ReaderPreferencesModule(
                 capability.documentVersionCode.toDouble(),
             )
             putString("firmwareFingerprint", Build.FINGERPRINT)
+            putBoolean("backupAvailable", backupResult.backup != null)
+            putString("backupStatus", backupResult.status)
+            putBoolean(
+                "backupOriginalMarkPresent",
+                backupResult.backup?.originalMarkPresent == true,
+            )
+            putDouble(
+                "backupCreatedAt",
+                (backupResult.backup?.createdAt ?: 0L).toDouble(),
+            )
         }
         Log.i(
             LOG_TAG,
@@ -337,6 +473,21 @@ class ReaderPreferencesModule(
         val reason: String,
         val protocol: Int = -1,
         val processId: Int = -1,
+    )
+
+    private data class NativeAnnotationBackup(
+        val manifest: File,
+        val snapshot: File,
+        val mark: File,
+        val originalMarkPresent: Boolean,
+        val markLength: Long,
+        val markSha256: String,
+        val createdAt: Long,
+    )
+
+    private data class NativeAnnotationBackupResult(
+        val backup: NativeAnnotationBackup?,
+        val status: String,
     )
 
     @Suppress("DEPRECATION")
@@ -510,6 +661,240 @@ class ReaderPreferencesModule(
         return File(parent, ".${pdfFile.name}$NATIVE_SPREAD_MARKER_SUFFIX")
     }
 
+    private fun nativeAnnotationMark(pdfFile: File): File =
+        File("${pdfFile.absolutePath}.mark")
+
+    private fun nativeAnnotationBackupManifest(pdfFile: File): File {
+        val parent = pdfFile.parentFile
+            ?: throw IllegalStateException("Current PDF has no parent directory")
+        return File(parent, ".${pdfFile.name}$NATIVE_SPREAD_BACKUP_SUFFIX")
+    }
+
+    private fun nativeAnnotationBackupSnapshot(pdfFile: File): File {
+        val parent = pdfFile.parentFile
+            ?: throw IllegalStateException("Current PDF has no parent directory")
+        return File(parent, ".${pdfFile.name}$NATIVE_SPREAD_BACKUP_MARK_SUFFIX")
+    }
+
+    private fun ensureNativeAnnotationBackup(pdfFile: File): NativeAnnotationBackup {
+        val existing = readNativeAnnotationBackup(pdfFile)
+        if (existing.backup != null) {
+            Log.i(
+                LOG_TAG,
+                "RTL_READER_NATIVE_BACKUP_REUSED manifest=${existing.backup.manifest.absolutePath}",
+            )
+            return existing.backup
+        }
+
+        val manifest = nativeAnnotationBackupManifest(pdfFile)
+        val snapshot = nativeAnnotationBackupSnapshot(pdfFile)
+        if (manifest.exists() || snapshot.exists()) {
+            throw IllegalStateException(
+                "An unverified annotation backup already exists (${existing.status}); recovery files were not overwritten",
+            )
+        }
+
+        val mark = nativeAnnotationMark(pdfFile)
+        if (mark.exists() && !mark.isFile) {
+            throw IllegalStateException("Supernote annotation path is not a regular file")
+        }
+        val originalPresent = mark.isFile
+        val markLength: Long
+        val markHash: String
+        if (originalPresent) {
+            markLength = mark.length()
+            markHash = sha256(mark)
+            copyFileAtomically(mark, snapshot)
+            if (snapshot.length() != markLength || sha256(snapshot) != markHash) {
+                throw IllegalStateException("Annotation snapshot byte verification failed")
+            }
+        } else {
+            markLength = 0L
+            markHash = "ABSENT"
+        }
+
+        val createdAt = System.currentTimeMillis()
+        val properties = Properties().apply {
+            setProperty("version", NATIVE_SPREAD_BACKUP_VERSION.toString())
+            setProperty("managedBy", "supernote-rtl-reader")
+            setProperty("documentPath", pdfFile.canonicalPath)
+            setProperty("documentLength", pdfFile.length().toString())
+            setProperty("documentModified", pdfFile.lastModified().toString())
+            setProperty("markPath", mark.canonicalPath)
+            setProperty("originalMarkPresent", originalPresent.toString())
+            setProperty("markLength", markLength.toString())
+            setProperty("markSha256", markHash)
+            setProperty("snapshotPath", snapshot.canonicalPath)
+            setProperty("createdAt", createdAt.toString())
+        }
+        writePropertiesAtomically(
+            manifest,
+            properties,
+            "Supernote RTL annotation recovery snapshot",
+        )
+
+        val verified = readNativeAnnotationBackup(pdfFile)
+        return verified.backup
+            ?: throw IllegalStateException(
+                "Annotation backup verification failed after creation: ${verified.status}",
+            )
+    }
+
+    private fun readNativeAnnotationBackup(pdfFile: File): NativeAnnotationBackupResult {
+        return try {
+            val manifest = nativeAnnotationBackupManifest(pdfFile)
+            if (!manifest.isFile) {
+                return NativeAnnotationBackupResult(null, "missing")
+            }
+            val properties = Properties()
+            FileInputStream(manifest).use { input -> properties.load(input) }
+            if (properties.getProperty("version") != NATIVE_SPREAD_BACKUP_VERSION.toString() ||
+                properties.getProperty("managedBy") != "supernote-rtl-reader"
+            ) {
+                throw IllegalStateException("unsupported_manifest")
+            }
+            if (File(properties.getProperty("documentPath", "")).canonicalPath !=
+                pdfFile.canonicalPath ||
+                properties.getProperty("documentLength")?.toLongOrNull() != pdfFile.length() ||
+                properties.getProperty("documentModified")?.toLongOrNull() != pdfFile.lastModified()
+            ) {
+                throw IllegalStateException("document_identity_changed")
+            }
+
+            val mark = nativeAnnotationMark(pdfFile)
+            if (File(properties.getProperty("markPath", "")).canonicalPath != mark.canonicalPath) {
+                throw IllegalStateException("mark_path_mismatch")
+            }
+            val snapshot = nativeAnnotationBackupSnapshot(pdfFile)
+            if (File(properties.getProperty("snapshotPath", "")).canonicalPath !=
+                snapshot.canonicalPath
+            ) {
+                throw IllegalStateException("snapshot_path_mismatch")
+            }
+            val originalPresent = properties.getProperty("originalMarkPresent", "false")
+                .equals("true", ignoreCase = true)
+            val markLength = properties.getProperty("markLength")?.toLongOrNull()
+                ?: throw IllegalStateException("mark_length_invalid")
+            val markHash = properties.getProperty("markSha256", "")
+            if (originalPresent) {
+                if (!snapshot.isFile || snapshot.length() != markLength ||
+                    sha256(snapshot) != markHash
+                ) {
+                    throw IllegalStateException("snapshot_bytes_invalid")
+                }
+            } else if (markLength != 0L || markHash != "ABSENT" || snapshot.exists()) {
+                throw IllegalStateException("absent_snapshot_invalid")
+            }
+            val createdAt = properties.getProperty("createdAt")?.toLongOrNull()
+                ?: throw IllegalStateException("created_at_invalid")
+            NativeAnnotationBackupResult(
+                NativeAnnotationBackup(
+                    manifest,
+                    snapshot,
+                    mark,
+                    originalPresent,
+                    markLength,
+                    markHash,
+                    createdAt,
+                ),
+                "verified",
+            )
+        } catch (error: Throwable) {
+            NativeAnnotationBackupResult(null, "invalid:${error.message}")
+        }
+    }
+
+    private fun nativeAnnotationBackupMap(
+        backup: NativeAnnotationBackup,
+        status: String,
+    ) = Arguments.createMap().apply {
+        putBoolean("backupAvailable", true)
+        putString("backupStatus", status)
+        putString("backupManifestPath", backup.manifest.absolutePath)
+        putBoolean("backupOriginalMarkPresent", backup.originalMarkPresent)
+        putDouble("backupCreatedAt", backup.createdAt.toDouble())
+    }
+
+    private fun protectedEditableMarkerValid(
+        pdfFile: File,
+        properties: Properties,
+        backup: NativeAnnotationBackup?,
+    ): Boolean {
+        if (backup == null ||
+            !properties.getProperty("editable", "false").equals("true", true) ||
+            properties.getProperty("mode", "") != "protected-editable-pilot" ||
+            properties.getProperty("managedBy", "") != "supernote-rtl-reader" ||
+            !properties.getProperty("backupVerified", "false").equals("true", true) ||
+            File(properties.getProperty("documentPath", "")).canonicalPath !=
+                pdfFile.canonicalPath ||
+            File(properties.getProperty("backupManifestPath", "")).canonicalPath !=
+                backup.manifest.canonicalPath
+        ) {
+            return false
+        }
+        return properties.getProperty("backupManifestSha256", "") ==
+            sha256(backup.manifest)
+    }
+
+    private fun writePropertiesAtomically(
+        file: File,
+        properties: Properties,
+        comment: String,
+    ) {
+        val bytes = ByteArrayOutputStream().use { buffer ->
+            properties.store(buffer, comment)
+            buffer.toByteArray()
+        }
+        writeBytesAtomically(file, bytes)
+    }
+
+    private fun writeBytesAtomically(file: File, bytes: ByteArray) {
+        val temporary = File(
+            file.parentFile,
+            "${file.name}.tmp-${android.os.Process.myPid()}-${UUID.randomUUID()}",
+        )
+        try {
+            writeBytesSynced(temporary, bytes)
+            Os.rename(temporary.absolutePath, file.absolutePath)
+        } finally {
+            if (temporary.exists()) temporary.delete()
+        }
+    }
+
+    private fun copyFileAtomically(source: File, destination: File) {
+        val temporary = File(
+            destination.parentFile,
+            "${destination.name}.tmp-${android.os.Process.myPid()}-${UUID.randomUUID()}",
+        )
+        try {
+            FileInputStream(source).use { input ->
+                FileOutputStream(temporary, false).use { output ->
+                    input.copyTo(output, 64 * 1024)
+                    output.flush()
+                    output.fd.sync()
+                }
+            }
+            Os.rename(temporary.absolutePath, destination.absolutePath)
+        } finally {
+            if (temporary.exists()) temporary.delete()
+        }
+    }
+
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val buffer = ByteArray(64 * 1024)
+        FileInputStream(file).use { input ->
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                if (count > 0) digest.update(buffer, 0, count)
+            }
+        }
+        return digest.digest().joinToString("") { byte ->
+            "%02x".format(byte.toInt() and 0xff)
+        }
+    }
+
     /**
      * Experimental native-reader handoff.
      *
@@ -522,6 +907,15 @@ class ReaderPreferencesModule(
      */
     @ReactMethod
     fun handoffLastSavedPage(promise: Promise) {
+        if (annotationRecoveryPending.compareAndSet(true, false)) {
+            Log.i(LOG_TAG, "RTL_READER_HANDOFF_SKIPPED reason=annotation_recovery")
+            promise.resolve(Arguments.createMap().apply {
+                putBoolean("annotationRecovery", true)
+                putInt("uid", android.os.Process.myUid())
+            })
+            return
+        }
+
         var configFile: File? = null
         var originalBytes: ByteArray? = null
         var wroteConfig = false
@@ -782,6 +1176,89 @@ class ReaderPreferencesModule(
             }
         }.apply {
             name = "RtlReaderNativeHandoff"
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun scheduleAnnotationRestore(
+        pdfFile: File,
+        backup: NativeAnnotationBackup,
+    ) {
+        Thread {
+            try {
+                // App.js closes PluginHost immediately after this method is
+                // prepared. Kill the native reader before touching its working
+                // .mark so an in-memory annotation model cannot overwrite the
+                // recovery snapshot while DocumentActivity is resuming.
+                SystemClock.sleep(350)
+                val activityManager = reactApplicationContext.getSystemService(
+                    Context.ACTIVITY_SERVICE,
+                ) as ActivityManager
+                val pids = documentPids(activityManager)
+                for (pid in pids) {
+                    Os.kill(pid, OsConstants.SIGKILL)
+                    Log.i(LOG_TAG, "RTL_READER_NATIVE_BACKUP_RESTORE_KILL_SENT pid=$pid")
+                }
+                if (pids.isNotEmpty()) {
+                    val deadline = SystemClock.elapsedRealtime() + 2500L
+                    while (SystemClock.elapsedRealtime() < deadline) {
+                        val running = documentPids(activityManager).toSet()
+                        if (pids.none { it in running }) break
+                        SystemClock.sleep(100)
+                    }
+                }
+
+                val currentMark = nativeAnnotationMark(pdfFile)
+                if (backup.originalMarkPresent) {
+                    if (backup.snapshot.length() != backup.markLength ||
+                        sha256(backup.snapshot) != backup.markSha256) {
+                        throw IllegalStateException("Recovery snapshot changed before restore")
+                    }
+                    copyFileAtomically(backup.snapshot, currentMark)
+                    if (currentMark.length() != backup.markLength ||
+                        sha256(currentMark) != backup.markSha256
+                    ) {
+                        throw IllegalStateException("Restored annotation file verification failed")
+                    }
+                } else if (currentMark.exists() && !currentMark.delete()) {
+                    throw IllegalStateException("Could not restore the original no-annotation state")
+                }
+
+                Log.i(
+                    LOG_TAG,
+                    "RTL_READER_NATIVE_BACKUP_RESTORED originalPresent=${backup.originalMarkPresent} mark=${currentMark.absolutePath}",
+                )
+                val snapshotCleaned = !backup.snapshot.exists() || backup.snapshot.delete()
+                if (!snapshotCleaned) {
+                    Log.w(
+                        LOG_TAG,
+                        "RTL_READER_NATIVE_BACKUP_CLEANUP_SKIPPED file=${backup.snapshot.absolutePath}",
+                    )
+                }
+                if (snapshotCleaned && backup.manifest.exists() &&
+                    !backup.manifest.delete()
+                ) {
+                    Log.w(
+                        LOG_TAG,
+                        "RTL_READER_NATIVE_BACKUP_CLEANUP_SKIPPED file=${backup.manifest.absolutePath}",
+                    )
+                }
+                SystemClock.sleep(250)
+                reactApplicationContext.startActivity(Intent().apply {
+                    setClassName(DOCUMENT_PACKAGE, DOCUMENT_ACTIVITY)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                })
+                Log.i(LOG_TAG, "RTL_READER_NATIVE_BACKUP_RESTORE_REOPENED")
+            } catch (error: Throwable) {
+                Log.e(
+                    LOG_TAG,
+                    "RTL_READER_NATIVE_BACKUP_RESTORE_WORKER_FAILED: ${error.message}",
+                    error,
+                )
+            }
+        }.apply {
+            name = "RtlReaderAnnotationRecovery"
             isDaemon = true
             start()
         }

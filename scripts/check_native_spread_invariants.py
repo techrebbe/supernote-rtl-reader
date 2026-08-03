@@ -278,14 +278,23 @@ def check(repo_root: Path) -> None:
         fail("could not isolate Cover synchronization")
     cover_sync = app[cover_start:readonly_start]
     cover_guard = cover_sync.find("if (nativeSpreadBusyRef.current) return;")
+    configured_unavailable = cover_sync.find(
+        "nativeSpreadConfigured && !nativeSpreadCompatible"
+    )
+    unconfigured_local = cover_sync.find("if (!nativeSpreadConfigured)")
     cover_busy = cover_sync.find("nativeSpreadBusyRef.current = true;")
     cover_configure = cover_sync.find("configureNativeSpreadEditable(")
     cover_release = cover_sync.find(
         "nativeSpreadBusyRef.current = false;",
         cover_configure,
     )
-    if not (0 <= cover_guard < cover_busy < cover_configure < cover_release):
+    if not (
+        0 <= cover_guard < configured_unavailable < unconfigured_local
+        < cover_busy < cover_configure < cover_release
+    ):
         fail("Cover synchronization is not blocked during native mode transitions")
+    if "nativeSpreadConfiguredEditable" not in cover_sync:
+        fail("Cover synchronization does not follow the configured marker mode")
     cover_controls_start = app.find(
         "<Text style={styles.settingLabel}>Treat Cover Page Separately</Text>"
     )
@@ -294,8 +303,11 @@ def check(repo_root: Path) -> None:
         cover_controls_start,
     )
     cover_controls = app[cover_controls_start:native_controls_start]
-    if cover_controls.count("disabled={nativeSpreadBusy}") != 2:
+    unavailable_guard = "nativeSpreadConfigured && !nativeSpreadCompatible"
+    if cover_controls.count("nativeSpreadBusy ||") != 2:
         fail("both Cover controls must be disabled during native mode transitions")
+    if cover_controls.count(unavailable_guard) != 2:
+        fail("Cover controls remain enabled for an unavailable configured marker")
 
     readonly_transition_start = app.find("const setNativeSpreadReadOnly = async")
     editable_transition_start = app.find(

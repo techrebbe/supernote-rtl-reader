@@ -181,7 +181,9 @@ restore uses the same staged cleanup transaction before reporting success.
 Cover controls are disabled while any native-mode transition is pending so a
 read-only Cover update cannot race a protected-editable handshake. A Cover
 change also owns that transition lock until its native marker update finishes,
-and leaving editable mode clears the retired recovery status from the UI.
+and leaving editable mode clears the retired recovery status from the UI. If a
+marker remains configured while its live hooks are unavailable, Cover is
+disabled so the UI cannot diverge from the sidecar's saved parity.
 
 The protected pilot validated that full rollback on hardware: an edited
 147,752-byte `.mark` was restored byte-for-byte to its original 89,801-byte

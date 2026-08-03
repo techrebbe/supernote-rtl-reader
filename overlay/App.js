@@ -714,7 +714,13 @@ export default function App() {
   const setCoverSeparateValue = async next => {
     if (nativeSpreadBusyRef.current) return;
     const normalized = next === true;
-    if (!nativeSpreadEnabled) {
+    if (nativeSpreadConfigured && !nativeSpreadCompatible) {
+      setNativeSpreadError(
+        'Native Spread is configured but unavailable. Cover can be changed after the native hooks reconnect.',
+      );
+      return;
+    }
+    if (!nativeSpreadConfigured) {
       coverSeparateRef.current = normalized;
       setCoverSeparate(normalized);
       console.log(`RTL_READER_COVER_SEPARATE ${normalized}`);
@@ -725,7 +731,7 @@ export default function App() {
     setNativeSpreadBusy(true);
     setNativeSpreadError(null);
     try {
-      const result = nativeSpreadEditable
+      const result = nativeSpreadConfiguredEditable
         ? await ReaderPreferencesModule.configureNativeSpreadEditable(
             filePathRef.current,
             normalized,
@@ -737,7 +743,7 @@ export default function App() {
           );
       coverSeparateRef.current = normalized;
       setCoverSeparate(normalized);
-      if (nativeSpreadEditable) {
+      if (nativeSpreadConfiguredEditable) {
         setNativeBackupAvailable(result?.backupAvailable === true);
         setNativeBackupOriginalMarkPresent(
           result?.backupOriginalMarkPresent === true,
@@ -1085,14 +1091,20 @@ export default function App() {
             <View style={styles.segmentRow}>
               <SegmentedButton
                 active={!coverSeparate}
-                disabled={nativeSpreadBusy}
+                disabled={
+                  nativeSpreadBusy ||
+                  (nativeSpreadConfigured && !nativeSpreadCompatible)
+                }
                 label="Off"
                 onPress={() => setCoverSeparateValue(false)}
                 style={styles.segmentHalf}
               />
               <SegmentedButton
                 active={coverSeparate}
-                disabled={nativeSpreadBusy}
+                disabled={
+                  nativeSpreadBusy ||
+                  (nativeSpreadConfigured && !nativeSpreadCompatible)
+                }
                 label="On"
                 onPress={() => setCoverSeparateValue(true)}
                 style={styles.segmentHalfLast}

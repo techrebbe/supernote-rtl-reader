@@ -270,6 +270,8 @@ Safety and setup:
   marker update completes.
 - [x] A successful Off or read-only transition clears the retired recovery
   snapshot status and Restore action from the settings UI.
+- [x] Cover cannot change while a configured marker's live hooks are
+  unavailable, preventing UI/sidecar parity drift.
 - [ ] A document with no `.mark` records and can restore the original absent state.
 - [ ] Removing or modifying a backup file makes editable mode fail closed.
 - [ ] Read-only mode and **Off** retain their v0.4.7-r1 behavior.

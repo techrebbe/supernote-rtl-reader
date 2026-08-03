@@ -41,7 +41,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 67L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 68L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -58,7 +58,12 @@ def check(repo_root: Path) -> None:
             'putBoolean("enabled", configured && runtimeCompatible)',
             "fun configureNativeSpreadEditable(",
             "ensureNativeAnnotationBackup(pdfFile)",
+            'startNativeBackupWorker("RTLReaderNativeBackupCreate")',
+            'startNativeBackupWorker("RTLReaderNativeBackupRetire")',
             "retireNativeAnnotationBackup(",
+            "val previousMarkerBytes = if (marker.isFile) marker.readBytes() else null",
+            "writeBytesAtomically(marker, previousMarkerBytes)",
+            "RTL_READER_NATIVE_MARKER_ROLLED_BACK",
             "A verified annotation backup belongs to an inactive protected session",
             "writeNativeSpreadEditableMarker(",
             "fun restoreNativeAnnotationBackup(",
@@ -108,7 +113,16 @@ def check(repo_root: Path) -> None:
     configure = plugin[configure_start:marker_writer_start]
     rejection = configure.find("if (!handshake.active)")
     marker_write = configure.find("writeNativeSpreadReadOnlyMarker(")
-    if rejection < 0 or marker_write < 0 or rejection > marker_write:
+    handshake_apply = configure.find(
+        "applyReadOnlyConfiguration(handshake)",
+        rejection,
+    )
+    if (
+        rejection < 0
+        or marker_write < 0
+        or "checkNotNull(handshake)" not in configure
+        or handshake_apply < rejection
+    ):
         fail("marker creation is not gated by a successful live handshake")
 
     editable_start = plugin.find("fun configureNativeSpreadEditable(")
@@ -117,10 +131,42 @@ def check(repo_root: Path) -> None:
         fail("could not isolate protected editable configuration method")
     editable_configure = plugin[editable_start:restore_start]
     editable_handshake = editable_configure.find("if (!handshake.active)")
+    editable_worker = editable_configure.find(
+        'startNativeBackupWorker("RTLReaderNativeBackupCreate")'
+    )
     editable_backup = editable_configure.find("ensureNativeAnnotationBackup(pdfFile)")
     editable_marker = editable_configure.find("writeNativeSpreadEditableMarker(")
-    if not (0 <= editable_handshake < editable_backup < editable_marker):
-        fail("editable marker is not gated by handshake then verified backup")
+    if not (
+        0 <= editable_handshake < editable_worker < editable_backup < editable_marker
+    ):
+        fail(
+            "editable marker is not gated by handshake then background verified backup"
+        )
+
+    configure_worker = configure.find(
+        'startNativeBackupWorker("RTLReaderNativeBackupRetire")'
+    )
+    marker_snapshot = configure.find("val previousMarkerBytes =")
+    retirement = configure.find("retireNativeAnnotationBackup(")
+    marker_rollback = configure.find("writeBytesAtomically(marker, previousMarkerBytes)")
+    if not (
+        0 <= configure_worker < marker_snapshot < retirement < marker_rollback
+    ):
+        fail("read-only/off transition does not preserve and roll back its marker")
+
+    require_markers(
+        module,
+        (
+            "final long documentModified;",
+            "final long documentLength;",
+            "&& cached.documentModified == documentModified",
+            "&& cached.documentLength == documentLength",
+            "&& documentModified == nextDocumentModified",
+            "&& documentLength == nextDocumentLength",
+            "startProtectedEditableVerification(",
+        ),
+        "protected PDF replacement invalidation",
+    )
 
     ensure_start = plugin.find("private fun ensureNativeAnnotationBackup(")
     read_backup_start = plugin.find("private fun readNativeAnnotationBackup(", ensure_start)
@@ -363,10 +409,10 @@ def check(repo_root: Path) -> None:
     if "releaseActivityResources(activity);" not in destroy:
         fail("onDestroy does not release all per-activity resources")
 
-    if 'android:versionCode="67"' not in manifest:
-        fail("companion manifest must use versionCode 67 for protected editing")
-    if 'android:versionName="0.0.67"' not in manifest:
-        fail("companion manifest must use versionName 0.0.67")
+    if 'android:versionCode="68"' not in manifest:
+        fail("companion manifest must use versionCode 68 for protected editing")
+    if 'android:versionName="0.0.68"' not in manifest:
+        fail("companion manifest must use versionName 0.0.68")
 
     print("Native Spread safety invariants: PASS")
 

@@ -44,7 +44,7 @@ class ReaderPreferencesModule(
         private const val NATIVE_SPREAD_PACKAGE =
             "com.techrebbe.supernote.spreadprobe"
         private const val PLUGIN_HOST_PACKAGE = "com.ratta.supernote.pluginhost"
-        private const val NATIVE_SPREAD_MIN_VERSION_CODE = 67L
+        private const val NATIVE_SPREAD_MIN_VERSION_CODE = 68L
         private const val NATIVE_SPREAD_MARKER_SUFFIX = ".snspread"
         private const val NATIVE_SPREAD_BACKUP_SUFFIX = ".snspread-backup.properties"
         private const val NATIVE_SPREAD_BACKUP_MARK_SUFFIX = ".snspread-backup.mark"
@@ -190,8 +190,6 @@ class ReaderPreferencesModule(
             val pdfFile = requirePdf(filePath)
             val marker = nativeSpreadMarker(pdfFile)
             val capability = nativeSpreadCapability()
-            val previousMarkerProperties = readPropertiesIfFile(marker)
-            val previousBackup = readNativeAnnotationBackup(pdfFile)
 
             if (enabled && !capability.compatible) {
                 throw IllegalStateException(
@@ -199,19 +197,84 @@ class ReaderPreferencesModule(
                 )
             }
 
-            if (!enabled) {
-                if (marker.exists() && !marker.delete()) {
-                    throw IllegalStateException(
-                        "Could not remove native spread setting: ${marker.absolutePath}",
-                    )
+            fun applyReadOnlyConfiguration(handshake: NativeSpreadHandshake?) {
+                startNativeBackupWorker("RTLReaderNativeBackupRetire") {
+                    try {
+                        val previousMarkerBytes = if (marker.isFile) marker.readBytes() else null
+                        val previousMarkerProperties = readPropertiesIfFile(marker)
+                        val previousBackup = readNativeAnnotationBackup(pdfFile)
+                        var markerChanged = false
+                        try {
+                            if (!enabled) {
+                                if (marker.exists() && !marker.delete()) {
+                                    throw IllegalStateException(
+                                        "Could not remove native spread setting: ${marker.absolutePath}",
+                                    )
+                                }
+                                markerChanged = true
+                            } else {
+                                writeNativeSpreadReadOnlyMarker(
+                                    marker,
+                                    coverSeparate,
+                                    checkNotNull(handshake),
+                                )
+                                markerChanged = true
+                            }
+                            retireNativeAnnotationBackup(
+                                pdfFile,
+                                previousMarkerProperties,
+                                previousBackup,
+                            )
+                        } catch (error: Throwable) {
+                            if (markerChanged) {
+                                try {
+                                    if (previousMarkerBytes == null) {
+                                        if (marker.exists() && !marker.delete()) {
+                                            throw IllegalStateException(
+                                                "Could not remove the replacement native spread marker",
+                                            )
+                                        }
+                                    } else {
+                                        writeBytesAtomically(marker, previousMarkerBytes)
+                                    }
+                                    Log.w(
+                                        LOG_TAG,
+                                        "RTL_READER_NATIVE_MARKER_ROLLED_BACK marker=${marker.absolutePath}",
+                                    )
+                                } catch (rollbackError: Throwable) {
+                                    error.addSuppressed(rollbackError)
+                                    Log.e(
+                                        LOG_TAG,
+                                        "RTL_READER_NATIVE_MARKER_ROLLBACK_FAILED marker=${marker.absolutePath}",
+                                        rollbackError,
+                                    )
+                                }
+                            }
+                            throw error
+                        }
+
+                        Log.i(
+                            LOG_TAG,
+                            "RTL_READER_NATIVE_SPREAD_CONFIG enabled=$enabled marker=${marker.absolutePath}",
+                        )
+                        promise.resolve(enabled)
+                    } catch (error: Throwable) {
+                        Log.e(
+                            LOG_TAG,
+                            "RTL_READER_NATIVE_SPREAD_CONFIG_FAILED: ${error.message}",
+                            error,
+                        )
+                        promise.reject(
+                            "NATIVE_SPREAD_CONFIG_FAILED",
+                            error.message,
+                            error,
+                        )
+                    }
                 }
-                retireNativeAnnotationBackup(
-                    pdfFile,
-                    previousMarkerProperties,
-                    previousBackup,
-                )
-                Log.i(LOG_TAG, "RTL_READER_NATIVE_SPREAD_CONFIG enabled=false marker=${marker.absolutePath}")
-                promise.resolve(false)
+            }
+
+            if (!enabled) {
+                applyReadOnlyConfiguration(null)
                 return
             }
 
@@ -233,30 +296,7 @@ class ReaderPreferencesModule(
                     return@requestNativeSpreadHandshake
                 }
 
-                try {
-                    writeNativeSpreadReadOnlyMarker(
-                        marker,
-                        coverSeparate,
-                        handshake,
-                    )
-                    retireNativeAnnotationBackup(
-                        pdfFile,
-                        previousMarkerProperties,
-                        previousBackup,
-                    )
-                    promise.resolve(true)
-                } catch (error: Throwable) {
-                    Log.e(
-                        LOG_TAG,
-                        "RTL_READER_NATIVE_SPREAD_CONFIG_FAILED: ${error.message}",
-                        error,
-                    )
-                    promise.reject(
-                        "NATIVE_SPREAD_CONFIG_FAILED",
-                        error.message,
-                        error,
-                    )
-                }
+                applyReadOnlyConfiguration(handshake)
             }
         } catch (error: Throwable) {
             Log.e(LOG_TAG, "RTL_READER_NATIVE_SPREAD_CONFIG_FAILED: ${error.message}", error)
@@ -289,19 +329,29 @@ class ReaderPreferencesModule(
                     return@requestNativeSpreadHandshake
                 }
 
-                try {
-                    val backup = ensureNativeAnnotationBackup(pdfFile)
-                    writeNativeSpreadEditableMarker(
-                        pdfFile,
-                        marker,
-                        coverSeparate,
-                        handshake,
-                        backup,
-                    )
-                    promise.resolve(nativeAnnotationBackupMap(backup, "verified"))
-                } catch (error: Throwable) {
-                    Log.e(LOG_TAG, "RTL_READER_NATIVE_EDITABLE_CONFIG_FAILED: ${error.message}", error)
-                    promise.reject("NATIVE_SPREAD_EDITABLE_CONFIG_FAILED", error.message, error)
+                startNativeBackupWorker("RTLReaderNativeBackupCreate") {
+                    try {
+                        val backup = ensureNativeAnnotationBackup(pdfFile)
+                        writeNativeSpreadEditableMarker(
+                            pdfFile,
+                            marker,
+                            coverSeparate,
+                            handshake,
+                            backup,
+                        )
+                        promise.resolve(nativeAnnotationBackupMap(backup, "verified"))
+                    } catch (error: Throwable) {
+                        Log.e(
+                            LOG_TAG,
+                            "RTL_READER_NATIVE_EDITABLE_CONFIG_FAILED: ${error.message}",
+                            error,
+                        )
+                        promise.reject(
+                            "NATIVE_SPREAD_EDITABLE_CONFIG_FAILED",
+                            error.message,
+                            error,
+                        )
+                    }
                 }
             }
         } catch (error: Throwable) {
@@ -720,6 +770,13 @@ class ReaderPreferencesModule(
     private fun readPropertiesIfFile(file: File): Properties = Properties().apply {
         if (file.isFile) {
             FileInputStream(file).use { input -> load(input) }
+        }
+    }
+
+    private fun startNativeBackupWorker(name: String, action: () -> Unit) {
+        Thread(action, name).apply {
+            isDaemon = true
+            start()
         }
     }
 

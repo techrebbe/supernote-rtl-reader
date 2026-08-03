@@ -79,7 +79,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         "documentApkLength";
     private static final String HANDSHAKE_EXTRA_PROCESS_ID = "processId";
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 67L;
+    private static final long MODULE_VERSION_CODE = 68L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -133,6 +133,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
 
     private static final class SpreadConfig {
         final String documentPath;
+        final long documentModified;
+        final long documentLength;
         final String markerPath;
         final long markerModified;
         final long markerLength;
@@ -147,6 +149,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
 
         SpreadConfig(
             String documentPath,
+            long documentModified,
+            long documentLength,
             String markerPath,
             long markerModified,
             long markerLength,
@@ -160,6 +164,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             boolean calibration
         ) {
             this.documentPath = documentPath;
+            this.documentModified = documentModified;
+            this.documentLength = documentLength;
             this.markerPath = markerPath;
             this.markerModified = markerModified;
             this.markerLength = markerLength;
@@ -176,6 +182,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
 
     private static final class ProtectedVerification {
         final String documentPath;
+        final long documentModified;
+        final long documentLength;
         final String markerPath;
         final long markerModified;
         final long markerLength;
@@ -188,6 +196,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
 
         ProtectedVerification(
             String documentPath,
+            long documentModified,
+            long documentLength,
             String markerPath,
             long markerModified,
             long markerLength,
@@ -197,6 +207,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             long snapshotLength
         ) {
             this.documentPath = documentPath;
+            this.documentModified = documentModified;
+            this.documentLength = documentLength;
             this.markerPath = markerPath;
             this.markerModified = markerModified;
             this.markerLength = markerLength;
@@ -208,6 +220,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
 
         boolean matches(
             String nextDocumentPath,
+            long nextDocumentModified,
+            long nextDocumentLength,
             String nextMarkerPath,
             long nextMarkerModified,
             long nextMarkerLength,
@@ -217,6 +231,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             long nextSnapshotLength
         ) {
             return documentPath.equals(nextDocumentPath)
+                && documentModified == nextDocumentModified
+                && documentLength == nextDocumentLength
                 && markerPath.equals(nextMarkerPath)
                 && markerModified == nextMarkerModified
                 && markerLength == nextMarkerLength
@@ -1911,6 +1927,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         File document,
         Properties markerProperties,
         String documentPath,
+        long documentModified,
+        long documentLength,
         String markerPath,
         long markerModified,
         long markerLength,
@@ -1921,6 +1939,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     ) {
         ProtectedVerification verification = new ProtectedVerification(
             documentPath,
+            documentModified,
+            documentLength,
             markerPath,
             markerModified,
             markerLength,
@@ -3568,6 +3588,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             if (TARGET_FILE.equals(path)) {
                 SpreadConfig calibration = new SpreadConfig(
                     path,
+                    0L,
+                    0L,
                     null,
                     0L,
                     0L,
@@ -3585,6 +3607,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             }
 
             File document = new File(path);
+            long documentModified = document.isFile()
+                ? document.lastModified() : -1L;
+            long documentLength = document.isFile()
+                ? document.length() : -1L;
             File parent = document.getParentFile();
             if (parent == null) {
                 return null;
@@ -3613,6 +3639,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 ? backupSnapshot.length() : -1L;
             SpreadConfig cached = SPREAD_CONFIGS.get(activity);
             if (cached != null && path.equals(cached.documentPath)
+                && cached.documentModified == documentModified
+                && cached.documentLength == documentLength
                 && marker.getAbsolutePath().equals(cached.markerPath)
                 && cached.markerModified == modified
                 && cached.markerLength == length
@@ -3626,6 +3654,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             if (!marker.isFile()) {
                 SpreadConfig disabled = new SpreadConfig(
                     path,
+                    documentModified,
+                    documentLength,
                     marker.getAbsolutePath(),
                     modified,
                     length,
@@ -3666,6 +3696,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     PROTECTED_VERIFICATIONS.get(activity);
                 if (verification == null || !verification.matches(
                         path,
+                        documentModified,
+                        documentLength,
                         marker.getAbsolutePath(),
                         modified,
                         length,
@@ -3679,6 +3711,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         document,
                         properties,
                         path,
+                        documentModified,
+                        documentLength,
                         marker.getAbsolutePath(),
                         modified,
                         length,
@@ -3697,6 +3731,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 && (disposable || protectedEditable);
             SpreadConfig loaded = new SpreadConfig(
                 path,
+                documentModified,
+                documentLength,
                 marker.getAbsolutePath(),
                 modified,
                 length,

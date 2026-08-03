@@ -242,7 +242,7 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 
 Safety and setup:
 
-- [x] v0.4.10 identifies Native Spread v0.0.67 through the live handshake.
+- [x] v0.4.10 identifies Native Spread v0.0.68 through the live handshake.
 - [x] The recovery manifest's full PDF SHA-256 remains valid after Supernote
   changes the PDF modification time during a native-reader restart.
 - [x] **RTL editable** requires a separate confirmation and reports a verified

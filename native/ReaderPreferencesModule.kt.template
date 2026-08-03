@@ -922,33 +922,57 @@ class ReaderPreferencesModule(
                 properties,
                 "Supernote RTL annotation recovery snapshot",
             )
+
+            val verified = readNativeAnnotationBackup(pdfFile)
+            return verified.backup
+                ?: throw IllegalStateException(
+                    "Annotation backup verification failed after creation: ${verified.status}",
+                )
         } catch (error: Throwable) {
-            if (!manifest.exists() && originalPresent && snapshot.exists()) {
-                if (!snapshot.delete()) {
-                    val cleanupError = IllegalStateException(
-                        "Could not remove the orphaned annotation snapshot after backup creation failed",
-                    )
-                    error.addSuppressed(cleanupError)
-                    Log.e(
-                        LOG_TAG,
-                        "RTL_READER_NATIVE_BACKUP_CREATION_ROLLBACK_FAILED file=${snapshot.absolutePath}",
-                        cleanupError,
-                    )
-                } else {
-                    Log.w(
-                        LOG_TAG,
-                        "RTL_READER_NATIVE_BACKUP_CREATION_ROLLED_BACK file=${snapshot.absolutePath}",
-                    )
-                }
+            var rollbackFailed = false
+            if (manifest.exists() && !manifest.delete()) {
+                rollbackFailed = true
+                val cleanupError = IllegalStateException(
+                    "Could not remove the failed annotation backup manifest",
+                )
+                error.addSuppressed(cleanupError)
+                Log.e(
+                    LOG_TAG,
+                    "RTL_READER_NATIVE_BACKUP_CREATION_ROLLBACK_FAILED file=${manifest.absolutePath}",
+                    cleanupError,
+                )
+            }
+            if (!manifest.exists() && snapshot.exists() && !snapshot.delete()) {
+                rollbackFailed = true
+                val cleanupError = IllegalStateException(
+                    "Could not remove the failed annotation backup snapshot",
+                )
+                error.addSuppressed(cleanupError)
+                Log.e(
+                    LOG_TAG,
+                    "RTL_READER_NATIVE_BACKUP_CREATION_ROLLBACK_FAILED file=${snapshot.absolutePath}",
+                    cleanupError,
+                )
+            }
+            if (!rollbackFailed) {
+                Log.w(
+                    LOG_TAG,
+                    "RTL_READER_NATIVE_BACKUP_CREATION_ROLLED_BACK manifest=${manifest.absolutePath} snapshot=${snapshot.absolutePath}",
+                )
+            }
+            if (retiring.exists() && !retiring.delete()) {
+                val cleanupError = IllegalStateException(
+                    "Could not remove the failed annotation backup retirement file",
+                )
+                error.addSuppressed(cleanupError)
+                Log.e(
+                    LOG_TAG,
+                    "RTL_READER_NATIVE_BACKUP_CREATION_ROLLBACK_FAILED file=${retiring.absolutePath}",
+                    cleanupError,
+                )
             }
             throw error
         }
-
-        val verified = readNativeAnnotationBackup(pdfFile)
-        return verified.backup
-            ?: throw IllegalStateException(
-                "Annotation backup verification failed after creation: ${verified.status}",
-            )
     }
 
     private fun readNativeAnnotationBackup(pdfFile: File): NativeAnnotationBackupResult {

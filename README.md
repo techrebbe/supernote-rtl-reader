@@ -156,6 +156,9 @@ the prior marker bytes and restore them if recovery-baseline retirement fails,
 keeping the cleanup retryable and the protected session recoverable. Initial
 editable activation is transactional too: if marker creation fails after a new
 backup is verified, the prior marker is restored and the new backup is retired.
+Final full-file verification is inside that same rollback scope. While any of
+these background transitions is pending, Settings dismissal, hardware Back,
+and Close are blocked so native handoff cannot race the recovery transaction.
 
 After successful verification, v0.0.68 explicitly refreshes an already visible
 landscape spread so native handwriting geometry is re-enabled without waiting

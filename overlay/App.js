@@ -1,6 +1,7 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {
   ActivityIndicator,
+  BackHandler,
   Image,
   Keyboard,
   NativeModules,
@@ -225,6 +226,20 @@ export default function App() {
   effectiveModeRef.current = effectiveMode;
   coverSeparateRef.current = coverSeparate;
   pageAreaWidthRef.current = Math.max(1, window.width);
+
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener(
+      'hardwareBackPress',
+      () => {
+        if (!nativeSpreadBusyRef.current) return false;
+        setNativeSpreadError(
+          'Wait for the native reader change to finish before closing.',
+        );
+        return true;
+      },
+    );
+    return () => subscription.remove();
+  }, []);
 
   if (preferencesReady && documentContext && Number.isInteger(pageIndex)) {
     latestPreferencesRef.current = {
@@ -597,6 +612,12 @@ export default function App() {
   ]);
 
   const close = async () => {
+    if (nativeSpreadBusyRef.current) {
+      setNativeSpreadError(
+        'Wait for the native reader change to finish before closing.',
+      );
+      return;
+    }
     if (preferencesSaveTimerRef.current) {
       clearTimeout(preferencesSaveTimerRef.current);
       preferencesSaveTimerRef.current = null;
@@ -611,6 +632,16 @@ export default function App() {
     PluginManager.closePluginView().catch(error =>
       console.error('RTL_READER_CLOSE_FAILED', error),
     );
+  };
+
+  const closeSettings = () => {
+    if (nativeSpreadBusyRef.current) {
+      setNativeSpreadError(
+        'Wait for the native reader change to finish before closing.',
+      );
+      return;
+    }
+    setSettingsOpen(false);
   };
 
   const goBy = delta => {
@@ -979,7 +1010,13 @@ export default function App() {
         <View style={styles.errorPanel}>
           <Text style={styles.errorTitle}>Could not render this page</Text>
           <Text style={styles.errorText}>{fatalError}</Text>
-          <Pressable onPress={close} style={styles.panelButton}>
+          <Pressable
+            disabled={nativeSpreadBusy}
+            onPress={close}
+            style={[
+              styles.panelButton,
+              nativeSpreadBusy && styles.segmentButtonDisabled,
+            ]}>
             <Text style={styles.panelButtonText}>Close</Text>
           </Pressable>
         </View>
@@ -1000,7 +1037,13 @@ export default function App() {
                 style={styles.headerButton}>
                 <Text style={styles.headerButtonText}>Settings</Text>
               </Pressable>
-              <Pressable onPress={close} style={styles.headerButton}>
+              <Pressable
+                disabled={nativeSpreadBusy}
+                onPress={close}
+                style={[
+                  styles.headerButton,
+                  nativeSpreadBusy && styles.segmentButtonDisabled,
+                ]}>
                 <Text style={styles.headerButtonText}>Close</Text>
               </Pressable>
             </View>
@@ -1040,9 +1083,15 @@ export default function App() {
                 </Text>
               </View>
               <Pressable
-                onPress={() => setSettingsOpen(false)}
-                style={styles.doneButton}>
-                <Text style={styles.doneButtonText}>Done</Text>
+                disabled={nativeSpreadBusy}
+                onPress={closeSettings}
+                style={[
+                  styles.doneButton,
+                  nativeSpreadBusy && styles.segmentButtonDisabled,
+                ]}>
+                <Text style={styles.doneButtonText}>
+                  {nativeSpreadBusy ? 'Applying...' : 'Done'}
+                </Text>
               </Pressable>
             </View>
 

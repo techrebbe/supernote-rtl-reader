@@ -102,6 +102,9 @@ def check(repo_root: Path) -> None:
             "const nativeSpreadBusyRef = useRef(false);",
             "nativeSpreadBusyRef.current = true;",
             "if (nativeSpreadBusyRef.current) return;",
+            "BackHandler.addEventListener(",
+            "if (!nativeSpreadBusyRef.current) return false;",
+            "Wait for the native reader change to finish before closing.",
         ),
         "configured/runtime Native Spread state separation",
     )
@@ -197,13 +200,55 @@ def check(repo_root: Path) -> None:
     if inactive_guard < 0 or reuse_log < 0 or inactive_guard > reuse_log:
         fail("a verified backup can be reused without an active protected session")
     snapshot_copy = ensure_backup.find("copyFileAtomically(mark, snapshot)")
+    final_verification = ensure_backup.find(
+        "val verified = readNativeAnnotationBackup(pdfFile)",
+        snapshot_copy,
+    )
     creation_catch = ensure_backup.find("catch (error: Throwable)", snapshot_copy)
     rollback_log = ensure_backup.find(
         "RTL_READER_NATIVE_BACKUP_CREATION_ROLLED_BACK",
         creation_catch,
     )
-    if not (0 <= snapshot_copy < creation_catch < rollback_log):
-        fail("annotation backup creation cannot roll back an orphaned snapshot")
+    if not (
+        0 <= snapshot_copy < final_verification < creation_catch < rollback_log
+    ):
+        fail("annotation backup final verification is outside rollback scope")
+
+    close_start = app.find("const close = async () =>")
+    go_by_start = app.find("const goBy = delta =>", close_start)
+    if close_start < 0 or go_by_start < 0:
+        fail("could not isolate plugin Close handler")
+    close_handler = app[close_start:go_by_start]
+    busy_guard = close_handler.find("if (nativeSpreadBusyRef.current)")
+    close_plugin = close_handler.find("PluginManager.closePluginView()")
+    if not (0 <= busy_guard < close_plugin):
+        fail("Close can hand off while a native-mode transition is pending")
+    close_settings_start = close_handler.find("const closeSettings = () =>")
+    close_settings_guard = close_handler.find(
+        "if (nativeSpreadBusyRef.current)",
+        close_settings_start,
+    )
+    close_settings_commit = close_handler.find(
+        "setSettingsOpen(false);",
+        close_settings_start,
+    )
+    if not (
+        0 <= close_settings_start < close_settings_guard < close_settings_commit
+    ):
+        fail("Settings can close before the busy ref clears")
+
+    settings_start = app.find("{settingsOpen && !fatalError && (")
+    cover_controls_start = app.find(
+        "<Text style={styles.settingLabel}>Treat Cover Page Separately</Text>",
+        settings_start,
+    )
+    settings_header = app[settings_start:cover_controls_start]
+    if (
+        "disabled={nativeSpreadBusy}" not in settings_header
+        or "onPress={closeSettings}" not in settings_header
+        or "nativeSpreadBusy ? 'Applying...' : 'Done'" not in settings_header
+    ):
+        fail("Settings Done remains available during a native-mode transition")
 
     restore_worker_start = plugin.find("private fun scheduleAnnotationRestore(")
     restore_worker_end = plugin.find("\n    }\n}", restore_worker_start)

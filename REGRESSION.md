@@ -214,7 +214,7 @@ SHA-256 remained
 `c2155e51a686a3ba7066c8ef7d859c19053019e85d23d1414fa1a69dc9de2c21`
 throughout.
 
-### Codex P1 configured-state follow-up - PENDING HARDWARE
+### Codex P1 configured-state follow-up - PASS
 
 - [x] Marker configuration is tracked separately from live hook availability.
 - [x] Read-only and externally configured editable markers remain distinct while
@@ -224,10 +224,19 @@ throughout.
 - [x] Switching to LTR removes a configured read-only marker even when the live
   handshake is unavailable.
 - [x] Build invariants cover configured/runtime state separation.
-- [ ] With the module disabled, the configured read-only choice remains visible
+- [x] With the module disabled, the configured read-only choice remains visible
   and **Off** removes its marker.
-- [ ] With the module disabled, switching to LTR removes its marker; re-enabling
+- [x] With the module disabled, switching to LTR removes its marker; re-enabling
   the module does not silently restore read-only mode.
+
+The v0.4.7-r1 hardware run first confirmed that a configured read-only marker
+remains visibly selected while the LSPosed hooks are unavailable. Selecting
+**Off** deleted the marker without a live handshake. The marker was then
+recreated through a valid handshake, the module was disabled again, and
+switching the plug-in to LTR deleted it automatically. After the module was
+re-enabled and the document process restarted, the protected PDF remained in
+ordinary native landscape view rather than silently restoring RTL spread mode.
+The protected `.mark` SHA-256 remained unchanged throughout.
 
 ## Failure capture
 

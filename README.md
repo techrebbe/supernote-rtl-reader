@@ -177,6 +177,14 @@ its retained activity reference and cached bitmaps on destruction. The same
 protected `.mark` checksum remained unchanged throughout the enabled,
 fail-closed, cleanup, and re-enabled smoke tests.
 
+The v0.4.7-r1 follow-up also preserves marker configuration separately from
+live hook availability. If the LSPosed hook is temporarily unavailable, the UI
+continues to show that RTL read-only is configured instead of falsely showing
+**Off**. Selecting **Off** or switching to LTR can still remove that read-only
+marker without a handshake, preventing it from silently reactivating when the
+module returns. Externally managed editable markers remain distinguishable from
+the plug-in's read-only marker.
+
 The exact v0.0.62 LSPosed companion source and its Windows build wrapper are
 tracked in [`native-spread-module/`](native-spread-module/README.md). Generated
 APKs remain build artifacts and are not committed.

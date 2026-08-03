@@ -141,14 +141,17 @@ and **RTL read-only**. Before an ordinary PDF can become editable, the plugin:
 4. verifies the snapshot length and SHA-256; and
 5. creates an editable marker bound to the recovery-manifest SHA-256.
 
-Native Spread v0.0.68 independently verifies that attestation off the document
+Native Spread v0.0.69 independently verifies that attestation off the document
 activity's main thread, with editing kept disabled until verification finishes.
 A missing, changed, mismatched, or orphaned recovery file fails closed to
 read-only. The
 module also notices backup-file metadata changes during a running session
 instead of trusting a stale editable configuration cache. It now includes the
-open PDF's length and modification time in that cache identity, so replacing or
-changing the document in place forces a fresh full-file attestation.
+open PDF's length, modification time, device/inode identity, and nanosecond
+change time in that cache identity. Replacing the document while preserving its
+path, length, and modification time therefore still forces a fresh full-file
+attestation; rewriting it in place changes the filesystem change time and does
+the same.
 
 The plugin also creates, verifies, and retires those recovery files on a worker
 thread rather than the PluginHost UI thread. Off/read-only transitions preserve
@@ -160,11 +163,11 @@ Final full-file verification is inside that same rollback scope. While any of
 these background transitions is pending, Settings dismissal, hardware Back,
 and Close are blocked so native handoff cannot race the recovery transaction.
 
-After successful verification, v0.0.68 explicitly refreshes an already visible
+After successful verification, v0.0.69 explicitly refreshes an already visible
 landscape spread so native handwriting geometry is re-enabled without waiting
 for a page turn or rotation.
 
-v0.4.10 raises the protected-editing compatibility floor to v0.0.68. Its
+v0.4.10 raises the protected-editing compatibility floor to v0.0.69. Its
 canonical lasso transition preserves the selection's native width and height
 during a pure move; only the translated origin is converted from the half-page
 spread. This prevents the live selection from growing to roughly twice its
@@ -197,6 +200,9 @@ change also owns that transition lock until its native marker update finishes,
 and leaving editable mode clears the retired recovery status from the UI. If a
 marker remains configured while its live hooks are unavailable, Cover is
 disabled so the UI cannot diverge from the sidecar's saved parity.
+Switching to LTR now waits for that native-mode shutdown transaction to succeed
+before committing the direction preference. A failed recovery-baseline
+retirement leaves both the protected RTL marker and the RTL UI state intact.
 
 The protected pilot validated that full rollback on hardware: an edited
 147,752-byte `.mark` was restored byte-for-byte to its original 89,801-byte

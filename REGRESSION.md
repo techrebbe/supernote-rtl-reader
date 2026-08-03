@@ -242,7 +242,7 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 
 Safety and setup:
 
-- [x] v0.4.10 identifies Native Spread v0.0.68 through the live handshake.
+- [ ] v0.4.10-r1 identifies Native Spread v0.0.69 through the live handshake.
 - [x] The recovery manifest's full PDF SHA-256 remains valid after Supernote
   changes the PDF modification time during a native-reader restart.
 - [x] **RTL editable** requires a separate confirmation and reports a verified
@@ -272,6 +272,11 @@ Safety and setup:
   snapshot status and Restore action from the settings UI.
 - [x] Cover cannot change while a configured marker's live hooks are
   unavailable, preventing UI/sidecar parity drift.
+- [x] The protected-verification cache includes device/inode and nanosecond
+  change time, so a metadata-preserving PDF replacement invalidates prior
+  authorization and reruns full-file attestation.
+- [x] Switching to LTR commits the direction only after native RTL shutdown and
+  recovery-baseline retirement succeed; failure retains the RTL UI state.
 - [ ] A document with no `.mark` records and can restore the original absent state.
 - [ ] Removing or modifying a backup file makes editable mode fail closed.
 - [ ] Read-only mode and **Off** retain their v0.4.7-r1 behavior.

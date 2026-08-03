@@ -41,7 +41,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 68L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 69L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -181,10 +181,27 @@ def check(repo_root: Path) -> None:
         (
             "final long documentModified;",
             "final long documentLength;",
+            "final long documentDevice;",
+            "final long documentInode;",
+            "final long documentChangeSeconds;",
+            "final long documentChangeNanos;",
             "&& cached.documentModified == documentModified",
             "&& cached.documentLength == documentLength",
+            "&& cached.documentDevice == documentDevice",
+            "&& cached.documentInode == documentInode",
+            "&& cached.documentChangeSeconds == documentChangeSeconds",
+            "&& cached.documentChangeNanos == documentChangeNanos",
             "&& documentModified == nextDocumentModified",
             "&& documentLength == nextDocumentLength",
+            "&& documentDevice == nextDocumentDevice",
+            "&& documentInode == nextDocumentInode",
+            "&& documentChangeSeconds == nextDocumentChangeSeconds",
+            "&& documentChangeNanos == nextDocumentChangeNanos",
+            "StructStat documentStat = Os.stat(document.getAbsolutePath());",
+            "long documentDevice = documentStat.st_dev;",
+            "long documentInode = documentStat.st_ino;",
+            "long documentChangeSeconds = documentStat.st_ctim.tv_sec;",
+            "long documentChangeNanos = documentStat.st_ctim.tv_nsec;",
             "startProtectedEditableVerification(",
         ),
         "protected PDF replacement invalidation",
@@ -481,6 +498,24 @@ def check(repo_root: Path) -> None:
     ):
         fail("leaving editable mode can leave retired backup state in the UI")
 
+    direction_start = app.find("const setDirectionValue = async next =>")
+    view_mode_start = app.find("const setViewModeValue = next =>", direction_start)
+    if direction_start < 0 or view_mode_start < 0:
+        fail("could not isolate asynchronous reading-direction transition")
+    direction_transition = app[direction_start:view_mode_start]
+    await_shutdown = direction_transition.find(
+        "const disabled = await setNativeSpreadReadOnly(false);"
+    )
+    shutdown_guard = direction_transition.find("if (!disabled)", await_shutdown)
+    commit_ref = direction_transition.find("directionRef.current = next;")
+    commit_state = direction_transition.find("setDirection(next);", commit_ref)
+    if not (
+        0 <= await_shutdown < shutdown_guard < commit_ref < commit_state
+    ):
+        fail("LTR can commit before protected native mode shuts down successfully")
+    if "return true;" not in readonly_transition or "return false;" not in readonly_transition:
+        fail("native read-only transition does not report success to direction changes")
+
     handle_start = module.find("public void handleLoadPackage(")
     first_helper = module.find(
         "private static synchronized void registerHandshakeReceiver(",
@@ -507,10 +542,10 @@ def check(repo_root: Path) -> None:
     if "releaseActivityResources(activity);" not in destroy:
         fail("onDestroy does not release all per-activity resources")
 
-    if 'android:versionCode="68"' not in manifest:
-        fail("companion manifest must use versionCode 68 for protected editing")
-    if 'android:versionName="0.0.68"' not in manifest:
-        fail("companion manifest must use versionName 0.0.68")
+    if 'android:versionCode="69"' not in manifest:
+        fail("companion manifest must use versionCode 69 for protected editing")
+    if 'android:versionName="0.0.69"' not in manifest:
+        fail("companion manifest must use versionName 0.0.69")
 
     print("Native Spread safety invariants: PASS")
 

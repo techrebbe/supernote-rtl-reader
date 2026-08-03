@@ -23,6 +23,8 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.os.Parcel;
 import android.os.Process;
+import android.system.Os;
+import android.system.StructStat;
 import android.util.Log;
 import android.util.Size;
 import android.view.Gravity;
@@ -79,7 +81,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         "documentApkLength";
     private static final String HANDSHAKE_EXTRA_PROCESS_ID = "processId";
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 68L;
+    private static final long MODULE_VERSION_CODE = 69L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -135,6 +137,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         final String documentPath;
         final long documentModified;
         final long documentLength;
+        final long documentDevice;
+        final long documentInode;
+        final long documentChangeSeconds;
+        final long documentChangeNanos;
         final String markerPath;
         final long markerModified;
         final long markerLength;
@@ -151,6 +157,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             String documentPath,
             long documentModified,
             long documentLength,
+            long documentDevice,
+            long documentInode,
+            long documentChangeSeconds,
+            long documentChangeNanos,
             String markerPath,
             long markerModified,
             long markerLength,
@@ -166,6 +176,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             this.documentPath = documentPath;
             this.documentModified = documentModified;
             this.documentLength = documentLength;
+            this.documentDevice = documentDevice;
+            this.documentInode = documentInode;
+            this.documentChangeSeconds = documentChangeSeconds;
+            this.documentChangeNanos = documentChangeNanos;
             this.markerPath = markerPath;
             this.markerModified = markerModified;
             this.markerLength = markerLength;
@@ -184,6 +198,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         final String documentPath;
         final long documentModified;
         final long documentLength;
+        final long documentDevice;
+        final long documentInode;
+        final long documentChangeSeconds;
+        final long documentChangeNanos;
         final String markerPath;
         final long markerModified;
         final long markerLength;
@@ -198,6 +216,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             String documentPath,
             long documentModified,
             long documentLength,
+            long documentDevice,
+            long documentInode,
+            long documentChangeSeconds,
+            long documentChangeNanos,
             String markerPath,
             long markerModified,
             long markerLength,
@@ -209,6 +231,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             this.documentPath = documentPath;
             this.documentModified = documentModified;
             this.documentLength = documentLength;
+            this.documentDevice = documentDevice;
+            this.documentInode = documentInode;
+            this.documentChangeSeconds = documentChangeSeconds;
+            this.documentChangeNanos = documentChangeNanos;
             this.markerPath = markerPath;
             this.markerModified = markerModified;
             this.markerLength = markerLength;
@@ -222,6 +248,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             String nextDocumentPath,
             long nextDocumentModified,
             long nextDocumentLength,
+            long nextDocumentDevice,
+            long nextDocumentInode,
+            long nextDocumentChangeSeconds,
+            long nextDocumentChangeNanos,
             String nextMarkerPath,
             long nextMarkerModified,
             long nextMarkerLength,
@@ -233,6 +263,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             return documentPath.equals(nextDocumentPath)
                 && documentModified == nextDocumentModified
                 && documentLength == nextDocumentLength
+                && documentDevice == nextDocumentDevice
+                && documentInode == nextDocumentInode
+                && documentChangeSeconds == nextDocumentChangeSeconds
+                && documentChangeNanos == nextDocumentChangeNanos
                 && markerPath.equals(nextMarkerPath)
                 && markerModified == nextMarkerModified
                 && markerLength == nextMarkerLength
@@ -1929,6 +1963,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         String documentPath,
         long documentModified,
         long documentLength,
+        long documentDevice,
+        long documentInode,
+        long documentChangeSeconds,
+        long documentChangeNanos,
         String markerPath,
         long markerModified,
         long markerLength,
@@ -1941,6 +1979,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             documentPath,
             documentModified,
             documentLength,
+            documentDevice,
+            documentInode,
+            documentChangeSeconds,
+            documentChangeNanos,
             markerPath,
             markerModified,
             markerLength,
@@ -3590,6 +3632,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     path,
                     0L,
                     0L,
+                    0L,
+                    0L,
+                    0L,
+                    0L,
                     null,
                     0L,
                     0L,
@@ -3611,6 +3657,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 ? document.lastModified() : -1L;
             long documentLength = document.isFile()
                 ? document.length() : -1L;
+            StructStat documentStat = Os.stat(document.getAbsolutePath());
+            long documentDevice = documentStat.st_dev;
+            long documentInode = documentStat.st_ino;
+            long documentChangeSeconds = documentStat.st_ctim.tv_sec;
+            long documentChangeNanos = documentStat.st_ctim.tv_nsec;
             File parent = document.getParentFile();
             if (parent == null) {
                 return null;
@@ -3641,6 +3692,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             if (cached != null && path.equals(cached.documentPath)
                 && cached.documentModified == documentModified
                 && cached.documentLength == documentLength
+                && cached.documentDevice == documentDevice
+                && cached.documentInode == documentInode
+                && cached.documentChangeSeconds == documentChangeSeconds
+                && cached.documentChangeNanos == documentChangeNanos
                 && marker.getAbsolutePath().equals(cached.markerPath)
                 && cached.markerModified == modified
                 && cached.markerLength == length
@@ -3656,6 +3711,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     path,
                     documentModified,
                     documentLength,
+                    documentDevice,
+                    documentInode,
+                    documentChangeSeconds,
+                    documentChangeNanos,
                     marker.getAbsolutePath(),
                     modified,
                     length,
@@ -3698,6 +3757,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         path,
                         documentModified,
                         documentLength,
+                        documentDevice,
+                        documentInode,
+                        documentChangeSeconds,
+                        documentChangeNanos,
                         marker.getAbsolutePath(),
                         modified,
                         length,
@@ -3713,6 +3776,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         path,
                         documentModified,
                         documentLength,
+                        documentDevice,
+                        documentInode,
+                        documentChangeSeconds,
+                        documentChangeNanos,
                         marker.getAbsolutePath(),
                         modified,
                         length,
@@ -3733,6 +3800,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 path,
                 documentModified,
                 documentLength,
+                documentDevice,
+                documentInode,
+                documentChangeSeconds,
+                documentChangeNanos,
                 marker.getAbsolutePath(),
                 modified,
                 length,

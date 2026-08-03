@@ -718,7 +718,7 @@ export default function App() {
     });
   }
 
-  const setDirectionValue = next => {
+  const setDirectionValue = async next => {
     if (
       (next !== 'rtl' && next !== 'ltr') ||
       nativeSpreadBusyRef.current
@@ -728,7 +728,10 @@ export default function App() {
     if (
       next === 'ltr' && nativeSpreadConfigured
     ) {
-      void setNativeSpreadReadOnly(false);
+      const disabled = await setNativeSpreadReadOnly(false);
+      if (!disabled) {
+        return;
+      }
     }
     directionRef.current = next;
     setDirection(next);
@@ -798,10 +801,10 @@ export default function App() {
       nativeSpreadBusyRef.current ||
       !ReaderPreferencesModule?.configureNativeSpreadReadOnly
     ) {
-      return;
+      return false;
     }
     if (enabled && (directionRef.current !== 'rtl' || !nativeSpreadCompatible)) {
-      return;
+      return false;
     }
 
     nativeSpreadBusyRef.current = true;
@@ -824,9 +827,11 @@ export default function App() {
       console.log(
         `RTL_READER_NATIVE_SPREAD enabled=${enabled} editable=false cover=${coverSeparateRef.current}`,
       );
+      return true;
     } catch (error) {
       console.error('RTL_READER_NATIVE_SPREAD_CONFIG_FAILED', error);
       setNativeSpreadError(error?.message ?? String(error));
+      return false;
     } finally {
       nativeSpreadBusyRef.current = false;
       setNativeSpreadBusy(false);

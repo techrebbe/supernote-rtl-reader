@@ -203,6 +203,18 @@ The protected pilot validated that full rollback on hardware: an edited
 snapshot and SHA-256, the reader reopened normally, and the completed marker,
 manifest, and recovery snapshot were removed.
 
+The final reviewed v0.4.10 build repeated the transaction from a clean Off
+state with Native Spread v0.0.68. First-time backup creation survived attempted
+Close and hardware-Back interruptions, native writing and erasing remained
+functional, and Restore reproduced the original 89,801-byte annotation file's
+SHA-256 exactly before removing all recovery sidecars and reopening page 145.
+
+In landscape spread editing, Supernote's immediate low-latency pen preview can
+look thicker than the settled stroke. The committed `.mark` keeps the canonical
+Supernote thickness; the difference is limited to the transient preview and is
+tracked for a later visual-polish revision rather than changing portable ink
+data in this safety release.
+
 Editable mode exposes the writing, eraser, lasso, text-highlight, embedded-link,
 and active-page geometry paths previously proven on disposable calibration
 documents. Native handwriting remains ordinary Supernote element data, so it

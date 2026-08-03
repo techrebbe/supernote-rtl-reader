@@ -318,6 +318,22 @@ write-baseline-erase-reconcile cycle is still needed to validate a deletion
 tombstone; a final page snapshot alone correctly contains only the surviving
 strokes.
 
+The final reviewed v0.4.10 / Native Spread v0.0.68 smoke test repeated the
+first-time protected activation on the same pilot. The plug-in created and
+verified the 89,801-byte baseline while immediate Close and hardware-Back
+attempts were blocked, then opened the native spread with protected editing
+active. A new native stroke changed the live `.mark` to 91,009 bytes; its erase
+was committed through the normal Supernote annotation path. **Restore
+snapshot** then replaced the edited file with the original baseline, reproduced
+the exact SHA-256 above, reopened page 145, and removed every `.snspread*`
+sidecar. No temporary inspector or rotation override was left running.
+
+One non-destructive visual difference remains: the low-latency live pen preview
+in a half-page landscape spread initially appears thicker than the settled
+stroke after Supernote commits and redraws it. The saved `.mark` retains the
+canonical Supernote thickness and remains portable through InkBridge; matching
+the transient preview to the half-page scale is tracked as post-v0.4.10 polish.
+
 ## Failure capture
 
 Before reproducing a failure:

@@ -41,7 +41,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 69L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 75L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -542,10 +542,40 @@ def check(repo_root: Path) -> None:
     if "releaseActivityResources(activity);" not in destroy:
         fail("onDestroy does not release all per-activity resources")
 
-    if 'android:versionCode="69"' not in manifest:
-        fail("companion manifest must use versionCode 69 for protected editing")
-    if 'android:versionName="0.0.69"' not in manifest:
-        fail("companion manifest must use versionName 0.0.69")
+    require_markers(
+        module,
+        (
+            '"com.supernote.document.document.DocumentActivity$6"',
+            '"onDigitalPosition"',
+            "handlePenPageActivation(",
+            "PEN_ACTIVATION_TARGETS.remove(activity);",
+            'phase="',
+            '"contact" : "hover"',
+            "activateDocumentPageFromPen(activity, requestedTarget);",
+            "pen_page_activation_prearmed",
+            "pen_activation_deferred",
+            "completePendingPenPageActivation(",
+            '"pen_up"',
+            "cancelPendingPenPageActivation(",
+            '"pen_left_screen"',
+            "SN_SPREAD_PROBE pen page activation",
+            'applySpreadMarkGeometry(',
+            '"pen_page_activation"',
+            "int targetMarkPage = targetPage + 1;",
+            "capturePendingPenActivationTrails(",
+            "normalizePendingPenTrail(",
+            "pen_activation_native_save_bypassed",
+            "persistPendingPenActivationTrails(",
+            '"modifyPageTrailsFromFile"',
+            'XposedHelpers.callMethod(',
+        ),
+        "inactive-page pen activation",
+    )
+
+    if 'android:versionCode="75"' not in manifest:
+        fail("companion manifest must use versionCode 75 for merged inactive-page persistence")
+    if 'android:versionName="0.0.75"' not in manifest:
+        fail("companion manifest must use versionName 0.0.75")
 
     print("Native Spread safety invariants: PASS")
 

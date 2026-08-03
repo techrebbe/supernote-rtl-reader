@@ -242,7 +242,7 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 
 Safety and setup:
 
-- [ ] v0.4.10-r1 identifies Native Spread v0.0.69 through the live handshake.
+- [x] v0.4.10-r1 identifies Native Spread v0.0.75 through the live handshake.
 - [x] The recovery manifest's full PDF SHA-256 remains valid after Supernote
   changes the PDF modification time during a native-reader restart.
 - [x] **RTL editable** requires a separate confirmation and reports a verified
@@ -284,7 +284,10 @@ Safety and setup:
 Protected duplicate editing:
 
 - [x] Native writing persists on the active left page through a cold restart.
-- [ ] Saved ink remains visible on the inactive page and after spread turns.
+- [x] Saved ink remains visible on the inactive page without deleting prior
+  annotations and after spread turns. The v0.0.75 hardware trace preserved the
+  seven existing `.mark` trails, appended the new trail as the eighth, and
+  reloaded all eight after leaving and returning to the spread.
 - [x] Eraser changes persist after a normal page-change save and cold restart,
   and do not alter the protected recovery snapshot.
 - [x] Lasso selection/movement preserves size and position through a spread

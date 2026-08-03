@@ -141,7 +141,7 @@ and **RTL read-only**. Before an ordinary PDF can become editable, the plugin:
 4. verifies the snapshot length and SHA-256; and
 5. creates an editable marker bound to the recovery-manifest SHA-256.
 
-Native Spread v0.0.69 independently verifies that attestation off the document
+Native Spread v0.0.75 independently verifies that attestation off the document
 activity's main thread, with editing kept disabled until verification finishes.
 A missing, changed, mismatched, or orphaned recovery file fails closed to
 read-only. The
@@ -163,17 +163,27 @@ Final full-file verification is inside that same rollback scope. While any of
 these background transitions is pending, Settings dismissal, hardware Back,
 and Close are blocked so native handoff cannot race the recovery transaction.
 
-After successful verification, v0.0.69 explicitly refreshes an already visible
+After successful verification, v0.0.75 explicitly refreshes an already visible
 landscape spread so native handwriting geometry is re-enabled without waiting
 for a page turn or rotation.
 
-v0.4.10 raises the protected-editing compatibility floor to v0.0.69. Its
+v0.4.10 raises the protected-editing compatibility floor to v0.0.75. Its
 canonical lasso transition preserves the selection's native width and height
 during a pure move; only the translated origin is converted from the half-page
 spread. This prevents the live selection from growing to roughly twice its
 size when moved in landscape. Hardware validation on the protected 738-page
 pilot confirmed that the moved X kept its size and position through a spread
 turn and a cold native-reader restart.
+
+Native Spread v0.0.75 also makes ordinary pen input on the inactive half of an
+editable landscape spread durable. It prearms the low-latency writer for the
+page under the pen without replacing the visible spread, captures the finished
+stroke, normalizes it into the native document-page coordinate system, and
+merges it with that page's existing `.mark` trails. The module bypasses the
+native intermediate save that otherwise serializes only the currently loaded
+subset and can delete older annotations. On the disposable Nomad test PDF, the
+new inactive-page line remained visible, all seven existing trails were
+preserved, and all eight trails survived a spread turn away and back.
 
 **Restore snapshot** disables the marker, terminates the native document
 process before touching `.mark`, re-enumerates the process list to catch a

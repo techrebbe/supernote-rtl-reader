@@ -23,14 +23,14 @@ hardware-tested environment:
 - LSPosed scope limited to `com.supernote.document`;
 - an enabled marker beside the current PDF.
 
-The read-only marker sets `editable=false`. In that mode v0.0.69
+The read-only marker sets `editable=false`. In that mode v0.0.75
 forces a full-page disabled handwriting region and blocks the native
 annotation-commit callback. It displays existing `.mark` ink but does not allow
 new native writing. An editable marker for an ordinary document is accepted
 only when the module can verify the exact PDF identity, recovery-manifest
 SHA-256, and original `.mark` snapshot bytes. Disposable calibration markers
 remain supported. Any failed protected-backup check downgrades the document to
-read-only. v0.0.69 performs the full PDF and snapshot hashing on a background
+read-only. v0.0.75 performs the full PDF and snapshot hashing on a background
 thread, keeps editing disabled until that verification completes, and refreshes
 an already visible landscape spread to reapply native handwriting geometry.
 The protected-verification cache also tracks the current PDF length,
@@ -47,14 +47,23 @@ module version, document APK identity, and live document-process PID. An
 installed-but-disabled, incorrectly scoped, or compatibility-rejected module
 therefore fails closed.
 
-v0.0.69 also clears the destroyed activity reference and recycles all
+v0.0.75 also clears the destroyed activity reference and recycles all
 per-activity full-resolution page, ink, and digest bitmaps when the native
 reader closes.
 
-For canonical landscape lasso moves, v0.0.69 converts the translated origin
+For canonical landscape lasso moves, v0.0.75 converts the translated origin
 from half-page display coordinates but preserves the native selection width and
 height. This prevents a pure move from applying the inverse spread scale to the
 selection dimensions a second time.
+
+For normal pen input on the inactive half of an editable landscape spread,
+v0.0.75 prearms the low-latency writer for the page under the pen, captures the
+completed trail, converts it to native document-page coordinates, and merges it
+with the page's existing `.mark` trails. It suppresses the native intermediate
+save during that transition because the native in-memory list may contain only
+a subset of the page and would otherwise replace older annotations. This path
+currently applies to ordinary ink; inactive-page eraser, highlighter, and lasso
+operations remain separate validation targets.
 
 This is firmware-specific experimental software for a rooted device. Back up
 documents and `.mark` files before testing a new firmware or module revision.
@@ -93,6 +102,8 @@ PDF and a protected copy of a 738-page annotated Hebrew PDF. The real-document
 pass confirmed persistent two-page annotation display, outer-edge-only tap
 navigation, side-preserving spread turns, and an unchanged `.mark` checksum.
 
-v0.0.69 compiles and passes automated handshake, backup-attestation,
-destroyed-activity cleanup, and canonical lasso-move invariants. Its focused
-hardware regression is tracked in the root `REGRESSION.md`.
+v0.0.75 compiles and passes automated handshake, backup-attestation,
+destroyed-activity cleanup, canonical lasso-move, and inactive-page ink-merge
+invariants. Its focused Nomad regression preserved seven existing trails,
+appended the new inactive-page stroke as an eighth, and retained all eight after
+a spread turn away and back. The full record is in the root `REGRESSION.md`.

@@ -242,7 +242,7 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 
 Safety and setup:
 
-- [x] v0.4.10 identifies Native Spread v0.0.66 through the live handshake.
+- [x] v0.4.10 identifies Native Spread v0.0.67 through the live handshake.
 - [x] The recovery manifest's full PDF SHA-256 remains valid after Supernote
   changes the PDF modification time during a native-reader restart.
 - [x] **RTL editable** requires a separate confirmation and reports a verified
@@ -259,6 +259,8 @@ Safety and setup:
   removal fails, and recovers or cleans interrupted retirement state on load.
 - [x] The companion hashes protected PDF and snapshot bytes off the activity
   main thread and keeps native editing disabled until verification completes.
+- [x] Successful asynchronous verification refreshes an already visible
+  landscape spread so native handwriting is re-enabled immediately.
 - [x] Backup-creation failure removes a newly copied orphan snapshot when no
   manifest exists.
 - [x] Successful restore uses the same staged, rollback-capable cleanup as

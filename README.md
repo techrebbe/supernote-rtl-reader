@@ -141,14 +141,18 @@ and **RTL read-only**. Before an ordinary PDF can become editable, the plugin:
 4. verifies the snapshot length and SHA-256; and
 5. creates an editable marker bound to the recovery-manifest SHA-256.
 
-Native Spread v0.0.66 independently verifies that attestation off the document
+Native Spread v0.0.67 independently verifies that attestation off the document
 activity's main thread, with editing kept disabled until verification finishes.
 A missing, changed, mismatched, or orphaned recovery file fails closed to
 read-only. The
 module also notices backup-file metadata changes during a running session
 instead of trusting a stale editable configuration cache.
 
-v0.4.10 raises the protected-editing compatibility floor to v0.0.66. Its
+After successful verification, v0.0.67 explicitly refreshes an already visible
+landscape spread so native handwriting geometry is re-enabled without waiting
+for a page turn or rotation.
+
+v0.4.10 raises the protected-editing compatibility floor to v0.0.67. Its
 canonical lasso transition preserves the selection's native width and height
 during a pure move; only the translated origin is converted from the half-page
 spread. This prevents the live selection from growing to roughly twice its

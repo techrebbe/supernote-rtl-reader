@@ -41,7 +41,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 66L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 67L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -223,6 +223,7 @@ def check(repo_root: Path) -> None:
             "verification.complete",
             "verification.valid",
             '"protected_backup_verified"',
+            "protected_editable_backup_refresh_scheduled",
             '"protected-editable-pilot"',
             "expectedManifestHash.equals(sha256(expectedManifest))",
             'backup.getProperty("documentSha256", "").trim().equals(',
@@ -255,6 +256,21 @@ def check(repo_root: Path) -> None:
         )
     ):
         fail("spreadConfig does not fail closed while asynchronous verification is pending")
+
+    verification_start = module.find(
+        "private static ProtectedVerification startProtectedEditableVerification("
+    )
+    sha_start = module.find("private static String sha256(", verification_start)
+    if verification_start < 0 or sha_start < 0:
+        fail("could not isolate asynchronous protected-backup verification")
+    verification = module[verification_start:sha_start]
+    verification_valid = verification.find("if (valid &&")
+    refresh_spread = verification.find(
+        "scheduleConfigurationRefresh(",
+        verification_valid,
+    )
+    if not (0 <= verification_valid < refresh_spread):
+        fail("successful protected verification does not refresh handwriting geometry")
 
     cover_start = app.find("const setCoverSeparateValue = async next =>")
     readonly_start = app.find("const setNativeSpreadReadOnly = async", cover_start)
@@ -335,10 +351,10 @@ def check(repo_root: Path) -> None:
     if "releaseActivityResources(activity);" not in destroy:
         fail("onDestroy does not release all per-activity resources")
 
-    if 'android:versionCode="66"' not in manifest:
-        fail("companion manifest must use versionCode 66 for protected editing")
-    if 'android:versionName="0.0.66"' not in manifest:
-        fail("companion manifest must use versionName 0.0.66")
+    if 'android:versionCode="67"' not in manifest:
+        fail("companion manifest must use versionCode 67 for protected editing")
+    if 'android:versionName="0.0.67"' not in manifest:
+        fail("companion manifest must use versionName 0.0.67")
 
     print("Native Spread safety invariants: PASS")
 

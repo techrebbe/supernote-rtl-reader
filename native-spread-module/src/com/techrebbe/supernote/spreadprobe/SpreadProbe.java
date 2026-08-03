@@ -79,7 +79,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         "documentApkLength";
     private static final String HANDSHAKE_EXTRA_PROCESS_ID = "processId";
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 66L;
+    private static final long MODULE_VERSION_CODE = 67L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -1961,6 +1961,17 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     currentActivity,
                     "protected_backup_verified"
                 );
+                if (valid && currentActivity.getResources()
+                        .getConfiguration().orientation
+                        == Configuration.ORIENTATION_LANDSCAPE) {
+                    log("protected_editable_backup_refresh_scheduled path="
+                        + verification.documentPath);
+                    scheduleConfigurationRefresh(
+                        currentActivity,
+                        Configuration.ORIENTATION_LANDSCAPE,
+                        0
+                    );
+                }
             });
         }, "SNSpreadBackupVerify");
         worker.setDaemon(true);

@@ -5,6 +5,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_ROOT="$(mktemp -d)"
 trap 'rm -rf "$WORK_ROOT"' EXIT
 
+python3 "$ROOT/scripts/check_native_spread_invariants.py" "$ROOT"
+
 pushd "$WORK_ROOT" >/dev/null
 npx --yes @react-native-community/cli@18.0.0 init SupernoteRtlReader \
   --template @supernote-plugin/sn-plugin-template \

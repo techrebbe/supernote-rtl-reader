@@ -1,9 +1,13 @@
 package __PACKAGE__
 
 import android.app.ActivityManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.net.Uri
 import android.os.SystemClock
 import android.system.Os
@@ -22,6 +26,8 @@ import java.io.FileOutputStream
 import java.io.ObjectInputStream
 import java.io.ObjectOutputStream
 import java.util.Properties
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 class ReaderPreferencesModule(
     reactContext: ReactApplicationContext,
@@ -35,11 +41,26 @@ class ReaderPreferencesModule(
             "com.supernote.document.document.DocumentActivity"
         private const val NATIVE_SPREAD_PACKAGE =
             "com.techrebbe.supernote.spreadprobe"
-        private const val NATIVE_SPREAD_MIN_VERSION_CODE = 61L
+        private const val PLUGIN_HOST_PACKAGE = "com.ratta.supernote.pluginhost"
+        private const val NATIVE_SPREAD_MIN_VERSION_CODE = 62L
         private const val NATIVE_SPREAD_MARKER_SUFFIX = ".snspread"
+        private const val NATIVE_SPREAD_HANDSHAKE_PROTOCOL = 1
+        private const val NATIVE_SPREAD_HANDSHAKE_TIMEOUT_MS = 1500L
+        private const val NATIVE_SPREAD_HANDSHAKE_REQUEST =
+            "com.techrebbe.supernote.spreadprobe.HANDSHAKE_REQUEST"
+        private const val NATIVE_SPREAD_HANDSHAKE_RESPONSE =
+            "com.techrebbe.supernote.spreadprobe.HANDSHAKE_RESPONSE"
+        private const val HANDSHAKE_EXTRA_NONCE = "nonce"
+        private const val HANDSHAKE_EXTRA_DOCUMENT_PATH = "documentPath"
+        private const val HANDSHAKE_EXTRA_PROTOCOL = "protocol"
+        private const val HANDSHAKE_EXTRA_HOOKS_READY = "hooksReady"
+        private const val HANDSHAKE_EXTRA_MODULE_VERSION_CODE = "moduleVersionCode"
+        private const val HANDSHAKE_EXTRA_DOCUMENT_APK_LENGTH = "documentApkLength"
+        private const val HANDSHAKE_EXTRA_PROCESS_ID = "processId"
         private const val SUPPORTED_FINGERPRINT =
             "Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys"
         private const val SUPPORTED_DOCUMENT_VERSION_CODE = 102446L
+        private const val SUPPORTED_DOCUMENT_APK_LENGTH = 138486560L
 
         private val DOCUMENT_CACHE_ROOTS = arrayOf(
             "/data/data/com.supernote.document/document_internal_cache",
@@ -105,32 +126,40 @@ class ReaderPreferencesModule(
                 FileInputStream(marker).use { input -> properties.load(input) }
             }
 
-            val enabled = properties.getProperty("enabled", "false")
+            val configured = properties.getProperty("enabled", "false")
                 .equals("true", ignoreCase = true) &&
                 properties.getProperty("direction", "")
                     .equals("rtl", ignoreCase = true)
-            val editable = enabled && properties.getProperty("editable", "false")
+            val configuredEditable = configured && properties.getProperty("editable", "false")
                 .equals("true", ignoreCase = true)
             val coverSeparate = properties.getProperty("coverSeparate", "false")
                 .equals("true", ignoreCase = true)
             val capability = nativeSpreadCapability()
 
-            val result = Arguments.createMap().apply {
-                putBoolean("enabled", enabled)
-                putBoolean("editable", editable)
-                putBoolean("coverSeparate", coverSeparate)
-                putString("markerPath", marker.absolutePath)
-                putBoolean("compatible", capability.compatible)
-                putBoolean("moduleInstalled", capability.moduleVersionCode >= 0L)
-                putDouble("moduleVersionCode", capability.moduleVersionCode.toDouble())
-                putString("moduleVersionName", capability.moduleVersionName)
-                putDouble(
-                    "documentVersionCode",
-                    capability.documentVersionCode.toDouble(),
+            if (!capability.compatible) {
+                resolveNativeSpreadMode(
+                    promise,
+                    configured,
+                    configuredEditable,
+                    coverSeparate,
+                    marker,
+                    capability,
+                    NativeSpreadHandshake(false, "package_incompatible"),
                 )
-                putString("firmwareFingerprint", Build.FINGERPRINT)
+                return
             }
-            promise.resolve(result)
+
+            requestNativeSpreadHandshake(pdfFile) { handshake ->
+                resolveNativeSpreadMode(
+                    promise,
+                    configured,
+                    configuredEditable,
+                    coverSeparate,
+                    marker,
+                    capability,
+                    handshake,
+                )
+            }
         } catch (error: Throwable) {
             promise.reject("NATIVE_SPREAD_LOAD_FAILED", error.message, error)
         }
@@ -165,51 +194,135 @@ class ReaderPreferencesModule(
                 return
             }
 
-            val properties = Properties().apply {
-                setProperty("enabled", "true")
-                setProperty("direction", "rtl")
-                setProperty("coverSeparate", coverSeparate.toString())
-                setProperty("editable", "false")
-                setProperty("disposable", "false")
-                setProperty("managedBy", "supernote-rtl-reader")
-                setProperty("mode", "read-only-pilot")
-            }
-            val temporary = File(
-                marker.parentFile,
-                "${marker.name}.tmp-${android.os.Process.myPid()}",
-            )
-            try {
-                FileOutputStream(temporary, false).use { output ->
-                    properties.store(output, "Supernote RTL native reader settings")
-                    output.flush()
-                    output.fd.sync()
+            requestNativeSpreadHandshake(pdfFile) { handshake ->
+                if (!handshake.active) {
+                    val error = IllegalStateException(
+                        "Native Spread hooks did not answer the live safety check: ${handshake.reason}",
+                    )
+                    Log.e(
+                        LOG_TAG,
+                        "RTL_READER_NATIVE_SPREAD_CONFIG_FAILED: ${error.message}",
+                        error,
+                    )
+                    promise.reject(
+                        "NATIVE_SPREAD_HANDSHAKE_FAILED",
+                        error.message,
+                        error,
+                    )
+                    return@requestNativeSpreadHandshake
                 }
-                Os.rename(temporary.absolutePath, marker.absolutePath)
-            } finally {
-                if (temporary.exists()) temporary.delete()
-            }
 
-            val verified = Properties()
-            FileInputStream(marker).use { input -> verified.load(input) }
-            if (!verified.getProperty("enabled", "false")
-                    .equals("true", ignoreCase = true) ||
-                !verified.getProperty("direction", "")
-                    .equals("rtl", ignoreCase = true) ||
-                !verified.getProperty("editable", "true")
-                    .equals("false", ignoreCase = true)
-            ) {
-                throw IllegalStateException("Native spread setting verification failed")
+                try {
+                    writeNativeSpreadReadOnlyMarker(
+                        marker,
+                        coverSeparate,
+                        handshake,
+                    )
+                    promise.resolve(true)
+                } catch (error: Throwable) {
+                    Log.e(
+                        LOG_TAG,
+                        "RTL_READER_NATIVE_SPREAD_CONFIG_FAILED: ${error.message}",
+                        error,
+                    )
+                    promise.reject(
+                        "NATIVE_SPREAD_CONFIG_FAILED",
+                        error.message,
+                        error,
+                    )
+                }
             }
-
-            Log.i(
-                LOG_TAG,
-                "RTL_READER_NATIVE_SPREAD_CONFIG enabled=true editable=false cover=$coverSeparate marker=${marker.absolutePath}",
-            )
-            promise.resolve(true)
         } catch (error: Throwable) {
             Log.e(LOG_TAG, "RTL_READER_NATIVE_SPREAD_CONFIG_FAILED: ${error.message}", error)
             promise.reject("NATIVE_SPREAD_CONFIG_FAILED", error.message, error)
         }
+    }
+
+    private fun writeNativeSpreadReadOnlyMarker(
+        marker: File,
+        coverSeparate: Boolean,
+        handshake: NativeSpreadHandshake,
+    ) {
+        check(handshake.active) { "Native Spread live safety check was not active" }
+
+        val properties = Properties().apply {
+            setProperty("enabled", "true")
+            setProperty("direction", "rtl")
+            setProperty("coverSeparate", coverSeparate.toString())
+            setProperty("editable", "false")
+            setProperty("disposable", "false")
+            setProperty("managedBy", "supernote-rtl-reader")
+            setProperty("mode", "read-only-pilot")
+        }
+        val temporary = File(
+            marker.parentFile,
+            "${marker.name}.tmp-${android.os.Process.myPid()}",
+        )
+        try {
+            FileOutputStream(temporary, false).use { output ->
+                properties.store(output, "Supernote RTL native reader settings")
+                output.flush()
+                output.fd.sync()
+            }
+            Os.rename(temporary.absolutePath, marker.absolutePath)
+        } finally {
+            if (temporary.exists()) temporary.delete()
+        }
+
+        val verified = Properties()
+        FileInputStream(marker).use { input -> verified.load(input) }
+        if (!verified.getProperty("enabled", "false")
+                .equals("true", ignoreCase = true) ||
+            !verified.getProperty("direction", "")
+                .equals("rtl", ignoreCase = true) ||
+            !verified.getProperty("editable", "true")
+                .equals("false", ignoreCase = true)
+        ) {
+            throw IllegalStateException("Native spread setting verification failed")
+        }
+
+        Log.i(
+            LOG_TAG,
+            "RTL_READER_NATIVE_SPREAD_CONFIG enabled=true editable=false cover=$coverSeparate hooksActive=true processId=${handshake.processId} marker=${marker.absolutePath}",
+        )
+    }
+
+    private fun resolveNativeSpreadMode(
+        promise: Promise,
+        configured: Boolean,
+        configuredEditable: Boolean,
+        coverSeparate: Boolean,
+        marker: File,
+        capability: NativeSpreadCapability,
+        handshake: NativeSpreadHandshake,
+    ) {
+        val runtimeCompatible = capability.compatible && handshake.active
+        val result = Arguments.createMap().apply {
+            putBoolean("configured", configured)
+            putBoolean("configuredEditable", configuredEditable)
+            putBoolean("enabled", configured && runtimeCompatible)
+            putBoolean("editable", configuredEditable && runtimeCompatible)
+            putBoolean("coverSeparate", coverSeparate)
+            putString("markerPath", marker.absolutePath)
+            putBoolean("compatible", runtimeCompatible)
+            putBoolean("hooksActive", handshake.active)
+            putString("handshakeReason", handshake.reason)
+            putDouble("handshakeProtocol", handshake.protocol.toDouble())
+            putDouble("handshakeProcessId", handshake.processId.toDouble())
+            putBoolean("moduleInstalled", capability.moduleVersionCode >= 0L)
+            putDouble("moduleVersionCode", capability.moduleVersionCode.toDouble())
+            putString("moduleVersionName", capability.moduleVersionName)
+            putDouble(
+                "documentVersionCode",
+                capability.documentVersionCode.toDouble(),
+            )
+            putString("firmwareFingerprint", Build.FINGERPRINT)
+        }
+        Log.i(
+            LOG_TAG,
+            "RTL_READER_NATIVE_SPREAD_HANDSHAKE active=${handshake.active} reason=${handshake.reason} protocol=${handshake.protocol} processId=${handshake.processId}",
+        )
+        promise.resolve(result)
     }
 
     private data class NativeSpreadCapability(
@@ -217,6 +330,13 @@ class ReaderPreferencesModule(
         val moduleVersionCode: Long,
         val moduleVersionName: String?,
         val documentVersionCode: Long,
+    )
+
+    private data class NativeSpreadHandshake(
+        val active: Boolean,
+        val reason: String,
+        val protocol: Int = -1,
+        val processId: Int = -1,
     )
 
     @Suppress("DEPRECATION")
@@ -228,6 +348,130 @@ class ReaderPreferencesModule(
             info.versionCode.toLong()
         }
         return code to info.versionName
+    }
+
+    private fun requestNativeSpreadHandshake(
+        pdfFile: File,
+        callback: (NativeSpreadHandshake) -> Unit,
+    ) {
+        if (reactApplicationContext.packageName != PLUGIN_HOST_PACKAGE) {
+            callback(NativeSpreadHandshake(false, "unexpected_plugin_host"))
+            return
+        }
+
+        val expectedPath = try {
+            pdfFile.canonicalPath
+        } catch (error: Throwable) {
+            callback(NativeSpreadHandshake(false, "document_path_unavailable"))
+            return
+        }
+        val nonce = UUID.randomUUID().toString()
+        val completed = AtomicBoolean(false)
+        val handler = Handler(Looper.getMainLooper())
+        var receiver: BroadcastReceiver? = null
+        var timeout: Runnable? = null
+
+        val finish: (NativeSpreadHandshake) -> Unit = { result ->
+            if (completed.compareAndSet(false, true)) {
+                timeout?.let(handler::removeCallbacks)
+                receiver?.let { registered ->
+                    try {
+                        reactApplicationContext.unregisterReceiver(registered)
+                    } catch (_: Throwable) {
+                        // The receiver may already have been removed during teardown.
+                    }
+                }
+                callback(result)
+            }
+        }
+
+        receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action != NATIVE_SPREAD_HANDSHAKE_RESPONSE ||
+                    intent.getStringExtra(HANDSHAKE_EXTRA_NONCE) != nonce
+                ) {
+                    return
+                }
+
+                val protocol = intent.getIntExtra(HANDSHAKE_EXTRA_PROTOCOL, -1)
+                val hooksReady = intent.getBooleanExtra(
+                    HANDSHAKE_EXTRA_HOOKS_READY,
+                    false,
+                )
+                val moduleVersionCode = intent.getLongExtra(
+                    HANDSHAKE_EXTRA_MODULE_VERSION_CODE,
+                    -1L,
+                )
+                val documentApkLength = intent.getLongExtra(
+                    HANDSHAKE_EXTRA_DOCUMENT_APK_LENGTH,
+                    -1L,
+                )
+                val processId = intent.getIntExtra(
+                    HANDSHAKE_EXTRA_PROCESS_ID,
+                    -1,
+                )
+                val reportedPath = intent.getStringExtra(
+                    HANDSHAKE_EXTRA_DOCUMENT_PATH,
+                )
+                val canonicalReportedPath = try {
+                    reportedPath?.let { File(it).canonicalPath }
+                } catch (_: Throwable) {
+                    null
+                }
+
+                val valid = hooksReady &&
+                    protocol == NATIVE_SPREAD_HANDSHAKE_PROTOCOL &&
+                    moduleVersionCode >= NATIVE_SPREAD_MIN_VERSION_CODE &&
+                    documentApkLength == SUPPORTED_DOCUMENT_APK_LENGTH &&
+                    processId > 0 &&
+                    canonicalReportedPath == expectedPath
+                finish(
+                    NativeSpreadHandshake(
+                        valid,
+                        if (valid) "ok" else "invalid_response",
+                        protocol,
+                        processId,
+                    ),
+                )
+            }
+        }
+
+        timeout = Runnable {
+            finish(NativeSpreadHandshake(false, "timeout"))
+        }
+
+        try {
+            reactApplicationContext.registerReceiver(
+                receiver,
+                IntentFilter(NATIVE_SPREAD_HANDSHAKE_RESPONSE),
+            )
+            handler.postDelayed(
+                timeout,
+                NATIVE_SPREAD_HANDSHAKE_TIMEOUT_MS,
+            )
+            reactApplicationContext.sendBroadcast(
+                Intent(NATIVE_SPREAD_HANDSHAKE_REQUEST).apply {
+                    setPackage(DOCUMENT_PACKAGE)
+                    putExtra(HANDSHAKE_EXTRA_NONCE, nonce)
+                    putExtra(HANDSHAKE_EXTRA_DOCUMENT_PATH, expectedPath)
+                    putExtra(
+                        HANDSHAKE_EXTRA_PROTOCOL,
+                        NATIVE_SPREAD_HANDSHAKE_PROTOCOL,
+                    )
+                },
+            )
+            Log.i(
+                LOG_TAG,
+                "RTL_READER_NATIVE_SPREAD_HANDSHAKE_REQUEST path=$expectedPath",
+            )
+        } catch (error: Throwable) {
+            Log.e(
+                LOG_TAG,
+                "RTL_READER_NATIVE_SPREAD_HANDSHAKE_REQUEST_FAILED: ${error.message}",
+                error,
+            )
+            finish(NativeSpreadHandshake(false, "request_failed"))
+        }
     }
 
     private fun nativeSpreadCapability(): NativeSpreadCapability {

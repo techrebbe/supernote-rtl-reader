@@ -177,6 +177,67 @@ renders canonical saved ink for both visible pages, suppresses non-edge native
 tap turns, and preserves the active spread side. The v0.0.60 hardware writer
 and annotation-commit blocks remain unchanged.
 
+## v0.4.7 / Native Spread v0.0.62 review hardening - PASS
+
+- [x] Package compatibility floor is raised to Native Spread v0.0.62.
+- [x] Marker creation requires a nonce-based response from the actively hooked
+  `DocumentActivity` for the exact currently open PDF.
+- [x] The response verifies protocol, module version, document APK length, and
+  live document-process PID.
+- [x] An installed module without an active handshake is reported as inactive.
+- [x] `DocumentActivity.onDestroy()` clears `activeActivity`, all per-activity
+  geometry/touch/config maps, and recycles page, committed-ink, full-ink, and
+  digest bitmap caches.
+- [x] Native Spread safety invariants pass.
+- [x] Native PDF renderer invariants pass.
+- [x] Native Spread v0.0.62 compiles, signs, and verifies successfully.
+- [x] RTL Reader v0.4.7 compiles and packages successfully.
+- [x] On-device live handshake succeeds for the protected pilot copy.
+- [x] Disabling the LSPosed module and restarting the document process makes the
+  RTL read-only control unavailable; the handshake times out with no response.
+- [x] Re-enabling the module and restarting the document process restores the
+  live handshake and RTL read-only spread without reinstalling either package.
+- [x] Repeated native-reader close/reopen logs complete resource release without
+  stale document state or regressions.
+- [x] Existing read-only navigation, annotation display, and unchanged `.mark`
+  checksum smoke tests still pass.
+
+The protected-pilot hardware run exercised the complete safety sequence. With
+Native Spread v0.0.62 enabled, RTL Reader received a protocol-1 response from
+the live `com.supernote.document` process for the exact protected PDF. After
+the LSPosed module was disabled and the process restarted, the response timed
+out and **RTL read-only** was grayed out. Re-enabling the module and restarting
+restored the handshake and spread. Removing the paused document task invoked
+`DocumentActivity.onDestroy()` and logged
+`activity_resources_released active_cleared=true`. The protected `.mark`
+SHA-256 remained
+`c2155e51a686a3ba7066c8ef7d859c19053019e85d23d1414fa1a69dc9de2c21`
+throughout.
+
+### Codex P1 configured-state follow-up - PASS
+
+- [x] Marker configuration is tracked separately from live hook availability.
+- [x] Read-only and externally configured editable markers remain distinct while
+  the live handshake is unavailable.
+- [x] The settings UI shows a configured read-only marker instead of falsely
+  showing **Off** while the hooks are unavailable.
+- [x] Switching to LTR removes a configured read-only marker even when the live
+  handshake is unavailable.
+- [x] Build invariants cover configured/runtime state separation.
+- [x] With the module disabled, the configured read-only choice remains visible
+  and **Off** removes its marker.
+- [x] With the module disabled, switching to LTR removes its marker; re-enabling
+  the module does not silently restore read-only mode.
+
+The v0.4.7-r1 hardware run first confirmed that a configured read-only marker
+remains visibly selected while the LSPosed hooks are unavailable. Selecting
+**Off** deleted the marker without a live handshake. The marker was then
+recreated through a valid handshake, the module was disabled again, and
+switching the plug-in to LTR deleted it automatically. After the module was
+re-enabled and the document process restarted, the protected PDF remained in
+ordinary native landscape view rather than silently restoring RTL spread mode.
+The protected `.mark` SHA-256 remained unchanged throughout.
+
 ## Failure capture
 
 Before reproducing a failure:

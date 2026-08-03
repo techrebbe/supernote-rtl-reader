@@ -4,7 +4,9 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 
 ## Stable baseline
 
-v0.4.2 is the current merged hardware-validated stable baseline on Supernote Nomad. v0.4.3 is a stabilization release candidate that preserves the v0.4.2 renderer while consolidating its source/build path and hardening initial layout handling.
+v0.4.6 is the current merged hardware-validated stable baseline on Supernote
+Nomad. v0.4.7 is a hardware-validated safety-hardening candidate for the native
+reader pilot, paired with Native Spread v0.0.62.
 
 The validated reader behavior covers:
 
@@ -125,11 +127,13 @@ This prevents the initial landscape spread from being mounted against stale or i
 
 Full validation details are recorded in `REGRESSION.md`.
 
-## v0.4.6 native-reader pilot control
+## v0.4.7 native-reader pilot control
 
 v0.4.5 added a safe per-document control for the rooted Native Spread module.
 v0.4.6 raises the compatibility floor to the real-document-validated Native
-Spread v0.0.61 module.
+Spread v0.0.61 module. v0.4.7 requires Native Spread v0.0.62 and adds a live,
+nonce-based handshake with the hooked document process before the setting is
+shown as active or a new read-only marker can be written.
 In Reading settings, **Supernote native reader** offers:
 
 - **Off** — remove this PDF's hidden native-spread setting;
@@ -137,8 +141,9 @@ In Reading settings, **Supernote native reader** offers:
   spreads, and the current cover-separate parity in Supernote's native reader.
 
 The plug-in verifies the exact supported firmware, SupernoteDocument build,
-and Native Spread module version before enabling the setting. It requires
-Native Spread v0.0.61 or newer. Its read-only mode forces a full-screen
+Native Spread module version, active hooked process, handshake protocol,
+current document path, and document APK identity before enabling the setting.
+It requires Native Spread v0.0.62 or newer. Its read-only mode forces a full-screen
 handwriting-disabled region and blocks the native annotation commit callback as
 a persistence fail-safe. v0.0.61 also composites saved `.mark` ink for both
 visible pages, preserves the active left/right side while turning spreads, and
@@ -163,7 +168,24 @@ active side was preserved. The protected copy's `.mark` SHA-256 remained
 `c2155e51a686a3ba7066c8ef7d859c19053019e85d23d1414fa1a69dc9de2c21`
 before and after the test.
 
-The exact v0.0.61 LSPosed companion source and its Windows build wrapper are
+The v0.4.7 / Native Spread v0.0.62 safety pass is also hardware validated. The
+live document-process handshake succeeds only while the LSPosed module is
+enabled and scoped to `com.supernote.document`; disabling the module and
+restarting the document process makes **RTL read-only** unavailable, and
+re-enabling it restores the feature. The native activity cleanup path clears
+its retained activity reference and cached bitmaps on destruction. The same
+protected `.mark` checksum remained unchanged throughout the enabled,
+fail-closed, cleanup, and re-enabled smoke tests.
+
+The v0.4.7-r1 follow-up also preserves marker configuration separately from
+live hook availability. If the LSPosed hook is temporarily unavailable, the UI
+continues to show that RTL read-only is configured instead of falsely showing
+**Off**. Selecting **Off** or switching to LTR can still remove that read-only
+marker without a handshake, preventing it from silently reactivating when the
+module returns. Externally managed editable markers remain distinguishable from
+the plug-in's read-only marker.
+
+The exact v0.0.62 LSPosed companion source and its Windows build wrapper are
 tracked in [`native-spread-module/`](native-spread-module/README.md). Generated
 APKs remain build artifacts and are not committed.
 

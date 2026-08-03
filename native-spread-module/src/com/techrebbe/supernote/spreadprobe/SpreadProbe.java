@@ -1,6 +1,10 @@
 package com.techrebbe.supernote.spreadprobe;
 
 import android.app.Activity;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
@@ -18,6 +22,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.Parcel;
+import android.os.Process;
 import android.util.Log;
 import android.util.Size;
 import android.view.Gravity;
@@ -56,6 +61,23 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         "/storage/emulated/0/Document/SupernoteNativeSpreadCalibration.pdf";
     private static final String SIDECAR_SUFFIX = ".snspread";
     private static final String TAG = "SN_SPREAD_PROBE";
+    private static final String PLUGIN_HOST_PACKAGE =
+        "com.ratta.supernote.pluginhost";
+    private static final String HANDSHAKE_REQUEST_ACTION =
+        "com.techrebbe.supernote.spreadprobe.HANDSHAKE_REQUEST";
+    private static final String HANDSHAKE_RESPONSE_ACTION =
+        "com.techrebbe.supernote.spreadprobe.HANDSHAKE_RESPONSE";
+    private static final String HANDSHAKE_EXTRA_NONCE = "nonce";
+    private static final String HANDSHAKE_EXTRA_DOCUMENT_PATH = "documentPath";
+    private static final String HANDSHAKE_EXTRA_PROTOCOL = "protocol";
+    private static final String HANDSHAKE_EXTRA_HOOKS_READY = "hooksReady";
+    private static final String HANDSHAKE_EXTRA_MODULE_VERSION_CODE =
+        "moduleVersionCode";
+    private static final String HANDSHAKE_EXTRA_DOCUMENT_APK_LENGTH =
+        "documentApkLength";
+    private static final String HANDSHAKE_EXTRA_PROCESS_ID = "processId";
+    private static final int HANDSHAKE_PROTOCOL = 1;
+    private static final long MODULE_VERSION_CODE = 62L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -95,6 +117,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         new ThreadLocal<>();
     private static Activity activeActivity;
     private static boolean nativeBridgeLoaded;
+    private static volatile boolean hooksReady;
+    private static BroadcastReceiver handshakeReceiver;
+    private static boolean handshakeReceiverRegistered;
     private static boolean spreadLassoActive;
     private static boolean spreadLassoOriginZero;
     private static boolean spreadLassoCanonicalSelection;
@@ -284,6 +309,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 protected void afterHookedMethod(MethodHookParam param) {
                     activeActivity = (Activity) param.thisObject;
                     SPREAD_CONFIGS.remove(activeActivity);
+                    registerHandshakeReceiver(activeActivity);
                     updateNativeEraserGate(activeActivity, "activity_created");
                     log("activity_created");
                 }
@@ -1099,12 +1125,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         "activity_destroyed",
                         false
                     );
-                    resetSpreadEditingState("activity_destroyed");
-                    ACTIVATION_TOUCH_TARGETS.remove(activity);
-                    ACTIVATION_TOUCH_STARTS.remove(activity);
-                    FINGER_TOUCH_STARTS.remove(activity);
-                    NON_EDGE_TAP_SUPPRESS_UNTIL.remove(activity);
-                    SPREAD_CONFIGS.remove(activity);
+                }
+
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    Activity activity = (Activity) param.thisObject;
+                    releaseActivityResources(activity);
                 }
             }
         );
@@ -1553,6 +1579,133 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 }
             }
         );
+        hooksReady = true;
+        log("hooks_ready handshake_protocol=" + HANDSHAKE_PROTOCOL
+            + " module_version_code=" + MODULE_VERSION_CODE);
+    }
+
+    private static synchronized void registerHandshakeReceiver(
+        Activity activity
+    ) {
+        if (handshakeReceiverRegistered || activity == null || !hooksReady) {
+            return;
+        }
+        final Context context = activity.getApplicationContext();
+        if (context == null) {
+            log("handshake_receiver_failed reason=no_application_context");
+            return;
+        }
+
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context receiverContext, Intent request) {
+                if (request == null
+                    || !HANDSHAKE_REQUEST_ACTION.equals(request.getAction())) {
+                    return;
+                }
+                String nonce = request.getStringExtra(HANDSHAKE_EXTRA_NONCE);
+                String requestedPath = request.getStringExtra(
+                    HANDSHAKE_EXTRA_DOCUMENT_PATH
+                );
+                int requestedProtocol = request.getIntExtra(
+                    HANDSHAKE_EXTRA_PROTOCOL,
+                    -1
+                );
+                Activity current = activeActivity;
+                String actualPath = currentDocumentPath(current);
+                boolean activityReady = current != null
+                    && !current.isFinishing()
+                    && !current.isDestroyed();
+                boolean pathMatches = sameCanonicalPath(
+                    requestedPath,
+                    actualPath
+                );
+                if (!hooksReady || !activityReady || nonce == null
+                    || nonce.length() < 16
+                    || requestedProtocol != HANDSHAKE_PROTOCOL
+                    || !pathMatches) {
+                    log("handshake_rejected hooks_ready=" + hooksReady
+                        + " activity_ready=" + activityReady
+                        + " protocol=" + requestedProtocol
+                        + " path_matches=" + pathMatches);
+                    return;
+                }
+
+                Intent response = new Intent(HANDSHAKE_RESPONSE_ACTION);
+                response.setPackage(PLUGIN_HOST_PACKAGE);
+                response.putExtra(HANDSHAKE_EXTRA_NONCE, nonce);
+                response.putExtra(
+                    HANDSHAKE_EXTRA_DOCUMENT_PATH,
+                    actualPath
+                );
+                response.putExtra(
+                    HANDSHAKE_EXTRA_PROTOCOL,
+                    HANDSHAKE_PROTOCOL
+                );
+                response.putExtra(HANDSHAKE_EXTRA_HOOKS_READY, true);
+                response.putExtra(
+                    HANDSHAKE_EXTRA_MODULE_VERSION_CODE,
+                    MODULE_VERSION_CODE
+                );
+                response.putExtra(
+                    HANDSHAKE_EXTRA_DOCUMENT_APK_LENGTH,
+                    TARGET_DOCUMENT_APK_LENGTH
+                );
+                response.putExtra(
+                    HANDSHAKE_EXTRA_PROCESS_ID,
+                    Process.myPid()
+                );
+                receiverContext.sendBroadcast(response);
+                log("handshake_response protocol=" + HANDSHAKE_PROTOCOL
+                    + " process_id=" + Process.myPid()
+                    + " path=" + actualPath);
+            }
+        };
+
+        try {
+            context.registerReceiver(
+                receiver,
+                new IntentFilter(HANDSHAKE_REQUEST_ACTION)
+            );
+            handshakeReceiver = receiver;
+            handshakeReceiverRegistered = true;
+            log("handshake_receiver_registered");
+        } catch (Throwable throwable) {
+            handshakeReceiver = null;
+            handshakeReceiverRegistered = false;
+            log("handshake_receiver_failed " + throwable);
+            XposedBridge.log(throwable);
+        }
+    }
+
+    private static String currentDocumentPath(Activity activity) {
+        if (activity == null) {
+            return null;
+        }
+        try {
+            Object viewModel = XposedHelpers.getObjectField(
+                activity,
+                "documentViewModel"
+            );
+            Uri uri = (Uri) XposedHelpers.getObjectField(viewModel, "uri");
+            return uri == null ? null : uri.getPath();
+        } catch (Throwable throwable) {
+            log("handshake_document_path_failed " + throwable);
+            return null;
+        }
+    }
+
+    private static boolean sameCanonicalPath(String first, String second) {
+        if (first == null || second == null) {
+            return false;
+        }
+        try {
+            return new File(first).getCanonicalPath().equals(
+                new File(second).getCanonicalPath()
+            );
+        } catch (Throwable throwable) {
+            return false;
+        }
     }
 
     private static boolean prepareNativeSpreadLasso(
@@ -3027,6 +3180,47 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
         SpreadConfig config = spreadConfig(activity);
         return config != null && config.editable;
+    }
+
+    private static void releaseActivityResources(Activity activity) {
+        if (activity == null) {
+            return;
+        }
+        boolean activeCleared = activeActivity == activity;
+        if (activeCleared) {
+            activeActivity = null;
+        }
+
+        resetSpreadEditingState("activity_destroyed");
+        int recycled = 0;
+        recycled += recycleRemovedBitmap(COMPOSITES, activity);
+        recycled += recycleRemovedBitmap(
+            COMMITTED_INK_COMPOSITES,
+            activity
+        );
+        recycled += recycleRemovedBitmap(FULL_INK_BITMAPS, activity);
+        recycled += recycleRemovedBitmap(DIGEST_COMPOSITES, activity);
+        LEFT_DESTINATIONS.remove(activity);
+        RIGHT_DESTINATIONS.remove(activity);
+        ACTIVATION_TOUCH_TARGETS.remove(activity);
+        ACTIVATION_TOUCH_STARTS.remove(activity);
+        FINGER_TOUCH_STARTS.remove(activity);
+        NON_EDGE_TAP_SUPPRESS_UNTIL.remove(activity);
+        SPREAD_CONFIGS.remove(activity);
+        log("activity_resources_released active_cleared=" + activeCleared
+            + " recycled_bitmaps=" + recycled);
+    }
+
+    private static int recycleRemovedBitmap(
+        Map<Activity, Bitmap> cache,
+        Activity activity
+    ) {
+        Bitmap bitmap = cache.remove(activity);
+        if (bitmap == null || bitmap.isRecycled()) {
+            return 0;
+        }
+        bitmap.recycle();
+        return 1;
     }
 
     private static void resetSpreadEditingState(String reason) {

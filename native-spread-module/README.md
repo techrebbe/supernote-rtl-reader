@@ -23,14 +23,15 @@ hardware-tested environment:
 - LSPosed scope limited to `com.supernote.document`;
 - an enabled marker beside the current PDF.
 
-The read-only marker sets `editable=false`. In that mode v0.0.65
+The read-only marker sets `editable=false`. In that mode v0.0.66
 forces a full-page disabled handwriting region and blocks the native
 annotation-commit callback. It displays existing `.mark` ink but does not allow
 new native writing. An editable marker for an ordinary document is accepted
 only when the module can verify the exact PDF identity, recovery-manifest
 SHA-256, and original `.mark` snapshot bytes. Disposable calibration markers
 remain supported. Any failed protected-backup check downgrades the document to
-read-only.
+read-only. v0.0.66 performs the full PDF and snapshot hashing on a background
+thread and keeps editing disabled until that verification completes.
 
 Before the plugin reports this mode as active or creates a marker, it sends a
 random challenge to the currently hooked `DocumentActivity`. The module answers
@@ -40,11 +41,11 @@ module version, document APK identity, and live document-process PID. An
 installed-but-disabled, incorrectly scoped, or compatibility-rejected module
 therefore fails closed.
 
-v0.0.65 also clears the destroyed activity reference and recycles all
+v0.0.66 also clears the destroyed activity reference and recycles all
 per-activity full-resolution page, ink, and digest bitmaps when the native
 reader closes.
 
-For canonical landscape lasso moves, v0.0.65 converts the translated origin
+For canonical landscape lasso moves, v0.0.66 converts the translated origin
 from half-page display coordinates but preserves the native selection width and
 height. This prevents a pure move from applying the inverse spread scale to the
 selection dimensions a second time.
@@ -86,6 +87,6 @@ PDF and a protected copy of a 738-page annotated Hebrew PDF. The real-document
 pass confirmed persistent two-page annotation display, outer-edge-only tap
 navigation, side-preserving spread turns, and an unchanged `.mark` checksum.
 
-v0.0.65 compiles and passes automated handshake, backup-attestation,
+v0.0.66 compiles and passes automated handshake, backup-attestation,
 destroyed-activity cleanup, and canonical lasso-move invariants. Its focused
 hardware regression is tracked in the root `REGRESSION.md`.

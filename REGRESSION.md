@@ -242,7 +242,7 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 
 Safety and setup:
 
-- [x] v0.4.10 identifies Native Spread v0.0.65 through the live handshake.
+- [x] v0.4.10 identifies Native Spread v0.0.66 through the live handshake.
 - [x] The recovery manifest's full PDF SHA-256 remains valid after Supernote
   changes the PDF modification time during a native-reader restart.
 - [x] **RTL editable** requires a separate confirmation and reports a verified
@@ -257,6 +257,14 @@ Safety and setup:
   visible failure message if an asynchronous recovery step fails.
 - [x] Backup retirement stages the snapshot first, rolls it back if manifest
   removal fails, and recovers or cleans interrupted retirement state on load.
+- [x] The companion hashes protected PDF and snapshot bytes off the activity
+  main thread and keeps native editing disabled until verification completes.
+- [x] Backup-creation failure removes a newly copied orphan snapshot when no
+  manifest exists.
+- [x] Successful restore uses the same staged, rollback-capable cleanup as
+  backup retirement before reporting completion.
+- [x] Cover controls and synchronization are blocked while a native-mode
+  transition is pending.
 - [ ] A document with no `.mark` records and can restore the original absent state.
 - [ ] Removing or modifying a backup file makes editable mode fail closed.
 - [ ] Read-only mode and **Off** retain their v0.4.7-r1 behavior.

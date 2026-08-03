@@ -35,6 +35,7 @@ import android.widget.TextView;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.lang.ref.WeakReference;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
@@ -78,7 +79,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         "documentApkLength";
     private static final String HANDSHAKE_EXTRA_PROCESS_ID = "processId";
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 65L;
+    private static final long MODULE_VERSION_CODE = 66L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -106,6 +107,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         new WeakHashMap<>();
     private static final Map<Activity, SpreadConfig> SPREAD_CONFIGS =
         new WeakHashMap<>();
+    private static final Map<Activity, ProtectedVerification>
+        PROTECTED_VERIFICATIONS = new WeakHashMap<>();
     private static final ThreadLocal<Boolean> LINK_SPLIT_ORIGINAL =
         new ThreadLocal<>();
     private static final ThreadLocal<List<Rect>> SELECT_POP_RECT_ORIGINALS =
@@ -168,6 +171,59 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             this.coverSeparate = coverSeparate;
             this.editable = editable;
             this.calibration = calibration;
+        }
+    }
+
+    private static final class ProtectedVerification {
+        final String documentPath;
+        final String markerPath;
+        final long markerModified;
+        final long markerLength;
+        final long backupModified;
+        final long backupLength;
+        final long snapshotModified;
+        final long snapshotLength;
+        boolean complete;
+        boolean valid;
+
+        ProtectedVerification(
+            String documentPath,
+            String markerPath,
+            long markerModified,
+            long markerLength,
+            long backupModified,
+            long backupLength,
+            long snapshotModified,
+            long snapshotLength
+        ) {
+            this.documentPath = documentPath;
+            this.markerPath = markerPath;
+            this.markerModified = markerModified;
+            this.markerLength = markerLength;
+            this.backupModified = backupModified;
+            this.backupLength = backupLength;
+            this.snapshotModified = snapshotModified;
+            this.snapshotLength = snapshotLength;
+        }
+
+        boolean matches(
+            String nextDocumentPath,
+            String nextMarkerPath,
+            long nextMarkerModified,
+            long nextMarkerLength,
+            long nextBackupModified,
+            long nextBackupLength,
+            long nextSnapshotModified,
+            long nextSnapshotLength
+        ) {
+            return documentPath.equals(nextDocumentPath)
+                && markerPath.equals(nextMarkerPath)
+                && markerModified == nextMarkerModified
+                && markerLength == nextMarkerLength
+                && backupModified == nextBackupModified
+                && backupLength == nextBackupLength
+                && snapshotModified == nextSnapshotModified
+                && snapshotLength == nextSnapshotLength;
         }
     }
 
@@ -1850,6 +1906,77 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
     }
 
+    private static ProtectedVerification startProtectedEditableVerification(
+        Activity activity,
+        File document,
+        Properties markerProperties,
+        String documentPath,
+        String markerPath,
+        long markerModified,
+        long markerLength,
+        long backupModified,
+        long backupLength,
+        long snapshotModified,
+        long snapshotLength
+    ) {
+        ProtectedVerification verification = new ProtectedVerification(
+            documentPath,
+            markerPath,
+            markerModified,
+            markerLength,
+            backupModified,
+            backupLength,
+            snapshotModified,
+            snapshotLength
+        );
+        PROTECTED_VERIFICATIONS.put(activity, verification);
+
+        Properties verificationProperties = new Properties();
+        verificationProperties.putAll(markerProperties);
+        File verificationDocument = new File(document.getAbsolutePath());
+        WeakReference<Activity> activityReference =
+            new WeakReference<>(activity);
+        Handler mainHandler = new Handler(activity.getMainLooper());
+        Thread worker = new Thread(() -> {
+            boolean valid = protectedEditableBackupValid(
+                verificationDocument,
+                verificationProperties
+            );
+            mainHandler.post(() -> {
+                Activity currentActivity = activityReference.get();
+                if (currentActivity == null
+                    || currentActivity.isFinishing()
+                    || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1
+                        && currentActivity.isDestroyed())
+                    || PROTECTED_VERIFICATIONS.get(currentActivity)
+                        != verification) {
+                    return;
+                }
+                verification.complete = true;
+                verification.valid = valid;
+                SPREAD_CONFIGS.remove(currentActivity);
+                log("protected_editable_backup_verification_complete valid="
+                    + valid + " path=" + verification.documentPath);
+                updateNativeEraserGate(
+                    currentActivity,
+                    "protected_backup_verified"
+                );
+            });
+        }, "SNSpreadBackupVerify");
+        worker.setDaemon(true);
+        try {
+            worker.start();
+            log("protected_editable_backup_verification_started path="
+                + verification.documentPath);
+        } catch (Throwable throwable) {
+            verification.complete = true;
+            verification.valid = false;
+            log("protected_editable_backup_verification_failed_to_start "
+                + throwable);
+        }
+        return verification;
+    }
+
     private static String sha256(File file) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         byte[] buffer = new byte[64 * 1024];
@@ -3379,6 +3506,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         FINGER_TOUCH_STARTS.remove(activity);
         NON_EDGE_TAP_SUPPRESS_UNTIL.remove(activity);
         SPREAD_CONFIGS.remove(activity);
+        PROTECTED_VERIFICATIONS.remove(activity);
         log("activity_resources_released active_cleared=" + activeCleared
             + " recycled_bitmaps=" + recycled);
     }
@@ -3521,9 +3649,39 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             boolean requestedEditable = "true".equalsIgnoreCase(
                 properties.getProperty("editable", "false").trim()
             );
-            boolean protectedEditable = enabled && requestedEditable
-                && !disposable
-                && protectedEditableBackupValid(document, properties);
+            boolean protectedEditable = false;
+            if (enabled && requestedEditable && !disposable) {
+                ProtectedVerification verification =
+                    PROTECTED_VERIFICATIONS.get(activity);
+                if (verification == null || !verification.matches(
+                        path,
+                        marker.getAbsolutePath(),
+                        modified,
+                        length,
+                        backupModified,
+                        backupLength,
+                        snapshotModified,
+                        snapshotLength
+                    )) {
+                    verification = startProtectedEditableVerification(
+                        activity,
+                        document,
+                        properties,
+                        path,
+                        marker.getAbsolutePath(),
+                        modified,
+                        length,
+                        backupModified,
+                        backupLength,
+                        snapshotModified,
+                        snapshotLength
+                    );
+                }
+                protectedEditable = verification.complete
+                    && verification.valid;
+            } else {
+                PROTECTED_VERIFICATIONS.remove(activity);
+            }
             boolean editable = enabled && requestedEditable
                 && (disposable || protectedEditable);
             SpreadConfig loaded = new SpreadConfig(

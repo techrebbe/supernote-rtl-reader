@@ -201,6 +201,7 @@ export default function App() {
     useState(false);
 
   const mountedRef = useRef(true);
+  const nativeSpreadBusyRef = useRef(false);
   const renderTokenRef = useRef(0);
   const pageAreaWidthRef = useRef(Math.max(1, window.width));
   const pageAreaLeftRef = useRef(0);
@@ -687,7 +688,12 @@ export default function App() {
   }
 
   const setDirectionValue = next => {
-    if (next !== 'rtl' && next !== 'ltr') return;
+    if (
+      (next !== 'rtl' && next !== 'ltr') ||
+      nativeSpreadBusyRef.current
+    ) {
+      return;
+    }
     if (
       next === 'ltr' && nativeSpreadConfigured
     ) {
@@ -706,6 +712,7 @@ export default function App() {
   };
 
   const setCoverSeparateValue = next => {
+    if (nativeSpreadBusyRef.current) return;
     const normalized = next === true;
     coverSeparateRef.current = normalized;
     setCoverSeparate(normalized);
@@ -732,7 +739,7 @@ export default function App() {
     const filePath = filePathRef.current;
     if (
       !filePath ||
-      nativeSpreadBusy ||
+      nativeSpreadBusyRef.current ||
       !ReaderPreferencesModule?.configureNativeSpreadReadOnly
     ) {
       return;
@@ -741,6 +748,7 @@ export default function App() {
       return;
     }
 
+    nativeSpreadBusyRef.current = true;
     setNativeSpreadBusy(true);
     setNativeSpreadError(null);
     try {
@@ -761,6 +769,7 @@ export default function App() {
       console.error('RTL_READER_NATIVE_SPREAD_CONFIG_FAILED', error);
       setNativeSpreadError(error?.message ?? String(error));
     } finally {
+      nativeSpreadBusyRef.current = false;
       setNativeSpreadBusy(false);
     }
   };
@@ -769,7 +778,7 @@ export default function App() {
     const filePath = filePathRef.current;
     if (
       !filePath ||
-      nativeSpreadBusy ||
+      nativeSpreadBusyRef.current ||
       directionRef.current !== 'rtl' ||
       !nativeSpreadCompatible ||
       !ReaderPreferencesModule?.configureNativeSpreadEditable
@@ -777,6 +786,7 @@ export default function App() {
       return;
     }
 
+    nativeSpreadBusyRef.current = true;
     setNativeSpreadBusy(true);
     setNativeSpreadError(null);
     try {
@@ -801,6 +811,7 @@ export default function App() {
       console.error('RTL_READER_NATIVE_EDITABLE_CONFIG_FAILED', error);
       setNativeSpreadError(error?.message ?? String(error));
     } finally {
+      nativeSpreadBusyRef.current = false;
       setNativeSpreadBusy(false);
     }
   };
@@ -809,12 +820,13 @@ export default function App() {
     const filePath = filePathRef.current;
     if (
       !filePath ||
-      nativeSpreadBusy ||
+      nativeSpreadBusyRef.current ||
       !nativeBackupAvailable ||
       !ReaderPreferencesModule?.restoreNativeAnnotationBackup
     ) {
       return;
     }
+    nativeSpreadBusyRef.current = true;
     setNativeSpreadBusy(true);
     setNativeSpreadError(null);
     try {
@@ -828,6 +840,7 @@ export default function App() {
     } catch (error) {
       console.error('RTL_READER_NATIVE_BACKUP_RESTORE_FAILED', error);
       setNativeSpreadError(error?.message ?? String(error));
+      nativeSpreadBusyRef.current = false;
       setNativeSpreadBusy(false);
     }
   };
@@ -1050,12 +1063,14 @@ export default function App() {
             <View style={styles.segmentRow}>
               <SegmentedButton
                 active={!coverSeparate}
+                disabled={nativeSpreadBusy}
                 label="Off"
                 onPress={() => setCoverSeparateValue(false)}
                 style={styles.segmentHalf}
               />
               <SegmentedButton
                 active={coverSeparate}
+                disabled={nativeSpreadBusy}
                 label="On"
                 onPress={() => setCoverSeparateValue(true)}
                 style={styles.segmentHalfLast}

@@ -44,7 +44,7 @@ class ReaderPreferencesModule(
         private const val NATIVE_SPREAD_PACKAGE =
             "com.techrebbe.supernote.spreadprobe"
         private const val PLUGIN_HOST_PACKAGE = "com.ratta.supernote.pluginhost"
-        private const val NATIVE_SPREAD_MIN_VERSION_CODE = 65L
+        private const val NATIVE_SPREAD_MIN_VERSION_CODE = 66L
         private const val NATIVE_SPREAD_MARKER_SUFFIX = ".snspread"
         private const val NATIVE_SPREAD_BACKUP_SUFFIX = ".snspread-backup.properties"
         private const val NATIVE_SPREAD_BACKUP_MARK_SUFFIX = ".snspread-backup.mark"
@@ -735,6 +735,17 @@ class ReaderPreferencesModule(
         // session. Retire its recovery baseline so a later "Back up & enable"
         // starts from the current .mark instead of silently reusing stale bytes
         // from before an ordinary, unprotected annotation interval.
+        removeNativeAnnotationBackupFiles(pdfFile, backup)
+        Log.i(
+            LOG_TAG,
+            "RTL_READER_NATIVE_BACKUP_RETIRED createdAt=${backup.createdAt}",
+        )
+    }
+
+    private fun removeNativeAnnotationBackupFiles(
+        pdfFile: File,
+        backup: NativeAnnotationBackup,
+    ) {
         val retiring = nativeAnnotationRetiringSnapshot(pdfFile)
         if (retiring.exists()) {
             throw IllegalStateException("A prior annotation backup retirement is incomplete")
@@ -754,10 +765,6 @@ class ReaderPreferencesModule(
                 "RTL_READER_NATIVE_BACKUP_RETIRE_CLEANUP_DEFERRED file=${retiring.absolutePath}",
             )
         }
-        Log.i(
-            LOG_TAG,
-            "RTL_READER_NATIVE_BACKUP_RETIRED createdAt=${backup.createdAt}",
-        )
     }
 
     private fun ensureNativeAnnotationBackup(pdfFile: File): NativeAnnotationBackup {
@@ -790,42 +797,64 @@ class ReaderPreferencesModule(
             throw IllegalStateException("Supernote annotation path is not a regular file")
         }
         val originalPresent = mark.isFile
-        val markLength: Long
-        val markHash: String
-        if (originalPresent) {
-            markLength = mark.length()
-            markHash = sha256(mark)
-            copyFileAtomically(mark, snapshot)
-            if (snapshot.length() != markLength || sha256(snapshot) != markHash) {
-                throw IllegalStateException("Annotation snapshot byte verification failed")
+        try {
+            val markLength: Long
+            val markHash: String
+            if (originalPresent) {
+                markLength = mark.length()
+                markHash = sha256(mark)
+                copyFileAtomically(mark, snapshot)
+                if (snapshot.length() != markLength || sha256(snapshot) != markHash) {
+                    throw IllegalStateException("Annotation snapshot byte verification failed")
+                }
+            } else {
+                markLength = 0L
+                markHash = "ABSENT"
             }
-        } else {
-            markLength = 0L
-            markHash = "ABSENT"
-        }
 
-        val createdAt = System.currentTimeMillis()
-        val properties = Properties().apply {
-            setProperty("version", NATIVE_SPREAD_BACKUP_VERSION.toString())
-            setProperty("managedBy", "supernote-rtl-reader")
-            setProperty("documentPath", pdfFile.canonicalPath)
-            setProperty("documentLength", pdfFile.length().toString())
-            setProperty("documentSha256", sha256(pdfFile))
-            // Supernote updates the PDF mtime when DocumentActivity reopens.
-            // Retain it for diagnostics, but bind recovery to the PDF bytes.
-            setProperty("documentModified", pdfFile.lastModified().toString())
-            setProperty("markPath", mark.canonicalPath)
-            setProperty("originalMarkPresent", originalPresent.toString())
-            setProperty("markLength", markLength.toString())
-            setProperty("markSha256", markHash)
-            setProperty("snapshotPath", snapshot.canonicalPath)
-            setProperty("createdAt", createdAt.toString())
+            val createdAt = System.currentTimeMillis()
+            val properties = Properties().apply {
+                setProperty("version", NATIVE_SPREAD_BACKUP_VERSION.toString())
+                setProperty("managedBy", "supernote-rtl-reader")
+                setProperty("documentPath", pdfFile.canonicalPath)
+                setProperty("documentLength", pdfFile.length().toString())
+                setProperty("documentSha256", sha256(pdfFile))
+                // Supernote updates the PDF mtime when DocumentActivity reopens.
+                // Retain it for diagnostics, but bind recovery to the PDF bytes.
+                setProperty("documentModified", pdfFile.lastModified().toString())
+                setProperty("markPath", mark.canonicalPath)
+                setProperty("originalMarkPresent", originalPresent.toString())
+                setProperty("markLength", markLength.toString())
+                setProperty("markSha256", markHash)
+                setProperty("snapshotPath", snapshot.canonicalPath)
+                setProperty("createdAt", createdAt.toString())
+            }
+            writePropertiesAtomically(
+                manifest,
+                properties,
+                "Supernote RTL annotation recovery snapshot",
+            )
+        } catch (error: Throwable) {
+            if (!manifest.exists() && originalPresent && snapshot.exists()) {
+                if (!snapshot.delete()) {
+                    val cleanupError = IllegalStateException(
+                        "Could not remove the orphaned annotation snapshot after backup creation failed",
+                    )
+                    error.addSuppressed(cleanupError)
+                    Log.e(
+                        LOG_TAG,
+                        "RTL_READER_NATIVE_BACKUP_CREATION_ROLLBACK_FAILED file=${snapshot.absolutePath}",
+                        cleanupError,
+                    )
+                } else {
+                    Log.w(
+                        LOG_TAG,
+                        "RTL_READER_NATIVE_BACKUP_CREATION_ROLLED_BACK file=${snapshot.absolutePath}",
+                    )
+                }
+            }
+            throw error
         }
-        writePropertiesAtomically(
-            manifest,
-            properties,
-            "Supernote RTL annotation recovery snapshot",
-        )
 
         val verified = readNativeAnnotationBackup(pdfFile)
         return verified.backup
@@ -1351,21 +1380,7 @@ class ReaderPreferencesModule(
                     LOG_TAG,
                     "RTL_READER_NATIVE_BACKUP_RESTORED originalPresent=${backup.originalMarkPresent} mark=${currentMark.absolutePath}",
                 )
-                val snapshotCleaned = !backup.snapshot.exists() || backup.snapshot.delete()
-                if (!snapshotCleaned) {
-                    Log.w(
-                        LOG_TAG,
-                        "RTL_READER_NATIVE_BACKUP_CLEANUP_SKIPPED file=${backup.snapshot.absolutePath}",
-                    )
-                }
-                if (snapshotCleaned && backup.manifest.exists() &&
-                    !backup.manifest.delete()
-                ) {
-                    Log.w(
-                        LOG_TAG,
-                        "RTL_READER_NATIVE_BACKUP_CLEANUP_SKIPPED file=${backup.manifest.absolutePath}",
-                    )
-                }
+                removeNativeAnnotationBackupFiles(pdfFile, backup)
                 SystemClock.sleep(250)
                 reactApplicationContext.startActivity(Intent().apply {
                     setClassName(DOCUMENT_PACKAGE, DOCUMENT_ACTIVITY)

@@ -141,12 +141,14 @@ and **RTL read-only**. Before an ordinary PDF can become editable, the plugin:
 4. verifies the snapshot length and SHA-256; and
 5. creates an editable marker bound to the recovery-manifest SHA-256.
 
-Native Spread v0.0.65 independently verifies that attestation. A missing,
-changed, mismatched, or orphaned recovery file fails closed to read-only. The
+Native Spread v0.0.66 independently verifies that attestation off the document
+activity's main thread, with editing kept disabled until verification finishes.
+A missing, changed, mismatched, or orphaned recovery file fails closed to
+read-only. The
 module also notices backup-file metadata changes during a running session
 instead of trusting a stale editable configuration cache.
 
-v0.4.10 raises the protected-editing compatibility floor to v0.0.65. Its
+v0.4.10 raises the protected-editing compatibility floor to v0.0.66. Its
 canonical lasso transition preserves the selection's native width and height
 during a pure move; only the translated origin is converted from the half-page
 spread. This prevents the live selection from growing to roughly twice its
@@ -170,6 +172,10 @@ the current `.mark`, including legitimate annotations made during the ordinary
 native-reader interval, rather than silently reusing an older baseline.
 Retirement first moves the snapshot to a recoverable staging path and preserves
 or reconstructs its manifest-bound state if cleanup is interrupted.
+Backup creation removes a newly copied snapshot if manifest creation fails, and
+restore uses the same staged cleanup transaction before reporting success.
+Cover controls are disabled while any native-mode transition is pending so a
+read-only Cover update cannot race a protected-editable handshake.
 
 The protected pilot validated that full rollback on hardware: an edited
 147,752-byte `.mark` was restored byte-for-byte to its original 89,801-byte

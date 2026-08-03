@@ -41,7 +41,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 65L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 66L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -70,7 +70,9 @@ def check(repo_root: Path) -> None:
             'promise.resolve(nativeAnnotationBackupMap(backup, "restored"))',
             "Toast.makeText(",
             "RTL_READER_NATIVE_BACKUP_RETIREMENT_ROLLED_BACK",
+            "RTL_READER_NATIVE_BACKUP_CREATION_ROLLED_BACK",
             "nativeAnnotationRetiringSnapshot(pdfFile)",
+            "removeNativeAnnotationBackupFiles(pdfFile, backup)",
             'putBoolean("backupAvailable", backupResult.backup != null)',
         ),
         "plugin handshake",
@@ -90,6 +92,9 @@ def check(repo_root: Path) -> None:
             "RTL editable",
             "Back up & enable",
             "restoreNativeAnnotationBackup",
+            "const nativeSpreadBusyRef = useRef(false);",
+            "nativeSpreadBusyRef.current = true;",
+            "if (nativeSpreadBusyRef.current) return;",
         ),
         "configured/runtime Native Spread state separation",
     )
@@ -126,6 +131,14 @@ def check(repo_root: Path) -> None:
     reuse_log = ensure_backup.find("RTL_READER_NATIVE_BACKUP_REUSED")
     if inactive_guard < 0 or reuse_log < 0 or inactive_guard > reuse_log:
         fail("a verified backup can be reused without an active protected session")
+    snapshot_copy = ensure_backup.find("copyFileAtomically(mark, snapshot)")
+    creation_catch = ensure_backup.find("catch (error: Throwable)", snapshot_copy)
+    rollback_log = ensure_backup.find(
+        "RTL_READER_NATIVE_BACKUP_CREATION_ROLLED_BACK",
+        creation_catch,
+    )
+    if not (0 <= snapshot_copy < creation_catch < rollback_log):
+        fail("annotation backup creation cannot roll back an orphaned snapshot")
 
     restore_worker_start = plugin.find("private fun scheduleAnnotationRestore(")
     restore_worker_end = plugin.find("\n    }\n}", restore_worker_start)
@@ -139,6 +152,13 @@ def check(repo_root: Path) -> None:
     mark_write = restore_worker.find("copyFileAtomically(backup.snapshot, currentMark)")
     if not (0 <= remaining_check < active_abort < mark_write):
         fail("annotation restore can touch .mark before all document processes exit")
+    transactional_cleanup = restore_worker.find(
+        "removeNativeAnnotationBackupFiles(pdfFile, backup)",
+        mark_write,
+    )
+    restore_success = restore_worker.find("completion(null)", mark_write)
+    if not (0 <= mark_write < transactional_cleanup < restore_success):
+        fail("annotation restore cleanup is not transactional before success")
 
     restore_api_start = plugin.find("fun restoreNativeAnnotationBackup(")
     marker_writer_start = plugin.find(
@@ -157,16 +177,16 @@ def check(repo_root: Path) -> None:
     if "restore_scheduled" in restore_api:
         fail("annotation restore still reports scheduling as successful recovery")
 
-    retire_start = plugin.find("private fun retireNativeAnnotationBackup(")
-    ensure_start = plugin.find("private fun ensureNativeAnnotationBackup(", retire_start)
-    if retire_start < 0 or ensure_start < 0:
-        fail("could not isolate annotation backup retirement")
-    retire = plugin[retire_start:ensure_start]
-    stage_snapshot = retire.find(
+    cleanup_start = plugin.find("private fun removeNativeAnnotationBackupFiles(")
+    ensure_start = plugin.find("private fun ensureNativeAnnotationBackup(", cleanup_start)
+    if cleanup_start < 0 or ensure_start < 0:
+        fail("could not isolate transactional annotation backup cleanup")
+    cleanup = plugin[cleanup_start:ensure_start]
+    stage_snapshot = cleanup.find(
         "Os.rename(backup.snapshot.absolutePath, retiring.absolutePath)"
     )
-    delete_manifest = retire.find("backup.manifest.delete()")
-    rollback_snapshot = retire.find(
+    delete_manifest = cleanup.find("backup.manifest.delete()")
+    rollback_snapshot = cleanup.find(
         "Os.rename(retiring.absolutePath, backup.snapshot.absolutePath)"
     )
     if not (0 <= stage_snapshot < delete_manifest < rollback_snapshot):
@@ -194,8 +214,15 @@ def check(repo_root: Path) -> None:
             "LEFT_DESTINATIONS.remove(activity);",
             "RIGHT_DESTINATIONS.remove(activity);",
             "SPREAD_CONFIGS.remove(activity);",
+            "PROTECTED_VERIFICATIONS.remove(activity);",
             "activity_resources_released",
-            "protectedEditableBackupValid(document, properties)",
+            "protectedEditableBackupValid(",
+            "startProtectedEditableVerification(",
+            'new Thread(() -> {',
+            '"SNSpreadBackupVerify"',
+            "verification.complete",
+            "verification.valid",
+            '"protected_backup_verified"',
             '"protected-editable-pilot"',
             "expectedManifestHash.equals(sha256(expectedManifest))",
             'backup.getProperty("documentSha256", "").trim().equals(',
@@ -208,6 +235,44 @@ def check(repo_root: Path) -> None:
         ),
         "companion handshake/lifecycle",
     )
+
+    spread_config_start = module.find("private static SpreadConfig spreadConfig(")
+    spread_pair_start = module.find(
+        "private static SpreadPair spreadPair(",
+        spread_config_start,
+    )
+    if spread_config_start < 0 or spread_pair_start < 0:
+        fail("could not isolate spreadConfig")
+    spread_config = module[spread_config_start:spread_pair_start]
+    if "protectedEditableBackupValid(document, properties)" in spread_config:
+        fail("protected backup verification still hashes the PDF on the activity thread")
+    if not all(
+        marker in spread_config
+        for marker in (
+            "startProtectedEditableVerification(",
+            "verification.complete",
+            "verification.valid",
+        )
+    ):
+        fail("spreadConfig does not fail closed while asynchronous verification is pending")
+
+    cover_start = app.find("const setCoverSeparateValue = next =>")
+    readonly_start = app.find("const setNativeSpreadReadOnly = async", cover_start)
+    if cover_start < 0 or readonly_start < 0:
+        fail("could not isolate Cover synchronization")
+    cover_sync = app[cover_start:readonly_start]
+    if "if (nativeSpreadBusyRef.current) return;" not in cover_sync:
+        fail("Cover synchronization is not blocked during native mode transitions")
+    cover_controls_start = app.find(
+        "<Text style={styles.settingLabel}>Treat Cover Page Separately</Text>"
+    )
+    native_controls_start = app.find(
+        "<Text style={styles.settingLabel}>Supernote native reader</Text>",
+        cover_controls_start,
+    )
+    cover_controls = app[cover_controls_start:native_controls_start]
+    if cover_controls.count("disabled={nativeSpreadBusy}") != 2:
+        fail("both Cover controls must be disabled during native mode transitions")
 
     handle_start = module.find("public void handleLoadPackage(")
     first_helper = module.find(
@@ -235,10 +300,10 @@ def check(repo_root: Path) -> None:
     if "releaseActivityResources(activity);" not in destroy:
         fail("onDestroy does not release all per-activity resources")
 
-    if 'android:versionCode="65"' not in manifest:
-        fail("companion manifest must use versionCode 65 for protected editing")
-    if 'android:versionName="0.0.65"' not in manifest:
-        fail("companion manifest must use versionName 0.0.65")
+    if 'android:versionCode="66"' not in manifest:
+        fail("companion manifest must use versionCode 66 for protected editing")
+    if 'android:versionName="0.0.66"' not in manifest:
+        fail("companion manifest must use versionName 0.0.66")
 
     print("Native Spread safety invariants: PASS")
 

@@ -67,6 +67,10 @@ def check(repo_root: Path) -> None:
             "copyFileAtomically(backup.snapshot, currentMark)",
             "RTL_READER_NATIVE_BACKUP_RESTORE_ABORTED_ACTIVE_PROCESS",
             "Native document process remained active; annotation recovery was not written",
+            'promise.resolve(nativeAnnotationBackupMap(backup, "restored"))',
+            "Toast.makeText(",
+            "RTL_READER_NATIVE_BACKUP_RETIREMENT_ROLLED_BACK",
+            "nativeAnnotationRetiringSnapshot(pdfFile)",
             'putBoolean("backupAvailable", backupResult.backup != null)',
         ),
         "plugin handshake",
@@ -135,6 +139,38 @@ def check(repo_root: Path) -> None:
     mark_write = restore_worker.find("copyFileAtomically(backup.snapshot, currentMark)")
     if not (0 <= remaining_check < active_abort < mark_write):
         fail("annotation restore can touch .mark before all document processes exit")
+
+    restore_api_start = plugin.find("fun restoreNativeAnnotationBackup(")
+    marker_writer_start = plugin.find(
+        "private fun writeNativeSpreadReadOnlyMarker(", restore_api_start
+    )
+    if restore_api_start < 0 or marker_writer_start < 0:
+        fail("could not isolate annotation restore API")
+    restore_api = plugin[restore_api_start:marker_writer_start]
+    scheduled = restore_api.find("scheduleAnnotationRestore(pdfFile, backup) { error ->")
+    completed = restore_api.find(
+        'promise.resolve(nativeAnnotationBackupMap(backup, "restored"))'
+    )
+    failure_toast = restore_api.find("Toast.makeText(")
+    if not (0 <= scheduled < completed and 0 <= scheduled < failure_toast):
+        fail("annotation restore promise does not report the worker's final outcome")
+    if "restore_scheduled" in restore_api:
+        fail("annotation restore still reports scheduling as successful recovery")
+
+    retire_start = plugin.find("private fun retireNativeAnnotationBackup(")
+    ensure_start = plugin.find("private fun ensureNativeAnnotationBackup(", retire_start)
+    if retire_start < 0 or ensure_start < 0:
+        fail("could not isolate annotation backup retirement")
+    retire = plugin[retire_start:ensure_start]
+    stage_snapshot = retire.find(
+        "Os.rename(backup.snapshot.absolutePath, retiring.absolutePath)"
+    )
+    delete_manifest = retire.find("backup.manifest.delete()")
+    rollback_snapshot = retire.find(
+        "Os.rename(retiring.absolutePath, backup.snapshot.absolutePath)"
+    )
+    if not (0 <= stage_snapshot < delete_manifest < rollback_snapshot):
+        fail("annotation backup retirement can lose its manifest before safe staging")
 
     require_markers(
         module,

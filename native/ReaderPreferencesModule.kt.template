@@ -13,6 +13,7 @@ import android.os.SystemClock
 import android.system.Os
 import android.system.OsConstants
 import android.util.Log
+import android.widget.Toast
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -323,12 +324,37 @@ class ReaderPreferencesModule(
                 throw IllegalStateException("Could not disable Native Spread before recovery")
             }
             annotationRecoveryPending.set(true)
-            scheduleAnnotationRestore(pdfFile, backup)
+            scheduleAnnotationRestore(pdfFile, backup) { error ->
+                Handler(Looper.getMainLooper()).post {
+                    if (error == null) {
+                        promise.resolve(nativeAnnotationBackupMap(backup, "restored"))
+                        // App.js normally consumes this flag immediately while
+                        // closing. Avoid leaving a stale skip behind if the
+                        // document restart has already dismissed PluginHost.
+                        Handler(Looper.getMainLooper()).postDelayed(
+                            { annotationRecoveryPending.compareAndSet(true, false) },
+                            5000L,
+                        )
+                    } else {
+                        annotationRecoveryPending.set(false)
+                        val message = "Annotation restore failed: ${error.message ?: "unknown error"}"
+                        Toast.makeText(
+                            reactApplicationContext,
+                            message,
+                            Toast.LENGTH_LONG,
+                        ).show()
+                        promise.reject(
+                            "NATIVE_SPREAD_BACKUP_RESTORE_FAILED",
+                            error.message,
+                            error,
+                        )
+                    }
+                }
+            }
             Log.i(
                 LOG_TAG,
                 "RTL_READER_NATIVE_BACKUP_RESTORE_PREPARED originalPresent=${backup.originalMarkPresent} backup=${backup.manifest.absolutePath}",
             )
-            promise.resolve(nativeAnnotationBackupMap(backup, "restore_scheduled"))
         } catch (error: Throwable) {
             annotationRecoveryPending.set(false)
             Log.e(LOG_TAG, "RTL_READER_NATIVE_BACKUP_RESTORE_FAILED: ${error.message}", error)
@@ -688,6 +714,9 @@ class ReaderPreferencesModule(
         return File(parent, ".${pdfFile.name}$NATIVE_SPREAD_BACKUP_MARK_SUFFIX")
     }
 
+    private fun nativeAnnotationRetiringSnapshot(pdfFile: File): File =
+        File("${nativeAnnotationBackupSnapshot(pdfFile).absolutePath}.retiring")
+
     private fun readPropertiesIfFile(file: File): Properties = Properties().apply {
         if (file.isFile) {
             FileInputStream(file).use { input -> load(input) }
@@ -706,11 +735,24 @@ class ReaderPreferencesModule(
         // session. Retire its recovery baseline so a later "Back up & enable"
         // starts from the current .mark instead of silently reusing stale bytes
         // from before an ordinary, unprotected annotation interval.
+        val retiring = nativeAnnotationRetiringSnapshot(pdfFile)
+        if (retiring.exists()) {
+            throw IllegalStateException("A prior annotation backup retirement is incomplete")
+        }
+        if (backup.originalMarkPresent) {
+            Os.rename(backup.snapshot.absolutePath, retiring.absolutePath)
+        }
         if (backup.manifest.exists() && !backup.manifest.delete()) {
+            if (backup.originalMarkPresent && retiring.exists()) {
+                Os.rename(retiring.absolutePath, backup.snapshot.absolutePath)
+            }
             throw IllegalStateException("Could not retire the completed annotation backup manifest")
         }
-        if (backup.snapshot.exists() && !backup.snapshot.delete()) {
-            throw IllegalStateException("Could not retire the completed annotation backup snapshot")
+        if (retiring.exists() && !retiring.delete()) {
+            Log.w(
+                LOG_TAG,
+                "RTL_READER_NATIVE_BACKUP_RETIRE_CLEANUP_DEFERRED file=${retiring.absolutePath}",
+            )
         }
         Log.i(
             LOG_TAG,
@@ -736,7 +778,8 @@ class ReaderPreferencesModule(
 
         val manifest = nativeAnnotationBackupManifest(pdfFile)
         val snapshot = nativeAnnotationBackupSnapshot(pdfFile)
-        if (manifest.exists() || snapshot.exists()) {
+        val retiring = nativeAnnotationRetiringSnapshot(pdfFile)
+        if (manifest.exists() || snapshot.exists() || retiring.exists()) {
             throw IllegalStateException(
                 "An unverified annotation backup already exists (${existing.status}); recovery files were not overwritten",
             )
@@ -794,6 +837,20 @@ class ReaderPreferencesModule(
     private fun readNativeAnnotationBackup(pdfFile: File): NativeAnnotationBackupResult {
         return try {
             val manifest = nativeAnnotationBackupManifest(pdfFile)
+            val snapshot = nativeAnnotationBackupSnapshot(pdfFile)
+            val retiring = nativeAnnotationRetiringSnapshot(pdfFile)
+            if (manifest.isFile && !snapshot.exists() && retiring.isFile) {
+                Os.rename(retiring.absolutePath, snapshot.absolutePath)
+                Log.w(
+                    LOG_TAG,
+                    "RTL_READER_NATIVE_BACKUP_RETIREMENT_ROLLED_BACK file=${snapshot.absolutePath}",
+                )
+            } else if (!manifest.exists() && retiring.exists() && !retiring.delete()) {
+                Log.w(
+                    LOG_TAG,
+                    "RTL_READER_NATIVE_BACKUP_RETIRE_CLEANUP_DEFERRED file=${retiring.absolutePath}",
+                )
+            }
             if (!manifest.isFile) {
                 return NativeAnnotationBackupResult(null, "missing")
             }
@@ -816,7 +873,6 @@ class ReaderPreferencesModule(
             if (File(properties.getProperty("markPath", "")).canonicalPath != mark.canonicalPath) {
                 throw IllegalStateException("mark_path_mismatch")
             }
-            val snapshot = nativeAnnotationBackupSnapshot(pdfFile)
             if (File(properties.getProperty("snapshotPath", "")).canonicalPath !=
                 snapshot.canonicalPath
             ) {
@@ -1235,13 +1291,14 @@ class ReaderPreferencesModule(
     private fun scheduleAnnotationRestore(
         pdfFile: File,
         backup: NativeAnnotationBackup,
+        completion: (Throwable?) -> Unit,
     ) {
         Thread {
             try {
-                // App.js closes PluginHost immediately after this method is
-                // prepared. Kill the native reader before touching its working
-                // .mark so an in-memory annotation model cannot overwrite the
-                // recovery snapshot while DocumentActivity is resuming.
+                // The promise remains pending while this worker runs. Kill the
+                // native reader before touching its working .mark so an
+                // in-memory annotation model cannot overwrite the recovery
+                // snapshot while DocumentActivity is resuming.
                 SystemClock.sleep(350)
                 val activityManager = reactApplicationContext.getSystemService(
                     Context.ACTIVITY_SERVICE,
@@ -1315,12 +1372,27 @@ class ReaderPreferencesModule(
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
                 })
                 Log.i(LOG_TAG, "RTL_READER_NATIVE_BACKUP_RESTORE_REOPENED")
+                completion(null)
             } catch (error: Throwable) {
                 Log.e(
                     LOG_TAG,
                     "RTL_READER_NATIVE_BACKUP_RESTORE_WORKER_FAILED: ${error.message}",
                     error,
                 )
+                try {
+                    reactApplicationContext.startActivity(Intent().apply {
+                        setClassName(DOCUMENT_PACKAGE, DOCUMENT_ACTIVITY)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                    })
+                    Log.i(LOG_TAG, "RTL_READER_NATIVE_BACKUP_RESTORE_FAILURE_REOPENED")
+                } catch (restartError: Throwable) {
+                    Log.e(
+                        LOG_TAG,
+                        "RTL_READER_NATIVE_BACKUP_RESTORE_FAILURE_REOPEN_FAILED: ${restartError.message}",
+                        restartError,
+                    )
+                }
+                completion(error)
             }
         }.apply {
             name = "RtlReaderAnnotationRecovery"

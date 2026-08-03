@@ -160,12 +160,16 @@ replacement PID, and aborts unless every document process has exited. It then
 atomically restores and verifies the original bytes (or the original no-`.mark`
 state), removes the completed recovery files, and reopens the native reader.
 This prevents an in-memory native annotation model from overwriting the
-recovered state.
+recovered state. The Restore action now waits for that worker's verified result;
+an asynchronous failure is returned to the settings UI and also shown as a
+long device message if the document restart has already dismissed the plugin.
 
 Selecting **Off** or downgrading to read-only retires the completed editable
 session's recovery baseline. A later **Back up & enable** therefore snapshots
 the current `.mark`, including legitimate annotations made during the ordinary
 native-reader interval, rather than silently reusing an older baseline.
+Retirement first moves the snapshot to a recoverable staging path and preserves
+or reconstructs its manifest-bound state if cleanup is interrupted.
 
 The protected pilot validated that full rollback on hardware: an edited
 147,752-byte `.mark` was restored byte-for-byte to its original 89,801-byte

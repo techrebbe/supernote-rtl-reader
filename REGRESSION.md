@@ -253,6 +253,10 @@ Safety and setup:
   interval.
 - [x] Recovery re-enumerates every native document PID and aborts before
   touching `.mark` unless all original or replacement processes have exited.
+- [x] Restore resolves only after the worker's verified outcome and shows a
+  visible failure message if an asynchronous recovery step fails.
+- [x] Backup retirement stages the snapshot first, rolls it back if manifest
+  removal fails, and recovers or cleans interrupted retirement state on load.
 - [ ] A document with no `.mark` records and can restore the original absent state.
 - [ ] Removing or modifying a backup file makes editable mode fail closed.
 - [ ] Read-only mode and **Off** retain their v0.4.7-r1 behavior.

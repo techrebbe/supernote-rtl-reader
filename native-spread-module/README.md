@@ -23,7 +23,7 @@ hardware-tested environment:
 - LSPosed scope limited to `com.supernote.document`;
 - an enabled marker beside the current PDF.
 
-The read-only marker sets `editable=false`. In that mode v0.0.64
+The read-only marker sets `editable=false`. In that mode v0.0.65
 forces a full-page disabled handwriting region and blocks the native
 annotation-commit callback. It displays existing `.mark` ink but does not allow
 new native writing. An editable marker for an ordinary document is accepted
@@ -40,9 +40,14 @@ module version, document APK identity, and live document-process PID. An
 installed-but-disabled, incorrectly scoped, or compatibility-rejected module
 therefore fails closed.
 
-v0.0.64 also clears the destroyed activity reference and recycles all
+v0.0.65 also clears the destroyed activity reference and recycles all
 per-activity full-resolution page, ink, and digest bitmaps when the native
 reader closes.
+
+For canonical landscape lasso moves, v0.0.65 converts the translated origin
+from half-page display coordinates but preserves the native selection width and
+height. This prevents a pure move from applying the inverse spread scale to the
+selection dimensions a second time.
 
 This is firmware-specific experimental software for a rooted device. Back up
 documents and `.mark` files before testing a new firmware or module revision.
@@ -69,7 +74,7 @@ The signed APK is written to `build/artifact/`.
 
 Install the APK, enable **Supernote Native Spread Probe** in LSPosed, scope it
 only to `com.supernote.document`, and restart the document reader. Supernote
-RTL Reader v0.4.9 or newer is required for protected editable mode. Its
+RTL Reader v0.4.10 or newer is required for protected editable mode. Its
 recovery manifest binds the backup to the PDF's full SHA-256 because
 Supernote changes the PDF modification time when the document activity
 reopens.
@@ -81,6 +86,6 @@ PDF and a protected copy of a 738-page annotated Hebrew PDF. The real-document
 pass confirmed persistent two-page annotation display, outer-edge-only tap
 navigation, side-preserving spread turns, and an unchanged `.mark` checksum.
 
-v0.0.64 compiles and passes automated handshake, backup-attestation, and
-destroyed-activity cleanup invariants. Its focused hardware regression is tracked in the root
-`REGRESSION.md`.
+v0.0.65 compiles and passes automated handshake, backup-attestation,
+destroyed-activity cleanup, and canonical lasso-move invariants. Its focused
+hardware regression is tracked in the root `REGRESSION.md`.

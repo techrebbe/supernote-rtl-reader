@@ -127,9 +127,9 @@ This prevents the initial landscape spread from being mounted against stale or i
 
 Full validation details are recorded in `REGRESSION.md`.
 
-## v0.4.9 protected native editing pilot
+## v0.4.10 protected native editing pilot
 
-v0.4.9 adds an explicitly confirmed **RTL editable** choice alongside **Off**
+v0.4.9 added an explicitly confirmed **RTL editable** choice alongside **Off**
 and **RTL read-only**. Before an ordinary PDF can become editable, the plugin:
 
 1. completes the live, document-bound Native Spread handshake;
@@ -141,10 +141,18 @@ and **RTL read-only**. Before an ordinary PDF can become editable, the plugin:
 4. verifies the snapshot length and SHA-256; and
 5. creates an editable marker bound to the recovery-manifest SHA-256.
 
-Native Spread v0.0.64 independently verifies that attestation. A missing,
+Native Spread v0.0.65 independently verifies that attestation. A missing,
 changed, mismatched, or orphaned recovery file fails closed to read-only. The
 module also notices backup-file metadata changes during a running session
 instead of trusting a stale editable configuration cache.
+
+v0.4.10 raises the protected-editing compatibility floor to v0.0.65. Its
+canonical lasso transition preserves the selection's native width and height
+during a pure move; only the translated origin is converted from the half-page
+spread. This prevents the live selection from growing to roughly twice its
+size when moved in landscape. Hardware validation on the protected 738-page
+pilot confirmed that the moved X kept its size and position through a spread
+turn and a cold native-reader restart.
 
 **Restore snapshot** disables the marker, terminates the native document
 process before touching `.mark`, atomically restores and verifies the original
@@ -152,12 +160,23 @@ bytes (or the original no-`.mark` state), removes the completed recovery files,
 and reopens the native reader. This prevents an in-memory native annotation
 model from overwriting the recovered state.
 
+The protected pilot validated that full rollback on hardware: an edited
+147,752-byte `.mark` was restored byte-for-byte to its original 89,801-byte
+snapshot and SHA-256, the reader reopened normally, and the completed marker,
+manifest, and recovery snapshot were removed.
+
 Editable mode exposes the writing, eraser, lasso, text-highlight, embedded-link,
 and active-page geometry paths previously proven on disposable calibration
 documents. Native handwriting remains ordinary Supernote element data, so it
 continues to work with InkBridge's validated schema-v2 page snapshot/export
 path. Native text highlights are a separate PDF-annotation stream and still
 need InkBridge's planned annotation adapter.
+
+The protected pilot confirmed that interoperability directly: InkBridge
+exported the lasso-moved X as two schema-v2 strokes with 84 pressure-bearing
+samples, stable Supernote UUIDs, normalized geometry, and native style data.
+Deletion tombstones still require InkBridge to compare a post-erase page
+snapshot against a previously captured portable baseline.
 
 ## v0.4.7 native-reader pilot control
 

@@ -238,38 +238,61 @@ re-enabled and the document process restarted, the protected PDF remained in
 ordinary native landscape view rather than silently restoring RTL spread mode.
 The protected `.mark` SHA-256 remained unchanged throughout.
 
-## v0.4.9 protected native editing pilot
+## v0.4.10 protected native editing pilot
 
 Safety and setup:
 
-- [ ] v0.4.9 identifies Native Spread v0.0.64 through the live handshake.
-- [ ] The recovery manifest's full PDF SHA-256 remains valid after Supernote
+- [x] v0.4.10 identifies Native Spread v0.0.65 through the live handshake.
+- [x] The recovery manifest's full PDF SHA-256 remains valid after Supernote
   changes the PDF modification time during a native-reader restart.
-- [ ] **RTL editable** requires a separate confirmation and reports a verified
+- [x] **RTL editable** requires a separate confirmation and reports a verified
   recovery snapshot before it becomes selected.
-- [ ] An existing `.mark` snapshot matches the pre-test byte length and SHA-256.
+- [x] An existing `.mark` snapshot matches the pre-test byte length and SHA-256.
 - [ ] A document with no `.mark` records and can restore the original absent state.
 - [ ] Removing or modifying a backup file makes editable mode fail closed.
 - [ ] Read-only mode and **Off** retain their v0.4.7-r1 behavior.
 
 Protected duplicate editing:
 
-- [ ] Native writing persists on the active left and right pages.
+- [x] Native writing persists on the active left page through a cold restart.
 - [ ] Saved ink remains visible on the inactive page and after spread turns.
-- [ ] Eraser changes persist and do not affect the other spread page.
-- [ ] Lasso selection/movement persists in canonical page coordinates.
+- [x] Eraser changes persist after a normal page-change save and cold restart,
+  and do not alter the protected recovery snapshot.
+- [x] Lasso selection/movement preserves size and position through a spread
+  turn and cold restart in canonical page coordinates.
 - [ ] Text highlight/underline selection and final annotations remain aligned.
 - [ ] Embedded document links, swipes, and outer-edge taps retain RTL behavior.
 - [ ] Portrait RTL navigation and landscape active-page switching remain correct.
 
 Recovery and portability:
 
-- [ ] **Restore snapshot** reopens the native reader with the exact original
+- [x] **Restore snapshot** reopens the native reader with the exact original
   `.mark` SHA-256 (or removes the pilot-created `.mark` when none existed).
-- [ ] Completed recovery files are removed so a later pilot takes a fresh baseline.
-- [ ] InkBridge's existing Supernote page export sees pilot-created handwriting,
-  lasso moves, and erasures as ordinary schema-v2 elements/tombstones.
+- [x] Completed recovery files are removed so a later pilot takes a fresh baseline.
+- [x] InkBridge's existing Supernote page export sees the pilot-created,
+  lasso-moved handwriting as ordinary schema-v2 elements.
+- [ ] InkBridge page reconciliation emits a tombstone for a stroke erased after
+  a prior portable baseline was captured.
 - [ ] No stale/blank/out-of-order spread, crash, or native handoff regression occurs.
+
+The protected 738-page pilot recovery test restored the live `.mark` from
+147,752 edited bytes to the original 89,801-byte snapshot. Its final SHA-256
+was exactly
+`c2155e51a686a3ba7066c8ef7d859c19053019e85d23d1414fa1a69dc9de2c21`,
+the document activity reopened normally, and all `.snspread*` recovery and
+marker sidecars were removed. The pre-restore edited `.mark` and verified
+recovery snapshot were retained as local test evidence for the InkBridge
+portability check.
+
+For that check, the edited snapshot was staged temporarily and page 145 was
+exported through InkBridge's installed **Export Page Test** action. The
+schema-v2 payload contained the moved X as two native strokes with 84 samples,
+stable Supernote UUIDs, normalized page geometry, pressure, thickness, pen
+type, and pen color. The original `.mark` was then restored again with the
+same verified SHA-256 and the temporary device copies were removed. A separate
+write-baseline-erase-reconcile cycle is still needed to validate a deletion
+tombstone; a final page snapshot alone correctly contains only the surviving
+strokes.
 
 ## Failure capture
 

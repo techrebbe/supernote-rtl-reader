@@ -41,7 +41,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 64L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 65L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -140,6 +140,8 @@ def check(repo_root: Path) -> None:
             "protected_editable_backup_verified",
             "cached.backupModified == backupModified",
             "cached.snapshotModified == snapshotModified",
+            "spreadLassoCanonicalSelection && mode == 1",
+            '" preserve_size=" + preserveCanonicalSize',
         ),
         "companion handshake/lifecycle",
     )
@@ -170,10 +172,10 @@ def check(repo_root: Path) -> None:
     if "releaseActivityResources(activity);" not in destroy:
         fail("onDestroy does not release all per-activity resources")
 
-    if 'android:versionCode="64"' not in manifest:
-        fail("companion manifest must use versionCode 64 for protected editing")
-    if 'android:versionName="0.0.64"' not in manifest:
-        fail("companion manifest must use versionName 0.0.64")
+    if 'android:versionCode="65"' not in manifest:
+        fail("companion manifest must use versionCode 65 for protected editing")
+    if 'android:versionName="0.0.65"' not in manifest:
+        fail("companion manifest must use versionName 0.0.65")
 
     print("Native Spread safety invariants: PASS")
 

@@ -53,7 +53,7 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: supernote-rtl-reader-v0.4.9-protected-editable-pilot
+          name: supernote-rtl-reader-v0.4.10-protected-editable-pilot
           path: out/*.snplg
           if-no-files-found: error
           retention-days: 3

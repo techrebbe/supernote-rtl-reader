@@ -78,7 +78,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         "documentApkLength";
     private static final String HANDSHAKE_EXTRA_PROCESS_ID = "processId";
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 64L;
+    private static final long MODULE_VERSION_CODE = 65L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -2947,8 +2947,19 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 (x - writable.left) / scaleX
             ) - (spreadLassoCanonicalSelection ? 0 : slotOffset);
             int nativeY = Math.round((y - writable.top) / scaleY);
-            int nativeWidth = Math.max(1, Math.round(width / scaleX));
-            int nativeHeight = Math.max(1, Math.round(height / scaleY));
+            // The native selection model keeps its canonical dimensions while
+            // AreaSelectionView reports a move using the padded native preview
+            // size. Only the translated origin is in spread-display space.
+            // Applying the inverse half-page scale to the width and height a
+            // second time makes a pure move enlarge the selected trails ~2x.
+            boolean preserveCanonicalSize =
+                spreadLassoCanonicalSelection && mode == 1;
+            int nativeWidth = preserveCanonicalSize
+                ? width
+                : Math.max(1, Math.round(width / scaleX));
+            int nativeHeight = preserveCanonicalSize
+                ? height
+                : Math.max(1, Math.round(height / scaleY));
 
             param.args[1] = nativeX;
             param.args[2] = nativeY;
@@ -2961,6 +2972,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 + nativeWidth + "x" + nativeHeight + "]"
                 + " slot_offset=" + slotOffset
                 + " canonical=" + spreadLassoCanonicalSelection
+                + " preserve_size=" + preserveCanonicalSize
                 + " scale=" + scaleX + "," + scaleY);
         } catch (Throwable throwable) {
             log("lasso_transition_repair_failed " + throwable);

@@ -298,6 +298,29 @@ def check(repo_root: Path) -> None:
     if "restore_scheduled" in restore_api:
         fail("annotation restore still reports scheduling as successful recovery")
 
+    restore_handler_start = app.find("const restoreNativeBackup = async () =>")
+    open_jump_start = app.find("const openJump = () =>", restore_handler_start)
+    if restore_handler_start < 0 or open_jump_start < 0:
+        fail("could not isolate Restore snapshot UI handler")
+    restore_handler = app[restore_handler_start:open_jump_start]
+    restore_completed = restore_handler.find(
+        "await ReaderPreferencesModule.restoreNativeAnnotationBackup(filePath)"
+    )
+    clear_restore_busy_ref = restore_handler.find(
+        "nativeSpreadBusyRef.current = false;",
+        restore_completed,
+    )
+    clear_restore_busy_state = restore_handler.find(
+        "setNativeSpreadBusy(false);",
+        clear_restore_busy_ref,
+    )
+    restore_close = restore_handler.find("await close();", restore_completed)
+    if not (
+        0 <= restore_completed < clear_restore_busy_ref
+        < clear_restore_busy_state < restore_close
+    ):
+        fail("successful Restore remains blocked by the native transition busy guard")
+
     cleanup_start = plugin.find("private fun removeNativeAnnotationBackupFiles(")
     ensure_start = plugin.find("private fun ensureNativeAnnotationBackup(", cleanup_start)
     if cleanup_start < 0 or ensure_start < 0:

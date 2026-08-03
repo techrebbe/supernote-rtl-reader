@@ -895,6 +895,8 @@ export default function App() {
       setNativeSpreadEnabled(false);
       setNativeSpreadEditable(false);
       setNativeEditableConfirmOpen(false);
+      nativeSpreadBusyRef.current = false;
+      setNativeSpreadBusy(false);
       await close();
     } catch (error) {
       console.error('RTL_READER_NATIVE_BACKUP_RESTORE_FAILED', error);

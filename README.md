@@ -175,7 +175,9 @@ or reconstructs its manifest-bound state if cleanup is interrupted.
 Backup creation removes a newly copied snapshot if manifest creation fails, and
 restore uses the same staged cleanup transaction before reporting success.
 Cover controls are disabled while any native-mode transition is pending so a
-read-only Cover update cannot race a protected-editable handshake.
+read-only Cover update cannot race a protected-editable handshake. A Cover
+change also owns that transition lock until its native marker update finishes,
+and leaving editable mode clears the retired recovery status from the UI.
 
 The protected pilot validated that full rollback on hardware: an edited
 147,752-byte `.mark` was restored byte-for-byte to its original 89,801-byte

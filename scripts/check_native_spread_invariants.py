@@ -256,12 +256,19 @@ def check(repo_root: Path) -> None:
     ):
         fail("spreadConfig does not fail closed while asynchronous verification is pending")
 
-    cover_start = app.find("const setCoverSeparateValue = next =>")
+    cover_start = app.find("const setCoverSeparateValue = async next =>")
     readonly_start = app.find("const setNativeSpreadReadOnly = async", cover_start)
     if cover_start < 0 or readonly_start < 0:
         fail("could not isolate Cover synchronization")
     cover_sync = app[cover_start:readonly_start]
-    if "if (nativeSpreadBusyRef.current) return;" not in cover_sync:
+    cover_guard = cover_sync.find("if (nativeSpreadBusyRef.current) return;")
+    cover_busy = cover_sync.find("nativeSpreadBusyRef.current = true;")
+    cover_configure = cover_sync.find("configureNativeSpreadEditable(")
+    cover_release = cover_sync.find(
+        "nativeSpreadBusyRef.current = false;",
+        cover_configure,
+    )
+    if not (0 <= cover_guard < cover_busy < cover_configure < cover_release):
         fail("Cover synchronization is not blocked during native mode transitions")
     cover_controls_start = app.find(
         "<Text style={styles.settingLabel}>Treat Cover Page Separately</Text>"
@@ -273,6 +280,34 @@ def check(repo_root: Path) -> None:
     cover_controls = app[cover_controls_start:native_controls_start]
     if cover_controls.count("disabled={nativeSpreadBusy}") != 2:
         fail("both Cover controls must be disabled during native mode transitions")
+
+    readonly_transition_start = app.find("const setNativeSpreadReadOnly = async")
+    editable_transition_start = app.find(
+        "const setNativeSpreadEditableMode = async",
+        readonly_transition_start,
+    )
+    readonly_transition = app[readonly_transition_start:editable_transition_start]
+    readonly_success = readonly_transition.find(
+        "await ReaderPreferencesModule.configureNativeSpreadReadOnly("
+    )
+    clear_backup = readonly_transition.find(
+        "setNativeBackupAvailable(false);",
+        readonly_success,
+    )
+    clear_original = readonly_transition.find(
+        "setNativeBackupOriginalMarkPresent(false);",
+        readonly_success,
+    )
+    clear_status = readonly_transition.find(
+        "setNativeBackupStatus('missing');",
+        readonly_success,
+    )
+    if not (
+        0 <= readonly_success < clear_backup
+        and 0 <= readonly_success < clear_original
+        and 0 <= readonly_success < clear_status
+    ):
+        fail("leaving editable mode can leave retired backup state in the UI")
 
     handle_start = module.find("public void handleLoadPackage(")
     first_helper = module.find(

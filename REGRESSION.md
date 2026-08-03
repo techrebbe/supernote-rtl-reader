@@ -264,7 +264,10 @@ Safety and setup:
 - [x] Successful restore uses the same staged, rollback-capable cleanup as
   backup retirement before reporting completion.
 - [x] Cover controls and synchronization are blocked while a native-mode
-  transition is pending.
+  transition is pending; a Cover change holds the same lock until its own
+  marker update completes.
+- [x] A successful Off or read-only transition clears the retired recovery
+  snapshot status and Restore action from the settings UI.
 - [ ] A document with no `.mark` records and can restore the original absent state.
 - [ ] Removing or modifying a backup file makes editable mode fail closed.
 - [ ] Read-only mode and **Off** retain their v0.4.7-r1 behavior.

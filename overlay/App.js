@@ -711,27 +711,46 @@ export default function App() {
     console.log(`RTL_READER_VIEW_MODE ${next}`);
   };
 
-  const setCoverSeparateValue = next => {
+  const setCoverSeparateValue = async next => {
     if (nativeSpreadBusyRef.current) return;
     const normalized = next === true;
-    coverSeparateRef.current = normalized;
-    setCoverSeparate(normalized);
-    console.log(`RTL_READER_COVER_SEPARATE ${normalized}`);
-    if (nativeSpreadEnabled) {
-      const syncPromise = nativeSpreadEditable
-        ? ReaderPreferencesModule?.configureNativeSpreadEditable?.(
+    if (!nativeSpreadEnabled) {
+      coverSeparateRef.current = normalized;
+      setCoverSeparate(normalized);
+      console.log(`RTL_READER_COVER_SEPARATE ${normalized}`);
+      return;
+    }
+
+    nativeSpreadBusyRef.current = true;
+    setNativeSpreadBusy(true);
+    setNativeSpreadError(null);
+    try {
+      const result = nativeSpreadEditable
+        ? await ReaderPreferencesModule.configureNativeSpreadEditable(
             filePathRef.current,
             normalized,
           )
-        : ReaderPreferencesModule?.configureNativeSpreadReadOnly?.(
+        : await ReaderPreferencesModule.configureNativeSpreadReadOnly(
             filePathRef.current,
             true,
             normalized,
           );
-      syncPromise?.catch(error => {
-        console.warn('RTL_READER_NATIVE_SPREAD_COVER_SYNC_FAILED', error);
-        setNativeSpreadError(error?.message ?? String(error));
-      });
+      coverSeparateRef.current = normalized;
+      setCoverSeparate(normalized);
+      if (nativeSpreadEditable) {
+        setNativeBackupAvailable(result?.backupAvailable === true);
+        setNativeBackupOriginalMarkPresent(
+          result?.backupOriginalMarkPresent === true,
+        );
+        setNativeBackupStatus(result?.backupStatus ?? 'verified');
+      }
+      console.log(`RTL_READER_COVER_SEPARATE ${normalized}`);
+    } catch (error) {
+      console.warn('RTL_READER_NATIVE_SPREAD_COVER_SYNC_FAILED', error);
+      setNativeSpreadError(error?.message ?? String(error));
+    } finally {
+      nativeSpreadBusyRef.current = false;
+      setNativeSpreadBusy(false);
     }
   };
 
@@ -761,6 +780,9 @@ export default function App() {
       setNativeSpreadConfiguredEditable(false);
       setNativeSpreadEnabled(enabled);
       setNativeSpreadEditable(false);
+      setNativeBackupAvailable(false);
+      setNativeBackupOriginalMarkPresent(false);
+      setNativeBackupStatus('missing');
       setNativeEditableConfirmOpen(false);
       console.log(
         `RTL_READER_NATIVE_SPREAD enabled=${enabled} editable=false cover=${coverSeparateRef.current}`,

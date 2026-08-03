@@ -331,14 +331,45 @@ class ReaderPreferencesModule(
 
                 startNativeBackupWorker("RTLReaderNativeBackupCreate") {
                     try {
+                        val previousMarkerBytes = if (marker.isFile) marker.readBytes() else null
+                        val backupManifestExisted = nativeAnnotationBackupManifest(pdfFile).isFile
                         val backup = ensureNativeAnnotationBackup(pdfFile)
-                        writeNativeSpreadEditableMarker(
-                            pdfFile,
-                            marker,
-                            coverSeparate,
-                            handshake,
-                            backup,
-                        )
+                        try {
+                            writeNativeSpreadEditableMarker(
+                                pdfFile,
+                                marker,
+                                coverSeparate,
+                                handshake,
+                                backup,
+                            )
+                        } catch (activationError: Throwable) {
+                            try {
+                                if (previousMarkerBytes == null) {
+                                    if (marker.exists() && !marker.delete()) {
+                                        throw IllegalStateException(
+                                            "Could not remove the failed protected editable marker",
+                                        )
+                                    }
+                                } else {
+                                    writeBytesAtomically(marker, previousMarkerBytes)
+                                }
+                                if (!backupManifestExisted) {
+                                    removeNativeAnnotationBackupFiles(pdfFile, backup)
+                                }
+                                Log.w(
+                                    LOG_TAG,
+                                    "RTL_READER_NATIVE_EDITABLE_ACTIVATION_ROLLED_BACK marker=${marker.absolutePath} backupCreated=${!backupManifestExisted}",
+                                )
+                            } catch (rollbackError: Throwable) {
+                                activationError.addSuppressed(rollbackError)
+                                Log.e(
+                                    LOG_TAG,
+                                    "RTL_READER_NATIVE_EDITABLE_ACTIVATION_ROLLBACK_FAILED marker=${marker.absolutePath}",
+                                    rollbackError,
+                                )
+                            }
+                            throw activationError
+                        }
                         promise.resolve(nativeAnnotationBackupMap(backup, "verified"))
                     } catch (error: Throwable) {
                         Log.e(
@@ -1008,6 +1039,18 @@ class ReaderPreferencesModule(
         putDouble("backupCreatedAt", backup.createdAt.toDouble())
     }
 
+    private fun sameNativeAnnotationBackup(
+        expected: NativeAnnotationBackup,
+        actual: NativeAnnotationBackup,
+    ): Boolean =
+        expected.manifest.canonicalPath == actual.manifest.canonicalPath &&
+            expected.snapshot.canonicalPath == actual.snapshot.canonicalPath &&
+            expected.mark.canonicalPath == actual.mark.canonicalPath &&
+            expected.originalMarkPresent == actual.originalMarkPresent &&
+            expected.markLength == actual.markLength &&
+            expected.markSha256 == actual.markSha256 &&
+            expected.createdAt == actual.createdAt
+
     private fun protectedEditableMarkerValid(
         pdfFile: File,
         properties: Properties,
@@ -1417,15 +1460,25 @@ class ReaderPreferencesModule(
                     )
                 }
 
+                val revalidatedBackup = readNativeAnnotationBackup(pdfFile).backup
+                    ?: throw IllegalStateException(
+                        "Document or recovery snapshot changed while preparing restore",
+                    )
+                if (!sameNativeAnnotationBackup(backup, revalidatedBackup)) {
+                    throw IllegalStateException(
+                        "Recovery snapshot identity changed while preparing restore",
+                    )
+                }
+
                 val currentMark = nativeAnnotationMark(pdfFile)
-                if (backup.originalMarkPresent) {
-                    if (backup.snapshot.length() != backup.markLength ||
-                        sha256(backup.snapshot) != backup.markSha256) {
+                if (revalidatedBackup.originalMarkPresent) {
+                    if (revalidatedBackup.snapshot.length() != revalidatedBackup.markLength ||
+                        sha256(revalidatedBackup.snapshot) != revalidatedBackup.markSha256) {
                         throw IllegalStateException("Recovery snapshot changed before restore")
                     }
-                    copyFileAtomically(backup.snapshot, currentMark)
-                    if (currentMark.length() != backup.markLength ||
-                        sha256(currentMark) != backup.markSha256
+                    copyFileAtomically(revalidatedBackup.snapshot, currentMark)
+                    if (currentMark.length() != revalidatedBackup.markLength ||
+                        sha256(currentMark) != revalidatedBackup.markSha256
                     ) {
                         throw IllegalStateException("Restored annotation file verification failed")
                     }
@@ -1435,9 +1488,9 @@ class ReaderPreferencesModule(
 
                 Log.i(
                     LOG_TAG,
-                    "RTL_READER_NATIVE_BACKUP_RESTORED originalPresent=${backup.originalMarkPresent} mark=${currentMark.absolutePath}",
+                    "RTL_READER_NATIVE_BACKUP_RESTORED originalPresent=${revalidatedBackup.originalMarkPresent} mark=${currentMark.absolutePath}",
                 )
-                removeNativeAnnotationBackupFiles(pdfFile, backup)
+                removeNativeAnnotationBackupFiles(pdfFile, revalidatedBackup)
                 SystemClock.sleep(250)
                 reactApplicationContext.startActivity(Intent().apply {
                     setClassName(DOCUMENT_PACKAGE, DOCUMENT_ACTIVITY)

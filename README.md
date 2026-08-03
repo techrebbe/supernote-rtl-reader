@@ -153,7 +153,9 @@ changing the document in place forces a fresh full-file attestation.
 The plugin also creates, verifies, and retires those recovery files on a worker
 thread rather than the PluginHost UI thread. Off/read-only transitions preserve
 the prior marker bytes and restore them if recovery-baseline retirement fails,
-keeping the cleanup retryable and the protected session recoverable.
+keeping the cleanup retryable and the protected session recoverable. Initial
+editable activation is transactional too: if marker creation fails after a new
+backup is verified, the prior marker is restored and the new backup is retired.
 
 After successful verification, v0.0.68 explicitly refreshes an already visible
 landscape spread so native handwriting geometry is re-enabled without waiting
@@ -170,6 +172,7 @@ turn and a cold native-reader restart.
 **Restore snapshot** disables the marker, terminates the native document
 process before touching `.mark`, re-enumerates the process list to catch a
 replacement PID, and aborts unless every document process has exited. It then
+rehashes the PDF and recovery snapshot immediately before touching `.mark`,
 atomically restores and verifies the original bytes (or the original no-`.mark`
 state), removes the completed recovery files, and reopens the native reader.
 This prevents an in-memory native annotation model from overwriting the

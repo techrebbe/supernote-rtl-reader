@@ -64,12 +64,14 @@ def check(repo_root: Path) -> None:
             "val previousMarkerBytes = if (marker.isFile) marker.readBytes() else null",
             "writeBytesAtomically(marker, previousMarkerBytes)",
             "RTL_READER_NATIVE_MARKER_ROLLED_BACK",
+            "RTL_READER_NATIVE_EDITABLE_ACTIVATION_ROLLED_BACK",
+            "sameNativeAnnotationBackup(backup, revalidatedBackup)",
             "A verified annotation backup belongs to an inactive protected session",
             "writeNativeSpreadEditableMarker(",
             "fun restoreNativeAnnotationBackup(",
             "scheduleAnnotationRestore(pdfFile, backup)",
             "Recovery snapshot changed before restore",
-            "copyFileAtomically(backup.snapshot, currentMark)",
+            "copyFileAtomically(revalidatedBackup.snapshot, currentMark)",
             "RTL_READER_NATIVE_BACKUP_RESTORE_ABORTED_ACTIVE_PROCESS",
             "Native document process remained active; annotation recovery was not written",
             'promise.resolve(nativeAnnotationBackupMap(backup, "restored"))',
@@ -142,6 +144,23 @@ def check(repo_root: Path) -> None:
         fail(
             "editable marker is not gated by handshake then background verified backup"
         )
+    editable_backup_existed = editable_configure.find(
+        "val backupManifestExisted = nativeAnnotationBackupManifest(pdfFile).isFile"
+    )
+    editable_marker_snapshot = editable_configure.find("val previousMarkerBytes =")
+    editable_cleanup = editable_configure.find(
+        "removeNativeAnnotationBackupFiles(pdfFile, backup)",
+        editable_marker,
+    )
+    editable_rollback = editable_configure.find(
+        "RTL_READER_NATIVE_EDITABLE_ACTIVATION_ROLLED_BACK",
+        editable_marker,
+    )
+    if not (
+        0 <= editable_marker_snapshot < editable_backup_existed < editable_backup
+        < editable_marker < editable_cleanup < editable_rollback
+    ):
+        fail("new backup and editable marker activation are not rollback-capable")
 
     configure_worker = configure.find(
         'startNativeBackupWorker("RTLReaderNativeBackupRetire")'
@@ -195,11 +214,22 @@ def check(repo_root: Path) -> None:
     active_abort = restore_worker.find(
         "RTL_READER_NATIVE_BACKUP_RESTORE_ABORTED_ACTIVE_PROCESS"
     )
-    mark_write = restore_worker.find("copyFileAtomically(backup.snapshot, currentMark)")
-    if not (0 <= remaining_check < active_abort < mark_write):
+    document_revalidation = restore_worker.find(
+        "val revalidatedBackup = readNativeAnnotationBackup(pdfFile).backup"
+    )
+    backup_identity_check = restore_worker.find(
+        "sameNativeAnnotationBackup(backup, revalidatedBackup)"
+    )
+    mark_write = restore_worker.find(
+        "copyFileAtomically(revalidatedBackup.snapshot, currentMark)"
+    )
+    if not (
+        0 <= remaining_check < active_abort < document_revalidation
+        < backup_identity_check < mark_write
+    ):
         fail("annotation restore can touch .mark before all document processes exit")
     transactional_cleanup = restore_worker.find(
-        "removeNativeAnnotationBackupFiles(pdfFile, backup)",
+        "removeNativeAnnotationBackupFiles(pdfFile, revalidatedBackup)",
         mark_write,
     )
     restore_success = restore_worker.find("completion(null)", mark_write)

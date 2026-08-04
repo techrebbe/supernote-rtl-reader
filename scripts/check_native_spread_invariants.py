@@ -41,7 +41,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 79L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 80L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -629,9 +629,41 @@ def check(repo_root: Path) -> None:
             "hasPendingPenActivationEdits(activity)",
             '"pen_activation_aborted reason=persistence_failed target="',
             'cancelPendingPenPageActivation(activity, "persistence_failed")',
+            "matchingTrailPoints(points, candidatePoints, 6)",
+            "matchingTrailInkAttributes(existing, candidate)",
+            'matchingTrailValue(existing, candidate, "get_pressures")',
+            'matchingTrailValue(existing, candidate, "get_angles")',
+            'matchingTrailValue(existing, candidate, "get_flag_draw")',
+            'matchingTrailValue(existing, candidate, "get_timestamp")',
         ),
         "inactive-page pen activation",
     )
+
+    trail_match_start = module.find("private static boolean matchingTrailExists(")
+    eraser_match_start = module.find(
+        "private static boolean eraserIntersectsTrail(", trail_match_start
+    )
+    if trail_match_start < 0 or eraser_match_start < 0:
+        fail("could not isolate inactive-page trail deduplication")
+    trail_match = module[trail_match_start:eraser_match_start]
+    require_markers(
+        trail_match,
+        (
+            "for (int index = 0; index < existing.size(); index++)",
+            "matchingTrailPoints(points, candidatePoints, 6)",
+            "matchingTrailInkAttributes(existing, candidate)",
+            '"get_pen_color"',
+            '"get_m_thickness"',
+            '"get_walcom_emr_type"',
+            '"get_pressures"',
+            '"get_angles"',
+            '"get_flag_draw"',
+            '"get_timestamp"',
+        ),
+        "full inactive-page stroke identity",
+    )
+    if "candidateFirst" in trail_match or "candidateLast" in trail_match:
+        fail("inactive-page deduplication still accepts endpoint-only identity")
 
     completion_start = module.find(
         "private static void completePendingPenPageActivation("
@@ -654,10 +686,10 @@ def check(repo_root: Path) -> None:
     if "PEN_ACTIVATION_TRAILS.remove(activity)" in completion:
         fail("completion cleanup still silently discards failed inactive-page edits")
 
-    if 'android:versionCode="79"' not in manifest:
-        fail("companion manifest must use versionCode 79 for reviewed cache and save hardening")
-    if 'android:versionName="0.0.79"' not in manifest:
-        fail("companion manifest must use versionName 0.0.79")
+    if 'android:versionCode="80"' not in manifest:
+        fail("companion manifest must use versionCode 80 for full stroke identity")
+    if 'android:versionName="0.0.80"' not in manifest:
+        fail("companion manifest must use versionName 0.0.80")
 
     print("Native Spread safety invariants: PASS")
 

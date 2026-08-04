@@ -172,7 +172,7 @@ After successful verification, v0.0.75 explicitly refreshes an already visible
 landscape spread so native handwriting geometry is re-enabled without waiting
 for a page turn or rotation.
 
-v0.4.10 raises the protected-editing compatibility floor to v0.0.79. Its
+v0.4.10 raises the protected-editing compatibility floor to v0.0.80. Its
 canonical lasso transition preserves the selection's native width and height
 during a pure move; only the translated origin is converted from the half-page
 spread. This prevents the live selection from growing to roughly twice its
@@ -205,6 +205,12 @@ pending edit; it cancels the activation and displays an explicit save-failure
 banner. The protected-editing cache now binds the marker, recovery manifest, and
 snapshot to device, inode, and nanosecond change time as well as length and
 mtime, so metadata-preserving sidecar replacement forces fresh attestation.
+
+Native Spread v0.0.80 strengthens inactive-page ink deduplication. A captured
+stroke is considered already saved only when its complete sampled path, pressure,
+angle, draw flags, timestamps, and ink-defining pen attributes match. Retracing a
+line or drawing another dot at the same location can no longer be discarded just
+because its point count and endpoints resemble an existing stroke.
 
 **Restore snapshot** disables the marker, terminates the native document
 process before touching `.mark`, re-enumerates the process list to catch a

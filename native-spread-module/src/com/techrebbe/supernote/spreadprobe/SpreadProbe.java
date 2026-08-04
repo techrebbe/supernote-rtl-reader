@@ -43,6 +43,7 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -5085,10 +5086,6 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             if (candidatePoints == null || candidatePoints.isEmpty()) {
                 return false;
             }
-            Point candidateFirst = candidatePoints.get(0);
-            Point candidateLast = candidatePoints.get(
-                candidatePoints.size() - 1
-            );
             for (Object existing : existingTrails) {
                 if (existing == null
                     || callInt(existing, "get_page_num")
@@ -5107,10 +5104,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 if (points == null || points.size() != candidatePoints.size()) {
                     continue;
                 }
-                Point first = points.get(0);
-                Point last = points.get(points.size() - 1);
-                if (pointsNear(first, candidateFirst, 6)
-                    && pointsNear(last, candidateLast, 6)) {
+                if (matchingTrailPoints(points, candidatePoints, 6)
+                    && matchingTrailInkAttributes(existing, candidate)
+                    && matchingTrailValue(existing, candidate, "get_pressures")
+                    && matchingTrailValue(existing, candidate, "get_angles")
+                    && matchingTrailValue(existing, candidate, "get_flag_draw")
+                    && matchingTrailValue(existing, candidate, "get_timestamp")) {
                     return true;
                 }
             }
@@ -5118,6 +5117,81 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             log("pen_activation_trail_match_failed " + throwable);
         }
         return false;
+    }
+
+    private static boolean matchingTrailPoints(
+        List<Point> existing,
+        List<Point> candidate,
+        int tolerance
+    ) {
+        if (existing == null || candidate == null
+            || existing.size() != candidate.size()) {
+            return false;
+        }
+        for (int index = 0; index < existing.size(); index++) {
+            Point existingPoint = existing.get(index);
+            Point candidatePoint = candidate.get(index);
+            if (existingPoint == null || candidatePoint == null) {
+                if (existingPoint != candidatePoint) {
+                    return false;
+                }
+            } else if (!pointsNear(
+                existingPoint,
+                candidatePoint,
+                tolerance
+            )) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean matchingTrailInkAttributes(
+        Object existing,
+        Object candidate
+    ) {
+        String[] integerGetters = new String[] {
+            "get_flag_penup",
+            "get_flag_special",
+            "get_layer_num",
+            "get_pen_color",
+            "get_pen_type",
+            "get_rec_mod",
+            "get_m_thickness",
+            "get_walcom_emr_type",
+            "get_max_x",
+            "get_max_y",
+            "get_m_emr_point_axis",
+            "get_m_trail_status",
+            "get_m_rotate_angle",
+            "get_m_redraw_width",
+            "get_m_redraw_height",
+            "get_m_trail_type",
+            "get_m_draw_version",
+            "get_recogn_trail_type",
+            "get_process_mod"
+        };
+        for (String getter : integerGetters) {
+            if (callInt(existing, getter) != callInt(candidate, getter)) {
+                return false;
+            }
+        }
+        return matchingTrailValue(
+            existing,
+            candidate,
+            "get_write_app_name"
+        );
+    }
+
+    private static boolean matchingTrailValue(
+        Object existing,
+        Object candidate,
+        String getter
+    ) {
+        return Objects.equals(
+            XposedHelpers.callMethod(existing, getter),
+            XposedHelpers.callMethod(candidate, getter)
+        );
     }
 
     private static boolean eraserIntersectsTrail(

@@ -304,6 +304,10 @@ Protected duplicate editing:
   page switch and discard its retained ink/eraser buffers. The v0.0.79 invariant
   requires failure detection before `loadPage`, explicit activation cancellation,
   and a visible save-failure state.
+- [x] Native Spread v0.0.80 compares every path point plus pressure, angle, draw
+  flags, timestamps, color, thickness, and related pen attributes before treating
+  an inactive-page stroke as already persisted. Endpoint-only collisions cannot
+  silently discard a retraced line or colocated dot.
 - [x] Eraser changes persist after a normal page-change save and cold restart,
   and do not alter the protected recovery snapshot.
 - [x] Lasso selection/movement preserves size and position through a spread

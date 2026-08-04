@@ -82,7 +82,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         "documentApkLength";
     private static final String HANDSHAKE_EXTRA_PROCESS_ID = "processId";
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 78L;
+    private static final long MODULE_VERSION_CODE = 79L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -144,6 +144,60 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static boolean spreadLassoToolArmed;
     private static Bitmap spreadLassoCorrectedPreview;
 
+    private static final class FileIdentity {
+        final long modified;
+        final long length;
+        final long device;
+        final long inode;
+        final long changeSeconds;
+        final long changeNanos;
+
+        FileIdentity(
+            long modified,
+            long length,
+            long device,
+            long inode,
+            long changeSeconds,
+            long changeNanos
+        ) {
+            this.modified = modified;
+            this.length = length;
+            this.device = device;
+            this.inode = inode;
+            this.changeSeconds = changeSeconds;
+            this.changeNanos = changeNanos;
+        }
+
+        static FileIdentity missing() {
+            return new FileIdentity(-1L, -1L, -1L, -1L, -1L, -1L);
+        }
+
+        static FileIdentity capture(File file) throws Exception {
+            if (file == null || !file.isFile()) {
+                return missing();
+            }
+            StructStat stat = Os.stat(file.getAbsolutePath());
+            return new FileIdentity(
+                file.lastModified(),
+                file.length(),
+                stat.st_dev,
+                stat.st_ino,
+                stat.st_ctim.tv_sec,
+                stat.st_ctim.tv_nsec
+            );
+        }
+
+        boolean sameAs(FileIdentity other) {
+            return other != null
+                && modified == other.modified
+                && length == other.length
+                && device == other.device
+                && inode == other.inode
+                && changeSeconds == other.changeSeconds
+                && changeNanos == other.changeNanos;
+        }
+    }
+
     private static final class SpreadConfig {
         final String documentPath;
         final long documentModified;
@@ -153,12 +207,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         final long documentChangeSeconds;
         final long documentChangeNanos;
         final String markerPath;
-        final long markerModified;
-        final long markerLength;
-        final long backupModified;
-        final long backupLength;
-        final long snapshotModified;
-        final long snapshotLength;
+        final FileIdentity markerIdentity;
+        final FileIdentity backupIdentity;
+        final FileIdentity snapshotIdentity;
         final boolean enabled;
         final boolean coverSeparate;
         final boolean editable;
@@ -173,12 +224,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             long documentChangeSeconds,
             long documentChangeNanos,
             String markerPath,
-            long markerModified,
-            long markerLength,
-            long backupModified,
-            long backupLength,
-            long snapshotModified,
-            long snapshotLength,
+            FileIdentity markerIdentity,
+            FileIdentity backupIdentity,
+            FileIdentity snapshotIdentity,
             boolean enabled,
             boolean coverSeparate,
             boolean editable,
@@ -192,12 +240,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             this.documentChangeSeconds = documentChangeSeconds;
             this.documentChangeNanos = documentChangeNanos;
             this.markerPath = markerPath;
-            this.markerModified = markerModified;
-            this.markerLength = markerLength;
-            this.backupModified = backupModified;
-            this.backupLength = backupLength;
-            this.snapshotModified = snapshotModified;
-            this.snapshotLength = snapshotLength;
+            this.markerIdentity = markerIdentity;
+            this.backupIdentity = backupIdentity;
+            this.snapshotIdentity = snapshotIdentity;
             this.enabled = enabled;
             this.coverSeparate = coverSeparate;
             this.editable = editable;
@@ -214,12 +259,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         final long documentChangeSeconds;
         final long documentChangeNanos;
         final String markerPath;
-        final long markerModified;
-        final long markerLength;
-        final long backupModified;
-        final long backupLength;
-        final long snapshotModified;
-        final long snapshotLength;
+        final FileIdentity markerIdentity;
+        final FileIdentity backupIdentity;
+        final FileIdentity snapshotIdentity;
         boolean complete;
         boolean valid;
 
@@ -232,12 +274,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             long documentChangeSeconds,
             long documentChangeNanos,
             String markerPath,
-            long markerModified,
-            long markerLength,
-            long backupModified,
-            long backupLength,
-            long snapshotModified,
-            long snapshotLength
+            FileIdentity markerIdentity,
+            FileIdentity backupIdentity,
+            FileIdentity snapshotIdentity
         ) {
             this.documentPath = documentPath;
             this.documentModified = documentModified;
@@ -247,12 +286,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             this.documentChangeSeconds = documentChangeSeconds;
             this.documentChangeNanos = documentChangeNanos;
             this.markerPath = markerPath;
-            this.markerModified = markerModified;
-            this.markerLength = markerLength;
-            this.backupModified = backupModified;
-            this.backupLength = backupLength;
-            this.snapshotModified = snapshotModified;
-            this.snapshotLength = snapshotLength;
+            this.markerIdentity = markerIdentity;
+            this.backupIdentity = backupIdentity;
+            this.snapshotIdentity = snapshotIdentity;
         }
 
         boolean matches(
@@ -264,12 +300,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             long nextDocumentChangeSeconds,
             long nextDocumentChangeNanos,
             String nextMarkerPath,
-            long nextMarkerModified,
-            long nextMarkerLength,
-            long nextBackupModified,
-            long nextBackupLength,
-            long nextSnapshotModified,
-            long nextSnapshotLength
+            FileIdentity nextMarkerIdentity,
+            FileIdentity nextBackupIdentity,
+            FileIdentity nextSnapshotIdentity
         ) {
             return documentPath.equals(nextDocumentPath)
                 && documentModified == nextDocumentModified
@@ -279,12 +312,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 && documentChangeSeconds == nextDocumentChangeSeconds
                 && documentChangeNanos == nextDocumentChangeNanos
                 && markerPath.equals(nextMarkerPath)
-                && markerModified == nextMarkerModified
-                && markerLength == nextMarkerLength
-                && backupModified == nextBackupModified
-                && backupLength == nextBackupLength
-                && snapshotModified == nextSnapshotModified
-                && snapshotLength == nextSnapshotLength;
+                && markerIdentity.sameAs(nextMarkerIdentity)
+                && backupIdentity.sameAs(nextBackupIdentity)
+                && snapshotIdentity.sameAs(nextSnapshotIdentity);
         }
     }
 
@@ -2107,12 +2137,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         long documentChangeSeconds,
         long documentChangeNanos,
         String markerPath,
-        long markerModified,
-        long markerLength,
-        long backupModified,
-        long backupLength,
-        long snapshotModified,
-        long snapshotLength
+        FileIdentity markerIdentity,
+        FileIdentity backupIdentity,
+        FileIdentity snapshotIdentity
     ) {
         ProtectedVerification verification = new ProtectedVerification(
             documentPath,
@@ -2123,12 +2150,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             documentChangeSeconds,
             documentChangeNanos,
             markerPath,
-            markerModified,
-            markerLength,
-            backupModified,
-            backupLength,
-            snapshotModified,
-            snapshotLength
+            markerIdentity,
+            backupIdentity,
+            snapshotIdentity
         );
         PROTECTED_VERIFICATIONS.put(activity, verification);
 
@@ -3786,12 +3810,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     0L,
                     0L,
                     null,
-                    0L,
-                    0L,
-                    0L,
-                    0L,
-                    0L,
-                    0L,
+                    FileIdentity.missing(),
+                    FileIdentity.missing(),
+                    FileIdentity.missing(),
                     true,
                     false,
                     true,
@@ -3819,8 +3840,6 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 parent,
                 "." + document.getName() + SIDECAR_SUFFIX
             );
-            long modified = marker.isFile() ? marker.lastModified() : -1L;
-            long length = marker.isFile() ? marker.length() : -1L;
             File backupManifest = new File(
                 parent,
                 "." + document.getName() + ".snspread-backup.properties"
@@ -3829,14 +3848,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 parent,
                 "." + document.getName() + ".snspread-backup.mark"
             );
-            long backupModified = backupManifest.isFile()
-                ? backupManifest.lastModified() : -1L;
-            long backupLength = backupManifest.isFile()
-                ? backupManifest.length() : -1L;
-            long snapshotModified = backupSnapshot.isFile()
-                ? backupSnapshot.lastModified() : -1L;
-            long snapshotLength = backupSnapshot.isFile()
-                ? backupSnapshot.length() : -1L;
+            FileIdentity markerIdentity = FileIdentity.capture(marker);
+            FileIdentity backupIdentity = FileIdentity.capture(backupManifest);
+            FileIdentity snapshotIdentity = FileIdentity.capture(backupSnapshot);
             SpreadConfig cached = SPREAD_CONFIGS.get(activity);
             if (cached != null && path.equals(cached.documentPath)
                 && cached.documentModified == documentModified
@@ -3846,12 +3860,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 && cached.documentChangeSeconds == documentChangeSeconds
                 && cached.documentChangeNanos == documentChangeNanos
                 && marker.getAbsolutePath().equals(cached.markerPath)
-                && cached.markerModified == modified
-                && cached.markerLength == length
-                && cached.backupModified == backupModified
-                && cached.backupLength == backupLength
-                && cached.snapshotModified == snapshotModified
-                && cached.snapshotLength == snapshotLength) {
+                && cached.markerIdentity.sameAs(markerIdentity)
+                && cached.backupIdentity.sameAs(backupIdentity)
+                && cached.snapshotIdentity.sameAs(snapshotIdentity)) {
                 return cached;
             }
 
@@ -3865,12 +3876,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     documentChangeSeconds,
                     documentChangeNanos,
                     marker.getAbsolutePath(),
-                    modified,
-                    length,
-                    backupModified,
-                    backupLength,
-                    snapshotModified,
-                    snapshotLength,
+                    markerIdentity,
+                    backupIdentity,
+                    snapshotIdentity,
                     false,
                     false,
                     false,
@@ -3911,12 +3919,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         documentChangeSeconds,
                         documentChangeNanos,
                         marker.getAbsolutePath(),
-                        modified,
-                        length,
-                        backupModified,
-                        backupLength,
-                        snapshotModified,
-                        snapshotLength
+                        markerIdentity,
+                        backupIdentity,
+                        snapshotIdentity
                     )) {
                     verification = startProtectedEditableVerification(
                         activity,
@@ -3930,12 +3935,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         documentChangeSeconds,
                         documentChangeNanos,
                         marker.getAbsolutePath(),
-                        modified,
-                        length,
-                        backupModified,
-                        backupLength,
-                        snapshotModified,
-                        snapshotLength
+                        markerIdentity,
+                        backupIdentity,
+                        snapshotIdentity
                     );
                 }
                 protectedEditable = verification.complete
@@ -3954,12 +3956,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 documentChangeSeconds,
                 documentChangeNanos,
                 marker.getAbsolutePath(),
-                modified,
-                length,
-                backupModified,
-                backupLength,
-                snapshotModified,
-                snapshotLength,
+                markerIdentity,
+                backupIdentity,
+                snapshotIdentity,
                 enabled,
                 coverSeparate,
                 editable,
@@ -4658,6 +4657,16 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         if (target == null) {
             return;
         }
+        if (hasPendingPenActivationEdits(activity)) {
+            log("pen_activation_aborted reason=persistence_failed target="
+                + target);
+            showOverlay(
+                activity,
+                "SPREAD PROBE: annotation save failed - edit not applied"
+            );
+            cancelPendingPenPageActivation(activity, "persistence_failed");
+            return;
+        }
         try {
             Object viewModel = XposedHelpers.getObjectField(
                 activity,
@@ -4684,19 +4693,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         } finally {
             PEN_ACTIVATION_TARGETS.remove(activity);
             PEN_ACTIVATION_ORIGINAL_PAGES.remove(activity);
-            List<Object> unpersisted = PEN_ACTIVATION_TRAILS.remove(activity);
-            if (unpersisted != null && !unpersisted.isEmpty()) {
-                log("pen_activation_trails_unpersisted count="
-                    + unpersisted.size() + " target=" + target);
-            }
-            List<Object> unpersistedErasers = PEN_ACTIVATION_ERASERS.remove(
-                activity
-            );
-            if (unpersistedErasers != null && !unpersistedErasers.isEmpty()) {
-                log("pen_activation_erasers_unpersisted count="
-                    + unpersistedErasers.size() + " target=" + target);
-            }
         }
+    }
+
+    private static boolean hasPendingPenActivationEdits(Activity activity) {
+        List<Object> trails = PEN_ACTIVATION_TRAILS.get(activity);
+        List<Object> erasers = PEN_ACTIVATION_ERASERS.get(activity);
+        return (trails != null && !trails.isEmpty())
+            || (erasers != null && !erasers.isEmpty());
     }
 
     /*

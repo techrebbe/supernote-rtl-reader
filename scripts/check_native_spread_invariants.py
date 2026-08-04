@@ -41,7 +41,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 78L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 79L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -202,6 +202,18 @@ def check(repo_root: Path) -> None:
             "long documentInode = documentStat.st_ino;",
             "long documentChangeSeconds = documentStat.st_ctim.tv_sec;",
             "long documentChangeNanos = documentStat.st_ctim.tv_nsec;",
+            "final FileIdentity markerIdentity;",
+            "final FileIdentity backupIdentity;",
+            "final FileIdentity snapshotIdentity;",
+            "FileIdentity markerIdentity = FileIdentity.capture(marker);",
+            "FileIdentity backupIdentity = FileIdentity.capture(backupManifest);",
+            "FileIdentity snapshotIdentity = FileIdentity.capture(backupSnapshot);",
+            "&& cached.markerIdentity.sameAs(markerIdentity)",
+            "&& cached.backupIdentity.sameAs(backupIdentity)",
+            "&& cached.snapshotIdentity.sameAs(snapshotIdentity)",
+            "&& markerIdentity.sameAs(nextMarkerIdentity)",
+            "&& backupIdentity.sameAs(nextBackupIdentity)",
+            "&& snapshotIdentity.sameAs(nextSnapshotIdentity)",
             "startProtectedEditableVerification(",
         ),
         "protected PDF replacement invalidation",
@@ -390,8 +402,8 @@ def check(repo_root: Path) -> None:
             'backup.getProperty("documentSha256", "").trim().equals(',
             "protected_editable_document_mtime_changed",
             "protected_editable_backup_verified",
-            "cached.backupModified == backupModified",
-            "cached.snapshotModified == snapshotModified",
+            "cached.backupIdentity.sameAs(backupIdentity)",
+            "cached.snapshotIdentity.sameAs(snapshotIdentity)",
             "spreadLassoCanonicalSelection && mode == 1",
             '" preserve_size=" + preserveCanonicalSize',
         ),
@@ -574,14 +586,38 @@ def check(repo_root: Path) -> None:
             "process != 0 && process != 6 && process != 7",
             '"pen_activation_eraser_captured',
             "normalizedTrailMatchPoints(",
+            "hasPendingPenActivationEdits(activity)",
+            '"pen_activation_aborted reason=persistence_failed target="',
+            'cancelPendingPenPageActivation(activity, "persistence_failed")',
         ),
         "inactive-page pen activation",
     )
 
-    if 'android:versionCode="78"' not in manifest:
-        fail("companion manifest must use versionCode 78 for scale-independent inactive erasing")
-    if 'android:versionName="0.0.78"' not in manifest:
-        fail("companion manifest must use versionName 0.0.78")
+    completion_start = module.find(
+        "private static void completePendingPenPageActivation("
+    )
+    capture_start = module.find(
+        "private static void capturePendingPenActivationTrails(",
+        completion_start,
+    )
+    if completion_start < 0 or capture_start < 0:
+        fail("could not isolate inactive-page completion handling")
+    completion = module[completion_start:capture_start]
+    failure_guard = completion.find("hasPendingPenActivationEdits(activity)")
+    abort_activation = completion.find(
+        'cancelPendingPenPageActivation(activity, "persistence_failed")',
+        failure_guard,
+    )
+    load_target = completion.find('"loadPage"', abort_activation)
+    if not 0 <= failure_guard < abort_activation < load_target:
+        fail("failed inactive-page persistence can still activate the target page")
+    if "PEN_ACTIVATION_TRAILS.remove(activity)" in completion:
+        fail("completion cleanup still silently discards failed inactive-page edits")
+
+    if 'android:versionCode="79"' not in manifest:
+        fail("companion manifest must use versionCode 79 for reviewed cache and save hardening")
+    if 'android:versionName="0.0.79"' not in manifest:
+        fail("companion manifest must use versionName 0.0.79")
 
     print("Native Spread safety invariants: PASS")
 

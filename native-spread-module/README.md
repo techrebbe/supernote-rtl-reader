@@ -68,6 +68,12 @@ paths. It normalizes saved ink and the eraser path before intersection testing,
 then rewrites the target page with only the matched ink removed. Inactive-page
 highlighter and lasso operations remain separate validation targets.
 
+v0.0.79 fails closed if that page-local write does not succeed: it cancels the
+page activation and visibly reports that the edit was not applied instead of
+discarding retained ink or eraser buffers. It also adds device, inode, and
+nanosecond change-time identity to the marker and both recovery sidecars, so a
+metadata-preserving replacement invalidates cached editable authorization.
+
 This is firmware-specific experimental software for a rooted device. Back up
 documents and `.mark` files before testing a new firmware or module revision.
 
@@ -93,7 +99,8 @@ The signed APK is written to `build/artifact/`.
 
 Install the APK, enable **Supernote Native Spread Probe** in LSPosed, scope it
 only to `com.supernote.document`, and restart the document reader. Supernote
-RTL Reader v0.4.10 or newer is required for protected editable mode. Its
+RTL Reader v0.4.10 or newer and Native Spread v0.0.79 or newer are required for
+protected editable mode. Its
 recovery manifest binds the backup to the PDF's full SHA-256 because
 Supernote changes the PDF modification time when the document activity
 reopens.
@@ -105,10 +112,11 @@ PDF and a protected copy of a 738-page annotated Hebrew PDF. The real-document
 pass confirmed persistent two-page annotation display, outer-edge-only tap
 navigation, side-preserving spread turns, and an unchanged `.mark` checksum.
 
-v0.0.78 compiles and passes automated handshake, backup-attestation,
+v0.0.79 compiles and passes automated handshake, backup-attestation,
 destroyed-activity cleanup, canonical lasso-move, inactive-page ink-merge, and
-scale-independent inactive-page eraser invariants. Its focused Nomad eraser
-regression removed exactly one of two separated inactive-page strokes, retained
-the control stroke, left companion page 4 unchanged, and preserved the result
-after a spread turn away and back. The full record is in the root
+scale-independent inactive-page eraser invariants, including fail-closed write
+handling and strong recovery-sidecar cache identity. The v0.0.78 focused Nomad
+eraser regression removed exactly one of two separated inactive-page strokes,
+retained the control stroke, left companion page 4 unchanged, and preserved the
+result after a spread turn away and back. The full record is in the root
 `REGRESSION.md`.

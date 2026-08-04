@@ -167,7 +167,7 @@ After successful verification, v0.0.75 explicitly refreshes an already visible
 landscape spread so native handwriting geometry is re-enabled without waiting
 for a page turn or rotation.
 
-v0.4.10 raises the protected-editing compatibility floor to v0.0.75. Its
+v0.4.10 raises the protected-editing compatibility floor to v0.0.79. Its
 canonical lasso transition preserves the selection's native width and height
 during a pure move; only the translated origin is converted from the half-page
 spread. This prevents the live selection from growing to roughly twice its
@@ -193,6 +193,13 @@ clear unrelated trails. On a fresh disposable Nomad document, erasing the
 right-hand one of two separated strokes on the inactive page removed exactly
 that stroke, preserved the control stroke and companion page 4, and remained
 correct after leaving and returning to the spread.
+
+Native Spread v0.0.79 incorporates the final review hardening. If the page-local
+`.mark` transaction fails, the module no longer switches pages and discards the
+pending edit; it cancels the activation and displays an explicit save-failure
+banner. The protected-editing cache now binds the marker, recovery manifest, and
+snapshot to device, inode, and nanosecond change time as well as length and
+mtime, so metadata-preserving sidecar replacement forces fresh attestation.
 
 **Restore snapshot** disables the marker, terminates the native document
 process before touching `.mark`, re-enumerates the process list to catch a

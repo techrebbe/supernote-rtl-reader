@@ -275,6 +275,9 @@ Safety and setup:
 - [x] The protected-verification cache includes device/inode and nanosecond
   change time, so a metadata-preserving PDF replacement invalidates prior
   authorization and reruns full-file attestation.
+- [x] Native Spread v0.0.79 applies the same strong identity to the marker,
+  recovery manifest, and recovery snapshot; replacing or rewriting any sidecar
+  invalidates the cached editable authorization and forces re-attestation.
 - [x] Switching to LTR commits the direction only after native RTL shutdown and
   recovery-baseline retirement succeed; failure retains the RTL UI state.
 - [ ] A document with no `.mark` records and can restore the original absent state.
@@ -293,6 +296,10 @@ Protected duplicate editing:
   shown beside a clean active page 4. The process-7 eraser transaction reported
   `erased=1`, retained one trail, left page 4 unchanged, and the selective erase
   remained correct after turning away from and back to the spread.
+- [x] A failed inactive-page `.mark` transaction cannot silently complete the
+  page switch and discard its retained ink/eraser buffers. The v0.0.79 invariant
+  requires failure detection before `loadPage`, explicit activation cancellation,
+  and a visible save-failure state.
 - [x] Eraser changes persist after a normal page-change save and cold restart,
   and do not alter the protected recovery snapshot.
 - [x] Lasso selection/movement preserves size and position through a spread

@@ -127,6 +127,150 @@ This prevents the initial landscape spread from being mounted against stale or i
 
 Full validation details are recorded in `REGRESSION.md`.
 
+## v0.4.10 protected native editing pilot
+
+v0.4.9 added an explicitly confirmed **RTL editable** choice alongside **Off**
+and **RTL read-only**. Before an ordinary PDF can become editable, the plugin:
+
+1. completes the live, document-bound Native Spread handshake;
+2. preserves the current `.mark` state byte-for-byte (including the original
+   absence of a `.mark` file);
+3. writes and rereads a recovery manifest bound to the PDF path, length, and
+   full-file SHA-256 (the native reader changes the PDF modification time when
+   it reopens, so mtime is recorded only for diagnostics);
+4. verifies the snapshot length and SHA-256; and
+5. creates an editable marker bound to the recovery-manifest SHA-256.
+
+Native Spread v0.0.75 independently verifies that attestation off the document
+activity's main thread, with editing kept disabled until verification finishes.
+A missing, changed, mismatched, or orphaned recovery file fails closed to
+read-only. The
+module also notices backup-file metadata changes during a running session
+instead of trusting a stale editable configuration cache. It now includes the
+open PDF's length, modification time, device/inode identity, and nanosecond
+change time in that cache identity. Replacing the document while preserving its
+path, length, and modification time therefore still forces a fresh full-file
+attestation; rewriting it in place changes the filesystem change time and does
+the same.
+
+The plugin also creates, verifies, and retires those recovery files on a worker
+thread rather than the PluginHost UI thread. Off/read-only transitions preserve
+the prior marker bytes and restore them if recovery-baseline retirement fails,
+keeping the cleanup retryable and the protected session recoverable. Initial
+editable activation is transactional too: if marker creation fails after a new
+backup is verified, the prior marker is restored and the new backup is retired.
+Final full-file verification is inside that same rollback scope. While any of
+these background transitions is pending, Settings dismissal, hardware Back,
+and Close are blocked so native handoff cannot race the recovery transaction.
+Immediately before the first editable marker is committed, the plug-in also
+compares the live `.mark` presence, length, and SHA-256 with the new recovery
+baseline. If the running native reader flushed annotations during backup
+creation, the stale snapshot is retired and recreated; activation fails closed
+after three unstable attempts rather than authorizing recovery from older ink.
+
+After successful verification, v0.0.75 explicitly refreshes an already visible
+landscape spread so native handwriting geometry is re-enabled without waiting
+for a page turn or rotation.
+
+v0.4.10 raises the protected-editing compatibility floor to v0.0.80. Its
+canonical lasso transition preserves the selection's native width and height
+during a pure move; only the translated origin is converted from the half-page
+spread. This prevents the live selection from growing to roughly twice its
+size when moved in landscape. Hardware validation on the protected 738-page
+pilot confirmed that the moved X kept its size and position through a spread
+turn and a cold native-reader restart.
+
+Native Spread v0.0.75 also makes ordinary pen input on the inactive half of an
+editable landscape spread durable. It prearms the low-latency writer for the
+page under the pen without replacing the visible spread, captures the finished
+stroke, normalizes it into the native document-page coordinate system, and
+merges it with that page's existing `.mark` trails. The module bypasses the
+native intermediate save that otherwise serializes only the currently loaded
+subset and can delete older annotations. On the disposable Nomad test PDF, the
+new inactive-page line remained visible, all seven existing trails were
+preserved, and all eight trails survived a spread turn away and back.
+
+Native Spread v0.0.78 extends that protected transaction to the stroke eraser.
+It captures Supernote's eraser path, compares it with saved handwriting in a
+scale-independent page coordinate system, removes only intersecting ink from
+the target page, and bypasses the native combined-spread save that can otherwise
+clear unrelated trails. On a fresh disposable Nomad document, erasing the
+right-hand one of two separated strokes on the inactive page removed exactly
+that stroke, preserved the control stroke and companion page 4, and remained
+correct after leaving and returning to the spread.
+
+Native Spread v0.0.79 incorporates the final review hardening. If the page-local
+`.mark` transaction fails, the module no longer switches pages and discards the
+pending edit; it cancels the activation and displays an explicit save-failure
+banner. The protected-editing cache now binds the marker, recovery manifest, and
+snapshot to device, inode, and nanosecond change time as well as length and
+mtime, so metadata-preserving sidecar replacement forces fresh attestation.
+
+Native Spread v0.0.80 strengthens inactive-page ink deduplication. A captured
+stroke is considered already saved only when its complete sampled path, pressure,
+angle, draw flags, timestamps, and ink-defining pen attributes match. Retracing a
+line or drawing another dot at the same location can no longer be discarded just
+because its point count and endpoints resemble an existing stroke.
+
+**Restore snapshot** disables the marker, terminates the native document
+process before touching `.mark`, re-enumerates the process list to catch a
+replacement PID, and aborts unless every document process has exited. It then
+rehashes the PDF and recovery snapshot immediately before touching `.mark`,
+atomically restores and verifies the original bytes (or the original no-`.mark`
+state), removes the completed recovery files, and reopens the native reader.
+This prevents an in-memory native annotation model from overwriting the
+recovered state. The Restore action now waits for that worker's verified result;
+an asynchronous failure is returned to the settings UI and also shown as a
+long device message if the document restart has already dismissed the plugin.
+
+Selecting **Off** or downgrading to read-only retires the completed editable
+session's recovery baseline. A later **Back up & enable** therefore snapshots
+the current `.mark`, including legitimate annotations made during the ordinary
+native-reader interval, rather than silently reusing an older baseline.
+Retirement first moves the snapshot to a recoverable staging path and preserves
+or reconstructs its manifest-bound state if cleanup is interrupted.
+Backup creation removes a newly copied snapshot if manifest creation fails, and
+restore uses the same staged cleanup transaction before reporting success.
+Cover controls are disabled while any native-mode transition is pending so a
+read-only Cover update cannot race a protected-editable handshake. A Cover
+change also owns that transition lock until its native marker update finishes,
+and leaving editable mode clears the retired recovery status from the UI. If a
+marker remains configured while its live hooks are unavailable, Cover is
+disabled so the UI cannot diverge from the sidecar's saved parity.
+Switching to LTR now waits for that native-mode shutdown transaction to succeed
+before committing the direction preference. A failed recovery-baseline
+retirement leaves both the protected RTL marker and the RTL UI state intact.
+
+The protected pilot validated that full rollback on hardware: an edited
+147,752-byte `.mark` was restored byte-for-byte to its original 89,801-byte
+snapshot and SHA-256, the reader reopened normally, and the completed marker,
+manifest, and recovery snapshot were removed.
+
+The final reviewed v0.4.10 build repeated the transaction from a clean Off
+state with Native Spread v0.0.68. First-time backup creation survived attempted
+Close and hardware-Back interruptions, native writing and erasing remained
+functional, and Restore reproduced the original 89,801-byte annotation file's
+SHA-256 exactly before removing all recovery sidecars and reopening page 145.
+
+In landscape spread editing, Supernote's immediate low-latency pen preview can
+look thicker than the settled stroke. The committed `.mark` keeps the canonical
+Supernote thickness; the difference is limited to the transient preview and is
+tracked for a later visual-polish revision rather than changing portable ink
+data in this safety release.
+
+Editable mode exposes the writing, eraser, lasso, text-highlight, embedded-link,
+and active-page geometry paths previously proven on disposable calibration
+documents. Native handwriting remains ordinary Supernote element data, so it
+continues to work with InkBridge's validated schema-v2 page snapshot/export
+path. Native text highlights are a separate PDF-annotation stream and still
+need InkBridge's planned annotation adapter.
+
+The protected pilot confirmed that interoperability directly: InkBridge
+exported the lasso-moved X as two schema-v2 strokes with 84 pressure-bearing
+samples, stable Supernote UUIDs, normalized geometry, and native style data.
+Deletion tombstones still require InkBridge to compare a post-erase page
+snapshot against a previously captured portable baseline.
+
 ## v0.4.7 native-reader pilot control
 
 v0.4.5 added a safe per-document control for the rooted Native Spread module.

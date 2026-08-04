@@ -12,6 +12,7 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.Point;
+import android.graphics.PointF;
 import android.graphics.PorterDuff;
 import android.graphics.Rect;
 import android.graphics.RectF;
@@ -23,6 +24,8 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.os.Parcel;
 import android.os.Process;
+import android.system.Os;
+import android.system.StructStat;
 import android.util.Log;
 import android.util.Size;
 import android.view.Gravity;
@@ -35,9 +38,12 @@ import android.widget.TextView;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.lang.ref.WeakReference;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -77,10 +83,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         "documentApkLength";
     private static final String HANDSHAKE_EXTRA_PROCESS_ID = "processId";
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 62L;
+    private static final long MODULE_VERSION_CODE = 80L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
+    private static final int DOCUMENT_PAGE_WIDTH = 1404;
+    private static final int DOCUMENT_PAGE_HEIGHT = 1872;
     private static final int SPREAD_PAGE_WIDTH = 932;
     private static final int SPREAD_PAGE_HEIGHT = 1243;
     private static final float SPREAD_OUTER_EDGE_FRACTION = 0.14f;
@@ -99,12 +107,22 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         new WeakHashMap<>();
     private static final Map<Activity, Point> ACTIVATION_TOUCH_STARTS =
         new WeakHashMap<>();
+    private static final Map<Activity, Integer> PEN_ACTIVATION_TARGETS =
+        new WeakHashMap<>();
+    private static final Map<Activity, Integer> PEN_ACTIVATION_ORIGINAL_PAGES =
+        new WeakHashMap<>();
+    private static final Map<Activity, List<Object>> PEN_ACTIVATION_TRAILS =
+        new WeakHashMap<>();
+    private static final Map<Activity, List<Object>> PEN_ACTIVATION_ERASERS =
+        new WeakHashMap<>();
     private static final Map<Activity, Point> FINGER_TOUCH_STARTS =
         new WeakHashMap<>();
     private static final Map<Activity, Long> NON_EDGE_TAP_SUPPRESS_UNTIL =
         new WeakHashMap<>();
     private static final Map<Activity, SpreadConfig> SPREAD_CONFIGS =
         new WeakHashMap<>();
+    private static final Map<Activity, ProtectedVerification>
+        PROTECTED_VERIFICATIONS = new WeakHashMap<>();
     private static final ThreadLocal<Boolean> LINK_SPLIT_ORIGINAL =
         new ThreadLocal<>();
     private static final ThreadLocal<List<Rect>> SELECT_POP_RECT_ORIGINALS =
@@ -127,11 +145,72 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static boolean spreadLassoToolArmed;
     private static Bitmap spreadLassoCorrectedPreview;
 
+    private static final class FileIdentity {
+        final long modified;
+        final long length;
+        final long device;
+        final long inode;
+        final long changeSeconds;
+        final long changeNanos;
+
+        FileIdentity(
+            long modified,
+            long length,
+            long device,
+            long inode,
+            long changeSeconds,
+            long changeNanos
+        ) {
+            this.modified = modified;
+            this.length = length;
+            this.device = device;
+            this.inode = inode;
+            this.changeSeconds = changeSeconds;
+            this.changeNanos = changeNanos;
+        }
+
+        static FileIdentity missing() {
+            return new FileIdentity(-1L, -1L, -1L, -1L, -1L, -1L);
+        }
+
+        static FileIdentity capture(File file) throws Exception {
+            if (file == null || !file.isFile()) {
+                return missing();
+            }
+            StructStat stat = Os.stat(file.getAbsolutePath());
+            return new FileIdentity(
+                file.lastModified(),
+                file.length(),
+                stat.st_dev,
+                stat.st_ino,
+                stat.st_ctim.tv_sec,
+                stat.st_ctim.tv_nsec
+            );
+        }
+
+        boolean sameAs(FileIdentity other) {
+            return other != null
+                && modified == other.modified
+                && length == other.length
+                && device == other.device
+                && inode == other.inode
+                && changeSeconds == other.changeSeconds
+                && changeNanos == other.changeNanos;
+        }
+    }
+
     private static final class SpreadConfig {
         final String documentPath;
+        final long documentModified;
+        final long documentLength;
+        final long documentDevice;
+        final long documentInode;
+        final long documentChangeSeconds;
+        final long documentChangeNanos;
         final String markerPath;
-        final long markerModified;
-        final long markerLength;
+        final FileIdentity markerIdentity;
+        final FileIdentity backupIdentity;
+        final FileIdentity snapshotIdentity;
         final boolean enabled;
         final boolean coverSeparate;
         final boolean editable;
@@ -139,22 +218,104 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
 
         SpreadConfig(
             String documentPath,
+            long documentModified,
+            long documentLength,
+            long documentDevice,
+            long documentInode,
+            long documentChangeSeconds,
+            long documentChangeNanos,
             String markerPath,
-            long markerModified,
-            long markerLength,
+            FileIdentity markerIdentity,
+            FileIdentity backupIdentity,
+            FileIdentity snapshotIdentity,
             boolean enabled,
             boolean coverSeparate,
             boolean editable,
             boolean calibration
         ) {
             this.documentPath = documentPath;
+            this.documentModified = documentModified;
+            this.documentLength = documentLength;
+            this.documentDevice = documentDevice;
+            this.documentInode = documentInode;
+            this.documentChangeSeconds = documentChangeSeconds;
+            this.documentChangeNanos = documentChangeNanos;
             this.markerPath = markerPath;
-            this.markerModified = markerModified;
-            this.markerLength = markerLength;
+            this.markerIdentity = markerIdentity;
+            this.backupIdentity = backupIdentity;
+            this.snapshotIdentity = snapshotIdentity;
             this.enabled = enabled;
             this.coverSeparate = coverSeparate;
             this.editable = editable;
             this.calibration = calibration;
+        }
+    }
+
+    private static final class ProtectedVerification {
+        final String documentPath;
+        final long documentModified;
+        final long documentLength;
+        final long documentDevice;
+        final long documentInode;
+        final long documentChangeSeconds;
+        final long documentChangeNanos;
+        final String markerPath;
+        final FileIdentity markerIdentity;
+        final FileIdentity backupIdentity;
+        final FileIdentity snapshotIdentity;
+        boolean complete;
+        boolean valid;
+
+        ProtectedVerification(
+            String documentPath,
+            long documentModified,
+            long documentLength,
+            long documentDevice,
+            long documentInode,
+            long documentChangeSeconds,
+            long documentChangeNanos,
+            String markerPath,
+            FileIdentity markerIdentity,
+            FileIdentity backupIdentity,
+            FileIdentity snapshotIdentity
+        ) {
+            this.documentPath = documentPath;
+            this.documentModified = documentModified;
+            this.documentLength = documentLength;
+            this.documentDevice = documentDevice;
+            this.documentInode = documentInode;
+            this.documentChangeSeconds = documentChangeSeconds;
+            this.documentChangeNanos = documentChangeNanos;
+            this.markerPath = markerPath;
+            this.markerIdentity = markerIdentity;
+            this.backupIdentity = backupIdentity;
+            this.snapshotIdentity = snapshotIdentity;
+        }
+
+        boolean matches(
+            String nextDocumentPath,
+            long nextDocumentModified,
+            long nextDocumentLength,
+            long nextDocumentDevice,
+            long nextDocumentInode,
+            long nextDocumentChangeSeconds,
+            long nextDocumentChangeNanos,
+            String nextMarkerPath,
+            FileIdentity nextMarkerIdentity,
+            FileIdentity nextBackupIdentity,
+            FileIdentity nextSnapshotIdentity
+        ) {
+            return documentPath.equals(nextDocumentPath)
+                && documentModified == nextDocumentModified
+                && documentLength == nextDocumentLength
+                && documentDevice == nextDocumentDevice
+                && documentInode == nextDocumentInode
+                && documentChangeSeconds == nextDocumentChangeSeconds
+                && documentChangeNanos == nextDocumentChangeNanos
+                && markerPath.equals(nextMarkerPath)
+                && markerIdentity.sameAs(nextMarkerIdentity)
+                && backupIdentity.sameAs(nextBackupIdentity)
+                && snapshotIdentity.sameAs(nextSnapshotIdentity);
         }
     }
 
@@ -384,6 +545,76 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     trackFingerTapNavigation(activity, event);
                     if (handlePageActivationTouch(activity, event)) {
                         param.setResult(true);
+                    }
+                }
+            }
+        );
+
+        /*
+         * The low-latency writer receives pen input outside
+         * Activity.dispatchTouchEvent(), but NativeEventCallBack still reports
+         * the physical pen position while the stylus is hovering and again on
+         * the first contact frame. Activate the page under the pen from that
+         * native signal so receiveTrials() commits the stroke to the page the
+         * user actually wrote on rather than to the previously active page.
+         */
+        XposedHelpers.findAndHookMethod(
+            "com.supernote.document.document.DocumentActivity$6",
+            loadPackageParam.classLoader,
+            "onDigitalPosition",
+            int.class,
+            int.class,
+            new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    Activity activity = activeActivity;
+                    if (activity == null) {
+                        return;
+                    }
+                    int pressure = -1;
+                    try {
+                        Object callback = XposedHelpers.getObjectField(
+                            activity,
+                            "eventCallBack"
+                        );
+                        pressure = XposedHelpers.getIntField(
+                            callback,
+                            "mPressure"
+                        );
+                    } catch (Throwable ignored) {
+                    }
+                    handlePenPageActivation(
+                        activity,
+                        ((Integer) param.args[0]).intValue(),
+                        ((Integer) param.args[1]).intValue(),
+                        pressure
+                    );
+                }
+            }
+        );
+
+        XposedHelpers.findAndHookMethod(
+            "com.supernote.document.document.DocumentActivity$6",
+            loadPackageParam.classLoader,
+            "onDigital",
+            int.class,
+            new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    if (((Integer) param.args[0]).intValue() == 1) {
+                        return;
+                    }
+                    Activity activity = activeActivity;
+                    if (activity != null) {
+                        activity.runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                cancelPendingPenPageActivation(
+                                    activity,
+                                    "pen_left_screen"
+                                );
+                            }
+                        });
                     }
                 }
             }
@@ -1370,6 +1601,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     Object result = param.getResult();
                     boolean prepared = false;
                     if (result instanceof List) {
+                        capturePendingPenActivationTrails(
+                            activity,
+                            (Integer) param.args[4],
+                            (List<?>) result
+                        );
                         prepared = prepareNativeSpreadLasso(
                             param.thisObject,
                             (List<?>) result
@@ -1508,21 +1744,74 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         XposedHelpers.findAndHookMethod(
             "com.supernote.document.handwrite.HandWritePresenter",
             loadPackageParam.classLoader,
+            "saveTrails",
+            boolean.class,
+            boolean.class,
+            new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    Activity activity = activeActivity;
+                    List<Object> captured = activity == null
+                        ? null
+                        : PEN_ACTIVATION_TRAILS.get(activity);
+                    List<Object> erasers = activity == null
+                        ? null
+                        : PEN_ACTIVATION_ERASERS.get(activity);
+                    if (activity == null
+                        || PEN_ACTIVATION_TARGETS.get(activity) == null
+                        || ((captured == null || captured.isEmpty())
+                            && (erasers == null || erasers.isEmpty()))) {
+                        return;
+                    }
+                    param.setResult(null);
+                    log("pen_activation_native_save_bypassed trails="
+                        + (captured == null ? 0 : captured.size())
+                        + " erasers="
+                        + (erasers == null ? 0 : erasers.size()));
+                }
+
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    Activity activity = activeActivity;
+                    if (activity != null) {
+                        persistPendingPenActivationTrails(
+                            activity,
+                            param.thisObject
+                        );
+                    }
+                }
+            }
+        );
+
+        XposedHelpers.findAndHookMethod(
+            "com.supernote.document.handwrite.HandWritePresenter",
+            loadPackageParam.classLoader,
             "receiveTrials",
             new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
-                    if (!spreadLassoOriginZero) {
-                        return;
+                    if (spreadLassoOriginZero) {
+                        Object superNoteNote = XposedHelpers.getObjectField(
+                            param.thisObject,
+                            "superNoteNote"
+                        );
+                        restoreSpreadLassoOrigin(
+                            superNoteNote,
+                            "receive_trials_fallback"
+                        );
                     }
-                    Object superNoteNote = XposedHelpers.getObjectField(
-                        param.thisObject,
-                        "superNoteNote"
-                    );
-                    restoreSpreadLassoOrigin(
-                        superNoteNote,
-                        "receive_trials_fallback"
-                    );
+                    Activity activity = activeActivity;
+                    if (activity != null) {
+                        activity.runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                completePendingPenPageActivation(
+                                    activity,
+                                    "pen_up"
+                                );
+                            }
+                        });
+                    }
                 }
             }
         );
@@ -1706,6 +1995,241 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         } catch (Throwable throwable) {
             return false;
         }
+    }
+
+    private static boolean protectedEditableBackupValid(
+        File document,
+        Properties markerProperties
+    ) {
+        try {
+            if (!"supernote-rtl-reader".equals(
+                    markerProperties.getProperty("managedBy", "").trim()
+                )
+                || !"protected-editable-pilot".equals(
+                    markerProperties.getProperty("mode", "").trim()
+                )
+                || !"true".equalsIgnoreCase(
+                    markerProperties.getProperty("backupVerified", "false").trim()
+                )
+                || !sameCanonicalPath(
+                    markerProperties.getProperty("documentPath"),
+                    document.getCanonicalPath()
+                )) {
+                log("protected_editable_backup_rejected reason=marker_attestation");
+                return false;
+            }
+
+            File parent = document.getParentFile();
+            if (parent == null) {
+                return false;
+            }
+            File expectedManifest = new File(
+                parent,
+                "." + document.getName() + ".snspread-backup.properties"
+            );
+            String markerManifestPath = markerProperties.getProperty(
+                "backupManifestPath",
+                ""
+            );
+            if (!expectedManifest.isFile()
+                || !sameCanonicalPath(
+                    markerManifestPath,
+                    expectedManifest.getCanonicalPath()
+                )) {
+                log("protected_editable_backup_rejected reason=manifest_path");
+                return false;
+            }
+            String expectedManifestHash = markerProperties.getProperty(
+                "backupManifestSha256",
+                ""
+            ).trim();
+            if (expectedManifestHash.length() != 64
+                || !expectedManifestHash.equals(sha256(expectedManifest))) {
+                log("protected_editable_backup_rejected reason=manifest_hash");
+                return false;
+            }
+
+            Properties backup = new Properties();
+            try (FileInputStream input = new FileInputStream(expectedManifest)) {
+                backup.load(input);
+            }
+            if (!"1".equals(backup.getProperty("version", "").trim())
+                || !"supernote-rtl-reader".equals(
+                    backup.getProperty("managedBy", "").trim()
+                )
+                || !sameCanonicalPath(
+                    backup.getProperty("documentPath"),
+                    document.getCanonicalPath()
+                )
+                || Long.parseLong(backup.getProperty("documentLength", "-1"))
+                    != document.length()
+                || !backup.getProperty("documentSha256", "").trim().equals(
+                    sha256(document)
+                )) {
+                log("protected_editable_backup_rejected reason=document_identity");
+                return false;
+            }
+
+            long backedUpModified = Long.parseLong(
+                backup.getProperty("documentModified", "-1")
+            );
+            if (backedUpModified != document.lastModified()) {
+                log("protected_editable_document_mtime_changed original="
+                    + backedUpModified + " current=" + document.lastModified()
+                    + " content_sha256_verified=true");
+            }
+
+            File expectedMark = new File(document.getAbsolutePath() + ".mark");
+            File expectedSnapshot = new File(
+                parent,
+                "." + document.getName() + ".snspread-backup.mark"
+            );
+            if (!sameCanonicalPath(
+                    backup.getProperty("markPath"),
+                    expectedMark.getCanonicalPath()
+                )
+                || !sameCanonicalPath(
+                    backup.getProperty("snapshotPath"),
+                    expectedSnapshot.getCanonicalPath()
+                )) {
+                log("protected_editable_backup_rejected reason=annotation_path");
+                return false;
+            }
+
+            boolean originalPresent = "true".equalsIgnoreCase(
+                backup.getProperty("originalMarkPresent", "false").trim()
+            );
+            long markLength = Long.parseLong(
+                backup.getProperty("markLength", "-1")
+            );
+            String markHash = backup.getProperty("markSha256", "").trim();
+            if (originalPresent) {
+                if (!expectedSnapshot.isFile()
+                    || expectedSnapshot.length() != markLength
+                    || !markHash.equals(sha256(expectedSnapshot))) {
+                    log("protected_editable_backup_rejected reason=snapshot_bytes");
+                    return false;
+                }
+            } else if (markLength != 0L
+                || !"ABSENT".equals(markHash)
+                || expectedSnapshot.exists()) {
+                log("protected_editable_backup_rejected reason=absent_snapshot");
+                return false;
+            }
+            log("protected_editable_backup_verified manifest="
+                + expectedManifest.getAbsolutePath()
+                + " original_mark_present=" + originalPresent);
+            return true;
+        } catch (Throwable throwable) {
+            log("protected_editable_backup_rejected reason=exception " + throwable);
+            return false;
+        }
+    }
+
+    private static ProtectedVerification startProtectedEditableVerification(
+        Activity activity,
+        File document,
+        Properties markerProperties,
+        String documentPath,
+        long documentModified,
+        long documentLength,
+        long documentDevice,
+        long documentInode,
+        long documentChangeSeconds,
+        long documentChangeNanos,
+        String markerPath,
+        FileIdentity markerIdentity,
+        FileIdentity backupIdentity,
+        FileIdentity snapshotIdentity
+    ) {
+        ProtectedVerification verification = new ProtectedVerification(
+            documentPath,
+            documentModified,
+            documentLength,
+            documentDevice,
+            documentInode,
+            documentChangeSeconds,
+            documentChangeNanos,
+            markerPath,
+            markerIdentity,
+            backupIdentity,
+            snapshotIdentity
+        );
+        PROTECTED_VERIFICATIONS.put(activity, verification);
+
+        Properties verificationProperties = new Properties();
+        verificationProperties.putAll(markerProperties);
+        File verificationDocument = new File(document.getAbsolutePath());
+        WeakReference<Activity> activityReference =
+            new WeakReference<>(activity);
+        Handler mainHandler = new Handler(activity.getMainLooper());
+        Thread worker = new Thread(() -> {
+            boolean valid = protectedEditableBackupValid(
+                verificationDocument,
+                verificationProperties
+            );
+            mainHandler.post(() -> {
+                Activity currentActivity = activityReference.get();
+                if (currentActivity == null
+                    || currentActivity.isFinishing()
+                    || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1
+                        && currentActivity.isDestroyed())
+                    || PROTECTED_VERIFICATIONS.get(currentActivity)
+                        != verification) {
+                    return;
+                }
+                verification.complete = true;
+                verification.valid = valid;
+                SPREAD_CONFIGS.remove(currentActivity);
+                log("protected_editable_backup_verification_complete valid="
+                    + valid + " path=" + verification.documentPath);
+                updateNativeEraserGate(
+                    currentActivity,
+                    "protected_backup_verified"
+                );
+                if (valid && currentActivity.getResources()
+                        .getConfiguration().orientation
+                        == Configuration.ORIENTATION_LANDSCAPE) {
+                    log("protected_editable_backup_refresh_scheduled path="
+                        + verification.documentPath);
+                    scheduleConfigurationRefresh(
+                        currentActivity,
+                        Configuration.ORIENTATION_LANDSCAPE,
+                        0
+                    );
+                }
+            });
+        }, "SNSpreadBackupVerify");
+        worker.setDaemon(true);
+        try {
+            worker.start();
+            log("protected_editable_backup_verification_started path="
+                + verification.documentPath);
+        } catch (Throwable throwable) {
+            verification.complete = true;
+            verification.valid = false;
+            log("protected_editable_backup_verification_failed_to_start "
+                + throwable);
+        }
+        return verification;
+    }
+
+    private static String sha256(File file) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] buffer = new byte[64 * 1024];
+        try (FileInputStream input = new FileInputStream(file)) {
+            int count;
+            while ((count = input.read(buffer)) >= 0) {
+                if (count > 0) {
+                    digest.update(buffer, 0, count);
+                }
+            }
+        }
+        StringBuilder value = new StringBuilder(64);
+        for (byte item : digest.digest()) {
+            value.append(String.format("%02x", item & 0xff));
+        }
+        return value.toString();
     }
 
     private static boolean prepareNativeSpreadLasso(
@@ -2787,8 +3311,19 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 (x - writable.left) / scaleX
             ) - (spreadLassoCanonicalSelection ? 0 : slotOffset);
             int nativeY = Math.round((y - writable.top) / scaleY);
-            int nativeWidth = Math.max(1, Math.round(width / scaleX));
-            int nativeHeight = Math.max(1, Math.round(height / scaleY));
+            // The native selection model keeps its canonical dimensions while
+            // AreaSelectionView reports a move using the padded native preview
+            // size. Only the translated origin is in spread-display space.
+            // Applying the inverse half-page scale to the width and height a
+            // second time makes a pure move enlarge the selected trails ~2x.
+            boolean preserveCanonicalSize =
+                spreadLassoCanonicalSelection && mode == 1;
+            int nativeWidth = preserveCanonicalSize
+                ? width
+                : Math.max(1, Math.round(width / scaleX));
+            int nativeHeight = preserveCanonicalSize
+                ? height
+                : Math.max(1, Math.round(height / scaleY));
 
             param.args[1] = nativeX;
             param.args[2] = nativeY;
@@ -2801,6 +3336,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 + nativeWidth + "x" + nativeHeight + "]"
                 + " slot_offset=" + slotOffset
                 + " canonical=" + spreadLassoCanonicalSelection
+                + " preserve_size=" + preserveCanonicalSize
                 + " scale=" + scaleX + "," + scaleY);
         } catch (Throwable throwable) {
             log("lasso_transition_repair_failed " + throwable);
@@ -3102,6 +3638,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     + " pen=" + callInt(trail, "get_pen_type")
                     + " status=" + callInt(trail, "get_m_trail_status")
                     + " process=" + callInt(trail, "get_process_mod")
+                    + " erased=" + String.valueOf(
+                        XposedHelpers.callMethod(
+                            trail,
+                            "get_erase_line_trail_num"
+                        )
+                    )
                     + " rotation=" + callInt(trail, "get_m_rotate_angle")
                     + " redraw=" + callInt(trail, "get_m_redraw_width")
                     + "x" + callInt(trail, "get_m_redraw_height")
@@ -3204,9 +3746,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         RIGHT_DESTINATIONS.remove(activity);
         ACTIVATION_TOUCH_TARGETS.remove(activity);
         ACTIVATION_TOUCH_STARTS.remove(activity);
+        PEN_ACTIVATION_TARGETS.remove(activity);
+        PEN_ACTIVATION_ORIGINAL_PAGES.remove(activity);
+        PEN_ACTIVATION_TRAILS.remove(activity);
+        PEN_ACTIVATION_ERASERS.remove(activity);
         FINGER_TOUCH_STARTS.remove(activity);
         NON_EDGE_TAP_SUPPRESS_UNTIL.remove(activity);
         SPREAD_CONFIGS.remove(activity);
+        PROTECTED_VERIFICATIONS.remove(activity);
         log("activity_resources_released active_cleared=" + activeCleared
             + " recycled_bitmaps=" + recycled);
     }
@@ -3257,9 +3804,16 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             if (TARGET_FILE.equals(path)) {
                 SpreadConfig calibration = new SpreadConfig(
                     path,
+                    0L,
+                    0L,
+                    0L,
+                    0L,
+                    0L,
+                    0L,
                     null,
-                    0L,
-                    0L,
+                    FileIdentity.missing(),
+                    FileIdentity.missing(),
+                    FileIdentity.missing(),
                     true,
                     false,
                     true,
@@ -3270,6 +3824,15 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             }
 
             File document = new File(path);
+            long documentModified = document.isFile()
+                ? document.lastModified() : -1L;
+            long documentLength = document.isFile()
+                ? document.length() : -1L;
+            StructStat documentStat = Os.stat(document.getAbsolutePath());
+            long documentDevice = documentStat.st_dev;
+            long documentInode = documentStat.st_ino;
+            long documentChangeSeconds = documentStat.st_ctim.tv_sec;
+            long documentChangeNanos = documentStat.st_ctim.tv_nsec;
             File parent = document.getParentFile();
             if (parent == null) {
                 return null;
@@ -3278,22 +3841,45 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 parent,
                 "." + document.getName() + SIDECAR_SUFFIX
             );
-            long modified = marker.isFile() ? marker.lastModified() : -1L;
-            long length = marker.isFile() ? marker.length() : -1L;
+            File backupManifest = new File(
+                parent,
+                "." + document.getName() + ".snspread-backup.properties"
+            );
+            File backupSnapshot = new File(
+                parent,
+                "." + document.getName() + ".snspread-backup.mark"
+            );
+            FileIdentity markerIdentity = FileIdentity.capture(marker);
+            FileIdentity backupIdentity = FileIdentity.capture(backupManifest);
+            FileIdentity snapshotIdentity = FileIdentity.capture(backupSnapshot);
             SpreadConfig cached = SPREAD_CONFIGS.get(activity);
             if (cached != null && path.equals(cached.documentPath)
+                && cached.documentModified == documentModified
+                && cached.documentLength == documentLength
+                && cached.documentDevice == documentDevice
+                && cached.documentInode == documentInode
+                && cached.documentChangeSeconds == documentChangeSeconds
+                && cached.documentChangeNanos == documentChangeNanos
                 && marker.getAbsolutePath().equals(cached.markerPath)
-                && cached.markerModified == modified
-                && cached.markerLength == length) {
+                && cached.markerIdentity.sameAs(markerIdentity)
+                && cached.backupIdentity.sameAs(backupIdentity)
+                && cached.snapshotIdentity.sameAs(snapshotIdentity)) {
                 return cached;
             }
 
             if (!marker.isFile()) {
                 SpreadConfig disabled = new SpreadConfig(
                     path,
+                    documentModified,
+                    documentLength,
+                    documentDevice,
+                    documentInode,
+                    documentChangeSeconds,
+                    documentChangeNanos,
                     marker.getAbsolutePath(),
-                    modified,
-                    length,
+                    markerIdentity,
+                    backupIdentity,
+                    snapshotIdentity,
                     false,
                     false,
                     false,
@@ -3318,15 +3904,62 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             boolean disposable = "true".equalsIgnoreCase(
                 properties.getProperty("disposable", "false").trim()
             );
-            boolean editable = enabled && disposable
-                && "true".equalsIgnoreCase(
-                    properties.getProperty("editable", "false").trim()
-                );
+            boolean requestedEditable = "true".equalsIgnoreCase(
+                properties.getProperty("editable", "false").trim()
+            );
+            boolean protectedEditable = false;
+            if (enabled && requestedEditable && !disposable) {
+                ProtectedVerification verification =
+                    PROTECTED_VERIFICATIONS.get(activity);
+                if (verification == null || !verification.matches(
+                        path,
+                        documentModified,
+                        documentLength,
+                        documentDevice,
+                        documentInode,
+                        documentChangeSeconds,
+                        documentChangeNanos,
+                        marker.getAbsolutePath(),
+                        markerIdentity,
+                        backupIdentity,
+                        snapshotIdentity
+                    )) {
+                    verification = startProtectedEditableVerification(
+                        activity,
+                        document,
+                        properties,
+                        path,
+                        documentModified,
+                        documentLength,
+                        documentDevice,
+                        documentInode,
+                        documentChangeSeconds,
+                        documentChangeNanos,
+                        marker.getAbsolutePath(),
+                        markerIdentity,
+                        backupIdentity,
+                        snapshotIdentity
+                    );
+                }
+                protectedEditable = verification.complete
+                    && verification.valid;
+            } else {
+                PROTECTED_VERIFICATIONS.remove(activity);
+            }
+            boolean editable = enabled && requestedEditable
+                && (disposable || protectedEditable);
             SpreadConfig loaded = new SpreadConfig(
                 path,
+                documentModified,
+                documentLength,
+                documentDevice,
+                documentInode,
+                documentChangeSeconds,
+                documentChangeNanos,
                 marker.getAbsolutePath(),
-                modified,
-                length,
+                markerIdentity,
+                backupIdentity,
+                snapshotIdentity,
                 enabled,
                 coverSeparate,
                 editable,
@@ -3338,6 +3971,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 + " enabled=" + enabled
                 + " cover_separate=" + coverSeparate
                 + " editable=" + editable
+                + " requested_editable=" + requestedEditable
+                + " protected_editable=" + protectedEditable
                 + " disposable=" + disposable);
             return loaded;
         } catch (Throwable throwable) {
@@ -3829,6 +4464,920 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
 
         return false;
+    }
+
+    private static void handlePenPageActivation(
+        Activity activity,
+        int x,
+        int y,
+        int pressure
+    ) {
+        if (activity == null) {
+            return;
+        }
+        final int requestedX = x;
+        final int requestedY = y;
+        final int requestedPressure = pressure;
+        activity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (!isEditableSpreadLandscape(activity)) {
+                    cancelPendingPenPageActivation(
+                        activity,
+                        "spread_inactive"
+                    );
+                    return;
+                }
+
+                int requestedTarget = pageAt(
+                    activity,
+                    requestedX,
+                    requestedY
+                );
+                int current = currentDocumentPage(activity);
+                if (requestedTarget < 0 || requestedTarget == current) {
+                    cancelPendingPenPageActivation(
+                        activity,
+                        requestedTarget < 0
+                            ? "pen_outside_pages"
+                            : "pen_returned_to_active_page"
+                    );
+                    return;
+                }
+
+                Integer pending = PEN_ACTIVATION_TARGETS.get(activity);
+                if (pending != null
+                    && pending.intValue() == requestedTarget) {
+                    return;
+                }
+                if (pending != null) {
+                    cancelPendingPenPageActivation(
+                        activity,
+                        "pen_changed_target"
+                    );
+                }
+                log("pen_page_activation current="
+                    + current
+                    + " target=" + requestedTarget
+                    + " point=" + requestedX + "," + requestedY
+                    + " phase="
+                    + (requestedPressure > 0 ? "contact" : "hover")
+                    + " pressure=" + requestedPressure);
+                activateDocumentPageFromPen(activity, requestedTarget);
+            }
+        });
+    }
+
+    private static void activateDocumentPageFromPen(
+        Activity activity,
+        int targetPage
+    ) {
+        try {
+            Object viewModel = XposedHelpers.getObjectField(
+                activity,
+                "documentViewModel"
+            );
+            int currentPage = XposedHelpers.getIntField(
+                viewModel,
+                "currentPage"
+            );
+            if (targetPage == currentPage) {
+                return;
+            }
+
+            Object presenter = XposedHelpers.getObjectField(
+                activity,
+                "handWritePresenter"
+            );
+            SpreadConfig config = spreadConfig(activity);
+            if (config != null && config.editable) {
+                XposedHelpers.callMethod(
+                    presenter,
+                    "saveTrails",
+                    false,
+                    false
+                );
+            }
+
+            /*
+             * Prime the writer for the target page before the ordinary page
+             * load starts. DocumentViewModel.loadPage() can spend close to a
+             * second loading the bitmap/mark layer; disabling handwriting for
+             * that interval drops a stroke made immediately after hover. The
+             * low-latency writer is independent, so update its page and slot
+             * geometry first and leave it enabled throughout the transition.
+             */
+            XposedHelpers.setIntField(viewModel, "currentPage", targetPage);
+            int targetMarkPage = targetPage + 1;
+            XposedHelpers.setIntField(
+                presenter,
+                "currentPage",
+                targetMarkPage
+            );
+            RectF writable = activePageDestination(activity);
+            ImageView imageView = (ImageView) XposedHelpers.getObjectField(
+                activity,
+                "mImage"
+            );
+            int outputWidth = imageView == null ? 0 : imageView.getWidth();
+            int outputHeight = imageView == null ? 0 : imageView.getHeight();
+            boolean prepared = writable != null
+                && outputWidth > outputHeight
+                && outputHeight > 0;
+            if (prepared) {
+                XposedHelpers.callMethod(
+                    presenter,
+                    "setDisableAreaList",
+                    "SN_SPREAD_PROBE pen page activation",
+                    activePageDisabledAreas(
+                        writable,
+                        outputWidth,
+                        outputHeight
+                    )
+                );
+                XposedHelpers.callMethod(presenter, "sendWriteInfo");
+                prepared = applySpreadMarkGeometry(
+                    activity,
+                    presenter,
+                    "pen_page_activation"
+                );
+            }
+            log("pen_page_activation_prearmed from=" + currentPage
+                + " to=" + targetPage
+                + " prepared=" + prepared
+                + " destination=" + rectDescription(writable));
+
+            if (!prepared) {
+                XposedHelpers.setIntField(
+                    presenter,
+                    "currentPage",
+                    currentPage + 1
+                );
+                XposedHelpers.setIntField(
+                    viewModel,
+                    "currentPage",
+                    currentPage
+                );
+                XposedHelpers.callMethod(
+                    presenter,
+                    "disableHandWrite",
+                    "SN_SPREAD_PROBE pen activation preparation failed"
+                );
+                activateDocumentPage(activity, targetPage);
+                return;
+            }
+
+            // Keep the displayed spread stable while the pen is down. The
+            // presenter and low-latency writer now target the intended page,
+            // but the visual DocumentViewModel remains on the original page
+            // until receiveTrials() has committed the stroke on pen-up.
+            XposedHelpers.setIntField(
+                viewModel,
+                "currentPage",
+                currentPage
+            );
+            PEN_ACTIVATION_TARGETS.put(activity, targetPage);
+            PEN_ACTIVATION_ORIGINAL_PAGES.put(activity, currentPage);
+            log("pen_activation_deferred from=" + currentPage
+                + " to=" + targetPage
+                + " writer_prepared=true");
+        } catch (Throwable throwable) {
+            log("pen_activation_failed target=" + targetPage + " "
+                + throwable);
+            XposedBridge.log(throwable);
+            activateDocumentPage(activity, targetPage);
+        }
+    }
+
+    private static void completePendingPenPageActivation(
+        Activity activity,
+        String reason
+    ) {
+        Integer target = PEN_ACTIVATION_TARGETS.get(activity);
+        Integer original = PEN_ACTIVATION_ORIGINAL_PAGES.get(activity);
+        if (target == null) {
+            return;
+        }
+        if (hasPendingPenActivationEdits(activity)) {
+            log("pen_activation_aborted reason=persistence_failed target="
+                + target);
+            showOverlay(
+                activity,
+                "SPREAD PROBE: annotation save failed - edit not applied"
+            );
+            cancelPendingPenPageActivation(activity, "persistence_failed");
+            return;
+        }
+        try {
+            Object viewModel = XposedHelpers.getObjectField(
+                activity,
+                "documentViewModel"
+            );
+            showOverlay(
+                activity,
+                "SPREAD PROBE: switching active page to "
+                    + (target.intValue() + 1)
+            );
+            XposedHelpers.callMethod(
+                viewModel,
+                "loadPage",
+                target.intValue()
+            );
+            log("pen_activation_completed reason=" + reason
+                + " from=" + original
+                + " to=" + target);
+        } catch (Throwable throwable) {
+            log("pen_activation_completion_failed reason=" + reason
+                + " target=" + target + " " + throwable);
+            XposedBridge.log(throwable);
+            activateDocumentPage(activity, target.intValue());
+        } finally {
+            PEN_ACTIVATION_TARGETS.remove(activity);
+            PEN_ACTIVATION_ORIGINAL_PAGES.remove(activity);
+        }
+    }
+
+    private static boolean hasPendingPenActivationEdits(Activity activity) {
+        List<Object> trails = PEN_ACTIVATION_TRAILS.get(activity);
+        List<Object> erasers = PEN_ACTIVATION_ERASERS.get(activity);
+        return (trails != null && !trails.isEmpty())
+            || (erasers != null && !erasers.isEmpty());
+    }
+
+    /*
+     * A pen-down that begins on the inactive half reaches getTrailContainer()
+     * before the visual page switch. Supernote associates that operation with
+     * the target page, but its later save pass still serializes the combined
+     * spread buffer. Preserve completed ink (process 0) and stroke-eraser paths
+     * (processes 6 and 7), normalize the spread writer's 4/3 EMR scale to the
+     * document mark geometry, and apply only that page-local transaction after
+     * bypassing the unsafe native save.
+     */
+    private static void capturePendingPenActivationTrails(
+        Activity activity,
+        int operationPage,
+        List<?> operationTrails
+    ) {
+        Integer target = PEN_ACTIVATION_TARGETS.get(activity);
+        int targetMarkPage = target == null ? -1 : target.intValue() + 1;
+        if (target == null || targetMarkPage != operationPage
+            || operationTrails == null || operationTrails.isEmpty()) {
+            return;
+        }
+
+        ArrayList<Object> captured = new ArrayList<>();
+        ArrayList<Object> erasers = new ArrayList<>();
+        for (Object source : operationTrails) {
+            if (source == null) {
+                continue;
+            }
+            try {
+                int process = callInt(source, "get_process_mod");
+                if (callInt(source, "get_page_num") != targetMarkPage
+                    || (process != 0 && process != 6 && process != 7)
+                    || (process == 0
+                        && callInt(source, "get_pen_type") == 4)) {
+                    continue;
+                }
+                @SuppressWarnings("unchecked")
+                List<Point> points = (List<Point>) XposedHelpers.callMethod(
+                    source,
+                    "get_m_points"
+                );
+                if (points == null || points.isEmpty()) {
+                    continue;
+                }
+                Object copy = copyObjectFields(source);
+                normalizePendingPenTrail(copy, targetMarkPage);
+                if (process == 6 || process == 7) {
+                    erasers.add(copy);
+                } else {
+                    captured.add(copy);
+                }
+                log(((process == 6 || process == 7)
+                        ? "pen_activation_eraser_captured reader_page="
+                        : "pen_activation_trail_captured reader_page=")
+                    + target
+                    + " mark_page=" + targetMarkPage
+                    + " in_page="
+                    + callInt(source, "get_m_trail_num_in_page")
+                    + " process=" + process
+                    + " points=" + points.size()
+                    + " redraw="
+                    + callInt(source, "get_m_redraw_width") + "x"
+                    + callInt(source, "get_m_redraw_height")
+                    + " max=" + callInt(source, "get_max_x") + "x"
+                    + callInt(source, "get_max_y"));
+            } catch (Throwable throwable) {
+                log("pen_activation_trail_capture_failed " + throwable);
+                XposedBridge.log(throwable);
+            }
+        }
+        if (!captured.isEmpty()) {
+            PEN_ACTIVATION_TRAILS.put(activity, captured);
+        }
+        if (!erasers.isEmpty()) {
+            PEN_ACTIVATION_ERASERS.put(activity, erasers);
+        }
+    }
+
+    private static void normalizePendingPenTrail(
+        Object trail,
+        int targetPage
+    ) throws Exception {
+        float emrXScale = DOCUMENT_PAGE_HEIGHT
+            / (float) CANONICAL_PAGE_HEIGHT;
+        float emrYScale = DOCUMENT_PAGE_WIDTH
+            / (float) CANONICAL_PAGE_WIDTH;
+        float pageXScale = DOCUMENT_PAGE_WIDTH
+            / (float) CANONICAL_PAGE_WIDTH;
+        float pageYScale = DOCUMENT_PAGE_HEIGHT
+            / (float) CANONICAL_PAGE_HEIGHT;
+
+        @SuppressWarnings("unchecked")
+        List<Point> sourcePoints = (List<Point>) XposedHelpers.callMethod(
+            trail,
+            "get_m_points"
+        );
+        ArrayList<Point> scaledPoints = new ArrayList<>();
+        if (sourcePoints != null) {
+            for (Point point : sourcePoints) {
+                if (point != null) {
+                    scaledPoints.add(new Point(
+                        Math.round(point.x * emrXScale),
+                        Math.round(point.y * emrYScale)
+                    ));
+                }
+            }
+        }
+        XposedHelpers.callMethod(trail, "set_m_points", scaledPoints);
+        XposedHelpers.callMethod(
+            trail,
+            "set_max_x",
+            Math.round(callInt(trail, "get_max_x") * emrXScale)
+        );
+        XposedHelpers.callMethod(
+            trail,
+            "set_max_y",
+            Math.round(callInt(trail, "get_max_y") * emrYScale)
+        );
+        XposedHelpers.callMethod(
+            trail,
+            "set_m_redraw_width",
+            DOCUMENT_PAGE_WIDTH
+        );
+        XposedHelpers.callMethod(
+            trail,
+            "set_m_redraw_height",
+            DOCUMENT_PAGE_HEIGHT
+        );
+        XposedHelpers.callMethod(trail, "set_page_num", targetPage);
+
+        Object sourceRrd = XposedHelpers.callMethod(trail, "get_rrd");
+        if (sourceRrd != null) {
+            Object copiedRrd = copyObjectFields(sourceRrd);
+            Rect bounds = (Rect) XposedHelpers.callMethod(
+                sourceRrd,
+                "getRect"
+            );
+            Rect scaled = scaleUsableRect(
+                bounds,
+                pageXScale,
+                pageYScale
+            );
+            if (scaled != null) {
+                XposedHelpers.callMethod(copiedRrd, "setRect", scaled);
+            }
+            XposedHelpers.callMethod(trail, "set_rrd", copiedRrd);
+        }
+
+        scaleOptionalTrailRect(
+            trail,
+            "get_refresh_rect",
+            "set_refresh_rect",
+            pageXScale,
+            pageYScale
+        );
+        scaleOptionalTrailRect(
+            trail,
+            "get_m_before_shift_rect",
+            "set_m_before_shift_rect",
+            pageXScale,
+            pageYScale
+        );
+        scaleOptionalTrailRect(
+            trail,
+            "get_m_after_shift_rect",
+            "set_m_after_shift_rect",
+            pageXScale,
+            pageYScale
+        );
+
+        Object contoursObject = XposedHelpers.callMethod(
+            trail,
+            "get_m_contours_src"
+        );
+        if (contoursObject instanceof List) {
+            ArrayList<List<PointF>> contours = new ArrayList<>();
+            for (Object contourObject : (List<?>) contoursObject) {
+                ArrayList<PointF> contour = new ArrayList<>();
+                if (contourObject instanceof List) {
+                    for (Object pointObject : (List<?>) contourObject) {
+                        if (pointObject instanceof PointF) {
+                            PointF point = (PointF) pointObject;
+                            contour.add(new PointF(
+                                point.x * pageXScale,
+                                point.y * pageYScale
+                            ));
+                        }
+                    }
+                }
+                contours.add(contour);
+            }
+            XposedHelpers.callMethod(
+                trail,
+                "set_m_contours_src",
+                contours
+            );
+        }
+    }
+
+    private static Object copyObjectFields(Object source) throws Exception {
+        Object copy = source.getClass().getDeclaredConstructor().newInstance();
+        Class<?> type = source.getClass();
+        while (type != null && type != Object.class) {
+            for (java.lang.reflect.Field field : type.getDeclaredFields()) {
+                if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+                    continue;
+                }
+                field.setAccessible(true);
+                field.set(copy, field.get(source));
+            }
+            type = type.getSuperclass();
+        }
+        return copy;
+    }
+
+    private static Rect scaleUsableRect(
+        Rect source,
+        float scaleX,
+        float scaleY
+    ) {
+        if (source == null
+            || source.left == Integer.MAX_VALUE
+            || source.top == Integer.MAX_VALUE
+            || source.right < 0
+            || source.bottom < 0) {
+            return null;
+        }
+        return new Rect(
+            Math.round(source.left * scaleX),
+            Math.round(source.top * scaleY),
+            Math.round(source.right * scaleX),
+            Math.round(source.bottom * scaleY)
+        );
+    }
+
+    private static void scaleOptionalTrailRect(
+        Object trail,
+        String getter,
+        String setter,
+        float scaleX,
+        float scaleY
+    ) {
+        try {
+            Rect source = (Rect) XposedHelpers.callMethod(trail, getter);
+            Rect scaled = scaleUsableRect(source, scaleX, scaleY);
+            if (scaled != null) {
+                XposedHelpers.callMethod(trail, setter, scaled);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void persistPendingPenActivationTrails(
+        Activity activity,
+        Object presenter
+    ) {
+        Integer target = PEN_ACTIVATION_TARGETS.get(activity);
+        List<Object> captured = PEN_ACTIVATION_TRAILS.get(activity);
+        List<Object> erasers = PEN_ACTIVATION_ERASERS.get(activity);
+        if (target == null
+            || ((captured == null || captured.isEmpty())
+                && (erasers == null || erasers.isEmpty()))) {
+            return;
+        }
+        try {
+            Object superNoteNote = XposedHelpers.getObjectField(
+                presenter,
+                "superNoteNote"
+            );
+            String markPath = (String) XposedHelpers.getObjectField(
+                presenter,
+                "markPath"
+            );
+            int targetMarkPage = target.intValue() + 1;
+            Object existingResult = XposedHelpers.callMethod(
+                superNoteNote,
+                "getFilePageTrails",
+                markPath,
+                targetMarkPage
+            );
+            ArrayList<Object> fileTrails = new ArrayList<>();
+            if (existingResult instanceof List) {
+                fileTrails.addAll((List<?>) existingResult);
+            }
+
+            int erased = 0;
+            if (erasers != null && !erasers.isEmpty()) {
+                for (int index = fileTrails.size() - 1; index >= 0; index--) {
+                    Object existing = fileTrails.get(index);
+                    if (existing == null
+                        || callInt(existing, "get_page_num") != targetMarkPage
+                        || callInt(existing, "get_process_mod") != 0) {
+                        continue;
+                    }
+                    boolean intersects = false;
+                    for (Object eraser : erasers) {
+                        if (eraserIntersectsTrail(eraser, existing)) {
+                            intersects = true;
+                            break;
+                        }
+                    }
+                    if (intersects) {
+                        fileTrails.remove(index);
+                        erased++;
+                    }
+                }
+            }
+
+            int nextTrailNumber = 0;
+            for (Object existing : fileTrails) {
+                if (existing != null) {
+                    nextTrailNumber = Math.max(
+                        nextTrailNumber,
+                        callInt(existing, "get_m_trail_num_in_page")
+                    );
+                }
+            }
+
+            int appended = 0;
+            int alreadyPresent = 0;
+            if (captured != null) {
+                for (Object trail : captured) {
+                    if (matchingTrailExists(fileTrails, trail)) {
+                        alreadyPresent++;
+                        continue;
+                    }
+                    nextTrailNumber++;
+                    XposedHelpers.callMethod(
+                        trail,
+                        "set_m_trail_num_in_page",
+                        nextTrailNumber
+                    );
+                    XposedHelpers.callMethod(
+                        trail,
+                        "set_page_num",
+                        targetMarkPage
+                    );
+                    fileTrails.add(trail);
+                    appended++;
+                }
+            }
+
+            boolean saved = (appended == 0 && erased == 0)
+                || Boolean.TRUE.equals(
+                XposedHelpers.callMethod(
+                    superNoteNote,
+                    "modifyPageTrailsFromFile",
+                    markPath,
+                    targetMarkPage,
+                    fileTrails
+                )
+            );
+            log("pen_activation_trails_persisted reader_page=" + target
+                + " mark_page=" + targetMarkPage
+                + " appended=" + appended
+                + " erased=" + erased
+                + " already_present=" + alreadyPresent
+                + " total=" + fileTrails.size()
+                + " saved=" + saved);
+            if (saved) {
+                PEN_ACTIVATION_TRAILS.remove(activity);
+                PEN_ACTIVATION_ERASERS.remove(activity);
+            }
+        } catch (Throwable throwable) {
+            log("pen_activation_trail_persist_failed target=" + target
+                + " " + throwable);
+            XposedBridge.log(throwable);
+        }
+    }
+
+    private static boolean matchingTrailExists(
+        List<Object> existingTrails,
+        Object candidate
+    ) {
+        try {
+            @SuppressWarnings("unchecked")
+            List<Point> candidatePoints = (List<Point>) XposedHelpers.callMethod(
+                candidate,
+                "get_m_points"
+            );
+            if (candidatePoints == null || candidatePoints.isEmpty()) {
+                return false;
+            }
+            for (Object existing : existingTrails) {
+                if (existing == null
+                    || callInt(existing, "get_page_num")
+                        != callInt(candidate, "get_page_num")
+                    || callInt(existing, "get_pen_type")
+                        != callInt(candidate, "get_pen_type")
+                    || callInt(existing, "get_process_mod")
+                        != callInt(candidate, "get_process_mod")) {
+                    continue;
+                }
+                @SuppressWarnings("unchecked")
+                List<Point> points = (List<Point>) XposedHelpers.callMethod(
+                    existing,
+                    "get_m_points"
+                );
+                if (points == null || points.size() != candidatePoints.size()) {
+                    continue;
+                }
+                if (matchingTrailPoints(points, candidatePoints, 6)
+                    && matchingTrailInkAttributes(existing, candidate)
+                    && matchingTrailValue(existing, candidate, "get_pressures")
+                    && matchingTrailValue(existing, candidate, "get_angles")
+                    && matchingTrailValue(existing, candidate, "get_flag_draw")
+                    && matchingTrailValue(existing, candidate, "get_timestamp")) {
+                    return true;
+                }
+            }
+        } catch (Throwable throwable) {
+            log("pen_activation_trail_match_failed " + throwable);
+        }
+        return false;
+    }
+
+    private static boolean matchingTrailPoints(
+        List<Point> existing,
+        List<Point> candidate,
+        int tolerance
+    ) {
+        if (existing == null || candidate == null
+            || existing.size() != candidate.size()) {
+            return false;
+        }
+        for (int index = 0; index < existing.size(); index++) {
+            Point existingPoint = existing.get(index);
+            Point candidatePoint = candidate.get(index);
+            if (existingPoint == null || candidatePoint == null) {
+                if (existingPoint != candidatePoint) {
+                    return false;
+                }
+            } else if (!pointsNear(
+                existingPoint,
+                candidatePoint,
+                tolerance
+            )) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean matchingTrailInkAttributes(
+        Object existing,
+        Object candidate
+    ) {
+        String[] integerGetters = new String[] {
+            "get_flag_penup",
+            "get_flag_special",
+            "get_layer_num",
+            "get_pen_color",
+            "get_pen_type",
+            "get_rec_mod",
+            "get_m_thickness",
+            "get_walcom_emr_type",
+            "get_max_x",
+            "get_max_y",
+            "get_m_emr_point_axis",
+            "get_m_trail_status",
+            "get_m_rotate_angle",
+            "get_m_redraw_width",
+            "get_m_redraw_height",
+            "get_m_trail_type",
+            "get_m_draw_version",
+            "get_recogn_trail_type",
+            "get_process_mod"
+        };
+        for (String getter : integerGetters) {
+            if (callInt(existing, getter) != callInt(candidate, getter)) {
+                return false;
+            }
+        }
+        return matchingTrailValue(
+            existing,
+            candidate,
+            "get_write_app_name"
+        );
+    }
+
+    private static boolean matchingTrailValue(
+        Object existing,
+        Object candidate,
+        String getter
+    ) {
+        return Objects.equals(
+            XposedHelpers.callMethod(existing, getter),
+            XposedHelpers.callMethod(candidate, getter)
+        );
+    }
+
+    private static boolean eraserIntersectsTrail(
+        Object eraser,
+        Object trail
+    ) {
+        final int radius = 225;
+        try {
+            List<Point> eraserPoints = normalizedTrailMatchPoints(eraser);
+            List<Point> trailPoints = normalizedTrailMatchPoints(trail);
+            if (eraserPoints == null || eraserPoints.isEmpty()
+                || trailPoints == null || trailPoints.isEmpty()) {
+                return false;
+            }
+
+            Rect eraserBounds = pointBounds(eraserPoints);
+            Rect trailBounds = pointBounds(trailPoints);
+            if (eraserBounds == null || trailBounds == null) {
+                return false;
+            }
+            eraserBounds.inset(-radius, -radius);
+            if (!Rect.intersects(eraserBounds, trailBounds)) {
+                return false;
+            }
+
+            double radiusSquared = (double) radius * radius;
+            if (polylinePointsNearSegments(
+                eraserPoints,
+                trailPoints,
+                radiusSquared
+            )) {
+                return true;
+            }
+            return polylinePointsNearSegments(
+                trailPoints,
+                eraserPoints,
+                radiusSquared
+            );
+        } catch (Throwable throwable) {
+            log("pen_activation_eraser_match_failed " + throwable);
+            return false;
+        }
+    }
+
+    private static List<Point> normalizedTrailMatchPoints(Object trail) {
+        @SuppressWarnings("unchecked")
+        List<Point> source = (List<Point>) XposedHelpers.callMethod(
+            trail,
+            "get_m_points"
+        );
+        ArrayList<Point> normalized = new ArrayList<>();
+        if (source == null || source.isEmpty()) {
+            return normalized;
+        }
+        int maxX = Math.max(1, Math.abs(callInt(trail, "get_max_x")));
+        int maxY = Math.max(1, Math.abs(callInt(trail, "get_max_y")));
+        for (Point point : source) {
+            if (point != null) {
+                normalized.add(new Point(
+                    Math.round(point.x * 10000.0f / maxX),
+                    Math.round(point.y * 10000.0f / maxY)
+                ));
+            }
+        }
+        return normalized;
+    }
+
+    private static boolean polylinePointsNearSegments(
+        List<Point> probes,
+        List<Point> polyline,
+        double radiusSquared
+    ) {
+        if (polyline.size() == 1) {
+            Point only = polyline.get(0);
+            for (Point probe : probes) {
+                if (probe != null && only != null
+                    && pointDistanceSquared(probe, only) <= radiusSquared) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        for (Point probe : probes) {
+            if (probe == null) {
+                continue;
+            }
+            for (int index = 1; index < polyline.size(); index++) {
+                Point start = polyline.get(index - 1);
+                Point end = polyline.get(index);
+                if (start != null && end != null
+                    && pointSegmentDistanceSquared(probe, start, end)
+                        <= radiusSquared) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static double pointDistanceSquared(Point first, Point second) {
+        double dx = first.x - (double) second.x;
+        double dy = first.y - (double) second.y;
+        return dx * dx + dy * dy;
+    }
+
+    private static double pointSegmentDistanceSquared(
+        Point point,
+        Point start,
+        Point end
+    ) {
+        double dx = end.x - (double) start.x;
+        double dy = end.y - (double) start.y;
+        if (dx == 0.0 && dy == 0.0) {
+            return pointDistanceSquared(point, start);
+        }
+        double projection = ((point.x - start.x) * dx
+            + (point.y - start.y) * dy) / (dx * dx + dy * dy);
+        projection = Math.max(0.0, Math.min(1.0, projection));
+        double closestX = start.x + projection * dx;
+        double closestY = start.y + projection * dy;
+        double offsetX = point.x - closestX;
+        double offsetY = point.y - closestY;
+        return offsetX * offsetX + offsetY * offsetY;
+    }
+
+    private static boolean pointsNear(Point first, Point second, int tolerance) {
+        return first != null && second != null
+            && Math.abs(first.x - second.x) <= tolerance
+            && Math.abs(first.y - second.y) <= tolerance;
+    }
+
+    private static void cancelPendingPenPageActivation(
+        Activity activity,
+        String reason
+    ) {
+        Integer target = PEN_ACTIVATION_TARGETS.remove(activity);
+        Integer original = PEN_ACTIVATION_ORIGINAL_PAGES.remove(activity);
+        PEN_ACTIVATION_TRAILS.remove(activity);
+        PEN_ACTIVATION_ERASERS.remove(activity);
+        if (target == null || original == null) {
+            return;
+        }
+        try {
+            Object presenter = XposedHelpers.getObjectField(
+                activity,
+                "handWritePresenter"
+            );
+            XposedHelpers.setIntField(
+                presenter,
+                "currentPage",
+                original.intValue() + 1
+            );
+            RectF writable = activePageDestination(activity);
+            ImageView imageView = (ImageView) XposedHelpers.getObjectField(
+                activity,
+                "mImage"
+            );
+            int outputWidth = imageView == null ? 0 : imageView.getWidth();
+            int outputHeight = imageView == null ? 0 : imageView.getHeight();
+            if (writable != null && outputWidth > outputHeight
+                && outputHeight > 0) {
+                XposedHelpers.callMethod(
+                    presenter,
+                    "setDisableAreaList",
+                    "SN_SPREAD_PROBE cancel pen page activation",
+                    activePageDisabledAreas(
+                        writable,
+                        outputWidth,
+                        outputHeight
+                    )
+                );
+                XposedHelpers.callMethod(presenter, "sendWriteInfo");
+                applySpreadMarkGeometry(
+                    activity,
+                    presenter,
+                    "pen_page_activation_cancelled"
+                );
+            }
+            log("pen_activation_cancelled reason=" + reason
+                + " target=" + target
+                + " restored=" + original);
+        } catch (Throwable throwable) {
+            log("pen_activation_cancel_failed reason=" + reason + " "
+                + throwable);
+            XposedBridge.log(throwable);
+        }
     }
 
     private static void trackFingerTapNavigation(

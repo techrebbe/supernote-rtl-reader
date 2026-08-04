@@ -238,6 +238,136 @@ re-enabled and the document process restarted, the protected PDF remained in
 ordinary native landscape view rather than silently restoring RTL spread mode.
 The protected `.mark` SHA-256 remained unchanged throughout.
 
+## v0.4.10 protected native editing pilot
+
+Safety and setup:
+
+- [x] v0.4.10-r1 identifies Native Spread v0.0.75 through the live handshake.
+- [x] The recovery manifest's full PDF SHA-256 remains valid after Supernote
+  changes the PDF modification time during a native-reader restart.
+- [x] **RTL editable** requires a separate confirmation and reports a verified
+  recovery snapshot before it becomes selected.
+- [x] An existing `.mark` snapshot matches the pre-test byte length and SHA-256.
+- [x] Leaving a protected editable session retires that session's recovery
+  baseline; a later **Back up & enable** cannot reuse it after an unprotected
+  interval.
+- [x] Recovery re-enumerates every native document PID and aborts before
+  touching `.mark` unless all original or replacement processes have exited.
+- [x] Restore resolves only after the worker's verified outcome and shows a
+  visible failure message if an asynchronous recovery step fails.
+- [x] Backup retirement stages the snapshot first, rolls it back if manifest
+  removal fails, and recovers or cleans interrupted retirement state on load.
+- [x] The companion hashes protected PDF and snapshot bytes off the activity
+  main thread and keeps native editing disabled until verification completes.
+- [x] Successful asynchronous verification refreshes an already visible
+  landscape spread so native handwriting is re-enabled immediately.
+- [x] Backup-creation failure removes a newly copied orphan snapshot when no
+  manifest exists.
+- [x] Successful restore uses the same staged, rollback-capable cleanup as
+  backup retirement before reporting completion.
+- [x] Cover controls and synchronization are blocked while a native-mode
+  transition is pending; a Cover change holds the same lock until its own
+  marker update completes.
+- [x] A successful Off or read-only transition clears the retired recovery
+  snapshot status and Restore action from the settings UI.
+- [x] Cover cannot change while a configured marker's live hooks are
+  unavailable, preventing UI/sidecar parity drift.
+- [x] The protected-verification cache includes device/inode and nanosecond
+  change time, so a metadata-preserving PDF replacement invalidates prior
+  authorization and reruns full-file attestation.
+- [x] Native Spread v0.0.79 applies the same strong identity to the marker,
+  recovery manifest, and recovery snapshot; replacing or rewriting any sidecar
+  invalidates the cached editable authorization and forces re-attestation.
+- [x] Switching to LTR commits the direction only after native RTL shutdown and
+  recovery-baseline retirement succeed; failure retains the RTL UI state.
+- [x] First-time editable activation revalidates the live `.mark` presence,
+  length, and SHA-256 immediately before marker creation. A native flush during
+  backup creation retires and retries the snapshot, including the original
+  absent-file case, and repeated instability fails closed without a marker.
+- [ ] A document with no `.mark` records and can restore the original absent state.
+- [ ] Removing or modifying a backup file makes editable mode fail closed.
+- [ ] Read-only mode and **Off** retain their v0.4.7-r1 behavior.
+
+Protected duplicate editing:
+
+- [x] Native writing persists on the active left page through a cold restart.
+- [x] Saved ink remains visible on the inactive page without deleting prior
+  annotations and after spread turns. The v0.0.75 hardware trace preserved the
+  seven existing `.mark` trails, appended the new trail as the eighth, and
+  reloaded all eight after leaving and returning to the spread.
+- [x] Stroke erasing on the inactive page removes only intersecting saved ink.
+  On a fresh v0.0.78 disposable document, two separated page-5 strokes were
+  shown beside a clean active page 4. The process-7 eraser transaction reported
+  `erased=1`, retained one trail, left page 4 unchanged, and the selective erase
+  remained correct after turning away from and back to the spread.
+- [x] A failed inactive-page `.mark` transaction cannot silently complete the
+  page switch and discard its retained ink/eraser buffers. The v0.0.79 invariant
+  requires failure detection before `loadPage`, explicit activation cancellation,
+  and a visible save-failure state.
+- [x] Native Spread v0.0.80 compares every path point plus pressure, angle, draw
+  flags, timestamps, color, thickness, and related pen attributes before treating
+  an inactive-page stroke as already persisted. Endpoint-only collisions cannot
+  silently discard a retraced line or colocated dot.
+- [x] The packaged Native Spread version, runtime handshake version, and plug-in
+  compatibility floor are required to match, preventing a valid module upgrade
+  from being rejected as an older incompatible build.
+- [x] The settings panel is viewport-bounded and its body scrolls, keeping the
+  expanded editable-mode confirmation and recovery controls reachable in
+  landscape.
+- [x] Eraser changes persist after a normal page-change save and cold restart,
+  and do not alter the protected recovery snapshot.
+- [x] Lasso selection/movement preserves size and position through a spread
+  turn and cold restart in canonical page coordinates.
+- [ ] Text highlight/underline selection and final annotations remain aligned.
+- [ ] Embedded document links, swipes, and outer-edge taps retain RTL behavior.
+- [ ] Portrait RTL navigation and landscape active-page switching remain correct.
+
+Recovery and portability:
+
+- [x] **Restore snapshot** reopens the native reader with the exact original
+  `.mark` SHA-256 (or removes the pilot-created `.mark` when none existed).
+- [x] Completed recovery files are removed so a later pilot takes a fresh baseline.
+- [x] InkBridge's existing Supernote page export sees the pilot-created,
+  lasso-moved handwriting as ordinary schema-v2 elements.
+- [ ] InkBridge page reconciliation emits a tombstone for a stroke erased after
+  a prior portable baseline was captured.
+- [ ] No stale/blank/out-of-order spread, crash, or native handoff regression occurs.
+
+The protected 738-page pilot recovery test restored the live `.mark` from
+147,752 edited bytes to the original 89,801-byte snapshot. Its final SHA-256
+was exactly
+`c2155e51a686a3ba7066c8ef7d859c19053019e85d23d1414fa1a69dc9de2c21`,
+the document activity reopened normally, and all `.snspread*` recovery and
+marker sidecars were removed. The pre-restore edited `.mark` and verified
+recovery snapshot were retained as local test evidence for the InkBridge
+portability check.
+
+For that check, the edited snapshot was staged temporarily and page 145 was
+exported through InkBridge's installed **Export Page Test** action. The
+schema-v2 payload contained the moved X as two native strokes with 84 samples,
+stable Supernote UUIDs, normalized page geometry, pressure, thickness, pen
+type, and pen color. The original `.mark` was then restored again with the
+same verified SHA-256 and the temporary device copies were removed. A separate
+write-baseline-erase-reconcile cycle is still needed to validate a deletion
+tombstone; a final page snapshot alone correctly contains only the surviving
+strokes.
+
+The final reviewed v0.4.10 / Native Spread v0.0.68 smoke test repeated the
+first-time protected activation on the same pilot. The plug-in created and
+verified the 89,801-byte baseline while immediate Close and hardware-Back
+attempts were blocked, then opened the native spread with protected editing
+active. A new native stroke changed the live `.mark` to 91,009 bytes; its erase
+was committed through the normal Supernote annotation path. **Restore
+snapshot** then replaced the edited file with the original baseline, reproduced
+the exact SHA-256 above, reopened page 145, and removed every `.snspread*`
+sidecar. No temporary inspector or rotation override was left running.
+
+One non-destructive visual difference remains: the low-latency live pen preview
+in a half-page landscape spread initially appears thicker than the settled
+stroke after Supernote commits and redraws it. The saved `.mark` retains the
+canonical Supernote thickness and remains portable through InkBridge; matching
+the transient preview to the half-page scale is tracked as post-v0.4.10 polish.
+
 ## Failure capture
 
 Before reproducing a failure:

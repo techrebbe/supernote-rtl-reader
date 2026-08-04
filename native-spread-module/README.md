@@ -61,9 +61,12 @@ v0.0.75 prearms the low-latency writer for the page under the pen, captures the
 completed trail, converts it to native document-page coordinates, and merges it
 with the page's existing `.mark` trails. It suppresses the native intermediate
 save during that transition because the native in-memory list may contain only
-a subset of the page and would otherwise replace older annotations. This path
-currently applies to ordinary ink; inactive-page eraser, highlighter, and lasso
-operations remain separate validation targets.
+a subset of the page and would otherwise replace older annotations.
+
+v0.0.78 applies the same page-local transaction to Supernote stroke-eraser
+paths. It normalizes saved ink and the eraser path before intersection testing,
+then rewrites the target page with only the matched ink removed. Inactive-page
+highlighter and lasso operations remain separate validation targets.
 
 This is firmware-specific experimental software for a rooted device. Back up
 documents and `.mark` files before testing a new firmware or module revision.
@@ -102,8 +105,10 @@ PDF and a protected copy of a 738-page annotated Hebrew PDF. The real-document
 pass confirmed persistent two-page annotation display, outer-edge-only tap
 navigation, side-preserving spread turns, and an unchanged `.mark` checksum.
 
-v0.0.75 compiles and passes automated handshake, backup-attestation,
-destroyed-activity cleanup, canonical lasso-move, and inactive-page ink-merge
-invariants. Its focused Nomad regression preserved seven existing trails,
-appended the new inactive-page stroke as an eighth, and retained all eight after
-a spread turn away and back. The full record is in the root `REGRESSION.md`.
+v0.0.78 compiles and passes automated handshake, backup-attestation,
+destroyed-activity cleanup, canonical lasso-move, inactive-page ink-merge, and
+scale-independent inactive-page eraser invariants. Its focused Nomad eraser
+regression removed exactly one of two separated inactive-page strokes, retained
+the control stroke, left companion page 4 unchanged, and preserved the result
+after a spread turn away and back. The full record is in the root
+`REGRESSION.md`.

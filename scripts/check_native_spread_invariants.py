@@ -41,7 +41,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 75L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 78L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -568,14 +568,20 @@ def check(repo_root: Path) -> None:
             "persistPendingPenActivationTrails(",
             '"modifyPageTrailsFromFile"',
             'XposedHelpers.callMethod(',
+            '"get_erase_line_trail_num"',
+            "PEN_ACTIVATION_ERASERS",
+            "eraserIntersectsTrail(",
+            "process != 0 && process != 6 && process != 7",
+            '"pen_activation_eraser_captured',
+            "normalizedTrailMatchPoints(",
         ),
         "inactive-page pen activation",
     )
 
-    if 'android:versionCode="75"' not in manifest:
-        fail("companion manifest must use versionCode 75 for merged inactive-page persistence")
-    if 'android:versionName="0.0.75"' not in manifest:
-        fail("companion manifest must use versionName 0.0.75")
+    if 'android:versionCode="78"' not in manifest:
+        fail("companion manifest must use versionCode 78 for scale-independent inactive erasing")
+    if 'android:versionName="0.0.78"' not in manifest:
+        fail("companion manifest must use versionName 0.0.78")
 
     print("Native Spread safety invariants: PASS")
 

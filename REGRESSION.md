@@ -288,6 +288,11 @@ Protected duplicate editing:
   annotations and after spread turns. The v0.0.75 hardware trace preserved the
   seven existing `.mark` trails, appended the new trail as the eighth, and
   reloaded all eight after leaving and returning to the spread.
+- [x] Stroke erasing on the inactive page removes only intersecting saved ink.
+  On a fresh v0.0.78 disposable document, two separated page-5 strokes were
+  shown beside a clean active page 4. The process-7 eraser transaction reported
+  `erased=1`, retained one trail, left page 4 unchanged, and the selective erase
+  remained correct after turning away from and back to the spread.
 - [x] Eraser changes persist after a normal page-change save and cold restart,
   and do not alter the protected recovery snapshot.
 - [x] Lasso selection/movement preserves size and position through a spread

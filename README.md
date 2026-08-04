@@ -185,6 +185,15 @@ subset and can delete older annotations. On the disposable Nomad test PDF, the
 new inactive-page line remained visible, all seven existing trails were
 preserved, and all eight trails survived a spread turn away and back.
 
+Native Spread v0.0.78 extends that protected transaction to the stroke eraser.
+It captures Supernote's eraser path, compares it with saved handwriting in a
+scale-independent page coordinate system, removes only intersecting ink from
+the target page, and bypasses the native combined-spread save that can otherwise
+clear unrelated trails. On a fresh disposable Nomad document, erasing the
+right-hand one of two separated strokes on the inactive page removed exactly
+that stroke, preserved the control stroke and companion page 4, and remained
+correct after leaving and returning to the spread.
+
 **Restore snapshot** disables the marker, terminates the native document
 process before touching `.mark`, re-enumerates the process list to catch a
 replacement PID, and aborts unless every document process has exited. It then

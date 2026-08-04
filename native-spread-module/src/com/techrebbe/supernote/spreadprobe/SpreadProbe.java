@@ -82,7 +82,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         "documentApkLength";
     private static final String HANDSHAKE_EXTRA_PROCESS_ID = "processId";
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 75L;
+    private static final long MODULE_VERSION_CODE = 78L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -111,6 +111,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final Map<Activity, Integer> PEN_ACTIVATION_ORIGINAL_PAGES =
         new WeakHashMap<>();
     private static final Map<Activity, List<Object>> PEN_ACTIVATION_TRAILS =
+        new WeakHashMap<>();
+    private static final Map<Activity, List<Object>> PEN_ACTIVATION_ERASERS =
         new WeakHashMap<>();
     private static final Map<Activity, Point> FINGER_TOUCH_STARTS =
         new WeakHashMap<>();
@@ -1721,15 +1723,20 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     List<Object> captured = activity == null
                         ? null
                         : PEN_ACTIVATION_TRAILS.get(activity);
+                    List<Object> erasers = activity == null
+                        ? null
+                        : PEN_ACTIVATION_ERASERS.get(activity);
                     if (activity == null
                         || PEN_ACTIVATION_TARGETS.get(activity) == null
-                        || captured == null
-                        || captured.isEmpty()) {
+                        || ((captured == null || captured.isEmpty())
+                            && (erasers == null || erasers.isEmpty()))) {
                         return;
                     }
                     param.setResult(null);
                     log("pen_activation_native_save_bypassed trails="
-                        + captured.size());
+                        + (captured == null ? 0 : captured.size())
+                        + " erasers="
+                        + (erasers == null ? 0 : erasers.size()));
                 }
 
                 @Override
@@ -3606,6 +3613,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     + " pen=" + callInt(trail, "get_pen_type")
                     + " status=" + callInt(trail, "get_m_trail_status")
                     + " process=" + callInt(trail, "get_process_mod")
+                    + " erased=" + String.valueOf(
+                        XposedHelpers.callMethod(
+                            trail,
+                            "get_erase_line_trail_num"
+                        )
+                    )
                     + " rotation=" + callInt(trail, "get_m_rotate_angle")
                     + " redraw=" + callInt(trail, "get_m_redraw_width")
                     + "x" + callInt(trail, "get_m_redraw_height")
@@ -3711,6 +3724,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         PEN_ACTIVATION_TARGETS.remove(activity);
         PEN_ACTIVATION_ORIGINAL_PAGES.remove(activity);
         PEN_ACTIVATION_TRAILS.remove(activity);
+        PEN_ACTIVATION_ERASERS.remove(activity);
         FINGER_TOUCH_STARTS.remove(activity);
         NON_EDGE_TAP_SUPPRESS_UNTIL.remove(activity);
         SPREAD_CONFIGS.remove(activity);
@@ -4675,18 +4689,24 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 log("pen_activation_trails_unpersisted count="
                     + unpersisted.size() + " target=" + target);
             }
+            List<Object> unpersistedErasers = PEN_ACTIVATION_ERASERS.remove(
+                activity
+            );
+            if (unpersistedErasers != null && !unpersistedErasers.isEmpty()) {
+                log("pen_activation_erasers_unpersisted count="
+                    + unpersistedErasers.size() + " target=" + target);
+            }
         }
     }
 
     /*
      * A pen-down that begins on the inactive half reaches getTrailContainer()
      * before the visual page switch. Supernote associates that operation with
-     * the target page, but its later save pass still serializes the previously
-     * active page buffer and can silently omit the new trail. Preserve a copy
-     * of only those just-finished ink trails, normalize the spread writer's
-     * 4/3 EMR scale to the document's 1404x1872 mark geometry, and append them
-     * after the native save has completed but before loadPage() reads the
-     * target page back.
+     * the target page, but its later save pass still serializes the combined
+     * spread buffer. Preserve completed ink (process 0) and stroke-eraser paths
+     * (processes 6 and 7), normalize the spread writer's 4/3 EMR scale to the
+     * document mark geometry, and apply only that page-local transaction after
+     * bypassing the unsafe native save.
      */
     private static void capturePendingPenActivationTrails(
         Activity activity,
@@ -4701,14 +4721,17 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
 
         ArrayList<Object> captured = new ArrayList<>();
+        ArrayList<Object> erasers = new ArrayList<>();
         for (Object source : operationTrails) {
             if (source == null) {
                 continue;
             }
             try {
+                int process = callInt(source, "get_process_mod");
                 if (callInt(source, "get_page_num") != targetMarkPage
-                    || callInt(source, "get_process_mod") != 0
-                    || callInt(source, "get_pen_type") == 4) {
+                    || (process != 0 && process != 6 && process != 7)
+                    || (process == 0
+                        && callInt(source, "get_pen_type") == 4)) {
                     continue;
                 }
                 @SuppressWarnings("unchecked")
@@ -4721,11 +4744,19 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 }
                 Object copy = copyObjectFields(source);
                 normalizePendingPenTrail(copy, targetMarkPage);
-                captured.add(copy);
-                log("pen_activation_trail_captured reader_page=" + target
+                if (process == 6 || process == 7) {
+                    erasers.add(copy);
+                } else {
+                    captured.add(copy);
+                }
+                log(((process == 6 || process == 7)
+                        ? "pen_activation_eraser_captured reader_page="
+                        : "pen_activation_trail_captured reader_page=")
+                    + target
                     + " mark_page=" + targetMarkPage
                     + " in_page="
                     + callInt(source, "get_m_trail_num_in_page")
+                    + " process=" + process
                     + " points=" + points.size()
                     + " redraw="
                     + callInt(source, "get_m_redraw_width") + "x"
@@ -4739,6 +4770,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
         if (!captured.isEmpty()) {
             PEN_ACTIVATION_TRAILS.put(activity, captured);
+        }
+        if (!erasers.isEmpty()) {
+            PEN_ACTIVATION_ERASERS.put(activity, erasers);
         }
     }
 
@@ -4922,7 +4956,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     ) {
         Integer target = PEN_ACTIVATION_TARGETS.get(activity);
         List<Object> captured = PEN_ACTIVATION_TRAILS.get(activity);
-        if (target == null || captured == null || captured.isEmpty()) {
+        List<Object> erasers = PEN_ACTIVATION_ERASERS.get(activity);
+        if (target == null
+            || ((captured == null || captured.isEmpty())
+                && (erasers == null || erasers.isEmpty()))) {
             return;
         }
         try {
@@ -4946,6 +4983,29 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 fileTrails.addAll((List<?>) existingResult);
             }
 
+            int erased = 0;
+            if (erasers != null && !erasers.isEmpty()) {
+                for (int index = fileTrails.size() - 1; index >= 0; index--) {
+                    Object existing = fileTrails.get(index);
+                    if (existing == null
+                        || callInt(existing, "get_page_num") != targetMarkPage
+                        || callInt(existing, "get_process_mod") != 0) {
+                        continue;
+                    }
+                    boolean intersects = false;
+                    for (Object eraser : erasers) {
+                        if (eraserIntersectsTrail(eraser, existing)) {
+                            intersects = true;
+                            break;
+                        }
+                    }
+                    if (intersects) {
+                        fileTrails.remove(index);
+                        erased++;
+                    }
+                }
+            }
+
             int nextTrailNumber = 0;
             for (Object existing : fileTrails) {
                 if (existing != null) {
@@ -4958,27 +5018,30 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
 
             int appended = 0;
             int alreadyPresent = 0;
-            for (Object trail : captured) {
-                if (matchingTrailExists(fileTrails, trail)) {
-                    alreadyPresent++;
-                    continue;
+            if (captured != null) {
+                for (Object trail : captured) {
+                    if (matchingTrailExists(fileTrails, trail)) {
+                        alreadyPresent++;
+                        continue;
+                    }
+                    nextTrailNumber++;
+                    XposedHelpers.callMethod(
+                        trail,
+                        "set_m_trail_num_in_page",
+                        nextTrailNumber
+                    );
+                    XposedHelpers.callMethod(
+                        trail,
+                        "set_page_num",
+                        targetMarkPage
+                    );
+                    fileTrails.add(trail);
+                    appended++;
                 }
-                nextTrailNumber++;
-                XposedHelpers.callMethod(
-                    trail,
-                    "set_m_trail_num_in_page",
-                    nextTrailNumber
-                );
-                XposedHelpers.callMethod(
-                    trail,
-                    "set_page_num",
-                    targetMarkPage
-                );
-                fileTrails.add(trail);
-                appended++;
             }
 
-            boolean saved = appended == 0 || Boolean.TRUE.equals(
+            boolean saved = (appended == 0 && erased == 0)
+                || Boolean.TRUE.equals(
                 XposedHelpers.callMethod(
                     superNoteNote,
                     "modifyPageTrailsFromFile",
@@ -4990,11 +5053,13 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             log("pen_activation_trails_persisted reader_page=" + target
                 + " mark_page=" + targetMarkPage
                 + " appended=" + appended
+                + " erased=" + erased
                 + " already_present=" + alreadyPresent
                 + " total=" + fileTrails.size()
                 + " saved=" + saved);
             if (saved) {
                 PEN_ACTIVATION_TRAILS.remove(activity);
+                PEN_ACTIVATION_ERASERS.remove(activity);
             }
         } catch (Throwable throwable) {
             log("pen_activation_trail_persist_failed target=" + target
@@ -5051,6 +5116,129 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         return false;
     }
 
+    private static boolean eraserIntersectsTrail(
+        Object eraser,
+        Object trail
+    ) {
+        final int radius = 225;
+        try {
+            List<Point> eraserPoints = normalizedTrailMatchPoints(eraser);
+            List<Point> trailPoints = normalizedTrailMatchPoints(trail);
+            if (eraserPoints == null || eraserPoints.isEmpty()
+                || trailPoints == null || trailPoints.isEmpty()) {
+                return false;
+            }
+
+            Rect eraserBounds = pointBounds(eraserPoints);
+            Rect trailBounds = pointBounds(trailPoints);
+            if (eraserBounds == null || trailBounds == null) {
+                return false;
+            }
+            eraserBounds.inset(-radius, -radius);
+            if (!Rect.intersects(eraserBounds, trailBounds)) {
+                return false;
+            }
+
+            double radiusSquared = (double) radius * radius;
+            if (polylinePointsNearSegments(
+                eraserPoints,
+                trailPoints,
+                radiusSquared
+            )) {
+                return true;
+            }
+            return polylinePointsNearSegments(
+                trailPoints,
+                eraserPoints,
+                radiusSquared
+            );
+        } catch (Throwable throwable) {
+            log("pen_activation_eraser_match_failed " + throwable);
+            return false;
+        }
+    }
+
+    private static List<Point> normalizedTrailMatchPoints(Object trail) {
+        @SuppressWarnings("unchecked")
+        List<Point> source = (List<Point>) XposedHelpers.callMethod(
+            trail,
+            "get_m_points"
+        );
+        ArrayList<Point> normalized = new ArrayList<>();
+        if (source == null || source.isEmpty()) {
+            return normalized;
+        }
+        int maxX = Math.max(1, Math.abs(callInt(trail, "get_max_x")));
+        int maxY = Math.max(1, Math.abs(callInt(trail, "get_max_y")));
+        for (Point point : source) {
+            if (point != null) {
+                normalized.add(new Point(
+                    Math.round(point.x * 10000.0f / maxX),
+                    Math.round(point.y * 10000.0f / maxY)
+                ));
+            }
+        }
+        return normalized;
+    }
+
+    private static boolean polylinePointsNearSegments(
+        List<Point> probes,
+        List<Point> polyline,
+        double radiusSquared
+    ) {
+        if (polyline.size() == 1) {
+            Point only = polyline.get(0);
+            for (Point probe : probes) {
+                if (probe != null && only != null
+                    && pointDistanceSquared(probe, only) <= radiusSquared) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        for (Point probe : probes) {
+            if (probe == null) {
+                continue;
+            }
+            for (int index = 1; index < polyline.size(); index++) {
+                Point start = polyline.get(index - 1);
+                Point end = polyline.get(index);
+                if (start != null && end != null
+                    && pointSegmentDistanceSquared(probe, start, end)
+                        <= radiusSquared) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static double pointDistanceSquared(Point first, Point second) {
+        double dx = first.x - (double) second.x;
+        double dy = first.y - (double) second.y;
+        return dx * dx + dy * dy;
+    }
+
+    private static double pointSegmentDistanceSquared(
+        Point point,
+        Point start,
+        Point end
+    ) {
+        double dx = end.x - (double) start.x;
+        double dy = end.y - (double) start.y;
+        if (dx == 0.0 && dy == 0.0) {
+            return pointDistanceSquared(point, start);
+        }
+        double projection = ((point.x - start.x) * dx
+            + (point.y - start.y) * dy) / (dx * dx + dy * dy);
+        projection = Math.max(0.0, Math.min(1.0, projection));
+        double closestX = start.x + projection * dx;
+        double closestY = start.y + projection * dy;
+        double offsetX = point.x - closestX;
+        double offsetY = point.y - closestY;
+        return offsetX * offsetX + offsetY * offsetY;
+    }
+
     private static boolean pointsNear(Point first, Point second, int tolerance) {
         return first != null && second != null
             && Math.abs(first.x - second.x) <= tolerance
@@ -5064,6 +5252,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         Integer target = PEN_ACTIVATION_TARGETS.remove(activity);
         Integer original = PEN_ACTIVATION_ORIGINAL_PAGES.remove(activity);
         PEN_ACTIVATION_TRAILS.remove(activity);
+        PEN_ACTIVATION_ERASERS.remove(activity);
         if (target == null || original == null) {
             return;
         }

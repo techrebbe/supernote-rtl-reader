@@ -162,6 +162,11 @@ backup is verified, the prior marker is restored and the new backup is retired.
 Final full-file verification is inside that same rollback scope. While any of
 these background transitions is pending, Settings dismissal, hardware Back,
 and Close are blocked so native handoff cannot race the recovery transaction.
+Immediately before the first editable marker is committed, the plug-in also
+compares the live `.mark` presence, length, and SHA-256 with the new recovery
+baseline. If the running native reader flushed annotations during backup
+creation, the stale snapshot is retired and recreated; activation fails closed
+after three unstable attempts rather than authorizing recovery from older ink.
 
 After successful verification, v0.0.75 explicitly refreshes an already visible
 landscape spread so native handwriting geometry is re-enabled without waiting

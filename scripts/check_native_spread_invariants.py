@@ -139,7 +139,9 @@ def check(repo_root: Path) -> None:
     editable_worker = editable_configure.find(
         'startNativeBackupWorker("RTLReaderNativeBackupCreate")'
     )
-    editable_backup = editable_configure.find("ensureNativeAnnotationBackup(pdfFile)")
+    editable_backup = editable_configure.find(
+        "ensureStableNativeAnnotationBackupForActivation("
+    )
     editable_marker = editable_configure.find("writeNativeSpreadEditableMarker(")
     if not (
         0 <= editable_handshake < editable_worker < editable_backup < editable_marker
@@ -164,6 +166,44 @@ def check(repo_root: Path) -> None:
         < editable_marker < editable_cleanup < editable_rollback
     ):
         fail("new backup and editable marker activation are not rollback-capable")
+
+    stable_backup_start = plugin.find(
+        "private fun ensureStableNativeAnnotationBackupForActivation("
+    )
+    read_backup_start = plugin.find(
+        "private fun readNativeAnnotationBackup(",
+        stable_backup_start,
+    )
+    if stable_backup_start < 0 or read_backup_start < 0:
+        fail("could not isolate live annotation backup stabilization")
+    stable_backup = plugin[stable_backup_start:read_backup_start]
+    require_markers(
+        stable_backup,
+        (
+            "repeat(maximumAttempts)",
+            "val backup = ensureNativeAnnotationBackup(pdfFile)",
+            "liveNativeAnnotationMatchesBackup(backup)",
+            "removeNativeAnnotationBackupFiles(pdfFile, backup)",
+            "mark.length() == backup.markLength",
+            "sha256(mark) == backup.markSha256",
+            "!mark.exists()",
+            "RTL_READER_NATIVE_BACKUP_LIVE_MARK_CHANGED",
+        ),
+        "live annotation backup stabilization",
+    )
+    snapshot_attempt = stable_backup.find(
+        "val backup = ensureNativeAnnotationBackup(pdfFile)"
+    )
+    live_check = stable_backup.find(
+        "liveNativeAnnotationMatchesBackup(backup)",
+        snapshot_attempt,
+    )
+    retry_cleanup = stable_backup.find(
+        "removeNativeAnnotationBackupFiles(pdfFile, backup)",
+        live_check,
+    )
+    if not 0 <= snapshot_attempt < live_check < retry_cleanup:
+        fail("editable activation does not retry a snapshot after live .mark drift")
 
     configure_worker = configure.find(
         'startNativeBackupWorker("RTLReaderNativeBackupRetire")'

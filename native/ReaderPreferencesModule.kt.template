@@ -333,7 +333,10 @@ class ReaderPreferencesModule(
                     try {
                         val previousMarkerBytes = if (marker.isFile) marker.readBytes() else null
                         val backupManifestExisted = nativeAnnotationBackupManifest(pdfFile).isFile
-                        val backup = ensureNativeAnnotationBackup(pdfFile)
+                        val backup = ensureStableNativeAnnotationBackupForActivation(
+                            pdfFile,
+                            backupManifestExisted,
+                        )
                         try {
                             writeNativeSpreadEditableMarker(
                                 pdfFile,
@@ -972,6 +975,55 @@ class ReaderPreferencesModule(
                 )
             }
             throw error
+        }
+    }
+
+    private fun ensureStableNativeAnnotationBackupForActivation(
+        pdfFile: File,
+        backupManifestExisted: Boolean,
+    ): NativeAnnotationBackup {
+        if (backupManifestExisted) {
+            // An already-active protected session intentionally diverges from
+            // its recovery baseline as the user edits. Reuse is authorized by
+            // ensureNativeAnnotationBackup's marker/manifest validation.
+            return ensureNativeAnnotationBackup(pdfFile)
+        }
+
+        val maximumAttempts = 3
+        repeat(maximumAttempts) { attempt ->
+            val backup = ensureNativeAnnotationBackup(pdfFile)
+            if (liveNativeAnnotationMatchesBackup(backup)) {
+                Log.i(
+                    LOG_TAG,
+                    "RTL_READER_NATIVE_BACKUP_LIVE_MARK_VERIFIED attempt=${attempt + 1}",
+                )
+                return backup
+            }
+
+            Log.w(
+                LOG_TAG,
+                "RTL_READER_NATIVE_BACKUP_LIVE_MARK_CHANGED attempt=${attempt + 1}; retrying snapshot",
+            )
+            removeNativeAnnotationBackupFiles(pdfFile, backup)
+            if (attempt + 1 < maximumAttempts) {
+                Thread.sleep(100L)
+            }
+        }
+        throw IllegalStateException(
+            "Supernote annotations kept changing while protected editing was being enabled; no editable marker was written",
+        )
+    }
+
+    private fun liveNativeAnnotationMatchesBackup(
+        backup: NativeAnnotationBackup,
+    ): Boolean {
+        val mark = backup.mark
+        return if (backup.originalMarkPresent) {
+            mark.isFile &&
+                mark.length() == backup.markLength &&
+                sha256(mark) == backup.markSha256
+        } else {
+            !mark.exists()
         }
     }
 

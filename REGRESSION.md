@@ -280,6 +280,10 @@ Safety and setup:
   invalidates the cached editable authorization and forces re-attestation.
 - [x] Switching to LTR commits the direction only after native RTL shutdown and
   recovery-baseline retirement succeed; failure retains the RTL UI state.
+- [x] First-time editable activation revalidates the live `.mark` presence,
+  length, and SHA-256 immediately before marker creation. A native flush during
+  backup creation retires and retries the snapshot, including the original
+  absent-file case, and repeated instability fails closed without a marker.
 - [ ] A document with no `.mark` records and can restore the original absent state.
 - [ ] Removing or modifying a backup file makes editable mode fail closed.
 - [ ] Read-only mode and **Off** retain their v0.4.7-r1 behavior.

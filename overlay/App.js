@@ -8,6 +8,7 @@ import {
   PanResponder,
   Pressable,
   SafeAreaView,
+  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
@@ -1102,6 +1103,10 @@ export default function App() {
               </Pressable>
             </View>
 
+            <ScrollView
+              contentContainerStyle={styles.settingsScrollContent}
+              keyboardShouldPersistTaps="handled"
+              style={styles.settingsScroll}>
             <Text style={styles.settingLabel}>Reading direction</Text>
             <View style={styles.segmentRow}>
               <SegmentedButton
@@ -1270,6 +1275,7 @@ export default function App() {
             {nativeSpreadError && (
               <Text style={styles.settingError}>{nativeSpreadError}</Text>
             )}
+            </ScrollView>
           </View>
         </View>
       )}
@@ -1498,6 +1504,7 @@ const styles = StyleSheet.create({
   settingsPanel: {
     width: 520,
     maxWidth: '90%',
+    maxHeight: '90%',
     padding: 20,
     borderWidth: 2,
     borderColor: '#000000',
@@ -1569,6 +1576,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#000000',
     backgroundColor: '#ffffff',
+  },
+  settingsScroll: {
+    flexShrink: 1,
+  },
+  settingsScrollContent: {
+    paddingBottom: 4,
   },
   nativeWarningTitle: {
     fontSize: 16,

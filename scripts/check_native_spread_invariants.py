@@ -319,6 +319,32 @@ def check(repo_root: Path) -> None:
     ):
         fail("Settings Done remains available during a native-mode transition")
 
+    settings_panel_start = app.find("<View style={styles.settingsPanel}>")
+    settings_scroll_start = app.find(
+        "<ScrollView", settings_panel_start
+    )
+    warning_panel_start = app.find(
+        "{nativeEditableConfirmOpen && (", settings_scroll_start
+    )
+    recovery_row_start = app.find(
+        "{nativeBackupAvailable && (", warning_panel_start
+    )
+    settings_scroll_end = app.find("</ScrollView>", recovery_row_start)
+    if not (
+        0 <= settings_panel_start < settings_scroll_start
+        < warning_panel_start < recovery_row_start < settings_scroll_end
+    ):
+        fail("expanded native settings controls are not inside the settings scroll view")
+    if (
+        "style={styles.settingsScroll}" not in app[
+            settings_scroll_start:warning_panel_start
+        ]
+        or "maxHeight: '90%'" not in app
+        or "settingsScroll: {" not in app
+        or "flexShrink: 1" not in app
+    ):
+        fail("settings panel is not bounded to a scrollable viewport")
+
     restore_worker_start = plugin.find("private fun scheduleAnnotationRestore(")
     restore_worker_end = plugin.find("\n    }\n}", restore_worker_start)
     if restore_worker_start < 0 or restore_worker_end < 0:

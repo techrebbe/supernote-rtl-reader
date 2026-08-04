@@ -311,6 +311,9 @@ Protected duplicate editing:
 - [x] The packaged Native Spread version, runtime handshake version, and plug-in
   compatibility floor are required to match, preventing a valid module upgrade
   from being rejected as an older incompatible build.
+- [x] The settings panel is viewport-bounded and its body scrolls, keeping the
+  expanded editable-mode confirmation and recovery controls reachable in
+  landscape.
 - [x] Eraser changes persist after a normal page-change save and cold restart,
   and do not alter the protected recovery snapshot.
 - [x] Lasso selection/movement preserves size and position through a spread

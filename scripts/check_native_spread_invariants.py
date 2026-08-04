@@ -691,6 +691,30 @@ def check(repo_root: Path) -> None:
     if 'android:versionName="0.0.80"' not in manifest:
         fail("companion manifest must use versionName 0.0.80")
 
+    manifest_version = re.search(
+        r'android:versionCode="(\d+)"', manifest
+    )
+    handshake_version = re.search(
+        r'private static final long MODULE_VERSION_CODE = (\d+)L;', module
+    )
+    plugin_minimum = re.search(
+        r'NATIVE_SPREAD_MIN_VERSION_CODE = (\d+)L', plugin
+    )
+    if not manifest_version or not handshake_version or not plugin_minimum:
+        fail("could not read packaged, handshake, and minimum module versions")
+    reported_versions = {
+        int(manifest_version.group(1)),
+        int(handshake_version.group(1)),
+        int(plugin_minimum.group(1)),
+    }
+    if len(reported_versions) != 1:
+        fail(
+            "packaged, handshake, and minimum module versions must match: "
+            f"manifest={manifest_version.group(1)} "
+            f"handshake={handshake_version.group(1)} "
+            f"minimum={plugin_minimum.group(1)}"
+        )
+
     print("Native Spread safety invariants: PASS")
 
 

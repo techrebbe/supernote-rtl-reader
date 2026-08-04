@@ -308,6 +308,9 @@ Protected duplicate editing:
   flags, timestamps, color, thickness, and related pen attributes before treating
   an inactive-page stroke as already persisted. Endpoint-only collisions cannot
   silently discard a retraced line or colocated dot.
+- [x] The packaged Native Spread version, runtime handshake version, and plug-in
+  compatibility floor are required to match, preventing a valid module upgrade
+  from being rejected as an older incompatible build.
 - [x] Eraser changes persist after a normal page-change save and cold restart,
   and do not alter the protected recovery snapshot.
 - [x] Lasso selection/movement preserves size and position through a spread

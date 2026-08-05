@@ -184,6 +184,12 @@ while retaining the existing fail-closed guard if that commit fails. Hardware
 validation in both directions confirmed that inactive-page strokes remain
 visible, preserve all earlier ink, and survive turning away and back.
 
+Native Spread v0.0.87 protects an inactive-page stroke erase from the native
+save that follows page activation. The page-local transaction already removes
+the correct intersecting trail; the one deferred native save is now suppressed
+before it can rewrite the page from stale in-memory trails. The guard is armed
+only after a successful erase, is consumed once, and expires after two seconds.
+
 ## v0.4.10 protected native editing pilot
 
 v0.4.9 added an explicitly confirmed **RTL editable** choice alongside **Off**

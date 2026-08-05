@@ -24,6 +24,7 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.os.Parcel;
 import android.os.Process;
+import android.os.SystemClock;
 import android.system.Os;
 import android.system.StructStat;
 import android.util.Log;
@@ -83,7 +84,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         "documentApkLength";
     private static final String HANDSHAKE_EXTRA_PROCESS_ID = "processId";
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 86L;
+    private static final long MODULE_VERSION_CODE = 87L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -93,6 +94,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int SPREAD_PAGE_HEIGHT = 1243;
     private static final float SPREAD_OUTER_EDGE_FRACTION = 0.14f;
     private static final long NON_EDGE_TAP_SUPPRESSION_MS = 400L;
+    private static final long POST_ACTIVATION_SAVE_BYPASS_MS = 2000L;
     private static final AtomicInteger GENERATION = new AtomicInteger();
     private static final Map<Activity, Bitmap> COMPOSITES = new WeakHashMap<>();
     private static final Map<Activity, RectF> LEFT_DESTINATIONS = new WeakHashMap<>();
@@ -120,6 +122,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final Map<Activity, List<Object>> PEN_ACTIVATION_TRAILS =
         new WeakHashMap<>();
     private static final Map<Activity, List<Object>> PEN_ACTIVATION_ERASERS =
+        new WeakHashMap<>();
+    private static final Map<Activity, Long> PEN_ACTIVATION_SAVE_BYPASS_UNTIL =
         new WeakHashMap<>();
     private static final Map<Activity, Point> FINGER_TOUCH_STARTS =
         new WeakHashMap<>();
@@ -1840,6 +1844,16 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
                     Activity activity = activeActivity;
+                    Long bypassUntil = activity == null
+                        ? null
+                        : PEN_ACTIVATION_SAVE_BYPASS_UNTIL.remove(activity);
+                    if (bypassUntil != null
+                        && SystemClock.uptimeMillis()
+                            <= bypassUntil.longValue()) {
+                        param.setResult(null);
+                        log("pen_activation_post_persist_save_bypassed");
+                        return;
+                    }
                     List<Object> captured = activity == null
                         ? null
                         : PEN_ACTIVATION_TRAILS.get(activity);
@@ -1865,7 +1879,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     if (activity != null) {
                         persistPendingPenActivationTrails(
                             activity,
-                            param.thisObject
+                            param.thisObject,
+                            false
                         );
                     }
                 }
@@ -1902,7 +1917,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                          */
                         persistPendingPenActivationTrails(
                             activity,
-                            param.thisObject
+                            param.thisObject,
+                            true
                         );
                         activity.runOnUiThread(new Runnable() {
                             @Override
@@ -3855,6 +3871,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         PEN_ACTIVATION_ORIGINAL_PAGES.remove(activity);
         PEN_ACTIVATION_TRAILS.remove(activity);
         PEN_ACTIVATION_ERASERS.remove(activity);
+        PEN_ACTIVATION_SAVE_BYPASS_UNTIL.remove(activity);
         FINGER_TOUCH_STARTS.remove(activity);
         NON_EDGE_TAP_SUPPRESS_UNTIL.remove(activity);
         SPREAD_CONFIGS.remove(activity);
@@ -5157,7 +5174,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
 
     private static void persistPendingPenActivationTrails(
         Activity activity,
-        Object presenter
+        Object presenter,
+        boolean armPostActivationSaveBypass
     ) {
         Integer target = PEN_ACTIVATION_TARGETS.get(activity);
         List<Object> captured = PEN_ACTIVATION_TRAILS.get(activity);
@@ -5265,6 +5283,15 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             if (saved) {
                 PEN_ACTIVATION_TRAILS.remove(activity);
                 PEN_ACTIVATION_ERASERS.remove(activity);
+                if (armPostActivationSaveBypass && erased > 0) {
+                    PEN_ACTIVATION_SAVE_BYPASS_UNTIL.put(
+                        activity,
+                        SystemClock.uptimeMillis()
+                            + POST_ACTIVATION_SAVE_BYPASS_MS
+                    );
+                    log("pen_activation_post_persist_save_armed window_ms="
+                        + POST_ACTIVATION_SAVE_BYPASS_MS);
+                }
             }
         } catch (Throwable throwable) {
             log("pen_activation_trail_persist_failed target=" + target

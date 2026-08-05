@@ -106,6 +106,12 @@ the fail-closed completion guard to run first and cancel valid ink. Persistence
 now finishes before page activation; a failed write still cancels activation
 without discarding or overwriting the retained annotation data.
 
+v0.0.87 suppresses the single delayed native `saveTrails()` call after a
+successful inactive-page stroke erase. Without that guard, the page-local erase
+correctly removed the intersecting trail, but the delayed save could restore it
+from stale memory while dropping a newer trail. The bypass is erase-only,
+one-shot, and expires after two seconds.
+
 This is firmware-specific experimental software for a rooted device. Back up
 documents and `.mark` files before testing a new firmware or module revision.
 

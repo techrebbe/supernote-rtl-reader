@@ -254,10 +254,10 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   strokes remain visible, including after a page turn.
 - [ ] Lasso-move one stroke and confirm no old pixels remain at its source.
 
-## v0.4.12 native spread appearance and inactive-page writing
+## v0.4.12 native spread appearance and inactive-page editing
 
-- [x] Native Spread v0.0.86 compiles and the packaged, handshake, and plug-in
-  compatibility versions all report 86.
+- [x] Native Spread v0.0.87 compiles and the packaged, handshake, and plug-in
+  compatibility versions all report 87.
 - [x] Native Spread v0.0.84: rotate an open spread to portrait and confirm the
   current page immediately uses the normal native-reader portrait size without
   turning away and back.
@@ -277,6 +277,13 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   new stroke survives a spread turn away and back.
 - [x] The symmetric inactive-left-page stroke follows the same sequence,
   preserves all prior trails, and survives a spread turn away and back.
+- [x] Erasing a saved line on the inactive page removes the intersecting line,
+  preserves the other page-local trails, and remains correct after turning
+  away and back. On the Nomad, the far-left wavy line was removed while the
+  other three visible trails remained. The page-local transaction reported
+  `erased=1`, the one stale native save logged
+  `pen_activation_post_persist_save_bypassed`, and the same result reloaded
+  after leaving and returning to the spread.
 - [ ] In the plug-in reader, Native fill reaches the physical top and bottom of
   landscape while the header/footer visibly overlay the PDF instead of
   reserving document space.

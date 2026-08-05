@@ -47,7 +47,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 86L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 87L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -705,6 +705,10 @@ def check(repo_root: Path) -> None:
             "normalizePendingPenTrail(",
             "pen_activation_native_save_bypassed",
             "persistPendingPenActivationTrails(",
+            "PEN_ACTIVATION_SAVE_BYPASS_UNTIL",
+            "POST_ACTIVATION_SAVE_BYPASS_MS",
+            "pen_activation_post_persist_save_armed",
+            "pen_activation_post_persist_save_bypassed",
             "receiveTrials() fetches the completed native trail",
             '"modifyPageTrailsFromFile"',
             'XposedHelpers.callMethod(',
@@ -752,6 +756,43 @@ def check(repo_root: Path) -> None:
             "receiveTrials must persist inactive-page edits before posting "
             "the fail-closed activation completion"
         )
+
+    save_hook_start = module.find('"saveTrails",')
+    save_hook_end = module.find('"receiveTrials",', save_hook_start)
+    if save_hook_start < 0 or save_hook_end < 0:
+        fail("could not isolate inactive-page saveTrails hook")
+    save_hook = module[save_hook_start:save_hook_end]
+    post_persist_bypass = save_hook.find(
+        "PEN_ACTIVATION_SAVE_BYPASS_UNTIL.remove(activity)"
+    )
+    pending_capture = save_hook.find(
+        "List<Object> captured = activity == null"
+    )
+    if not 0 <= post_persist_bypass < pending_capture:
+        fail(
+            "post-persistence stale native save must be bypassed before "
+            "pending inactive-page buffers are inspected"
+        )
+
+    persist_start = module.find(
+        "private static void persistPendingPenActivationTrails("
+    )
+    match_start = module.find(
+        "private static boolean matchingTrailExists(", persist_start
+    )
+    if persist_start < 0 or match_start < 0:
+        fail("could not isolate inactive-page persistence")
+    persist_method = module[persist_start:match_start]
+    require_markers(
+        persist_method,
+        (
+            "armPostActivationSaveBypass && erased > 0",
+            "PEN_ACTIVATION_SAVE_BYPASS_UNTIL.put(",
+            "SystemClock.uptimeMillis()",
+            "+ POST_ACTIVATION_SAVE_BYPASS_MS",
+        ),
+        "inactive-page eraser stale-save guard",
+    )
 
     require_markers(
         module,
@@ -859,10 +900,10 @@ def check(repo_root: Path) -> None:
         "native-reader-equivalent spread trimming",
     )
 
-    if 'android:versionCode="86"' not in manifest:
-        fail("companion manifest must use versionCode 86 for inactive-page persistence sequencing")
-    if 'android:versionName="0.0.86"' not in manifest:
-        fail("companion manifest must use versionName 0.0.86")
+    if 'android:versionCode="87"' not in manifest:
+        fail("companion manifest must use versionCode 87 for inactive-page eraser save ordering")
+    if 'android:versionName="0.0.87"' not in manifest:
+        fail("companion manifest must use versionName 0.0.87")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

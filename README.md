@@ -159,10 +159,10 @@ and page activation therefore share the same scale and crop instead of each
 feature approximating the new layout independently. Existing documents default
 to **Fit page** with the divider **On** until changed.
 
-Native Spread v0.0.83 also waits for the native document view to finish its
-portrait/landscape layout before refreshing the current page after rotation.
-This prevents the first portrait frame from retaining the smaller landscape
-scale until a page turn forces another native render.
+Native Spread v0.0.84 waits for the native document view to finish its
+portrait/landscape layout and then asks Supernote to reload the unchanged
+current page after returning to portrait. This prevents the first portrait
+frame from retaining the smaller landscape-rendered page until a page turn.
 
 ## v0.4.10 protected native editing pilot
 

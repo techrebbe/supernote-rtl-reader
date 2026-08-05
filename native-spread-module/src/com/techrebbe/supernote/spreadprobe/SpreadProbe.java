@@ -83,7 +83,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         "documentApkLength";
     private static final String HANDSHAKE_EXTRA_PROCESS_ID = "processId";
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 83L;
+    private static final long MODULE_VERSION_CODE = 84L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -4199,6 +4199,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                                 + orientation + " view=" + viewWidth + "x"
                                 + viewHeight);
                         }
+                        return;
+                    }
+
+                    if (orientation == Configuration.ORIENTATION_PORTRAIT) {
+                        log("configuration_refresh_native_reload orientation="
+                            + orientation + " attempt=" + attempt
+                            + " view=" + viewWidth + "x" + viewHeight);
+                        XposedHelpers.callMethod(viewModel, "reloadPage");
                         return;
                     }
 

@@ -93,10 +93,11 @@ and handwriting input all use the same full-page transform plus visible-slot
 clip. Disabling the divider removes the dark rule and gives both pages the full
 936-pixel half-screen width.
 
-v0.0.83 fixes the first portrait frame after leaving a landscape spread. The
-module now waits until the native ImageView reports portrait dimensions before
-resubmitting the current page, so it immediately uses the native portrait scale
-without requiring a page turn.
+v0.0.84 fixes the first portrait frame after leaving a landscape spread. The
+module waits until the native ImageView reports portrait dimensions and then
+uses Supernote's own `reloadPage()` path for the unchanged current page. This
+regenerates the native portrait display bitmap instead of resubmitting the
+landscape-scaled cached origin bitmap.
 
 This is firmware-specific experimental software for a rooted device. Back up
 documents and `.mark` files before testing a new firmware or module revision.
@@ -123,7 +124,7 @@ The signed APK is written to `build/artifact/`.
 
 Install the APK, enable **Supernote Native Spread Probe** in LSPosed, scope it
 only to `com.supernote.document`, and restart the document reader. Supernote
-RTL Reader v0.4.12 or newer and Native Spread v0.0.83 or newer are required for
+RTL Reader v0.4.12 or newer and Native Spread v0.0.84 or newer are required for
 protected editable mode. Its
 recovery manifest binds the backup to the PDF's full SHA-256 because
 Supernote changes the PDF modification time when the document activity

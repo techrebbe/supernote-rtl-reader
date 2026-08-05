@@ -164,6 +164,18 @@ portrait/landscape layout and then asks Supernote to reload the unchanged
 current page after returning to portrait. This prevents the first portrait
 frame from retaining the smaller landscape-rendered page until a page turn.
 
+Native Spread v0.0.85 makes **Native fill** use Supernote's actual automatic
+page-trimming geometry instead of filling each half from the uncropped PDF
+page. The active page reuses the trim rectangle already calculated by the
+native reader; the adjacent page calculates the same non-white content bounds
+when it has not yet been active. The original PDF bitmap remains the drawing
+source, and the full-page destination is derived from the trim transform, so
+native ink, eraser, lasso, highlights, links, and activation all retain one
+canonical coordinate system. On the Nomad hardware pass, both spread pages
+extended behind the top toolbar and bottom page bar without stretching. A new
+stroke remained aligned and persisted in the same position after turning away
+and back.
+
 ## v0.4.10 protected native editing pilot
 
 v0.4.9 added an explicitly confirmed **RTL editable** choice alongside **Off**

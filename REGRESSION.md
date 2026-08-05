@@ -256,9 +256,9 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 
 ## v0.4.12 native spread appearance
 
-- [x] Native Spread v0.0.82 compiles and the packaged, handshake, and plug-in
-  compatibility versions all report 82.
-- [ ] Native Spread v0.0.84: rotate an open spread to portrait and confirm the
+- [x] Native Spread v0.0.85 compiles and the packaged, handshake, and plug-in
+  compatibility versions all report 85.
+- [x] Native Spread v0.0.84: rotate an open spread to portrait and confirm the
   current page immediately uses the normal native-reader portrait size without
   turning away and back.
 - [x] Appearance choices are stored per PDF and marker updates retain the
@@ -269,13 +269,16 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   behavior.
 - [ ] **Fit page + Divider Off** removes the dark line and uses the full two
   halves without moving or resizing existing ink incorrectly.
-- [ ] **Native fill + Divider Off** fills each half without stretching; the
-  expected small horizontal crop is visible.
+- [x] **Native fill + Divider Off** uses Supernote's automatic non-white page
+  trim independently for both pages, fills the full landscape height without
+  stretching, and extends behind the native toolbar and page-number bar.
 - [ ] In the plug-in reader, Native fill reaches the physical top and bottom of
   landscape while the header/footer visibly overlay the PDF instead of
   reserving document space.
 - [ ] In Native fill, pen, eraser, lasso, highlights, and embedded links remain
-  aligned with the PDF on both active sides.
+  aligned with the PDF on both active sides. Pen alignment and persistence on
+  the active page passed with Native Spread v0.0.85; the remaining tools still
+  need a focused smoke test with the new trim transform.
 - [ ] Return to Fit page and confirm all existing annotations return to their
   original whole-page positions.
 

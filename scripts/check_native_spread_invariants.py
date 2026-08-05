@@ -47,7 +47,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 84L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 85L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -817,10 +817,25 @@ def check(repo_root: Path) -> None:
         "portrait rotation refresh",
     )
 
-    if 'android:versionCode="84"' not in manifest:
-        fail("companion manifest must use versionCode 84 for native portrait reload")
-    if 'android:versionName="0.0.84"' not in manifest:
-        fail("companion manifest must use versionName 0.0.84")
+    require_markers(
+        module,
+        (
+            "nativeTrimmingRect(",
+            '"com.supernote.document.utils.TrimmingUtil"',
+            '"getTrimmingRect"',
+            "trimmingRect.left / horizontalMargin",
+            "trimmingRect.top / verticalMargin",
+            "left + sourceWidth * scale",
+            "top + sourceHeight * scale",
+            '"native_fill_trim_detected page="',
+        ),
+        "native-reader-equivalent spread trimming",
+    )
+
+    if 'android:versionCode="85"' not in manifest:
+        fail("companion manifest must use versionCode 85 for native spread trimming")
+    if 'android:versionName="0.0.85"' not in manifest:
+        fail("companion manifest must use versionName 0.0.85")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

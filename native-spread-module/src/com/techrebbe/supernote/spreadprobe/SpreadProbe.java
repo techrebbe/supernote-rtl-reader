@@ -83,7 +83,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         "documentApkLength";
     private static final String HANDSHAKE_EXTRA_PROCESS_ID = "processId";
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 84L;
+    private static final long MODULE_VERSION_CODE = 85L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -99,6 +99,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final Map<Activity, RectF> RIGHT_DESTINATIONS = new WeakHashMap<>();
     private static final Map<Activity, RectF> LEFT_VISIBLE_BOUNDS = new WeakHashMap<>();
     private static final Map<Activity, RectF> RIGHT_VISIBLE_BOUNDS = new WeakHashMap<>();
+    private static final Map<Object, RectF> AUTO_TRIMMING_RECTS =
+        new WeakHashMap<>();
     private static final Map<Activity, Bitmap> COMMITTED_INK_COMPOSITES =
         new WeakHashMap<>();
     private static final Map<Activity, Bitmap> FULL_INK_BITMAPS =
@@ -4373,17 +4375,33 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         RectF leftSlot = new RectF(0.0f, 0.0f, half - gutter / 2.0f, outputHeight);
         RectF rightSlot = new RectF(half + gutter / 2.0f, 0.0f, outputWidth, outputHeight);
         Bitmap geometryBitmap = usable(rightBitmap) ? rightBitmap : leftBitmap;
+        RectF leftTrimmingRect = nativeTrimmingRect(
+            activity,
+            leftPage,
+            leftInfo,
+            leftBitmap,
+            nativeFill
+        );
+        RectF rightTrimmingRect = nativeTrimmingRect(
+            activity,
+            rightPage,
+            rightInfo,
+            rightBitmap,
+            nativeFill
+        );
         SpreadPageLayout leftLayout = pageLayout(
             usable(leftBitmap) ? leftBitmap.getWidth() : geometryBitmap.getWidth(),
             usable(leftBitmap) ? leftBitmap.getHeight() : geometryBitmap.getHeight(),
             leftSlot,
-            nativeFill
+            nativeFill,
+            leftTrimmingRect
         );
         SpreadPageLayout rightLayout = pageLayout(
             usable(rightBitmap) ? rightBitmap.getWidth() : geometryBitmap.getWidth(),
             usable(rightBitmap) ? rightBitmap.getHeight() : geometryBitmap.getHeight(),
             rightSlot,
-            nativeFill
+            nativeFill,
+            rightTrimmingRect
         );
         RectF leftDestination = leftLayout.destination;
         RectF rightDestination = rightLayout.destination;
@@ -4500,6 +4518,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             + " left_source=" + bitmapDescription(leftBitmap)
             + " right_dest=" + rectDescription(rightDestination)
             + " left_dest=" + rectDescription(leftDestination)
+            + " right_trim=" + rectDescription(rightTrimmingRect)
+            + " left_trim=" + rectDescription(leftTrimmingRect)
             + " active_side=" + activeSide
             + " show_divider=" + showDivider
             + " sizing=" + (nativeFill ? "native_fill" : "fit")
@@ -6675,11 +6695,30 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 currentPage,
                 pageCount
             );
+            Map<Integer, Object> pageMap =
+                (Map<Integer, Object>) XposedHelpers.getObjectField(
+                    viewModel,
+                    "pageInfoHashMap"
+                );
+            Object currentPageInfo = pageMap.get(currentPage);
+            Bitmap currentOrigin = currentPageInfo == null ? null
+                : (Bitmap) XposedHelpers.callMethod(
+                    currentPageInfo,
+                    "getOriginBitmap"
+                );
+            RectF currentTrimmingRect = nativeTrimmingRect(
+                activity,
+                currentPage,
+                currentPageInfo,
+                currentOrigin,
+                nativeFill
+            );
             SpreadPageLayout provisionalLayout = pageLayout(
                 sourceWidth,
                 sourceHeight,
                 currentPage == pair.leftPage ? leftSlot : rightSlot,
-                nativeFill
+                nativeFill,
+                currentTrimmingRect
             );
             RectF provisional = provisionalLayout.destination;
             log("provisional_active_destination page=" + currentPage
@@ -7215,14 +7254,136 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         RectF slot,
         boolean nativeFill
     ) {
-        RectF destination = nativeFill
-            ? fill(sourceWidth, sourceHeight, slot)
-            : fit(sourceWidth, sourceHeight, slot);
+        return pageLayout(
+            sourceWidth,
+            sourceHeight,
+            slot,
+            nativeFill,
+            null
+        );
+    }
+
+    private static SpreadPageLayout pageLayout(
+        float sourceWidth,
+        float sourceHeight,
+        RectF slot,
+        boolean nativeFill,
+        RectF trimmingRect
+    ) {
+        RectF destination;
+        if (nativeFill && validTrimmingRect(
+            trimmingRect,
+            sourceWidth,
+            sourceHeight
+        )) {
+            // Mirror Supernote's BitmapUtil.trimming() transform without
+            // creating a second bitmap. The detected content rectangle is
+            // fitted into the half-screen, while its asymmetric placement in
+            // the original page is retained. Keeping destination in original
+            // page coordinates also keeps pen, eraser, lasso, highlights and
+            // links on the same canonical geometry.
+            float scale = Math.min(
+                slot.width() / trimmingRect.width(),
+                slot.height() / trimmingRect.height()
+            );
+            float horizontalRoom = slot.width()
+                - trimmingRect.width() * scale;
+            float verticalRoom = slot.height()
+                - trimmingRect.height() * scale;
+            float horizontalMargin = sourceWidth - trimmingRect.width();
+            float verticalMargin = sourceHeight - trimmingRect.height();
+            float horizontalAnchor = horizontalMargin > 0.0f
+                ? trimmingRect.left / horizontalMargin : 0.5f;
+            float verticalAnchor = verticalMargin > 0.0f
+                ? trimmingRect.top / verticalMargin : 0.5f;
+            horizontalAnchor = Math.max(0.0f, Math.min(1.0f, horizontalAnchor));
+            verticalAnchor = Math.max(0.0f, Math.min(1.0f, verticalAnchor));
+            float trimmedLeft = slot.left + horizontalRoom * horizontalAnchor;
+            float trimmedTop = slot.top + verticalRoom * verticalAnchor;
+            float left = trimmedLeft - trimmingRect.left * scale;
+            float top = trimmedTop - trimmingRect.top * scale;
+            destination = new RectF(
+                left,
+                top,
+                left + sourceWidth * scale,
+                top + sourceHeight * scale
+            );
+        } else {
+            destination = nativeFill
+                ? fill(sourceWidth, sourceHeight, slot)
+                : fit(sourceWidth, sourceHeight, slot);
+        }
         RectF visibleBounds = new RectF(destination);
         if (nativeFill) {
             visibleBounds.intersect(slot);
         }
         return new SpreadPageLayout(destination, visibleBounds);
+    }
+
+    private static RectF nativeTrimmingRect(
+        Activity activity,
+        int page,
+        Object pageInfo,
+        Bitmap originBitmap,
+        boolean nativeFill
+    ) {
+        if (!nativeFill || pageInfo == null || !usable(originBitmap)) {
+            return null;
+        }
+        float sourceWidth = originBitmap.getWidth();
+        float sourceHeight = originBitmap.getHeight();
+        try {
+            RectF nativeRect = (RectF) XposedHelpers.callMethod(
+                pageInfo,
+                "getTrimmingRect"
+            );
+            if (validTrimmingRect(nativeRect, sourceWidth, sourceHeight)) {
+                RectF copy = new RectF(nativeRect);
+                AUTO_TRIMMING_RECTS.put(pageInfo, copy);
+                return copy;
+            }
+
+            RectF cached = AUTO_TRIMMING_RECTS.get(pageInfo);
+            if (validTrimmingRect(cached, sourceWidth, sourceHeight)) {
+                return new RectF(cached);
+            }
+
+            Class<?> trimmingUtil = activity.getClassLoader().loadClass(
+                "com.supernote.document.utils.TrimmingUtil"
+            );
+            RectF detected = (RectF) trimmingUtil
+                .getMethod("getTrimmingRect", Bitmap.class)
+                .invoke(null, originBitmap);
+            if (validTrimmingRect(detected, sourceWidth, sourceHeight)) {
+                RectF copy = new RectF(detected);
+                AUTO_TRIMMING_RECTS.put(pageInfo, copy);
+                log("native_fill_trim_detected page=" + page
+                    + " source=" + bitmapDescription(originBitmap)
+                    + " rect=" + rectDescription(copy));
+                return copy;
+            }
+            log("native_fill_trim_unavailable page=" + page
+                + " source=" + bitmapDescription(originBitmap)
+                + " rect=" + rectDescription(detected));
+        } catch (Throwable throwable) {
+            log("native_fill_trim_failed page=" + page + " " + throwable);
+            XposedBridge.log(throwable);
+        }
+        return null;
+    }
+
+    private static boolean validTrimmingRect(
+        RectF rect,
+        float sourceWidth,
+        float sourceHeight
+    ) {
+        return rect != null
+            && rect.left >= 0.0f
+            && rect.top >= 0.0f
+            && rect.right <= sourceWidth + 1.0f
+            && rect.bottom <= sourceHeight + 1.0f
+            && rect.width() > 1.0f
+            && rect.height() > 1.0f;
     }
 
     private static void drawPageBitmap(

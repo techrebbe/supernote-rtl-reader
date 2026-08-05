@@ -32,11 +32,17 @@ def check(repo_root: Path) -> None:
     )
     manifest_path = repo_root / "native-spread-module" / "AndroidManifest.xml"
     app_path = repo_root / "overlay" / "App.js"
+    pdf_view_path = repo_root / "native" / "PdfPageView.kt.template"
+    pdf_view_manager_path = repo_root / "native" / "PdfPageViewManager.kt.template"
+    direct_patch_path = repo_root / "scripts" / "patch_direct_view.py"
 
     plugin = plugin_path.read_text(encoding="utf-8")
     module = module_path.read_text(encoding="utf-8")
     manifest = manifest_path.read_text(encoding="utf-8")
     app = app_path.read_text(encoding="utf-8")
+    pdf_view = pdf_view_path.read_text(encoding="utf-8")
+    pdf_view_manager = pdf_view_manager_path.read_text(encoding="utf-8")
+    direct_patch = direct_patch_path.read_text(encoding="utf-8")
 
     require_markers(
         plugin,
@@ -131,6 +137,19 @@ def check(repo_root: Path) -> None:
             "Math.max(",
         ),
         "native spread appearance geometry",
+    )
+    require_markers(
+        pdf_view + pdf_view_manager + direct_patch,
+        (
+            'var pendingContentMode: String = "fit"',
+            'if (pendingContentMode == "native_fill")',
+            "max(widthScale, heightScale)",
+            '@ReactProp(name = "contentMode")',
+            "contentMode={spreadSizing}",
+            'contentMode="fit"',
+            "{showSpreadDivider && <View style={styles.spreadDivider} />}",
+        ),
+        "full-screen custom reader spread sizing",
     )
     configure_start = plugin.find("fun configureNativeSpreadReadOnly(")
     marker_writer_start = plugin.find(
@@ -562,7 +581,7 @@ def check(repo_root: Path) -> None:
         "<Text style={styles.settingLabel}>Treat Cover Page Separately</Text>"
     )
     appearance_controls_start = app.find(
-        "<Text style={styles.settingLabel}>Native spread page sizing</Text>",
+        "<Text style={styles.settingLabel}>Spread page sizing</Text>",
         cover_controls_start,
     )
     cover_controls = app[cover_controls_start:appearance_controls_start]

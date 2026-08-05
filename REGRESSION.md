@@ -268,6 +268,9 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   halves without moving or resizing existing ink incorrectly.
 - [ ] **Native fill + Divider Off** fills each half without stretching; the
   expected small horizontal crop is visible.
+- [ ] In the plug-in reader, Native fill reaches the physical top and bottom of
+  landscape while the header/footer visibly overlay the PDF instead of
+  reserving document space.
 - [ ] In Native fill, pen, eraser, lasso, highlights, and embedded links remain
   aligned with the PDF on both active sides.
 - [ ] Return to Fit page and confirm all existing annotations return to their

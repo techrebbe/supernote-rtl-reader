@@ -1075,19 +1075,23 @@ export default function App() {
               {display.left ? (
                 <Image
                   source={{uri: display.left}}
-                  resizeMode="contain"
+                  resizeMode={
+                    spreadSizing === 'native_fill' ? 'cover' : 'contain'
+                  }
                   style={styles.pageImage}
                 />
               ) : (
                 <View style={styles.blankPage} />
               )}
             </View>
-            <View style={styles.spreadDivider} />
+            {showSpreadDivider && <View style={styles.spreadDivider} />}
             <View style={styles.spreadPage}>
               {display.right ? (
                 <Image
                   source={{uri: display.right}}
-                  resizeMode="contain"
+                  resizeMode={
+                    spreadSizing === 'native_fill' ? 'cover' : 'contain'
+                  }
                   style={styles.pageImage}
                 />
               ) : (
@@ -1274,7 +1278,7 @@ export default function App() {
               On inserts a virtual blank beside the cover; the PDF is not changed.
             </Text>
 
-            <Text style={styles.settingLabel}>Native spread page sizing</Text>
+            <Text style={styles.settingLabel}>Spread page sizing</Text>
             <View style={styles.segmentRow}>
               <SegmentedButton
                 active={spreadSizing === 'fit'}
@@ -1306,8 +1310,9 @@ export default function App() {
             </View>
             <Text style={styles.settingHint}>
               Native fill preserves the page aspect ratio and crops overflow,
-              matching Supernote&apos;s full-screen native reader. Fit page keeps
-              the entire page visible.
+              matching Supernote&apos;s full-screen native reader. The document
+              still uses the full screen beneath the overlaid controls. Fit
+              page keeps the entire page visible.
             </Text>
 
             <Text style={styles.settingLabel}>Spread divider</Text>

@@ -148,6 +148,11 @@ Native Spread v0.0.82 adds two per-document appearance controls:
   whole-page view. Native fill uses the same aspect-preserving fill/crop rule
   as Supernote's full-screen native reader; it never stretches the page.
 
+The setting now applies to the plug-in's own landscape spread as well as Native
+Spread. The PDF view occupies the full display height; RTL Reader's header and
+footer remain absolute overlays, like Supernote's native toolbox, instead of
+reducing the document viewport.
+
 The module stores a full-page transform separately from the visible half-page
 bounds. PDF pixels, native ink, highlights, lasso geometry, links, eraser input,
 and page activation therefore share the same scale and crop instead of each

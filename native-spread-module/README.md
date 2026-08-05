@@ -99,6 +99,13 @@ uses Supernote's own `reloadPage()` path for the unchanged current page. This
 regenerates the native portrait display bitmap instead of resubmitting the
 landscape-scaled cached origin bitmap.
 
+v0.0.86 commits an inactive-page pen transaction directly after
+`receiveTrials()` captures its completed trail. The native callback does not
+call `saveTrails()`, so waiting for that separate lifecycle operation allowed
+the fail-closed completion guard to run first and cancel valid ink. Persistence
+now finishes before page activation; a failed write still cancels activation
+without discarding or overwriting the retained annotation data.
+
 This is firmware-specific experimental software for a rooted device. Back up
 documents and `.mark` files before testing a new firmware or module revision.
 

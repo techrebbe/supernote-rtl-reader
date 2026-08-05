@@ -83,7 +83,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         "documentApkLength";
     private static final String HANDSHAKE_EXTRA_PROCESS_ID = "processId";
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 85L;
+    private static final long MODULE_VERSION_CODE = 86L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -1891,6 +1891,19 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     }
                     Activity activity = activeActivity;
                     if (activity != null) {
+                        /*
+                         * receiveTrials() fetches the completed native trail,
+                         * but it does not call saveTrails(). Persist the
+                         * page-local transaction here before the deferred page
+                         * activation checks its fail-closed guard. Waiting for
+                         * a later lifecycle save makes completion race ahead of
+                         * persistence and cancel otherwise valid inactive-page
+                         * ink.
+                         */
+                        persistPendingPenActivationTrails(
+                            activity,
+                            param.thisObject
+                        );
                         activity.runOnUiThread(new Runnable() {
                             @Override
                             public void run() {

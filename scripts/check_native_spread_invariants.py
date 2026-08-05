@@ -47,7 +47,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 85L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 86L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -705,6 +705,7 @@ def check(repo_root: Path) -> None:
             "normalizePendingPenTrail(",
             "pen_activation_native_save_bypassed",
             "persistPendingPenActivationTrails(",
+            "receiveTrials() fetches the completed native trail",
             '"modifyPageTrailsFromFile"',
             'XposedHelpers.callMethod(',
             '"get_erase_line_trail_num"',
@@ -725,6 +726,32 @@ def check(repo_root: Path) -> None:
         ),
         "inactive-page pen activation",
     )
+
+    receive_hook_start = module.find(
+        '"receiveTrials",',
+        module.find("pen_activation_native_save_bypassed"),
+    )
+    receive_hook_end = module.find(
+        '"areaSelectionTransition",',
+        receive_hook_start,
+    )
+    if receive_hook_start < 0 or receive_hook_end < 0:
+        fail("could not isolate inactive-page receiveTrials completion hook")
+    receive_hook = module[receive_hook_start:receive_hook_end]
+    persist_before_completion = receive_hook.find(
+        "persistPendingPenActivationTrails("
+    )
+    post_completion = receive_hook.find("activity.runOnUiThread(")
+    completion_guard = receive_hook.find(
+        "completePendingPenPageActivation("
+    )
+    if not (
+        0 <= persist_before_completion < post_completion < completion_guard
+    ):
+        fail(
+            "receiveTrials must persist inactive-page edits before posting "
+            "the fail-closed activation completion"
+        )
 
     require_markers(
         module,
@@ -832,10 +859,10 @@ def check(repo_root: Path) -> None:
         "native-reader-equivalent spread trimming",
     )
 
-    if 'android:versionCode="85"' not in manifest:
-        fail("companion manifest must use versionCode 85 for native spread trimming")
-    if 'android:versionName="0.0.85"' not in manifest:
-        fail("companion manifest must use versionName 0.0.85")
+    if 'android:versionCode="86"' not in manifest:
+        fail("companion manifest must use versionCode 86 for inactive-page persistence sequencing")
+    if 'android:versionName="0.0.86"' not in manifest:
+        fail("companion manifest must use versionName 0.0.86")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

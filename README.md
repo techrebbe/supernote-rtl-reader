@@ -176,6 +176,14 @@ extended behind the top toolbar and bottom page bar without stretching. A new
 stroke remained aligned and persisted in the same position after turning away
 and back.
 
+Native Spread v0.0.86 fixes direct writing on the inactive half of an editable
+spread. Supernote's `receiveTrials()` callback exposes the completed stroke but
+does not invoke its later `saveTrails()` routine. The module now commits the
+captured page-local transaction before completing the deferred page activation,
+while retaining the existing fail-closed guard if that commit fails. Hardware
+validation in both directions confirmed that inactive-page strokes remain
+visible, preserve all earlier ink, and survive turning away and back.
+
 ## v0.4.10 protected native editing pilot
 
 v0.4.9 added an explicitly confirmed **RTL editable** choice alongside **Off**

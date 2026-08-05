@@ -254,10 +254,10 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   strokes remain visible, including after a page turn.
 - [ ] Lasso-move one stroke and confirm no old pixels remain at its source.
 
-## v0.4.12 native spread appearance
+## v0.4.12 native spread appearance and inactive-page writing
 
-- [x] Native Spread v0.0.85 compiles and the packaged, handshake, and plug-in
-  compatibility versions all report 85.
+- [x] Native Spread v0.0.86 compiles and the packaged, handshake, and plug-in
+  compatibility versions all report 86.
 - [x] Native Spread v0.0.84: rotate an open spread to portrait and confirm the
   current page immediately uses the normal native-reader portrait size without
   turning away and back.
@@ -272,6 +272,11 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 - [x] **Native fill + Divider Off** uses Supernote's automatic non-white page
   trim independently for both pages, fills the full landscape height without
   stretching, and extends behind the native toolbar and page-number bar.
+- [x] A pen stroke drawn directly on the inactive right page is appended only
+  after its page-local write succeeds; all earlier ink remains visible and the
+  new stroke survives a spread turn away and back.
+- [x] The symmetric inactive-left-page stroke follows the same sequence,
+  preserves all prior trails, and survives a spread turn away and back.
 - [ ] In the plug-in reader, Native fill reaches the physical top and bottom of
   landscape while the header/footer visibly overlay the PDF instead of
   reserving document space.

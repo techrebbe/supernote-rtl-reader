@@ -112,6 +112,40 @@ correctly removed the intersecting trail, but the delayed save could restore it
 from stale memory while dropping a newer trail. The bypass is erase-only,
 one-shot, and expires after two seconds.
 
+v0.0.88 adds the page-local transaction to Supernote's existing Undo/Redo
+control stack after the target page finishes loading. A protected inactive-page
+write or erase records the trail lists immediately before and after the edit;
+Undo and Redo restore those snapshots through the same page-local native file
+API and reload the active annotation layer.
+
+v0.0.89 preserves the inactive page's prearmed writable geometry across
+Supernote's first-pen-down writable-area refresh after document launch.
+
+v0.0.90 invisibly loads the inactive target into Supernote's native mark engine
+before writing, while suppressing that intermediate bitmap from the spread UI.
+
+v0.0.91 renders settled eraser refreshes from the saved canonical `.mark` page
+instead of replacing the active spread slot with an incomplete native refresh
+bitmap after deferred page activation.
+
+v0.0.92 synchronously saves a completed native active-page eraser operation at
+pen-up so that the canonical spread redraw sees the erased state rather than
+the older on-disk page.
+
+v0.0.93 keeps finger taps in the native top toolbar and bottom page-number bar
+out of the inactive-page activation path. Native Undo/Redo and page-bar controls
+can therefore operate without first changing the active spread page.
+
+v0.0.94 forces Undo/Redo refreshes through the canonical `.mark` renderer after
+Supernote updates the operation history, avoiding an incomplete transient
+bitmap that could visually clear all ink from the active spread page.
+
+v0.0.95 saves the in-memory native Undo/Redo result and reloads that page before
+the canonical spread redraw, making the restored or reapplied edit visible and
+durable without a page turn. This was hardware-validated on the Nomad with an
+active-page erase, top-toolbar Undo and Redo, and a spread reload; unrelated
+trails remained unchanged throughout.
+
 This is firmware-specific experimental software for a rooted device. Back up
 documents and `.mark` files before testing a new firmware or module revision.
 

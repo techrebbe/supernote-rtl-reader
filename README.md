@@ -190,6 +190,47 @@ the correct intersecting trail; the one deferred native save is now suppressed
 before it can rewrite the page from stale in-memory trails. The guard is armed
 only after a successful erase, is consumed once, and expires after two seconds.
 
+Native Spread v0.0.88 registers protected inactive-page writes and erases with
+Supernote's existing Undo/Redo controls after page activation finishes. Each
+entry retains the page-local trail lists immediately before and after the edit.
+Undo and Redo restore only that annotation-page transaction, while the native
+stack continues to control button availability and operation ordering.
+
+Native Spread v0.0.89 preserves the inactive page's prearmed writable region
+when Supernote performs its one-shot pen-down refresh after opening a document.
+That native refresh otherwise restores the still-visible original page's
+geometry before the first stroke can reach the page-local transaction.
+
+Native Spread v0.0.90 also primes the target page inside Supernote's native
+handwriting engine before deferred inactive-page input begins. Its intermediate
+annotation bitmap is suppressed, keeping the visible spread unchanged until
+the page-local stroke has been captured and committed.
+
+Native Spread v0.0.91 redraws a settled eraser result directly from the newly
+saved native `.mark` page. This avoids replacing the active spread slot with
+Supernote's sometimes incomplete post-eraser bitmap after an inactive-page
+activation, while leaving the live low-latency eraser path and page-local data
+format unchanged.
+
+Native Spread v0.0.92 flushes a completed active-page native eraser transaction
+to the `.mark` file immediately after pen-up, before the canonical spread redraw
+can reread and restore the pre-erase file contents.
+
+Native Spread v0.0.93 excludes the native top toolbar and bottom page-number
+bar from inactive-page tap activation. Toolbar Undo/Redo taps therefore remain
+on the current page instead of first switching to the page beneath the control.
+
+Native Spread v0.0.94 redraws native Undo and Redo from the operation's updated
+canonical `.mark` state. It no longer clears the active spread slot with the
+incomplete transient bitmap Supernote can emit during those operations.
+
+Native Spread v0.0.95 flushes Supernote's in-memory Undo/Redo result to `.mark`
+before performing the canonical reload, so an erased stroke restored by Undo
+and removed again by Redo is immediately visible and persistent. Nomad hardware
+testing confirmed the complete active-page erase -> Undo -> Redo sequence,
+including persistence of the redone erasure after a spread reload, without
+changing unrelated trails or activating the opposite page.
+
 ## v0.4.10 protected native editing pilot
 
 v0.4.9 added an explicitly confirmed **RTL editable** choice alongside **Off**

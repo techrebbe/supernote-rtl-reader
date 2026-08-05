@@ -245,8 +245,8 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 - [x] Automated invariants require additive composition for ordinary pen
   commits and keep active-slot clearing behind the replacement-operation guard.
 - [x] Pen selection enters additive mode; eraser and lasso selection enter
-  replacement mode; undo and redo force replacement only for their synchronous
-  refresh.
+  replacement mode; undo and redo use the updated canonical `.mark` page rather
+  than Supernote's sometimes incomplete transient replacement bitmap.
 - [ ] Draw three separate strokes on one active page. Each earlier stroke remains
   visible after the next stroke settles.
 - [ ] Turn away and back. All three strokes remain present in the same positions.
@@ -256,8 +256,8 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 
 ## v0.4.12 native spread appearance and inactive-page editing
 
-- [x] Native Spread v0.0.87 compiles and the packaged, handshake, and plug-in
-  compatibility versions all report 87.
+- [x] Native Spread v0.0.95 compiles and the packaged, handshake, and plug-in
+  compatibility versions all report 95.
 - [x] Native Spread v0.0.84: rotate an open spread to portrait and confirm the
   current page immediately uses the normal native-reader portrait size without
   turning away and back.
@@ -284,6 +284,19 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   `erased=1`, the one stale native save logged
   `pen_activation_post_persist_save_bypassed`, and the same result reloaded
   after leaving and returning to the spread.
+- [x] Immediately after an inactive-page write, Undo removes the new stroke and
+  Redo restores it without changing unrelated trails. Confirmed on the Nomad
+  with Native Spread v0.0.90 using the native top-toolbar controls.
+- [ ] Immediately after an inactive-page erase, Undo restores the erased trail
+  and Redo removes it again without changing unrelated trails.
+- [x] Immediately after an active-page erase, native top-toolbar Undo restores
+  exactly the erased section and Redo removes it again without changing any
+  unrelated trail. Confirmed on the Nomad with Native Spread v0.0.95; the
+  redone erasure remained correct after leaving and returning to the spread.
+- [ ] Tapping native Undo/Redo or the bottom page-number bar on the inactive
+  half does not activate that page before the native control handles the tap.
+- [ ] After an inactive-page erase activates its page, a following active-page
+  erase keeps every unrelated trail visible without requiring a page reload.
 - [ ] In the plug-in reader, Native fill reaches the physical top and bottom of
   landscape while the header/footer visibly overlay the PDF instead of
   reserving document space.

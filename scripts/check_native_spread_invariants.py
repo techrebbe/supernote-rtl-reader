@@ -47,7 +47,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 87L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 95L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -697,6 +697,12 @@ def check(repo_root: Path) -> None:
             '"pen_up"',
             "cancelPendingPenPageActivation(",
             '"pen_left_screen"',
+            '"sendDisableWriteAreaNotRefreshBitmap"',
+            "pen_activation_disable_area_refresh_bypassed",
+            "param.setResult(Boolean.TRUE);",
+            "PEN_ACTIVATION_MARK_PRIMING",
+            "pen_activation_mark_bitmap_suppressed",
+            "pen_activation_mark_primed",
             "SN_SPREAD_PROBE pen page activation",
             'applySpreadMarkGeometry(',
             '"pen_page_activation"',
@@ -709,6 +715,10 @@ def check(repo_root: Path) -> None:
             "POST_ACTIVATION_SAVE_BYPASS_MS",
             "pen_activation_post_persist_save_armed",
             "pen_activation_post_persist_save_bypassed",
+            "PENDING_PAGE_EDIT_HISTORY",
+            "PAGE_EDIT_HISTORY_ACTIONS",
+            "page_edit_history_registered",
+            "page_edit_history_applied",
             "receiveTrials() fetches the completed native trail",
             '"modifyPageTrailsFromFile"',
             'XposedHelpers.callMethod(',
@@ -797,14 +807,42 @@ def check(repo_root: Path) -> None:
     require_markers(
         module,
         (
+            "private static final class PageEditHistory",
+            "registerPendingPageEditHistory(",
+            "applyPageEditHistory(",
+            'getDeclaredField("isTrail")',
+            "isTrailField.setBoolean(action, false)",
+            'XposedHelpers.callMethod(stack, "appendTrail")',
+            'String listField = undo ? "undoList" : "redoList"',
+            'XposedHelpers.callMethod(stack, actionName)',
+            '"modifyPageTrailsFromFile"',
+            'new ArrayList<>(snapshot)',
+            '"loadHandWrite"',
+        ),
+        "inactive-page native undo and redo integration",
+    )
+
+    require_markers(
+        module,
+        (
             "REPLACE_ACTIVE_INK_MODES",
-            "FORCE_REPLACE_ACTIVE_INK",
+            "CANONICAL_ONLY_INK_MODES",
+            "FORCE_CANONICAL_ACTIVE_INK",
             'setReplaceActiveInkMode(',
             '"area_selection"',
             '"eraser:" + eraserType',
             '"pen"',
             'new String[] {"undo", "redo"}',
+            'ink_composition_force_canonical reason=',
+            'undo_redo_saved_before_canonical_reload',
+            '"saveTrails",\n                                    false,\n                                    false',
+            '"loadHandWrite",\n                                    markPage',
             "boolean replaceActiveSlot",
+            "boolean canonicalOnly",
+            "readOnly || canonicalOnly",
+            'committed_ink_canonical_only reason=eraser',
+            "persistActiveEraserBeforeCanonicalRefresh(",
+            'active_eraser_saved_before_canonical_refresh',
             "if (replaceActiveSlot && activeDestination != null)",
             '" mode=" + (replaceActiveSlot ? "replace" : "add")',
         ),
@@ -900,10 +938,22 @@ def check(repo_root: Path) -> None:
         "native-reader-equivalent spread trimming",
     )
 
-    if 'android:versionCode="87"' not in manifest:
-        fail("companion manifest must use versionCode 87 for inactive-page eraser save ordering")
-    if 'android:versionName="0.0.87"' not in manifest:
-        fail("companion manifest must use versionName 0.0.87")
+    require_markers(
+        module,
+        (
+            "NATIVE_TOP_CHROME_TOUCH_EXCLUSION_PX",
+            "NATIVE_BOTTOM_CHROME_TOUCH_EXCLUSION_PX",
+            "isNativeChromeTouch(activity, event.getY())",
+            "activation_touch_ignored_native_chrome",
+            "activation_touch_cancelled_native_chrome",
+        ),
+        "native chrome activation exclusion",
+    )
+
+    if 'android:versionCode="95"' not in manifest:
+        fail("companion manifest must use versionCode 95 for persisted undo and redo")
+    if 'android:versionName="0.0.95"' not in manifest:
+        fail("companion manifest must use versionName 0.0.95")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

@@ -83,7 +83,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         "documentApkLength";
     private static final String HANDSHAKE_EXTRA_PROCESS_ID = "processId";
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 82L;
+    private static final long MODULE_VERSION_CODE = 83L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -4175,6 +4175,33 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         return;
                     }
 
+                    ImageView imageView = (ImageView) XposedHelpers
+                        .getObjectField(activity, "mImage");
+                    int viewWidth = imageView == null ? 0 : imageView.getWidth();
+                    int viewHeight = imageView == null ? 0 : imageView.getHeight();
+                    boolean viewMatchesOrientation = orientation
+                        == Configuration.ORIENTATION_LANDSCAPE
+                            ? viewWidth > viewHeight
+                            : orientation == Configuration.ORIENTATION_PORTRAIT
+                                && viewHeight > viewWidth;
+                    if (!viewMatchesOrientation) {
+                        if (attempt < 20) {
+                            log("configuration_refresh_waiting_for_layout orientation="
+                                + orientation + " attempt=" + attempt
+                                + " view=" + viewWidth + "x" + viewHeight);
+                            scheduleConfigurationRefresh(
+                                activity,
+                                orientation,
+                                attempt + 1
+                            );
+                        } else {
+                            log("configuration_refresh_layout_abandoned orientation="
+                                + orientation + " view=" + viewWidth + "x"
+                                + viewHeight);
+                        }
+                        return;
+                    }
+
                     // DocumentActivity.setImage() mutates the bitmap it receives
                     // when Supernote's native half-page mode is active: it draws
                     // the pointing-hand split indicators directly into that
@@ -4185,6 +4212,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     Bitmap refreshBitmap = Bitmap.createBitmap(originBitmap);
                     log("configuration_refresh orientation=" + orientation
                         + " attempt=" + attempt
+                        + " view=" + viewWidth + "x" + viewHeight
                         + " source=" + bitmapDescription(originBitmap)
                         + " disposable=" + bitmapDescription(refreshBitmap));
                     XposedHelpers.callMethod(

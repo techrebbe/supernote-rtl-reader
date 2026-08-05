@@ -258,6 +258,9 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 
 - [x] Native Spread v0.0.82 compiles and the packaged, handshake, and plug-in
   compatibility versions all report 82.
+- [ ] Native Spread v0.0.83: rotate an open spread to portrait and confirm the
+  current page immediately uses the normal native-reader portrait size without
+  turning away and back.
 - [x] Appearance choices are stored per PDF and marker updates retain the
   existing transactional backup protections.
 - [x] Automated invariants cover the divider and sizing controls, visible-page

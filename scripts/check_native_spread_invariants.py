@@ -47,7 +47,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 82L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 83L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -807,10 +807,10 @@ def check(repo_root: Path) -> None:
     if "PEN_ACTIVATION_TRAILS.remove(activity)" in completion:
         fail("completion cleanup still silently discards failed inactive-page edits")
 
-    if 'android:versionCode="82"' not in manifest:
-        fail("companion manifest must use versionCode 82 for spread appearance")
-    if 'android:versionName="0.0.82"' not in manifest:
-        fail("companion manifest must use versionName 0.0.82")
+    if 'android:versionCode="83"' not in manifest:
+        fail("companion manifest must use versionCode 83 for portrait rotation refresh")
+    if 'android:versionName="0.0.83"' not in manifest:
+        fail("companion manifest must use versionName 0.0.83")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

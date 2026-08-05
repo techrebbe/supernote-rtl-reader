@@ -127,6 +127,33 @@ This prevents the initial landscape spread from being mounted against stale or i
 
 Full validation details are recorded in `REGRESSION.md`.
 
+## v0.4.11 settled native ink composition
+
+Native Spread v0.0.81 separates additive pen commits from replacement-style
+annotation updates. Ordinary pen and highlighter refreshes now draw the newest
+captured trail over the canonical saved page, preserving every earlier settled
+stroke. Eraser, lasso, undo, and redo refreshes still replace the active page
+slot so transparent pixels can remove or move older ink. This addresses the
+case where each newly settled stroke temporarily hid all earlier strokes until
+the page was turned away and reloaded; the underlying `.mark` data was already
+complete and is not rewritten by this display fix.
+
+## v0.4.12 native spread appearance
+
+Native Spread v0.0.82 adds two per-document appearance controls:
+
+- **Spread divider — On / Off**. Off removes the dark center rule and gives
+  each page the full physical half of the landscape display.
+- **Page sizing — Fit page / Native fill**. Fit page preserves the previous
+  whole-page view. Native fill uses the same aspect-preserving fill/crop rule
+  as Supernote's full-screen native reader; it never stretches the page.
+
+The module stores a full-page transform separately from the visible half-page
+bounds. PDF pixels, native ink, highlights, lasso geometry, links, eraser input,
+and page activation therefore share the same scale and crop instead of each
+feature approximating the new layout independently. Existing documents default
+to **Fit page** with the divider **On** until changed.
+
 ## v0.4.10 protected native editing pilot
 
 v0.4.9 added an explicitly confirmed **RTL editable** choice alongside **Off**

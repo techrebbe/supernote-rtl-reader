@@ -41,7 +41,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 80L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 82L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -81,6 +81,10 @@ def check(repo_root: Path) -> None:
             "nativeAnnotationRetiringSnapshot(pdfFile)",
             "removeNativeAnnotationBackupFiles(pdfFile, backup)",
             'putBoolean("backupAvailable", backupResult.backup != null)',
+            'setProperty("showDivider", showDivider.toString())',
+            '"spreadSizing"',
+            'putBoolean("showDivider", showDivider)',
+            'putString("spreadSizing", spreadSizing)',
         ),
         "plugin handshake",
     )
@@ -105,8 +109,28 @@ def check(repo_root: Path) -> None:
             "BackHandler.addEventListener(",
             "if (!nativeSpreadBusyRef.current) return false;",
             "Wait for the native reader change to finish before closing.",
+            "const [showSpreadDivider, setShowSpreadDivider]",
+            "const [spreadSizing, setSpreadSizing]",
+            "setNativeSpreadAppearanceValue",
         ),
         "configured/runtime Native Spread state separation",
+    )
+    require_markers(
+        module,
+        (
+            "final boolean showDivider;",
+            "final boolean nativeFill;",
+            'properties.getProperty("showDivider", "true")',
+            'properties.getProperty("spreadSizing", "fit")',
+            "LEFT_VISIBLE_BOUNDS",
+            "RIGHT_VISIBLE_BOUNDS",
+            "SpreadPageLayout",
+            "drawPageBitmap(canvas, leftBitmap, leftLayout, bitmapPaint)",
+            "canvas.clipRect(layout.visibleBounds)",
+            "visibleBoundsOrDestination(activity, activeDestination)",
+            "Math.max(",
+        ),
+        "native spread appearance geometry",
     )
     configure_start = plugin.find("fun configureNativeSpreadReadOnly(")
     marker_writer_start = plugin.find(
@@ -537,16 +561,34 @@ def check(repo_root: Path) -> None:
     cover_controls_start = app.find(
         "<Text style={styles.settingLabel}>Treat Cover Page Separately</Text>"
     )
-    native_controls_start = app.find(
-        "<Text style={styles.settingLabel}>Supernote native reader</Text>",
+    appearance_controls_start = app.find(
+        "<Text style={styles.settingLabel}>Native spread page sizing</Text>",
         cover_controls_start,
     )
-    cover_controls = app[cover_controls_start:native_controls_start]
+    cover_controls = app[cover_controls_start:appearance_controls_start]
     unavailable_guard = "nativeSpreadConfigured && !nativeSpreadCompatible"
     if cover_controls.count("nativeSpreadBusy ||") != 2:
         fail("both Cover controls must be disabled during native mode transitions")
     if cover_controls.count(unavailable_guard) != 2:
         fail("Cover controls remain enabled for an unavailable configured marker")
+
+    native_controls_start = app.find(
+        "<Text style={styles.settingLabel}>Supernote native reader</Text>",
+        appearance_controls_start,
+    )
+    appearance_controls = app[appearance_controls_start:native_controls_start]
+    if appearance_controls.count("nativeSpreadBusy ||") != 4:
+        fail("all native spread appearance controls must be transition-safe")
+    if appearance_controls.count(unavailable_guard) != 4:
+        fail("native spread appearance controls ignore unavailable hooks")
+    for required in (
+        "showSpreadDivider",
+        "spreadSizing",
+        "setNativeSpreadAppearanceValue",
+        "native_fill",
+    ):
+        if required not in appearance_controls:
+            fail(f"native spread appearance controls missing {required}")
 
     readonly_transition_start = app.find("const setNativeSpreadReadOnly = async")
     editable_transition_start = app.find(
@@ -665,6 +707,40 @@ def check(repo_root: Path) -> None:
         "inactive-page pen activation",
     )
 
+    require_markers(
+        module,
+        (
+            "REPLACE_ACTIVE_INK_MODES",
+            "FORCE_REPLACE_ACTIVE_INK",
+            'setReplaceActiveInkMode(',
+            '"area_selection"',
+            '"eraser:" + eraserType',
+            '"pen"',
+            'new String[] {"undo", "redo"}',
+            "boolean replaceActiveSlot",
+            "if (replaceActiveSlot && activeDestination != null)",
+            '" mode=" + (replaceActiveSlot ? "replace" : "add")',
+        ),
+        "settled ink composition",
+    )
+
+    combined_start = module.find(
+        "private static Bitmap renderCombinedCommittedInk("
+    )
+    destination_start = module.find(
+        "private static RectF activePageDestination(", combined_start
+    )
+    if combined_start < 0 or destination_start < 0:
+        fail("could not isolate settled ink composition")
+    combined = module[combined_start:destination_start]
+    clear_slot = combined.find("PorterDuff.Mode.CLEAR")
+    replacement_guard = combined.find(
+        "if (replaceActiveSlot && activeDestination != null)"
+    )
+    draw_active = combined.find("canvas.drawBitmap(active, 0.0f, 0.0f, paint)")
+    if not 0 <= replacement_guard < clear_slot < draw_active:
+        fail("normal pen commits can still clear previously settled active-page ink")
+
     trail_match_start = module.find("private static boolean matchingTrailExists(")
     eraser_match_start = module.find(
         "private static boolean eraserIntersectsTrail(", trail_match_start
@@ -712,10 +788,10 @@ def check(repo_root: Path) -> None:
     if "PEN_ACTIVATION_TRAILS.remove(activity)" in completion:
         fail("completion cleanup still silently discards failed inactive-page edits")
 
-    if 'android:versionCode="80"' not in manifest:
-        fail("companion manifest must use versionCode 80 for full stroke identity")
-    if 'android:versionName="0.0.80"' not in manifest:
-        fail("companion manifest must use versionName 0.0.80")
+    if 'android:versionCode="82"' not in manifest:
+        fail("companion manifest must use versionCode 82 for spread appearance")
+    if 'android:versionName="0.0.82"' not in manifest:
+        fail("companion manifest must use versionName 0.0.82")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

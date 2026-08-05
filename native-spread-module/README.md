@@ -79,6 +79,20 @@ match before an inactive-page capture is considered already persisted. Point
 count and endpoints are no longer sufficient, so retraced lines and colocated
 dots remain distinct annotations.
 
+v0.0.81 keeps normal pen commits additive in the composed landscape ink layer.
+The newest settled trail is drawn over the canonical saved page rather than
+clearing the active slot, so earlier strokes do not disappear until a page
+reload. Eraser, lasso, undo, and redo remain replacement operations because
+their transparent pixels must remove or relocate existing ink.
+
+v0.0.82 adds per-document divider and page-sizing controls. **Fit page** keeps
+the complete page visible. **Native fill** preserves the page aspect ratio,
+fills its half of the screen, and clips overflow like Supernote's native
+full-screen reader. The PDF, committed ink, highlights, lasso/link geometry,
+and handwriting input all use the same full-page transform plus visible-slot
+clip. Disabling the divider removes the dark rule and gives both pages the full
+936-pixel half-screen width.
+
 This is firmware-specific experimental software for a rooted device. Back up
 documents and `.mark` files before testing a new firmware or module revision.
 
@@ -104,7 +118,7 @@ The signed APK is written to `build/artifact/`.
 
 Install the APK, enable **Supernote Native Spread Probe** in LSPosed, scope it
 only to `com.supernote.document`, and restart the document reader. Supernote
-RTL Reader v0.4.10 or newer and Native Spread v0.0.80 or newer are required for
+RTL Reader v0.4.12 or newer and Native Spread v0.0.82 or newer are required for
 protected editable mode. Its
 recovery manifest binds the backup to the PDF's full SHA-256 because
 Supernote changes the PDF modification time when the document activity
@@ -117,10 +131,11 @@ PDF and a protected copy of a 738-page annotated Hebrew PDF. The real-document
 pass confirmed persistent two-page annotation display, outer-edge-only tap
 navigation, side-preserving spread turns, and an unchanged `.mark` checksum.
 
-v0.0.80 compiles and passes automated handshake, backup-attestation,
+v0.0.82 compiles and passes automated handshake, backup-attestation,
 destroyed-activity cleanup, canonical lasso-move, inactive-page ink-merge, and
 scale-independent inactive-page eraser invariants, including fail-closed write
-handling, full-stroke deduplication, and strong recovery-sidecar cache identity.
+handling, full-stroke deduplication, strong recovery-sidecar cache identity, and
+operation-aware settled-ink composition, and shared spread-appearance geometry.
 The v0.0.78 focused Nomad
 eraser regression removed exactly one of two separated inactive-page strokes,
 retained the control stroke, left companion page 4 unchanged, and preserved the

@@ -238,6 +238,41 @@ re-enabled and the document process restarted, the protected PDF remained in
 ordinary native landscape view rather than silently restoring RTL spread mode.
 The protected `.mark` SHA-256 remained unchanged throughout.
 
+## v0.4.11 settled native ink composition
+
+- [x] Native Spread v0.0.81 compiles and the packaged, handshake, and plug-in
+  compatibility versions all report 81.
+- [x] Automated invariants require additive composition for ordinary pen
+  commits and keep active-slot clearing behind the replacement-operation guard.
+- [x] Pen selection enters additive mode; eraser and lasso selection enter
+  replacement mode; undo and redo force replacement only for their synchronous
+  refresh.
+- [ ] Draw three separate strokes on one active page. Each earlier stroke remains
+  visible after the next stroke settles.
+- [ ] Turn away and back. All three strokes remain present in the same positions.
+- [ ] Erase part of one stroke. The erased pixels remain absent while the other
+  strokes remain visible, including after a page turn.
+- [ ] Lasso-move one stroke and confirm no old pixels remain at its source.
+
+## v0.4.12 native spread appearance
+
+- [x] Native Spread v0.0.82 compiles and the packaged, handshake, and plug-in
+  compatibility versions all report 82.
+- [x] Appearance choices are stored per PDF and marker updates retain the
+  existing transactional backup protections.
+- [x] Automated invariants cover the divider and sizing controls, visible-page
+  clipping, and the full-page annotation transform.
+- [ ] **Fit page + Divider On** matches the v0.0.81 layout and annotation
+  behavior.
+- [ ] **Fit page + Divider Off** removes the dark line and uses the full two
+  halves without moving or resizing existing ink incorrectly.
+- [ ] **Native fill + Divider Off** fills each half without stretching; the
+  expected small horizontal crop is visible.
+- [ ] In Native fill, pen, eraser, lasso, highlights, and embedded links remain
+  aligned with the PDF on both active sides.
+- [ ] Return to Fit page and confirm all existing annotations return to their
+  original whole-page positions.
+
 ## v0.4.10 protected native editing pilot
 
 Safety and setup:

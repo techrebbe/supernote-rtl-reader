@@ -84,7 +84,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         "documentApkLength";
     private static final String HANDSHAKE_EXTRA_PROCESS_ID = "processId";
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 95L;
+    private static final long MODULE_VERSION_CODE = 96L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -154,6 +154,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final ThreadLocal<Boolean> PEN_ACTIVATION_MARK_PRIMING =
         new ThreadLocal<>();
     private static final ThreadLocal<Boolean> FORCE_CANONICAL_ACTIVE_INK =
+        new ThreadLocal<>();
+    private static final ThreadLocal<Boolean> EXPLICIT_CANONICAL_TRAIL_SAVE =
         new ThreadLocal<>();
     private static Activity activeActivity;
     private static boolean nativeBridgeLoaded;
@@ -1725,11 +1727,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                                     param.thisObject,
                                     "currentPage"
                                 );
-                                XposedHelpers.callMethod(
+                                saveTrailsForCanonicalReload(
                                     param.thisObject,
-                                    "saveTrails",
-                                    false,
-                                    false
+                                    "undo_redo:" + mutationName
                                 );
                                 XposedHelpers.callMethod(
                                     param.thisObject,
@@ -1988,15 +1988,25 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
                     Activity activity = activeActivity;
+                    boolean explicitCanonicalSave = Boolean.TRUE.equals(
+                        EXPLICIT_CANONICAL_TRAIL_SAVE.get()
+                    );
                     Long bypassUntil = activity == null
                         ? null
-                        : PEN_ACTIVATION_SAVE_BYPASS_UNTIL.remove(activity);
-                    if (bypassUntil != null
-                        && SystemClock.uptimeMillis()
-                            <= bypassUntil.longValue()) {
-                        param.setResult(null);
-                        log("pen_activation_post_persist_save_bypassed");
-                        return;
+                        : PEN_ACTIVATION_SAVE_BYPASS_UNTIL.get(activity);
+                    if (bypassUntil != null) {
+                        if (SystemClock.uptimeMillis()
+                            > bypassUntil.longValue()) {
+                            PEN_ACTIVATION_SAVE_BYPASS_UNTIL.remove(activity);
+                        } else if (!explicitCanonicalSave) {
+                            PEN_ACTIVATION_SAVE_BYPASS_UNTIL.remove(activity);
+                            param.setResult(null);
+                            log("pen_activation_post_persist_save_bypassed");
+                            return;
+                        } else {
+                            log("pen_activation_post_persist_save_preserved"
+                                + " reason=explicit_canonical");
+                        }
                     }
                     List<Object> captured = activity == null
                         ? null
@@ -5535,17 +5545,33 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
              * completed native transaction before that refresh can restore the
              * pre-erase file contents.
              */
-            XposedHelpers.callMethod(
+            saveTrailsForCanonicalReload(
                 presenter,
-                "saveTrails",
-                false,
-                false
+                "active_eraser"
             );
             log("active_eraser_saved_before_canonical_refresh page="
                 + currentDocumentPage(activity));
         } catch (Throwable throwable) {
             log("active_eraser_save_before_refresh_failed " + throwable);
             XposedBridge.log(throwable);
+        }
+    }
+
+    private static void saveTrailsForCanonicalReload(
+        Object presenter,
+        String reason
+    ) {
+        EXPLICIT_CANONICAL_TRAIL_SAVE.set(Boolean.TRUE);
+        try {
+            XposedHelpers.callMethod(
+                presenter,
+                "saveTrails",
+                false,
+                false
+            );
+            log("explicit_canonical_trail_save reason=" + reason);
+        } finally {
+            EXPLICIT_CANONICAL_TRAIL_SAVE.remove();
         }
     }
 

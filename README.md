@@ -231,6 +231,11 @@ testing confirmed the complete active-page erase -> Undo -> Redo sequence,
 including persistence of the redone erasure after a spread reload, without
 changing unrelated trails or activating the opposite page.
 
+Native Spread v0.0.96 keeps that deliberate active-eraser and Undo/Redo flush
+eligible even while the one-shot stale activation-save guard is armed. The
+guard remains available for the delayed stale native save instead of consuming
+and suppressing the canonical transaction that must reach `.mark` first.
+
 ## v0.4.10 protected native editing pilot
 
 v0.4.9 added an explicitly confirmed **RTL editable** choice alongside **Off**

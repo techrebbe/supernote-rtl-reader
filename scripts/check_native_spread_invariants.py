@@ -47,7 +47,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 95L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 96L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -118,6 +118,11 @@ def check(repo_root: Path) -> None:
             "const [showSpreadDivider, setShowSpreadDivider]",
             "const [spreadSizing, setSpreadSizing]",
             "setNativeSpreadAppearanceValue",
+            """const restoredSizing = nativeSpread?.configured
+          ? nativeSpread?.spreadSizing === 'native_fill'
+            ? 'native_fill'
+            : 'fit'
+          : restored.spreadSizing;""",
         ),
         "configured/runtime Native Spread state separation",
     )
@@ -772,16 +777,30 @@ def check(repo_root: Path) -> None:
     if save_hook_start < 0 or save_hook_end < 0:
         fail("could not isolate inactive-page saveTrails hook")
     save_hook = module[save_hook_start:save_hook_end]
+    explicit_save_guard = save_hook.find(
+        "boolean explicitCanonicalSave = Boolean.TRUE.equals("
+    )
     post_persist_bypass = save_hook.find(
-        "PEN_ACTIVATION_SAVE_BYPASS_UNTIL.remove(activity)"
+        "else if (!explicitCanonicalSave)"
+    )
+    bypass_consumption = save_hook.find(
+        "PEN_ACTIVATION_SAVE_BYPASS_UNTIL.remove(activity)",
+        post_persist_bypass,
+    )
+    explicit_save_preserved = save_hook.find(
+        "pen_activation_post_persist_save_preserved"
     )
     pending_capture = save_hook.find(
         "List<Object> captured = activity == null"
     )
-    if not 0 <= post_persist_bypass < pending_capture:
+    if not (
+        0 <= explicit_save_guard < post_persist_bypass
+        < bypass_consumption < explicit_save_preserved < pending_capture
+    ):
         fail(
-            "post-persistence stale native save must be bypassed before "
-            "pending inactive-page buffers are inspected"
+            "post-persistence stale native save must remain armed for an "
+            "explicit canonical save and be consumed before pending "
+            "inactive-page buffers are inspected"
         )
 
     persist_start = module.find(
@@ -828,6 +847,7 @@ def check(repo_root: Path) -> None:
             "REPLACE_ACTIVE_INK_MODES",
             "CANONICAL_ONLY_INK_MODES",
             "FORCE_CANONICAL_ACTIVE_INK",
+            "EXPLICIT_CANONICAL_TRAIL_SAVE",
             'setReplaceActiveInkMode(',
             '"area_selection"',
             '"eraser:" + eraserType',
@@ -835,7 +855,6 @@ def check(repo_root: Path) -> None:
             'new String[] {"undo", "redo"}',
             'ink_composition_force_canonical reason=',
             'undo_redo_saved_before_canonical_reload',
-            '"saveTrails",\n                                    false,\n                                    false',
             '"loadHandWrite",\n                                    markPage',
             "boolean replaceActiveSlot",
             "boolean canonicalOnly",
@@ -843,6 +862,10 @@ def check(repo_root: Path) -> None:
             'committed_ink_canonical_only reason=eraser',
             "persistActiveEraserBeforeCanonicalRefresh(",
             'active_eraser_saved_before_canonical_refresh',
+            "saveTrailsForCanonicalReload(",
+            '"undo_redo:" + mutationName',
+            '"active_eraser"',
+            'explicit_canonical_trail_save reason=',
             "if (replaceActiveSlot && activeDestination != null)",
             '" mode=" + (replaceActiveSlot ? "replace" : "add")',
         ),
@@ -950,10 +973,10 @@ def check(repo_root: Path) -> None:
         "native chrome activation exclusion",
     )
 
-    if 'android:versionCode="95"' not in manifest:
-        fail("companion manifest must use versionCode 95 for persisted undo and redo")
-    if 'android:versionName="0.0.95"' not in manifest:
-        fail("companion manifest must use versionName 0.0.95")
+    if 'android:versionCode="96"' not in manifest:
+        fail("companion manifest must use versionCode 96 for scoped stale-save suppression")
+    if 'android:versionName="0.0.96"' not in manifest:
+        fail("companion manifest must use versionName 0.0.96")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

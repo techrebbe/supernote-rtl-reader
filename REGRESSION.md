@@ -256,8 +256,8 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 
 ## v0.4.12 native spread appearance and inactive-page editing
 
-- [x] Native Spread v0.0.95 compiles and the packaged, handshake, and plug-in
-  compatibility versions all report 95.
+- [x] Native Spread v0.0.96 compiles and the packaged, handshake, and plug-in
+  compatibility versions all report 96.
 - [x] Native Spread v0.0.84: rotate an open spread to portrait and confirm the
   current page immediately uses the normal native-reader portrait size without
   turning away and back.
@@ -293,6 +293,9 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   exactly the erased section and Redo removes it again without changing any
   unrelated trail. Confirmed on the Nomad with Native Spread v0.0.95; the
   redone erasure remained correct after leaving and returning to the spread.
+- [ ] Immediately after an inactive-page erase, begin an active-page erase
+  inside the two-second stale-save window. The deliberate active-page save is
+  not suppressed, and the later stale activation save is still consumed once.
 - [ ] Tapping native Undo/Redo or the bottom page-number bar on the inactive
   half does not activate that page before the native control handles the tap.
 - [ ] After an inactive-page erase activates its page, a following active-page

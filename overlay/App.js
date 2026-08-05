@@ -420,9 +420,10 @@ export default function App() {
         const restoredDivider = nativeSpread?.configured
           ? nativeSpread?.showDivider !== false
           : restored.showSpreadDivider;
-        const restoredSizing = nativeSpread?.configured &&
-          nativeSpread?.spreadSizing === 'native_fill'
-          ? 'native_fill'
+        const restoredSizing = nativeSpread?.configured
+          ? nativeSpread?.spreadSizing === 'native_fill'
+            ? 'native_fill'
+            : 'fit'
           : restored.spreadSizing;
         showSpreadDividerRef.current = restoredDivider;
         spreadSizingRef.current = restoredSizing;

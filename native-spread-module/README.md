@@ -146,6 +146,11 @@ durable without a page turn. This was hardware-validated on the Nomad with an
 active-page erase, top-toolbar Undo and Redo, and a spread reload; unrelated
 trails remained unchanged throughout.
 
+v0.0.96 exempts deliberate active-eraser and Undo/Redo canonical saves from the
+short stale activation-save guard. The explicit transaction reaches `.mark`,
+while the guard remains armed to consume the delayed stale save it was created
+for.
+
 This is firmware-specific experimental software for a rooted device. Back up
 documents and `.mark` files before testing a new firmware or module revision.
 
@@ -171,7 +176,7 @@ The signed APK is written to `build/artifact/`.
 
 Install the APK, enable **Supernote Native Spread Probe** in LSPosed, scope it
 only to `com.supernote.document`, and restart the document reader. Supernote
-RTL Reader v0.4.12 or newer and Native Spread v0.0.84 or newer are required for
+RTL Reader v0.4.12 or newer and Native Spread v0.0.96 or newer are required for
 protected editable mode. Its
 recovery manifest binds the backup to the PDF's full SHA-256 because
 Supernote changes the PDF modification time when the document activity

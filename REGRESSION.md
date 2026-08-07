@@ -256,13 +256,17 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 
 ## v0.4.12 native spread appearance and inactive-page editing
 
-- [x] Native Spread v0.0.96 compiles and the packaged, handshake, and plug-in
-  compatibility versions all report 96.
+- [x] Native Spread v0.0.97 compiles and the packaged, handshake, and plug-in
+  compatibility versions all report 97.
 - [x] Native Spread v0.0.84: rotate an open spread to portrait and confirm the
   current page immediately uses the normal native-reader portrait size without
   turning away and back.
 - [x] Appearance choices are stored per PDF and marker updates retain the
   existing transactional backup protections.
+- [ ] Set **Active-page header: Off** and confirm the persistent red ACTIVE or
+  READ ONLY banner disappears, remains hidden after reopening the document,
+  and returns when the setting is switched On. Safety/error overlays remain
+  available in either state.
 - [x] Automated invariants cover the divider and sizing controls, visible-page
   clipping, and the full-page annotation transform.
 - [ ] **Fit page + Divider On** matches the v0.0.81 layout and annotation

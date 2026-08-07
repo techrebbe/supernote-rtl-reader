@@ -128,6 +128,7 @@ function decodePreferences(raw, context) {
     : 'auto';
   const coverSeparate = saved?.coverSeparate === true;
   const showSpreadDivider = saved?.showSpreadDivider !== false;
+  const showNativeSpreadHeader = saved?.showNativeSpreadHeader !== false;
   const spreadSizing = saved?.spreadSizing === 'native_fill'
     ? 'native_fill'
     : 'fit';
@@ -147,6 +148,7 @@ function decodePreferences(raw, context) {
     viewMode,
     coverSeparate,
     showSpreadDivider,
+    showNativeSpreadHeader,
     spreadSizing,
     pageIndex,
     source: useSavedPage ? 'saved' : nativePositionChanged ? 'native-changed' : 'native',
@@ -186,6 +188,7 @@ export default function App() {
   const [viewMode, setViewMode] = useState('auto');
   const [coverSeparate, setCoverSeparate] = useState(false);
   const [showSpreadDivider, setShowSpreadDivider] = useState(true);
+  const [showNativeSpreadHeader, setShowNativeSpreadHeader] = useState(true);
   const [spreadSizing, setSpreadSizing] = useState('fit');
   const [chromeVisible, setChromeVisible] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -222,6 +225,7 @@ export default function App() {
   const effectiveModeRef = useRef(effectiveMode);
   const coverSeparateRef = useRef(coverSeparate);
   const showSpreadDividerRef = useRef(showSpreadDivider);
+  const showNativeSpreadHeaderRef = useRef(showNativeSpreadHeader);
   const spreadSizingRef = useRef(spreadSizing);
   const filePathRef = useRef(null);
   const nativePageIndexAtOpenRef = useRef(null);
@@ -237,6 +241,7 @@ export default function App() {
   effectiveModeRef.current = effectiveMode;
   coverSeparateRef.current = coverSeparate;
   showSpreadDividerRef.current = showSpreadDivider;
+  showNativeSpreadHeaderRef.current = showNativeSpreadHeader;
   spreadSizingRef.current = spreadSizing;
   pageAreaWidthRef.current = Math.max(1, window.width);
 
@@ -261,6 +266,7 @@ export default function App() {
       viewMode,
       coverSeparate,
       showSpreadDivider,
+      showNativeSpreadHeader,
       spreadSizing,
       lastPageIndex: pageIndex,
       nativePageIndexAtOpen: nativePageIndexAtOpenRef.current,
@@ -376,7 +382,7 @@ export default function App() {
 
     await ReaderPreferencesModule.save(filePath, JSON.stringify(payload));
     console.log(
-      `RTL_READER_PREFS_SAVED reason=${reason} page=${payload.lastPageIndex + 1} direction=${payload.direction} view=${payload.viewMode} cover=${payload.coverSeparate} divider=${payload.showSpreadDivider} sizing=${payload.spreadSizing}`,
+      `RTL_READER_PREFS_SAVED reason=${reason} page=${payload.lastPageIndex + 1} direction=${payload.direction} view=${payload.viewMode} cover=${payload.coverSeparate} divider=${payload.showSpreadDivider} header=${payload.showNativeSpreadHeader} sizing=${payload.spreadSizing}`,
     );
   };
 
@@ -420,12 +426,16 @@ export default function App() {
         const restoredDivider = nativeSpread?.configured
           ? nativeSpread?.showDivider !== false
           : restored.showSpreadDivider;
+        const restoredHeader = nativeSpread?.configured
+          ? nativeSpread?.showHeader !== false
+          : restored.showNativeSpreadHeader;
         const restoredSizing = nativeSpread?.configured
           ? nativeSpread?.spreadSizing === 'native_fill'
             ? 'native_fill'
             : 'fit'
           : restored.spreadSizing;
         showSpreadDividerRef.current = restoredDivider;
+        showNativeSpreadHeaderRef.current = restoredHeader;
         spreadSizingRef.current = restoredSizing;
         pageIndexRef.current = restored.pageIndex;
 
@@ -434,6 +444,7 @@ export default function App() {
         setViewMode(restored.viewMode);
         setCoverSeparate(restored.coverSeparate);
         setShowSpreadDivider(restoredDivider);
+        setShowNativeSpreadHeader(restoredHeader);
         setSpreadSizing(restoredSizing);
         setPageIndex(restored.pageIndex);
         setTotalPages(context.totalPages);
@@ -518,6 +529,7 @@ export default function App() {
     viewMode,
     coverSeparate,
     showSpreadDivider,
+    showNativeSpreadHeader,
     spreadSizing,
   ]);
 
@@ -799,6 +811,7 @@ export default function App() {
             filePathRef.current,
             normalized,
             showSpreadDividerRef.current,
+            showNativeSpreadHeaderRef.current,
             spreadSizingRef.current,
           )
         : await ReaderPreferencesModule.configureNativeSpreadReadOnly(
@@ -806,6 +819,7 @@ export default function App() {
             true,
             normalized,
             showSpreadDividerRef.current,
+            showNativeSpreadHeaderRef.current,
             spreadSizingRef.current,
           );
       coverSeparateRef.current = normalized;
@@ -827,12 +841,17 @@ export default function App() {
     }
   };
 
-  const setNativeSpreadAppearanceValue = async (nextDivider, nextSizing) => {
+  const setNativeSpreadAppearanceValue = async (
+    nextDivider,
+    nextSizing,
+    nextHeader,
+  ) => {
     if (nativeSpreadBusyRef.current) return;
     const normalizedDivider = nextDivider !== false;
     const normalizedSizing = nextSizing === 'native_fill'
       ? 'native_fill'
       : 'fit';
+    const normalizedHeader = nextHeader !== false;
     if (nativeSpreadConfigured && !nativeSpreadCompatible) {
       setNativeSpreadError(
         'Native Spread is configured but unavailable. Appearance can be changed after the native hooks reconnect.',
@@ -841,11 +860,13 @@ export default function App() {
     }
     if (!nativeSpreadConfigured) {
       showSpreadDividerRef.current = normalizedDivider;
+      showNativeSpreadHeaderRef.current = normalizedHeader;
       spreadSizingRef.current = normalizedSizing;
       setShowSpreadDivider(normalizedDivider);
+      setShowNativeSpreadHeader(normalizedHeader);
       setSpreadSizing(normalizedSizing);
       console.log(
-        `RTL_READER_NATIVE_SPREAD_APPEARANCE divider=${normalizedDivider} sizing=${normalizedSizing}`,
+        `RTL_READER_NATIVE_SPREAD_APPEARANCE divider=${normalizedDivider} header=${normalizedHeader} sizing=${normalizedSizing}`,
       );
       return;
     }
@@ -859,6 +880,7 @@ export default function App() {
             filePathRef.current,
             coverSeparateRef.current,
             normalizedDivider,
+            normalizedHeader,
             normalizedSizing,
           )
         : await ReaderPreferencesModule.configureNativeSpreadReadOnly(
@@ -866,11 +888,14 @@ export default function App() {
             true,
             coverSeparateRef.current,
             normalizedDivider,
+            normalizedHeader,
             normalizedSizing,
           );
       showSpreadDividerRef.current = normalizedDivider;
+      showNativeSpreadHeaderRef.current = normalizedHeader;
       spreadSizingRef.current = normalizedSizing;
       setShowSpreadDivider(normalizedDivider);
+      setShowNativeSpreadHeader(normalizedHeader);
       setSpreadSizing(normalizedSizing);
       if (nativeSpreadConfiguredEditable) {
         setNativeBackupAvailable(result?.backupAvailable === true);
@@ -880,7 +905,7 @@ export default function App() {
         setNativeBackupStatus(result?.backupStatus ?? 'verified');
       }
       console.log(
-        `RTL_READER_NATIVE_SPREAD_APPEARANCE divider=${normalizedDivider} sizing=${normalizedSizing}`,
+        `RTL_READER_NATIVE_SPREAD_APPEARANCE divider=${normalizedDivider} header=${normalizedHeader} sizing=${normalizedSizing}`,
       );
     } catch (error) {
       console.warn('RTL_READER_NATIVE_SPREAD_APPEARANCE_SYNC_FAILED', error);
@@ -913,6 +938,7 @@ export default function App() {
         enabled,
         coverSeparateRef.current,
         showSpreadDividerRef.current,
+        showNativeSpreadHeaderRef.current,
         spreadSizingRef.current,
       );
       setNativeSpreadConfigured(enabled);
@@ -957,6 +983,7 @@ export default function App() {
         filePath,
         coverSeparateRef.current,
         showSpreadDividerRef.current,
+        showNativeSpreadHeaderRef.current,
         spreadSizingRef.current,
       );
       setNativeSpreadConfigured(true);
@@ -1289,7 +1316,11 @@ export default function App() {
                 }
                 label="Fit page"
                 onPress={() =>
-                  setNativeSpreadAppearanceValue(showSpreadDivider, 'fit')
+                  setNativeSpreadAppearanceValue(
+                    showSpreadDivider,
+                    'fit',
+                    showNativeSpreadHeader,
+                  )
                 }
                 style={styles.segmentHalf}
               />
@@ -1304,6 +1335,7 @@ export default function App() {
                   setNativeSpreadAppearanceValue(
                     showSpreadDivider,
                     'native_fill',
+                    showNativeSpreadHeader,
                   )
                 }
                 style={styles.segmentHalfLast}
@@ -1326,7 +1358,11 @@ export default function App() {
                 }
                 label="Off"
                 onPress={() =>
-                  setNativeSpreadAppearanceValue(false, spreadSizing)
+                  setNativeSpreadAppearanceValue(
+                    false,
+                    spreadSizing,
+                    showNativeSpreadHeader,
+                  )
                 }
                 style={styles.segmentHalf}
               />
@@ -1338,13 +1374,57 @@ export default function App() {
                 }
                 label="On"
                 onPress={() =>
-                  setNativeSpreadAppearanceValue(true, spreadSizing)
+                  setNativeSpreadAppearanceValue(
+                    true,
+                    spreadSizing,
+                    showNativeSpreadHeader,
+                  )
                 }
                 style={styles.segmentHalfLast}
               />
             </View>
             <Text style={styles.settingHint}>
               Off removes the dark center rule and gives each page its full half.
+            </Text>
+
+            <Text style={styles.settingLabel}>Active-page header</Text>
+            <View style={styles.segmentRow}>
+              <SegmentedButton
+                active={!showNativeSpreadHeader}
+                disabled={
+                  nativeSpreadBusy ||
+                  (nativeSpreadConfigured && !nativeSpreadCompatible)
+                }
+                label="Off"
+                onPress={() =>
+                  setNativeSpreadAppearanceValue(
+                    showSpreadDivider,
+                    spreadSizing,
+                    false,
+                  )
+                }
+                style={styles.segmentHalf}
+              />
+              <SegmentedButton
+                active={showNativeSpreadHeader}
+                disabled={
+                  nativeSpreadBusy ||
+                  (nativeSpreadConfigured && !nativeSpreadCompatible)
+                }
+                label="On"
+                onPress={() =>
+                  setNativeSpreadAppearanceValue(
+                    showSpreadDivider,
+                    spreadSizing,
+                    true,
+                  )
+                }
+                style={styles.segmentHalfLast}
+              />
+            </View>
+            <Text style={styles.settingHint}>
+              Off hides the red ACTIVE LEFT/RIGHT or READ ONLY banner. Safety
+              and annotation-save errors remain visible.
             </Text>
 
             <Text style={styles.settingLabel}>Supernote native reader</Text>

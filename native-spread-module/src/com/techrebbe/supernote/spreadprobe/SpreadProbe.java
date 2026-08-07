@@ -84,7 +84,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         "documentApkLength";
     private static final String HANDSHAKE_EXTRA_PROCESS_ID = "processId";
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 96L;
+    private static final long MODULE_VERSION_CODE = 97L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -260,6 +260,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         final boolean enabled;
         final boolean coverSeparate;
         final boolean showDivider;
+        final boolean showHeader;
         final boolean nativeFill;
         final boolean editable;
         final boolean calibration;
@@ -279,6 +280,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             boolean enabled,
             boolean coverSeparate,
             boolean showDivider,
+            boolean showHeader,
             boolean nativeFill,
             boolean editable,
             boolean calibration
@@ -297,6 +299,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             this.enabled = enabled;
             this.coverSeparate = coverSeparate;
             this.showDivider = showDivider;
+            this.showHeader = showHeader;
             this.nativeFill = nativeFill;
             this.editable = editable;
             this.calibration = calibration;
@@ -4099,6 +4102,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     true,
                     false,
                     true,
+                    true,
                     false,
                     true,
                     true
@@ -4167,6 +4171,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     false,
                     false,
                     true,
+                    true,
                     false,
                     false,
                     false
@@ -4189,6 +4194,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             );
             boolean showDivider = !"false".equalsIgnoreCase(
                 properties.getProperty("showDivider", "true").trim()
+            );
+            boolean showHeader = !"false".equalsIgnoreCase(
+                properties.getProperty("showHeader", "true").trim()
             );
             boolean nativeFill = "native_fill".equalsIgnoreCase(
                 properties.getProperty("spreadSizing", "fit").trim()
@@ -4255,6 +4263,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 enabled,
                 coverSeparate,
                 showDivider,
+                showHeader,
                 nativeFill,
                 editable,
                 false
@@ -4265,6 +4274,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 + " enabled=" + enabled
                 + " cover_separate=" + coverSeparate
                 + " show_divider=" + showDivider
+                + " show_header=" + showHeader
                 + " sizing=" + (nativeFill ? "native_fill" : "fit")
                 + " editable=" + editable
                 + " requested_editable=" + requestedEditable
@@ -4664,7 +4674,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 outputWidth,
                 outputHeight
             )) {
-                showOverlay(
+                showStatusOverlay(
                     activity,
                     "RTL SPREAD: ACTIVE " + activeSide
                         + " page " + (currentPage + 1)
@@ -4688,7 +4698,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 "disableHandWrite",
                 "SN_SPREAD_PROBE read-only opt-in spread"
             );
-            showOverlay(
+            showStatusOverlay(
                 activity,
                 "RTL SPREAD: READ ONLY - writing geometry not approved"
             );
@@ -5101,7 +5111,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 activity,
                 "documentViewModel"
             );
-            showOverlay(
+            showStatusOverlay(
                 activity,
                 "SPREAD PROBE: switching active page to "
                     + (target.intValue() + 1)
@@ -6474,7 +6484,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     false
                 );
             }
-            showOverlay(
+            showStatusOverlay(
                 activity,
                 "SPREAD PROBE: switching active page to "
                     + (targetPage + 1)
@@ -7943,6 +7953,15 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
         label.setText(text);
         label.bringToFront();
+    }
+
+    private static void showStatusOverlay(Activity activity, String text) {
+        SpreadConfig config = spreadConfig(activity);
+        if (config != null && !config.showHeader) {
+            removeOverlay(activity);
+            return;
+        }
+        showOverlay(activity, text);
     }
 
     private static void removeOverlay(Activity activity) {

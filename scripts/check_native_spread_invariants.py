@@ -47,7 +47,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 96L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 97L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -88,8 +88,10 @@ def check(repo_root: Path) -> None:
             "removeNativeAnnotationBackupFiles(pdfFile, backup)",
             'putBoolean("backupAvailable", backupResult.backup != null)',
             'setProperty("showDivider", showDivider.toString())',
+            'setProperty("showHeader", showHeader.toString())',
             '"spreadSizing"',
             'putBoolean("showDivider", showDivider)',
+            'putBoolean("showHeader", showHeader)',
             'putString("spreadSizing", spreadSizing)',
         ),
         "plugin handshake",
@@ -116,8 +118,11 @@ def check(repo_root: Path) -> None:
             "if (!nativeSpreadBusyRef.current) return false;",
             "Wait for the native reader change to finish before closing.",
             "const [showSpreadDivider, setShowSpreadDivider]",
+            "const [showNativeSpreadHeader, setShowNativeSpreadHeader]",
             "const [spreadSizing, setSpreadSizing]",
             "setNativeSpreadAppearanceValue",
+            "nativeSpread?.showHeader !== false",
+            "Active-page header",
             """const restoredSizing = nativeSpread?.configured
           ? nativeSpread?.spreadSizing === 'native_fill'
             ? 'native_fill'
@@ -130,14 +135,19 @@ def check(repo_root: Path) -> None:
         module,
         (
             "final boolean showDivider;",
+            "final boolean showHeader;",
             "final boolean nativeFill;",
             'properties.getProperty("showDivider", "true")',
+            'properties.getProperty("showHeader", "true")',
             'properties.getProperty("spreadSizing", "fit")',
             "LEFT_VISIBLE_BOUNDS",
             "RIGHT_VISIBLE_BOUNDS",
             "SpreadPageLayout",
             "drawPageBitmap(canvas, leftBitmap, leftLayout, bitmapPaint)",
             "canvas.clipRect(layout.visibleBounds)",
+            "showStatusOverlay(",
+            "!config.showHeader",
+            "removeOverlay(activity);",
             "visibleBoundsOrDestination(activity, activeDestination)",
             "Math.max(",
         ),
@@ -601,12 +611,13 @@ def check(repo_root: Path) -> None:
         appearance_controls_start,
     )
     appearance_controls = app[appearance_controls_start:native_controls_start]
-    if appearance_controls.count("nativeSpreadBusy ||") != 4:
+    if appearance_controls.count("nativeSpreadBusy ||") != 6:
         fail("all native spread appearance controls must be transition-safe")
-    if appearance_controls.count(unavailable_guard) != 4:
+    if appearance_controls.count(unavailable_guard) != 6:
         fail("native spread appearance controls ignore unavailable hooks")
     for required in (
         "showSpreadDivider",
+        "showNativeSpreadHeader",
         "spreadSizing",
         "setNativeSpreadAppearanceValue",
         "native_fill",
@@ -973,10 +984,10 @@ def check(repo_root: Path) -> None:
         "native chrome activation exclusion",
     )
 
-    if 'android:versionCode="96"' not in manifest:
-        fail("companion manifest must use versionCode 96 for scoped stale-save suppression")
-    if 'android:versionName="0.0.96"' not in manifest:
-        fail("companion manifest must use versionName 0.0.96")
+    if 'android:versionCode="97"' not in manifest:
+        fail("companion manifest must use versionCode 97 for the header preference")
+    if 'android:versionName="0.0.97"' not in manifest:
+        fail("companion manifest must use versionName 0.0.97")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

@@ -236,6 +236,10 @@ eligible even while the one-shot stale activation-save guard is armed. The
 guard remains available for the delayed stale native save instead of consuming
 and suppressing the canonical transaction that must reach `.mark` first.
 
+Native Spread v0.0.97 adds a per-document active-page header choice. Turning
+it off removes the persistent red ACTIVE LEFT/RIGHT or READ ONLY banner while
+retaining safety failures and annotation-save error messages.
+
 ## v0.4.10 protected native editing pilot
 
 v0.4.9 added an explicitly confirmed **RTL editable** choice alongside **Off**

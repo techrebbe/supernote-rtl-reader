@@ -151,6 +151,10 @@ short stale activation-save guard. The explicit transaction reaches `.mark`,
 while the guard remains armed to consume the delayed stale save it was created
 for.
 
+v0.0.97 adds the `showHeader` marker property. It defaults to `true` for older
+markers; when disabled, normal ACTIVE LEFT/RIGHT and READ ONLY status banners
+are removed while failure and annotation-save warnings remain visible.
+
 This is firmware-specific experimental software for a rooted device. Back up
 documents and `.mark` files before testing a new firmware or module revision.
 
@@ -176,7 +180,7 @@ The signed APK is written to `build/artifact/`.
 
 Install the APK, enable **Supernote Native Spread Probe** in LSPosed, scope it
 only to `com.supernote.document`, and restart the document reader. Supernote
-RTL Reader v0.4.12 or newer and Native Spread v0.0.96 or newer are required for
+RTL Reader v0.4.12 or newer and Native Spread v0.0.97 or newer are required for
 protected editable mode. Its
 recovery manifest binds the backup to the PDF's full SHA-256 because
 Supernote changes the PDF modification time when the document activity

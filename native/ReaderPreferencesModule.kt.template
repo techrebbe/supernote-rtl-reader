@@ -44,7 +44,7 @@ class ReaderPreferencesModule(
         private const val NATIVE_SPREAD_PACKAGE =
             "com.techrebbe.supernote.spreadprobe"
         private const val PLUGIN_HOST_PACKAGE = "com.ratta.supernote.pluginhost"
-        private const val NATIVE_SPREAD_MIN_VERSION_CODE = 96L
+        private const val NATIVE_SPREAD_MIN_VERSION_CODE = 97L
         private const val NATIVE_SPREAD_MARKER_SUFFIX = ".snspread"
         private const val NATIVE_SPREAD_BACKUP_SUFFIX = ".snspread-backup.properties"
         private const val NATIVE_SPREAD_BACKUP_MARK_SUFFIX = ".snspread-backup.mark"
@@ -148,6 +148,8 @@ class ReaderPreferencesModule(
                 .equals("true", ignoreCase = true)
             val showDivider = !properties.getProperty("showDivider", "true")
                 .equals("false", ignoreCase = true)
+            val showHeader = !properties.getProperty("showHeader", "true")
+                .equals("false", ignoreCase = true)
             val spreadSizing = if (
                 properties.getProperty("spreadSizing", "fit")
                     .equals("native_fill", ignoreCase = true)
@@ -161,6 +163,7 @@ class ReaderPreferencesModule(
                     configuredEditable,
                     coverSeparate,
                     showDivider,
+                    showHeader,
                     spreadSizing,
                     marker,
                     capability,
@@ -177,6 +180,7 @@ class ReaderPreferencesModule(
                     configuredEditable,
                     coverSeparate,
                     showDivider,
+                    showHeader,
                     spreadSizing,
                     marker,
                     capability,
@@ -195,6 +199,7 @@ class ReaderPreferencesModule(
         enabled: Boolean,
         coverSeparate: Boolean,
         showDivider: Boolean,
+        showHeader: Boolean,
         spreadSizing: String,
         promise: Promise,
     ) {
@@ -229,6 +234,7 @@ class ReaderPreferencesModule(
                                     marker,
                                     coverSeparate,
                                     showDivider,
+                                    showHeader,
                                     spreadSizing,
                                     checkNotNull(handshake),
                                 )
@@ -323,6 +329,7 @@ class ReaderPreferencesModule(
         filePath: String,
         coverSeparate: Boolean,
         showDivider: Boolean,
+        showHeader: Boolean,
         spreadSizing: String,
         promise: Promise,
     ) {
@@ -359,6 +366,7 @@ class ReaderPreferencesModule(
                                 marker,
                                 coverSeparate,
                                 showDivider,
+                                showHeader,
                                 spreadSizing,
                                 handshake,
                                 backup,
@@ -468,6 +476,7 @@ class ReaderPreferencesModule(
         marker: File,
         coverSeparate: Boolean,
         showDivider: Boolean,
+        showHeader: Boolean,
         spreadSizing: String,
         handshake: NativeSpreadHandshake,
     ) {
@@ -478,6 +487,7 @@ class ReaderPreferencesModule(
             setProperty("direction", "rtl")
             setProperty("coverSeparate", coverSeparate.toString())
             setProperty("showDivider", showDivider.toString())
+            setProperty("showHeader", showHeader.toString())
             setProperty(
                 "spreadSizing",
                 if (spreadSizing == "native_fill") "native_fill" else "fit",
@@ -512,6 +522,8 @@ class ReaderPreferencesModule(
                 .equals("false", ignoreCase = true) ||
             verified.getProperty("showDivider", "true") !=
                 showDivider.toString() ||
+            verified.getProperty("showHeader", "true") !=
+                showHeader.toString() ||
             verified.getProperty("spreadSizing", "fit") !=
                 (if (spreadSizing == "native_fill") "native_fill" else "fit")
         ) {
@@ -529,6 +541,7 @@ class ReaderPreferencesModule(
         marker: File,
         coverSeparate: Boolean,
         showDivider: Boolean,
+        showHeader: Boolean,
         spreadSizing: String,
         handshake: NativeSpreadHandshake,
         backup: NativeAnnotationBackup,
@@ -540,6 +553,7 @@ class ReaderPreferencesModule(
             setProperty("direction", "rtl")
             setProperty("coverSeparate", coverSeparate.toString())
             setProperty("showDivider", showDivider.toString())
+            setProperty("showHeader", showHeader.toString())
             setProperty(
                 "spreadSizing",
                 if (spreadSizing == "native_fill") "native_fill" else "fit",
@@ -563,6 +577,8 @@ class ReaderPreferencesModule(
             verified.getProperty("backupManifestSha256", "") != manifestHash ||
             verified.getProperty("showDivider", "true") !=
                 showDivider.toString() ||
+            verified.getProperty("showHeader", "true") !=
+                showHeader.toString() ||
             verified.getProperty("spreadSizing", "fit") !=
                 (if (spreadSizing == "native_fill") "native_fill" else "fit")
         ) {
@@ -580,6 +596,7 @@ class ReaderPreferencesModule(
         configuredEditable: Boolean,
         coverSeparate: Boolean,
         showDivider: Boolean,
+        showHeader: Boolean,
         spreadSizing: String,
         marker: File,
         capability: NativeSpreadCapability,
@@ -594,6 +611,7 @@ class ReaderPreferencesModule(
             putBoolean("editable", configuredEditable && runtimeCompatible)
             putBoolean("coverSeparate", coverSeparate)
             putBoolean("showDivider", showDivider)
+            putBoolean("showHeader", showHeader)
             putString("spreadSizing", spreadSizing)
             putString("markerPath", marker.absolutePath)
             putBoolean("compatible", runtimeCompatible)

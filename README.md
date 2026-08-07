@@ -127,6 +127,119 @@ This prevents the initial landscape spread from being mounted against stale or i
 
 Full validation details are recorded in `REGRESSION.md`.
 
+## v0.4.11 settled native ink composition
+
+Native Spread v0.0.81 separates additive pen commits from replacement-style
+annotation updates. Ordinary pen and highlighter refreshes now draw the newest
+captured trail over the canonical saved page, preserving every earlier settled
+stroke. Eraser, lasso, undo, and redo refreshes still replace the active page
+slot so transparent pixels can remove or move older ink. This addresses the
+case where each newly settled stroke temporarily hid all earlier strokes until
+the page was turned away and reloaded; the underlying `.mark` data was already
+complete and is not rewritten by this display fix.
+
+## v0.4.12 native spread appearance
+
+Native Spread v0.0.82 adds two per-document appearance controls:
+
+- **Spread divider — On / Off**. Off removes the dark center rule and gives
+  each page the full physical half of the landscape display.
+- **Page sizing — Fit page / Native fill**. Fit page preserves the previous
+  whole-page view. Native fill uses the same aspect-preserving fill/crop rule
+  as Supernote's full-screen native reader; it never stretches the page.
+
+The setting now applies to the plug-in's own landscape spread as well as Native
+Spread. The PDF view occupies the full display height; RTL Reader's header and
+footer remain absolute overlays, like Supernote's native toolbox, instead of
+reducing the document viewport.
+
+The module stores a full-page transform separately from the visible half-page
+bounds. PDF pixels, native ink, highlights, lasso geometry, links, eraser input,
+and page activation therefore share the same scale and crop instead of each
+feature approximating the new layout independently. Existing documents default
+to **Fit page** with the divider **On** until changed.
+
+Native Spread v0.0.84 waits for the native document view to finish its
+portrait/landscape layout and then asks Supernote to reload the unchanged
+current page after returning to portrait. This prevents the first portrait
+frame from retaining the smaller landscape-rendered page until a page turn.
+
+Native Spread v0.0.85 makes **Native fill** use Supernote's actual automatic
+page-trimming geometry instead of filling each half from the uncropped PDF
+page. The active page reuses the trim rectangle already calculated by the
+native reader; the adjacent page calculates the same non-white content bounds
+when it has not yet been active. The original PDF bitmap remains the drawing
+source, and the full-page destination is derived from the trim transform, so
+native ink, eraser, lasso, highlights, links, and activation all retain one
+canonical coordinate system. On the Nomad hardware pass, both spread pages
+extended behind the top toolbar and bottom page bar without stretching. A new
+stroke remained aligned and persisted in the same position after turning away
+and back.
+
+Native Spread v0.0.86 fixes direct writing on the inactive half of an editable
+spread. Supernote's `receiveTrials()` callback exposes the completed stroke but
+does not invoke its later `saveTrails()` routine. The module now commits the
+captured page-local transaction before completing the deferred page activation,
+while retaining the existing fail-closed guard if that commit fails. Hardware
+validation in both directions confirmed that inactive-page strokes remain
+visible, preserve all earlier ink, and survive turning away and back.
+
+Native Spread v0.0.87 protects an inactive-page stroke erase from the native
+save that follows page activation. The page-local transaction already removes
+the correct intersecting trail; the one deferred native save is now suppressed
+before it can rewrite the page from stale in-memory trails. The guard is armed
+only after a successful erase, is consumed once, and expires after two seconds.
+
+Native Spread v0.0.88 registers protected inactive-page writes and erases with
+Supernote's existing Undo/Redo controls after page activation finishes. Each
+entry retains the page-local trail lists immediately before and after the edit.
+Undo and Redo restore only that annotation-page transaction, while the native
+stack continues to control button availability and operation ordering.
+
+Native Spread v0.0.89 preserves the inactive page's prearmed writable region
+when Supernote performs its one-shot pen-down refresh after opening a document.
+That native refresh otherwise restores the still-visible original page's
+geometry before the first stroke can reach the page-local transaction.
+
+Native Spread v0.0.90 also primes the target page inside Supernote's native
+handwriting engine before deferred inactive-page input begins. Its intermediate
+annotation bitmap is suppressed, keeping the visible spread unchanged until
+the page-local stroke has been captured and committed.
+
+Native Spread v0.0.91 redraws a settled eraser result directly from the newly
+saved native `.mark` page. This avoids replacing the active spread slot with
+Supernote's sometimes incomplete post-eraser bitmap after an inactive-page
+activation, while leaving the live low-latency eraser path and page-local data
+format unchanged.
+
+Native Spread v0.0.92 flushes a completed active-page native eraser transaction
+to the `.mark` file immediately after pen-up, before the canonical spread redraw
+can reread and restore the pre-erase file contents.
+
+Native Spread v0.0.93 excludes the native top toolbar and bottom page-number
+bar from inactive-page tap activation. Toolbar Undo/Redo taps therefore remain
+on the current page instead of first switching to the page beneath the control.
+
+Native Spread v0.0.94 redraws native Undo and Redo from the operation's updated
+canonical `.mark` state. It no longer clears the active spread slot with the
+incomplete transient bitmap Supernote can emit during those operations.
+
+Native Spread v0.0.95 flushes Supernote's in-memory Undo/Redo result to `.mark`
+before performing the canonical reload, so an erased stroke restored by Undo
+and removed again by Redo is immediately visible and persistent. Nomad hardware
+testing confirmed the complete active-page erase -> Undo -> Redo sequence,
+including persistence of the redone erasure after a spread reload, without
+changing unrelated trails or activating the opposite page.
+
+Native Spread v0.0.96 keeps that deliberate active-eraser and Undo/Redo flush
+eligible even while the one-shot stale activation-save guard is armed. The
+guard remains available for the delayed stale native save instead of consuming
+and suppressing the canonical transaction that must reach `.mark` first.
+
+Native Spread v0.0.97 adds a per-document active-page header choice. Turning
+it off removes the persistent red ACTIVE LEFT/RIGHT or READ ONLY banner while
+retaining safety failures and annotation-save error messages.
+
 ## v0.4.10 protected native editing pilot
 
 v0.4.9 added an explicitly confirmed **RTL editable** choice alongside **Off**

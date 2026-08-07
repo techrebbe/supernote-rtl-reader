@@ -238,6 +238,82 @@ re-enabled and the document process restarted, the protected PDF remained in
 ordinary native landscape view rather than silently restoring RTL spread mode.
 The protected `.mark` SHA-256 remained unchanged throughout.
 
+## v0.4.11 settled native ink composition
+
+- [x] Native Spread v0.0.81 compiles and the packaged, handshake, and plug-in
+  compatibility versions all report 81.
+- [x] Automated invariants require additive composition for ordinary pen
+  commits and keep active-slot clearing behind the replacement-operation guard.
+- [x] Pen selection enters additive mode; eraser and lasso selection enter
+  replacement mode; undo and redo use the updated canonical `.mark` page rather
+  than Supernote's sometimes incomplete transient replacement bitmap.
+- [ ] Draw three separate strokes on one active page. Each earlier stroke remains
+  visible after the next stroke settles.
+- [ ] Turn away and back. All three strokes remain present in the same positions.
+- [ ] Erase part of one stroke. The erased pixels remain absent while the other
+  strokes remain visible, including after a page turn.
+- [ ] Lasso-move one stroke and confirm no old pixels remain at its source.
+
+## v0.4.12 native spread appearance and inactive-page editing
+
+- [x] Native Spread v0.0.97 compiles and the packaged, handshake, and plug-in
+  compatibility versions all report 97.
+- [x] Native Spread v0.0.84: rotate an open spread to portrait and confirm the
+  current page immediately uses the normal native-reader portrait size without
+  turning away and back.
+- [x] Appearance choices are stored per PDF and marker updates retain the
+  existing transactional backup protections.
+- [ ] Set **Active-page header: Off** and confirm the persistent red ACTIVE or
+  READ ONLY banner disappears, remains hidden after reopening the document,
+  and returns when the setting is switched On. Safety/error overlays remain
+  available in either state.
+- [x] Automated invariants cover the divider and sizing controls, visible-page
+  clipping, and the full-page annotation transform.
+- [ ] **Fit page + Divider On** matches the v0.0.81 layout and annotation
+  behavior.
+- [ ] **Fit page + Divider Off** removes the dark line and uses the full two
+  halves without moving or resizing existing ink incorrectly.
+- [x] **Native fill + Divider Off** uses Supernote's automatic non-white page
+  trim independently for both pages, fills the full landscape height without
+  stretching, and extends behind the native toolbar and page-number bar.
+- [x] A pen stroke drawn directly on the inactive right page is appended only
+  after its page-local write succeeds; all earlier ink remains visible and the
+  new stroke survives a spread turn away and back.
+- [x] The symmetric inactive-left-page stroke follows the same sequence,
+  preserves all prior trails, and survives a spread turn away and back.
+- [x] Erasing a saved line on the inactive page removes the intersecting line,
+  preserves the other page-local trails, and remains correct after turning
+  away and back. On the Nomad, the far-left wavy line was removed while the
+  other three visible trails remained. The page-local transaction reported
+  `erased=1`, the one stale native save logged
+  `pen_activation_post_persist_save_bypassed`, and the same result reloaded
+  after leaving and returning to the spread.
+- [x] Immediately after an inactive-page write, Undo removes the new stroke and
+  Redo restores it without changing unrelated trails. Confirmed on the Nomad
+  with Native Spread v0.0.90 using the native top-toolbar controls.
+- [ ] Immediately after an inactive-page erase, Undo restores the erased trail
+  and Redo removes it again without changing unrelated trails.
+- [x] Immediately after an active-page erase, native top-toolbar Undo restores
+  exactly the erased section and Redo removes it again without changing any
+  unrelated trail. Confirmed on the Nomad with Native Spread v0.0.95; the
+  redone erasure remained correct after leaving and returning to the spread.
+- [ ] Immediately after an inactive-page erase, begin an active-page erase
+  inside the two-second stale-save window. The deliberate active-page save is
+  not suppressed, and the later stale activation save is still consumed once.
+- [ ] Tapping native Undo/Redo or the bottom page-number bar on the inactive
+  half does not activate that page before the native control handles the tap.
+- [ ] After an inactive-page erase activates its page, a following active-page
+  erase keeps every unrelated trail visible without requiring a page reload.
+- [ ] In the plug-in reader, Native fill reaches the physical top and bottom of
+  landscape while the header/footer visibly overlay the PDF instead of
+  reserving document space.
+- [ ] In Native fill, pen, eraser, lasso, highlights, and embedded links remain
+  aligned with the PDF on both active sides. Pen alignment and persistence on
+  the active page passed with Native Spread v0.0.85; the remaining tools still
+  need a focused smoke test with the new trim transform.
+- [ ] Return to Fit page and confirm all existing annotations return to their
+  original whole-page positions.
+
 ## v0.4.10 protected native editing pilot
 
 Safety and setup:

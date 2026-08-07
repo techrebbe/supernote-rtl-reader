@@ -32,16 +32,22 @@ def check(repo_root: Path) -> None:
     )
     manifest_path = repo_root / "native-spread-module" / "AndroidManifest.xml"
     app_path = repo_root / "overlay" / "App.js"
+    pdf_view_path = repo_root / "native" / "PdfPageView.kt.template"
+    pdf_view_manager_path = repo_root / "native" / "PdfPageViewManager.kt.template"
+    direct_patch_path = repo_root / "scripts" / "patch_direct_view.py"
 
     plugin = plugin_path.read_text(encoding="utf-8")
     module = module_path.read_text(encoding="utf-8")
     manifest = manifest_path.read_text(encoding="utf-8")
     app = app_path.read_text(encoding="utf-8")
+    pdf_view = pdf_view_path.read_text(encoding="utf-8")
+    pdf_view_manager = pdf_view_manager_path.read_text(encoding="utf-8")
+    direct_patch = direct_patch_path.read_text(encoding="utf-8")
 
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 80L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 97L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -81,6 +87,12 @@ def check(repo_root: Path) -> None:
             "nativeAnnotationRetiringSnapshot(pdfFile)",
             "removeNativeAnnotationBackupFiles(pdfFile, backup)",
             'putBoolean("backupAvailable", backupResult.backup != null)',
+            'setProperty("showDivider", showDivider.toString())',
+            'setProperty("showHeader", showHeader.toString())',
+            '"spreadSizing"',
+            'putBoolean("showDivider", showDivider)',
+            'putBoolean("showHeader", showHeader)',
+            'putString("spreadSizing", spreadSizing)',
         ),
         "plugin handshake",
     )
@@ -105,8 +117,54 @@ def check(repo_root: Path) -> None:
             "BackHandler.addEventListener(",
             "if (!nativeSpreadBusyRef.current) return false;",
             "Wait for the native reader change to finish before closing.",
+            "const [showSpreadDivider, setShowSpreadDivider]",
+            "const [showNativeSpreadHeader, setShowNativeSpreadHeader]",
+            "const [spreadSizing, setSpreadSizing]",
+            "setNativeSpreadAppearanceValue",
+            "nativeSpread?.showHeader !== false",
+            "Active-page header",
+            """const restoredSizing = nativeSpread?.configured
+          ? nativeSpread?.spreadSizing === 'native_fill'
+            ? 'native_fill'
+            : 'fit'
+          : restored.spreadSizing;""",
         ),
         "configured/runtime Native Spread state separation",
+    )
+    require_markers(
+        module,
+        (
+            "final boolean showDivider;",
+            "final boolean showHeader;",
+            "final boolean nativeFill;",
+            'properties.getProperty("showDivider", "true")',
+            'properties.getProperty("showHeader", "true")',
+            'properties.getProperty("spreadSizing", "fit")',
+            "LEFT_VISIBLE_BOUNDS",
+            "RIGHT_VISIBLE_BOUNDS",
+            "SpreadPageLayout",
+            "drawPageBitmap(canvas, leftBitmap, leftLayout, bitmapPaint)",
+            "canvas.clipRect(layout.visibleBounds)",
+            "showStatusOverlay(",
+            "!config.showHeader",
+            "removeOverlay(activity);",
+            "visibleBoundsOrDestination(activity, activeDestination)",
+            "Math.max(",
+        ),
+        "native spread appearance geometry",
+    )
+    require_markers(
+        pdf_view + pdf_view_manager + direct_patch,
+        (
+            'var pendingContentMode: String = "fit"',
+            'if (pendingContentMode == "native_fill")',
+            "max(widthScale, heightScale)",
+            '@ReactProp(name = "contentMode")',
+            "contentMode={spreadSizing}",
+            'contentMode="fit"',
+            "{showSpreadDivider && <View style={styles.spreadDivider} />}",
+        ),
+        "full-screen custom reader spread sizing",
     )
     configure_start = plugin.find("fun configureNativeSpreadReadOnly(")
     marker_writer_start = plugin.find(
@@ -537,16 +595,35 @@ def check(repo_root: Path) -> None:
     cover_controls_start = app.find(
         "<Text style={styles.settingLabel}>Treat Cover Page Separately</Text>"
     )
-    native_controls_start = app.find(
-        "<Text style={styles.settingLabel}>Supernote native reader</Text>",
+    appearance_controls_start = app.find(
+        "<Text style={styles.settingLabel}>Spread page sizing</Text>",
         cover_controls_start,
     )
-    cover_controls = app[cover_controls_start:native_controls_start]
+    cover_controls = app[cover_controls_start:appearance_controls_start]
     unavailable_guard = "nativeSpreadConfigured && !nativeSpreadCompatible"
     if cover_controls.count("nativeSpreadBusy ||") != 2:
         fail("both Cover controls must be disabled during native mode transitions")
     if cover_controls.count(unavailable_guard) != 2:
         fail("Cover controls remain enabled for an unavailable configured marker")
+
+    native_controls_start = app.find(
+        "<Text style={styles.settingLabel}>Supernote native reader</Text>",
+        appearance_controls_start,
+    )
+    appearance_controls = app[appearance_controls_start:native_controls_start]
+    if appearance_controls.count("nativeSpreadBusy ||") != 6:
+        fail("all native spread appearance controls must be transition-safe")
+    if appearance_controls.count(unavailable_guard) != 6:
+        fail("native spread appearance controls ignore unavailable hooks")
+    for required in (
+        "showSpreadDivider",
+        "showNativeSpreadHeader",
+        "spreadSizing",
+        "setNativeSpreadAppearanceValue",
+        "native_fill",
+    ):
+        if required not in appearance_controls:
+            fail(f"native spread appearance controls missing {required}")
 
     readonly_transition_start = app.find("const setNativeSpreadReadOnly = async")
     editable_transition_start = app.find(
@@ -636,6 +713,12 @@ def check(repo_root: Path) -> None:
             '"pen_up"',
             "cancelPendingPenPageActivation(",
             '"pen_left_screen"',
+            '"sendDisableWriteAreaNotRefreshBitmap"',
+            "pen_activation_disable_area_refresh_bypassed",
+            "param.setResult(Boolean.TRUE);",
+            "PEN_ACTIVATION_MARK_PRIMING",
+            "pen_activation_mark_bitmap_suppressed",
+            "pen_activation_mark_primed",
             "SN_SPREAD_PROBE pen page activation",
             'applySpreadMarkGeometry(',
             '"pen_page_activation"',
@@ -644,6 +727,15 @@ def check(repo_root: Path) -> None:
             "normalizePendingPenTrail(",
             "pen_activation_native_save_bypassed",
             "persistPendingPenActivationTrails(",
+            "PEN_ACTIVATION_SAVE_BYPASS_UNTIL",
+            "POST_ACTIVATION_SAVE_BYPASS_MS",
+            "pen_activation_post_persist_save_armed",
+            "pen_activation_post_persist_save_bypassed",
+            "PENDING_PAGE_EDIT_HISTORY",
+            "PAGE_EDIT_HISTORY_ACTIONS",
+            "page_edit_history_registered",
+            "page_edit_history_applied",
+            "receiveTrials() fetches the completed native trail",
             '"modifyPageTrailsFromFile"',
             'XposedHelpers.callMethod(',
             '"get_erase_line_trail_num"',
@@ -664,6 +756,149 @@ def check(repo_root: Path) -> None:
         ),
         "inactive-page pen activation",
     )
+
+    receive_hook_start = module.find(
+        '"receiveTrials",',
+        module.find("pen_activation_native_save_bypassed"),
+    )
+    receive_hook_end = module.find(
+        '"areaSelectionTransition",',
+        receive_hook_start,
+    )
+    if receive_hook_start < 0 or receive_hook_end < 0:
+        fail("could not isolate inactive-page receiveTrials completion hook")
+    receive_hook = module[receive_hook_start:receive_hook_end]
+    persist_before_completion = receive_hook.find(
+        "persistPendingPenActivationTrails("
+    )
+    post_completion = receive_hook.find("activity.runOnUiThread(")
+    completion_guard = receive_hook.find(
+        "completePendingPenPageActivation("
+    )
+    if not (
+        0 <= persist_before_completion < post_completion < completion_guard
+    ):
+        fail(
+            "receiveTrials must persist inactive-page edits before posting "
+            "the fail-closed activation completion"
+        )
+
+    save_hook_start = module.find('"saveTrails",')
+    save_hook_end = module.find('"receiveTrials",', save_hook_start)
+    if save_hook_start < 0 or save_hook_end < 0:
+        fail("could not isolate inactive-page saveTrails hook")
+    save_hook = module[save_hook_start:save_hook_end]
+    explicit_save_guard = save_hook.find(
+        "boolean explicitCanonicalSave = Boolean.TRUE.equals("
+    )
+    post_persist_bypass = save_hook.find(
+        "else if (!explicitCanonicalSave)"
+    )
+    bypass_consumption = save_hook.find(
+        "PEN_ACTIVATION_SAVE_BYPASS_UNTIL.remove(activity)",
+        post_persist_bypass,
+    )
+    explicit_save_preserved = save_hook.find(
+        "pen_activation_post_persist_save_preserved"
+    )
+    pending_capture = save_hook.find(
+        "List<Object> captured = activity == null"
+    )
+    if not (
+        0 <= explicit_save_guard < post_persist_bypass
+        < bypass_consumption < explicit_save_preserved < pending_capture
+    ):
+        fail(
+            "post-persistence stale native save must remain armed for an "
+            "explicit canonical save and be consumed before pending "
+            "inactive-page buffers are inspected"
+        )
+
+    persist_start = module.find(
+        "private static void persistPendingPenActivationTrails("
+    )
+    match_start = module.find(
+        "private static boolean matchingTrailExists(", persist_start
+    )
+    if persist_start < 0 or match_start < 0:
+        fail("could not isolate inactive-page persistence")
+    persist_method = module[persist_start:match_start]
+    require_markers(
+        persist_method,
+        (
+            "armPostActivationSaveBypass && erased > 0",
+            "PEN_ACTIVATION_SAVE_BYPASS_UNTIL.put(",
+            "SystemClock.uptimeMillis()",
+            "+ POST_ACTIVATION_SAVE_BYPASS_MS",
+        ),
+        "inactive-page eraser stale-save guard",
+    )
+
+    require_markers(
+        module,
+        (
+            "private static final class PageEditHistory",
+            "registerPendingPageEditHistory(",
+            "applyPageEditHistory(",
+            'getDeclaredField("isTrail")',
+            "isTrailField.setBoolean(action, false)",
+            'XposedHelpers.callMethod(stack, "appendTrail")',
+            'String listField = undo ? "undoList" : "redoList"',
+            'XposedHelpers.callMethod(stack, actionName)',
+            '"modifyPageTrailsFromFile"',
+            'new ArrayList<>(snapshot)',
+            '"loadHandWrite"',
+        ),
+        "inactive-page native undo and redo integration",
+    )
+
+    require_markers(
+        module,
+        (
+            "REPLACE_ACTIVE_INK_MODES",
+            "CANONICAL_ONLY_INK_MODES",
+            "FORCE_CANONICAL_ACTIVE_INK",
+            "EXPLICIT_CANONICAL_TRAIL_SAVE",
+            'setReplaceActiveInkMode(',
+            '"area_selection"',
+            '"eraser:" + eraserType',
+            '"pen"',
+            'new String[] {"undo", "redo"}',
+            'ink_composition_force_canonical reason=',
+            'undo_redo_saved_before_canonical_reload',
+            '"loadHandWrite",\n                                    markPage',
+            "boolean replaceActiveSlot",
+            "boolean canonicalOnly",
+            "readOnly || canonicalOnly",
+            'committed_ink_canonical_only reason=eraser',
+            "persistActiveEraserBeforeCanonicalRefresh(",
+            'active_eraser_saved_before_canonical_refresh',
+            "saveTrailsForCanonicalReload(",
+            '"undo_redo:" + mutationName',
+            '"active_eraser"',
+            'explicit_canonical_trail_save reason=',
+            "if (replaceActiveSlot && activeDestination != null)",
+            '" mode=" + (replaceActiveSlot ? "replace" : "add")',
+        ),
+        "settled ink composition",
+    )
+
+    combined_start = module.find(
+        "private static Bitmap renderCombinedCommittedInk("
+    )
+    destination_start = module.find(
+        "private static RectF activePageDestination(", combined_start
+    )
+    if combined_start < 0 or destination_start < 0:
+        fail("could not isolate settled ink composition")
+    combined = module[combined_start:destination_start]
+    clear_slot = combined.find("PorterDuff.Mode.CLEAR")
+    replacement_guard = combined.find(
+        "if (replaceActiveSlot && activeDestination != null)"
+    )
+    draw_active = combined.find("canvas.drawBitmap(active, 0.0f, 0.0f, paint)")
+    if not 0 <= replacement_guard < clear_slot < draw_active:
+        fail("normal pen commits can still clear previously settled active-page ink")
 
     trail_match_start = module.find("private static boolean matchingTrailExists(")
     eraser_match_start = module.find(
@@ -712,10 +947,47 @@ def check(repo_root: Path) -> None:
     if "PEN_ACTIVATION_TRAILS.remove(activity)" in completion:
         fail("completion cleanup still silently discards failed inactive-page edits")
 
-    if 'android:versionCode="80"' not in manifest:
-        fail("companion manifest must use versionCode 80 for full stroke identity")
-    if 'android:versionName="0.0.80"' not in manifest:
-        fail("companion manifest must use versionName 0.0.80")
+    require_markers(
+        module,
+        (
+            "configuration_refresh_waiting_for_layout",
+            "configuration_refresh_native_reload",
+            'XposedHelpers.callMethod(viewModel, "reloadPage")',
+        ),
+        "portrait rotation refresh",
+    )
+
+    require_markers(
+        module,
+        (
+            "nativeTrimmingRect(",
+            '"com.supernote.document.utils.TrimmingUtil"',
+            '"getTrimmingRect"',
+            "trimmingRect.left / horizontalMargin",
+            "trimmingRect.top / verticalMargin",
+            "left + sourceWidth * scale",
+            "top + sourceHeight * scale",
+            '"native_fill_trim_detected page="',
+        ),
+        "native-reader-equivalent spread trimming",
+    )
+
+    require_markers(
+        module,
+        (
+            "NATIVE_TOP_CHROME_TOUCH_EXCLUSION_PX",
+            "NATIVE_BOTTOM_CHROME_TOUCH_EXCLUSION_PX",
+            "isNativeChromeTouch(activity, event.getY())",
+            "activation_touch_ignored_native_chrome",
+            "activation_touch_cancelled_native_chrome",
+        ),
+        "native chrome activation exclusion",
+    )
+
+    if 'android:versionCode="97"' not in manifest:
+        fail("companion manifest must use versionCode 97 for the header preference")
+    if 'android:versionName="0.0.97"' not in manifest:
+        fail("companion manifest must use versionName 0.0.97")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

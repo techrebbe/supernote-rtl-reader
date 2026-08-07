@@ -442,6 +442,7 @@ class PdfPageView(
     var pendingFilePath: String? = null
     var pendingPageIndex: Int = -1
     var pendingRequestedWidth: Int = 0
+    var pendingContentMode: String = "fit"
     var pendingPrefetchPageIndexes: List<Int> = emptyList()
     var pendingRequestStartedAtMs: Double = 0.0
 
@@ -530,6 +531,13 @@ class PdfPageView(
                 }
             }
         }
+    }
+
+    fun setContentMode(contentMode: String?) {
+        val normalized = if (contentMode == "native_fill") "native_fill" else "fit"
+        if (pendingContentMode == normalized) return
+        pendingContentMode = normalized
+        invalidate()
     }
 
     fun dispose() {
@@ -634,10 +642,13 @@ override fun onDraw(canvas: Canvas) {
         val bitmap = pageBitmap ?: return
         if (bitmap.isRecycled || width <= 0 || height <= 0) return
 
-        val scale = min(
-            width.toFloat() / bitmap.width.toFloat(),
-            height.toFloat() / bitmap.height.toFloat(),
-        )
+        val widthScale = width.toFloat() / bitmap.width.toFloat()
+        val heightScale = height.toFloat() / bitmap.height.toFloat()
+        val scale = if (pendingContentMode == "native_fill") {
+            max(widthScale, heightScale)
+        } else {
+            min(widthScale, heightScale)
+        }
         val drawWidth = bitmap.width * scale
         val drawHeight = bitmap.height * scale
         val left = (width - drawWidth) / 2f

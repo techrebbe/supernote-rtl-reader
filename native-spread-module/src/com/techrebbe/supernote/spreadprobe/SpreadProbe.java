@@ -24,6 +24,7 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.os.Parcel;
 import android.os.Process;
+import android.os.SystemClock;
 import android.system.Os;
 import android.system.StructStat;
 import android.util.Log;
@@ -83,7 +84,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         "documentApkLength";
     private static final String HANDSHAKE_EXTRA_PROCESS_ID = "processId";
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 80L;
+    private static final long MODULE_VERSION_CODE = 97L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -92,14 +93,25 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int SPREAD_PAGE_WIDTH = 932;
     private static final int SPREAD_PAGE_HEIGHT = 1243;
     private static final float SPREAD_OUTER_EDGE_FRACTION = 0.14f;
+    private static final int NATIVE_TOP_CHROME_TOUCH_EXCLUSION_PX = 112;
+    private static final int NATIVE_BOTTOM_CHROME_TOUCH_EXCLUSION_PX = 96;
     private static final long NON_EDGE_TAP_SUPPRESSION_MS = 400L;
+    private static final long POST_ACTIVATION_SAVE_BYPASS_MS = 2000L;
     private static final AtomicInteger GENERATION = new AtomicInteger();
     private static final Map<Activity, Bitmap> COMPOSITES = new WeakHashMap<>();
     private static final Map<Activity, RectF> LEFT_DESTINATIONS = new WeakHashMap<>();
     private static final Map<Activity, RectF> RIGHT_DESTINATIONS = new WeakHashMap<>();
+    private static final Map<Activity, RectF> LEFT_VISIBLE_BOUNDS = new WeakHashMap<>();
+    private static final Map<Activity, RectF> RIGHT_VISIBLE_BOUNDS = new WeakHashMap<>();
+    private static final Map<Object, RectF> AUTO_TRIMMING_RECTS =
+        new WeakHashMap<>();
     private static final Map<Activity, Bitmap> COMMITTED_INK_COMPOSITES =
         new WeakHashMap<>();
     private static final Map<Activity, Bitmap> FULL_INK_BITMAPS =
+        new WeakHashMap<>();
+    private static final Map<Activity, Boolean> REPLACE_ACTIVE_INK_MODES =
+        new WeakHashMap<>();
+    private static final Map<Activity, Boolean> CANONICAL_ONLY_INK_MODES =
         new WeakHashMap<>();
     private static final Map<Activity, Bitmap> DIGEST_COMPOSITES =
         new WeakHashMap<>();
@@ -115,6 +127,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         new WeakHashMap<>();
     private static final Map<Activity, List<Object>> PEN_ACTIVATION_ERASERS =
         new WeakHashMap<>();
+    private static final Map<Activity, Long> PEN_ACTIVATION_SAVE_BYPASS_UNTIL =
+        new WeakHashMap<>();
+    private static final Map<Activity, PageEditHistory>
+        PENDING_PAGE_EDIT_HISTORY = new WeakHashMap<>();
+    private static final Map<Object, PageEditHistory>
+        PAGE_EDIT_HISTORY_ACTIONS = new WeakHashMap<>();
     private static final Map<Activity, Point> FINGER_TOUCH_STARTS =
         new WeakHashMap<>();
     private static final Map<Activity, Long> NON_EDGE_TAP_SUPPRESS_UNTIL =
@@ -132,6 +150,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final ThreadLocal<Boolean> SET_IMAGE_VIEW_SUPPRESSED =
         new ThreadLocal<>();
     private static final ThreadLocal<Boolean> COMMITTED_INK_ALREADY_SPREAD =
+        new ThreadLocal<>();
+    private static final ThreadLocal<Boolean> PEN_ACTIVATION_MARK_PRIMING =
+        new ThreadLocal<>();
+    private static final ThreadLocal<Boolean> FORCE_CANONICAL_ACTIVE_INK =
+        new ThreadLocal<>();
+    private static final ThreadLocal<Boolean> EXPLICIT_CANONICAL_TRAIL_SAVE =
         new ThreadLocal<>();
     private static Activity activeActivity;
     private static boolean nativeBridgeLoaded;
@@ -199,6 +223,28 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
     }
 
+    private static final class PageEditHistory {
+        final Activity activity;
+        final String markPath;
+        final int markPage;
+        final ArrayList<Object> beforeTrails;
+        final ArrayList<Object> afterTrails;
+
+        PageEditHistory(
+            Activity activity,
+            String markPath,
+            int markPage,
+            List<Object> beforeTrails,
+            List<Object> afterTrails
+        ) {
+            this.activity = activity;
+            this.markPath = markPath;
+            this.markPage = markPage;
+            this.beforeTrails = new ArrayList<>(beforeTrails);
+            this.afterTrails = new ArrayList<>(afterTrails);
+        }
+    }
+
     private static final class SpreadConfig {
         final String documentPath;
         final long documentModified;
@@ -213,6 +259,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         final FileIdentity snapshotIdentity;
         final boolean enabled;
         final boolean coverSeparate;
+        final boolean showDivider;
+        final boolean showHeader;
+        final boolean nativeFill;
         final boolean editable;
         final boolean calibration;
 
@@ -230,6 +279,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             FileIdentity snapshotIdentity,
             boolean enabled,
             boolean coverSeparate,
+            boolean showDivider,
+            boolean showHeader,
+            boolean nativeFill,
             boolean editable,
             boolean calibration
         ) {
@@ -246,6 +298,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             this.snapshotIdentity = snapshotIdentity;
             this.enabled = enabled;
             this.coverSeparate = coverSeparate;
+            this.showDivider = showDivider;
+            this.showHeader = showHeader;
+            this.nativeFill = nativeFill;
             this.editable = editable;
             this.calibration = calibration;
         }
@@ -330,6 +385,16 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
 
         boolean contains(int page) {
             return page >= 0 && (page == rightPage || page == leftPage);
+        }
+    }
+
+    private static final class SpreadPageLayout {
+        final RectF destination;
+        final RectF visibleBounds;
+
+        SpreadPageLayout(RectF destination, RectF visibleBounds) {
+            this.destination = destination;
+            this.visibleBounds = visibleBounds;
         }
     }
 
@@ -621,6 +686,37 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         );
 
         /*
+         * DocumentActivity performs a one-shot writable-area refresh on the
+         * first pen-down after opening a document. During deferred inactive-
+         * page activation its DocumentViewModel still intentionally points at
+         * the visible original page, so that refresh replaces the target-page
+         * geometry prepared from the preceding hover frame and drops the
+         * stroke. Keep the prepared region intact for this one narrow state;
+         * returning true preserves the caller's normal sendWritable(true).
+         */
+        XposedHelpers.findAndHookMethod(
+            "com.supernote.document.document.DocumentActivity",
+            loadPackageParam.classLoader,
+            "sendDisableWriteAreaNotRefreshBitmap",
+            new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    Activity activity = activeActivity;
+                    Integer target = activity == null
+                        ? null
+                        : PEN_ACTIVATION_TARGETS.get(activity);
+                    if (target == null
+                        || !isEditableSpreadLandscape(activity)) {
+                        return;
+                    }
+                    param.setResult(Boolean.TRUE);
+                    log("pen_activation_disable_area_refresh_bypassed target="
+                        + target);
+                }
+            }
+        );
+
+        /*
          * The Nomad's low-latency pen service does not consistently route
          * stylus events through Activity.dispatchTouchEvent().  In read-only
          * mode, enforce the disabled region at the HandWriteClient boundary
@@ -766,12 +862,16 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     }
                     try {
                         RectF destination = activePageDestination(activity);
+                        RectF visibleBounds = activePageVisibleBounds(activity);
                         if (destination == null
-                            || !destination.contains(input.x, input.y)) {
+                            || visibleBounds == null
+                            || !visibleBounds.contains(input.x, input.y)) {
                             log("link_remap_skipped point="
                                 + pointDescription(input)
                                 + " destination="
-                                + rectDescription(destination));
+                                + rectDescription(destination)
+                                + " visible="
+                                + rectDescription(visibleBounds));
                             return;
                         }
                         Object pageInfo = XposedHelpers.getObjectField(
@@ -1375,6 +1475,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
+                    if (Boolean.TRUE.equals(
+                        PEN_ACTIVATION_MARK_PRIMING.get()
+                    )) {
+                        return;
+                    }
                     Activity activity = activeActivity;
                     Bitmap fullBitmap = (Bitmap) param.args[0];
                     if (activity == null || !isCalibrationLandscape(activity)
@@ -1403,6 +1508,13 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
                     if (Boolean.TRUE.equals(
+                        PEN_ACTIVATION_MARK_PRIMING.get()
+                    )) {
+                        param.setResult(null);
+                        log("pen_activation_mark_bitmap_suppressed");
+                        return;
+                    }
+                    if (Boolean.TRUE.equals(
                         COMMITTED_INK_ALREADY_SPREAD.get()
                     )) {
                         return;
@@ -1422,9 +1534,26 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     }
 
                     boolean readOnly = isReadOnlyNativeMode(activity);
-                    Bitmap transformed = readOnly
+                    boolean replaceActiveSlot = shouldReplaceActiveInkSlot(
+                        activity
+                    );
+                    boolean canonicalOnly = !readOnly
+                        && (Boolean.TRUE.equals(
+                            CANONICAL_ONLY_INK_MODES.get(activity)
+                        ) || Boolean.TRUE.equals(
+                            FORCE_CANONICAL_ACTIVE_INK.get()
+                        ));
+                    Bitmap transformed = readOnly || canonicalOnly
                         ? renderCanonicalCommittedInk(activity)
-                        : renderCombinedCommittedInk(activity);
+                        : renderCombinedCommittedInk(
+                            activity,
+                            replaceActiveSlot
+                        );
+                    if (canonicalOnly && transformed != null) {
+                        log("committed_ink_canonical_only reason=eraser"
+                            + " active_page="
+                            + (currentDocumentPage(activity) + 1));
+                    }
                     if (transformed == null && !readOnly) {
                         transformed = transformCommittedInkFallback(
                             source,
@@ -1476,6 +1605,15 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             "setAreaSelection",
             new XC_MethodHook() {
                 @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    setReplaceActiveInkMode(
+                        activeActivity,
+                        true,
+                        "area_selection"
+                    );
+                }
+
+                @Override
                 protected void afterHookedMethod(MethodHookParam param) {
                     Activity activity = activeActivity;
                     if (activity == null
@@ -1515,6 +1653,25 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         XposedHelpers.findAndHookMethod(
             "com.supernote.document.handwrite.HandWritePresenter",
             loadPackageParam.classLoader,
+            "setPen",
+            int.class,
+            int.class,
+            int.class,
+            new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    setReplaceActiveInkMode(
+                        activeActivity,
+                        false,
+                        "pen"
+                    );
+                }
+            }
+        );
+
+        XposedHelpers.findAndHookMethod(
+            "com.supernote.document.handwrite.HandWritePresenter",
+            loadPackageParam.classLoader,
             "sendEraserInfo",
             int.class,
             new XC_MethodHook() {
@@ -1522,6 +1679,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 protected void beforeHookedMethod(MethodHookParam param) {
                     Activity activity = activeActivity;
                     int eraserType = (Integer) param.args[0];
+                    setReplaceActiveInkMode(
+                        activity,
+                        true,
+                        "eraser:" + eraserType
+                    );
                     if (activity == null || eraserType == 2
                         || !isEditableSpreadLandscape(activity)) {
                         return;
@@ -1531,6 +1693,84 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         param.thisObject,
                         eraserType
                     );
+                }
+            }
+        );
+
+        for (String methodName : new String[] {"undo", "redo"}) {
+            final String mutationName = methodName;
+            XposedHelpers.findAndHookMethod(
+                "com.supernote.document.handwrite.HandWritePresenter",
+                loadPackageParam.classLoader,
+                methodName,
+                new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        FORCE_CANONICAL_ACTIVE_INK.set(true);
+                        log("ink_composition_force_canonical reason="
+                            + mutationName);
+                        Activity activity = activeActivity;
+                        if (activity != null
+                            && applyPageEditHistory(
+                                activity,
+                                param.thisObject,
+                                mutationName
+                            )) {
+                            param.setResult(null);
+                        }
+                    }
+
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        try {
+                            Activity activity = activeActivity;
+                            if (activity != null
+                                && isEditableSpreadLandscape(activity)) {
+                                int markPage = XposedHelpers.getIntField(
+                                    param.thisObject,
+                                    "currentPage"
+                                );
+                                saveTrailsForCanonicalReload(
+                                    param.thisObject,
+                                    "undo_redo:" + mutationName
+                                );
+                                XposedHelpers.callMethod(
+                                    param.thisObject,
+                                    "loadHandWrite",
+                                    markPage
+                                );
+                                log("undo_redo_saved_before_canonical_reload"
+                                    + " action=" + mutationName
+                                    + " mark_page=" + markPage);
+                            }
+                        } catch (Throwable throwable) {
+                            log("undo_redo_canonical_reload_failed action="
+                                + mutationName + " " + throwable);
+                            XposedBridge.log(throwable);
+                        } finally {
+                            FORCE_CANONICAL_ACTIVE_INK.remove();
+                        }
+                    }
+                }
+            );
+        }
+
+        XposedHelpers.findAndHookMethod(
+            "com.supernote.document.handwrite.HandWritePresenter",
+            loadPackageParam.classLoader,
+            "loadHandWrite",
+            int.class,
+            new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    Activity activity = activeActivity;
+                    if (activity != null) {
+                        registerPendingPageEditHistory(
+                            activity,
+                            param.thisObject,
+                            ((Integer) param.args[0]).intValue()
+                        );
+                    }
                 }
             }
         );
@@ -1751,6 +1991,26 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
                     Activity activity = activeActivity;
+                    boolean explicitCanonicalSave = Boolean.TRUE.equals(
+                        EXPLICIT_CANONICAL_TRAIL_SAVE.get()
+                    );
+                    Long bypassUntil = activity == null
+                        ? null
+                        : PEN_ACTIVATION_SAVE_BYPASS_UNTIL.get(activity);
+                    if (bypassUntil != null) {
+                        if (SystemClock.uptimeMillis()
+                            > bypassUntil.longValue()) {
+                            PEN_ACTIVATION_SAVE_BYPASS_UNTIL.remove(activity);
+                        } else if (!explicitCanonicalSave) {
+                            PEN_ACTIVATION_SAVE_BYPASS_UNTIL.remove(activity);
+                            param.setResult(null);
+                            log("pen_activation_post_persist_save_bypassed");
+                            return;
+                        } else {
+                            log("pen_activation_post_persist_save_preserved"
+                                + " reason=explicit_canonical");
+                        }
+                    }
                     List<Object> captured = activity == null
                         ? null
                         : PEN_ACTIVATION_TRAILS.get(activity);
@@ -1776,7 +2036,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     if (activity != null) {
                         persistPendingPenActivationTrails(
                             activity,
-                            param.thisObject
+                            param.thisObject,
+                            false
                         );
                     }
                 }
@@ -1802,6 +2063,24 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     }
                     Activity activity = activeActivity;
                     if (activity != null) {
+                        persistActiveEraserBeforeCanonicalRefresh(
+                            activity,
+                            param.thisObject
+                        );
+                        /*
+                         * receiveTrials() fetches the completed native trail,
+                         * but it does not call saveTrails(). Persist the
+                         * page-local transaction here before the deferred page
+                         * activation checks its fail-closed guard. Waiting for
+                         * a later lifecycle save makes completion race ahead of
+                         * persistence and cancel otherwise valid inactive-page
+                         * ink.
+                         */
+                        persistPendingPenActivationTrails(
+                            activity,
+                            param.thisObject,
+                            true
+                        );
                         activity.runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
@@ -3742,14 +4021,20 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         );
         recycled += recycleRemovedBitmap(FULL_INK_BITMAPS, activity);
         recycled += recycleRemovedBitmap(DIGEST_COMPOSITES, activity);
+        REPLACE_ACTIVE_INK_MODES.remove(activity);
+        CANONICAL_ONLY_INK_MODES.remove(activity);
         LEFT_DESTINATIONS.remove(activity);
         RIGHT_DESTINATIONS.remove(activity);
+        LEFT_VISIBLE_BOUNDS.remove(activity);
+        RIGHT_VISIBLE_BOUNDS.remove(activity);
         ACTIVATION_TOUCH_TARGETS.remove(activity);
         ACTIVATION_TOUCH_STARTS.remove(activity);
         PEN_ACTIVATION_TARGETS.remove(activity);
         PEN_ACTIVATION_ORIGINAL_PAGES.remove(activity);
         PEN_ACTIVATION_TRAILS.remove(activity);
         PEN_ACTIVATION_ERASERS.remove(activity);
+        PEN_ACTIVATION_SAVE_BYPASS_UNTIL.remove(activity);
+        clearPageEditHistory(activity);
         FINGER_TOUCH_STARTS.remove(activity);
         NON_EDGE_TAP_SUPPRESS_UNTIL.remove(activity);
         SPREAD_CONFIGS.remove(activity);
@@ -3814,6 +4099,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     FileIdentity.missing(),
                     FileIdentity.missing(),
                     FileIdentity.missing(),
+                    true,
+                    false,
+                    true,
                     true,
                     false,
                     true,
@@ -3882,6 +4170,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     snapshotIdentity,
                     false,
                     false,
+                    true,
+                    true,
+                    false,
                     false,
                     false
                 );
@@ -3900,6 +4191,15 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             );
             boolean coverSeparate = "true".equalsIgnoreCase(
                 properties.getProperty("coverSeparate", "false").trim()
+            );
+            boolean showDivider = !"false".equalsIgnoreCase(
+                properties.getProperty("showDivider", "true").trim()
+            );
+            boolean showHeader = !"false".equalsIgnoreCase(
+                properties.getProperty("showHeader", "true").trim()
+            );
+            boolean nativeFill = "native_fill".equalsIgnoreCase(
+                properties.getProperty("spreadSizing", "fit").trim()
             );
             boolean disposable = "true".equalsIgnoreCase(
                 properties.getProperty("disposable", "false").trim()
@@ -3962,6 +4262,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 snapshotIdentity,
                 enabled,
                 coverSeparate,
+                showDivider,
+                showHeader,
+                nativeFill,
                 editable,
                 false
             );
@@ -3970,6 +4273,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 + " marker=" + marker.getAbsolutePath()
                 + " enabled=" + enabled
                 + " cover_separate=" + coverSeparate
+                + " show_divider=" + showDivider
+                + " show_header=" + showHeader
+                + " sizing=" + (nativeFill ? "native_fill" : "fit")
                 + " editable=" + editable
                 + " requested_editable=" + requestedEditable
                 + " protected_editable=" + protectedEditable
@@ -4071,6 +4377,41 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         return;
                     }
 
+                    ImageView imageView = (ImageView) XposedHelpers
+                        .getObjectField(activity, "mImage");
+                    int viewWidth = imageView == null ? 0 : imageView.getWidth();
+                    int viewHeight = imageView == null ? 0 : imageView.getHeight();
+                    boolean viewMatchesOrientation = orientation
+                        == Configuration.ORIENTATION_LANDSCAPE
+                            ? viewWidth > viewHeight
+                            : orientation == Configuration.ORIENTATION_PORTRAIT
+                                && viewHeight > viewWidth;
+                    if (!viewMatchesOrientation) {
+                        if (attempt < 20) {
+                            log("configuration_refresh_waiting_for_layout orientation="
+                                + orientation + " attempt=" + attempt
+                                + " view=" + viewWidth + "x" + viewHeight);
+                            scheduleConfigurationRefresh(
+                                activity,
+                                orientation,
+                                attempt + 1
+                            );
+                        } else {
+                            log("configuration_refresh_layout_abandoned orientation="
+                                + orientation + " view=" + viewWidth + "x"
+                                + viewHeight);
+                        }
+                        return;
+                    }
+
+                    if (orientation == Configuration.ORIENTATION_PORTRAIT) {
+                        log("configuration_refresh_native_reload orientation="
+                            + orientation + " attempt=" + attempt
+                            + " view=" + viewWidth + "x" + viewHeight);
+                        XposedHelpers.callMethod(viewModel, "reloadPage");
+                        return;
+                    }
+
                     // DocumentActivity.setImage() mutates the bitmap it receives
                     // when Supernote's native half-page mode is active: it draws
                     // the pointing-hand split indicators directly into that
@@ -4081,6 +4422,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     Bitmap refreshBitmap = Bitmap.createBitmap(originBitmap);
                     log("configuration_refresh orientation=" + orientation
                         + " attempt=" + attempt
+                        + " view=" + viewWidth + "x" + viewHeight
                         + " source=" + bitmapDescription(originBitmap)
                         + " disposable=" + bitmapDescription(refreshBitmap));
                     XposedHelpers.callMethod(
@@ -4109,6 +4451,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             }
             LEFT_DESTINATIONS.remove(activity);
             RIGHT_DESTINATIONS.remove(activity);
+            LEFT_VISIBLE_BOUNDS.remove(activity);
+            RIGHT_VISIBLE_BOUNDS.remove(activity);
         } catch (Throwable throwable) {
             log("portrait_presentation_restore_failed " + throwable);
             XposedBridge.log(throwable);
@@ -4224,30 +4568,66 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         canvas.drawColor(Color.WHITE);
 
         Paint bitmapPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-        float gutter = 8.0f;
+        boolean showDivider = config == null || config.showDivider;
+        boolean nativeFill = config != null && config.nativeFill;
+        float gutter = showDivider ? 8.0f : 0.0f;
         float half = outputWidth / 2.0f;
         RectF leftSlot = new RectF(0.0f, 0.0f, half - gutter / 2.0f, outputHeight);
         RectF rightSlot = new RectF(half + gutter / 2.0f, 0.0f, outputWidth, outputHeight);
         Bitmap geometryBitmap = usable(rightBitmap) ? rightBitmap : leftBitmap;
-        RectF leftDestination = usable(leftBitmap)
-            ? fit(leftBitmap, leftSlot)
-            : fit(geometryBitmap.getWidth(), geometryBitmap.getHeight(), leftSlot);
-        RectF rightDestination = usable(rightBitmap)
-            ? fit(rightBitmap, rightSlot)
-            : fit(geometryBitmap.getWidth(), geometryBitmap.getHeight(), rightSlot);
+        RectF leftTrimmingRect = nativeTrimmingRect(
+            activity,
+            leftPage,
+            leftInfo,
+            leftBitmap,
+            nativeFill
+        );
+        RectF rightTrimmingRect = nativeTrimmingRect(
+            activity,
+            rightPage,
+            rightInfo,
+            rightBitmap,
+            nativeFill
+        );
+        SpreadPageLayout leftLayout = pageLayout(
+            usable(leftBitmap) ? leftBitmap.getWidth() : geometryBitmap.getWidth(),
+            usable(leftBitmap) ? leftBitmap.getHeight() : geometryBitmap.getHeight(),
+            leftSlot,
+            nativeFill,
+            leftTrimmingRect
+        );
+        SpreadPageLayout rightLayout = pageLayout(
+            usable(rightBitmap) ? rightBitmap.getWidth() : geometryBitmap.getWidth(),
+            usable(rightBitmap) ? rightBitmap.getHeight() : geometryBitmap.getHeight(),
+            rightSlot,
+            nativeFill,
+            rightTrimmingRect
+        );
+        RectF leftDestination = leftLayout.destination;
+        RectF rightDestination = rightLayout.destination;
 
         if (usable(leftBitmap)) {
-            canvas.drawBitmap(leftBitmap, null, leftDestination, bitmapPaint);
+            drawPageBitmap(canvas, leftBitmap, leftLayout, bitmapPaint);
         }
         if (usable(rightBitmap)) {
-            canvas.drawBitmap(rightBitmap, null, rightDestination, bitmapPaint);
+            drawPageBitmap(canvas, rightBitmap, rightLayout, bitmapPaint);
         }
         LEFT_DESTINATIONS.put(activity, new RectF(leftDestination));
         RIGHT_DESTINATIONS.put(activity, new RectF(rightDestination));
+        LEFT_VISIBLE_BOUNDS.put(activity, new RectF(leftLayout.visibleBounds));
+        RIGHT_VISIBLE_BOUNDS.put(activity, new RectF(rightLayout.visibleBounds));
 
-        Paint dividerPaint = new Paint();
-        dividerPaint.setColor(Color.DKGRAY);
-        canvas.drawRect(half - gutter / 2.0f, 0.0f, half + gutter / 2.0f, outputHeight, dividerPaint);
+        if (showDivider) {
+            Paint dividerPaint = new Paint();
+            dividerPaint.setColor(Color.DKGRAY);
+            canvas.drawRect(
+                half - gutter / 2.0f,
+                0.0f,
+                half + gutter / 2.0f,
+                outputHeight,
+                dividerPaint
+            );
+        }
 
         imageView.setScaleType(ImageView.ScaleType.FIT_XY);
         imageView.setImageBitmap(composite);
@@ -4256,6 +4636,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             ? leftBitmap : rightBitmap;
         RectF activeDestination =
             currentPage == leftPage ? leftDestination : rightDestination;
+        RectF activeVisibleBounds = currentPage == leftPage
+            ? leftLayout.visibleBounds : rightLayout.visibleBounds;
         String activeSide =
             currentPage == leftPage ? "LEFT" : "RIGHT";
         boolean calibrationSpreadWriteEnabled = config != null
@@ -4264,6 +4646,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             && editableSpreadGeometrySupported(
                 activeOrigin,
                 activeDestination,
+                activeVisibleBounds,
                 outputWidth,
                 outputHeight
             );
@@ -4274,7 +4657,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         );
         if (calibrationSpreadWriteEnabled) {
             ArrayList<Rect> disabledAreas = activePageDisabledAreas(
-                activeDestination,
+                activeVisibleBounds,
                 outputWidth,
                 outputHeight
             );
@@ -4291,7 +4674,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 outputWidth,
                 outputHeight
             )) {
-                showOverlay(
+                showStatusOverlay(
                     activity,
                     "RTL SPREAD: ACTIVE " + activeSide
                         + " page " + (currentPage + 1)
@@ -4315,7 +4698,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 "disableHandWrite",
                 "SN_SPREAD_PROBE read-only opt-in spread"
             );
-            showOverlay(
+            showStatusOverlay(
                 activity,
                 "RTL SPREAD: READ ONLY - writing geometry not approved"
             );
@@ -4335,7 +4718,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             + " left_source=" + bitmapDescription(leftBitmap)
             + " right_dest=" + rectDescription(rightDestination)
             + " left_dest=" + rectDescription(leftDestination)
+            + " right_trim=" + rectDescription(rightTrimmingRect)
+            + " left_trim=" + rectDescription(leftTrimmingRect)
             + " active_side=" + activeSide
+            + " show_divider=" + showDivider
+            + " sizing=" + (nativeFill ? "native_fill" : "fit")
             + " spread_write_enabled=" + calibrationSpreadWriteEnabled
             + " cover_separate="
             + (config != null && config.coverSeparate)
@@ -4401,6 +4788,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         if (action == MotionEvent.ACTION_DOWN) {
             ACTIVATION_TOUCH_TARGETS.remove(activity);
             ACTIVATION_TOUCH_STARTS.remove(activity);
+            if (isNativeChromeTouch(activity, event.getY())) {
+                log("activation_touch_ignored_native_chrome point="
+                    + Math.round(event.getX()) + ","
+                    + Math.round(event.getY()));
+                return false;
+            }
             int target = pageAt(activity, event.getX(), event.getY());
             int current = currentDocumentPage(activity);
             if (target >= 0 && target != current
@@ -4422,6 +4815,15 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
 
         if (trackedTarget == null) {
+            return false;
+        }
+
+        if (isNativeChromeTouch(activity, event.getY())) {
+            ACTIVATION_TOUCH_TARGETS.remove(activity);
+            ACTIVATION_TOUCH_STARTS.remove(activity);
+            log("activation_touch_cancelled_native_chrome target="
+                + trackedTarget + " point=" + Math.round(event.getX())
+                + "," + Math.round(event.getY()));
             return false;
         }
 
@@ -4464,6 +4866,23 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
 
         return false;
+    }
+
+    private static boolean isNativeChromeTouch(Activity activity, float y) {
+        if (y <= NATIVE_TOP_CHROME_TOUCH_EXCLUSION_PX) {
+            return true;
+        }
+        try {
+            View decor = activity == null || activity.getWindow() == null
+                ? null
+                : activity.getWindow().getDecorView();
+            int height = decor == null ? 0 : decor.getHeight();
+            return height > 0
+                && y >= height - NATIVE_BOTTOM_CHROME_TOUCH_EXCLUSION_PX;
+        } catch (Throwable throwable) {
+            log("native_chrome_touch_check_failed " + throwable);
+            return false;
+        }
     }
 
     private static void handlePenPageActivation(
@@ -4574,6 +4993,25 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 "currentPage",
                 targetMarkPage
             );
+            /*
+             * Merely changing HandWritePresenter.currentPage and the DrawPath
+             * geometry does not make libsupernote's trail container current
+             * for a page that has not been loaded. Prime the target mark page
+             * through the native load path, but suppress HandWriteView's
+             * bitmap submission so the visible two-page spread never changes
+             * before pen-up completes the deferred activation.
+             */
+            PEN_ACTIVATION_MARK_PRIMING.set(true);
+            try {
+                XposedHelpers.callMethod(
+                    presenter,
+                    "loadHandWrite",
+                    targetMarkPage
+                );
+            } finally {
+                PEN_ACTIVATION_MARK_PRIMING.remove();
+            }
+            log("pen_activation_mark_primed mark_page=" + targetMarkPage);
             RectF writable = activePageDestination(activity);
             ImageView imageView = (ImageView) XposedHelpers.getObjectField(
                 activity,
@@ -4590,7 +5028,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     "setDisableAreaList",
                     "SN_SPREAD_PROBE pen page activation",
                     activePageDisabledAreas(
-                        writable,
+                        visibleBoundsOrDestination(activity, writable),
                         outputWidth,
                         outputHeight
                     )
@@ -4673,7 +5111,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 activity,
                 "documentViewModel"
             );
-            showOverlay(
+            showStatusOverlay(
                 activity,
                 "SPREAD PROBE: switching active page to "
                     + (target.intValue() + 1)
@@ -4957,7 +5395,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
 
     private static void persistPendingPenActivationTrails(
         Activity activity,
-        Object presenter
+        Object presenter,
+        boolean armPostActivationSaveBypass
     ) {
         Integer target = PEN_ACTIVATION_TARGETS.get(activity);
         List<Object> captured = PEN_ACTIVATION_TRAILS.get(activity);
@@ -4987,6 +5426,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             if (existingResult instanceof List) {
                 fileTrails.addAll((List<?>) existingResult);
             }
+            ArrayList<Object> beforeTrails = new ArrayList<>(fileTrails);
 
             int erased = 0;
             if (erasers != null && !erasers.isEmpty()) {
@@ -5065,11 +5505,246 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             if (saved) {
                 PEN_ACTIVATION_TRAILS.remove(activity);
                 PEN_ACTIVATION_ERASERS.remove(activity);
+                if (appended > 0 || erased > 0) {
+                    PENDING_PAGE_EDIT_HISTORY.put(
+                        activity,
+                        new PageEditHistory(
+                            activity,
+                            markPath,
+                            targetMarkPage,
+                            beforeTrails,
+                            fileTrails
+                        )
+                    );
+                    log("page_edit_history_pending mark_page="
+                        + targetMarkPage
+                        + " before=" + beforeTrails.size()
+                        + " after=" + fileTrails.size());
+                }
+                if (armPostActivationSaveBypass && erased > 0) {
+                    PEN_ACTIVATION_SAVE_BYPASS_UNTIL.put(
+                        activity,
+                        SystemClock.uptimeMillis()
+                            + POST_ACTIVATION_SAVE_BYPASS_MS
+                    );
+                    log("pen_activation_post_persist_save_armed window_ms="
+                        + POST_ACTIVATION_SAVE_BYPASS_MS);
+                }
             }
         } catch (Throwable throwable) {
             log("pen_activation_trail_persist_failed target=" + target
                 + " " + throwable);
             XposedBridge.log(throwable);
+        }
+    }
+
+    private static void persistActiveEraserBeforeCanonicalRefresh(
+        Activity activity,
+        Object presenter
+    ) {
+        if (!isEditableSpreadLandscape(activity)
+            || PEN_ACTIVATION_TARGETS.get(activity) != null
+            || !Boolean.TRUE.equals(CANONICAL_ONLY_INK_MODES.get(activity))) {
+            return;
+        }
+        try {
+            /*
+             * Native area erasing updates Supernote's in-memory trail state in
+             * receiveTrials(), but the ordinary writer defers the .mark write.
+             * The spread refresh is canonical-file-backed, so flush the
+             * completed native transaction before that refresh can restore the
+             * pre-erase file contents.
+             */
+            saveTrailsForCanonicalReload(
+                presenter,
+                "active_eraser"
+            );
+            log("active_eraser_saved_before_canonical_refresh page="
+                + currentDocumentPage(activity));
+        } catch (Throwable throwable) {
+            log("active_eraser_save_before_refresh_failed " + throwable);
+            XposedBridge.log(throwable);
+        }
+    }
+
+    private static void saveTrailsForCanonicalReload(
+        Object presenter,
+        String reason
+    ) {
+        EXPLICIT_CANONICAL_TRAIL_SAVE.set(Boolean.TRUE);
+        try {
+            XposedHelpers.callMethod(
+                presenter,
+                "saveTrails",
+                false,
+                false
+            );
+            log("explicit_canonical_trail_save reason=" + reason);
+        } finally {
+            EXPLICIT_CANONICAL_TRAIL_SAVE.remove();
+        }
+    }
+
+    private static void registerPendingPageEditHistory(
+        Activity activity,
+        Object presenter,
+        int loadedMarkPage
+    ) {
+        PageEditHistory history = PENDING_PAGE_EDIT_HISTORY.get(activity);
+        if (history == null || history.markPage != loadedMarkPage) {
+            return;
+        }
+        try {
+            String currentMarkPath = (String) XposedHelpers.getObjectField(
+                presenter,
+                "markPath"
+            );
+            if (!Objects.equals(history.markPath, currentMarkPath)) {
+                PENDING_PAGE_EDIT_HISTORY.remove(activity);
+                log("page_edit_history_discarded reason=mark_changed");
+                return;
+            }
+            Object stack = XposedHelpers.getObjectField(
+                presenter,
+                "handWriteRedoUndoStack"
+            );
+            XposedHelpers.callMethod(stack, "appendTrail");
+            Object undoObject = XposedHelpers.getObjectField(
+                stack,
+                "undoList"
+            );
+            if (!(undoObject instanceof List)
+                || ((List<?>) undoObject).isEmpty()) {
+                throw new IllegalStateException(
+                    "native undo stack did not accept page edit"
+                );
+            }
+            Object action = ((List<?>) undoObject).get(0);
+            java.lang.reflect.Field isTrailField = action.getClass()
+                .getDeclaredField("isTrail");
+            isTrailField.setAccessible(true);
+            isTrailField.setBoolean(action, false);
+            PAGE_EDIT_HISTORY_ACTIONS.put(action, history);
+            PENDING_PAGE_EDIT_HISTORY.remove(activity);
+            log("page_edit_history_registered mark_page="
+                + history.markPage
+                + " before=" + history.beforeTrails.size()
+                + " after=" + history.afterTrails.size());
+        } catch (Throwable throwable) {
+            log("page_edit_history_register_failed mark_page="
+                + history.markPage + " " + throwable);
+            XposedBridge.log(throwable);
+        }
+    }
+
+    private static boolean applyPageEditHistory(
+        Activity activity,
+        Object presenter,
+        String actionName
+    ) {
+        try {
+            boolean undo = "undo".equals(actionName);
+            String listField = undo ? "undoList" : "redoList";
+            Object stack = XposedHelpers.getObjectField(
+                presenter,
+                "handWriteRedoUndoStack"
+            );
+            Object actionsObject = XposedHelpers.getObjectField(
+                stack,
+                listField
+            );
+            if (!(actionsObject instanceof List)
+                || ((List<?>) actionsObject).isEmpty()) {
+                return false;
+            }
+            Object action = ((List<?>) actionsObject).get(0);
+            PageEditHistory history = PAGE_EDIT_HISTORY_ACTIONS.get(action);
+            if (history == null) {
+                return false;
+            }
+            String currentMarkPath = (String) XposedHelpers.getObjectField(
+                presenter,
+                "markPath"
+            );
+            int currentMarkPage = XposedHelpers.getIntField(
+                presenter,
+                "currentPage"
+            );
+            if (history.activity != activity
+                || history.markPage != currentMarkPage
+                || !Objects.equals(history.markPath, currentMarkPath)) {
+                log("page_edit_history_rejected action=" + actionName
+                    + " expected_page=" + history.markPage
+                    + " current_page=" + currentMarkPage
+                    + " mark_match="
+                    + Objects.equals(history.markPath, currentMarkPath));
+                showOverlay(
+                    activity,
+                    "SPREAD PROBE: Undo/Redo page changed"
+                );
+                return true;
+            }
+
+            Object superNoteNote = XposedHelpers.getObjectField(
+                presenter,
+                "superNoteNote"
+            );
+            List<Object> snapshot = undo
+                ? history.beforeTrails
+                : history.afterTrails;
+            boolean restored = Boolean.TRUE.equals(
+                XposedHelpers.callMethod(
+                    superNoteNote,
+                    "modifyPageTrailsFromFile",
+                    history.markPath,
+                    history.markPage,
+                    new ArrayList<>(snapshot)
+                )
+            );
+            if (!restored) {
+                log("page_edit_history_apply_failed action=" + actionName
+                    + " mark_page=" + history.markPage);
+                showOverlay(
+                    activity,
+                    "SPREAD PROBE: Undo/Redo save failed"
+                );
+                return true;
+            }
+
+            XposedHelpers.callMethod(stack, actionName);
+            XposedHelpers.callMethod(
+                presenter,
+                "loadHandWrite",
+                history.markPage
+            );
+            log("page_edit_history_applied action=" + actionName
+                + " mark_page=" + history.markPage
+                + " trails=" + snapshot.size());
+            return true;
+        } catch (Throwable throwable) {
+            log("page_edit_history_apply_failed action=" + actionName
+                + " " + throwable);
+            XposedBridge.log(throwable);
+            showOverlay(
+                activity,
+                "SPREAD PROBE: Undo/Redo failed"
+            );
+            return true;
+        }
+    }
+
+    private static void clearPageEditHistory(Activity activity) {
+        PENDING_PAGE_EDIT_HISTORY.remove(activity);
+        ArrayList<Object> remove = new ArrayList<>();
+        for (Map.Entry<Object, PageEditHistory> entry
+            : PAGE_EDIT_HISTORY_ACTIONS.entrySet()) {
+            PageEditHistory history = entry.getValue();
+            if (history != null && history.activity == activity) {
+                remove.add(entry.getKey());
+            }
+        }
+        for (Object action : remove) {
+            PAGE_EDIT_HISTORY_ACTIONS.remove(action);
         }
     }
 
@@ -5331,6 +6006,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         Integer original = PEN_ACTIVATION_ORIGINAL_PAGES.remove(activity);
         PEN_ACTIVATION_TRAILS.remove(activity);
         PEN_ACTIVATION_ERASERS.remove(activity);
+        PENDING_PAGE_EDIT_HISTORY.remove(activity);
         if (target == null || original == null) {
             return;
         }
@@ -5358,7 +6034,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     "setDisableAreaList",
                     "SN_SPREAD_PROBE cancel pen page activation",
                     activePageDisabledAreas(
-                        writable,
+                        visibleBoundsOrDestination(activity, writable),
                         outputWidth,
                         outputHeight
                     )
@@ -5540,12 +6216,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             int leftCount = leftInfo == null ? 0 : drawPageAnnotations(
                 canvas,
                 leftInfo,
-                leftDestination
+                leftDestination,
+                LEFT_VISIBLE_BOUNDS.get(activity)
             );
             int rightCount = rightInfo == null ? 0 : drawPageAnnotations(
                 canvas,
                 rightInfo,
-                rightDestination
+                rightDestination,
+                RIGHT_VISIBLE_BOUNDS.get(activity)
             );
 
             digestImage.setScaleType(ImageView.ScaleType.FIT_XY);
@@ -5574,7 +6252,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static int drawPageAnnotations(
         Canvas canvas,
         Object pageInfo,
-        RectF destination
+        RectF destination,
+        RectF visibleBounds
     ) {
         Bitmap originBitmap = (Bitmap) XposedHelpers.callMethod(
             pageInfo,
@@ -5591,6 +6270,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
 
         float scaleX = destination.width() / originBitmap.getWidth();
         float scaleY = destination.height() / originBitmap.getHeight();
+        int saveCount = canvas.save();
+        if (visibleBounds != null) {
+            canvas.clipRect(visibleBounds);
+        }
         Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         int drawn = 0;
         for (Object annotation : annotations) {
@@ -5644,6 +6327,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             }
             drawn++;
         }
+        canvas.restoreToCount(saveCount);
         return drawn;
     }
 
@@ -5655,8 +6339,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     }
 
     private static int pageAt(Activity activity, float x, float y) {
-        RectF left = LEFT_DESTINATIONS.get(activity);
-        RectF right = RIGHT_DESTINATIONS.get(activity);
+        RectF left = LEFT_VISIBLE_BOUNDS.get(activity);
+        RectF right = RIGHT_VISIBLE_BOUNDS.get(activity);
         if (left == null || right == null) {
             return -1;
         }
@@ -5800,7 +6484,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     false
                 );
             }
-            showOverlay(
+            showStatusOverlay(
                 activity,
                 "SPREAD PROBE: switching active page to "
                     + (targetPage + 1)
@@ -5832,6 +6516,30 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             } catch (Throwable ignored) {
             }
         }
+    }
+
+    private static void setReplaceActiveInkMode(
+        Activity activity,
+        boolean replace,
+        String reason
+    ) {
+        if (activity == null) {
+            return;
+        }
+        REPLACE_ACTIVE_INK_MODES.put(activity, replace);
+        if (replace && reason != null && reason.startsWith("eraser:")) {
+            CANONICAL_ONLY_INK_MODES.put(activity, true);
+        } else {
+            CANONICAL_ONLY_INK_MODES.remove(activity);
+        }
+        log("ink_composition_mode mode=" + (replace ? "replace" : "add")
+            + " canonical_only="
+            + Boolean.TRUE.equals(CANONICAL_ONLY_INK_MODES.get(activity))
+            + " reason=" + reason);
+    }
+
+    private static boolean shouldReplaceActiveInkSlot(Activity activity) {
+        return Boolean.TRUE.equals(REPLACE_ACTIVE_INK_MODES.get(activity));
     }
 
     private static Bitmap renderCapturedFullInk(Activity activity) {
@@ -5870,7 +6578,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
     }
 
-    private static Bitmap renderCombinedCommittedInk(Activity activity) {
+    private static Bitmap renderCombinedCommittedInk(
+        Activity activity,
+        boolean replaceActiveSlot
+    ) {
         Bitmap canonical = renderCanonicalCommittedInk(activity);
         Bitmap active = renderCapturedFullInk(activity);
         if (canonical == null) {
@@ -5885,16 +6596,18 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             Paint paint = new Paint(
                 Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG
             );
-            // The canonical bitmap may still reflect the pre-save mark data
-            // immediately after an eraser gesture. The captured active-page
-            // bitmap is newer, but transparent erased pixels cannot remove
-            // stale ink with SRC_OVER. Replace the active slot completely
-            // before drawing the captured bitmap while retaining canonical
-            // ink from the opposite page.
+            // A normal pen refresh can contain only the newest live trail while
+            // the canonical mark bitmap still contains the previously saved
+            // trails. Compose those additively so settling a new stroke cannot
+            // hide earlier ink. Eraser, lasso, undo, and redo refreshes are
+            // replacement operations: transparent pixels in their captured
+            // bitmap must remove stale ink from the active slot.
             RectF activeDestination = activePageDestination(activity);
-            if (activeDestination != null) {
+            if (replaceActiveSlot && activeDestination != null) {
                 int saveCount = canvas.save();
-                canvas.clipRect(activeDestination);
+                canvas.clipRect(
+                    visibleBoundsOrDestination(activity, activeDestination)
+                );
                 canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
                 canvas.restoreToCount(saveCount);
             }
@@ -5903,6 +6616,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 + bitmapDescription(canonical)
                 + " active=" + bitmapDescription(active)
                 + " active_dest=" + rectDescription(activeDestination)
+                + " mode=" + (replaceActiveSlot ? "replace" : "add")
                 + " active_page=" + (currentDocumentPage(activity) + 1));
             return canonical;
         } catch (Throwable throwable) {
@@ -5943,6 +6657,32 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             return destination == null ? null : new RectF(destination);
         } catch (Throwable throwable) {
             log("active_destination_failed " + throwable);
+            return null;
+        }
+    }
+
+    private static RectF activePageVisibleBounds(Activity activity) {
+        try {
+            Object viewModel = XposedHelpers.getObjectField(
+                activity,
+                "documentViewModel"
+            );
+            int currentPage = XposedHelpers.getIntField(
+                viewModel,
+                "currentPage"
+            );
+            int pageCount = XposedHelpers.getIntField(viewModel, "pageCount");
+            SpreadPair pair = spreadPair(
+                spreadConfig(activity),
+                currentPage,
+                pageCount
+            );
+            RectF visible = currentPage == pair.leftPage
+                ? LEFT_VISIBLE_BOUNDS.get(activity)
+                : RIGHT_VISIBLE_BOUNDS.get(activity);
+            return visible == null ? null : new RectF(visible);
+        } catch (Throwable throwable) {
+            log("active_visible_bounds_failed " + throwable);
             return null;
         }
     }
@@ -6205,7 +6945,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             }
 
             ArrayList<Rect> disabledAreas = activePageDisabledAreas(
-                writable,
+                visibleBoundsOrDestination(activity, writable),
                 outputWidth,
                 outputHeight
             );
@@ -6304,7 +7044,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             }
 
             ArrayList<Rect> disabledAreas = activePageDisabledAreas(
-                writable,
+                visibleBoundsOrDestination(activity, writable),
                 outputWidth,
                 outputHeight
             );
@@ -6422,7 +7162,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 return null;
             }
 
-            float gutter = 8.0f;
+            SpreadConfig config = spreadConfig(activity);
+            boolean showDivider = config == null || config.showDivider;
+            boolean nativeFill = config != null && config.nativeFill;
+            float gutter = showDivider ? 8.0f : 0.0f;
             float half = outputWidth / 2.0f;
             RectF leftSlot = new RectF(
                 0.0f,
@@ -6443,13 +7186,36 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             );
             int pageCount = XposedHelpers.getIntField(viewModel, "pageCount");
             SpreadPair pair = spreadPair(
-                spreadConfig(activity),
+                config,
                 currentPage,
                 pageCount
             );
-            RectF provisional = currentPage == pair.leftPage
-                ? fit(sourceWidth, sourceHeight, leftSlot)
-                : fit(sourceWidth, sourceHeight, rightSlot);
+            Map<Integer, Object> pageMap =
+                (Map<Integer, Object>) XposedHelpers.getObjectField(
+                    viewModel,
+                    "pageInfoHashMap"
+                );
+            Object currentPageInfo = pageMap.get(currentPage);
+            Bitmap currentOrigin = currentPageInfo == null ? null
+                : (Bitmap) XposedHelpers.callMethod(
+                    currentPageInfo,
+                    "getOriginBitmap"
+                );
+            RectF currentTrimmingRect = nativeTrimmingRect(
+                activity,
+                currentPage,
+                currentPageInfo,
+                currentOrigin,
+                nativeFill
+            );
+            SpreadPageLayout provisionalLayout = pageLayout(
+                sourceWidth,
+                sourceHeight,
+                currentPage == pair.leftPage ? leftSlot : rightSlot,
+                nativeFill,
+                currentTrimmingRect
+            );
+            RectF provisional = provisionalLayout.destination;
             log("provisional_active_destination page=" + currentPage
                 + " source=" + sourceWidth + "x" + sourceHeight
                 + " destination=" + rectDescription(provisional));
@@ -6586,20 +7352,18 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG
             );
             if (leftLoaded) {
-                canvas.drawBitmap(
-                    leftCanonical,
-                    null,
-                    leftDestination,
-                    paint
-                );
+                int saveCount = canvas.save();
+                RectF visible = LEFT_VISIBLE_BOUNDS.get(activity);
+                if (visible != null) canvas.clipRect(visible);
+                canvas.drawBitmap(leftCanonical, null, leftDestination, paint);
+                canvas.restoreToCount(saveCount);
             }
             if (rightLoaded) {
-                canvas.drawBitmap(
-                    rightCanonical,
-                    null,
-                    rightDestination,
-                    paint
-                );
+                int saveCount = canvas.save();
+                RectF visible = RIGHT_VISIBLE_BOUNDS.get(activity);
+                if (visible != null) canvas.clipRect(visible);
+                canvas.drawBitmap(rightCanonical, null, rightDestination, paint);
+                canvas.restoreToCount(saveCount);
             }
             log("canonical_ink_transformed right_page=" + rightPage
                 + " right_loaded=" + rightLoaded
@@ -6688,6 +7452,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             Paint paint = new Paint(
                 Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG
             );
+            canvas.clipRect(visibleBoundsOrDestination(activity, destination));
             canvas.drawBitmap(source, null, visibleDestination, paint);
             log("committed_ink_transformed source="
                 + bitmapDescription(source)
@@ -6863,6 +7628,51 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
     }
 
+    private static RectF visibleBoundsOrDestination(
+        Activity activity,
+        RectF destination
+    ) {
+        RectF visible = activePageVisibleBounds(activity);
+        if (visible != null) {
+            return visible;
+        }
+        try {
+            ImageView imageView = (ImageView) XposedHelpers.getObjectField(
+                activity,
+                "mImage"
+            );
+            int outputWidth = imageView == null ? 0 : imageView.getWidth();
+            int outputHeight = imageView == null ? 0 : imageView.getHeight();
+            if (outputWidth <= outputHeight || outputHeight <= 0) {
+                return destination;
+            }
+            SpreadConfig config = spreadConfig(activity);
+            float gutter = config == null || config.showDivider ? 8.0f : 0.0f;
+            float half = outputWidth / 2.0f;
+            int currentPage = currentDocumentPage(activity);
+            Object viewModel = XposedHelpers.getObjectField(
+                activity,
+                "documentViewModel"
+            );
+            int pageCount = XposedHelpers.getIntField(viewModel, "pageCount");
+            SpreadPair pair = spreadPair(config, currentPage, pageCount);
+            RectF slot = currentPage == pair.leftPage
+                ? new RectF(0.0f, 0.0f, half - gutter / 2.0f, outputHeight)
+                : new RectF(
+                    half + gutter / 2.0f,
+                    0.0f,
+                    outputWidth,
+                    outputHeight
+                );
+            RectF clipped = new RectF(destination);
+            clipped.intersect(slot);
+            return clipped;
+        } catch (Throwable throwable) {
+            log("visible_bounds_fallback_failed " + throwable);
+            return destination;
+        }
+    }
+
     private static ArrayList<Rect> activePageDisabledAreas(
         RectF writable,
         int outputWidth,
@@ -6897,24 +7707,33 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static boolean editableSpreadGeometrySupported(
         Bitmap originBitmap,
         RectF destination,
+        RectF visibleBounds,
         int outputWidth,
         int outputHeight
     ) {
-        if (!usable(originBitmap) || destination == null) {
+        if (!usable(originBitmap) || destination == null
+            || visibleBounds == null) {
             return false;
         }
         boolean supported = outputWidth == CANONICAL_PAGE_WIDTH
             && outputHeight == 1404
             && originBitmap.getWidth() == 1404
             && originBitmap.getHeight() == 1872
-            && Math.abs(Math.round(destination.width()) - SPREAD_PAGE_WIDTH)
-                <= 1
-            && Math.abs(Math.round(destination.height()) - SPREAD_PAGE_HEIGHT)
-                <= 2;
+            && destination.width() > 0.0f
+            && destination.height() > 0.0f
+            && visibleBounds.width() >= SPREAD_PAGE_WIDTH - 1
+            && visibleBounds.width() <= outputWidth / 2.0f + 1.0f
+            && visibleBounds.height() <= outputHeight + 1.0f
+            && Math.abs(
+                destination.width() / destination.height()
+                    - (float) originBitmap.getWidth()
+                        / (float) originBitmap.getHeight()
+            ) <= 0.002f;
         if (!supported) {
             log("editable_geometry_rejected origin="
                 + bitmapDescription(originBitmap)
                 + " destination=" + rectDescription(destination)
+                + " visible=" + rectDescription(visibleBounds)
                 + " output=" + outputWidth + "x" + outputHeight);
         }
         return supported;
@@ -6924,12 +7743,178 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         return fit(bitmap.getWidth(), bitmap.getHeight(), slot);
     }
 
+    private static SpreadPageLayout pageLayout(
+        float sourceWidth,
+        float sourceHeight,
+        RectF slot,
+        boolean nativeFill
+    ) {
+        return pageLayout(
+            sourceWidth,
+            sourceHeight,
+            slot,
+            nativeFill,
+            null
+        );
+    }
+
+    private static SpreadPageLayout pageLayout(
+        float sourceWidth,
+        float sourceHeight,
+        RectF slot,
+        boolean nativeFill,
+        RectF trimmingRect
+    ) {
+        RectF destination;
+        if (nativeFill && validTrimmingRect(
+            trimmingRect,
+            sourceWidth,
+            sourceHeight
+        )) {
+            // Mirror Supernote's BitmapUtil.trimming() transform without
+            // creating a second bitmap. The detected content rectangle is
+            // fitted into the half-screen, while its asymmetric placement in
+            // the original page is retained. Keeping destination in original
+            // page coordinates also keeps pen, eraser, lasso, highlights and
+            // links on the same canonical geometry.
+            float scale = Math.min(
+                slot.width() / trimmingRect.width(),
+                slot.height() / trimmingRect.height()
+            );
+            float horizontalRoom = slot.width()
+                - trimmingRect.width() * scale;
+            float verticalRoom = slot.height()
+                - trimmingRect.height() * scale;
+            float horizontalMargin = sourceWidth - trimmingRect.width();
+            float verticalMargin = sourceHeight - trimmingRect.height();
+            float horizontalAnchor = horizontalMargin > 0.0f
+                ? trimmingRect.left / horizontalMargin : 0.5f;
+            float verticalAnchor = verticalMargin > 0.0f
+                ? trimmingRect.top / verticalMargin : 0.5f;
+            horizontalAnchor = Math.max(0.0f, Math.min(1.0f, horizontalAnchor));
+            verticalAnchor = Math.max(0.0f, Math.min(1.0f, verticalAnchor));
+            float trimmedLeft = slot.left + horizontalRoom * horizontalAnchor;
+            float trimmedTop = slot.top + verticalRoom * verticalAnchor;
+            float left = trimmedLeft - trimmingRect.left * scale;
+            float top = trimmedTop - trimmingRect.top * scale;
+            destination = new RectF(
+                left,
+                top,
+                left + sourceWidth * scale,
+                top + sourceHeight * scale
+            );
+        } else {
+            destination = nativeFill
+                ? fill(sourceWidth, sourceHeight, slot)
+                : fit(sourceWidth, sourceHeight, slot);
+        }
+        RectF visibleBounds = new RectF(destination);
+        if (nativeFill) {
+            visibleBounds.intersect(slot);
+        }
+        return new SpreadPageLayout(destination, visibleBounds);
+    }
+
+    private static RectF nativeTrimmingRect(
+        Activity activity,
+        int page,
+        Object pageInfo,
+        Bitmap originBitmap,
+        boolean nativeFill
+    ) {
+        if (!nativeFill || pageInfo == null || !usable(originBitmap)) {
+            return null;
+        }
+        float sourceWidth = originBitmap.getWidth();
+        float sourceHeight = originBitmap.getHeight();
+        try {
+            RectF nativeRect = (RectF) XposedHelpers.callMethod(
+                pageInfo,
+                "getTrimmingRect"
+            );
+            if (validTrimmingRect(nativeRect, sourceWidth, sourceHeight)) {
+                RectF copy = new RectF(nativeRect);
+                AUTO_TRIMMING_RECTS.put(pageInfo, copy);
+                return copy;
+            }
+
+            RectF cached = AUTO_TRIMMING_RECTS.get(pageInfo);
+            if (validTrimmingRect(cached, sourceWidth, sourceHeight)) {
+                return new RectF(cached);
+            }
+
+            Class<?> trimmingUtil = activity.getClassLoader().loadClass(
+                "com.supernote.document.utils.TrimmingUtil"
+            );
+            RectF detected = (RectF) trimmingUtil
+                .getMethod("getTrimmingRect", Bitmap.class)
+                .invoke(null, originBitmap);
+            if (validTrimmingRect(detected, sourceWidth, sourceHeight)) {
+                RectF copy = new RectF(detected);
+                AUTO_TRIMMING_RECTS.put(pageInfo, copy);
+                log("native_fill_trim_detected page=" + page
+                    + " source=" + bitmapDescription(originBitmap)
+                    + " rect=" + rectDescription(copy));
+                return copy;
+            }
+            log("native_fill_trim_unavailable page=" + page
+                + " source=" + bitmapDescription(originBitmap)
+                + " rect=" + rectDescription(detected));
+        } catch (Throwable throwable) {
+            log("native_fill_trim_failed page=" + page + " " + throwable);
+            XposedBridge.log(throwable);
+        }
+        return null;
+    }
+
+    private static boolean validTrimmingRect(
+        RectF rect,
+        float sourceWidth,
+        float sourceHeight
+    ) {
+        return rect != null
+            && rect.left >= 0.0f
+            && rect.top >= 0.0f
+            && rect.right <= sourceWidth + 1.0f
+            && rect.bottom <= sourceHeight + 1.0f
+            && rect.width() > 1.0f
+            && rect.height() > 1.0f;
+    }
+
+    private static void drawPageBitmap(
+        Canvas canvas,
+        Bitmap bitmap,
+        SpreadPageLayout layout,
+        Paint paint
+    ) {
+        int saveCount = canvas.save();
+        canvas.clipRect(layout.visibleBounds);
+        canvas.drawBitmap(bitmap, null, layout.destination, paint);
+        canvas.restoreToCount(saveCount);
+    }
+
     private static RectF fit(
         float sourceWidth,
         float sourceHeight,
         RectF slot
     ) {
         float scale = Math.min(
+            slot.width() / sourceWidth,
+            slot.height() / sourceHeight
+        );
+        float width = sourceWidth * scale;
+        float height = sourceHeight * scale;
+        float left = slot.left + (slot.width() - width) / 2.0f;
+        float top = slot.top + (slot.height() - height) / 2.0f;
+        return new RectF(left, top, left + width, top + height);
+    }
+
+    private static RectF fill(
+        float sourceWidth,
+        float sourceHeight,
+        RectF slot
+    ) {
+        float scale = Math.max(
             slot.width() / sourceWidth,
             slot.height() / sourceHeight
         );
@@ -6968,6 +7953,15 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
         label.setText(text);
         label.bringToFront();
+    }
+
+    private static void showStatusOverlay(Activity activity, String text) {
+        SpreadConfig config = spreadConfig(activity);
+        if (config != null && !config.showHeader) {
+            removeOverlay(activity);
+            return;
+        }
+        showOverlay(activity, text);
     }
 
     private static void removeOverlay(Activity activity) {

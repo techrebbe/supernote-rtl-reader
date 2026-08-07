@@ -79,6 +79,82 @@ match before an inactive-page capture is considered already persisted. Point
 count and endpoints are no longer sufficient, so retraced lines and colocated
 dots remain distinct annotations.
 
+v0.0.81 keeps normal pen commits additive in the composed landscape ink layer.
+The newest settled trail is drawn over the canonical saved page rather than
+clearing the active slot, so earlier strokes do not disappear until a page
+reload. Eraser, lasso, undo, and redo remain replacement operations because
+their transparent pixels must remove or relocate existing ink.
+
+v0.0.82 adds per-document divider and page-sizing controls. **Fit page** keeps
+the complete page visible. **Native fill** preserves the page aspect ratio,
+fills its half of the screen, and clips overflow like Supernote's native
+full-screen reader. The PDF, committed ink, highlights, lasso/link geometry,
+and handwriting input all use the same full-page transform plus visible-slot
+clip. Disabling the divider removes the dark rule and gives both pages the full
+936-pixel half-screen width.
+
+v0.0.84 fixes the first portrait frame after leaving a landscape spread. The
+module waits until the native ImageView reports portrait dimensions and then
+uses Supernote's own `reloadPage()` path for the unchanged current page. This
+regenerates the native portrait display bitmap instead of resubmitting the
+landscape-scaled cached origin bitmap.
+
+v0.0.86 commits an inactive-page pen transaction directly after
+`receiveTrials()` captures its completed trail. The native callback does not
+call `saveTrails()`, so waiting for that separate lifecycle operation allowed
+the fail-closed completion guard to run first and cancel valid ink. Persistence
+now finishes before page activation; a failed write still cancels activation
+without discarding or overwriting the retained annotation data.
+
+v0.0.87 suppresses the single delayed native `saveTrails()` call after a
+successful inactive-page stroke erase. Without that guard, the page-local erase
+correctly removed the intersecting trail, but the delayed save could restore it
+from stale memory while dropping a newer trail. The bypass is erase-only,
+one-shot, and expires after two seconds.
+
+v0.0.88 adds the page-local transaction to Supernote's existing Undo/Redo
+control stack after the target page finishes loading. A protected inactive-page
+write or erase records the trail lists immediately before and after the edit;
+Undo and Redo restore those snapshots through the same page-local native file
+API and reload the active annotation layer.
+
+v0.0.89 preserves the inactive page's prearmed writable geometry across
+Supernote's first-pen-down writable-area refresh after document launch.
+
+v0.0.90 invisibly loads the inactive target into Supernote's native mark engine
+before writing, while suppressing that intermediate bitmap from the spread UI.
+
+v0.0.91 renders settled eraser refreshes from the saved canonical `.mark` page
+instead of replacing the active spread slot with an incomplete native refresh
+bitmap after deferred page activation.
+
+v0.0.92 synchronously saves a completed native active-page eraser operation at
+pen-up so that the canonical spread redraw sees the erased state rather than
+the older on-disk page.
+
+v0.0.93 keeps finger taps in the native top toolbar and bottom page-number bar
+out of the inactive-page activation path. Native Undo/Redo and page-bar controls
+can therefore operate without first changing the active spread page.
+
+v0.0.94 forces Undo/Redo refreshes through the canonical `.mark` renderer after
+Supernote updates the operation history, avoiding an incomplete transient
+bitmap that could visually clear all ink from the active spread page.
+
+v0.0.95 saves the in-memory native Undo/Redo result and reloads that page before
+the canonical spread redraw, making the restored or reapplied edit visible and
+durable without a page turn. This was hardware-validated on the Nomad with an
+active-page erase, top-toolbar Undo and Redo, and a spread reload; unrelated
+trails remained unchanged throughout.
+
+v0.0.96 exempts deliberate active-eraser and Undo/Redo canonical saves from the
+short stale activation-save guard. The explicit transaction reaches `.mark`,
+while the guard remains armed to consume the delayed stale save it was created
+for.
+
+v0.0.97 adds the `showHeader` marker property. It defaults to `true` for older
+markers; when disabled, normal ACTIVE LEFT/RIGHT and READ ONLY status banners
+are removed while failure and annotation-save warnings remain visible.
+
 This is firmware-specific experimental software for a rooted device. Back up
 documents and `.mark` files before testing a new firmware or module revision.
 
@@ -104,7 +180,7 @@ The signed APK is written to `build/artifact/`.
 
 Install the APK, enable **Supernote Native Spread Probe** in LSPosed, scope it
 only to `com.supernote.document`, and restart the document reader. Supernote
-RTL Reader v0.4.10 or newer and Native Spread v0.0.80 or newer are required for
+RTL Reader v0.4.12 or newer and Native Spread v0.0.97 or newer are required for
 protected editable mode. Its
 recovery manifest binds the backup to the PDF's full SHA-256 because
 Supernote changes the PDF modification time when the document activity
@@ -117,10 +193,11 @@ PDF and a protected copy of a 738-page annotated Hebrew PDF. The real-document
 pass confirmed persistent two-page annotation display, outer-edge-only tap
 navigation, side-preserving spread turns, and an unchanged `.mark` checksum.
 
-v0.0.80 compiles and passes automated handshake, backup-attestation,
+v0.0.82 compiles and passes automated handshake, backup-attestation,
 destroyed-activity cleanup, canonical lasso-move, inactive-page ink-merge, and
 scale-independent inactive-page eraser invariants, including fail-closed write
-handling, full-stroke deduplication, and strong recovery-sidecar cache identity.
+handling, full-stroke deduplication, strong recovery-sidecar cache identity, and
+operation-aware settled-ink composition, and shared spread-appearance geometry.
 The v0.0.78 focused Nomad
 eraser regression removed exactly one of two separated inactive-page strokes,
 retained the control stroke, left companion page 4 unchanged, and preserved the

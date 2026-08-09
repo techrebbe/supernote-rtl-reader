@@ -256,8 +256,8 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 
 ## v0.4.12 native spread appearance and inactive-page editing
 
-- [x] Native Spread v0.0.111 compiles and the packaged, handshake, and plug-in
-  compatibility versions all report 111.
+- [x] Native Spread v0.0.112 compiles and the packaged, handshake, and plug-in
+  compatibility versions all report 112.
 - [x] Native Spread v0.0.84: rotate an open spread to portrait and confirm the
   current page immediately uses the normal native-reader portrait size without
   turning away and back.
@@ -359,6 +359,8 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   a completed session.
 - [x] Static invariant: snapshot publication captures the live source identity
   again after hashing the copied snapshot and rejects a concurrent rewrite.
+- [x] Static invariant: missing-file and unchanged-hash final snapshot paths
+  recheck the live source identity before reporting success.
 - [x] Nomad helper simulation: `Stop` reported a disposable `incomplete.txt`
   session by name, refused the preceding `last.txt`, retained its partial
   directory, and left the prior completed pointer unchanged. The disposable

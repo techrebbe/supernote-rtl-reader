@@ -23,6 +23,8 @@ session, `active.txt` is removed, and the helper reports the incomplete result
 without treating it as finalized.
 The source identity is checked again after the copied snapshot is hashed; a
 rewrite during that verification makes the attempt unstable and retryable.
+Missing-file and unchanged-hash fast paths also recheck the live source before
+they can complete finalization.
 
 Every stateful event may include:
 

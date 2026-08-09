@@ -111,7 +111,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int TRACE_FINAL_SNAPSHOT_ATTEMPTS = 5;
     private static final long TRACE_FINAL_SNAPSHOT_RETRY_MS = 120L;
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 111L;
+    private static final long MODULE_VERSION_CODE = 112L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -4141,15 +4141,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         File mark = new File(expected.markPath);
         try {
             if (!mark.isFile()) {
+                FileIdentity missingBefore = FileIdentity.capture(mark);
                 boolean changed;
                 synchronized (TRACE_LOCK) {
+                    if (traceSession != expected) {
+                        return false;
+                    }
                     changed = traceSession == expected
                         && !"missing".equals(expected.lastSnapshotHash);
-                    if (traceSession == expected) {
-                        expected.lastSnapshotHash = "missing";
-                        expected.lastSnapshotIdentity =
-                            FileIdentity.missing();
-                    }
                 }
                 if (changed) {
                     traceEvent(
@@ -4160,6 +4159,26 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         "exists",
                         false
                     );
+                }
+                FileIdentity missingAfter = FileIdentity.capture(mark);
+                if (!FileIdentity.missing().sameAs(missingBefore)
+                    || !missingBefore.sameAs(missingAfter)) {
+                    traceEvent(
+                        activity,
+                        "mark_snapshot_unstable",
+                        "reason",
+                        reason,
+                        "phase",
+                        "missing_recheck"
+                    );
+                    return false;
+                }
+                synchronized (TRACE_LOCK) {
+                    if (traceSession != expected) {
+                        return false;
+                    }
+                    expected.lastSnapshotHash = "missing";
+                    expected.lastSnapshotIdentity = missingAfter;
                 }
                 return true;
             }
@@ -4192,24 +4211,48 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 );
                 return false;
             }
+            boolean unchanged;
             synchronized (TRACE_LOCK) {
                 if (traceSession != expected) {
                     return false;
                 }
-                if (hash.equals(expected.lastSnapshotHash)) {
-                    expected.lastSnapshotIdentity = after;
+                unchanged = hash.equals(expected.lastSnapshotHash);
+            }
+            if (unchanged) {
+                FileIdentity unchangedVerified = FileIdentity.capture(mark);
+                if (!after.sameAs(unchangedVerified)) {
                     traceEvent(
                         activity,
-                        "mark_snapshot_unchanged",
+                        "mark_snapshot_unstable",
                         "reason",
                         reason,
-                        "sha256",
-                        hash,
-                        "length",
-                        after.length
+                        "phase",
+                        "unchanged_recheck",
+                        "lengthBefore",
+                        after.length,
+                        "lengthAfter",
+                        unchangedVerified.length
                     );
-                    return true;
+                    return false;
                 }
+                synchronized (TRACE_LOCK) {
+                    if (traceSession != expected
+                        || !hash.equals(expected.lastSnapshotHash)) {
+                        return false;
+                    }
+                    expected.lastSnapshotIdentity = unchangedVerified;
+                }
+                traceEvent(
+                    activity,
+                    "mark_snapshot_unchanged",
+                    "reason",
+                    reason,
+                    "sha256",
+                    hash,
+                    "length",
+                    unchangedVerified.length
+                );
+                return true;
             }
             long sequenceHint;
             synchronized (TRACE_LOCK) {
@@ -4228,8 +4271,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             FileIdentity publishedSource = FileIdentity.capture(mark);
             String publishedHash = sha256(snapshot);
             FileIdentity verifiedSource = FileIdentity.capture(mark);
+            FileIdentity acceptedSource = FileIdentity.capture(mark);
             if (!after.sameAs(publishedSource)
                 || !publishedSource.sameAs(verifiedSource)
+                || !verifiedSource.sameAs(acceptedSource)
                 || !hash.equals(publishedHash)) {
                 snapshot.delete();
                 traceEvent(
@@ -4252,7 +4297,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     return false;
                 }
                 expected.lastSnapshotHash = hash;
-                expected.lastSnapshotIdentity = after;
+                expected.lastSnapshotIdentity = acceptedSource;
             }
             traceEvent(
                 activity,

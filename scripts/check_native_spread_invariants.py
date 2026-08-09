@@ -49,7 +49,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 99L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 100L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -729,10 +729,10 @@ def check(repo_root: Path) -> None:
             "normalizePendingPenTrail(",
             "pen_activation_native_save_bypassed",
             "persistPendingPenActivationTrails(",
-            "PEN_ACTIVATION_SAVE_BYPASS_UNTIL",
-            "POST_ACTIVATION_SAVE_BYPASS_MS",
-            "pen_activation_post_persist_save_armed",
-            "pen_activation_post_persist_save_bypassed",
+            "PEN_ACTIVATION_STALE_SAVE_PENDING",
+            "PEN_ACTIVATION_STALE_SAVE_SCOPE",
+            "pen_activation_stale_save_armed",
+            "pen_activation_stale_save_bypassed",
             "PENDING_PAGE_EDIT_HISTORY",
             "PAGE_EDIT_HISTORY_ACTIONS",
             "page_edit_history_registered",
@@ -793,27 +793,35 @@ def check(repo_root: Path) -> None:
     explicit_save_guard = save_hook.find(
         "boolean explicitCanonicalSave = Boolean.TRUE.equals("
     )
+    stale_save_guard = save_hook.find(
+        "boolean staleActivationSave = activity != null"
+    )
+    stale_scope_check = save_hook.find(
+        "PEN_ACTIVATION_STALE_SAVE_SCOPE.get()",
+        stale_save_guard,
+    )
     post_persist_bypass = save_hook.find(
-        "else if (!explicitCanonicalSave)"
+        "if (staleActivationSave && !explicitCanonicalSave)"
     )
     bypass_consumption = save_hook.find(
-        "PEN_ACTIVATION_SAVE_BYPASS_UNTIL.remove(activity)",
+        "PEN_ACTIVATION_STALE_SAVE_PENDING.remove(activity)",
         post_persist_bypass,
     )
     explicit_save_preserved = save_hook.find(
-        "pen_activation_post_persist_save_preserved"
+        "pen_activation_stale_save_preserved"
     )
     pending_capture = save_hook.find(
         "List<Object> captured = activity == null"
     )
     if not (
-        0 <= explicit_save_guard < post_persist_bypass
+        0 <= explicit_save_guard < stale_save_guard < stale_scope_check
+        < post_persist_bypass
         < bypass_consumption < explicit_save_preserved < pending_capture
     ):
         fail(
-            "post-persistence stale native save must remain armed for an "
-            "explicit canonical save and be consumed before pending "
-            "inactive-page buffers are inspected"
+            "only the deferred loadPage stale save may consume the inactive-"
+            "eraser guard; explicit canonical and ordinary saves must remain "
+            "outside that scope"
         )
 
     persist_start = module.find(
@@ -829,12 +837,14 @@ def check(repo_root: Path) -> None:
         persist_method,
         (
             "armPostActivationSaveBypass && erased > 0",
-            "PEN_ACTIVATION_SAVE_BYPASS_UNTIL.put(",
-            "SystemClock.uptimeMillis()",
-            "+ POST_ACTIVATION_SAVE_BYPASS_MS",
+            "PEN_ACTIVATION_STALE_SAVE_PENDING.put(",
+            "Boolean.TRUE",
+            '" scope=deferred_load_page"',
         ),
         "inactive-page eraser stale-save guard",
     )
+    if "POST_ACTIVATION_SAVE_BYPASS_MS" in module:
+        fail("inactive-page eraser still uses a broad time-window save bypass")
 
     require_markers(
         module,
@@ -971,6 +981,25 @@ def check(repo_root: Path) -> None:
         fail("failed inactive-page persistence can still activate the target page")
     if "PEN_ACTIVATION_TRAILS.remove(activity)" in completion:
         fail("completion cleanup still silently discards failed inactive-page edits")
+    stale_scope_set = completion.find(
+        "PEN_ACTIVATION_STALE_SAVE_SCOPE.set(Boolean.TRUE)"
+    )
+    stale_scope_remove = completion.find(
+        "PEN_ACTIVATION_STALE_SAVE_SCOPE.remove()",
+        load_target,
+    )
+    stale_guard_cleanup = completion.find(
+        "PEN_ACTIVATION_STALE_SAVE_PENDING.remove(activity)",
+        stale_scope_remove,
+    )
+    if not (
+        0 <= stale_scope_set < load_target < stale_scope_remove
+        < stale_guard_cleanup
+    ):
+        fail(
+            "inactive-page stale-save suppression must be scoped exactly "
+            "around the deferred loadPage call"
+        )
 
     require_markers(
         module,
@@ -1029,9 +1058,61 @@ def check(repo_root: Path) -> None:
             '"orderedFingerprint"',
             "FileObserver.CLOSE_WRITE",
             "TRACE_MAX_SNAPSHOT_BYTES",
+            "TRACE_SNAPSHOT_DEBOUNCE_MS",
+            "ScheduledExecutorService",
+            "snapshotExecutor.schedule(",
+            "pendingSnapshot.cancel(false)",
+            "scheduleTraceMarkSnapshot(",
             "traceLogMessage(message)",
         ),
         "opt-in annotation transaction tracing",
+    )
+
+    observer_start = module.find(
+        "private static void startTraceMarkObserver("
+    )
+    touch_trace_start = module.find(
+        "private static void traceTouchEvent(", observer_start
+    )
+    if observer_start < 0 or touch_trace_start < 0:
+        fail("could not isolate mark observer trace scheduling")
+    mark_observer = module[observer_start:touch_trace_start]
+    if "scheduleTraceMarkSnapshot(" not in mark_observer:
+        fail("mark observer does not use the serialized snapshot worker")
+    if "Looper.getMainLooper()" in mark_observer:
+        fail("mark observer still posts snapshot hashing onto the UI thread")
+
+    boundary_start = module.find(
+        "private static void traceAnnotationBoundary("
+    )
+    trace_list_start = module.find(
+        "private static JSONObject traceTrailList(", boundary_start
+    )
+    if boundary_start < 0 or trace_list_start < 0:
+        fail("could not isolate annotation-boundary trace collection")
+    boundary = module[boundary_start:trace_list_start]
+    if "sha256(mark)" in boundary:
+        fail("annotation boundaries still hash the .mark file on the UI thread")
+    if "scheduleTraceMarkSnapshot(" not in boundary:
+        fail("annotation boundary snapshots do not use the background worker")
+
+    trace_trail_start = module.find(
+        "private static JSONObject traceTrail(", trace_list_start
+    )
+    if trace_trail_start < 0:
+        fail("could not isolate trace trail-list fingerprinting")
+    trace_list = module[trace_list_start:trace_trail_start]
+    require_markers(
+        trace_list,
+        (
+            "for (int index = 0; index < trails.size(); index++)",
+            "if (index < limit)",
+            "items.put(item)",
+            "fingerprint = traceTrailFingerprint(trail)",
+            "ordered.append(fingerprint).append(';')",
+            'summary.put("truncated", Math.max(0, trails.size() - limit))',
+        ),
+        "complete trail fingerprint with capped details",
     )
 
     require_markers(
@@ -1050,10 +1131,10 @@ def check(repo_root: Path) -> None:
         "Native Spread trace collection script",
     )
 
-    if 'android:versionCode="99"' not in manifest:
-        fail("companion manifest must use versionCode 99")
-    if 'android:versionName="0.0.99"' not in manifest:
-        fail("companion manifest must use versionName 0.0.99")
+    if 'android:versionCode="100"' not in manifest:
+        fail("companion manifest must use versionCode 100")
+    if 'android:versionName="0.0.100"' not in manifest:
+        fail("companion manifest must use versionName 0.0.100")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

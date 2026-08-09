@@ -257,6 +257,13 @@ transaction and reloads the same mark page in that order, so the active page is
 rebuilt immediately from the erased state instead of retaining stale ink until
 focus moves to the other page.
 
+Native Spread v0.0.100 narrows inactive-page eraser protection to the exact
+deferred `loadPage()` save that carries stale activation data. It no longer
+uses a two-second window that could consume a new pen or page-switch save.
+Annotation-trace snapshots are now debounced on a serialized background worker,
+and ordered trail fingerprints cover every trail while detailed JSON remains
+capped at 256 entries.
+
 ## v0.4.10 protected native editing pilot
 
 v0.4.9 added an explicitly confirmed **RTL editable** choice alongside **Off**

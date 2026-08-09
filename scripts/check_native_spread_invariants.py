@@ -1127,9 +1127,26 @@ def check(repo_root: Path) -> None:
             "module-logcat.txt",
             "summary.md",
             "Write-TraceSummary",
+            "function Wait-TraceFinalization",
+            "__TRACE_FINALIZED__",
+            "Timed out waiting for trace",
         ),
         "Native Spread trace collection script",
     )
+
+    stop_trace = trace_script.find("'Stop' {")
+    status_trace = trace_script.find("'Status' {", stop_trace)
+    if stop_trace < 0 or status_trace < 0:
+        fail("could not isolate Native Spread trace Stop action")
+    stop_action = trace_script[stop_trace:status_trace]
+    wait_for_finalization = stop_action.find(
+        "Wait-TraceFinalization -Session $session"
+    )
+    pull_bundle = stop_action.find('Invoke-Adb pull "$remoteRoot/$session"')
+    if not 0 <= wait_for_finalization < pull_bundle:
+        fail("trace bundle can be pulled before asynchronous finalization")
+    if "Start-Sleep -Milliseconds 500" in stop_action:
+        fail("trace Stop still relies on a fixed finalization delay")
 
     if 'android:versionCode="100"' not in manifest:
         fail("companion manifest must use versionCode 100")

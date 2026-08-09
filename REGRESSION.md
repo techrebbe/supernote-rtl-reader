@@ -322,6 +322,8 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   while the one stale activation save is still suppressed.
 - [x] Trace `.mark` snapshots are debounced and serialized off the UI thread;
   annotation boundaries do not hash the file synchronously.
+- [x] The trace collection script waits for asynchronous finalization and
+  verifies the completed session pointer before pulling the bundle.
 - [x] Ordered trail fingerprints cover all trails while detailed trace items
   remain capped at 256.
 - [ ] Tapping native Undo/Redo or the bottom page-number bar on the inactive

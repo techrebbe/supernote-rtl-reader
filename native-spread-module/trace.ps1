@@ -110,6 +110,38 @@ function Read-RemotePointer {
     return ($value | Out-String).Trim()
 }
 
+function Wait-TraceFinalization {
+    param(
+        [Parameter(Mandatory = $true)][string]$Session,
+        [int]$TimeoutSeconds = 60
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    Write-Host 'Waiting for the final annotation snapshot...'
+    do {
+        $state = Invoke-Adb shell (
+            "if [ -f '$remoteRoot/active.txt' ]; then " +
+            "cat '$remoteRoot/active.txt'; else " +
+            "echo __TRACE_FINALIZED__; fi"
+        )
+        $activeSession = ($state | Out-String).Trim()
+        if ($activeSession -eq '__TRACE_FINALIZED__') {
+            $lastSession = Read-RemotePointer -Name last
+            if ($lastSession -ne $Session) {
+                throw "Trace finalized as '$lastSession', expected '$Session'."
+            }
+            Write-Host 'Final annotation snapshot completed.'
+            return
+        }
+        if ($activeSession -and $activeSession -ne $Session) {
+            throw "A different trace became active: $activeSession"
+        }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    throw "Timed out waiting for trace '$Session' to finalize after $TimeoutSeconds seconds. The bundle was not pulled."
+}
+
 function Get-SafeLabel {
     param([string]$Value)
 
@@ -283,7 +315,7 @@ switch ($Action) {
             Start-Sleep -Milliseconds 250
             Save-RemoteScreenshot -Session $session -CheckpointLabel 'final'
             Send-TraceControl -Command 'stop' -CheckpointLabel $Label
-            Start-Sleep -Milliseconds 500
+            Wait-TraceFinalization -Session $session
         } else {
             Write-Host 'The document closed before Stop; pulling the last completed session.'
         }

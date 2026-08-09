@@ -33,6 +33,7 @@ $traceAction = 'com.techrebbe.supernote.spreadprobe.TRACE_CONTROL'
 $documentPackage = 'com.supernote.document'
 $remoteRoot = '/storage/emulated/0/Download/SupernoteNativeSpreadTrace'
 $recoveredAbandonedTraceSession = $null
+$incompleteTraceSession = $null
 
 if ($Adb -eq 'adb' -and -not (Get-Command adb -ErrorAction SilentlyContinue)) {
     $sdkAdb = Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe'
@@ -105,10 +106,25 @@ function Send-TraceControl {
 }
 
 function Read-RemotePointer {
-    param([ValidateSet('active', 'last')][string]$Name)
+    param([ValidateSet('active', 'last', 'incomplete')][string]$Name)
 
     $value = Invoke-Adb shell "cat '$remoteRoot/$Name.txt'"
     return ($value | Out-String).Trim()
+}
+
+function Read-IncompleteTraceState {
+    $script:incompleteTraceSession = $null
+    try {
+        $session = Read-RemotePointer -Name incomplete
+    } catch {
+        return
+    }
+    if ($session -match '^[A-Za-z0-9._-]+$') {
+        $script:incompleteTraceSession = $session
+    } else {
+        Invoke-Adb shell "rm -f '$remoteRoot/incomplete.txt'" | Out-Null
+        Write-Warning 'Removed an invalid Native Spread incomplete pointer.'
+    }
 }
 
 function Reconcile-AbandonedTracePointer {
@@ -176,6 +192,20 @@ function Wait-TraceFinalization {
         )
         $activeSession = ($state | Out-String).Trim()
         if ($activeSession -eq '__TRACE_FINALIZED__') {
+            try {
+                $incomplete = Read-RemotePointer -Name incomplete
+                if ($incomplete -eq $Session) {
+                    throw (
+                        "Trace '$Session' could not obtain a stable final " +
+                        "annotation snapshot. Its partial directory remains " +
+                        "at '$remoteRoot/$Session'."
+                    )
+                }
+            } catch {
+                if ($_.Exception.Message -match 'stable final annotation') {
+                    throw
+                }
+            }
             $lastSession = Read-RemotePointer -Name last
             if ($lastSession -ne $Session) {
                 throw "Trace finalized as '$lastSession', expected '$Session'."
@@ -324,6 +354,7 @@ function Write-TraceSummary {
 
 Assert-DeviceConnected
 Reconcile-AbandonedTracePointer
+Read-IncompleteTraceState
 
 switch ($Action) {
     'Start' {
@@ -366,6 +397,14 @@ switch ($Action) {
         try {
             $session = Read-RemotePointer -Name active
         } catch {
+            if ($incompleteTraceSession) {
+                throw (
+                    "Trace '$incompleteTraceSession' could not obtain a " +
+                    'stable final annotation snapshot. Its partial directory ' +
+                    "remains at '$remoteRoot/$incompleteTraceSession'. Stop " +
+                    'did not pull the preceding completed session.'
+                )
+            }
             $sessionWasActive = $false
             $session = Read-RemotePointer -Name last
         }
@@ -410,6 +449,13 @@ switch ($Action) {
             $session = Read-RemotePointer -Name active
             Write-Host "Recording: $session"
         } catch {
+            if ($incompleteTraceSession) {
+                Write-Host (
+                    'No active trace. Incomplete session: ' +
+                    $incompleteTraceSession
+                )
+                return
+            }
             try {
                 $last = Read-RemotePointer -Name last
                 Write-Host "No active trace. Last session: $last"

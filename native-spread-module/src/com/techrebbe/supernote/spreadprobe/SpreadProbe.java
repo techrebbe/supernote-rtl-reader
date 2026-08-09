@@ -108,8 +108,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int TRACE_SCHEMA_VERSION = 1;
     private static final int TRACE_TRAIL_LIMIT = 256;
     private static final long TRACE_MAX_SNAPSHOT_BYTES = 64L * 1024L * 1024L;
+    private static final int TRACE_FINAL_SNAPSHOT_ATTEMPTS = 5;
+    private static final long TRACE_FINAL_SNAPSHOT_RETRY_MS = 120L;
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 109L;
+    private static final long MODULE_VERSION_CODE = 110L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -3097,7 +3099,25 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 new Runnable() {
                     @Override
                     public void run() {
-                        captureTraceMarkSnapshot(session, "trace_stop");
+                        boolean stableFinalSnapshot =
+                            captureStableFinalTraceMarkSnapshot(session);
+                        if (!stableFinalSnapshot) {
+                            traceEvent(
+                                activity,
+                                "trace_session_incomplete",
+                                "reason",
+                                "final_snapshot_unstable",
+                                "attempts",
+                                TRACE_FINAL_SNAPSHOT_ATTEMPTS
+                            );
+                            finishTraceSession(
+                                session,
+                                activity,
+                                reason,
+                                false
+                            );
+                            return;
+                        }
                         traceEvent(
                             activity,
                             "trace_session_stopped",
@@ -3107,7 +3127,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                             System.currentTimeMillis()
                                 - session.startedAtMillis
                         );
-                        finishTraceSession(session, activity, reason);
+                        finishTraceSession(
+                            session,
+                            activity,
+                            reason,
+                            true
+                        );
                     }
                 }
             );
@@ -3120,14 +3145,42 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 "error",
                 String.valueOf(throwable)
             );
-            finishTraceSession(session, activity, reason);
+            traceEvent(
+                activity,
+                "trace_session_incomplete",
+                "reason",
+                "final_snapshot_worker_failed"
+            );
+            finishTraceSession(session, activity, reason, false);
         }
+    }
+
+    private static boolean captureStableFinalTraceMarkSnapshot(
+        TraceSession session
+    ) {
+        for (int attempt = 1;
+             attempt <= TRACE_FINAL_SNAPSHOT_ATTEMPTS;
+             attempt++) {
+            if (captureTraceMarkSnapshot(
+                    session,
+                    "trace_stop_attempt_" + attempt
+                )) {
+                return true;
+            }
+            if (!isTraceSessionActive(session)
+                || attempt >= TRACE_FINAL_SNAPSHOT_ATTEMPTS) {
+                break;
+            }
+            SystemClock.sleep(TRACE_FINAL_SNAPSHOT_RETRY_MS);
+        }
+        return false;
     }
 
     private static void finishTraceSession(
         TraceSession session,
         Activity activity,
-        String reason
+        String reason,
+        boolean completed
     ) {
         boolean owned;
         synchronized (TRACE_LOCK) {
@@ -3138,10 +3191,21 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
         if (owned) {
             try {
-                writeTraceText(
-                    new File(session.rootDirectory, "last.txt"),
-                    session.id + "\n"
+                File incomplete = new File(
+                    session.rootDirectory,
+                    "incomplete.txt"
                 );
+                if (completed) {
+                    writeTraceText(
+                        new File(session.rootDirectory, "last.txt"),
+                        session.id + "\n"
+                    );
+                    if (incomplete.isFile()) {
+                        incomplete.delete();
+                    }
+                } else {
+                    writeTraceText(incomplete, session.id + "\n");
+                }
                 File active = new File(session.rootDirectory, "active.txt");
                 if (active.isFile()) {
                     active.delete();
@@ -3153,7 +3217,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         TRACE_LAST_PRESSURES.remove(activity);
         TRACE_TRANSACTION_IDS.remove(activity);
         log("trace_session_stopped id=" + session.id
-            + " reason=" + reason);
+            + " reason=" + reason
+            + " completed=" + completed);
     }
 
     private static void startTraceMarkObserver(final TraceSession session) {
@@ -4065,12 +4130,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
     }
 
-    private static void captureTraceMarkSnapshot(
+    private static boolean captureTraceMarkSnapshot(
         TraceSession expected,
         String reason
     ) {
         if (!isTraceSessionActive(expected) || expected.markPath == null) {
-            return;
+            return false;
         }
         Activity activity = expected.activity.get();
         File mark = new File(expected.markPath);
@@ -4096,7 +4161,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         false
                     );
                 }
-                return;
+                return true;
             }
             if (mark.length() > TRACE_MAX_SNAPSHOT_BYTES) {
                 traceEvent(
@@ -4109,7 +4174,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     "limit",
                     TRACE_MAX_SNAPSHOT_BYTES
                 );
-                return;
+                return false;
             }
             FileIdentity before = FileIdentity.capture(mark);
             String hash = sha256(mark);
@@ -4125,11 +4190,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     "lengthAfter",
                     after.length
                 );
-                return;
+                return false;
             }
             synchronized (TRACE_LOCK) {
                 if (traceSession != expected) {
-                    return;
+                    return false;
                 }
                 if (hash.equals(expected.lastSnapshotHash)) {
                     expected.lastSnapshotIdentity = after;
@@ -4143,7 +4208,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         "length",
                         after.length
                     );
-                    return;
+                    return true;
                 }
             }
             long sequenceHint;
@@ -4177,12 +4242,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     "snapshotSha256",
                     publishedHash
                 );
-                return;
+                return false;
             }
             synchronized (TRACE_LOCK) {
                 if (traceSession != expected) {
                     snapshot.delete();
-                    return;
+                    return false;
                 }
                 expected.lastSnapshotHash = hash;
                 expected.lastSnapshotIdentity = after;
@@ -4201,6 +4266,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 "snapshot",
                 snapshot.getName()
             );
+            return true;
         } catch (Throwable throwable) {
             traceEvent(
                 activity,
@@ -4210,6 +4276,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 "error",
                 String.valueOf(throwable)
             );
+            return false;
         }
     }
 

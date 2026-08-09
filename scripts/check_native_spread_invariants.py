@@ -49,7 +49,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 109L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 110L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -1145,6 +1145,56 @@ def check(repo_root: Path) -> None:
     )
     if not 0 <= publish_last < remove_active:
         fail("last.txt is not published before active.txt is removed")
+    require_markers(
+        finish_trace,
+        (
+            "boolean completed",
+            'new File(\n                    session.rootDirectory,\n                    "incomplete.txt"',
+            "if (completed)",
+            "writeTraceText(incomplete, session.id",
+        ),
+        "completed-versus-incomplete trace pointer publication",
+    )
+
+    stable_final_start = module.find(
+        "private static boolean captureStableFinalTraceMarkSnapshot("
+    )
+    snapshot_start = module.find(
+        "private static boolean captureTraceMarkSnapshot(", stable_final_start
+    )
+    if stable_final_start < 0 or snapshot_start < 0:
+        fail("could not isolate stable final trace snapshot retry")
+    stable_final = module[stable_final_start:snapshot_start]
+    require_markers(
+        stable_final,
+        (
+            "TRACE_FINAL_SNAPSHOT_ATTEMPTS",
+            "captureTraceMarkSnapshot(",
+            "return true",
+            "SystemClock.sleep(TRACE_FINAL_SNAPSHOT_RETRY_MS)",
+            "return false",
+        ),
+        "stable final trace snapshot retry",
+    )
+    stop_session_start = module.find(
+        "private static void stopAnnotationTrace("
+    )
+    if stop_session_start < 0 or stable_final_start < stop_session_start:
+        fail("could not isolate final snapshot completion gating")
+    stop_session = module[stop_session_start:stable_final_start]
+    require_markers(
+        stop_session,
+        (
+            "captureStableFinalTraceMarkSnapshot(session)",
+            '"trace_session_incomplete"',
+            '"final_snapshot_unstable"',
+            "finishTraceSession(\n                                session,",
+            "false",
+            '"trace_session_stopped"',
+            "true",
+        ),
+        "stable snapshot requirement before completed trace publication",
+    )
 
     boundary_start = module.find(
         "private static void traceAnnotationBoundary("
@@ -1314,6 +1364,9 @@ def check(repo_root: Path) -> None:
             "__TRACE_ABANDONED_REMOVED__",
             "$script:recoveredAbandonedTraceSession = $session",
             "Stop did not pull the preceding completed session.",
+            "Read-IncompleteTraceState",
+            "Read-RemotePointer -Name incomplete",
+            "stable final annotation snapshot",
             "__TRACE_FINALIZED__",
             "Timed out waiting for trace",
         ),
@@ -1352,21 +1405,34 @@ def check(repo_root: Path) -> None:
         "if ($recoveredAbandonedTraceSession)"
     )
     completed_fallback = stop_action.find("Read-RemotePointer -Name last")
+    incomplete_guard = stop_action.find("if ($incompleteTraceSession)")
     wait_for_finalization = stop_action.find(
         "Wait-TraceFinalization -Session $session"
     )
     pull_bundle = stop_action.find('Invoke-Adb pull "$remoteRoot/$session"')
-    if not 0 <= abandoned_guard < completed_fallback < pull_bundle:
+    if not 0 <= abandoned_guard < incomplete_guard < completed_fallback < pull_bundle:
         fail("trace Stop can substitute a prior session after crash recovery")
     if not 0 <= wait_for_finalization < pull_bundle:
         fail("trace bundle can be pulled before asynchronous finalization")
     if "Start-Sleep -Milliseconds 500" in stop_action:
         fail("trace Stop still relies on a fixed finalization delay")
 
-    if 'android:versionCode="109"' not in manifest:
-        fail("companion manifest must use versionCode 109")
-    if 'android:versionName="0.0.109"' not in manifest:
-        fail("companion manifest must use versionName 0.0.109")
+    wait_start = trace_script.find("function Wait-TraceFinalization")
+    safe_label_start = trace_script.find("function Get-SafeLabel", wait_start)
+    if wait_start < 0 or safe_label_start < 0:
+        fail("could not isolate trace finalization polling")
+    wait_action = trace_script[wait_start:safe_label_start]
+    incomplete_result = wait_action.find(
+        "Read-RemotePointer -Name incomplete"
+    )
+    completed_result = wait_action.find("Read-RemotePointer -Name last")
+    if not 0 <= incomplete_result < completed_result:
+        fail("trace helper can publish completion before checking incomplete.txt")
+
+    if 'android:versionCode="110"' not in manifest:
+        fail("companion manifest must use versionCode 110")
+    if 'android:versionName="0.0.110"' not in manifest:
+        fail("companion manifest must use versionName 0.0.110")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

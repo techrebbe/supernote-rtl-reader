@@ -16,6 +16,11 @@ PID. The partial session directory is retained for diagnosis and `last.txt`
 continues to identify the preceding completed session. A `Stop` action reports
 the recovered incomplete session and refuses to pull that preceding session in
 its place.
+At normal shutdown, final snapshot capture is retried up to five times if the
+source changes during hashing or copying. `last.txt` is published only after a
+stable attempt. If all attempts fail, `incomplete.txt` names the partial
+session, `active.txt` is removed, and the helper reports the incomplete result
+without treating it as finalized.
 
 Every stateful event may include:
 

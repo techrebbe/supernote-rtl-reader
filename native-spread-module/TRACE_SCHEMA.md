@@ -25,6 +25,8 @@ The source identity is checked again after the copied snapshot is hashed; a
 rewrite during that verification makes the attempt unstable and retryable.
 Missing-file and unchanged-hash fast paths also recheck the live source before
 they can complete finalization.
+Snapshot diagnostics precede the last re-stat; successful paths do no logging
+between final source verification and acceptance.
 
 Every stateful event may include:
 

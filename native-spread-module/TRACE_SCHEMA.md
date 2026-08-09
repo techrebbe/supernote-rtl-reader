@@ -10,6 +10,10 @@ The trace root's `active.txt` identifies the session currently recording.
 final snapshot and stop event are written, immediately before `active.txt` is
 removed. A failed startup therefore leaves the previous completed-session
 pointer unchanged.
+If the document process terminates before finalization, the next document
+process or trace-helper action removes the abandoned `active.txt` pointer. The
+partial session directory is retained for diagnosis and `last.txt` continues
+to identify the preceding completed session.
 
 Every stateful event may include:
 

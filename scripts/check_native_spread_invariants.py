@@ -49,7 +49,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 107L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 108L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -1124,6 +1124,27 @@ def check(repo_root: Path) -> None:
         ),
         "failed trace startup cleanup",
     )
+    reconcile_start = module.find(
+        "private static void reconcileAbandonedTracePointer()"
+    )
+    receiver_start = module.find(
+        "private static synchronized void registerTraceControlReceiver(",
+        reconcile_start,
+    )
+    if reconcile_start < 0 or receiver_start < 0:
+        fail("could not isolate abandoned trace pointer recovery")
+    require_markers(
+        module[reconcile_start:receiver_start],
+        (
+            "traceSession != null",
+            'new File(TRACE_ROOT, "active.txt")',
+            "active.delete()",
+            '"trace_abandoned_pointer_removed processId="',
+        ),
+        "document-process abandoned trace pointer recovery",
+    )
+    if "reconcileAbandonedTracePointer();" not in module:
+        fail("document activity startup does not reconcile abandoned traces")
     trace_startup = module[trace_start:checkpoint_start]
     if '"last.txt"' in trace_startup:
         fail("trace startup publishes last.txt before finalization")
@@ -1308,11 +1329,28 @@ def check(repo_root: Path) -> None:
             "summary.md",
             "Write-TraceSummary",
             "function Wait-TraceFinalization",
+            "function Reconcile-AbandonedTracePointer",
+            "pidof '$documentPackage'",
+            "grep -Fqx '$session'",
+            "__TRACE_ABANDONED_REMOVED__",
             "__TRACE_FINALIZED__",
             "Timed out waiting for trace",
         ),
         "Native Spread trace collection script",
     )
+
+    helper_reconcile = trace_script.find(
+        "function Reconcile-AbandonedTracePointer"
+    )
+    helper_wait = trace_script.find(
+        "function Wait-TraceFinalization", helper_reconcile
+    )
+    action_switch = trace_script.find("switch ($Action)")
+    helper_call = trace_script.rfind(
+        "Reconcile-AbandonedTracePointer", 0, action_switch
+    )
+    if not 0 <= helper_reconcile < helper_wait < helper_call < action_switch:
+        fail("trace helper does not reconcile abandoned pointers before actions")
 
     stop_trace = trace_script.find("'Stop' {")
     status_trace = trace_script.find("'Status' {", stop_trace)
@@ -1328,10 +1366,10 @@ def check(repo_root: Path) -> None:
     if "Start-Sleep -Milliseconds 500" in stop_action:
         fail("trace Stop still relies on a fixed finalization delay")
 
-    if 'android:versionCode="107"' not in manifest:
-        fail("companion manifest must use versionCode 107")
-    if 'android:versionName="0.0.107"' not in manifest:
-        fail("companion manifest must use versionName 0.0.107")
+    if 'android:versionCode="108"' not in manifest:
+        fail("companion manifest must use versionCode 108")
+    if 'android:versionName="0.0.108"' not in manifest:
+        fail("companion manifest must use versionName 0.0.108")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

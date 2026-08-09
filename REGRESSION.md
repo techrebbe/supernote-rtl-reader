@@ -256,8 +256,8 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 
 ## v0.4.12 native spread appearance and inactive-page editing
 
-- [x] Native Spread v0.0.107 compiles and the packaged, handshake, and plug-in
-  compatibility versions all report 107.
+- [x] Native Spread v0.0.108 compiles and the packaged, handshake, and plug-in
+  compatibility versions all report 108.
 - [x] Native Spread v0.0.84: rotate an open spread to portrait and confirm the
   current page immediately uses the normal native-reader portrait size without
   turning away and back.
@@ -346,6 +346,12 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 - [x] Static invariant: `last.txt` is published only during successful trace
   finalization, before `active.txt` is removed; failed startup preserves the
   previous completed-session pointer.
+- [x] Static invariant: a fresh document process and every desktop trace-helper
+  action reconcile an `active.txt` whose recorded PID is no longer the live
+  document process, retaining the partial directory without promoting it.
+- [x] Nomad helper simulation: an `active.txt` tied to dead PID `999999` was
+  removed, its partial directory was retained, and `last.txt` remained on the
+  preceding completed session. The disposable test directory was then removed.
 - [x] The trace collection script waits for asynchronous finalization and
   verifies the completed session pointer before pulling the bundle.
 - [x] Ordered trail fingerprints cover all trails while detailed trace items

@@ -110,6 +110,52 @@ function Read-RemotePointer {
     return ($value | Out-String).Trim()
 }
 
+function Reconcile-AbandonedTracePointer {
+    try {
+        $session = Read-RemotePointer -Name active
+    } catch {
+        return
+    }
+
+    if ($session -notmatch '^[A-Za-z0-9._-]+$') {
+        Invoke-Adb shell "rm -f '$remoteRoot/active.txt'" | Out-Null
+        Write-Warning 'Removed an invalid Native Spread active-trace pointer.'
+        return
+    }
+
+    $properties = "$remoteRoot/$session/session.properties"
+    $processId = (
+        Invoke-Adb shell (
+            "sed -n 's/^processId=//p' '$properties' | " +
+            "tr -d '\r' | head -n 1"
+        ) | Out-String
+    ).Trim()
+    $livePids = @(
+        ((
+            Invoke-Adb shell "pidof '$documentPackage' 2>/dev/null || true"
+        ) | Out-String).Trim() -split '\s+' |
+            Where-Object { $_ }
+    )
+    if ($processId -match '^\d+$' -and $livePids -contains $processId) {
+        return
+    }
+
+    $result = Invoke-Adb shell (
+        "if [ -f '$remoteRoot/active.txt' ] && " +
+        "grep -Fqx '$session' '$remoteRoot/active.txt'; then " +
+        "rm -f '$remoteRoot/active.txt'; " +
+        "echo __TRACE_ABANDONED_REMOVED__; else " +
+        "echo __TRACE_POINTER_CHANGED__; fi"
+    )
+    if (($result | Out-String).Trim() -eq '__TRACE_ABANDONED_REMOVED__') {
+        Write-Warning (
+            "Recovered abandoned Native Spread trace '$session' " +
+            "from document process $processId. Its partial directory was " +
+            'retained, but it was not published as the last completed trace.'
+        )
+    }
+}
+
 function Wait-TraceFinalization {
     param(
         [Parameter(Mandatory = $true)][string]$Session,
@@ -273,6 +319,7 @@ function Write-TraceSummary {
 }
 
 Assert-DeviceConnected
+Reconcile-AbandonedTracePointer
 
 switch ($Action) {
     'Start' {

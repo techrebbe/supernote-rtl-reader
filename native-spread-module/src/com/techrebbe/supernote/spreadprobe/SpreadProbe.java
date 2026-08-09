@@ -109,7 +109,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int TRACE_TRAIL_LIMIT = 256;
     private static final long TRACE_MAX_SNAPSHOT_BYTES = 64L * 1024L * 1024L;
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 107L;
+    private static final long MODULE_VERSION_CODE = 108L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -858,6 +858,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 protected void afterHookedMethod(MethodHookParam param) {
                     activeActivity = (Activity) param.thisObject;
                     SPREAD_CONFIGS.remove(activeActivity);
+                    reconcileAbandonedTracePointer();
                     registerHandshakeReceiver(activeActivity);
                     registerTraceControlReceiver(activeActivity);
                     updateNativeEraserGate(activeActivity, "activity_created");
@@ -2802,6 +2803,27 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             handshakeReceiverRegistered = false;
             log("handshake_receiver_failed " + throwable);
             XposedBridge.log(throwable);
+        }
+    }
+
+    private static void reconcileAbandonedTracePointer() {
+        if (traceSession != null) {
+            return;
+        }
+        try {
+            File active = new File(TRACE_ROOT, "active.txt");
+            if (!active.isFile()) {
+                return;
+            }
+            if (active.delete()) {
+                log("trace_abandoned_pointer_removed processId="
+                    + Process.myPid());
+            } else {
+                log("trace_abandoned_pointer_delete_failed path="
+                    + active.getAbsolutePath());
+            }
+        } catch (Throwable throwable) {
+            log("trace_abandoned_pointer_cleanup_failed " + throwable);
         }
     }
 

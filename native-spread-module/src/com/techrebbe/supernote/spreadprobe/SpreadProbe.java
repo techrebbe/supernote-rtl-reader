@@ -111,7 +111,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int TRACE_FINAL_SNAPSHOT_ATTEMPTS = 5;
     private static final long TRACE_FINAL_SNAPSHOT_RETRY_MS = 120L;
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 113L;
+    private static final long MODULE_VERSION_CODE = 114L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -4150,16 +4150,6 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     changed = traceSession == expected
                         && !"missing".equals(expected.lastSnapshotHash);
                 }
-                if (changed) {
-                    traceEvent(
-                        activity,
-                        "mark_snapshot",
-                        "reason",
-                        reason,
-                        "exists",
-                        false
-                    );
-                }
                 FileIdentity missingAfter = FileIdentity.capture(mark);
                 if (!FileIdentity.missing().sameAs(missingBefore)
                     || !missingBefore.sameAs(missingAfter)) {
@@ -4179,6 +4169,16 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     }
                     expected.lastSnapshotHash = "missing";
                     expected.lastSnapshotIdentity = missingAfter;
+                }
+                if (changed) {
+                    traceEvent(
+                        activity,
+                        "mark_snapshot",
+                        "reason",
+                        reason,
+                        "exists",
+                        false
+                    );
                 }
                 return true;
             }
@@ -4219,16 +4219,6 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 unchanged = hash.equals(expected.lastSnapshotHash);
             }
             if (unchanged) {
-                traceEvent(
-                    activity,
-                    "mark_snapshot_unchanged",
-                    "reason",
-                    reason,
-                    "sha256",
-                    hash,
-                    "length",
-                    after.length
-                );
                 FileIdentity unchangedVerified = FileIdentity.capture(mark);
                 if (!after.sameAs(unchangedVerified)) {
                     traceEvent(
@@ -4252,6 +4242,16 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     }
                     expected.lastSnapshotIdentity = unchangedVerified;
                 }
+                traceEvent(
+                    activity,
+                    "mark_snapshot_unchanged",
+                    "reason",
+                    reason,
+                    "sha256",
+                    hash,
+                    "length",
+                    unchangedVerified.length
+                );
                 return true;
             }
             long sequenceHint;
@@ -4289,20 +4289,6 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 );
                 return false;
             }
-            traceEvent(
-                activity,
-                "mark_snapshot",
-                "reason",
-                reason,
-                "exists",
-                true,
-                "sha256",
-                hash,
-                "length",
-                after.length,
-                "snapshot",
-                snapshot.getName()
-            );
             FileIdentity acceptedSource = FileIdentity.capture(mark);
             if (!verifiedSource.sameAs(acceptedSource)) {
                 snapshot.delete();
@@ -4328,6 +4314,20 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 expected.lastSnapshotHash = hash;
                 expected.lastSnapshotIdentity = acceptedSource;
             }
+            traceEvent(
+                activity,
+                "mark_snapshot",
+                "reason",
+                reason,
+                "exists",
+                true,
+                "sha256",
+                hash,
+                "length",
+                acceptedSource.length,
+                "snapshot",
+                snapshot.getName()
+            );
             return true;
         } catch (Throwable throwable) {
             traceEvent(

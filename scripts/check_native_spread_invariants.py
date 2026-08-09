@@ -49,7 +49,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 113L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 114L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -1195,20 +1195,24 @@ def check(repo_root: Path) -> None:
     compare_verified = snapshot_capture.find(
         "!publishedSource.sameAs(verifiedSource)", verified_source
     )
-    snapshot_event = snapshot_capture.find(
-        '"mark_snapshot",', compare_verified
-    )
     accepted_source = snapshot_capture.find(
         "FileIdentity acceptedSource = FileIdentity.capture(mark);",
-        snapshot_event,
+        compare_verified,
     )
     compare_accepted = snapshot_capture.find(
         "!verifiedSource.sameAs(acceptedSource)", accepted_source
     )
+    accepted_state = snapshot_capture.find(
+        "expected.lastSnapshotIdentity = acceptedSource;",
+        compare_accepted,
+    )
+    snapshot_event = snapshot_capture.find(
+        '"mark_snapshot",', accepted_state
+    )
     if not (
         0 <= published_source < verify_snapshot < verified_source
-        < compare_verified < snapshot_event < accepted_source
-        < compare_accepted
+        < compare_verified < accepted_source < compare_accepted
+        < accepted_state < snapshot_event
     ):
         fail(
             "snapshot publication does not recheck the source after "
@@ -1224,13 +1228,16 @@ def check(repo_root: Path) -> None:
     missing_compare = snapshot_capture.find(
         "!missingBefore.sameAs(missingAfter)", missing_after
     )
-    unchanged_branch = snapshot_capture.find("if (unchanged)")
-    unchanged_event = snapshot_capture.find(
-        '"mark_snapshot_unchanged"', unchanged_branch
+    missing_accept = snapshot_capture.find(
+        'expected.lastSnapshotHash = "missing";', missing_compare
     )
+    missing_event = snapshot_capture.find(
+        '"mark_snapshot",', missing_accept
+    )
+    unchanged_branch = snapshot_capture.find("if (unchanged)")
     unchanged_verified = snapshot_capture.find(
         "FileIdentity unchangedVerified = FileIdentity.capture(mark);",
-        unchanged_event,
+        unchanged_branch,
     )
     unchanged_compare = snapshot_capture.find(
         "!after.sameAs(unchangedVerified)", unchanged_verified
@@ -1239,10 +1246,14 @@ def check(repo_root: Path) -> None:
         "expected.lastSnapshotIdentity = unchangedVerified;",
         unchanged_compare,
     )
+    unchanged_event = snapshot_capture.find(
+        '"mark_snapshot_unchanged"', unchanged_accept
+    )
     if not (
         0 <= missing_before < missing_after < missing_compare
-        and 0 <= unchanged_branch < unchanged_event < unchanged_verified
-        < unchanged_compare < unchanged_accept
+        < missing_accept < missing_event
+        and 0 <= unchanged_branch < unchanged_verified
+        < unchanged_compare < unchanged_accept < unchanged_event
     ):
         fail(
             "missing or unchanged final snapshots bypass their final "
@@ -1501,10 +1512,10 @@ def check(repo_root: Path) -> None:
     if not 0 <= incomplete_result < completed_result:
         fail("trace helper can publish completion before checking incomplete.txt")
 
-    if 'android:versionCode="113"' not in manifest:
-        fail("companion manifest must use versionCode 113")
-    if 'android:versionName="0.0.113"' not in manifest:
-        fail("companion manifest must use versionName 0.0.113")
+    if 'android:versionCode="114"' not in manifest:
+        fail("companion manifest must use versionCode 114")
+    if 'android:versionName="0.0.114"' not in manifest:
+        fail("companion manifest must use versionName 0.0.114")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

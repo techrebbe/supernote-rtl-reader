@@ -25,8 +25,9 @@ The source identity is checked again after the copied snapshot is hashed; a
 rewrite during that verification makes the attempt unstable and retryable.
 Missing-file and unchanged-hash fast paths also recheck the live source before
 they can complete finalization.
-Snapshot diagnostics precede the last re-stat; successful paths do no logging
-between final source verification and acceptance.
+Successful snapshot events follow final source verification and in-memory
+acceptance. Rejected candidates therefore cannot publish a `mark_snapshot`
+entry naming a deleted snapshot.
 
 Every stateful event may include:
 

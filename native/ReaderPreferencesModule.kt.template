@@ -44,7 +44,7 @@ class ReaderPreferencesModule(
         private const val NATIVE_SPREAD_PACKAGE =
             "com.techrebbe.supernote.spreadprobe"
         private const val PLUGIN_HOST_PACKAGE = "com.ratta.supernote.pluginhost"
-        private const val NATIVE_SPREAD_MIN_VERSION_CODE = 80L
+        private const val NATIVE_SPREAD_MIN_VERSION_CODE = 116L
         private const val NATIVE_SPREAD_MARKER_SUFFIX = ".snspread"
         private const val NATIVE_SPREAD_BACKUP_SUFFIX = ".snspread-backup.properties"
         private const val NATIVE_SPREAD_BACKUP_MARK_SUFFIX = ".snspread-backup.mark"
@@ -146,6 +146,14 @@ class ReaderPreferencesModule(
                 )
             val coverSeparate = properties.getProperty("coverSeparate", "false")
                 .equals("true", ignoreCase = true)
+            val showDivider = !properties.getProperty("showDivider", "true")
+                .equals("false", ignoreCase = true)
+            val showHeader = !properties.getProperty("showHeader", "true")
+                .equals("false", ignoreCase = true)
+            val spreadSizing = if (
+                properties.getProperty("spreadSizing", "fit")
+                    .equals("native_fill", ignoreCase = true)
+            ) "native_fill" else "fit"
             val capability = nativeSpreadCapability()
 
             if (!capability.compatible) {
@@ -154,6 +162,9 @@ class ReaderPreferencesModule(
                     configured,
                     configuredEditable,
                     coverSeparate,
+                    showDivider,
+                    showHeader,
+                    spreadSizing,
                     marker,
                     capability,
                     NativeSpreadHandshake(false, "package_incompatible"),
@@ -168,6 +179,9 @@ class ReaderPreferencesModule(
                     configured,
                     configuredEditable,
                     coverSeparate,
+                    showDivider,
+                    showHeader,
+                    spreadSizing,
                     marker,
                     capability,
                     handshake,
@@ -184,6 +198,9 @@ class ReaderPreferencesModule(
         filePath: String,
         enabled: Boolean,
         coverSeparate: Boolean,
+        showDivider: Boolean,
+        showHeader: Boolean,
+        spreadSizing: String,
         promise: Promise,
     ) {
         try {
@@ -216,6 +233,9 @@ class ReaderPreferencesModule(
                                 writeNativeSpreadReadOnlyMarker(
                                     marker,
                                     coverSeparate,
+                                    showDivider,
+                                    showHeader,
+                                    spreadSizing,
                                     checkNotNull(handshake),
                                 )
                                 markerChanged = true
@@ -308,6 +328,9 @@ class ReaderPreferencesModule(
     fun configureNativeSpreadEditable(
         filePath: String,
         coverSeparate: Boolean,
+        showDivider: Boolean,
+        showHeader: Boolean,
+        spreadSizing: String,
         promise: Promise,
     ) {
         try {
@@ -342,6 +365,9 @@ class ReaderPreferencesModule(
                                 pdfFile,
                                 marker,
                                 coverSeparate,
+                                showDivider,
+                                showHeader,
+                                spreadSizing,
                                 handshake,
                                 backup,
                             )
@@ -449,6 +475,9 @@ class ReaderPreferencesModule(
     private fun writeNativeSpreadReadOnlyMarker(
         marker: File,
         coverSeparate: Boolean,
+        showDivider: Boolean,
+        showHeader: Boolean,
+        spreadSizing: String,
         handshake: NativeSpreadHandshake,
     ) {
         check(handshake.active) { "Native Spread live safety check was not active" }
@@ -457,6 +486,12 @@ class ReaderPreferencesModule(
             setProperty("enabled", "true")
             setProperty("direction", "rtl")
             setProperty("coverSeparate", coverSeparate.toString())
+            setProperty("showDivider", showDivider.toString())
+            setProperty("showHeader", showHeader.toString())
+            setProperty(
+                "spreadSizing",
+                if (spreadSizing == "native_fill") "native_fill" else "fit",
+            )
             setProperty("editable", "false")
             setProperty("disposable", "false")
             setProperty("managedBy", "supernote-rtl-reader")
@@ -484,7 +519,13 @@ class ReaderPreferencesModule(
             !verified.getProperty("direction", "")
                 .equals("rtl", ignoreCase = true) ||
             !verified.getProperty("editable", "true")
-                .equals("false", ignoreCase = true)
+                .equals("false", ignoreCase = true) ||
+            verified.getProperty("showDivider", "true") !=
+                showDivider.toString() ||
+            verified.getProperty("showHeader", "true") !=
+                showHeader.toString() ||
+            verified.getProperty("spreadSizing", "fit") !=
+                (if (spreadSizing == "native_fill") "native_fill" else "fit")
         ) {
             throw IllegalStateException("Native spread setting verification failed")
         }
@@ -499,6 +540,9 @@ class ReaderPreferencesModule(
         pdfFile: File,
         marker: File,
         coverSeparate: Boolean,
+        showDivider: Boolean,
+        showHeader: Boolean,
+        spreadSizing: String,
         handshake: NativeSpreadHandshake,
         backup: NativeAnnotationBackup,
     ) {
@@ -508,6 +552,12 @@ class ReaderPreferencesModule(
             setProperty("enabled", "true")
             setProperty("direction", "rtl")
             setProperty("coverSeparate", coverSeparate.toString())
+            setProperty("showDivider", showDivider.toString())
+            setProperty("showHeader", showHeader.toString())
+            setProperty(
+                "spreadSizing",
+                if (spreadSizing == "native_fill") "native_fill" else "fit",
+            )
             setProperty("editable", "true")
             setProperty("disposable", "false")
             setProperty("managedBy", "supernote-rtl-reader")
@@ -524,7 +574,13 @@ class ReaderPreferencesModule(
         }
         if (!verified.getProperty("editable", "false").equals("true", true) ||
             verified.getProperty("mode", "") != "protected-editable-pilot" ||
-            verified.getProperty("backupManifestSha256", "") != manifestHash
+            verified.getProperty("backupManifestSha256", "") != manifestHash ||
+            verified.getProperty("showDivider", "true") !=
+                showDivider.toString() ||
+            verified.getProperty("showHeader", "true") !=
+                showHeader.toString() ||
+            verified.getProperty("spreadSizing", "fit") !=
+                (if (spreadSizing == "native_fill") "native_fill" else "fit")
         ) {
             throw IllegalStateException("Protected editable marker verification failed")
         }
@@ -539,6 +595,9 @@ class ReaderPreferencesModule(
         configured: Boolean,
         configuredEditable: Boolean,
         coverSeparate: Boolean,
+        showDivider: Boolean,
+        showHeader: Boolean,
+        spreadSizing: String,
         marker: File,
         capability: NativeSpreadCapability,
         handshake: NativeSpreadHandshake,
@@ -551,6 +610,9 @@ class ReaderPreferencesModule(
             putBoolean("enabled", configured && runtimeCompatible)
             putBoolean("editable", configuredEditable && runtimeCompatible)
             putBoolean("coverSeparate", coverSeparate)
+            putBoolean("showDivider", showDivider)
+            putBoolean("showHeader", showHeader)
+            putString("spreadSizing", spreadSizing)
             putString("markerPath", marker.absolutePath)
             putBoolean("compatible", runtimeCompatible)
             putBoolean("hooksActive", handshake.active)

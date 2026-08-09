@@ -238,6 +238,163 @@ re-enabled and the document process restarted, the protected PDF remained in
 ordinary native landscape view rather than silently restoring RTL spread mode.
 The protected `.mark` SHA-256 remained unchanged throughout.
 
+## v0.4.11 settled native ink composition
+
+- [x] Native Spread v0.0.81 compiles and the packaged, handshake, and plug-in
+  compatibility versions all report 81.
+- [x] Automated invariants require additive composition for ordinary pen
+  commits and keep active-slot clearing behind the replacement-operation guard.
+- [x] Pen selection enters additive mode; eraser and lasso selection enter
+  replacement mode; undo and redo use the updated canonical `.mark` page rather
+  than Supernote's sometimes incomplete transient replacement bitmap.
+- [ ] Draw three separate strokes on one active page. Each earlier stroke remains
+  visible after the next stroke settles.
+- [ ] Turn away and back. All three strokes remain present in the same positions.
+- [ ] Erase part of one stroke. The erased pixels remain absent while the other
+  strokes remain visible, including after a page turn.
+- [ ] Lasso-move one stroke and confirm no old pixels remain at its source.
+
+## v0.4.12 native spread appearance and inactive-page editing
+
+- [x] Native Spread v0.0.116 compiles and the packaged, handshake, and plug-in
+  compatibility versions all report 116.
+- [x] Native Spread v0.0.84: rotate an open spread to portrait and confirm the
+  current page immediately uses the normal native-reader portrait size without
+  turning away and back.
+- [x] Appearance choices are stored per PDF and marker updates retain the
+  existing transactional backup protections.
+- [ ] Set **Active-page header: Off** and confirm the persistent red ACTIVE or
+  READ ONLY banner disappears, remains hidden after reopening the document,
+  and returns when the setting is switched On. Safety/error overlays remain
+  available in either state.
+- [ ] Start an annotation trace while an editable document is open. Confirm
+  `events.jsonl`, `session.properties`, and the initial `.mark` snapshot appear
+  under `Download/SupernoteNativeSpreadTrace` without changing visible ink.
+- [ ] Record one portrait control stroke and the equivalent landscape-spread
+  stroke. Each trace correlates pen contact, reader page, mark page,
+  `receiveTrials`, `saveTrails`, trail fingerprints, and the resulting `.mark`
+  SHA-256 under one transaction/session timeline.
+- [ ] Record checkpoints after settling and after returning to the page. The
+  collected ZIP contains both screenshots, only content-changed `.mark`
+  snapshots, and `module-logcat.txt`.
+- [ ] Stop tracing and repeat ordinary writing with no active session. No trace
+  files grow and annotation behavior remains unchanged.
+- [x] On the active spread page, stroke-erase one saved line. The line disappears
+  as soon as the eraser settles, without changing page focus; the trace records
+  the canonical save before `active_eraser_canonical_reload`.
+- [x] Activate the other page and return. The erased line remains absent and all
+  unrelated trails on both pages remain visible.
+- [x] Automated invariants cover the divider and sizing controls, visible-page
+  clipping, and the full-page annotation transform.
+- [ ] **Fit page + Divider On** matches the v0.0.81 layout and annotation
+  behavior.
+- [ ] **Fit page + Divider Off** removes the dark line and uses the full two
+  halves without moving or resizing existing ink incorrectly.
+- [x] **Native fill + Divider Off** uses Supernote's automatic non-white page
+  trim independently for both pages, fills the full landscape height without
+  stretching, and extends behind the native toolbar and page-number bar.
+- [x] A pen stroke drawn directly on the inactive right page is appended only
+  after its page-local write succeeds; all earlier ink remains visible and the
+  new stroke survives a spread turn away and back.
+- [x] The symmetric inactive-left-page stroke follows the same sequence,
+  preserves all prior trails, and survives a spread turn away and back.
+- [x] Erasing a saved line on the inactive page removes the intersecting line,
+  preserves the other page-local trails, and remains correct after turning
+  away and back. On the Nomad, the far-left wavy line was removed while the
+  other three visible trails remained. The page-local transaction reported
+  `erased=1`, the one stale native save logged
+  `pen_activation_stale_save_bypassed`, and the same result reloaded
+  after leaving and returning to the spread.
+- [x] Immediately after an inactive-page write, Undo removes the new stroke and
+  Redo restores it without changing unrelated trails. Confirmed on the Nomad
+  with Native Spread v0.0.90 using the native top-toolbar controls.
+- [ ] Immediately after an inactive-page erase, Undo restores the erased trail
+  and Redo removes it again without changing unrelated trails.
+- [x] Immediately after an active-page erase, native top-toolbar Undo restores
+  exactly the erased section and Redo removes it again without changing any
+  unrelated trail. Confirmed on the Nomad with Native Spread v0.0.95; the
+  redone erasure remained correct after leaving and returning to the spread.
+- [x] The stale inactive-eraser save guard exists only while the deferred target
+  `loadPage()` call is on the stack. Source invariants reject the former timed
+  window, so later active pen and page-switch saves cannot consume the guard.
+- [ ] On hardware, immediately write or erase on the newly active page after an
+  inactive-page erase, then switch halves. Confirm those ordinary saves persist
+  while the one stale activation save is still suppressed.
+- [x] Trace `.mark` snapshots are debounced and serialized off the UI thread;
+  annotation boundaries do not hash the file synchronously.
+- [x] Trail details and all-trail fingerprints are computed from immutable
+  captures on the trace worker rather than on annotation hook threads.
+- [x] Annotation boundaries report a `.mark` hash only when the live file
+  identity matches the completed snapshot; changed files report `pending`.
+- [x] Ordered trail fingerprints include rotation, redraw dimensions, and
+  coordinate extents in addition to points and pen metadata.
+- [x] Trace captures and fingerprints include every integer/value identity
+  attribute used by the production inactive-page trail matcher.
+- [x] Trace captures and fingerprints include recognition, refresh,
+  before/after-shift rectangles, and contour point geometry.
+- [x] Native Fill active settled ink is clipped to the active page's visible
+  half-screen slot before composition.
+- [x] Static invariant: plug-in Native Fill mirrors native content trimming and
+  asymmetric margin anchoring; trim metadata survives native bitmap caching
+  and prefetch.
+- [x] Static invariant: non-white content detection runs only for Native Fill;
+  Fit foreground and prefetch renders skip it.
+- [x] Static invariant: a configured marker is authoritative for cover parity
+  as well as divider, header, and page-sizing state during initialization.
+- [x] Static invariant: failed trace startup stops observers, cancels pending
+  work, and removes the stale `active.txt` session pointer.
+- [x] Static invariant: `last.txt` is published only during successful trace
+  finalization, before `active.txt` is removed; failed startup preserves the
+  previous completed-session pointer.
+- [x] Static invariant: every desktop trace-helper action recognizes an
+  `active.txt` whose recorded PID is no longer the live document process.
+  `Status` retains that pointer across invocations; `Stop` removes it only after
+  retaining its identity and partial directory without promoting it.
+- [x] Nomad helper simulation: after recovering an `active.txt` tied to dead PID
+  `999999`, `Stop` must report that exact incomplete session and refuse to pull
+  the preceding completed session. `last.txt` remained unchanged, the partial
+  directory was retained for diagnosis, and the disposable test was removed.
+- [x] Static invariant: final `.mark` capture is retried after unstable hashes
+  or copies; only a stable result can publish `last.txt`. Exhausted retries
+  publish `incomplete.txt`, and the helper checks it before accepting or pulling
+  a completed session.
+- [x] Static invariant: snapshot publication captures the live source identity
+  again after hashing the copied snapshot and rejects a concurrent rewrite.
+- [x] Static invariant: missing-file and unchanged-hash final snapshot paths
+  recheck the live source identity before reporting success.
+- [x] Static invariant: successful final-snapshot events are emitted only after
+  final source verification and in-memory acceptance; rejected candidates can
+  publish only instability events.
+- [x] Static invariant: hook-thread event capture queues immutable records to a
+  per-session serialized writer; only that writer opens `events.jsonl`, and
+  finalization drains it before publishing a session pointer.
+- [x] Static invariant: completed/incomplete pointer publication always attempts
+  `active.txt` cleanup in `finally`; a failure preserves the exact session via
+  `publication-failed.txt`, which the helper checks before `last.txt`.
+- [x] Static invariant: completed publication rejects an undeletable stale
+  `incomplete.txt` and preserves an explicit publication-failure session.
+- [x] Nomad helper simulation: `Stop` reported a disposable `incomplete.txt`
+  session by name, refused the preceding `last.txt`, retained its partial
+  directory, and left the prior completed pointer unchanged. The disposable
+  marker and directory were then removed.
+- [x] The trace collection script waits for asynchronous finalization and
+  verifies the completed session pointer before pulling the bundle.
+- [x] Ordered trail fingerprints cover all trails while detailed trace items
+  remain capped at 256.
+- [ ] Tapping native Undo/Redo or the bottom page-number bar on the inactive
+  half does not activate that page before the native control handles the tap.
+- [ ] After an inactive-page erase activates its page, a following active-page
+  erase keeps every unrelated trail visible without requiring a page reload.
+- [ ] In the plug-in reader, Native fill reaches the physical top and bottom of
+  landscape while the header/footer visibly overlay the PDF instead of
+  reserving document space.
+- [ ] In Native fill, pen, eraser, lasso, highlights, and embedded links remain
+  aligned with the PDF on both active sides. Pen alignment and persistence on
+  the active page passed with Native Spread v0.0.85; the remaining tools still
+  need a focused smoke test with the new trim transform.
+- [ ] Return to Fit page and confirm all existing annotations return to their
+  original whole-page positions.
+
 ## v0.4.10 protected native editing pilot
 
 Safety and setup:

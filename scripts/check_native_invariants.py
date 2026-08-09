@@ -23,6 +23,19 @@ REQUIRED_MARKERS = (
     "result.key",
     "activeLength == key.length",
     "activeModified == key.modified",
+    "private object NativeFillTrimming",
+    '"com.example.libsupernote.SuperNoteNote"',
+    '.getMethod("getMatNone0Area", Bitmap::class.java)',
+    "fallbackContentBounds(bitmap)",
+    "detectTrimming: Boolean",
+    "if (detectTrimming) NativeFillTrimming.detect(bitmap) else null",
+    'contentMode == "native_fill"',
+    'pending.contentMode == "native_fill"',
+    "trimmingRect = result.trimmingRect?.let(::RectF)",
+    "private fun nativeTrimmedDestination(",
+    "trimmingRect.left / horizontalMargin",
+    "trimmingRect.top / verticalMargin",
+    "nativeTrimmedDestination(bitmap, trimmingRect!!)",
 )
 
 FORBIDDEN_MARKERS = (
@@ -68,7 +81,9 @@ def verify_source(text: str, label: str) -> None:
     return_block = text[return_start:make_key_start]
     if "makeKey(" in return_block:
         fail(f"{label} reconstructs file metadata when returning a visible bitmap")
-    if "putCached(key," not in return_block:
+    put_cached = return_block.find("putCached(")
+    original_key = return_block.find("key,", put_cached)
+    if put_cached < 0 or original_key < 0:
         fail(f"{label} does not return visible bitmaps under their original key")
 
     render_key_match = re.search(

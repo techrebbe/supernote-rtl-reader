@@ -27,6 +27,11 @@ class PdfPageViewManager : SimpleViewManager<PdfPageView>() {
         view.pendingRequestedWidth = requestedWidth
     }
 
+    @ReactProp(name = "contentMode")
+    fun setContentMode(view: PdfPageView, contentMode: String?) {
+        view.setContentMode(contentMode)
+    }
+
     @ReactProp(name = "prefetchPageIndexes")
     fun setPrefetchPageIndexes(view: PdfPageView, pageIndexes: ReadableArray?) {
         if (pageIndexes == null) {

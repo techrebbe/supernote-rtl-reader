@@ -287,19 +287,23 @@ def main() -> None:
               {display.left ? (
                 <Image
                   source={{uri: display.left}}
-                  resizeMode="contain"
+                  resizeMode={
+                    spreadSizing === 'native_fill' ? 'cover' : 'contain'
+                  }
                   style={styles.pageImage}
                 />
               ) : (
                 <View style={styles.blankPage} />
               )}
             </View>
-            <View style={styles.spreadDivider} />
+            {showSpreadDivider && <View style={styles.spreadDivider} />}
             <View style={styles.spreadPage}>
               {display.right ? (
                 <Image
                   source={{uri: display.right}}
-                  resizeMode="contain"
+                  resizeMode={
+                    spreadSizing === 'native_fill' ? 'cover' : 'contain'
+                  }
                   style={styles.pageImage}
                 />
               ) : (
@@ -325,6 +329,7 @@ def main() -> None:
                   filePath={documentContext?.filePath ?? ''}
                   pageIndex={display.leftPageIndex}
                   requestedWidth={Math.max(360, Math.floor(window.width / 2))}
+                  contentMode={spreadSizing}
                   prefetchPageIndexes={display.prefetchPageIndexes ?? []}
                   requestStartedAtMs={display.requestStartedAtMs ?? 0}
                   onPdfRendered={handleNativeRendered}
@@ -335,13 +340,14 @@ def main() -> None:
                 <View style={styles.blankPage} />
               )}
             </View>
-            <View style={styles.spreadDivider} />
+            {showSpreadDivider && <View style={styles.spreadDivider} />}
             <View style={styles.spreadPage}>
               {Number.isInteger(display.rightPageIndex) ? (
                 <NativePdfPageView
                   filePath={documentContext?.filePath ?? ''}
                   pageIndex={display.rightPageIndex}
                   requestedWidth={Math.max(360, Math.floor(window.width / 2))}
+                  contentMode={spreadSizing}
                   prefetchPageIndexes={display.prefetchPageIndexes ?? []}
                   requestStartedAtMs={display.requestStartedAtMs ?? 0}
                   onPdfRendered={handleNativeRendered}
@@ -358,6 +364,7 @@ def main() -> None:
             filePath={documentContext?.filePath ?? ''}
             pageIndex={display.singlePageIndex}
             requestedWidth={Math.max(600, Math.round(window.width))}
+            contentMode="fit"
             prefetchPageIndexes={display.prefetchPageIndexes ?? []}
             requestStartedAtMs={display.requestStartedAtMs ?? 0}
             onPdfRendered={handleNativeRendered}

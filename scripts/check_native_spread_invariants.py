@@ -31,17 +31,25 @@ def check(repo_root: Path) -> None:
         / "SpreadProbe.java"
     )
     manifest_path = repo_root / "native-spread-module" / "AndroidManifest.xml"
+    trace_script_path = repo_root / "native-spread-module" / "trace.ps1"
     app_path = repo_root / "overlay" / "App.js"
+    pdf_view_path = repo_root / "native" / "PdfPageView.kt.template"
+    pdf_view_manager_path = repo_root / "native" / "PdfPageViewManager.kt.template"
+    direct_patch_path = repo_root / "scripts" / "patch_direct_view.py"
 
     plugin = plugin_path.read_text(encoding="utf-8")
     module = module_path.read_text(encoding="utf-8")
     manifest = manifest_path.read_text(encoding="utf-8")
+    trace_script = trace_script_path.read_text(encoding="utf-8")
     app = app_path.read_text(encoding="utf-8")
+    pdf_view = pdf_view_path.read_text(encoding="utf-8")
+    pdf_view_manager = pdf_view_manager_path.read_text(encoding="utf-8")
+    direct_patch = direct_patch_path.read_text(encoding="utf-8")
 
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 80L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 116L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -81,6 +89,12 @@ def check(repo_root: Path) -> None:
             "nativeAnnotationRetiringSnapshot(pdfFile)",
             "removeNativeAnnotationBackupFiles(pdfFile, backup)",
             'putBoolean("backupAvailable", backupResult.backup != null)',
+            'setProperty("showDivider", showDivider.toString())',
+            'setProperty("showHeader", showHeader.toString())',
+            '"spreadSizing"',
+            'putBoolean("showDivider", showDivider)',
+            'putBoolean("showHeader", showHeader)',
+            'putString("spreadSizing", spreadSizing)',
         ),
         "plugin handshake",
     )
@@ -105,8 +119,77 @@ def check(repo_root: Path) -> None:
             "BackHandler.addEventListener(",
             "if (!nativeSpreadBusyRef.current) return false;",
             "Wait for the native reader change to finish before closing.",
+            "const [showSpreadDivider, setShowSpreadDivider]",
+            "const [showNativeSpreadHeader, setShowNativeSpreadHeader]",
+            "const [spreadSizing, setSpreadSizing]",
+            "setNativeSpreadAppearanceValue",
+            "nativeSpread?.showHeader !== false",
+            "Active-page header",
+            """const restoredCoverSeparate = nativeSpread?.configured
+          ? nativeSpread?.coverSeparate === true
+          : restored.coverSeparate;""",
+            """const restoredSizing = nativeSpread?.configured
+          ? nativeSpread?.spreadSizing === 'native_fill'
+            ? 'native_fill'
+            : 'fit'
+          : restored.spreadSizing;""",
         ),
         "configured/runtime Native Spread state separation",
+    )
+    require_markers(
+        module,
+        (
+            "final boolean showDivider;",
+            "final boolean showHeader;",
+            "final boolean nativeFill;",
+            'properties.getProperty("showDivider", "true")',
+            'properties.getProperty("showHeader", "true")',
+            'properties.getProperty("spreadSizing", "fit")',
+            "LEFT_VISIBLE_BOUNDS",
+            "RIGHT_VISIBLE_BOUNDS",
+            "SpreadPageLayout",
+            "drawPageBitmap(canvas, leftBitmap, leftLayout, bitmapPaint)",
+            "canvas.clipRect(layout.visibleBounds)",
+            "showStatusOverlay(",
+            "!config.showHeader",
+            "removeOverlay(activity);",
+            "visibleBoundsOrDestination(activity, activeDestination)",
+            "Math.max(",
+        ),
+        "native spread appearance geometry",
+    )
+    captured_ink_start = module.find(
+        "private static Bitmap renderCapturedFullInk("
+    )
+    combined_ink_start = module.find(
+        "private static Bitmap renderCombinedCommittedInk(",
+        captured_ink_start,
+    )
+    if captured_ink_start < 0 or combined_ink_start < 0:
+        fail("could not isolate active settled-ink compositor")
+    require_markers(
+        module[captured_ink_start:combined_ink_start],
+        (
+            "RectF activeVisibleBounds = activePageVisibleBounds(activity)",
+            "activeVisibleBounds = new RectF(activeDestination)",
+            "canvas.clipRect(activeVisibleBounds)",
+            "canvas.drawBitmap(",
+            "canvas.restoreToCount(saveCount)",
+        ),
+        "Native Fill active settled-ink clipping",
+    )
+    require_markers(
+        pdf_view + pdf_view_manager + direct_patch,
+        (
+            'var pendingContentMode: String = "fit"',
+            'if (pendingContentMode == "native_fill")',
+            "max(widthScale, heightScale)",
+            '@ReactProp(name = "contentMode")',
+            "contentMode={spreadSizing}",
+            'contentMode="fit"',
+            "{showSpreadDivider && <View style={styles.spreadDivider} />}",
+        ),
+        "full-screen custom reader spread sizing",
     )
     configure_start = plugin.find("fun configureNativeSpreadReadOnly(")
     marker_writer_start = plugin.find(
@@ -537,16 +620,35 @@ def check(repo_root: Path) -> None:
     cover_controls_start = app.find(
         "<Text style={styles.settingLabel}>Treat Cover Page Separately</Text>"
     )
-    native_controls_start = app.find(
-        "<Text style={styles.settingLabel}>Supernote native reader</Text>",
+    appearance_controls_start = app.find(
+        "<Text style={styles.settingLabel}>Spread page sizing</Text>",
         cover_controls_start,
     )
-    cover_controls = app[cover_controls_start:native_controls_start]
+    cover_controls = app[cover_controls_start:appearance_controls_start]
     unavailable_guard = "nativeSpreadConfigured && !nativeSpreadCompatible"
     if cover_controls.count("nativeSpreadBusy ||") != 2:
         fail("both Cover controls must be disabled during native mode transitions")
     if cover_controls.count(unavailable_guard) != 2:
         fail("Cover controls remain enabled for an unavailable configured marker")
+
+    native_controls_start = app.find(
+        "<Text style={styles.settingLabel}>Supernote native reader</Text>",
+        appearance_controls_start,
+    )
+    appearance_controls = app[appearance_controls_start:native_controls_start]
+    if appearance_controls.count("nativeSpreadBusy ||") != 6:
+        fail("all native spread appearance controls must be transition-safe")
+    if appearance_controls.count(unavailable_guard) != 6:
+        fail("native spread appearance controls ignore unavailable hooks")
+    for required in (
+        "showSpreadDivider",
+        "showNativeSpreadHeader",
+        "spreadSizing",
+        "setNativeSpreadAppearanceValue",
+        "native_fill",
+    ):
+        if required not in appearance_controls:
+            fail(f"native spread appearance controls missing {required}")
 
     readonly_transition_start = app.find("const setNativeSpreadReadOnly = async")
     editable_transition_start = app.find(
@@ -636,6 +738,12 @@ def check(repo_root: Path) -> None:
             '"pen_up"',
             "cancelPendingPenPageActivation(",
             '"pen_left_screen"',
+            '"sendDisableWriteAreaNotRefreshBitmap"',
+            "pen_activation_disable_area_refresh_bypassed",
+            "param.setResult(Boolean.TRUE);",
+            "PEN_ACTIVATION_MARK_PRIMING",
+            "pen_activation_mark_bitmap_suppressed",
+            "pen_activation_mark_primed",
             "SN_SPREAD_PROBE pen page activation",
             'applySpreadMarkGeometry(',
             '"pen_page_activation"',
@@ -644,6 +752,15 @@ def check(repo_root: Path) -> None:
             "normalizePendingPenTrail(",
             "pen_activation_native_save_bypassed",
             "persistPendingPenActivationTrails(",
+            "PEN_ACTIVATION_STALE_SAVE_PENDING",
+            "PEN_ACTIVATION_STALE_SAVE_SCOPE",
+            "pen_activation_stale_save_armed",
+            "pen_activation_stale_save_bypassed",
+            "PENDING_PAGE_EDIT_HISTORY",
+            "PAGE_EDIT_HISTORY_ACTIONS",
+            "page_edit_history_registered",
+            "page_edit_history_applied",
+            "receiveTrials() fetches the completed native trail",
             '"modifyPageTrailsFromFile"',
             'XposedHelpers.callMethod(',
             '"get_erase_line_trail_num"',
@@ -664,6 +781,182 @@ def check(repo_root: Path) -> None:
         ),
         "inactive-page pen activation",
     )
+
+    receive_hook_start = module.find(
+        '"receiveTrials",',
+        module.find("pen_activation_native_save_bypassed"),
+    )
+    receive_hook_end = module.find(
+        '"areaSelectionTransition",',
+        receive_hook_start,
+    )
+    if receive_hook_start < 0 or receive_hook_end < 0:
+        fail("could not isolate inactive-page receiveTrials completion hook")
+    receive_hook = module[receive_hook_start:receive_hook_end]
+    persist_before_completion = receive_hook.find(
+        "persistPendingPenActivationTrails("
+    )
+    post_completion = receive_hook.find("activity.runOnUiThread(")
+    completion_guard = receive_hook.find(
+        "completePendingPenPageActivation("
+    )
+    if not (
+        0 <= persist_before_completion < post_completion < completion_guard
+    ):
+        fail(
+            "receiveTrials must persist inactive-page edits before posting "
+            "the fail-closed activation completion"
+        )
+
+    save_hook_start = module.find('"saveTrails",')
+    save_hook_end = module.find('"receiveTrials",', save_hook_start)
+    if save_hook_start < 0 or save_hook_end < 0:
+        fail("could not isolate inactive-page saveTrails hook")
+    save_hook = module[save_hook_start:save_hook_end]
+    explicit_save_guard = save_hook.find(
+        "boolean explicitCanonicalSave = Boolean.TRUE.equals("
+    )
+    stale_save_guard = save_hook.find(
+        "boolean staleActivationSave = activity != null"
+    )
+    stale_scope_check = save_hook.find(
+        "PEN_ACTIVATION_STALE_SAVE_SCOPE.get()",
+        stale_save_guard,
+    )
+    post_persist_bypass = save_hook.find(
+        "if (staleActivationSave && !explicitCanonicalSave)"
+    )
+    bypass_consumption = save_hook.find(
+        "PEN_ACTIVATION_STALE_SAVE_PENDING.remove(activity)",
+        post_persist_bypass,
+    )
+    explicit_save_preserved = save_hook.find(
+        "pen_activation_stale_save_preserved"
+    )
+    pending_capture = save_hook.find(
+        "List<Object> captured = activity == null"
+    )
+    if not (
+        0 <= explicit_save_guard < stale_save_guard < stale_scope_check
+        < post_persist_bypass
+        < bypass_consumption < explicit_save_preserved < pending_capture
+    ):
+        fail(
+            "only the deferred loadPage stale save may consume the inactive-"
+            "eraser guard; explicit canonical and ordinary saves must remain "
+            "outside that scope"
+        )
+
+    persist_start = module.find(
+        "private static void persistPendingPenActivationTrails("
+    )
+    match_start = module.find(
+        "private static boolean matchingTrailExists(", persist_start
+    )
+    if persist_start < 0 or match_start < 0:
+        fail("could not isolate inactive-page persistence")
+    persist_method = module[persist_start:match_start]
+    require_markers(
+        persist_method,
+        (
+            "armPostActivationSaveBypass && erased > 0",
+            "PEN_ACTIVATION_STALE_SAVE_PENDING.put(",
+            "Boolean.TRUE",
+            '" scope=deferred_load_page"',
+        ),
+        "inactive-page eraser stale-save guard",
+    )
+    if "POST_ACTIVATION_SAVE_BYPASS_MS" in module:
+        fail("inactive-page eraser still uses a broad time-window save bypass")
+
+    require_markers(
+        module,
+        (
+            "private static final class PageEditHistory",
+            "registerPendingPageEditHistory(",
+            "applyPageEditHistory(",
+            'getDeclaredField("isTrail")',
+            "isTrailField.setBoolean(action, false)",
+            'XposedHelpers.callMethod(stack, "appendTrail")',
+            'String listField = undo ? "undoList" : "redoList"',
+            'XposedHelpers.callMethod(stack, actionName)',
+            '"modifyPageTrailsFromFile"',
+            'new ArrayList<>(snapshot)',
+            '"loadHandWrite"',
+        ),
+        "inactive-page native undo and redo integration",
+    )
+
+    require_markers(
+        module,
+        (
+            "REPLACE_ACTIVE_INK_MODES",
+            "CANONICAL_ONLY_INK_MODES",
+            "FORCE_CANONICAL_ACTIVE_INK",
+            "EXPLICIT_CANONICAL_TRAIL_SAVE",
+            'setReplaceActiveInkMode(',
+            '"area_selection"',
+            '"eraser:" + eraserType',
+            '"pen"',
+            'new String[] {"undo", "redo"}',
+            'ink_composition_force_canonical reason=',
+            'undo_redo_saved_before_canonical_reload',
+            '"loadHandWrite",\n                                    markPage',
+            "boolean replaceActiveSlot",
+            "boolean canonicalOnly",
+            "readOnly || canonicalOnly",
+            'committed_ink_canonical_only reason=eraser',
+            "persistActiveEraserBeforeCanonicalRefresh(",
+            'active_eraser_saved_before_canonical_refresh',
+            'active_eraser_canonical_reloaded',
+            '"active_eraser_canonical_reload"',
+            "saveTrailsForCanonicalReload(",
+            '"undo_redo:" + mutationName',
+            '"active_eraser"',
+            'explicit_canonical_trail_save reason=',
+            "if (replaceActiveSlot && activeDestination != null)",
+            '" mode=" + (replaceActiveSlot ? "replace" : "add")',
+        ),
+        "settled ink composition",
+    )
+
+    active_eraser_start = module.find(
+        "private static void persistActiveEraserBeforeCanonicalRefresh("
+    )
+    canonical_save_start = module.find(
+        "private static void saveTrailsForCanonicalReload(",
+        active_eraser_start,
+    )
+    if active_eraser_start < 0 or canonical_save_start < 0:
+        fail("could not isolate active-page eraser canonical refresh")
+    active_eraser_refresh = module[active_eraser_start:canonical_save_start]
+    eraser_save = active_eraser_refresh.find("saveTrailsForCanonicalReload(")
+    eraser_reload = active_eraser_refresh.find('"loadHandWrite"', eraser_save)
+    eraser_trace = active_eraser_refresh.find(
+        '"active_eraser_canonical_reload"', eraser_reload
+    )
+    if not 0 <= eraser_save < eraser_reload < eraser_trace:
+        fail(
+            "active-page eraser must save canonical trails before reloading "
+            "and tracing the settled bitmap"
+        )
+
+    combined_start = module.find(
+        "private static Bitmap renderCombinedCommittedInk("
+    )
+    destination_start = module.find(
+        "private static RectF activePageDestination(", combined_start
+    )
+    if combined_start < 0 or destination_start < 0:
+        fail("could not isolate settled ink composition")
+    combined = module[combined_start:destination_start]
+    clear_slot = combined.find("PorterDuff.Mode.CLEAR")
+    replacement_guard = combined.find(
+        "if (replaceActiveSlot && activeDestination != null)"
+    )
+    draw_active = combined.find("canvas.drawBitmap(active, 0.0f, 0.0f, paint)")
+    if not 0 <= replacement_guard < clear_slot < draw_active:
+        fail("normal pen commits can still clear previously settled active-page ink")
 
     trail_match_start = module.find("private static boolean matchingTrailExists(")
     eraser_match_start = module.find(
@@ -711,11 +1004,628 @@ def check(repo_root: Path) -> None:
         fail("failed inactive-page persistence can still activate the target page")
     if "PEN_ACTIVATION_TRAILS.remove(activity)" in completion:
         fail("completion cleanup still silently discards failed inactive-page edits")
+    stale_scope_set = completion.find(
+        "PEN_ACTIVATION_STALE_SAVE_SCOPE.set(Boolean.TRUE)"
+    )
+    stale_scope_remove = completion.find(
+        "PEN_ACTIVATION_STALE_SAVE_SCOPE.remove()",
+        load_target,
+    )
+    stale_guard_cleanup = completion.find(
+        "PEN_ACTIVATION_STALE_SAVE_PENDING.remove(activity)",
+        stale_scope_remove,
+    )
+    if not (
+        0 <= stale_scope_set < load_target < stale_scope_remove
+        < stale_guard_cleanup
+    ):
+        fail(
+            "inactive-page stale-save suppression must be scoped exactly "
+            "around the deferred loadPage call"
+        )
 
-    if 'android:versionCode="80"' not in manifest:
-        fail("companion manifest must use versionCode 80 for full stroke identity")
-    if 'android:versionName="0.0.80"' not in manifest:
-        fail("companion manifest must use versionName 0.0.80")
+    require_markers(
+        module,
+        (
+            "configuration_refresh_waiting_for_layout",
+            "configuration_refresh_native_reload",
+            'XposedHelpers.callMethod(viewModel, "reloadPage")',
+        ),
+        "portrait rotation refresh",
+    )
+
+    require_markers(
+        module,
+        (
+            "nativeTrimmingRect(",
+            '"com.supernote.document.utils.TrimmingUtil"',
+            '"getTrimmingRect"',
+            "trimmingRect.left / horizontalMargin",
+            "trimmingRect.top / verticalMargin",
+            "left + sourceWidth * scale",
+            "top + sourceHeight * scale",
+            '"native_fill_trim_detected page="',
+        ),
+        "native-reader-equivalent spread trimming",
+    )
+
+    require_markers(
+        module,
+        (
+            "NATIVE_TOP_CHROME_TOUCH_EXCLUSION_PX",
+            "NATIVE_BOTTOM_CHROME_TOUCH_EXCLUSION_PX",
+            "isNativeChromeTouch(activity, event.getY())",
+            "activation_touch_ignored_native_chrome",
+            "activation_touch_cancelled_native_chrome",
+        ),
+        "native chrome activation exclusion",
+    )
+
+    require_markers(
+        module,
+        (
+            "TRACE_CONTROL_ACTION",
+            "TRACE_CONTROL_PERMISSION",
+            '"android.permission.DUMP"',
+            "registerTraceControlReceiver(activeActivity)",
+            '"trace_session_started"',
+            '"pen_contact_started"',
+            '"annotation_boundary"',
+            '"save_trails_before"',
+            '"save_trails_after"',
+            '"receive_trials_before"',
+            '"receive_trials_after"',
+            '"modify_page_trails_started"',
+            '"modify_page_trails_finished"',
+            '"mark_snapshot"',
+            '"orderedFingerprint"',
+            "FileObserver.CLOSE_WRITE",
+            "TRACE_MAX_SNAPSHOT_BYTES",
+            "TRACE_SNAPSHOT_DEBOUNCE_MS",
+            "ScheduledExecutorService",
+            "snapshotExecutor.schedule(",
+            "pendingSnapshot.cancel(false)",
+            "scheduleTraceWorkerTask(",
+            "scheduleTraceMarkSnapshot(",
+            "lastSnapshotIdentity",
+            "traceLogMessage(message)",
+        ),
+        "opt-in annotation transaction tracing",
+    )
+
+    observer_start = module.find(
+        "private static void startTraceMarkObserver("
+    )
+    touch_trace_start = module.find(
+        "private static void traceTouchEvent(", observer_start
+    )
+    if observer_start < 0 or touch_trace_start < 0:
+        fail("could not isolate mark observer trace scheduling")
+    mark_observer = module[observer_start:touch_trace_start]
+    if "scheduleTraceMarkSnapshot(" not in mark_observer:
+        fail("mark observer does not use the serialized snapshot worker")
+    if "Looper.getMainLooper()" in mark_observer:
+        fail("mark observer still posts snapshot hashing onto the UI thread")
+
+    trace_start = module.find("private static void startAnnotationTrace(")
+    checkpoint_start = module.find(
+        "private static void checkpointAnnotationTrace(", trace_start
+    )
+    if trace_start < 0 or checkpoint_start < 0:
+        fail("could not isolate trace startup failure cleanup")
+    require_markers(
+        module[trace_start:checkpoint_start],
+        (
+            "failedObserver.stopWatching()",
+            "started.pendingSnapshot.cancel(false)",
+            "started.snapshotExecutor.shutdownNow()",
+            "started.eventExecutor.shutdownNow()",
+            'new File(\n                        started.rootDirectory,\n                        "active.txt"',
+            "active.isFile() && !active.delete()",
+        ),
+        "failed trace startup cleanup",
+    )
+    trace_startup = module[trace_start:checkpoint_start]
+    if '"last.txt"' in trace_startup:
+        fail("trace startup publishes last.txt before finalization")
+
+    finish_start = module.find("private static void finishTraceSession(")
+    observer_start = module.find(
+        "private static void startTraceMarkObserver(", finish_start
+    )
+    if finish_start < 0 or observer_start < 0:
+        fail("could not isolate completed trace pointer publication")
+    finish_trace = module[finish_start:observer_start]
+    if module.count('"last.txt"') != 1:
+        fail("last.txt must be published only by completed trace finalization")
+    publish_last = finish_trace.find(
+        'new File(session.rootDirectory, "last.txt")'
+    )
+    cleanup_finally = finish_trace.find("} finally {", publish_last)
+    remove_active = finish_trace.find(
+        "if (active.isFile() && !active.delete())", cleanup_finally
+    )
+    if not 0 <= publish_last < cleanup_finally < remove_active:
+        fail("last.txt is not published before active.txt is removed")
+    require_markers(
+        finish_trace,
+        (
+            "boolean requestedCompleted",
+            "boolean eventLogComplete = drainTraceEventWriter(session)",
+            "boolean completed = requestedCompleted && eventLogComplete",
+            'new File(\n                    session.rootDirectory,\n                    "incomplete.txt"',
+            "if (completed)",
+            "if (incomplete.isFile() && !incomplete.delete())",
+            "writeTraceText(incomplete, session.id",
+            '"publication-failed.txt"',
+            "preserveTracePublicationFailure(",
+            "} finally {",
+        ),
+        "completed-versus-incomplete trace pointer publication",
+    )
+    require_markers(
+        finish_trace,
+        (
+            "private static boolean drainTraceEventWriter(",
+            "session.eventExecutor.shutdown()",
+            "session.eventExecutor.awaitTermination(",
+            "session.eventWriteFailure",
+            "private static void preserveTracePublicationFailure(",
+            "active.renameTo(failed)",
+            "writeTraceText(failed, session.id",
+        ),
+        "event-writer drain and explicit publication-failure state",
+    )
+
+    stable_final_start = module.find(
+        "private static boolean captureStableFinalTraceMarkSnapshot("
+    )
+    snapshot_start = module.find(
+        "private static boolean captureTraceMarkSnapshot(", stable_final_start
+    )
+    if stable_final_start < 0 or snapshot_start < 0:
+        fail("could not isolate stable final trace snapshot retry")
+    stable_final = module[stable_final_start:snapshot_start]
+    require_markers(
+        stable_final,
+        (
+            "TRACE_FINAL_SNAPSHOT_ATTEMPTS",
+            "captureTraceMarkSnapshot(",
+            "return true",
+            "SystemClock.sleep(TRACE_FINAL_SNAPSHOT_RETRY_MS)",
+            "return false",
+        ),
+        "stable final trace snapshot retry",
+    )
+    snapshot_capture_end = module.find(
+        "private static void traceEvent(", snapshot_start
+    )
+    if snapshot_capture_end < 0:
+        fail("could not isolate final snapshot source verification")
+    snapshot_capture = module[snapshot_start:snapshot_capture_end]
+    published_source = snapshot_capture.find(
+        "FileIdentity publishedSource = FileIdentity.capture(mark);"
+    )
+    verify_snapshot = snapshot_capture.find(
+        "String publishedHash = sha256(snapshot);", published_source
+    )
+    verified_source = snapshot_capture.find(
+        "FileIdentity verifiedSource = FileIdentity.capture(mark);",
+        verify_snapshot,
+    )
+    compare_verified = snapshot_capture.find(
+        "!publishedSource.sameAs(verifiedSource)", verified_source
+    )
+    accepted_source = snapshot_capture.find(
+        "FileIdentity acceptedSource = FileIdentity.capture(mark);",
+        compare_verified,
+    )
+    compare_accepted = snapshot_capture.find(
+        "!verifiedSource.sameAs(acceptedSource)", accepted_source
+    )
+    accepted_state = snapshot_capture.find(
+        "expected.lastSnapshotIdentity = acceptedSource;",
+        compare_accepted,
+    )
+    snapshot_event = snapshot_capture.find(
+        '"mark_snapshot",', accepted_state
+    )
+    if not (
+        0 <= published_source < verify_snapshot < verified_source
+        < compare_verified < accepted_source < compare_accepted
+        < accepted_state < snapshot_event
+    ):
+        fail(
+            "snapshot publication does not recheck the source after "
+            "verifying the copied snapshot"
+        )
+    missing_before = snapshot_capture.find(
+        "FileIdentity missingBefore = FileIdentity.capture(mark);"
+    )
+    missing_after = snapshot_capture.find(
+        "FileIdentity missingAfter = FileIdentity.capture(mark);",
+        missing_before,
+    )
+    missing_compare = snapshot_capture.find(
+        "!missingBefore.sameAs(missingAfter)", missing_after
+    )
+    missing_accept = snapshot_capture.find(
+        'expected.lastSnapshotHash = "missing";', missing_compare
+    )
+    missing_event = snapshot_capture.find(
+        '"mark_snapshot",', missing_accept
+    )
+    unchanged_branch = snapshot_capture.find("if (unchanged)")
+    unchanged_verified = snapshot_capture.find(
+        "FileIdentity unchangedVerified = FileIdentity.capture(mark);",
+        unchanged_branch,
+    )
+    unchanged_compare = snapshot_capture.find(
+        "!after.sameAs(unchangedVerified)", unchanged_verified
+    )
+    unchanged_accept = snapshot_capture.find(
+        "expected.lastSnapshotIdentity = unchangedVerified;",
+        unchanged_compare,
+    )
+    unchanged_event = snapshot_capture.find(
+        '"mark_snapshot_unchanged"', unchanged_accept
+    )
+    if not (
+        0 <= missing_before < missing_after < missing_compare
+        < missing_accept < missing_event
+        and 0 <= unchanged_branch < unchanged_verified
+        < unchanged_compare < unchanged_accept < unchanged_event
+    ):
+        fail(
+            "missing or unchanged final snapshots bypass their final "
+            "source-identity recheck"
+        )
+    stop_session_start = module.find(
+        "private static void stopAnnotationTrace("
+    )
+    if stop_session_start < 0 or stable_final_start < stop_session_start:
+        fail("could not isolate final snapshot completion gating")
+    stop_session = module[stop_session_start:stable_final_start]
+    require_markers(
+        stop_session,
+        (
+            "captureStableFinalTraceMarkSnapshot(session)",
+            '"trace_session_incomplete"',
+            '"final_snapshot_unstable"',
+            "finishTraceSession(\n                                session,",
+            "false",
+            '"trace_session_stopped"',
+            "true",
+        ),
+        "stable snapshot requirement before completed trace publication",
+    )
+
+    boundary_start = module.find(
+        "private static void traceAnnotationBoundary("
+    )
+    capture_trails_start = module.find(
+        "private static TraceTrailListCapture captureTraceTrailList(",
+        boundary_start,
+    )
+    if boundary_start < 0 or capture_trails_start < 0:
+        fail("could not isolate annotation-boundary trace collection")
+    boundary = module[boundary_start:capture_trails_start]
+    if "sha256(mark)" in boundary:
+        fail("annotation boundaries still hash the .mark file on the UI thread")
+    if "scheduleTraceMarkSnapshot(" not in boundary:
+        fail("annotation boundary snapshots do not use the background worker")
+    trail_capture = boundary.find(
+        "final TraceTrailListCapture fileTrails = captureTraceTrailList("
+    )
+    worker_submit = boundary.find("scheduleTraceWorkerTask(", trail_capture)
+    worker_run = boundary.find("public void run()", worker_submit)
+    trail_serialize = boundary.find("traceTrailList(fileTrails)", worker_run)
+    if not 0 <= trail_capture < worker_submit < worker_run < trail_serialize:
+        fail("annotation trail serialization is not confined to the trace worker")
+    require_markers(
+        boundary,
+        (
+            "traceLastSnapshotHash(session, mark)",
+            '"trace_stop".equals(boundary)',
+            '"markSha256"',
+            "markHash",
+        ),
+        "identity-aware annotation boundary hash and final boundary queueing",
+    )
+
+    trace_list_start = module.find(
+        "private static JSONObject traceTrailList(", capture_trails_start
+    )
+    if trace_list_start < 0:
+        fail("could not isolate immutable trace trail capture")
+    trail_capture_code = module[capture_trails_start:trace_list_start]
+    if "traceTrailFingerprint(" in trail_capture_code or "sha256Text(" in trail_capture_code:
+        fail("trail fingerprinting still runs while capturing hook-thread input")
+    if "traceValueDescription(" in trail_capture_code:
+        fail("trail auxiliary values are still serialized on the hook thread")
+    require_markers(
+        trail_capture_code,
+        (
+            'captureTraceValue(traceCall(trail, "get_pressures"))',
+            'captureTraceValue(traceCall(trail, "get_angles"))',
+            'captureTraceValue(traceCall(trail, "get_timestamp"))',
+            'captureTraceValue(traceCall(trail, "get_write_app_name"))',
+            'captureTraceRect(rrd == null ? null : traceCall(rrd, "getRect"))',
+            'captureTraceRect(traceCall(trail, "get_refresh_rect"))',
+            'captureTraceRect(traceCall(trail, "get_m_before_shift_rect"))',
+            'captureTraceRect(traceCall(trail, "get_m_after_shift_rect"))',
+            'captureTraceContours(traceCall(trail, "get_m_contours_src"))',
+        ),
+        "immutable auxiliary trail-value capture",
+    )
+
+    trace_trail_start = module.find(
+        "private static JSONObject traceTrail(", trace_list_start
+    )
+    if trace_trail_start < 0:
+        fail("could not isolate trace trail-list fingerprinting")
+    trace_list = module[trace_list_start:trace_trail_start]
+    require_markers(
+        trace_list,
+        (
+            "for (int index = 0; index < captured.trails.length; index++)",
+            "String fingerprint = traceTrailFingerprint(trail)",
+            "if (index < limit)",
+            "items.put(traceTrail(trail, index, fingerprint))",
+            "ordered.append(fingerprint).append(';')",
+            "Math.max(0, captured.trails.length - limit)",
+        ),
+        "complete trail fingerprint with capped details",
+    )
+
+    fingerprint_start = module.find(
+        "private static String traceTrailFingerprint(", trace_trail_start
+    )
+    point_description_start = module.find(
+        "private static String capturedPointDescription(", fingerprint_start
+    )
+    if fingerprint_start < 0 or point_description_start < 0:
+        fail("could not isolate complete trail fingerprint")
+    require_markers(
+        module[fingerprint_start:point_description_start],
+        (
+            ".append(trail.flagPenup).append('|')",
+            ".append(trail.flagSpecial).append('|')",
+            ".append(trail.layer).append('|')",
+            ".append(trail.recMod).append('|')",
+            ".append(trail.emrPointAxis).append('|')",
+            ".append(trail.trailType).append('|')",
+            ".append(trail.drawVersion).append('|')",
+            ".append(trail.recognTrailType).append('|')",
+            ".append(trail.rotation).append('|')",
+            ".append(trail.redrawWidth).append('|')",
+            ".append(trail.redrawHeight).append('|')",
+            ".append(trail.maxX).append('|')",
+            ".append(trail.maxY).append('|')",
+            ".append(traceValueDescription(trail.rrdRect)).append('|')",
+            ".append(traceValueDescription(trail.refreshRect)).append('|')",
+            ".append(traceValueDescription(trail.beforeShiftRect)).append('|')",
+            ".append(traceValueDescription(trail.afterShiftRect)).append('|')",
+            ".append(traceValueDescription(trail.contours)).append('|')",
+            ".append(traceValueDescription(trail.writeAppName)).append('|')",
+        ),
+        "complete production trail-identity fingerprint coverage",
+    )
+
+    hash_state_start = module.find(
+        "private static String traceLastSnapshotHash("
+    )
+    snapshot_schedule_start = module.find(
+        "private static void scheduleTraceWorkerTask(", hash_state_start
+    )
+    if hash_state_start < 0 or snapshot_schedule_start < 0:
+        fail("could not isolate identity-aware boundary hash state")
+    hash_state = module[hash_state_start:snapshot_schedule_start]
+    require_markers(
+        hash_state,
+        (
+            "FileIdentity.capture(mark)",
+            "expected.lastSnapshotIdentity.sameAs(currentIdentity)",
+            'return "pending"',
+        ),
+        "non-stale annotation boundary hash",
+    )
+
+    worker_start = module.find(
+        "private static void scheduleTraceWorkerTask(",
+        snapshot_schedule_start,
+    )
+    worker_end = module.find(
+        "private static void scheduleTraceMarkSnapshot(", worker_start
+    )
+    if worker_start < 0 or worker_end < 0:
+        fail("could not isolate trace worker admission logic")
+    require_markers(
+        module[worker_start:worker_end],
+        (
+            "final boolean allowWhenStopping",
+            "expected.stopping && !allowWhenStopping",
+        ),
+        "trace-stop boundary worker admission",
+    )
+
+    event_start = module.find(
+        "private static void traceEvent(\n        TraceSession expected"
+    )
+    event_queue_start = module.find(
+        "private static void queueTraceEventRecord(", event_start
+    )
+    trace_log_start = module.find(
+        "private static void traceLogMessage(", event_queue_start
+    )
+    trace_log_end = module.find(
+        "private static int traceCurrentDocumentPage(", trace_log_start
+    )
+    if min(event_start, event_queue_start, trace_log_start, trace_log_end) < 0:
+        fail("could not isolate serialized trace-event writer")
+    event_capture = module[event_start:event_queue_start]
+    require_markers(
+        event_capture,
+        (
+            'final String record = entry.toString() + "\\n"',
+            "queueTraceEventRecord(expected, event, record)",
+        ),
+        "immutable trace-event capture",
+    )
+    if "appendTraceRecord(" in event_capture or "FileOutputStream" in event_capture:
+        fail("traceEvent still performs filesystem I/O on its caller thread")
+    require_markers(
+        module[event_queue_start:trace_log_start],
+        (
+            "expected.eventExecutor.execute(",
+            "appendTraceRecord(expected.eventFile, record)",
+            "expected.eventWriteFailure",
+        ),
+        "serialized background trace-event writer",
+    )
+    require_markers(
+        module[trace_log_start:trace_log_end],
+        ("traceEvent(expected, null, \"module_log\"",),
+        "module-log event delegation",
+    )
+    require_markers(
+        module,
+        (
+            "final ScheduledExecutorService eventExecutor;",
+            '"SNSpreadTraceEvent-" + id',
+        ),
+        "per-session trace-event executor",
+    )
+
+    require_markers(
+        trace_script,
+        (
+            "[ValidateSet('Start', 'Checkpoint', 'Stop', 'Status')]",
+            "com.techrebbe.supernote.spreadprobe.TRACE_CONTROL",
+            "SupernoteNativeSpreadTrace",
+            "screencap -p",
+            "Invoke-Adb pull",
+            "Compress-Archive",
+            "module-logcat.txt",
+            "summary.md",
+            "Write-TraceSummary",
+            "function Wait-TraceFinalization",
+            "function Reconcile-AbandonedTracePointer",
+            "[string]$CurrentAction",
+            "pidof '$documentPackage'",
+            "grep -Fqx '$session'",
+            "__TRACE_ABANDONED_REMOVED__",
+            "$script:recoveredAbandonedTraceSession = $session",
+            "Status retained active.txt",
+            "Reconcile-AbandonedTracePointer -CurrentAction $Action",
+            "Stop did not pull the preceding completed session.",
+            "Read-IncompleteTraceState",
+            "Read-RemotePointer -Name incomplete",
+            "stable final annotation snapshot",
+            "Read-PublicationFailedTraceState",
+            "Read-RemotePointer `\n                    -Name publication-failed",
+            "trustworthy completion pointer",
+            "__TRACE_FINALIZED__",
+            "Timed out waiting for trace",
+        ),
+        "Native Spread trace collection script",
+    )
+
+    helper_reconcile = trace_script.find(
+        "function Reconcile-AbandonedTracePointer"
+    )
+    helper_wait = trace_script.find(
+        "function Wait-TraceFinalization", helper_reconcile
+    )
+    action_switch = trace_script.find("switch ($Action)")
+    helper_call = trace_script.rfind(
+        "Reconcile-AbandonedTracePointer", 0, action_switch
+    )
+    if not 0 <= helper_reconcile < helper_wait < helper_call < action_switch:
+        fail("trace helper does not reconcile abandoned pointers before actions")
+    helper_reconcile_code = trace_script[helper_reconcile:helper_wait]
+    recovered_check = helper_reconcile_code.find(
+        "__TRACE_ABANDONED_REMOVED__"
+    )
+    recovered_identity = helper_reconcile_code.find(
+        "$script:recoveredAbandonedTraceSession = $session",
+        recovered_check,
+    )
+    if not 0 <= recovered_check < recovered_identity:
+        fail("trace helper does not retain the recovered session identity")
+
+    invalid_status_retention = helper_reconcile_code.find(
+        "if ($CurrentAction -eq 'Status')"
+    )
+    status_retention = helper_reconcile_code.find(
+        "if ($CurrentAction -eq 'Status')",
+        invalid_status_retention + 1,
+    )
+    pointer_removal = helper_reconcile_code.find(
+        '$result = Invoke-Adb shell (', status_retention
+    )
+    if not (
+        0 <= invalid_status_retention < status_retention < pointer_removal
+    ):
+        fail("trace Status can consume an abandoned active pointer")
+
+    stop_trace = trace_script.find("'Stop' {")
+    status_trace = trace_script.find("'Status' {", stop_trace)
+    if stop_trace < 0 or status_trace < 0:
+        fail("could not isolate Native Spread trace Stop action")
+    stop_action = trace_script[stop_trace:status_trace]
+    status_action = trace_script[status_trace:]
+    abandoned_guard = stop_action.find(
+        "if ($recoveredAbandonedTraceSession)"
+    )
+    publication_failed_guard = stop_action.find(
+        "if ($publicationFailedTraceSession)"
+    )
+    completed_fallback = stop_action.find("Read-RemotePointer -Name last")
+    incomplete_guard = stop_action.find("if ($incompleteTraceSession)")
+    wait_for_finalization = stop_action.find(
+        "Wait-TraceFinalization -Session $session"
+    )
+    pull_bundle = stop_action.find('Invoke-Adb pull "$remoteRoot/$session"')
+    if not (
+        0 <= abandoned_guard < publication_failed_guard
+        < incomplete_guard < completed_fallback < pull_bundle
+    ):
+        fail("trace Stop can substitute a prior session after crash recovery")
+    if not 0 <= wait_for_finalization < pull_bundle:
+        fail("trace bundle can be pulled before asynchronous finalization")
+    if "Start-Sleep -Milliseconds 500" in stop_action:
+        fail("trace Stop still relies on a fixed finalization delay")
+    status_abandoned_guard = status_action.find(
+        "if ($recoveredAbandonedTraceSession)"
+    )
+    status_reads_active = status_action.find(
+        "Read-RemotePointer -Name active"
+    )
+    if not 0 <= status_abandoned_guard < status_reads_active:
+        fail("trace Status can report an abandoned trace as recording")
+
+    wait_start = trace_script.find("function Wait-TraceFinalization")
+    safe_label_start = trace_script.find("function Get-SafeLabel", wait_start)
+    if wait_start < 0 or safe_label_start < 0:
+        fail("could not isolate trace finalization polling")
+    wait_action = trace_script[wait_start:safe_label_start]
+    publication_failed_result = wait_action.find(
+        "Read-RemotePointer `\n                    -Name publication-failed"
+    )
+    incomplete_result = wait_action.find(
+        "Read-RemotePointer -Name incomplete"
+    )
+    completed_result = wait_action.find("Read-RemotePointer -Name last")
+    if not (
+        0 <= publication_failed_result < incomplete_result < completed_result
+    ):
+        fail("trace helper can publish completion before checking incomplete.txt")
+
+    if 'android:versionCode="116"' not in manifest:
+        fail("companion manifest must use versionCode 116")
+    if 'android:versionName="0.0.116"' not in manifest:
+        fail("companion manifest must use versionName 0.0.116")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

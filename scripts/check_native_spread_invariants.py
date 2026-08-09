@@ -49,7 +49,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 115L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 116L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -1155,6 +1155,7 @@ def check(repo_root: Path) -> None:
             "boolean completed = requestedCompleted && eventLogComplete",
             'new File(\n                    session.rootDirectory,\n                    "incomplete.txt"',
             "if (completed)",
+            "if (incomplete.isFile() && !incomplete.delete())",
             "writeTraceText(incomplete, session.id",
             '"publication-failed.txt"',
             "preserveTracePublicationFailure(",
@@ -1594,10 +1595,10 @@ def check(repo_root: Path) -> None:
     ):
         fail("trace helper can publish completion before checking incomplete.txt")
 
-    if 'android:versionCode="115"' not in manifest:
-        fail("companion manifest must use versionCode 115")
-    if 'android:versionName="0.0.115"' not in manifest:
-        fail("companion manifest must use versionName 0.0.115")
+    if 'android:versionCode="116"' not in manifest:
+        fail("companion manifest must use versionCode 116")
+    if 'android:versionName="0.0.116"' not in manifest:
+        fail("companion manifest must use versionName 0.0.116")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

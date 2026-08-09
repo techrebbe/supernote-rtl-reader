@@ -111,7 +111,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int TRACE_FINAL_SNAPSHOT_ATTEMPTS = 5;
     private static final long TRACE_FINAL_SNAPSHOT_RETRY_MS = 120L;
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 115L;
+    private static final long MODULE_VERSION_CODE = 116L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -3224,8 +3224,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         new File(session.rootDirectory, "last.txt"),
                         session.id + "\n"
                     );
-                    if (incomplete.isFile()) {
-                        incomplete.delete();
+                    if (incomplete.isFile() && !incomplete.delete()) {
+                        throw new IllegalStateException(
+                            "could not clear " + incomplete
+                        );
                     }
                 } else {
                     writeTraceText(incomplete, session.id + "\n");

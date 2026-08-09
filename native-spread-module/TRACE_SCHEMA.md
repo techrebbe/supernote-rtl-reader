@@ -33,6 +33,8 @@ to a per-session serialized writer. Finalization drains this writer before
 publishing `last.txt` or `incomplete.txt`. If pointer publication fails,
 `publication-failed.txt` preserves the session identity, `active.txt` cleanup is
 attempted in `finally`, and the desktop helper refuses any older `last.txt`.
+An undeletable stale `incomplete.txt` is itself a publication failure and cannot
+silently override a newer completed session.
 
 Every stateful event may include:
 

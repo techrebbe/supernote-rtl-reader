@@ -264,7 +264,7 @@ Annotation-trace snapshots are now debounced on a serialized background worker,
 and ordered trail fingerprints cover every trail while detailed JSON remains
 capped at 256 entries.
 
-Native Spread v0.0.114 keeps annotation tracing from perturbing pen timing on
+Native Spread v0.0.115 keeps annotation tracing from perturbing pen timing on
 trail-heavy pages. Hook threads now capture immutable scalar and point arrays;
 the trace worker performs JSON serialization and SHA-256 fingerprinting. A
 boundary reports its `.mark` hash as `pending` whenever the live file identity
@@ -296,6 +296,11 @@ identity checks before they can complete a trace.
 Successful snapshot events are emitted only after the final source re-stat and
 in-memory acceptance. Rejected candidates can therefore never publish a
 `mark_snapshot` entry that names a deleted snapshot file.
+All event records are now captured as immutable JSON on the calling thread and
+written by a per-session serialized background writer. Finalization drains that
+writer before publishing a completion pointer. If pointer publication fails,
+`active.txt` is cleaned up in `finally` and `publication-failed.txt` preserves
+the exact failed session so the helper cannot fall back to an older trace.
 
 The active settled-ink compositor now clips its transformed bitmap to the
 same visible page-slot bounds used by Native Fill PDF and canonical-ink

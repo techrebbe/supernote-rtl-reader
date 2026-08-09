@@ -49,7 +49,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 114L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 115L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -1119,6 +1119,7 @@ def check(repo_root: Path) -> None:
             "failedObserver.stopWatching()",
             "started.pendingSnapshot.cancel(false)",
             "started.snapshotExecutor.shutdownNow()",
+            "started.eventExecutor.shutdownNow()",
             'new File(\n                        started.rootDirectory,\n                        "active.txt"',
             "active.isFile() && !active.delete()",
         ),
@@ -1140,20 +1141,39 @@ def check(repo_root: Path) -> None:
     publish_last = finish_trace.find(
         'new File(session.rootDirectory, "last.txt")'
     )
+    cleanup_finally = finish_trace.find("} finally {", publish_last)
     remove_active = finish_trace.find(
-        'new File(session.rootDirectory, "active.txt")'
+        "if (active.isFile() && !active.delete())", cleanup_finally
     )
-    if not 0 <= publish_last < remove_active:
+    if not 0 <= publish_last < cleanup_finally < remove_active:
         fail("last.txt is not published before active.txt is removed")
     require_markers(
         finish_trace,
         (
-            "boolean completed",
+            "boolean requestedCompleted",
+            "boolean eventLogComplete = drainTraceEventWriter(session)",
+            "boolean completed = requestedCompleted && eventLogComplete",
             'new File(\n                    session.rootDirectory,\n                    "incomplete.txt"',
             "if (completed)",
             "writeTraceText(incomplete, session.id",
+            '"publication-failed.txt"',
+            "preserveTracePublicationFailure(",
+            "} finally {",
         ),
         "completed-versus-incomplete trace pointer publication",
+    )
+    require_markers(
+        finish_trace,
+        (
+            "private static boolean drainTraceEventWriter(",
+            "session.eventExecutor.shutdown()",
+            "session.eventExecutor.awaitTermination(",
+            "session.eventWriteFailure",
+            "private static void preserveTracePublicationFailure(",
+            "active.renameTo(failed)",
+            "writeTraceText(failed, session.id",
+        ),
+        "event-writer drain and explicit publication-failure state",
     )
 
     stable_final_start = module.find(
@@ -1428,6 +1448,54 @@ def check(repo_root: Path) -> None:
         "trace-stop boundary worker admission",
     )
 
+    event_start = module.find(
+        "private static void traceEvent(\n        TraceSession expected"
+    )
+    event_queue_start = module.find(
+        "private static void queueTraceEventRecord(", event_start
+    )
+    trace_log_start = module.find(
+        "private static void traceLogMessage(", event_queue_start
+    )
+    trace_log_end = module.find(
+        "private static int traceCurrentDocumentPage(", trace_log_start
+    )
+    if min(event_start, event_queue_start, trace_log_start, trace_log_end) < 0:
+        fail("could not isolate serialized trace-event writer")
+    event_capture = module[event_start:event_queue_start]
+    require_markers(
+        event_capture,
+        (
+            'final String record = entry.toString() + "\\n"',
+            "queueTraceEventRecord(expected, event, record)",
+        ),
+        "immutable trace-event capture",
+    )
+    if "appendTraceRecord(" in event_capture or "FileOutputStream" in event_capture:
+        fail("traceEvent still performs filesystem I/O on its caller thread")
+    require_markers(
+        module[event_queue_start:trace_log_start],
+        (
+            "expected.eventExecutor.execute(",
+            "appendTraceRecord(expected.eventFile, record)",
+            "expected.eventWriteFailure",
+        ),
+        "serialized background trace-event writer",
+    )
+    require_markers(
+        module[trace_log_start:trace_log_end],
+        ("traceEvent(expected, null, \"module_log\"",),
+        "module-log event delegation",
+    )
+    require_markers(
+        module,
+        (
+            "final ScheduledExecutorService eventExecutor;",
+            '"SNSpreadTraceEvent-" + id',
+        ),
+        "per-session trace-event executor",
+    )
+
     require_markers(
         trace_script,
         (
@@ -1450,6 +1518,9 @@ def check(repo_root: Path) -> None:
             "Read-IncompleteTraceState",
             "Read-RemotePointer -Name incomplete",
             "stable final annotation snapshot",
+            "Read-PublicationFailedTraceState",
+            "Read-RemotePointer `\n                    -Name publication-failed",
+            "trustworthy completion pointer",
             "__TRACE_FINALIZED__",
             "Timed out waiting for trace",
         ),
@@ -1487,13 +1558,19 @@ def check(repo_root: Path) -> None:
     abandoned_guard = stop_action.find(
         "if ($recoveredAbandonedTraceSession)"
     )
+    publication_failed_guard = stop_action.find(
+        "if ($publicationFailedTraceSession)"
+    )
     completed_fallback = stop_action.find("Read-RemotePointer -Name last")
     incomplete_guard = stop_action.find("if ($incompleteTraceSession)")
     wait_for_finalization = stop_action.find(
         "Wait-TraceFinalization -Session $session"
     )
     pull_bundle = stop_action.find('Invoke-Adb pull "$remoteRoot/$session"')
-    if not 0 <= abandoned_guard < incomplete_guard < completed_fallback < pull_bundle:
+    if not (
+        0 <= abandoned_guard < publication_failed_guard
+        < incomplete_guard < completed_fallback < pull_bundle
+    ):
         fail("trace Stop can substitute a prior session after crash recovery")
     if not 0 <= wait_for_finalization < pull_bundle:
         fail("trace bundle can be pulled before asynchronous finalization")
@@ -1505,17 +1582,22 @@ def check(repo_root: Path) -> None:
     if wait_start < 0 or safe_label_start < 0:
         fail("could not isolate trace finalization polling")
     wait_action = trace_script[wait_start:safe_label_start]
+    publication_failed_result = wait_action.find(
+        "Read-RemotePointer `\n                    -Name publication-failed"
+    )
     incomplete_result = wait_action.find(
         "Read-RemotePointer -Name incomplete"
     )
     completed_result = wait_action.find("Read-RemotePointer -Name last")
-    if not 0 <= incomplete_result < completed_result:
+    if not (
+        0 <= publication_failed_result < incomplete_result < completed_result
+    ):
         fail("trace helper can publish completion before checking incomplete.txt")
 
-    if 'android:versionCode="114"' not in manifest:
-        fail("companion manifest must use versionCode 114")
-    if 'android:versionName="0.0.114"' not in manifest:
-        fail("companion manifest must use versionName 0.0.114")
+    if 'android:versionCode="115"' not in manifest:
+        fail("companion manifest must use versionCode 115")
+    if 'android:versionName="0.0.115"' not in manifest:
+        fail("companion manifest must use versionName 0.0.115")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

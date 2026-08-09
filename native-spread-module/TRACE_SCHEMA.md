@@ -28,6 +28,11 @@ they can complete finalization.
 Successful snapshot events follow final source verification and in-memory
 acceptance. Rejected candidates therefore cannot publish a `mark_snapshot`
 entry naming a deleted snapshot.
+Event JSON is captured on the observed caller as an immutable string and queued
+to a per-session serialized writer. Finalization drains this writer before
+publishing `last.txt` or `incomplete.txt`. If pointer publication fails,
+`publication-failed.txt` preserves the session identity, `active.txt` cleanup is
+attempted in `finally`, and the desktop helper refuses any older `last.txt`.
 
 Every stateful event may include:
 

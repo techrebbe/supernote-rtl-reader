@@ -111,7 +111,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int TRACE_FINAL_SNAPSHOT_ATTEMPTS = 5;
     private static final long TRACE_FINAL_SNAPSHOT_RETRY_MS = 120L;
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 114L;
+    private static final long MODULE_VERSION_CODE = 115L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -280,9 +280,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         FileIdentity lastSnapshotIdentity;
         FileObserver markObserver;
         final ScheduledExecutorService snapshotExecutor;
+        final ScheduledExecutorService eventExecutor;
         ScheduledFuture<?> pendingSnapshot;
         long snapshotGeneration;
         boolean stopping;
+        volatile String eventWriteFailure;
 
         TraceSession(
             String id,
@@ -311,6 +313,19 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         Thread thread = new Thread(
                             runnable,
                             "SNSpreadTraceSnapshot-" + id
+                        );
+                        thread.setDaemon(true);
+                        return thread;
+                    }
+                }
+            );
+            this.eventExecutor = Executors.newSingleThreadScheduledExecutor(
+                new ThreadFactory() {
+                    @Override
+                    public Thread newThread(Runnable runnable) {
+                        Thread thread = new Thread(
+                            runnable,
+                            "SNSpreadTraceEvent-" + id
                         );
                         thread.setDaemon(true);
                         return thread;
@@ -2996,6 +3011,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             }
             if (started != null) {
                 started.snapshotExecutor.shutdownNow();
+                started.eventExecutor.shutdownNow();
                 try {
                     File active = new File(
                         started.rootDirectory,
@@ -3180,7 +3196,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         TraceSession session,
         Activity activity,
         String reason,
-        boolean completed
+        boolean requestedCompleted
     ) {
         boolean owned;
         synchronized (TRACE_LOCK) {
@@ -3189,11 +3205,19 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 traceSession = null;
             }
         }
+        boolean eventLogComplete = drainTraceEventWriter(session);
+        boolean completed = requestedCompleted && eventLogComplete;
+        Throwable publicationFailure = null;
         if (owned) {
+            File active = new File(session.rootDirectory, "active.txt");
             try {
                 File incomplete = new File(
                     session.rootDirectory,
                     "incomplete.txt"
+                );
+                File failed = new File(
+                    session.rootDirectory,
+                    "publication-failed.txt"
                 );
                 if (completed) {
                     writeTraceText(
@@ -3206,11 +3230,33 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 } else {
                     writeTraceText(incomplete, session.id + "\n");
                 }
-                File active = new File(session.rootDirectory, "active.txt");
-                if (active.isFile()) {
-                    active.delete();
+                if (failed.isFile() && !failed.delete()) {
+                    throw new IllegalStateException(
+                        "could not clear " + failed
+                    );
                 }
-            } catch (Throwable ignored) {
+            } catch (Throwable throwable) {
+                publicationFailure = throwable;
+                preserveTracePublicationFailure(
+                    session,
+                    active,
+                    throwable
+                );
+            } finally {
+                if (active.isFile() && !active.delete()) {
+                    IllegalStateException cleanupFailure =
+                        new IllegalStateException(
+                            "could not clear " + active
+                        );
+                    if (publicationFailure == null) {
+                        publicationFailure = cleanupFailure;
+                    }
+                    preserveTracePublicationFailure(
+                        session,
+                        active,
+                        cleanupFailure
+                    );
+                }
             }
         }
         session.snapshotExecutor.shutdown();
@@ -3218,7 +3264,89 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         TRACE_TRANSACTION_IDS.remove(activity);
         log("trace_session_stopped id=" + session.id
             + " reason=" + reason
-            + " completed=" + completed);
+            + " completed=" + completed
+            + " eventLogComplete=" + eventLogComplete
+            + " publicationFailure=" + String.valueOf(publicationFailure));
+    }
+
+    private static boolean drainTraceEventWriter(TraceSession session) {
+        session.eventExecutor.shutdown();
+        boolean terminated = false;
+        try {
+            terminated = session.eventExecutor.awaitTermination(
+                30L,
+                TimeUnit.SECONDS
+            );
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            session.eventWriteFailure = String.valueOf(interrupted);
+        }
+        if (!terminated) {
+            session.eventExecutor.shutdownNow();
+            if (session.eventWriteFailure == null) {
+                session.eventWriteFailure = "event_writer_timeout";
+            }
+        }
+        if (session.eventWriteFailure != null) {
+            Log.e(
+                TAG,
+                "trace_event_writer_incomplete id=" + session.id
+                    + " error=" + session.eventWriteFailure
+            );
+            return false;
+        }
+        return terminated;
+    }
+
+    private static void preserveTracePublicationFailure(
+        TraceSession session,
+        File active,
+        Throwable failure
+    ) {
+        File failed = new File(
+            session.rootDirectory,
+            "publication-failed.txt"
+        );
+        boolean preserved = false;
+        try {
+            if (failed.isFile() && !failed.delete()) {
+                Log.e(TAG, "trace_publication_old_failure_delete_failed");
+            }
+            if (active.isFile()) {
+                preserved = active.renameTo(failed);
+            }
+            if (!preserved) {
+                writeTraceText(failed, session.id + "\n");
+                preserved = true;
+            }
+        } catch (Throwable pointerFailure) {
+            Log.e(
+                TAG,
+                "trace_publication_failure_pointer_failed id=" + session.id,
+                pointerFailure
+            );
+        }
+        try {
+            writeTraceText(
+                new File(
+                    session.sessionDirectory,
+                    "publication-failure.txt"
+                ),
+                String.valueOf(failure) + "\n"
+            );
+        } catch (Throwable detailFailure) {
+            Log.e(
+                TAG,
+                "trace_publication_failure_detail_failed id=" + session.id,
+                detailFailure
+            );
+        }
+        Log.e(
+            TAG,
+            "trace_publication_failed id=" + session.id
+                + " preserved=" + preserved,
+            failure
+        );
     }
 
     private static void startTraceMarkObserver(final TraceSession session) {
@@ -4390,36 +4518,55 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         entry.put(key, value == null ? JSONObject.NULL : value);
                     }
                 }
-                appendTraceJson(expected.eventFile, entry);
+                final String record = entry.toString() + "\n";
+                queueTraceEventRecord(expected, event, record);
             } catch (Throwable throwable) {
                 Log.e(TAG, "trace_event_failed event=" + event, throwable);
             }
         }
     }
 
-    private static void traceLogMessage(String message) {
-        synchronized (TRACE_LOCK) {
-            TraceSession session = traceSession;
-            if (session == null) {
-                return;
-            }
-            try {
-                JSONObject entry = new JSONObject();
-                entry.put("schema", TRACE_SCHEMA_VERSION);
-                entry.put("session", session.id);
-                entry.put("seq", ++session.sequence);
-                entry.put("wallMs", System.currentTimeMillis());
-                entry.put("uptimeMs", SystemClock.uptimeMillis());
-                entry.put("pid", Process.myPid());
-                entry.put("tid", Process.myTid());
-                entry.put("thread", Thread.currentThread().getName());
-                entry.put("event", "module_log");
-                entry.put("message", message);
-                appendTraceJson(session.eventFile, entry);
-            } catch (Throwable throwable) {
-                Log.e(TAG, "trace_log_failed", throwable);
-            }
+    private static void queueTraceEventRecord(
+        final TraceSession expected,
+        final String event,
+        final String record
+    ) {
+        try {
+            expected.eventExecutor.execute(
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            appendTraceRecord(expected.eventFile, record);
+                        } catch (Throwable throwable) {
+                            expected.eventWriteFailure = String.valueOf(
+                                throwable
+                            );
+                            Log.e(
+                                TAG,
+                                "trace_event_write_failed event=" + event,
+                                throwable
+                            );
+                        }
+                    }
+                }
+            );
+        } catch (Throwable throwable) {
+            expected.eventWriteFailure = String.valueOf(throwable);
+            Log.e(
+                TAG,
+                "trace_event_queue_failed event=" + event,
+                throwable
+            );
         }
+    }
+
+    private static void traceLogMessage(String message) {
+        TraceSession expected = traceSession;
+        if (expected == null) {
+            return;
+        }
+        traceEvent(expected, null, "module_log", "message", message);
     }
 
     private static int traceCurrentDocumentPage(Activity activity) {
@@ -4442,9 +4589,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
     }
 
-    private static void appendTraceJson(File file, JSONObject entry)
+    private static void appendTraceRecord(File file, String record)
         throws Exception {
-        byte[] bytes = (entry.toString() + "\n").getBytes("UTF-8");
+        byte[] bytes = record.getBytes("UTF-8");
         try (FileOutputStream output = new FileOutputStream(file, true)) {
             output.write(bytes);
             output.flush();

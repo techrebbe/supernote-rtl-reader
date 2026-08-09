@@ -34,6 +34,7 @@ $documentPackage = 'com.supernote.document'
 $remoteRoot = '/storage/emulated/0/Download/SupernoteNativeSpreadTrace'
 $recoveredAbandonedTraceSession = $null
 $incompleteTraceSession = $null
+$publicationFailedTraceSession = $null
 
 if ($Adb -eq 'adb' -and -not (Get-Command adb -ErrorAction SilentlyContinue)) {
     $sdkAdb = Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe'
@@ -106,10 +107,35 @@ function Send-TraceControl {
 }
 
 function Read-RemotePointer {
-    param([ValidateSet('active', 'last', 'incomplete')][string]$Name)
+    param(
+        [ValidateSet(
+            'active',
+            'last',
+            'incomplete',
+            'publication-failed'
+        )]
+        [string]$Name
+    )
 
     $value = Invoke-Adb shell "cat '$remoteRoot/$Name.txt'"
     return ($value | Out-String).Trim()
+}
+
+function Read-PublicationFailedTraceState {
+    $script:publicationFailedTraceSession = $null
+    try {
+        $session = Read-RemotePointer -Name publication-failed
+    } catch {
+        return
+    }
+    if ($session -match '^[A-Za-z0-9._-]+$') {
+        $script:publicationFailedTraceSession = $session
+    } else {
+        Invoke-Adb shell (
+            "rm -f '$remoteRoot/publication-failed.txt'"
+        ) | Out-Null
+        Write-Warning 'Removed an invalid trace publication-failure pointer.'
+    }
 }
 
 function Read-IncompleteTraceState {
@@ -192,6 +218,21 @@ function Wait-TraceFinalization {
         )
         $activeSession = ($state | Out-String).Trim()
         if ($activeSession -eq '__TRACE_FINALIZED__') {
+            try {
+                $publicationFailed = Read-RemotePointer `
+                    -Name publication-failed
+                if ($publicationFailed -eq $Session) {
+                    throw (
+                        "Trace '$Session' finalized its worker but could not " +
+                        'publish a trustworthy completion pointer. Its ' +
+                        "partial directory remains at '$remoteRoot/$Session'."
+                    )
+                }
+            } catch {
+                if ($_.Exception.Message -match 'trustworthy completion') {
+                    throw
+                }
+            }
             try {
                 $incomplete = Read-RemotePointer -Name incomplete
                 if ($incomplete -eq $Session) {
@@ -354,6 +395,7 @@ function Write-TraceSummary {
 
 Assert-DeviceConnected
 Reconcile-AbandonedTracePointer
+Read-PublicationFailedTraceState
 Read-IncompleteTraceState
 
 switch ($Action) {
@@ -397,6 +439,15 @@ switch ($Action) {
         try {
             $session = Read-RemotePointer -Name active
         } catch {
+            if ($publicationFailedTraceSession) {
+                throw (
+                    "Trace '$publicationFailedTraceSession' could not " +
+                    'publish a trustworthy completion pointer. Its partial ' +
+                    "directory remains at '$remoteRoot/" +
+                    "$publicationFailedTraceSession'. Stop did not pull the " +
+                    'preceding completed session.'
+                )
+            }
             if ($incompleteTraceSession) {
                 throw (
                     "Trace '$incompleteTraceSession' could not obtain a " +
@@ -449,6 +500,13 @@ switch ($Action) {
             $session = Read-RemotePointer -Name active
             Write-Host "Recording: $session"
         } catch {
+            if ($publicationFailedTraceSession) {
+                Write-Host (
+                    'No active trace. Publication failed for session: ' +
+                    $publicationFailedTraceSession
+                )
+                return
+            }
             if ($incompleteTraceSession) {
                 Write-Host (
                     'No active trace. Incomplete session: ' +

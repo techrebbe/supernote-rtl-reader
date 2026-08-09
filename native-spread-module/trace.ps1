@@ -7,12 +7,27 @@ param(
 
     [string]$Adb = 'adb',
 
-    [string]$Destination = $(
-        Join-Path $PSScriptRoot 'trace-bundles'
-    )
+    [string]$Serial,
+
+    [string]$Destination
 )
 
 $ErrorActionPreference = 'Stop'
+
+if (-not $Destination) {
+    $downloads = Join-Path (
+        [Environment]::GetFolderPath('UserProfile')
+    ) 'Downloads'
+    if (Test-Path -LiteralPath $downloads) {
+        $Destination = Join-Path $downloads 'SupernoteNativeSpreadTraceBundles'
+    } else {
+        $Destination = Join-Path $PSScriptRoot 'trace-bundles'
+    }
+}
+
+if (-not $Serial -and $env:ANDROID_SERIAL) {
+    $Serial = $env:ANDROID_SERIAL
+}
 
 $traceAction = 'com.techrebbe.supernote.spreadprobe.TRACE_CONTROL'
 $documentPackage = 'com.supernote.document'
@@ -28,11 +43,42 @@ if ($Adb -eq 'adb' -and -not (Get-Command adb -ErrorAction SilentlyContinue)) {
 function Invoke-Adb {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
 
-    $output = & $Adb @Arguments 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "adb failed ($LASTEXITCODE): $($output -join [Environment]::NewLine)"
+    $adbArguments = @()
+    if ($Serial) {
+        $adbArguments += @('-s', $Serial)
     }
-    return $output
+    $adbArguments += $Arguments
+
+    $stderrFile = [IO.Path]::GetTempFileName()
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = @(& $Adb @adbArguments 2> $stderrFile)
+        $exitCode = $LASTEXITCODE
+        $stderrOutput = @(
+            Get-Content -LiteralPath $stderrFile -ErrorAction SilentlyContinue
+        )
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+        Remove-Item -LiteralPath $stderrFile -Force -ErrorAction SilentlyContinue
+    }
+    $normalizedOutput = @(
+        foreach ($item in $output) {
+            if ($item -is [System.Management.Automation.ErrorRecord]) {
+                $item.Exception.Message
+            } else {
+                [string]$item
+            }
+        }
+    )
+    $combinedOutput = @($normalizedOutput) + @($stderrOutput)
+    if ($exitCode -ne 0) {
+        throw "adb failed ($exitCode): $($combinedOutput -join [Environment]::NewLine)"
+    }
+    # adb reports successful pull progress on stderr. Preserve it for failures,
+    # but do not replay it as a PowerShell NativeCommandError on a successful
+    # trace collection.
+    return $normalizedOutput
 }
 
 function Assert-DeviceConnected {
@@ -84,8 +130,8 @@ function Save-RemoteScreenshot {
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
     $remoteDirectory = "$remoteRoot/$Session/screenshots"
     $remoteFile = "$remoteDirectory/$stamp-$safeLabel.png"
-    Invoke-Adb shell mkdir -p $remoteDirectory | Out-Null
-    Invoke-Adb shell screencap -p $remoteFile | Out-Null
+    Invoke-Adb shell "mkdir -p '$remoteDirectory'" | Out-Null
+    Invoke-Adb shell "screencap -p '$remoteFile'" | Out-Null
     Write-Host "Screenshot: $remoteFile"
 }
 
@@ -203,7 +249,11 @@ switch ($Action) {
         try {
             $session = Read-RemotePointer -Name active
         } catch {
-            $diagnostic = Invoke-Adb logcat -v raw -d -s 'SN_SPREAD_PROBE:I' '*:S'
+            $logcatArguments = @(
+                'logcat', '-v', 'raw', '-d', '-s',
+                'SN_SPREAD_PROBE:I', '*:S'
+            )
+            $diagnostic = Invoke-Adb @logcatArguments
             throw "Trace did not start. Open an editable Native Spread document first.`n$($diagnostic -join [Environment]::NewLine)"
         }
         Write-Host "Recording Native Spread annotation trace: $session"
@@ -244,7 +294,11 @@ switch ($Action) {
             throw "Refusing to replace an existing trace bundle: $localSession"
         }
         Invoke-Adb pull "$remoteRoot/$session" $Destination | Out-Host
-        Invoke-Adb logcat -v threadtime -d -s 'SN_SPREAD_PROBE:I' '*:S' |
+        $logcatArguments = @(
+            'logcat', '-v', 'threadtime', '-d', '-s',
+            'SN_SPREAD_PROBE:I', '*:S'
+        )
+        Invoke-Adb @logcatArguments |
             Set-Content -LiteralPath (Join-Path $localSession 'module-logcat.txt')
         Write-TraceSummary -SessionDirectory $localSession
 

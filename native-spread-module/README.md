@@ -163,6 +163,13 @@ and display composition. It watches the active `.mark` file and copies a new
 snapshot only when its SHA-256 changes. Snapshots are capped at 64 MiB. No
 annotation or rendering decision is changed by enabling the trace.
 
+v0.0.99 reloads the active mark page after an eraser transaction is explicitly
+saved. The native committed-ink callback can otherwise render from the older
+canonical file before `receiveTrials()` flushes the erase, leaving the erased
+stroke visible until a page-focus change even though persistence is correct.
+The save-before-reload ordering now makes the settled active-page view match the
+updated `.mark` immediately.
+
 This is firmware-specific experimental software for a rooted device. Back up
 documents and `.mark` files before testing a new firmware or module revision.
 
@@ -188,7 +195,7 @@ The signed APK is written to `build/artifact/`.
 
 Install the APK, enable **Supernote Native Spread Probe** in LSPosed, scope it
 only to `com.supernote.document`, and restart the document reader. Supernote
-RTL Reader v0.4.12 or newer and Native Spread v0.0.98 or newer are required for
+RTL Reader v0.4.12 or newer and Native Spread v0.0.99 or newer are required for
 protected editable mode. Its
 recovery manifest binds the backup to the PDF's full SHA-256 because
 Supernote changes the PDF modification time when the document activity
@@ -202,6 +209,10 @@ From this directory, run:
 ```powershell
 .\trace.ps1 -Action Start -Label portrait-control
 ```
+
+When more than one Android device is connected, pin every command to the
+Supernote serial, for example `-Serial SN078C10015092`. The script also honors
+the standard `ANDROID_SERIAL` environment variable.
 
 Perform one tightly scoped operation. Record named checkpoints after the ink
 settles or after a page turn:
@@ -218,7 +229,8 @@ Stop and pull the complete bundle:
 ```
 
 The collector places a session directory and ZIP under
-`native-spread-module/trace-bundles/`. Each bundle contains `events.jsonl`,
+`Downloads/SupernoteNativeSpreadTraceBundles/` by default. Pass `-Destination`
+to choose another short local path. Each bundle contains `events.jsonl`,
 session metadata, changed `.mark` snapshots, checkpoint screenshots, and the
 matching `SN_SPREAD_PROBE` logcat capture. Treat the bundle as private document
 data. Use the same short operation once in portrait native mode and once in

@@ -256,8 +256,8 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 
 ## v0.4.12 native spread appearance and inactive-page editing
 
-- [x] Native Spread v0.0.98 compiles and the packaged, handshake, and plug-in
-  compatibility versions all report 98.
+- [x] Native Spread v0.0.99 compiles and the packaged, handshake, and plug-in
+  compatibility versions all report 99.
 - [x] Native Spread v0.0.84: rotate an open spread to portrait and confirm the
   current page immediately uses the normal native-reader portrait size without
   turning away and back.
@@ -279,6 +279,11 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   snapshots, and `module-logcat.txt`.
 - [ ] Stop tracing and repeat ordinary writing with no active session. No trace
   files grow and annotation behavior remains unchanged.
+- [x] On the active spread page, stroke-erase one saved line. The line disappears
+  as soon as the eraser settles, without changing page focus; the trace records
+  the canonical save before `active_eraser_canonical_reload`.
+- [x] Activate the other page and return. The erased line remains absent and all
+  unrelated trails on both pages remain visible.
 - [x] Automated invariants cover the divider and sizing controls, visible-page
   clipping, and the full-page annotation transform.
 - [ ] **Fit page + Divider On** matches the v0.0.81 layout and annotation

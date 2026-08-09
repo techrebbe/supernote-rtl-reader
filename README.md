@@ -250,6 +250,13 @@ collector produces one ZIP suitable for comparing ordinary portrait behavior
 with the same operation in a landscape spread. Trace data can contain document
 paths and handwriting; it stays on the device until explicitly pulled.
 
+Native Spread v0.0.99 fixes active-page eraser settling in a landscape spread.
+Supernote's first committed-ink callback can run before the completed eraser
+transaction reaches the canonical `.mark` file. The module now saves that
+transaction and reloads the same mark page in that order, so the active page is
+rebuilt immediately from the erased state instead of retaining stale ink until
+focus moves to the other page.
+
 ## v0.4.10 protected native editing pilot
 
 v0.4.9 added an explicitly confirmed **RTL editable** choice alongside **Off**

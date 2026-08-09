@@ -49,7 +49,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 98L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 99L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -875,6 +875,8 @@ def check(repo_root: Path) -> None:
             'committed_ink_canonical_only reason=eraser',
             "persistActiveEraserBeforeCanonicalRefresh(",
             'active_eraser_saved_before_canonical_refresh',
+            'active_eraser_canonical_reloaded',
+            '"active_eraser_canonical_reload"',
             "saveTrailsForCanonicalReload(",
             '"undo_redo:" + mutationName',
             '"active_eraser"',
@@ -884,6 +886,27 @@ def check(repo_root: Path) -> None:
         ),
         "settled ink composition",
     )
+
+    active_eraser_start = module.find(
+        "private static void persistActiveEraserBeforeCanonicalRefresh("
+    )
+    canonical_save_start = module.find(
+        "private static void saveTrailsForCanonicalReload(",
+        active_eraser_start,
+    )
+    if active_eraser_start < 0 or canonical_save_start < 0:
+        fail("could not isolate active-page eraser canonical refresh")
+    active_eraser_refresh = module[active_eraser_start:canonical_save_start]
+    eraser_save = active_eraser_refresh.find("saveTrailsForCanonicalReload(")
+    eraser_reload = active_eraser_refresh.find('"loadHandWrite"', eraser_save)
+    eraser_trace = active_eraser_refresh.find(
+        '"active_eraser_canonical_reload"', eraser_reload
+    )
+    if not 0 <= eraser_save < eraser_reload < eraser_trace:
+        fail(
+            "active-page eraser must save canonical trails before reloading "
+            "and tracing the settled bitmap"
+        )
 
     combined_start = module.find(
         "private static Bitmap renderCombinedCommittedInk("
@@ -1027,10 +1050,10 @@ def check(repo_root: Path) -> None:
         "Native Spread trace collection script",
     )
 
-    if 'android:versionCode="98"' not in manifest:
-        fail("companion manifest must use versionCode 98 for annotation tracing")
-    if 'android:versionName="0.0.98"' not in manifest:
-        fail("companion manifest must use versionName 0.0.98")
+    if 'android:versionCode="99"' not in manifest:
+        fail("companion manifest must use versionCode 99")
+    if 'android:versionName="0.0.99"' not in manifest:
+        fail("companion manifest must use versionName 0.0.99")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

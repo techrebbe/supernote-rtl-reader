@@ -104,7 +104,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int TRACE_TRAIL_LIMIT = 256;
     private static final long TRACE_MAX_SNAPSHOT_BYTES = 64L * 1024L * 1024L;
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 98L;
+    private static final long MODULE_VERSION_CODE = 99L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -6848,12 +6848,18 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             return;
         }
         try {
+            int markPage = XposedHelpers.getIntField(
+                presenter,
+                "currentPage"
+            );
             /*
              * Native area erasing updates Supernote's in-memory trail state in
              * receiveTrials(), but the ordinary writer defers the .mark write.
-             * The spread refresh is canonical-file-backed, so flush the
-             * completed native transaction before that refresh can restore the
-             * pre-erase file contents.
+             * The first spread refresh has already run against the pre-erase
+             * file by the time receiveTrials() returns. Flush the completed
+             * transaction, then explicitly reload the same mark page so the
+             * active committed-ink layer is rebuilt from the updated canonical
+             * file instead of retaining those stale pixels until a page switch.
              */
             saveTrailsForCanonicalReload(
                 presenter,
@@ -6861,6 +6867,19 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             );
             log("active_eraser_saved_before_canonical_refresh page="
                 + currentDocumentPage(activity));
+            XposedHelpers.callMethod(
+                presenter,
+                "loadHandWrite",
+                markPage
+            );
+            log("active_eraser_canonical_reloaded mark_page=" + markPage
+                + " document_page=" + currentDocumentPage(activity));
+            traceAnnotationBoundary(
+                activity,
+                presenter,
+                "active_eraser_canonical_reload",
+                true
+            );
         } catch (Throwable throwable) {
             log("active_eraser_save_before_refresh_failed " + throwable);
             XposedBridge.log(throwable);

@@ -278,12 +278,12 @@ are captured immutably and included in the worker-side fingerprint as well.
 The `last.txt` trace pointer is published only after final snapshot collection
 completes, so a failed startup cannot replace the previous completed-session
 pointer with a partial trace.
-If the document process dies during a recording, the next desktop trace-helper
-action removes the abandoned `active.txt` after verifying that its recorded PID
-is no longer the live Supernote document process. The partial session directory
-is retained for diagnosis but is never promoted to `last.txt`; `Stop` reports
-that incomplete session explicitly instead of pulling the preceding completed
-trace.
+If the document process dies during a recording, the desktop trace helper
+verifies that its recorded PID is no longer the live Supernote document process.
+`Status` reports the abandoned session but deliberately retains `active.txt`, so
+a later helper invocation cannot lose that identity. `Stop` then removes the
+pointer, reports the exact incomplete session, retains its partial directory for
+diagnosis, and refuses to pull the preceding completed trace from `last.txt`.
 Trace shutdown retries an unstable final `.mark` snapshot up to five times. A
 session is published to `last.txt` only after one attempt captures a stable,
 verified state. Persistent instability writes `incomplete.txt`, leaves the

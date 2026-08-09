@@ -154,6 +154,12 @@ function Read-IncompleteTraceState {
 }
 
 function Reconcile-AbandonedTracePointer {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Start', 'Checkpoint', 'Stop', 'Status')]
+        [string]$CurrentAction
+    )
+
     $script:recoveredAbandonedTraceSession = $null
     try {
         $session = Read-RemotePointer -Name active
@@ -162,6 +168,15 @@ function Reconcile-AbandonedTracePointer {
     }
 
     if ($session -notmatch '^[A-Za-z0-9._-]+$') {
+        if ($CurrentAction -eq 'Status') {
+            $script:recoveredAbandonedTraceSession = '[invalid pointer]'
+            Write-Warning (
+                'Detected an invalid Native Spread active-trace pointer. ' +
+                'Status retained it so a later Stop cannot fall back to an ' +
+                'older completed session.'
+            )
+            return
+        }
         Invoke-Adb shell "rm -f '$remoteRoot/active.txt'" | Out-Null
         $script:recoveredAbandonedTraceSession = '[invalid pointer]'
         Write-Warning 'Removed an invalid Native Spread active-trace pointer.'
@@ -182,6 +197,17 @@ function Reconcile-AbandonedTracePointer {
             Where-Object { $_ }
     )
     if ($processId -match '^\d+$' -and $livePids -contains $processId) {
+        return
+    }
+
+    if ($CurrentAction -eq 'Status') {
+        $script:recoveredAbandonedTraceSession = $session
+        Write-Warning (
+            "Detected abandoned Native Spread trace '$session' from " +
+            "document process $processId. Status retained active.txt so a " +
+            'later Stop can report this exact incomplete session instead of ' +
+            'pulling an older completed trace.'
+        )
         return
     }
 
@@ -394,7 +420,7 @@ function Write-TraceSummary {
 }
 
 Assert-DeviceConnected
-Reconcile-AbandonedTracePointer
+Reconcile-AbandonedTracePointer -CurrentAction $Action
 Read-PublicationFailedTraceState
 Read-IncompleteTraceState
 
@@ -496,6 +522,14 @@ switch ($Action) {
     }
 
     'Status' {
+        if ($recoveredAbandonedTraceSession) {
+            Write-Host (
+                'No active trace. Abandoned session: ' +
+                $recoveredAbandonedTraceSession +
+                '. Its active pointer was retained for Stop.'
+            )
+            return
+        }
         try {
             $session = Read-RemotePointer -Name active
             Write-Host "Recording: $session"

@@ -202,10 +202,11 @@ session has completed final snapshot collection, preserving the preceding
 completed-session pointer if startup fails.
 An `active.txt` left by a killed document process is reconciled by every desktop
 trace-helper action. The helper compares the session's recorded PID with the
-live Supernote document PID before removing the pointer; it retains the partial
-directory without publishing it as completed. `Stop` then raises an explicit
-incomplete-session error rather than substituting and pulling an older trace
-from `last.txt`.
+live Supernote document PID. `Status` reports the abandoned session while
+retaining `active.txt`, preserving its identity across helper invocations.
+`Stop` removes the pointer, retains the partial directory without publishing it
+as completed, and raises an explicit incomplete-session error rather than
+substituting and pulling an older trace from `last.txt`.
 Finalization retries an unstable stop-time `.mark` hash/copy up to five times.
 Only a stable, SHA-256-verified snapshot can publish `last.txt`. Exhausted
 retries publish `incomplete.txt` instead, remove the recording pointer, retain

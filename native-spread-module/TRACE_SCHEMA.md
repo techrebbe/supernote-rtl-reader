@@ -11,11 +11,10 @@ final snapshot and stop event are written, immediately before `active.txt` is
 removed. A failed startup therefore leaves the previous completed-session
 pointer unchanged.
 If the document process terminates before finalization, the next trace-helper
-action removes the abandoned `active.txt` pointer after validating its recorded
-PID. The partial session directory is retained for diagnosis and `last.txt`
-continues to identify the preceding completed session. A `Stop` action reports
-the recovered incomplete session and refuses to pull that preceding session in
-its place.
+action validates the recorded PID. `Status` reports the abandoned session but
+retains `active.txt`, preserving the crash identity for a later invocation.
+`Stop` removes that pointer, retains the partial session directory for diagnosis,
+and refuses to pull the preceding completed session still named by `last.txt`.
 At normal shutdown, final snapshot capture is retried up to five times if the
 source changes during hashing or copying. `last.txt` is published only after a
 stable attempt. If all attempts fail, `incomplete.txt` names the partial

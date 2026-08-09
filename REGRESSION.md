@@ -346,8 +346,9 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 - [x] Static invariant: `last.txt` is published only during successful trace
   finalization, before `active.txt` is removed; failed startup preserves the
   previous completed-session pointer.
-- [x] Static invariant: every desktop trace-helper action reconciles an
-  `active.txt` whose recorded PID is no longer the live document process,
+- [x] Static invariant: every desktop trace-helper action recognizes an
+  `active.txt` whose recorded PID is no longer the live document process.
+  `Status` retains that pointer across invocations; `Stop` removes it only after
   retaining its identity and partial directory without promoting it.
 - [x] Nomad helper simulation: after recovering an `active.txt` tied to dead PID
   `999999`, `Stop` must report that exact incomplete session and refuse to pull

@@ -1511,10 +1511,13 @@ def check(repo_root: Path) -> None:
             "Write-TraceSummary",
             "function Wait-TraceFinalization",
             "function Reconcile-AbandonedTracePointer",
+            "[string]$CurrentAction",
             "pidof '$documentPackage'",
             "grep -Fqx '$session'",
             "__TRACE_ABANDONED_REMOVED__",
             "$script:recoveredAbandonedTraceSession = $session",
+            "Status retained active.txt",
+            "Reconcile-AbandonedTracePointer -CurrentAction $Action",
             "Stop did not pull the preceding completed session.",
             "Read-IncompleteTraceState",
             "Read-RemotePointer -Name incomplete",
@@ -1551,11 +1554,27 @@ def check(repo_root: Path) -> None:
     if not 0 <= recovered_check < recovered_identity:
         fail("trace helper does not retain the recovered session identity")
 
+    invalid_status_retention = helper_reconcile_code.find(
+        "if ($CurrentAction -eq 'Status')"
+    )
+    status_retention = helper_reconcile_code.find(
+        "if ($CurrentAction -eq 'Status')",
+        invalid_status_retention + 1,
+    )
+    pointer_removal = helper_reconcile_code.find(
+        '$result = Invoke-Adb shell (', status_retention
+    )
+    if not (
+        0 <= invalid_status_retention < status_retention < pointer_removal
+    ):
+        fail("trace Status can consume an abandoned active pointer")
+
     stop_trace = trace_script.find("'Stop' {")
     status_trace = trace_script.find("'Status' {", stop_trace)
     if stop_trace < 0 or status_trace < 0:
         fail("could not isolate Native Spread trace Stop action")
     stop_action = trace_script[stop_trace:status_trace]
+    status_action = trace_script[status_trace:]
     abandoned_guard = stop_action.find(
         "if ($recoveredAbandonedTraceSession)"
     )
@@ -1577,6 +1596,14 @@ def check(repo_root: Path) -> None:
         fail("trace bundle can be pulled before asynchronous finalization")
     if "Start-Sleep -Milliseconds 500" in stop_action:
         fail("trace Stop still relies on a fixed finalization delay")
+    status_abandoned_guard = status_action.find(
+        "if ($recoveredAbandonedTraceSession)"
+    )
+    status_reads_active = status_action.find(
+        "Read-RemotePointer -Name active"
+    )
+    if not 0 <= status_abandoned_guard < status_reads_active:
+        fail("trace Status can report an abandoned trace as recording")
 
     wait_start = trace_script.find("function Wait-TraceFinalization")
     safe_label_start = trace_script.find("function Get-SafeLabel", wait_start)

@@ -155,6 +155,14 @@ v0.0.97 adds the `showHeader` marker property. It defaults to `true` for older
 markers; when disabled, normal ACTIVE LEFT/RIGHT and READ ONLY status banners
 are removed while failure and annotation-save warnings remain visible.
 
+v0.0.98 adds explicit, diagnostic-only annotation trace sessions. Tracing is
+off by default and can be controlled only through an ADB broadcast protected by
+Android's `DUMP` permission. A session records structured JSONL events for pen
+contact, page routing, trail-container results, save/load boundaries, Undo/Redo,
+and display composition. It watches the active `.mark` file and copies a new
+snapshot only when its SHA-256 changes. Snapshots are capped at 64 MiB. No
+annotation or rendering decision is changed by enabling the trace.
+
 This is firmware-specific experimental software for a rooted device. Back up
 documents and `.mark` files before testing a new firmware or module revision.
 
@@ -180,11 +188,43 @@ The signed APK is written to `build/artifact/`.
 
 Install the APK, enable **Supernote Native Spread Probe** in LSPosed, scope it
 only to `com.supernote.document`, and restart the document reader. Supernote
-RTL Reader v0.4.12 or newer and Native Spread v0.0.97 or newer are required for
+RTL Reader v0.4.12 or newer and Native Spread v0.0.98 or newer are required for
 protected editable mode. Its
 recovery manifest binds the backup to the PDF's full SHA-256 because
 Supernote changes the PDF modification time when the document activity
 reopens.
+
+## Annotation trace laboratory
+
+Open an RTL-editable disposable or protected document before starting a trace.
+From this directory, run:
+
+```powershell
+.\trace.ps1 -Action Start -Label portrait-control
+```
+
+Perform one tightly scoped operation. Record named checkpoints after the ink
+settles or after a page turn:
+
+```powershell
+.\trace.ps1 -Action Checkpoint -Label stroke-1-settled
+.\trace.ps1 -Action Checkpoint -Label returned-to-page
+```
+
+Stop and pull the complete bundle:
+
+```powershell
+.\trace.ps1 -Action Stop
+```
+
+The collector places a session directory and ZIP under
+`native-spread-module/trace-bundles/`. Each bundle contains `events.jsonl`,
+session metadata, changed `.mark` snapshots, checkpoint screenshots, and the
+matching `SN_SPREAD_PROBE` logcat capture. Treat the bundle as private document
+data. Use the same short operation once in portrait native mode and once in
+landscape Native Spread so their event sequences and canonical trail states can
+be compared directly. See `TRACE_SCHEMA.md` for the event and fingerprint
+contract.
 
 ## Hardware validation
 

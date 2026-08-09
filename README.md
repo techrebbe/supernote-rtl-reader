@@ -240,6 +240,16 @@ Native Spread v0.0.97 adds a per-document active-page header choice. Turning
 it off removes the persistent red ACTIVE LEFT/RIGHT or READ ONLY banner while
 retaining safety failures and annotation-save error messages.
 
+Native Spread v0.0.98 adds an opt-in annotation trace laboratory for diagnosing
+dual-page ink without changing the writing, eraser, lasso, or rendering paths.
+A protected ADB control broadcast starts a session for the currently open
+editable document. The module correlates pen transactions with active/mark
+pages, save/load callbacks, trail-list fingerprints, `.mark` filesystem events,
+and content-addressed `.mark` snapshots. Checkpoints add screenshots, and the
+collector produces one ZIP suitable for comparing ordinary portrait behavior
+with the same operation in a landscape spread. Trace data can contain document
+paths and handwriting; it stays on the device until explicitly pulled.
+
 ## v0.4.10 protected native editing pilot
 
 v0.4.9 added an explicitly confirmed **RTL editable** choice alongside **Off**

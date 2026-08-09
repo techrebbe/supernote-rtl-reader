@@ -31,6 +31,7 @@ def check(repo_root: Path) -> None:
         / "SpreadProbe.java"
     )
     manifest_path = repo_root / "native-spread-module" / "AndroidManifest.xml"
+    trace_script_path = repo_root / "native-spread-module" / "trace.ps1"
     app_path = repo_root / "overlay" / "App.js"
     pdf_view_path = repo_root / "native" / "PdfPageView.kt.template"
     pdf_view_manager_path = repo_root / "native" / "PdfPageViewManager.kt.template"
@@ -39,6 +40,7 @@ def check(repo_root: Path) -> None:
     plugin = plugin_path.read_text(encoding="utf-8")
     module = module_path.read_text(encoding="utf-8")
     manifest = manifest_path.read_text(encoding="utf-8")
+    trace_script = trace_script_path.read_text(encoding="utf-8")
     app = app_path.read_text(encoding="utf-8")
     pdf_view = pdf_view_path.read_text(encoding="utf-8")
     pdf_view_manager = pdf_view_manager_path.read_text(encoding="utf-8")
@@ -47,7 +49,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 97L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 98L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -984,10 +986,51 @@ def check(repo_root: Path) -> None:
         "native chrome activation exclusion",
     )
 
-    if 'android:versionCode="97"' not in manifest:
-        fail("companion manifest must use versionCode 97 for the header preference")
-    if 'android:versionName="0.0.97"' not in manifest:
-        fail("companion manifest must use versionName 0.0.97")
+    require_markers(
+        module,
+        (
+            "TRACE_CONTROL_ACTION",
+            "TRACE_CONTROL_PERMISSION",
+            '"android.permission.DUMP"',
+            "registerTraceControlReceiver(activeActivity)",
+            '"trace_session_started"',
+            '"pen_contact_started"',
+            '"annotation_boundary"',
+            '"save_trails_before"',
+            '"save_trails_after"',
+            '"receive_trials_before"',
+            '"receive_trials_after"',
+            '"modify_page_trails_started"',
+            '"modify_page_trails_finished"',
+            '"mark_snapshot"',
+            '"orderedFingerprint"',
+            "FileObserver.CLOSE_WRITE",
+            "TRACE_MAX_SNAPSHOT_BYTES",
+            "traceLogMessage(message)",
+        ),
+        "opt-in annotation transaction tracing",
+    )
+
+    require_markers(
+        trace_script,
+        (
+            "[ValidateSet('Start', 'Checkpoint', 'Stop', 'Status')]",
+            "com.techrebbe.supernote.spreadprobe.TRACE_CONTROL",
+            "SupernoteNativeSpreadTrace",
+            "screencap -p",
+            "Invoke-Adb pull",
+            "Compress-Archive",
+            "module-logcat.txt",
+            "summary.md",
+            "Write-TraceSummary",
+        ),
+        "Native Spread trace collection script",
+    )
+
+    if 'android:versionCode="98"' not in manifest:
+        fail("companion manifest must use versionCode 98 for annotation tracing")
+    if 'android:versionName="0.0.98"' not in manifest:
+        fail("companion manifest must use versionName 0.0.98")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

@@ -256,8 +256,8 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 
 ## v0.4.12 native spread appearance and inactive-page editing
 
-- [x] Native Spread v0.0.97 compiles and the packaged, handshake, and plug-in
-  compatibility versions all report 97.
+- [x] Native Spread v0.0.98 compiles and the packaged, handshake, and plug-in
+  compatibility versions all report 98.
 - [x] Native Spread v0.0.84: rotate an open spread to portrait and confirm the
   current page immediately uses the normal native-reader portrait size without
   turning away and back.
@@ -267,6 +267,18 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   READ ONLY banner disappears, remains hidden after reopening the document,
   and returns when the setting is switched On. Safety/error overlays remain
   available in either state.
+- [ ] Start an annotation trace while an editable document is open. Confirm
+  `events.jsonl`, `session.properties`, and the initial `.mark` snapshot appear
+  under `Download/SupernoteNativeSpreadTrace` without changing visible ink.
+- [ ] Record one portrait control stroke and the equivalent landscape-spread
+  stroke. Each trace correlates pen contact, reader page, mark page,
+  `receiveTrials`, `saveTrails`, trail fingerprints, and the resulting `.mark`
+  SHA-256 under one transaction/session timeline.
+- [ ] Record checkpoints after settling and after returning to the page. The
+  collected ZIP contains both screenshots, only content-changed `.mark`
+  snapshots, and `module-logcat.txt`.
+- [ ] Stop tracing and repeat ordinary writing with no active session. No trace
+  files grow and annotation behavior remains unchanged.
 - [x] Automated invariants cover the divider and sizing controls, visible-page
   clipping, and the full-page annotation transform.
 - [ ] **Fit page + Divider On** matches the v0.0.81 layout and annotation

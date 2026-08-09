@@ -49,7 +49,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 106L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 107L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -1124,6 +1124,27 @@ def check(repo_root: Path) -> None:
         ),
         "failed trace startup cleanup",
     )
+    trace_startup = module[trace_start:checkpoint_start]
+    if '"last.txt"' in trace_startup:
+        fail("trace startup publishes last.txt before finalization")
+
+    finish_start = module.find("private static void finishTraceSession(")
+    observer_start = module.find(
+        "private static void startTraceMarkObserver(", finish_start
+    )
+    if finish_start < 0 or observer_start < 0:
+        fail("could not isolate completed trace pointer publication")
+    finish_trace = module[finish_start:observer_start]
+    if module.count('"last.txt"') != 1:
+        fail("last.txt must be published only by completed trace finalization")
+    publish_last = finish_trace.find(
+        'new File(session.rootDirectory, "last.txt")'
+    )
+    remove_active = finish_trace.find(
+        'new File(session.rootDirectory, "active.txt")'
+    )
+    if not 0 <= publish_last < remove_active:
+        fail("last.txt is not published before active.txt is removed")
 
     boundary_start = module.find(
         "private static void traceAnnotationBoundary("
@@ -1307,10 +1328,10 @@ def check(repo_root: Path) -> None:
     if "Start-Sleep -Milliseconds 500" in stop_action:
         fail("trace Stop still relies on a fixed finalization delay")
 
-    if 'android:versionCode="106"' not in manifest:
-        fail("companion manifest must use versionCode 106")
-    if 'android:versionName="0.0.106"' not in manifest:
-        fail("companion manifest must use versionName 0.0.106")
+    if 'android:versionCode="107"' not in manifest:
+        fail("companion manifest must use versionCode 107")
+    if 'android:versionName="0.0.107"' not in manifest:
+        fail("companion manifest must use versionName 0.0.107")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

@@ -5,6 +5,12 @@ monotonic `seq` within one session plus wall-clock and uptime timestamps. Pen
 transactions receive a `transaction` number at first contact and retain it
 through `receive_trials_finished`.
 
+The trace root's `active.txt` identifies the session currently recording.
+`last.txt` identifies only a fully finalized session: it is updated after the
+final snapshot and stop event are written, immediately before `active.txt` is
+removed. A failed startup therefore leaves the previous completed-session
+pointer unchanged.
+
 Every stateful event may include:
 
 - `readerPage`: zero-based PDF page held by `DocumentViewModel`;

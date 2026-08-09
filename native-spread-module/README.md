@@ -177,7 +177,7 @@ hashing and copying now run on a debounced single-thread worker instead of the
 document UI thread. Ordered trace fingerprints include all trails even when the
 detailed `items` array is truncated after 256 entries.
 
-v0.0.105 also moves trail JSON serialization and fingerprint hashing to that
+v0.0.106 also moves trail JSON serialization and fingerprint hashing to that
 worker. The hook thread copies an immutable trail representation first, so the
 worker cannot observe later native mutations. Annotation-boundary `.mark`
 hashes are reported as `pending` until the live file identity matches a
@@ -187,6 +187,9 @@ extents so geometrically different states cannot compare as equal. It also
 captures and hashes the remaining trail identity fields used by the production
 ink matcher: layer, pen-up/special flags, recognition and EMR modes, trail/draw
 versions, recognition type, and writing-app identity.
+Recognition, refresh, before/after-shift rectangles and contour point geometry
+are copied into immutable scalar arrays and included in worker-side details and
+fingerprints.
 
 The active settled-ink transform is clipped to the active page's visible slot,
 matching Native Fill's PDF and canonical-ink clipping and keeping cropped ink
@@ -221,7 +224,7 @@ The signed APK is written to `build/artifact/`.
 
 Install the APK, enable **Supernote Native Spread Probe** in LSPosed, scope it
 only to `com.supernote.document`, and restart the document reader. Supernote
-RTL Reader v0.4.12 or newer and Native Spread v0.0.105 or newer are required for
+RTL Reader v0.4.12 or newer and Native Spread v0.0.106 or newer are required for
 protected editable mode. Its
 recovery manifest binds the backup to the PDF's full SHA-256 because
 Supernote changes the PDF modification time when the document activity

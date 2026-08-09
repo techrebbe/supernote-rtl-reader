@@ -55,6 +55,7 @@ private data class PendingRenderedEvent(
     val filePath: String,
     val pageIndex: Int,
     val requestedWidth: Int,
+    val contentMode: String,
     val prefetchPageIndexes: List<Int>,
     val requestStartedAtMs: Double,
     val result: DirectRenderResult,
@@ -352,6 +353,7 @@ private object PdfDirectRenderEngine {
         file: File,
         key: RenderKey,
         totalStarted: Long,
+        detectTrimming: Boolean,
     ): DirectRenderResult {
         val openStarted = SystemClock.elapsedRealtime()
         val (renderer, reusedRenderer) = ensureRendererLocked(file, key)
@@ -383,7 +385,8 @@ private object PdfDirectRenderEngine {
                 PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY,
             )
             val renderMs = SystemClock.elapsedRealtime() - renderStarted
-            val trimmingRect = NativeFillTrimming.detect(bitmap)
+            val trimmingRect =
+                if (detectTrimming) NativeFillTrimming.detect(bitmap) else null
             val totalMs = SystemClock.elapsedRealtime() - totalStarted
 
             val result = DirectRenderResult(
@@ -412,6 +415,7 @@ private object PdfDirectRenderEngine {
         filePath: String,
         pageIndex: Int,
         requestedWidth: Int,
+        detectTrimming: Boolean,
         isCurrent: () -> Boolean,
     ): DirectRenderResult? {
         val totalStarted = SystemClock.elapsedRealtime()
@@ -423,6 +427,13 @@ private object PdfDirectRenderEngine {
                 putCached(key, cached)
                 return null
             }
+            val trimmingRect =
+                if (detectTrimming) {
+                    cached.trimmingRect?.let(::RectF)
+                        ?: NativeFillTrimming.detect(cached.bitmap)
+                } else {
+                    cached.trimmingRect?.let(::RectF)
+                }
             val totalMs = SystemClock.elapsedRealtime() - totalStarted
             Log.i(
                 LOG_TAG,
@@ -438,7 +449,7 @@ private object PdfDirectRenderEngine {
                 openMs = 0L,
                 renderMs = 0L,
                 totalMs = totalMs,
-                trimmingRect = cached.trimmingRect?.let(::RectF),
+                trimmingRect = trimmingRect,
             )
         }
 
@@ -456,6 +467,13 @@ private object PdfDirectRenderEngine {
                     putCached(key, cached)
                     return null
                 }
+                val trimmingRect =
+                    if (detectTrimming) {
+                        cached.trimmingRect?.let(::RectF)
+                            ?: NativeFillTrimming.detect(cached.bitmap)
+                    } else {
+                        cached.trimmingRect?.let(::RectF)
+                    }
                 val totalMs = SystemClock.elapsedRealtime() - totalStarted
                 Log.i(
                     LOG_TAG,
@@ -471,12 +489,12 @@ private object PdfDirectRenderEngine {
                     openMs = 0L,
                     renderMs = 0L,
                     totalMs = totalMs,
-                    trimmingRect = cached.trimmingRect?.let(::RectF),
+                    trimmingRect = trimmingRect,
                 )
             }
 
             if (!isCurrent()) return null
-            val result = renderLocked(file, key, totalStarted)
+            val result = renderLocked(file, key, totalStarted, detectTrimming)
             Log.i(
                 LOG_TAG,
                 "RTL_READER_NATIVE_VIEW_RENDER page=${pageIndex + 1} reused=${result.reusedRenderer} cacheHit=false " +
@@ -489,7 +507,12 @@ private object PdfDirectRenderEngine {
         }
     }
 
-    fun schedulePrefetch(filePath: String, pageIndexes: List<Int>, requestedWidth: Int) {
+    fun schedulePrefetch(
+        filePath: String,
+        pageIndexes: List<Int>,
+        requestedWidth: Int,
+        detectTrimming: Boolean,
+    ) {
         pageIndexes.distinct().filter { it >= 0 }.forEach { pageIndex ->
             val pair = try {
                 makeKey(filePath, pageIndex, requestedWidth)
@@ -539,7 +562,12 @@ private object PdfDirectRenderEngine {
                             return@execute
                         }
 
-                        val result = renderLocked(file, key, totalStarted)
+                        val result = renderLocked(
+                            file,
+                            key,
+                            totalStarted,
+                            detectTrimming,
+                        )
                         putCached(
                             key,
                             CachedBitmap(
@@ -610,9 +638,10 @@ class PdfPageView(
         val filePath = pendingFilePath
         val pageIndex = pendingPageIndex
         val requestedWidth = pendingRequestedWidth
+        val contentMode = pendingContentMode
         val prefetchPages = pendingPrefetchPageIndexes.distinct()
         val requestStartedAtMs = pendingRequestStartedAtMs
-        val signature = "$filePath|$pageIndex|$requestedWidth|${prefetchPages.joinToString(",")}" 
+        val signature = "$filePath|$pageIndex|$requestedWidth|$contentMode|${prefetchPages.joinToString(",")}"
         if (signature == committedSignature) return
         committedSignature = signature
 
@@ -631,6 +660,7 @@ class PdfPageView(
                     filePath,
                     pageIndex,
                     requestedWidth,
+                    contentMode == "native_fill",
                 ) { generation == renderGeneration.get() } ?: return@execute
                 post {
                     if (generation != renderGeneration.get()) {
@@ -648,6 +678,7 @@ class PdfPageView(
                         filePath = filePath,
                         pageIndex = pageIndex,
                         requestedWidth = requestedWidth,
+                        contentMode = contentMode,
                         prefetchPageIndexes = prefetchPages,
                         requestStartedAtMs = requestStartedAtMs,
                         result = result,
@@ -756,6 +787,7 @@ class PdfPageView(
                             pending.filePath,
                             pending.prefetchPageIndexes,
                             pending.requestedWidth,
+                            pending.contentMode == "native_fill",
                         )
                     }
                 },

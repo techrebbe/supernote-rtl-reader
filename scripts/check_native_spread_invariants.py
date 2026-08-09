@@ -49,7 +49,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 105L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 106L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -1175,6 +1175,11 @@ def check(repo_root: Path) -> None:
             'captureTraceValue(traceCall(trail, "get_angles"))',
             'captureTraceValue(traceCall(trail, "get_timestamp"))',
             'captureTraceValue(traceCall(trail, "get_write_app_name"))',
+            'captureTraceRect(rrd == null ? null : traceCall(rrd, "getRect"))',
+            'captureTraceRect(traceCall(trail, "get_refresh_rect"))',
+            'captureTraceRect(traceCall(trail, "get_m_before_shift_rect"))',
+            'captureTraceRect(traceCall(trail, "get_m_after_shift_rect"))',
+            'captureTraceContours(traceCall(trail, "get_m_contours_src"))',
         ),
         "immutable auxiliary trail-value capture",
     )
@@ -1222,6 +1227,11 @@ def check(repo_root: Path) -> None:
             ".append(trail.redrawHeight).append('|')",
             ".append(trail.maxX).append('|')",
             ".append(trail.maxY).append('|')",
+            ".append(traceValueDescription(trail.rrdRect)).append('|')",
+            ".append(traceValueDescription(trail.refreshRect)).append('|')",
+            ".append(traceValueDescription(trail.beforeShiftRect)).append('|')",
+            ".append(traceValueDescription(trail.afterShiftRect)).append('|')",
+            ".append(traceValueDescription(trail.contours)).append('|')",
             ".append(traceValueDescription(trail.writeAppName)).append('|')",
         ),
         "complete production trail-identity fingerprint coverage",
@@ -1297,10 +1307,10 @@ def check(repo_root: Path) -> None:
     if "Start-Sleep -Milliseconds 500" in stop_action:
         fail("trace Stop still relies on a fixed finalization delay")
 
-    if 'android:versionCode="105"' not in manifest:
-        fail("companion manifest must use versionCode 105")
-    if 'android:versionName="0.0.105"' not in manifest:
-        fail("companion manifest must use versionName 0.0.105")
+    if 'android:versionCode="106"' not in manifest:
+        fail("companion manifest must use versionCode 106")
+    if 'android:versionName="0.0.106"' not in manifest:
+        fail("companion manifest must use versionName 0.0.106")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

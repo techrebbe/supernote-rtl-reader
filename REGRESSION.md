@@ -256,8 +256,8 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 
 ## v0.4.12 native spread appearance and inactive-page editing
 
-- [x] Native Spread v0.0.105 compiles and the packaged, handshake, and plug-in
-  compatibility versions all report 105.
+- [x] Native Spread v0.0.106 compiles and the packaged, handshake, and plug-in
+  compatibility versions all report 106.
 - [x] Native Spread v0.0.84: rotate an open spread to portrait and confirm the
   current page immediately uses the normal native-reader portrait size without
   turning away and back.
@@ -330,11 +330,15 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   coordinate extents in addition to points and pen metadata.
 - [x] Trace captures and fingerprints include every integer/value identity
   attribute used by the production inactive-page trail matcher.
+- [x] Trace captures and fingerprints include recognition, refresh,
+  before/after-shift rectangles, and contour point geometry.
 - [x] Native Fill active settled ink is clipped to the active page's visible
   half-screen slot before composition.
 - [x] Static invariant: plug-in Native Fill mirrors native content trimming and
   asymmetric margin anchoring; trim metadata survives native bitmap caching
   and prefetch.
+- [x] Static invariant: non-white content detection runs only for Native Fill;
+  Fit foreground and prefetch renders skip it.
 - [x] Static invariant: a configured marker is authoritative for cover parity
   as well as divider, header, and page-sizing state during initialization.
 - [x] Static invariant: failed trace startup stops observers, cancels pending

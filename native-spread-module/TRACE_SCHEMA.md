@@ -32,8 +32,9 @@ Important event families:
 - `module_log`: the existing detailed Native Spread diagnostic stream.
 
 Each trail summary contains an ordered-list fingerprint and per-trail
-fingerprints derived from identity, tool attributes, eraser references, and all
-point coordinates. This permits exact state comparison without relying on a
+fingerprints derived from identity, tool attributes, eraser references,
+recognition/refresh/shift rectangles, contour geometry, and all point
+coordinates. This permits exact state comparison without relying on a
 screenshot. Screenshots remain useful for distinguishing correct persistence
 from incorrect visible composition.
 

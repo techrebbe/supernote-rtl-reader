@@ -109,7 +109,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int TRACE_TRAIL_LIMIT = 256;
     private static final long TRACE_MAX_SNAPSHOT_BYTES = 64L * 1024L * 1024L;
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 105L;
+    private static final long MODULE_VERSION_CODE = 106L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -431,6 +431,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         final int redrawHeight;
         final int maxX;
         final int maxY;
+        final TraceValueCapture rrdRect;
+        final TraceValueCapture refreshRect;
+        final TraceValueCapture beforeShiftRect;
+        final TraceValueCapture afterShiftRect;
+        final TraceValueCapture contours;
         final int[] pointXs;
         final int[] pointYs;
         final boolean[] pointPresent;
@@ -466,6 +471,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             int redrawHeight,
             int maxX,
             int maxY,
+            TraceValueCapture rrdRect,
+            TraceValueCapture refreshRect,
+            TraceValueCapture beforeShiftRect,
+            TraceValueCapture afterShiftRect,
+            TraceValueCapture contours,
             int[] pointXs,
             int[] pointYs,
             boolean[] pointPresent,
@@ -500,6 +510,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             this.redrawHeight = redrawHeight;
             this.maxX = maxX;
             this.maxY = maxY;
+            this.rrdRect = rrdRect;
+            this.refreshRect = refreshRect;
+            this.beforeShiftRect = beforeShiftRect;
+            this.afterShiftRect = afterShiftRect;
+            this.contours = contours;
             this.pointXs = pointXs;
             this.pointYs = pointYs;
             this.pointPresent = pointPresent;
@@ -3466,6 +3481,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 trail,
                 "get_erase_line_trail_num"
             );
+            Object rrd = traceCall(trail, "get_rrd");
             return new TraceTrailCapture(
                 false,
                 null,
@@ -3492,6 +3508,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 traceInt(trail, "get_m_redraw_height"),
                 traceInt(trail, "get_max_x"),
                 traceInt(trail, "get_max_y"),
+                captureTraceRect(rrd == null ? null : traceCall(rrd, "getRect")),
+                captureTraceRect(traceCall(trail, "get_refresh_rect")),
+                captureTraceRect(traceCall(trail, "get_m_before_shift_rect")),
+                captureTraceRect(traceCall(trail, "get_m_after_shift_rect")),
+                captureTraceContours(traceCall(trail, "get_m_contours_src")),
                 pointXs,
                 pointYs,
                 pointPresent,
@@ -3536,6 +3557,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             Integer.MIN_VALUE,
             Integer.MIN_VALUE,
             Integer.MIN_VALUE,
+            captureTraceValue(null),
+            captureTraceValue(null),
+            captureTraceValue(null),
+            captureTraceValue(null),
+            captureTraceValue(null),
             new int[0],
             new int[0],
             new boolean[0],
@@ -3630,6 +3656,17 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             item.put("redrawHeight", trail.redrawHeight);
             item.put("maxX", trail.maxX);
             item.put("maxY", trail.maxY);
+            item.put("rrdRect", traceValueDescription(trail.rrdRect));
+            item.put("refreshRect", traceValueDescription(trail.refreshRect));
+            item.put(
+                "beforeShiftRect",
+                traceValueDescription(trail.beforeShiftRect)
+            );
+            item.put(
+                "afterShiftRect",
+                traceValueDescription(trail.afterShiftRect)
+            );
+            item.put("contours", traceValueDescription(trail.contours));
             item.put("pointCount", pointCount);
             item.put("first", capturedPointDescription(trail, 0));
             item.put(
@@ -3695,6 +3732,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 .append(trail.redrawHeight).append('|')
                 .append(trail.maxX).append('|')
                 .append(trail.maxY).append('|')
+                .append(traceValueDescription(trail.rrdRect)).append('|')
+                .append(traceValueDescription(trail.refreshRect)).append('|')
+                .append(traceValueDescription(trail.beforeShiftRect)).append('|')
+                .append(traceValueDescription(trail.afterShiftRect)).append('|')
+                .append(traceValueDescription(trail.contours)).append('|')
                 .append(trail.erased).append('|')
                 .append(traceValueDescription(trail.writeAppName)).append('|')
                 .append(traceValueDescription(trail.pressures)).append('|')
@@ -3760,6 +3802,70 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         } catch (Throwable throwable) {
             return null;
         }
+    }
+
+    private static TraceValueCapture captureTraceRect(Object value) {
+        if (value == null) {
+            return captureTraceValue(null);
+        }
+        if (!(value instanceof Rect)) {
+            return captureTraceValue(new Object[] {
+                "unexpected",
+                value.getClass().getName()
+            });
+        }
+        Rect rect = (Rect) value;
+        return captureTraceValue(new int[] {
+            rect.left,
+            rect.top,
+            rect.right,
+            rect.bottom
+        });
+    }
+
+    private static TraceValueCapture captureTraceContours(Object value) {
+        if (value == null) {
+            return captureTraceValue(null);
+        }
+        if (!(value instanceof List)) {
+            return captureTraceValue(new Object[] {
+                "unexpected",
+                value.getClass().getName()
+            });
+        }
+        ArrayList<Object> flattened = new ArrayList<>();
+        List<?> contours = (List<?>) value;
+        flattened.add("contours");
+        flattened.add(Integer.valueOf(contours.size()));
+        for (Object contourValue : contours) {
+            if (!(contourValue instanceof List)) {
+                flattened.add("unexpected-contour");
+                flattened.add(
+                    contourValue == null
+                        ? "null"
+                        : contourValue.getClass().getName()
+                );
+                continue;
+            }
+            List<?> contour = (List<?>) contourValue;
+            flattened.add("contour");
+            flattened.add(Integer.valueOf(contour.size()));
+            for (Object pointValue : contour) {
+                if (!(pointValue instanceof PointF)) {
+                    flattened.add("unexpected-point");
+                    flattened.add(
+                        pointValue == null
+                            ? "null"
+                            : pointValue.getClass().getName()
+                    );
+                    continue;
+                }
+                PointF point = (PointF) pointValue;
+                flattened.add(Integer.valueOf(Float.floatToRawIntBits(point.x)));
+                flattened.add(Integer.valueOf(Float.floatToRawIntBits(point.y)));
+            }
+        }
+        return captureTraceValue(flattened);
     }
 
     private static TraceValueCapture captureTraceValue(Object value) {

@@ -335,6 +335,8 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 - [x] Static invariant: plug-in Native Fill mirrors native content trimming and
   asymmetric margin anchoring; trim metadata survives native bitmap caching
   and prefetch.
+- [x] Static invariant: a configured marker is authoritative for cover parity
+  as well as divider, header, and page-sizing state during initialization.
 - [x] Static invariant: failed trace startup stops observers, cancels pending
   work, and removes the stale `active.txt` session pointer.
 - [x] The trace collection script waits for asynchronous finalization and

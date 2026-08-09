@@ -422,7 +422,10 @@ export default function App() {
         nativePageIndexAtOpenRef.current = context.pageIndex;
         directionRef.current = restored.direction;
         viewModeRef.current = restored.viewMode;
-        coverSeparateRef.current = restored.coverSeparate;
+        const restoredCoverSeparate = nativeSpread?.configured
+          ? nativeSpread?.coverSeparate === true
+          : restored.coverSeparate;
+        coverSeparateRef.current = restoredCoverSeparate;
         const restoredDivider = nativeSpread?.configured
           ? nativeSpread?.showDivider !== false
           : restored.showSpreadDivider;
@@ -442,7 +445,7 @@ export default function App() {
         setDocumentContext(context);
         setDirection(restored.direction);
         setViewMode(restored.viewMode);
-        setCoverSeparate(restored.coverSeparate);
+        setCoverSeparate(restoredCoverSeparate);
         setShowSpreadDivider(restoredDivider);
         setShowNativeSpreadHeader(restoredHeader);
         setSpreadSizing(restoredSizing);

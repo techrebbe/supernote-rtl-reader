@@ -125,6 +125,9 @@ def check(repo_root: Path) -> None:
             "setNativeSpreadAppearanceValue",
             "nativeSpread?.showHeader !== false",
             "Active-page header",
+            """const restoredCoverSeparate = nativeSpread?.configured
+          ? nativeSpread?.coverSeparate === true
+          : restored.coverSeparate;""",
             """const restoredSizing = nativeSpread?.configured
           ? nativeSpread?.spreadSizing === 'native_fill'
             ? 'native_fill'

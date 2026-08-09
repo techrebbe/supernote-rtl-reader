@@ -284,6 +284,17 @@ verifies that its recorded PID is no longer the live Supernote document process.
 a later helper invocation cannot lose that identity. `Stop` then removes the
 pointer, reports the exact incomplete session, retains its partial directory for
 diagnosis, and refuses to pull the preceding completed trace from `last.txt`.
+
+The v0.0.116 tracing path is hardware validated on the Nomad. In one completed
+editable-spread trace, two consecutive active-page strokes increased the saved
+page from four to five to six trails without hiding earlier ink. A stroke drawn
+directly on the inactive page increased that page from three to four trails
+without affecting the opposite page. Portrait reloads and the restored
+landscape spread retained every trail. The trace recorded 433 events, three pen
+transactions, 48 annotation boundaries, six changed `.mark` snapshots, and no
+potential failures. Fingerprints that differ while the spread is visible reflect
+Supernote's exact 4/3 in-memory landscape transform; the canonical and current
+trail fingerprints match again in portrait.
 Trace shutdown retries an unstable final `.mark` snapshot up to five times. A
 session is published to `last.txt` only after one attempt captures a stable,
 verified state. Persistent instability writes `incomplete.txt`, leaves the

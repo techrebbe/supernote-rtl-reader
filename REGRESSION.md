@@ -256,8 +256,8 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 
 ## v0.4.12 native spread appearance and inactive-page editing
 
-- [x] Native Spread v0.0.103 compiles and the packaged, handshake, and plug-in
-  compatibility versions all report 103.
+- [x] Native Spread v0.0.104 compiles and the packaged, handshake, and plug-in
+  compatibility versions all report 104.
 - [x] Native Spread v0.0.84: rotate an open spread to portrait and confirm the
   current page immediately uses the normal native-reader portrait size without
   turning away and back.
@@ -328,6 +328,8 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   identity matches the completed snapshot; changed files report `pending`.
 - [x] Ordered trail fingerprints include rotation, redraw dimensions, and
   coordinate extents in addition to points and pen metadata.
+- [x] Trace captures and fingerprints include every integer/value identity
+  attribute used by the production inactive-page trail matcher.
 - [x] Native Fill active settled ink is clipped to the active page's visible
   half-screen slot before composition.
 - [x] The trace collection script waits for asynchronous finalization and

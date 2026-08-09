@@ -264,13 +264,15 @@ Annotation-trace snapshots are now debounced on a serialized background worker,
 and ordered trail fingerprints cover every trail while detailed JSON remains
 capped at 256 entries.
 
-Native Spread v0.0.103 keeps annotation tracing from perturbing pen timing on
+Native Spread v0.0.104 keeps annotation tracing from perturbing pen timing on
 trail-heavy pages. Hook threads now capture immutable scalar and point arrays;
 the trace worker performs JSON serialization and SHA-256 fingerprinting. A
 boundary reports its `.mark` hash as `pending` whenever the live file identity
 does not match the most recently completed snapshot. Trail fingerprints include
 rotation, redraw dimensions, and coordinate extents as well as points and pen
-metadata.
+metadata. The canonical trace identity now covers every trail attribute used
+by inactive-page ink matching, including layer, pen-up/special flags,
+recognition and EMR modes, trail/draw versions, and writing-app identity.
 
 The active settled-ink compositor now clips its transformed bitmap to the
 same visible page-slot bounds used by Native Fill PDF and canonical-ink

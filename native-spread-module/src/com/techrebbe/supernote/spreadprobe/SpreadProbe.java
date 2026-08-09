@@ -109,7 +109,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int TRACE_TRAIL_LIMIT = 256;
     private static final long TRACE_MAX_SNAPSHOT_BYTES = 64L * 1024L * 1024L;
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 103L;
+    private static final long MODULE_VERSION_CODE = 104L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -416,6 +416,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         final int thickness;
         final int emrType;
         final int flagDraw;
+        final int flagPenup;
+        final int flagSpecial;
+        final int layer;
+        final int recMod;
+        final int emrPointAxis;
+        final int trailType;
+        final int drawVersion;
+        final int recognTrailType;
         final int status;
         final int process;
         final int rotation;
@@ -427,6 +435,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         final int[] pointYs;
         final boolean[] pointPresent;
         final String erased;
+        final TraceValueCapture writeAppName;
         final TraceValueCapture pressures;
         final TraceValueCapture angles;
         final TraceValueCapture timestamp;
@@ -442,6 +451,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             int thickness,
             int emrType,
             int flagDraw,
+            int flagPenup,
+            int flagSpecial,
+            int layer,
+            int recMod,
+            int emrPointAxis,
+            int trailType,
+            int drawVersion,
+            int recognTrailType,
             int status,
             int process,
             int rotation,
@@ -453,6 +470,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             int[] pointYs,
             boolean[] pointPresent,
             String erased,
+            TraceValueCapture writeAppName,
             TraceValueCapture pressures,
             TraceValueCapture angles,
             TraceValueCapture timestamp
@@ -467,6 +485,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             this.thickness = thickness;
             this.emrType = emrType;
             this.flagDraw = flagDraw;
+            this.flagPenup = flagPenup;
+            this.flagSpecial = flagSpecial;
+            this.layer = layer;
+            this.recMod = recMod;
+            this.emrPointAxis = emrPointAxis;
+            this.trailType = trailType;
+            this.drawVersion = drawVersion;
+            this.recognTrailType = recognTrailType;
             this.status = status;
             this.process = process;
             this.rotation = rotation;
@@ -478,6 +504,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             this.pointYs = pointYs;
             this.pointPresent = pointPresent;
             this.erased = erased;
+            this.writeAppName = writeAppName;
             this.pressures = pressures;
             this.angles = angles;
             this.timestamp = timestamp;
@@ -3419,6 +3446,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 traceInt(trail, "get_m_thickness"),
                 traceInt(trail, "get_walcom_emr_type"),
                 traceInt(trail, "get_flag_draw"),
+                traceInt(trail, "get_flag_penup"),
+                traceInt(trail, "get_flag_special"),
+                traceInt(trail, "get_layer_num"),
+                traceInt(trail, "get_rec_mod"),
+                traceInt(trail, "get_m_emr_point_axis"),
+                traceInt(trail, "get_m_trail_type"),
+                traceInt(trail, "get_m_draw_version"),
+                traceInt(trail, "get_recogn_trail_type"),
                 traceInt(trail, "get_m_trail_status"),
                 traceInt(trail, "get_process_mod"),
                 traceInt(trail, "get_m_rotate_angle"),
@@ -3430,6 +3465,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 pointYs,
                 pointPresent,
                 String.valueOf(erased),
+                captureTraceValue(traceCall(trail, "get_write_app_name")),
                 captureTraceValue(traceCall(trail, "get_pressures")),
                 captureTraceValue(traceCall(trail, "get_angles")),
                 captureTraceValue(traceCall(trail, "get_timestamp"))
@@ -3461,10 +3497,19 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             Integer.MIN_VALUE,
             Integer.MIN_VALUE,
             Integer.MIN_VALUE,
+            Integer.MIN_VALUE,
+            Integer.MIN_VALUE,
+            Integer.MIN_VALUE,
+            Integer.MIN_VALUE,
+            Integer.MIN_VALUE,
+            Integer.MIN_VALUE,
+            Integer.MIN_VALUE,
+            Integer.MIN_VALUE,
             new int[0],
             new int[0],
             new boolean[0],
             "null",
+            captureTraceValue(null),
             captureTraceValue(null),
             captureTraceValue(null),
             captureTraceValue(null)
@@ -3539,6 +3584,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             item.put("thickness", trail.thickness);
             item.put("emrType", trail.emrType);
             item.put("flagDraw", trail.flagDraw);
+            item.put("flagPenup", trail.flagPenup);
+            item.put("flagSpecial", trail.flagSpecial);
+            item.put("layer", trail.layer);
+            item.put("recMod", trail.recMod);
+            item.put("emrPointAxis", trail.emrPointAxis);
+            item.put("trailType", trail.trailType);
+            item.put("drawVersion", trail.drawVersion);
+            item.put("recognTrailType", trail.recognTrailType);
             item.put("status", trail.status);
             item.put("process", trail.process);
             item.put("rotation", trail.rotation);
@@ -3558,6 +3611,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             );
             item.put("bounds", rectDescription(capturedPointBounds(trail)));
             item.put("erased", trail.erased);
+            item.put(
+                "writeAppName",
+                traceValueDescription(trail.writeAppName)
+            );
             item.put(
                 "pressures",
                 traceValueDescription(trail.pressures)
@@ -3592,6 +3649,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 .append(trail.thickness).append('|')
                 .append(trail.emrType).append('|')
                 .append(trail.flagDraw).append('|')
+                .append(trail.flagPenup).append('|')
+                .append(trail.flagSpecial).append('|')
+                .append(trail.layer).append('|')
+                .append(trail.recMod).append('|')
+                .append(trail.emrPointAxis).append('|')
+                .append(trail.trailType).append('|')
+                .append(trail.drawVersion).append('|')
+                .append(trail.recognTrailType).append('|')
                 .append(trail.status).append('|')
                 .append(trail.process).append('|')
                 .append(trail.rotation).append('|')
@@ -3600,6 +3665,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 .append(trail.maxX).append('|')
                 .append(trail.maxY).append('|')
                 .append(trail.erased).append('|')
+                .append(traceValueDescription(trail.writeAppName)).append('|')
                 .append(traceValueDescription(trail.pressures)).append('|')
                 .append(traceValueDescription(trail.angles)).append('|')
                 .append(traceValueDescription(trail.timestamp)).append('|');

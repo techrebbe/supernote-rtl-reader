@@ -109,7 +109,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int TRACE_TRAIL_LIMIT = 256;
     private static final long TRACE_MAX_SNAPSHOT_BYTES = 64L * 1024L * 1024L;
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 101L;
+    private static final long MODULE_VERSION_CODE = 102L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -3594,6 +3594,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 .append(trail.flagDraw).append('|')
                 .append(trail.status).append('|')
                 .append(trail.process).append('|')
+                .append(trail.rotation).append('|')
+                .append(trail.redrawWidth).append('|')
+                .append(trail.redrawHeight).append('|')
+                .append(trail.maxX).append('|')
+                .append(trail.maxY).append('|')
                 .append(trail.erased).append('|')
                 .append(traceValueDescription(trail.pressures)).append('|')
                 .append(traceValueDescription(trail.angles)).append('|')

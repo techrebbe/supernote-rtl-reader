@@ -49,7 +49,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 101L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 102L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -1156,6 +1156,26 @@ def check(repo_root: Path) -> None:
         "complete trail fingerprint with capped details",
     )
 
+    fingerprint_start = module.find(
+        "private static String traceTrailFingerprint(", trace_trail_start
+    )
+    point_description_start = module.find(
+        "private static String capturedPointDescription(", fingerprint_start
+    )
+    if fingerprint_start < 0 or point_description_start < 0:
+        fail("could not isolate complete trail fingerprint")
+    require_markers(
+        module[fingerprint_start:point_description_start],
+        (
+            ".append(trail.rotation).append('|')",
+            ".append(trail.redrawWidth).append('|')",
+            ".append(trail.redrawHeight).append('|')",
+            ".append(trail.maxX).append('|')",
+            ".append(trail.maxY).append('|')",
+        ),
+        "trail geometry fingerprint coverage",
+    )
+
     hash_state_start = module.find(
         "private static String traceLastSnapshotHash("
     )
@@ -1226,10 +1246,10 @@ def check(repo_root: Path) -> None:
     if "Start-Sleep -Milliseconds 500" in stop_action:
         fail("trace Stop still relies on a fixed finalization delay")
 
-    if 'android:versionCode="101"' not in manifest:
-        fail("companion manifest must use versionCode 101")
-    if 'android:versionName="0.0.101"' not in manifest:
-        fail("companion manifest must use versionName 0.0.101")
+    if 'android:versionCode="102"' not in manifest:
+        fail("companion manifest must use versionCode 102")
+    if 'android:versionName="0.0.102"' not in manifest:
+        fail("companion manifest must use versionName 0.0.102")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

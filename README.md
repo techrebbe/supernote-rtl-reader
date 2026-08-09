@@ -264,7 +264,7 @@ Annotation-trace snapshots are now debounced on a serialized background worker,
 and ordered trail fingerprints cover every trail while detailed JSON remains
 capped at 256 entries.
 
-Native Spread v0.0.104 keeps annotation tracing from perturbing pen timing on
+Native Spread v0.0.105 keeps annotation tracing from perturbing pen timing on
 trail-heavy pages. Hook threads now capture immutable scalar and point arrays;
 the trace worker performs JSON serialization and SHA-256 fingerprinting. A
 boundary reports its `.mark` hash as `pending` whenever the live file identity
@@ -277,6 +277,13 @@ recognition and EMR modes, trail/draw versions, and writing-app identity.
 The active settled-ink compositor now clips its transformed bitmap to the
 same visible page-slot bounds used by Native Fill PDF and canonical-ink
 rendering, preventing cropped-margin ink from crossing the spread divider.
+
+The custom plug-in's Native Fill renderer now uses the same non-white content
+bounds, seven-pixel padding, asymmetric margin anchor, and fit transform as
+Supernote's native `TrimmingUtil`, with a local detector fallback when the
+native helper is unavailable. Native and plug-in handoff therefore retain the
+same page zoom and position. Failed trace startup also stops observers and
+removes the stale active-session pointer.
 
 ## v0.4.10 protected native editing pilot
 

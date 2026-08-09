@@ -35,6 +35,7 @@ private data class RenderKey(
 private data class CachedBitmap(
     val bitmap: Bitmap,
     val pageCount: Int,
+    val trimmingRect: RectF?,
 )
 
 private data class DirectRenderResult(
@@ -46,6 +47,7 @@ private data class DirectRenderResult(
     val openMs: Long,
     val renderMs: Long,
     val totalMs: Long,
+    val trimmingRect: RectF?,
 )
 
 private data class PendingRenderedEvent(
@@ -61,7 +63,140 @@ private data class PendingRenderedEvent(
 private data class VisibleBitmapMetadata(
     val key: RenderKey,
     val pageCount: Int,
+    val trimmingRect: RectF?,
 )
+
+private object NativeFillTrimming {
+    private const val LOG_TAG = "RTL_READER"
+    private const val PORTRAIT_REFERENCE_WIDTH = 1404f
+    private const val PORTRAIT_REFERENCE_HEIGHT = 1872f
+    private const val NATIVE_PADDING_PX = 7f
+    private const val WHITE_THRESHOLD = 250
+
+    private val methodLock = Any()
+
+    @Volatile
+    private var methodResolved = false
+
+    @Volatile
+    private var methodDisabled = false
+
+    @Volatile
+    private var getMatNone0Area: java.lang.reflect.Method? = null
+
+    private fun resolveNativeMethod(): java.lang.reflect.Method? {
+        if (methodResolved) return getMatNone0Area
+        synchronized(methodLock) {
+            if (!methodResolved) {
+                getMatNone0Area = try {
+                    Class.forName(
+                        "com.example.libsupernote.SuperNoteNote",
+                        true,
+                        NativeFillTrimming::class.java.classLoader,
+                    ).getMethod("getMatNone0Area", Bitmap::class.java)
+                } catch (_: Throwable) {
+                    null
+                }
+                methodResolved = true
+                Log.i(
+                    LOG_TAG,
+                    "RTL_READER_NATIVE_FILL_TRIM_NATIVE available=${getMatNone0Area != null}",
+                )
+            }
+        }
+        return getMatNone0Area
+    }
+
+    private fun nativeContentBounds(bitmap: Bitmap): RectF? {
+        if (methodDisabled) return null
+        val method = resolveNativeMethod() ?: return null
+        return try {
+            val rect = method.invoke(null, bitmap) ?: return null
+            val type = rect.javaClass
+            val left = (type.getMethod("get_x").invoke(rect) as Number).toFloat()
+            val top = (type.getMethod("get_y").invoke(rect) as Number).toFloat()
+            val width = (type.getMethod("get_width").invoke(rect) as Number).toFloat()
+            val height = (type.getMethod("get_height").invoke(rect) as Number).toFloat()
+            RectF(left, top, left + width, top + height)
+        } catch (error: Throwable) {
+            methodDisabled = true
+            Log.w(LOG_TAG, "RTL_READER_NATIVE_FILL_TRIM_NATIVE_FAILED", error)
+            null
+        }
+    }
+
+    private fun isContentPixel(pixel: Int): Boolean {
+        val alpha = pixel ushr 24 and 0xff
+        if (alpha == 0) return false
+        val red = pixel ushr 16 and 0xff
+        val green = pixel ushr 8 and 0xff
+        val blue = pixel and 0xff
+        return red < WHITE_THRESHOLD || green < WHITE_THRESHOLD || blue < WHITE_THRESHOLD
+    }
+
+    private fun fallbackContentBounds(bitmap: Bitmap): RectF {
+        val bitmapWidth = bitmap.width
+        val bitmapHeight = bitmap.height
+        val row = IntArray(bitmapWidth)
+
+        fun rowContainsContent(y: Int): Boolean {
+            bitmap.getPixels(row, 0, bitmapWidth, 0, y, bitmapWidth, 1)
+            return row.any(::isContentPixel)
+        }
+
+        var top = 0
+        while (top < bitmapHeight && !rowContainsContent(top)) top++
+        if (top >= bitmapHeight) {
+            return RectF(0f, 0f, bitmapWidth.toFloat(), bitmapHeight.toFloat())
+        }
+
+        var bottom = bitmapHeight - 1
+        while (bottom > top && !rowContainsContent(bottom)) bottom--
+
+        val column = IntArray(bitmapHeight)
+        fun columnContainsContent(x: Int): Boolean {
+            bitmap.getPixels(column, 0, 1, x, 0, 1, bitmapHeight)
+            return column.any(::isContentPixel)
+        }
+
+        var left = 0
+        while (left < bitmapWidth && !columnContainsContent(left)) left++
+        var right = bitmapWidth - 1
+        while (right > left && !columnContainsContent(right)) right--
+
+        return RectF(
+            left.toFloat(),
+            top.toFloat(),
+            (right + 1).toFloat(),
+            (bottom + 1).toFloat(),
+        )
+    }
+
+    fun detect(bitmap: Bitmap): RectF? {
+        if (bitmap.isRecycled || bitmap.width <= 1 || bitmap.height <= 1) return null
+        val raw = nativeContentBounds(bitmap) ?: fallbackContentBounds(bitmap)
+        if (raw.width() <= 1f || raw.height() <= 1f) return null
+
+        val referenceWidth =
+            if (bitmap.width > bitmap.height) PORTRAIT_REFERENCE_HEIGHT
+            else PORTRAIT_REFERENCE_WIDTH
+        val referenceHeight =
+            if (bitmap.width > bitmap.height) PORTRAIT_REFERENCE_WIDTH
+            else PORTRAIT_REFERENCE_HEIGHT
+        val renderedScale = min(
+            bitmap.width / referenceWidth,
+            bitmap.height / referenceHeight,
+        )
+        val padding = max(1f, NATIVE_PADDING_PX * renderedScale)
+        val padded = RectF(
+            max(0f, raw.left - padding),
+            max(0f, raw.top - padding),
+            min(bitmap.width.toFloat(), raw.right + padding),
+            min(bitmap.height.toFloat(), raw.bottom + padding),
+        )
+        return if (padded.width() > 1f && padded.height() > 1f) padded else null
+    }
+}
 
 private object PdfDirectRenderEngine {
     private const val LOG_TAG = "RTL_READER"
@@ -121,9 +256,17 @@ private object PdfDirectRenderEngine {
         key: RenderKey,
         pageCount: Int,
         bitmap: Bitmap,
+        trimmingRect: RectF?,
     ) {
         if (bitmap.isRecycled) return
-        putCached(key, CachedBitmap(bitmap = bitmap, pageCount = pageCount))
+        putCached(
+            key,
+            CachedBitmap(
+                bitmap = bitmap,
+                pageCount = pageCount,
+                trimmingRect = trimmingRect?.let(::RectF),
+            ),
+        )
         Log.i(LOG_TAG, "RTL_READER_NATIVE_VIEW_VISIBLE_CACHED page=${key.pageIndex + 1}")
     }
 
@@ -240,6 +383,7 @@ private object PdfDirectRenderEngine {
                 PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY,
             )
             val renderMs = SystemClock.elapsedRealtime() - renderStarted
+            val trimmingRect = NativeFillTrimming.detect(bitmap)
             val totalMs = SystemClock.elapsedRealtime() - totalStarted
 
             val result = DirectRenderResult(
@@ -251,6 +395,7 @@ private object PdfDirectRenderEngine {
                 openMs = openMs,
                 renderMs = renderMs,
                 totalMs = totalMs,
+                trimmingRect = trimmingRect,
             )
             bitmap = null
             return result
@@ -293,6 +438,7 @@ private object PdfDirectRenderEngine {
                 openMs = 0L,
                 renderMs = 0L,
                 totalMs = totalMs,
+                trimmingRect = cached.trimmingRect?.let(::RectF),
             )
         }
 
@@ -325,6 +471,7 @@ private object PdfDirectRenderEngine {
                     openMs = 0L,
                     renderMs = 0L,
                     totalMs = totalMs,
+                    trimmingRect = cached.trimmingRect?.let(::RectF),
                 )
             }
 
@@ -398,6 +545,7 @@ private object PdfDirectRenderEngine {
                             CachedBitmap(
                                 bitmap = result.bitmap,
                                 pageCount = result.pageCount,
+                                trimmingRect = result.trimmingRect?.let(::RectF),
                             ),
                         )
                         Log.i(
@@ -490,6 +638,7 @@ class PdfPageView(
                             result.key,
                             result.pageCount,
                             result.bitmap,
+                            result.trimmingRect,
                         )
                         return@post
                     }
@@ -508,6 +657,7 @@ class PdfPageView(
                         VisibleBitmapMetadata(
                             key = result.key,
                             pageCount = result.pageCount,
+                            trimmingRect = result.trimmingRect?.let(::RectF),
                         ),
                     )
                     pendingRenderedEvent = renderedEvent
@@ -562,6 +712,7 @@ class PdfPageView(
                     previousMetadata.key,
                     previousMetadata.pageCount,
                     previous,
+                    previousMetadata.trimmingRect,
                 )
             } else {
                 previous.recycle()
@@ -637,24 +788,74 @@ override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
     }
 }
 
+private fun validTrimmingRect(bitmap: Bitmap, rect: RectF?): Boolean =
+    rect != null &&
+        rect.left >= 0f &&
+        rect.top >= 0f &&
+        rect.right <= bitmap.width + 1f &&
+        rect.bottom <= bitmap.height + 1f &&
+        rect.width() > 1f &&
+        rect.height() > 1f
+
+private fun nativeTrimmedDestination(bitmap: Bitmap, trimmingRect: RectF): RectF {
+    // Mirror Supernote TrimmingUtil/BitmapUtil geometry: fit the detected
+    // non-white content rectangle into this page slot while preserving the
+    // asymmetric margin anchor in the original page coordinate system.
+    val scale = min(
+        width.toFloat() / trimmingRect.width(),
+        height.toFloat() / trimmingRect.height(),
+    )
+    val horizontalRoom = width - trimmingRect.width() * scale
+    val verticalRoom = height - trimmingRect.height() * scale
+    val horizontalMargin = bitmap.width - trimmingRect.width()
+    val verticalMargin = bitmap.height - trimmingRect.height()
+    val horizontalAnchor =
+        (if (horizontalMargin > 0f) trimmingRect.left / horizontalMargin else 0.5f)
+            .coerceIn(0f, 1f)
+    val verticalAnchor =
+        (if (verticalMargin > 0f) trimmingRect.top / verticalMargin else 0.5f)
+            .coerceIn(0f, 1f)
+    val trimmedLeft = horizontalRoom * horizontalAnchor
+    val trimmedTop = verticalRoom * verticalAnchor
+    val left = trimmedLeft - trimmingRect.left * scale
+    val top = trimmedTop - trimmingRect.top * scale
+    return RectF(
+        left,
+        top,
+        left + bitmap.width * scale,
+        top + bitmap.height * scale,
+    )
+}
+
 override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val bitmap = pageBitmap ?: return
         if (bitmap.isRecycled || width <= 0 || height <= 0) return
 
-        val widthScale = width.toFloat() / bitmap.width.toFloat()
-        val heightScale = height.toFloat() / bitmap.height.toFloat()
-        val scale = if (pendingContentMode == "native_fill") {
-            max(widthScale, heightScale)
+        val trimmingRect = pageBitmapMetadata?.trimmingRect
+        val destination = if (
+            pendingContentMode == "native_fill" &&
+            validTrimmingRect(bitmap, trimmingRect)
+        ) {
+            nativeTrimmedDestination(bitmap, trimmingRect!!)
         } else {
-            min(widthScale, heightScale)
+            val widthScale = width.toFloat() / bitmap.width.toFloat()
+            val heightScale = height.toFloat() / bitmap.height.toFloat()
+            val scale = if (pendingContentMode == "native_fill") {
+                max(widthScale, heightScale)
+            } else {
+                min(widthScale, heightScale)
+            }
+            val drawWidth = bitmap.width * scale
+            val drawHeight = bitmap.height * scale
+            val left = (width - drawWidth) / 2f
+            val top = (height - drawHeight) / 2f
+            RectF(left, top, left + drawWidth, top + drawHeight)
         }
-        val drawWidth = bitmap.width * scale
-        val drawHeight = bitmap.height * scale
-        val left = (width - drawWidth) / 2f
-        val top = (height - drawHeight) / 2f
-        val destination = RectF(left, top, left + drawWidth, top + drawHeight)
+        val saveCount = canvas.save()
+        canvas.clipRect(0f, 0f, width.toFloat(), height.toFloat())
         canvas.drawBitmap(bitmap, null, destination, bitmapPaint)
+        canvas.restoreToCount(saveCount)
 
         val pending = pendingRenderedEvent
         if (pending != null && pending.generation == renderGeneration.get()) {

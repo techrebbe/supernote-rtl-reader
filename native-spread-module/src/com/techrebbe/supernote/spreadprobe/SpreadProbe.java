@@ -109,7 +109,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int TRACE_TRAIL_LIMIT = 256;
     private static final long TRACE_MAX_SNAPSHOT_BYTES = 64L * 1024L * 1024L;
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 104L;
+    private static final long MODULE_VERSION_CODE = 105L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -2956,11 +2956,42 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 + " dir=" + directory.getAbsolutePath());
             showStatusOverlay(activity, "SPREAD TRACE: recording");
         } catch (Throwable throwable) {
+            FileObserver failedObserver = null;
             synchronized (TRACE_LOCK) {
-                traceSession = null;
+                if (traceSession == started) {
+                    traceSession = null;
+                }
+                if (started != null) {
+                    started.stopping = true;
+                    failedObserver = started.markObserver;
+                    started.markObserver = null;
+                    if (started.pendingSnapshot != null) {
+                        started.pendingSnapshot.cancel(false);
+                        started.pendingSnapshot = null;
+                    }
+                    started.snapshotGeneration++;
+                }
+            }
+            if (failedObserver != null) {
+                try {
+                    failedObserver.stopWatching();
+                } catch (Throwable ignored) {
+                }
             }
             if (started != null) {
                 started.snapshotExecutor.shutdownNow();
+                try {
+                    File active = new File(
+                        started.rootDirectory,
+                        "active.txt"
+                    );
+                    if (active.isFile() && !active.delete()) {
+                        log("trace_start_active_pointer_delete_failed path="
+                            + active.getAbsolutePath());
+                    }
+                } catch (Throwable cleanupError) {
+                    log("trace_start_pointer_cleanup_failed " + cleanupError);
+                }
             }
             log("trace_start_failed " + throwable);
             XposedBridge.log(throwable);

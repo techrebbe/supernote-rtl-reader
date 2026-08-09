@@ -49,7 +49,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 104L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 105L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -1104,6 +1104,24 @@ def check(repo_root: Path) -> None:
     if "Looper.getMainLooper()" in mark_observer:
         fail("mark observer still posts snapshot hashing onto the UI thread")
 
+    trace_start = module.find("private static void startAnnotationTrace(")
+    checkpoint_start = module.find(
+        "private static void checkpointAnnotationTrace(", trace_start
+    )
+    if trace_start < 0 or checkpoint_start < 0:
+        fail("could not isolate trace startup failure cleanup")
+    require_markers(
+        module[trace_start:checkpoint_start],
+        (
+            "failedObserver.stopWatching()",
+            "started.pendingSnapshot.cancel(false)",
+            "started.snapshotExecutor.shutdownNow()",
+            'new File(\n                        started.rootDirectory,\n                        "active.txt"',
+            "active.isFile() && !active.delete()",
+        ),
+        "failed trace startup cleanup",
+    )
+
     boundary_start = module.find(
         "private static void traceAnnotationBoundary("
     )
@@ -1276,10 +1294,10 @@ def check(repo_root: Path) -> None:
     if "Start-Sleep -Milliseconds 500" in stop_action:
         fail("trace Stop still relies on a fixed finalization delay")
 
-    if 'android:versionCode="104"' not in manifest:
-        fail("companion manifest must use versionCode 104")
-    if 'android:versionName="0.0.104"' not in manifest:
-        fail("companion manifest must use versionName 0.0.104")
+    if 'android:versionCode="105"' not in manifest:
+        fail("companion manifest must use versionCode 105")
+    if 'android:versionName="0.0.105"' not in manifest:
+        fail("companion manifest must use versionName 0.0.105")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

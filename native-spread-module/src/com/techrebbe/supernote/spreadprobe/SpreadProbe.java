@@ -109,7 +109,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int TRACE_TRAIL_LIMIT = 256;
     private static final long TRACE_MAX_SNAPSHOT_BYTES = 64L * 1024L * 1024L;
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 102L;
+    private static final long MODULE_VERSION_CODE = 103L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -8530,6 +8530,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             if (!usable(fullBitmap) || activeDestination == null) {
                 return null;
             }
+            RectF activeVisibleBounds = activePageVisibleBounds(activity);
+            if (activeVisibleBounds == null) {
+                activeVisibleBounds = new RectF(activeDestination);
+            }
             ImageView imageView =
                 (ImageView) XposedHelpers.getObjectField(activity, "mImage");
             Bitmap transformed = Bitmap.createBitmap(
@@ -8541,15 +8545,19 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             Paint paint = new Paint(
                 Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG
             );
+            int saveCount = canvas.save();
+            canvas.clipRect(activeVisibleBounds);
             canvas.drawBitmap(
                 fullBitmap,
                 null,
                 activeDestination,
                 paint
             );
+            canvas.restoreToCount(saveCount);
             log("full_ink_transformed source="
                 + bitmapDescription(fullBitmap)
                 + " active_dest=" + rectDescription(activeDestination)
+                + " visible=" + rectDescription(activeVisibleBounds)
                 + " active_page=" + (currentDocumentPage(activity) + 1));
             return transformed;
         } catch (Throwable throwable) {

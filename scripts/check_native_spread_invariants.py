@@ -49,7 +49,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 102L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 103L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -154,6 +154,26 @@ def check(repo_root: Path) -> None:
             "Math.max(",
         ),
         "native spread appearance geometry",
+    )
+    captured_ink_start = module.find(
+        "private static Bitmap renderCapturedFullInk("
+    )
+    combined_ink_start = module.find(
+        "private static Bitmap renderCombinedCommittedInk(",
+        captured_ink_start,
+    )
+    if captured_ink_start < 0 or combined_ink_start < 0:
+        fail("could not isolate active settled-ink compositor")
+    require_markers(
+        module[captured_ink_start:combined_ink_start],
+        (
+            "RectF activeVisibleBounds = activePageVisibleBounds(activity)",
+            "activeVisibleBounds = new RectF(activeDestination)",
+            "canvas.clipRect(activeVisibleBounds)",
+            "canvas.drawBitmap(",
+            "canvas.restoreToCount(saveCount)",
+        ),
+        "Native Fill active settled-ink clipping",
     )
     require_markers(
         pdf_view + pdf_view_manager + direct_patch,
@@ -1246,10 +1266,10 @@ def check(repo_root: Path) -> None:
     if "Start-Sleep -Milliseconds 500" in stop_action:
         fail("trace Stop still relies on a fixed finalization delay")
 
-    if 'android:versionCode="102"' not in manifest:
-        fail("companion manifest must use versionCode 102")
-    if 'android:versionName="0.0.102"' not in manifest:
-        fail("companion manifest must use versionName 0.0.102")
+    if 'android:versionCode="103"' not in manifest:
+        fail("companion manifest must use versionCode 103")
+    if 'android:versionName="0.0.103"' not in manifest:
+        fail("companion manifest must use versionName 0.0.103")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

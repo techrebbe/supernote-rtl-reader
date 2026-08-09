@@ -177,7 +177,7 @@ hashing and copying now run on a debounced single-thread worker instead of the
 document UI thread. Ordered trace fingerprints include all trails even when the
 detailed `items` array is truncated after 256 entries.
 
-v0.0.110 also moves trail JSON serialization and fingerprint hashing to that
+v0.0.111 also moves trail JSON serialization and fingerprint hashing to that
 worker. The hook thread copies an immutable trail representation first, so the
 worker cannot observe later native mutations. Annotation-boundary `.mark`
 hashes are reported as `pending` until the live file identity matches a
@@ -211,6 +211,8 @@ Only a stable, SHA-256-verified snapshot can publish `last.txt`. Exhausted
 retries publish `incomplete.txt` instead, remove the recording pointer, retain
 the partial directory, and cause `trace.ps1 Stop` to report the failed session
 without substituting an older trace.
+The live source identity is checked once more after the copied snapshot's hash
+is verified, so a rewrite during that verification cannot be accepted.
 
 This is firmware-specific experimental software for a rooted device. Back up
 documents and `.mark` files before testing a new firmware or module revision.
@@ -237,7 +239,7 @@ The signed APK is written to `build/artifact/`.
 
 Install the APK, enable **Supernote Native Spread Probe** in LSPosed, scope it
 only to `com.supernote.document`, and restart the document reader. Supernote
-RTL Reader v0.4.12 or newer and Native Spread v0.0.110 or newer are required for
+RTL Reader v0.4.12 or newer and Native Spread v0.0.111 or newer are required for
 protected editable mode. Its
 recovery manifest binds the backup to the PDF's full SHA-256 because
 Supernote changes the PDF modification time when the document activity

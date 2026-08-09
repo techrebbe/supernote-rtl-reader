@@ -21,6 +21,8 @@ source changes during hashing or copying. `last.txt` is published only after a
 stable attempt. If all attempts fail, `incomplete.txt` names the partial
 session, `active.txt` is removed, and the helper reports the incomplete result
 without treating it as finalized.
+The source identity is checked again after the copied snapshot is hashed; a
+rewrite during that verification makes the attempt unstable and retryable.
 
 Every stateful event may include:
 

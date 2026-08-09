@@ -49,7 +49,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 110L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 111L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -1176,6 +1176,33 @@ def check(repo_root: Path) -> None:
         ),
         "stable final trace snapshot retry",
     )
+    snapshot_capture_end = module.find(
+        "private static void traceEvent(", snapshot_start
+    )
+    if snapshot_capture_end < 0:
+        fail("could not isolate final snapshot source verification")
+    snapshot_capture = module[snapshot_start:snapshot_capture_end]
+    published_source = snapshot_capture.find(
+        "FileIdentity publishedSource = FileIdentity.capture(mark);"
+    )
+    verify_snapshot = snapshot_capture.find(
+        "String publishedHash = sha256(snapshot);", published_source
+    )
+    verified_source = snapshot_capture.find(
+        "FileIdentity verifiedSource = FileIdentity.capture(mark);",
+        verify_snapshot,
+    )
+    compare_verified = snapshot_capture.find(
+        "!publishedSource.sameAs(verifiedSource)", verified_source
+    )
+    if not (
+        0 <= published_source < verify_snapshot < verified_source
+        < compare_verified
+    ):
+        fail(
+            "snapshot publication does not recheck the source after "
+            "verifying the copied snapshot"
+        )
     stop_session_start = module.find(
         "private static void stopAnnotationTrace("
     )
@@ -1429,10 +1456,10 @@ def check(repo_root: Path) -> None:
     if not 0 <= incomplete_result < completed_result:
         fail("trace helper can publish completion before checking incomplete.txt")
 
-    if 'android:versionCode="110"' not in manifest:
-        fail("companion manifest must use versionCode 110")
-    if 'android:versionName="0.0.110"' not in manifest:
-        fail("companion manifest must use versionName 0.0.110")
+    if 'android:versionCode="111"' not in manifest:
+        fail("companion manifest must use versionCode 111")
+    if 'android:versionName="0.0.111"' not in manifest:
+        fail("companion manifest must use versionName 0.0.111")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

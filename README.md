@@ -264,6 +264,12 @@ Annotation-trace snapshots are now debounced on a serialized background worker,
 and ordered trail fingerprints cover every trail while detailed JSON remains
 capped at 256 entries.
 
+Native Spread v0.0.101 keeps annotation tracing from perturbing pen timing on
+trail-heavy pages. Hook threads now capture immutable scalar and point arrays;
+the trace worker performs JSON serialization and SHA-256 fingerprinting. A
+boundary reports its `.mark` hash as `pending` whenever the live file identity
+does not match the most recently completed snapshot.
+
 ## v0.4.10 protected native editing pilot
 
 v0.4.9 added an explicitly confirmed **RTL editable** choice alongside **Off**

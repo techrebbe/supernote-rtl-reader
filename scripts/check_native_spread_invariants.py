@@ -49,7 +49,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 100L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 101L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -1062,7 +1062,9 @@ def check(repo_root: Path) -> None:
             "ScheduledExecutorService",
             "snapshotExecutor.schedule(",
             "pendingSnapshot.cancel(false)",
+            "scheduleTraceWorkerTask(",
             "scheduleTraceMarkSnapshot(",
+            "lastSnapshotIdentity",
             "traceLogMessage(message)",
         ),
         "opt-in annotation transaction tracing",
@@ -1085,16 +1087,55 @@ def check(repo_root: Path) -> None:
     boundary_start = module.find(
         "private static void traceAnnotationBoundary("
     )
-    trace_list_start = module.find(
-        "private static JSONObject traceTrailList(", boundary_start
+    capture_trails_start = module.find(
+        "private static TraceTrailListCapture captureTraceTrailList(",
+        boundary_start,
     )
-    if boundary_start < 0 or trace_list_start < 0:
+    if boundary_start < 0 or capture_trails_start < 0:
         fail("could not isolate annotation-boundary trace collection")
-    boundary = module[boundary_start:trace_list_start]
+    boundary = module[boundary_start:capture_trails_start]
     if "sha256(mark)" in boundary:
         fail("annotation boundaries still hash the .mark file on the UI thread")
     if "scheduleTraceMarkSnapshot(" not in boundary:
         fail("annotation boundary snapshots do not use the background worker")
+    trail_capture = boundary.find(
+        "final TraceTrailListCapture fileTrails = captureTraceTrailList("
+    )
+    worker_submit = boundary.find("scheduleTraceWorkerTask(", trail_capture)
+    worker_run = boundary.find("public void run()", worker_submit)
+    trail_serialize = boundary.find("traceTrailList(fileTrails)", worker_run)
+    if not 0 <= trail_capture < worker_submit < worker_run < trail_serialize:
+        fail("annotation trail serialization is not confined to the trace worker")
+    require_markers(
+        boundary,
+        (
+            "traceLastSnapshotHash(session, mark)",
+            '"trace_stop".equals(boundary)',
+            '"markSha256"',
+            "markHash",
+        ),
+        "identity-aware annotation boundary hash and final boundary queueing",
+    )
+
+    trace_list_start = module.find(
+        "private static JSONObject traceTrailList(", capture_trails_start
+    )
+    if trace_list_start < 0:
+        fail("could not isolate immutable trace trail capture")
+    trail_capture_code = module[capture_trails_start:trace_list_start]
+    if "traceTrailFingerprint(" in trail_capture_code or "sha256Text(" in trail_capture_code:
+        fail("trail fingerprinting still runs while capturing hook-thread input")
+    if "traceValueDescription(" in trail_capture_code:
+        fail("trail auxiliary values are still serialized on the hook thread")
+    require_markers(
+        trail_capture_code,
+        (
+            'captureTraceValue(traceCall(trail, "get_pressures"))',
+            'captureTraceValue(traceCall(trail, "get_angles"))',
+            'captureTraceValue(traceCall(trail, "get_timestamp"))',
+        ),
+        "immutable auxiliary trail-value capture",
+    )
 
     trace_trail_start = module.find(
         "private static JSONObject traceTrail(", trace_list_start
@@ -1105,14 +1146,51 @@ def check(repo_root: Path) -> None:
     require_markers(
         trace_list,
         (
-            "for (int index = 0; index < trails.size(); index++)",
+            "for (int index = 0; index < captured.trails.length; index++)",
+            "String fingerprint = traceTrailFingerprint(trail)",
             "if (index < limit)",
-            "items.put(item)",
-            "fingerprint = traceTrailFingerprint(trail)",
+            "items.put(traceTrail(trail, index, fingerprint))",
             "ordered.append(fingerprint).append(';')",
-            'summary.put("truncated", Math.max(0, trails.size() - limit))',
+            "Math.max(0, captured.trails.length - limit)",
         ),
         "complete trail fingerprint with capped details",
+    )
+
+    hash_state_start = module.find(
+        "private static String traceLastSnapshotHash("
+    )
+    snapshot_schedule_start = module.find(
+        "private static void scheduleTraceWorkerTask(", hash_state_start
+    )
+    if hash_state_start < 0 or snapshot_schedule_start < 0:
+        fail("could not isolate identity-aware boundary hash state")
+    hash_state = module[hash_state_start:snapshot_schedule_start]
+    require_markers(
+        hash_state,
+        (
+            "FileIdentity.capture(mark)",
+            "expected.lastSnapshotIdentity.sameAs(currentIdentity)",
+            'return "pending"',
+        ),
+        "non-stale annotation boundary hash",
+    )
+
+    worker_start = module.find(
+        "private static void scheduleTraceWorkerTask(",
+        snapshot_schedule_start,
+    )
+    worker_end = module.find(
+        "private static void scheduleTraceMarkSnapshot(", worker_start
+    )
+    if worker_start < 0 or worker_end < 0:
+        fail("could not isolate trace worker admission logic")
+    require_markers(
+        module[worker_start:worker_end],
+        (
+            "final boolean allowWhenStopping",
+            "expected.stopping && !allowWhenStopping",
+        ),
+        "trace-stop boundary worker admission",
     )
 
     require_markers(
@@ -1148,10 +1226,10 @@ def check(repo_root: Path) -> None:
     if "Start-Sleep -Milliseconds 500" in stop_action:
         fail("trace Stop still relies on a fixed finalization delay")
 
-    if 'android:versionCode="100"' not in manifest:
-        fail("companion manifest must use versionCode 100")
-    if 'android:versionName="0.0.100"' not in manifest:
-        fail("companion manifest must use versionName 0.0.100")
+    if 'android:versionCode="101"' not in manifest:
+        fail("companion manifest must use versionCode 101")
+    if 'android:versionName="0.0.101"' not in manifest:
+        fail("companion manifest must use versionName 0.0.101")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

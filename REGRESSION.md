@@ -256,8 +256,8 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 
 ## v0.4.12 native spread appearance and inactive-page editing
 
-- [x] Native Spread v0.0.100 compiles and the packaged, handshake, and plug-in
-  compatibility versions all report 100.
+- [x] Native Spread v0.0.101 compiles and the packaged, handshake, and plug-in
+  compatibility versions all report 101.
 - [x] Native Spread v0.0.84: rotate an open spread to portrait and confirm the
   current page immediately uses the normal native-reader portrait size without
   turning away and back.
@@ -322,6 +322,10 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   while the one stale activation save is still suppressed.
 - [x] Trace `.mark` snapshots are debounced and serialized off the UI thread;
   annotation boundaries do not hash the file synchronously.
+- [x] Trail details and all-trail fingerprints are computed from immutable
+  captures on the trace worker rather than on annotation hook threads.
+- [x] Annotation boundaries report a `.mark` hash only when the live file
+  identity matches the completed snapshot; changed files report `pending`.
 - [x] The trace collection script waits for asynchronous finalization and
   verifies the completed session pointer before pulling the bundle.
 - [x] Ordered trail fingerprints cover all trails while detailed trace items

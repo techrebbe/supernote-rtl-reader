@@ -32,6 +32,7 @@ if (-not $Serial -and $env:ANDROID_SERIAL) {
 $traceAction = 'com.techrebbe.supernote.spreadprobe.TRACE_CONTROL'
 $documentPackage = 'com.supernote.document'
 $remoteRoot = '/storage/emulated/0/Download/SupernoteNativeSpreadTrace'
+$recoveredAbandonedTraceSession = $null
 
 if ($Adb -eq 'adb' -and -not (Get-Command adb -ErrorAction SilentlyContinue)) {
     $sdkAdb = Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe'
@@ -111,6 +112,7 @@ function Read-RemotePointer {
 }
 
 function Reconcile-AbandonedTracePointer {
+    $script:recoveredAbandonedTraceSession = $null
     try {
         $session = Read-RemotePointer -Name active
     } catch {
@@ -119,6 +121,7 @@ function Reconcile-AbandonedTracePointer {
 
     if ($session -notmatch '^[A-Za-z0-9._-]+$') {
         Invoke-Adb shell "rm -f '$remoteRoot/active.txt'" | Out-Null
+        $script:recoveredAbandonedTraceSession = '[invalid pointer]'
         Write-Warning 'Removed an invalid Native Spread active-trace pointer.'
         return
     }
@@ -148,6 +151,7 @@ function Reconcile-AbandonedTracePointer {
         "echo __TRACE_POINTER_CHANGED__; fi"
     )
     if (($result | Out-String).Trim() -eq '__TRACE_ABANDONED_REMOVED__') {
+        $script:recoveredAbandonedTraceSession = $session
         Write-Warning (
             "Recovered abandoned Native Spread trace '$session' " +
             "from document process $processId. Its partial directory was " +
@@ -350,6 +354,14 @@ switch ($Action) {
     }
 
     'Stop' {
+        if ($recoveredAbandonedTraceSession) {
+            throw (
+                "Trace '$recoveredAbandonedTraceSession' ended when the " +
+                'Supernote document process exited. Its partial directory ' +
+                "remains at '$remoteRoot/$recoveredAbandonedTraceSession'. " +
+                'Stop did not pull the preceding completed session.'
+            )
+        }
         $sessionWasActive = $true
         try {
             $session = Read-RemotePointer -Name active

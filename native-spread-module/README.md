@@ -177,7 +177,7 @@ hashing and copying now run on a debounced single-thread worker instead of the
 document UI thread. Ordered trace fingerprints include all trails even when the
 detailed `items` array is truncated after 256 entries.
 
-v0.0.108 also moves trail JSON serialization and fingerprint hashing to that
+v0.0.109 also moves trail JSON serialization and fingerprint hashing to that
 worker. The hook thread copies an immutable trail representation first, so the
 worker cannot observe later native mutations. Annotation-boundary `.mark`
 hashes are reported as `pending` until the live file identity matches a
@@ -200,11 +200,12 @@ observer, and deletes `active.txt`, so the collection helper cannot mistake a
 failed session for a recording trace. It does not publish `last.txt` until a
 session has completed final snapshot collection, preserving the preceding
 completed-session pointer if startup fails.
-An `active.txt` left by a killed document process is reconciled on the next
-document activity startup and by every desktop trace-helper action. The helper
-compares the session's recorded PID with the live Supernote document PID before
-removing the pointer; it retains the partial directory without publishing it as
-completed.
+An `active.txt` left by a killed document process is reconciled by every desktop
+trace-helper action. The helper compares the session's recorded PID with the
+live Supernote document PID before removing the pointer; it retains the partial
+directory without publishing it as completed. `Stop` then raises an explicit
+incomplete-session error rather than substituting and pulling an older trace
+from `last.txt`.
 
 This is firmware-specific experimental software for a rooted device. Back up
 documents and `.mark` files before testing a new firmware or module revision.
@@ -231,7 +232,7 @@ The signed APK is written to `build/artifact/`.
 
 Install the APK, enable **Supernote Native Spread Probe** in LSPosed, scope it
 only to `com.supernote.document`, and restart the document reader. Supernote
-RTL Reader v0.4.12 or newer and Native Spread v0.0.108 or newer are required for
+RTL Reader v0.4.12 or newer and Native Spread v0.0.109 or newer are required for
 protected editable mode. Its
 recovery manifest binds the backup to the PDF's full SHA-256 because
 Supernote changes the PDF modification time when the document activity

@@ -49,7 +49,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 108L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 109L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -1124,27 +1124,6 @@ def check(repo_root: Path) -> None:
         ),
         "failed trace startup cleanup",
     )
-    reconcile_start = module.find(
-        "private static void reconcileAbandonedTracePointer()"
-    )
-    receiver_start = module.find(
-        "private static synchronized void registerTraceControlReceiver(",
-        reconcile_start,
-    )
-    if reconcile_start < 0 or receiver_start < 0:
-        fail("could not isolate abandoned trace pointer recovery")
-    require_markers(
-        module[reconcile_start:receiver_start],
-        (
-            "traceSession != null",
-            'new File(TRACE_ROOT, "active.txt")',
-            "active.delete()",
-            '"trace_abandoned_pointer_removed processId="',
-        ),
-        "document-process abandoned trace pointer recovery",
-    )
-    if "reconcileAbandonedTracePointer();" not in module:
-        fail("document activity startup does not reconcile abandoned traces")
     trace_startup = module[trace_start:checkpoint_start]
     if '"last.txt"' in trace_startup:
         fail("trace startup publishes last.txt before finalization")
@@ -1333,6 +1312,8 @@ def check(repo_root: Path) -> None:
             "pidof '$documentPackage'",
             "grep -Fqx '$session'",
             "__TRACE_ABANDONED_REMOVED__",
+            "$script:recoveredAbandonedTraceSession = $session",
+            "Stop did not pull the preceding completed session.",
             "__TRACE_FINALIZED__",
             "Timed out waiting for trace",
         ),
@@ -1351,25 +1332,41 @@ def check(repo_root: Path) -> None:
     )
     if not 0 <= helper_reconcile < helper_wait < helper_call < action_switch:
         fail("trace helper does not reconcile abandoned pointers before actions")
+    helper_reconcile_code = trace_script[helper_reconcile:helper_wait]
+    recovered_check = helper_reconcile_code.find(
+        "__TRACE_ABANDONED_REMOVED__"
+    )
+    recovered_identity = helper_reconcile_code.find(
+        "$script:recoveredAbandonedTraceSession = $session",
+        recovered_check,
+    )
+    if not 0 <= recovered_check < recovered_identity:
+        fail("trace helper does not retain the recovered session identity")
 
     stop_trace = trace_script.find("'Stop' {")
     status_trace = trace_script.find("'Status' {", stop_trace)
     if stop_trace < 0 or status_trace < 0:
         fail("could not isolate Native Spread trace Stop action")
     stop_action = trace_script[stop_trace:status_trace]
+    abandoned_guard = stop_action.find(
+        "if ($recoveredAbandonedTraceSession)"
+    )
+    completed_fallback = stop_action.find("Read-RemotePointer -Name last")
     wait_for_finalization = stop_action.find(
         "Wait-TraceFinalization -Session $session"
     )
     pull_bundle = stop_action.find('Invoke-Adb pull "$remoteRoot/$session"')
+    if not 0 <= abandoned_guard < completed_fallback < pull_bundle:
+        fail("trace Stop can substitute a prior session after crash recovery")
     if not 0 <= wait_for_finalization < pull_bundle:
         fail("trace bundle can be pulled before asynchronous finalization")
     if "Start-Sleep -Milliseconds 500" in stop_action:
         fail("trace Stop still relies on a fixed finalization delay")
 
-    if 'android:versionCode="108"' not in manifest:
-        fail("companion manifest must use versionCode 108")
-    if 'android:versionName="0.0.108"' not in manifest:
-        fail("companion manifest must use versionName 0.0.108")
+    if 'android:versionCode="109"' not in manifest:
+        fail("companion manifest must use versionCode 109")
+    if 'android:versionName="0.0.109"' not in manifest:
+        fail("companion manifest must use versionName 0.0.109")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

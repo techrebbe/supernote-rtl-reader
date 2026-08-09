@@ -264,7 +264,7 @@ Annotation-trace snapshots are now debounced on a serialized background worker,
 and ordered trail fingerprints cover every trail while detailed JSON remains
 capped at 256 entries.
 
-Native Spread v0.0.108 keeps annotation tracing from perturbing pen timing on
+Native Spread v0.0.109 keeps annotation tracing from perturbing pen timing on
 trail-heavy pages. Hook threads now capture immutable scalar and point arrays;
 the trace worker performs JSON serialization and SHA-256 fingerprinting. A
 boundary reports its `.mark` hash as `pending` whenever the live file identity
@@ -278,11 +278,12 @@ are captured immutably and included in the worker-side fingerprint as well.
 The `last.txt` trace pointer is published only after final snapshot collection
 completes, so a failed startup cannot replace the previous completed-session
 pointer with a partial trace.
-If the document process dies during a recording, the next document process or
-desktop trace-helper action removes the abandoned `active.txt` after verifying
-that its recorded PID is no longer the live Supernote document process. The
-partial session directory is retained for diagnosis but is never promoted to
-`last.txt`.
+If the document process dies during a recording, the next desktop trace-helper
+action removes the abandoned `active.txt` after verifying that its recorded PID
+is no longer the live Supernote document process. The partial session directory
+is retained for diagnosis but is never promoted to `last.txt`; `Stop` reports
+that incomplete session explicitly instead of pulling the preceding completed
+trace.
 
 The active settled-ink compositor now clips its transformed bitmap to the
 same visible page-slot bounds used by Native Fill PDF and canonical-ink

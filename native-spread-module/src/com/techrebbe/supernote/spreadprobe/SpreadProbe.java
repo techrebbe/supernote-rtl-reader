@@ -1066,12 +1066,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     }
                     Integer contactStartPage =
                         PEN_CONTACT_START_PAGES.get(activity);
-                    boolean completingActivePageStroke = pressure == 0
-                        && contactStartPage != null
-                        && PAGE_ACTIVATION_TRANSACTIONS.get(activity) == null
-                        && isEditableSpreadLandscape(activity)
-                        && contactStartPage.intValue()
-                            == currentDocumentPage(activity);
+                    boolean completingActivePageStroke =
+                        isCompletingActivePageStroke(activity, pressure);
                     tracePenPosition(
                         activity,
                         ((Integer) param.args[0]).intValue(),
@@ -2667,7 +2663,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         "save_trails_before",
                         false
                     );
-                    if (shouldBlockPageActivationGesture(activity)) {
+                    if (shouldBlockPageActivationSave(activity)) {
                         param.setResult(null);
                         PageActivationTransaction transaction =
                             PAGE_ACTIVATION_TRANSACTIONS.get(activity);
@@ -7674,7 +7670,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         if (activity == null || !isEditableSpreadLandscape(activity)) {
             return false;
         }
+        boolean completingActivePageStroke =
+            isCompletingActivePageStroke(activity, pressure);
         if (isNativeChromeTouch(activity, y)) {
+            if (completingActivePageStroke) {
+                log("page_activation_native_chrome_terminal_preserved"
+                    + " point=" + x + "," + y);
+                return false;
+            }
             // The toolbar and bottom page bar consume ordinary Android stylus
             // events.  Suppress only the parallel low-latency DrawPath point,
             // so selecting a native control with the pen cannot ink or activate
@@ -7713,7 +7716,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     + " start=" + contactStartPage);
                 return true;
             }
-            if (pressure == 0) {
+            if (completingActivePageStroke) {
                 // The source page must receive its ordinary terminal callback
                 // even when the lift coordinate is over the other half. The
                 // caller skips hover activation for this same frame and clears
@@ -7730,6 +7733,28 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         log("page_activation_trigger_input_blocked current=" + current
             + " target=" + target + " pressure=" + pressure);
         return true;
+    }
+
+    private static boolean isCompletingActivePageStroke(
+        Activity activity,
+        int pressure
+    ) {
+        if (activity == null || pressure != 0
+            || PAGE_ACTIVATION_TRANSACTIONS.get(activity) != null
+            || !isEditableSpreadLandscape(activity)) {
+            return false;
+        }
+        Integer contactStartPage = PEN_CONTACT_START_PAGES.get(activity);
+        if (contactStartPage == null) {
+            return false;
+        }
+        try {
+            return contactStartPage.intValue()
+                == currentDocumentPage(activity);
+        } catch (Throwable throwable) {
+            log("page_activation_terminal_identity_failed " + throwable);
+            return false;
+        }
     }
 
     private static Integer pendingPageActivationTarget(Activity activity) {
@@ -8138,6 +8163,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         PageActivationTransaction transaction = activity == null
             ? null : PAGE_ACTIVATION_TRANSACTIONS.get(activity);
         return transaction != null && transaction.triggerContactObserved;
+    }
+
+    private static boolean shouldBlockPageActivationSave(Activity activity) {
+        return activity != null
+            && PAGE_ACTIVATION_TRANSACTIONS.get(activity) != null;
     }
 
     private static void abortPageActivationTransaction(

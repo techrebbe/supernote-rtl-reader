@@ -860,11 +860,13 @@ def check(repo_root: Path) -> None:
         '"page_activation_pen_ignored_native_chrome point="',
         '"page_activation_cross_page_point_blocked current="',
         '"page_activation_cross_page_terminal_preserved current="',
+        '"page_activation_native_chrome_terminal_preserved"',
         '"page_activation_active_stroke_terminal_preserved"',
         '"page_activation_ignored_cross_page_stroke current="',
         '"page_activation_rejected reason=pen_contact_active"',
         '"page_activation_ui_input_blocked id="',
         '"page_activation_history_blocked id="',
+        "shouldBlockPageActivationSave(activity)",
         '"RTL SPREAD: page switch failed - writing disabled"',
     )
     require_markers(
@@ -909,11 +911,15 @@ def check(repo_root: Path) -> None:
         "protected void beforeHookedMethod"
     )
     active_stroke_terminal = digital_position_hook.find(
-        "boolean completingActivePageStroke = pressure == 0",
+        "boolean completingActivePageStroke =",
         before_native_callback,
     )
+    active_stroke_terminal_helper = digital_position_hook.find(
+        "isCompletingActivePageStroke(activity, pressure)",
+        active_stroke_terminal,
+    )
     intercept_input = digital_position_hook.find(
-        "interceptPenPageActivation(", active_stroke_terminal
+        "interceptPenPageActivation(", active_stroke_terminal_helper
     )
     discard_input = digital_position_hook.find(
         "param.setResult(null);", intercept_input
@@ -926,7 +932,8 @@ def check(repo_root: Path) -> None:
     )
     if not (
         0 <= before_native_callback < active_stroke_terminal
-        < intercept_input < discard_input < preserve_terminal
+        < active_stroke_terminal_helper < intercept_input
+        < discard_input < preserve_terminal
         < schedule_activation
     ):
         fail(
@@ -1015,23 +1022,33 @@ def check(repo_root: Path) -> None:
     intercept_method = module[
         intercept_method_start:pending_target_after_intercept
     ]
+    intercept_terminal_identity = intercept_method.find(
+        "isCompletingActivePageStroke(activity, pressure)"
+    )
     intercept_chrome = intercept_method.find(
-        "isNativeChromeTouch(activity, y)"
+        "isNativeChromeTouch(activity, y)", intercept_terminal_identity
+    )
+    intercept_chrome_terminal = intercept_method.find(
+        "if (completingActivePageStroke)", intercept_chrome
+    )
+    intercept_chrome_preserve = intercept_method.find(
+        "return false;", intercept_chrome_terminal
     )
     intercept_chrome_discard = intercept_method.find(
-        "return true;", intercept_chrome
+        "return true;", intercept_chrome_preserve
     )
     intercept_page_mapping = intercept_method.find(
         "int target = pageAt(activity, x, y);",
         intercept_chrome_discard,
     )
     if not (
-        0 <= intercept_chrome < intercept_chrome_discard
-        < intercept_page_mapping
+        0 <= intercept_terminal_identity < intercept_chrome
+        < intercept_chrome_terminal < intercept_chrome_preserve
+        < intercept_chrome_discard < intercept_page_mapping
     ):
         fail(
-            "native chrome must discard the parallel low-latency pen point "
-            "without scheduling page activation"
+            "native chrome does not preserve an active stroke's terminal "
+            "callback before discarding ordinary low-latency pen points"
         )
     crossing_guard = intercept_method.find(
         "contactStartPage.intValue() == current"
@@ -1041,7 +1058,7 @@ def check(repo_root: Path) -> None:
     )
     crossing_discard = intercept_method.find("return true;", crossing_guard)
     terminal_pressure_guard = intercept_method.find(
-        "if (pressure == 0)", crossing_discard
+        "if (completingActivePageStroke)", crossing_discard
     )
     terminal_preserved = intercept_method.find(
         "return false;", terminal_pressure_guard
@@ -1096,6 +1113,29 @@ def check(repo_root: Path) -> None:
         fail("finger input can reach native controls during an ownership transfer")
     if "transaction != null && !isNativeChromeTouch" in activation_touch_method:
         fail("native chrome remains exempt from ownership-transfer input blocking")
+
+    terminal_helper_start = module.find(
+        "private static boolean isCompletingActivePageStroke("
+    )
+    pending_target_start_for_terminal = module.find(
+        "private static Integer pendingPageActivationTarget(",
+        terminal_helper_start,
+    )
+    if terminal_helper_start < 0 or pending_target_start_for_terminal < 0:
+        fail("could not isolate active-stroke terminal identity helper")
+    terminal_helper = module[
+        terminal_helper_start:pending_target_start_for_terminal
+    ]
+    require_markers(
+        terminal_helper,
+        (
+            "pressure != 0",
+            "PAGE_ACTIVATION_TRANSACTIONS.get(activity) != null",
+            "PEN_CONTACT_START_PAGES.get(activity)",
+            "currentDocumentPage(activity)",
+        ),
+        "active-stroke terminal identity",
+    )
 
     digital_lift_start = module.find('"onDigital",', digital_position_start)
     digital_lift_end = module.find(
@@ -1226,12 +1266,32 @@ def check(repo_root: Path) -> None:
     require_markers(
         transaction_save_hook,
         (
-            "shouldBlockPageActivationGesture(activity)",
+            "shouldBlockPageActivationSave(activity)",
             "param.setResult(null);",
             '"page_activation_save_blocked id="',
         ),
         "transactional saveTrails guard",
     )
+    save_blocker_start = module.find(
+        "private static boolean shouldBlockPageActivationSave("
+    )
+    abort_transaction_start = module.find(
+        "private static void abortPageActivationTransaction(",
+        save_blocker_start,
+    )
+    if save_blocker_start < 0 or abort_transaction_start < 0:
+        fail("could not isolate all-transaction save blocking")
+    save_blocker = module[save_blocker_start:abort_transaction_start]
+    require_markers(
+        save_blocker,
+        (
+            "activity != null",
+            "PAGE_ACTIVATION_TRANSACTIONS.get(activity) != null",
+        ),
+        "all-transaction save blocking",
+    )
+    if "triggerContactObserved" in save_blocker:
+        fail("non-contact ownership transfers still allow lifecycle saves")
 
     receive_hook_start = module.find(
         '"receiveTrials",',

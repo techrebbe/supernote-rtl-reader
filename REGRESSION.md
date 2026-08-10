@@ -421,8 +421,10 @@ Automated and build evidence:
   merge experiment is preserved on `agent/v116-inactive-erase-regression` at
   `818db1f` and is not in this branch's ancestry.
 - [x] Native PDF renderer invariants pass.
-- [x] Native Spread safety invariants pass and require source-save -> writer
-  disable -> exact transaction publication -> target native load ordering.
+- [x] Native Spread safety invariants pass and require exact transaction/input
+  guard publication -> thread-scoped source save -> writer disable -> target
+  native load ordering. Concurrent pen contact, UI/history actions, and all
+  other lifecycle saves remain blocked from publication through commit.
 - [x] Static invariants require the inactive-page pen coordinate to be rejected
   in an Xposed `beforeHookedMethod`, before Supernote's native callback can add
   it to the source page's DrawPath.
@@ -433,6 +435,9 @@ Automated and build evidence:
 - [x] Static invariants require trigger-contact save and receive callbacks to be
   blocked until pen-up, and require timeout/completion work to match the exact
   transaction token.
+- [x] Static invariants serialize contact-start latching, activation startup,
+  and final guard removal under the same ownership lock, including contacts
+  that begin in a gutter/cropped margin or race a queued transfer/commit.
 - [x] Static invariants keep a stroke that begins on the active page owned by
   that page and discard any points that cross into the inactive half.
 - [x] Native Spread v0.0.118 compiles, is v2/v3 signed, and reports matching

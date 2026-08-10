@@ -29,13 +29,19 @@ An inactive-page finger tap, pen hover, or pen contact requests one serialized
 ownership transfer:
 
 1. Validate the exact document, spread, source page, and target page.
-2. Save the source page through Supernote's ordinary `saveTrails()` path.
-3. Disable native handwriting before publishing the transition.
-4. Call the native `loadPage(target)` lifecycle.
-5. Wait until both reader and handwriting presenter identify the exact target.
-6. Recompose the spread from canonical page and annotation state.
-7. Install writable geometry for only the target page.
-8. Commit the transaction and re-enable native editing.
+2. Under the ownership lock, reject an existing pen contact or publish the
+   exact transaction/input guard before any persistence or page mutation.
+3. Save the source page through Supernote's ordinary `saveTrails()` path using
+   a thread-scoped bypass for only this intentional flush; all concurrent
+   lifecycle saves remain blocked.
+4. Disable native handwriting while the page owner changes.
+5. Call the native `loadPage(target)` lifecycle.
+6. Wait until both reader and handwriting presenter identify the exact target.
+7. Recompose the spread from canonical page and annotation state.
+8. Install writable geometry for only the target page.
+9. Under the same ownership lock, recheck that no contact is held, remove the
+   exact guard, and commit/re-enable native editing. If contact raced commit,
+   retain the guard and writer disable through pen-up.
 
 Input is serialized while those steps run. A stale timeout or completion may
 act only on its own transaction ID.

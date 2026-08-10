@@ -152,6 +152,18 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 return thread;
             }
         });
+    private static final ScheduledExecutorService DEFERRED_CONFIG_EXECUTOR =
+        Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
+            @Override
+            public Thread newThread(Runnable runnable) {
+                Thread thread = new Thread(
+                    runnable,
+                    "SNSpreadDeferredConfig"
+                );
+                thread.setDaemon(true);
+                return thread;
+            }
+        });
     private static final Object TRACE_LOCK = new Object();
     private static final Object PAGE_ACTIVATION_OWNERSHIP_LOCK = new Object();
     private static final Map<Activity, Bitmap> COMPOSITES = new WeakHashMap<>();
@@ -673,6 +685,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final class DeferredSpreadTurn {
         final long id;
         final String documentPath;
+        final SpreadConfig config;
         final int sourcePage;
         final int targetPage;
         final String trigger;
@@ -682,14 +695,15 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
 
         DeferredSpreadTurn(
             long id,
-            String documentPath,
+            SpreadConfig config,
             int sourcePage,
             int targetPage,
             String trigger,
             Boolean coverSeparate
         ) {
             this.id = id;
-            this.documentPath = documentPath;
+            this.documentPath = config.documentPath;
+            this.config = config;
             this.sourcePage = sourcePage;
             this.targetPage = targetPage;
             this.trigger = trigger;
@@ -778,6 +792,28 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             this.nativeFill = nativeFill;
             this.editable = editable;
             this.calibration = calibration;
+        }
+
+        boolean samePersistedState(SpreadConfig other) {
+            return other != null
+                && Objects.equals(documentPath, other.documentPath)
+                && documentModified == other.documentModified
+                && documentLength == other.documentLength
+                && documentDevice == other.documentDevice
+                && documentInode == other.documentInode
+                && documentChangeSeconds == other.documentChangeSeconds
+                && documentChangeNanos == other.documentChangeNanos
+                && Objects.equals(markerPath, other.markerPath)
+                && markerIdentity.sameAs(other.markerIdentity)
+                && backupIdentity.sameAs(other.backupIdentity)
+                && snapshotIdentity.sameAs(other.snapshotIdentity)
+                && enabled == other.enabled
+                && coverSeparate == other.coverSeparate
+                && showDivider == other.showDivider
+                && showHeader == other.showHeader
+                && nativeFill == other.nativeFill
+                && editable == other.editable
+                && calibration == other.calibration;
         }
     }
 
@@ -10937,7 +10973,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
         DeferredSpreadTurn deferred = new DeferredSpreadTurn(
             DEFERRED_SPREAD_TURN_COUNTER.incrementAndGet(),
-            config.documentPath,
+            config,
             sourcePage,
             targetPage,
             trigger,
@@ -10964,121 +11000,192 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         long delay = elapsed < DEFERRED_SPREAD_TURN_NOTICE_MS
             ? DEFERRED_SPREAD_TURN_RETRY_MS
             : DEFERRED_SPREAD_TURN_SLOW_RETRY_MS;
-        new Handler(activity.getMainLooper()).postDelayed(new Runnable() {
+        DEFERRED_CONFIG_EXECUTOR.schedule(new Runnable() {
             @Override
             public void run() {
-                DeferredSpreadTurn current =
-                    DEFERRED_SPREAD_TURNS.get(activity);
-                if (current != deferred) {
-                    return;
-                }
-                if (activity.isFinishing()
-                    || (Build.VERSION.SDK_INT
-                            >= Build.VERSION_CODES.JELLY_BEAN_MR1
-                        && activity.isDestroyed())) {
-                    DEFERRED_SPREAD_TURNS.remove(activity, deferred);
-                    return;
-                }
-                try {
-                    if (activity.getResources().getConfiguration().orientation
-                            != Configuration.ORIENTATION_LANDSCAPE
-                        || !deferred.documentPath.equals(
-                            currentDocumentPath(activity)
-                        )) {
-                        DEFERRED_SPREAD_TURNS.remove(activity, deferred);
-                        log("rtl_spread_turn_deferred_cancelled id="
-                            + deferred.id + " reason=context_changed");
-                        return;
-                    }
-
-                    PenInputSnapshot deferredSnapshot =
-                        penInputSnapshot(activity);
-                    if (deferredSnapshot != null
-                        && deferredSnapshot.config != null
-                        && (!deferredSnapshot.config.enabled
-                            || !deferredSnapshot.config.editable)) {
-                        DEFERRED_SPREAD_TURNS.remove(activity, deferred);
-                        log("rtl_spread_turn_deferred_cancelled id="
-                            + deferred.id + " reason=editing_disabled");
-                        return;
-                    }
-                    if (deferred.coverSeparate != null) {
-                        if (deferredSnapshot == null
-                            || deferredSnapshot.config == null) {
-                            scheduleDeferredRtlSpreadTurn(activity, deferred);
-                            return;
-                        }
-                        if (deferredSnapshot.config.coverSeparate
-                                != deferred.coverSeparate.booleanValue()) {
-                            DEFERRED_SPREAD_TURNS.remove(activity, deferred);
-                            log("rtl_spread_turn_deferred_cancelled id="
-                                + deferred.id
-                                + " reason=cover_parity_changed"
-                                + " expected=" + deferred.coverSeparate
-                                + " current="
-                                + deferredSnapshot.config.coverSeparate);
-                            return;
-                        }
-                    }
-
-                    int currentPage = currentDocumentPage(activity);
-                    if (currentPage == deferred.targetPage) {
-                        DEFERRED_SPREAD_TURNS.remove(activity, deferred);
-                        log("rtl_spread_turn_deferred_satisfied id="
-                            + deferred.id + " target="
-                            + deferred.targetPage);
-                        return;
-                    }
-                    if (currentPage != deferred.sourcePage) {
-                        DEFERRED_SPREAD_TURNS.remove(activity, deferred);
-                        log("rtl_spread_turn_deferred_cancelled id="
-                            + deferred.id + " reason=source_changed"
-                            + " expected=" + deferred.sourcePage
-                            + " current=" + currentPage);
-                        return;
-                    }
-
-                    if (editablePenInputReady(activity)
-                        && beginPageActivationTransaction(
-                             activity,
-                             deferred.targetPage,
-                             deferred.trigger,
-                             false
-                        )) {
-                        DEFERRED_SPREAD_TURNS.remove(activity, deferred);
-                        log("rtl_spread_turn_deferred_started id="
-                            + deferred.id + " source="
-                            + deferred.sourcePage + " target="
-                            + deferred.targetPage + " trigger="
-                            + deferred.trigger);
-                        return;
-                    }
-
-                    long waiting = SystemClock.uptimeMillis()
-                        - deferred.startedAt;
-                    if (!deferred.noticeShown
-                        && waiting >= DEFERRED_SPREAD_TURN_NOTICE_MS) {
-                        deferred.noticeShown = true;
-                        showStatusOverlay(
+                final boolean persistedConfigUnchanged =
+                    persistedDeferredConfigUnchanged(deferred);
+                new Handler(activity.getMainLooper()).post(new Runnable() {
+                    @Override
+                    public void run() {
+                        runDeferredRtlSpreadTurnRetry(
                             activity,
-                            "RTL SPREAD: "
-                                + ("deferred_spread_turn".equals(
-                                        deferred.trigger
-                                    )
-                                    ? "page turn" : "page activation")
-                                + " waiting for pen/page state"
+                            deferred,
+                            persistedConfigUnchanged
                         );
-                        log("rtl_spread_turn_deferred_waiting id="
-                            + deferred.id + " elapsed_ms=" + waiting);
                     }
-                    scheduleDeferredRtlSpreadTurn(activity, deferred);
-                } catch (Throwable throwable) {
-                    log("rtl_spread_turn_deferred_retry_failed id="
-                        + deferred.id + " " + throwable);
-                    scheduleDeferredRtlSpreadTurn(activity, deferred);
-                }
+                });
             }
-        }, delay);
+        }, delay, TimeUnit.MILLISECONDS);
+    }
+
+    private static boolean persistedDeferredConfigUnchanged(
+        DeferredSpreadTurn deferred
+    ) {
+        SpreadConfig config = deferred == null ? null : deferred.config;
+        if (config == null || !config.enabled || !config.editable) {
+            return false;
+        }
+        if (config.calibration) {
+            return TARGET_FILE.equals(config.documentPath);
+        }
+        try {
+            File document = new File(config.documentPath);
+            if (!document.isFile()) {
+                return false;
+            }
+            StructStat documentStat = Os.stat(document.getAbsolutePath());
+            if (document.lastModified() != config.documentModified
+                || document.length() != config.documentLength
+                || documentStat.st_dev != config.documentDevice
+                || documentStat.st_ino != config.documentInode
+                || documentStat.st_ctim.tv_sec
+                    != config.documentChangeSeconds
+                || documentStat.st_ctim.tv_nsec
+                    != config.documentChangeNanos) {
+                return false;
+            }
+            File parent = document.getParentFile();
+            if (parent == null || config.markerPath == null) {
+                return false;
+            }
+            File marker = new File(config.markerPath);
+            File backupManifest = new File(
+                parent,
+                "." + document.getName() + ".snspread-backup.properties"
+            );
+            File backupSnapshot = new File(
+                parent,
+                "." + document.getName() + ".snspread-backup.mark"
+            );
+            return config.markerIdentity.sameAs(FileIdentity.capture(marker))
+                && config.backupIdentity.sameAs(
+                    FileIdentity.capture(backupManifest)
+                )
+                && config.snapshotIdentity.sameAs(
+                    FileIdentity.capture(backupSnapshot)
+                );
+        } catch (Throwable throwable) {
+            return false;
+        }
+    }
+
+    private static void runDeferredRtlSpreadTurnRetry(
+        Activity activity,
+        DeferredSpreadTurn deferred,
+        boolean persistedConfigUnchanged
+    ) {
+        DeferredSpreadTurn current = DEFERRED_SPREAD_TURNS.get(activity);
+        if (current != deferred) {
+            return;
+        }
+        if (activity.isFinishing()
+            || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1
+                && activity.isDestroyed())) {
+            DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+            return;
+        }
+        try {
+            if (activity.getResources().getConfiguration().orientation
+                    != Configuration.ORIENTATION_LANDSCAPE
+                || !deferred.documentPath.equals(currentDocumentPath(activity))) {
+                DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+                log("rtl_spread_turn_deferred_cancelled id="
+                    + deferred.id + " reason=context_changed");
+                return;
+            }
+            if (!persistedConfigUnchanged) {
+                DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+                log("rtl_spread_turn_deferred_cancelled id="
+                    + deferred.id + " reason=persisted_config_changed");
+                return;
+            }
+
+            PenInputSnapshot deferredSnapshot = penInputSnapshot(activity);
+            if (deferredSnapshot == null
+                || deferredSnapshot.config == null) {
+                scheduleDeferredRtlSpreadTurn(activity, deferred);
+                return;
+            }
+            if (!deferred.config.samePersistedState(
+                    deferredSnapshot.config
+                )) {
+                DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+                log("rtl_spread_turn_deferred_cancelled id="
+                    + deferred.id + " reason=runtime_config_changed");
+                return;
+            }
+            if (!deferredSnapshot.config.enabled
+                || !deferredSnapshot.config.editable) {
+                DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+                log("rtl_spread_turn_deferred_cancelled id="
+                    + deferred.id + " reason=editing_disabled");
+                return;
+            }
+            if (deferred.coverSeparate != null
+                && deferredSnapshot.config.coverSeparate
+                    != deferred.coverSeparate.booleanValue()) {
+                DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+                log("rtl_spread_turn_deferred_cancelled id="
+                    + deferred.id
+                    + " reason=cover_parity_changed"
+                    + " expected=" + deferred.coverSeparate
+                    + " current="
+                    + deferredSnapshot.config.coverSeparate);
+                return;
+            }
+
+            int currentPage = currentDocumentPage(activity);
+            if (currentPage == deferred.targetPage) {
+                DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+                log("rtl_spread_turn_deferred_satisfied id="
+                    + deferred.id + " target=" + deferred.targetPage);
+                return;
+            }
+            if (currentPage != deferred.sourcePage) {
+                DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+                log("rtl_spread_turn_deferred_cancelled id="
+                    + deferred.id + " reason=source_changed"
+                    + " expected=" + deferred.sourcePage
+                    + " current=" + currentPage);
+                return;
+            }
+
+            if (editablePenInputReady(activity)
+                && beginPageActivationTransaction(
+                     activity,
+                     deferred.targetPage,
+                     deferred.trigger,
+                     false
+                )) {
+                DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+                log("rtl_spread_turn_deferred_started id="
+                    + deferred.id + " source=" + deferred.sourcePage
+                    + " target=" + deferred.targetPage + " trigger="
+                    + deferred.trigger);
+                return;
+            }
+
+            long waiting = SystemClock.uptimeMillis() - deferred.startedAt;
+            if (!deferred.noticeShown
+                && waiting >= DEFERRED_SPREAD_TURN_NOTICE_MS) {
+                deferred.noticeShown = true;
+                showStatusOverlay(
+                    activity,
+                    "RTL SPREAD: "
+                        + ("deferred_spread_turn".equals(deferred.trigger)
+                            ? "page turn" : "page activation")
+                        + " waiting for pen/page state"
+                );
+                log("rtl_spread_turn_deferred_waiting id="
+                    + deferred.id + " elapsed_ms=" + waiting);
+            }
+            scheduleDeferredRtlSpreadTurn(activity, deferred);
+        } catch (Throwable throwable) {
+            log("rtl_spread_turn_deferred_retry_failed id="
+                + deferred.id + " " + throwable);
+            scheduleDeferredRtlSpreadTurn(activity, deferred);
+        }
     }
 
     private static boolean handleRtlSpreadTurn(

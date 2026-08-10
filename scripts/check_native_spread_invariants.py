@@ -2200,7 +2200,8 @@ def check(repo_root: Path) -> None:
         (
             "deferRtlPageActivation(",
             "DEFERRED_SPREAD_TURN_COUNTER.incrementAndGet()",
-            "config.documentPath",
+            "new DeferredSpreadTurn(",
+            "config,",
             "trigger",
             '"deferred_spread_turn".equals(trigger)',
             "Boolean.valueOf(config.coverSeparate)",
@@ -2215,6 +2216,13 @@ def check(repo_root: Path) -> None:
             "current != deferred",
             "deferred.documentPath.equals(",
             "currentDocumentPath(activity)",
+            "DEFERRED_CONFIG_EXECUTOR.schedule(",
+            "persistedDeferredConfigUnchanged(deferred)",
+            "runDeferredRtlSpreadTurnRetry(",
+            "!persistedConfigUnchanged",
+            'reason=persisted_config_changed',
+            "!deferred.config.samePersistedState(",
+            'reason=runtime_config_changed',
             "!deferredSnapshot.config.editable",
             'reason=editing_disabled',
             "deferred.coverSeparate != null",
@@ -2230,10 +2238,22 @@ def check(repo_root: Path) -> None:
         "exact-context deferred RTL spread-turn replay",
     )
     parity_guard = deferred_turn_schedule.find(
-        "if (deferred.coverSeparate != null)"
+        "if (deferred.coverSeparate != null"
+    )
+    persisted_guard = deferred_turn_schedule.find(
+        "if (!persistedConfigUnchanged)"
+    )
+    persisted_cancel = deferred_turn_schedule.find(
+        'reason=persisted_config_changed', persisted_guard
+    )
+    runtime_config_guard = deferred_turn_schedule.find(
+        "!deferred.config.samePersistedState(", persisted_cancel
+    )
+    runtime_config_cancel = deferred_turn_schedule.find(
+        'reason=runtime_config_changed', runtime_config_guard
     )
     editable_guard = deferred_turn_schedule.find(
-        "!deferredSnapshot.config.editable"
+        "!deferredSnapshot.config.editable", runtime_config_cancel
     )
     editable_cancel = deferred_turn_schedule.find(
         'reason=editing_disabled',
@@ -2252,12 +2272,93 @@ def check(repo_root: Path) -> None:
         parity_cancel,
     )
     if not (
-        0 <= editable_guard < editable_cancel < parity_guard
+        0 <= persisted_guard < persisted_cancel < runtime_config_guard
+        < runtime_config_cancel < editable_guard < editable_cancel < parity_guard
         < parity_compare < parity_cancel < target_satisfied
     ):
         fail(
-            "deferred activation can replay before persisted editable/parity "
-            "revalidation"
+            "deferred activation can replay before persisted identity, runtime "
+            "editable, or cover-parity revalidation"
+        )
+
+    persisted_config_start = deferred_turn_schedule.find(
+        "private static boolean persistedDeferredConfigUnchanged("
+    )
+    deferred_retry_start = deferred_turn_schedule.find(
+        "private static void runDeferredRtlSpreadTurnRetry("
+    )
+    if persisted_config_start < 0 or deferred_retry_start < 0:
+        fail("could not isolate asynchronous deferred-config validation")
+    deferred_schedule_method = deferred_turn_schedule[
+        :persisted_config_start
+    ]
+    persisted_config_method = deferred_turn_schedule[
+        persisted_config_start:deferred_retry_start
+    ]
+    deferred_retry_method = deferred_turn_schedule[deferred_retry_start:]
+    require_markers(
+        deferred_schedule_method,
+        (
+            "DEFERRED_CONFIG_EXECUTOR.schedule(",
+            "persistedDeferredConfigUnchanged(deferred)",
+            "new Handler(activity.getMainLooper()).post(",
+            "runDeferredRtlSpreadTurnRetry(",
+        ),
+        "off-UI deferred-config validation",
+    )
+    require_markers(
+        persisted_config_method,
+        (
+            "Os.stat(document.getAbsolutePath())",
+            "config.markerIdentity.sameAs(FileIdentity.capture(marker))",
+            "config.backupIdentity.sameAs(",
+            "config.snapshotIdentity.sameAs(",
+        ),
+        "persisted deferred-config identity validation",
+    )
+    spread_config_class_start = module.find(
+        "private static final class SpreadConfig"
+    )
+    protected_verification_start = module.find(
+        "private static final class ProtectedVerification",
+        spread_config_class_start,
+    )
+    if spread_config_class_start < 0 or protected_verification_start < 0:
+        fail("could not isolate persisted SpreadConfig equality")
+    spread_config_class = module[
+        spread_config_class_start:protected_verification_start
+    ]
+    require_markers(
+        spread_config_class,
+        (
+            "boolean samePersistedState(SpreadConfig other)",
+            "markerIdentity.sameAs(other.markerIdentity)",
+            "backupIdentity.sameAs(other.backupIdentity)",
+            "snapshotIdentity.sameAs(other.snapshotIdentity)",
+            "enabled == other.enabled",
+            "coverSeparate == other.coverSeparate",
+            "showDivider == other.showDivider",
+            "showHeader == other.showHeader",
+            "nativeFill == other.nativeFill",
+            "editable == other.editable",
+        ),
+        "complete persisted negative-state equality",
+    )
+    ui_blocking_config_hits = [
+        marker for marker in (
+            "Os.stat(",
+            "FileIdentity.capture(",
+            "new File(",
+            "FileInputStream",
+            "Properties",
+            "spreadConfig(",
+        )
+        if marker in deferred_retry_method
+    ]
+    if ui_blocking_config_hits:
+        fail(
+            "deferred UI retry performs persisted-config I/O instead of using "
+            f"the worker result: {ui_blocking_config_hits}"
         )
     editable_turn = rtl_turn.find("if (config != null && config.editable)")
     turn_started = rtl_turn.find(

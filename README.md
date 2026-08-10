@@ -4,9 +4,10 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 
 ## Stable baseline
 
-v0.4.6 is the current merged hardware-validated stable baseline on Supernote
-Nomad. v0.4.7 is a hardware-validated safety-hardening candidate for the native
-reader pilot, paired with Native Spread v0.0.62.
+v0.4.12 with Native Spread v0.0.116 is the current merged stable baseline.
+v0.4.13 with Native Spread v0.0.118 is an unvalidated transactional
+single-active-page candidate. Native Spread v0.0.117 is preserved only on its
+experimental branch and is not part of this release line.
 
 The validated reader behavior covers:
 
@@ -314,6 +315,34 @@ writer before publishing a completion pointer. If pointer publication fails,
 the exact failed session so the helper cannot fall back to an older trace.
 Failure to remove a stale `incomplete.txt` is treated as the same publication
 failure, preventing it from overriding a newly completed session.
+
+## v0.4.13 transactional single-active-page editing
+
+Native Spread v0.0.118 replaces the live inactive-page annotation route with a
+serialized ownership transfer through Supernote's own page lifecycle. The
+landscape reader still presents two pages, but only one page at a time owns the
+native `DocumentViewModel`, `HandWritePresenter`, DrawPath geometry, Undo/Redo
+history, and `.mark` writer.
+
+When the inactive half is tapped or hovered, the module saves the current page
+through native `saveTrails()`, disables writing, calls native `loadPage()` for
+the target, verifies both reader and handwriting page identities, recomposes the
+spread, and installs target-only writing geometry before committing. Page turns
+use the same transaction. Transactions carry unique IDs, allow one bounded
+reload retry, and fail closed on stale completion, identity mismatch, timeout,
+or geometry failure.
+
+Pen coordinates that initiate or overlap a transfer are intercepted before
+Supernote's native position callback. Hover can therefore preactivate a page,
+while a too-fast contact activates the target but deliberately discards that
+gesture through pen-up. The next stroke uses the ordinary native writer on the
+now-active page. The runtime path does not invoke v0.0.117's experimental
+inactive-page trail capture, coordinate normalization, `.mark` merge, or
+synthetic history transaction.
+
+The full design and safety boundary are recorded in
+`TRANSACTIONAL_ACTIVE_PAGE.md`. Automated invariants and the v0.0.118 APK build
+pass locally; Nomad hardware validation is still required.
 
 The active settled-ink compositor now clips its transformed bitmap to the
 same visible page-slot bounds used by Native Fill PDF and canonical-ink

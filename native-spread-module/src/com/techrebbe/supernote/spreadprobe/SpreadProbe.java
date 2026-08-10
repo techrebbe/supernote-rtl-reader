@@ -52,6 +52,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.WeakHashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -111,7 +112,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int TRACE_FINAL_SNAPSHOT_ATTEMPTS = 5;
     private static final long TRACE_FINAL_SNAPSHOT_RETRY_MS = 120L;
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 116L;
+    private static final long MODULE_VERSION_CODE = 118L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -123,9 +124,13 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int NATIVE_TOP_CHROME_TOUCH_EXCLUSION_PX = 112;
     private static final int NATIVE_BOTTOM_CHROME_TOUCH_EXCLUSION_PX = 96;
     private static final long NON_EDGE_TAP_SUPPRESSION_MS = 400L;
+    private static final long PAGE_ACTIVATION_TIMEOUT_MS = 3000L;
+    private static final long PAGE_ACTIVATION_PEN_SETTLE_MS = 160L;
     private static final long TRACE_SNAPSHOT_DEBOUNCE_MS = 80L;
     private static final AtomicInteger GENERATION = new AtomicInteger();
     private static final AtomicLong TRACE_TRANSACTION_COUNTER =
+        new AtomicLong();
+    private static final AtomicLong PAGE_ACTIVATION_COUNTER =
         new AtomicLong();
     private static final Object TRACE_LOCK = new Object();
     private static final Map<Activity, Bitmap> COMPOSITES = new WeakHashMap<>();
@@ -149,6 +154,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         new WeakHashMap<>();
     private static final Map<Activity, Point> ACTIVATION_TOUCH_STARTS =
         new WeakHashMap<>();
+    private static final Map<Activity, PageActivationTransaction>
+        PAGE_ACTIVATION_TRANSACTIONS = new ConcurrentHashMap<>();
+    private static final Map<Activity, Integer> PEN_CONTACT_START_PAGES =
+        new ConcurrentHashMap<>();
     private static final Map<Activity, Integer> PEN_ACTIVATION_TARGETS =
         new WeakHashMap<>();
     private static final Map<Activity, Integer> PEN_ACTIVATION_ORIGINAL_PAGES =
@@ -196,6 +205,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         new ThreadLocal<>();
     private static final ThreadLocal<Boolean> PEN_ACTIVATION_STALE_SAVE_SCOPE =
         new ThreadLocal<>();
+    private static final ThreadLocal<Boolean>
+        PAGE_ACTIVATION_RECEIVE_BLOCKED = new ThreadLocal<>();
     private static Activity activeActivity;
     private static boolean nativeBridgeLoaded;
     private static volatile boolean hooksReady;
@@ -384,7 +395,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 orientation,
                 TRACE_TRANSACTION_IDS.get(activity),
                 TRACE_TOOLS.get(activity),
-                PEN_ACTIVATION_TARGETS.get(activity),
+                pendingPageActivationTarget(activity),
                 config == null ? null : Boolean.valueOf(config.editable),
                 config == null ? null : Boolean.valueOf(config.coverSeparate)
             );
@@ -582,6 +593,40 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             this.markPage = markPage;
             this.beforeTrails = new ArrayList<>(beforeTrails);
             this.afterTrails = new ArrayList<>(afterTrails);
+        }
+    }
+
+    /**
+     * One fail-closed ownership transfer for Supernote's single native
+     * handwriting page.  The spread may display two pages, but only targetPage
+     * is allowed to own HandWritePresenter, DrawPath, Undo/Redo, and .mark I/O
+     * after this transaction commits.
+     */
+    private static final class PageActivationTransaction {
+        final long id;
+        final int sourcePage;
+        final int targetPage;
+        final String trigger;
+        final long startedAt;
+        volatile boolean triggerContactObserved;
+        volatile boolean triggerPenLifted;
+        volatile boolean geometryCommitted;
+        int loadAttempts;
+
+        PageActivationTransaction(
+            long id,
+            int sourcePage,
+            int targetPage,
+            String trigger,
+            boolean triggerContactObserved
+        ) {
+            this.id = id;
+            this.sourcePage = sourcePage;
+            this.targetPage = targetPage;
+            this.trigger = trigger;
+            this.startedAt = SystemClock.uptimeMillis();
+            this.triggerContactObserved = triggerContactObserved;
+            this.triggerPenLifted = !triggerContactObserved;
         }
     }
 
@@ -979,7 +1024,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             int.class,
             new XC_MethodHook() {
                 @Override
-                protected void afterHookedMethod(MethodHookParam param) {
+                protected void beforeHookedMethod(MethodHookParam param) {
                     Activity activity = activeActivity;
                     if (activity == null) {
                         return;
@@ -996,12 +1041,36 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         );
                     } catch (Throwable ignored) {
                     }
+                    if (pressure > 0
+                        && PEN_CONTACT_START_PAGES.get(activity) == null
+                        && isEditableSpreadLandscape(activity)) {
+                        PEN_CONTACT_START_PAGES.put(
+                            activity,
+                            Integer.valueOf(pageAt(
+                                activity,
+                                ((Integer) param.args[0]).intValue(),
+                                ((Integer) param.args[1]).intValue()
+                            ))
+                        );
+                    }
                     tracePenPosition(
                         activity,
                         ((Integer) param.args[0]).intValue(),
                         ((Integer) param.args[1]).intValue(),
                         pressure
                     );
+                    if (interceptPenPageActivation(
+                            activity,
+                            ((Integer) param.args[0]).intValue(),
+                            ((Integer) param.args[1]).intValue(),
+                            pressure
+                        )) {
+                        // The native callback must not see any point belonging
+                        // to a gesture that initiated or overlaps an ownership
+                        // transfer.  The user lifts and starts a fresh stroke
+                        // only after the target page owns the writer.
+                        param.setResult(null);
+                    }
                     handlePenPageActivation(
                         activity,
                         ((Integer) param.args[0]).intValue(),
@@ -1030,6 +1099,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         activity.runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
+                                markPageActivationPenLifted(
+                                    activity,
+                                    "digital_state:" + state
+                                );
+                                PEN_CONTACT_START_PAGES.remove(activity);
                                 cancelPendingPenPageActivation(
                                     activity,
                                     "pen_left_screen"
@@ -2526,6 +2600,17 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         "save_trails_before",
                         false
                     );
+                    if (shouldBlockPageActivationGesture(activity)) {
+                        param.setResult(null);
+                        PageActivationTransaction transaction =
+                            PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+                        log("page_activation_save_blocked id="
+                            + (transaction == null ? -1L : transaction.id)
+                            + " target="
+                            + (transaction == null
+                                ? -1 : transaction.targetPage));
+                        return;
+                    }
                     boolean explicitCanonicalSave = Boolean.TRUE.equals(
                         EXPLICIT_CANONICAL_TRAIL_SAVE.get()
                     );
@@ -2601,6 +2686,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
+                    PAGE_ACTIVATION_RECEIVE_BLOCKED.remove();
                     traceEvent(activeActivity, "receive_trials_started");
                     traceAnnotationBoundary(
                         activeActivity,
@@ -2608,10 +2694,26 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         "receive_trials_before",
                         false
                     );
+                    Activity activity = activeActivity;
+                    if (shouldBlockPageActivationGesture(activity)) {
+                        PAGE_ACTIVATION_RECEIVE_BLOCKED.set(Boolean.TRUE);
+                        param.setResult(null);
+                        PageActivationTransaction transaction =
+                            PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+                        log("page_activation_receive_blocked id="
+                            + (transaction == null ? -1L : transaction.id)
+                            + " target="
+                            + (transaction == null
+                                ? -1 : transaction.targetPage));
+                    }
                 }
 
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
+                    boolean activationGestureBlocked = Boolean.TRUE.equals(
+                        PAGE_ACTIVATION_RECEIVE_BLOCKED.get()
+                    );
+                    PAGE_ACTIVATION_RECEIVE_BLOCKED.remove();
                     if (spreadLassoOriginZero) {
                         Object superNoteNote = XposedHelpers.getObjectField(
                             param.thisObject,
@@ -2623,6 +2725,20 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         );
                     }
                     Activity activity = activeActivity;
+                    if (activationGestureBlocked) {
+                        if (activity != null) {
+                            markPageActivationPenLifted(
+                                activity,
+                                "receive_trials_blocked"
+                            );
+                            traceEvent(
+                                activity,
+                                "page_activation_trigger_gesture_discarded"
+                            );
+                            TRACE_TRANSACTION_IDS.remove(activity);
+                        }
+                        return;
+                    }
                     if (activity != null) {
                         persistActiveEraserBeforeCanonicalRefresh(
                             activity,
@@ -6452,6 +6568,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         RIGHT_VISIBLE_BOUNDS.remove(activity);
         ACTIVATION_TOUCH_TARGETS.remove(activity);
         ACTIVATION_TOUCH_STARTS.remove(activity);
+        PAGE_ACTIVATION_TRANSACTIONS.remove(activity);
+        PEN_CONTACT_START_PAGES.remove(activity);
         PEN_ACTIVATION_TARGETS.remove(activity);
         PEN_ACTIVATION_ORIGINAL_PAGES.remove(activity);
         PEN_ACTIVATION_TRAILS.remove(activity);
@@ -7100,12 +7218,19 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 outputWidth,
                 outputHeight
             )) {
-                showStatusOverlay(
+                boolean activationReady = commitPageActivationGeometry(
                     activity,
-                    "RTL SPREAD: ACTIVE " + activeSide
-                        + " page " + (currentPage + 1)
-                        + " - tap the other page to activate it"
+                    presenter,
+                    currentPage
                 );
+                if (activationReady) {
+                    showStatusOverlay(
+                        activity,
+                        "RTL SPREAD: ACTIVE " + activeSide
+                            + " page " + (currentPage + 1)
+                            + " - tap or hover over the other page to activate it"
+                    );
+                }
             } else {
                 XposedHelpers.callMethod(
                     presenter,
@@ -7208,6 +7333,17 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             || event.getToolType(0) != MotionEvent.TOOL_TYPE_FINGER) {
             return false;
         }
+        PageActivationTransaction transaction =
+            PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+        if (transaction != null && !isNativeChromeTouch(
+                activity,
+                event.getY()
+            )) {
+            log("page_activation_touch_blocked id=" + transaction.id
+                + " target=" + transaction.targetPage
+                + " action=" + event.getActionMasked());
+            return true;
+        }
 
         int action = event.getActionMasked();
         Integer trackedTarget = ACTIVATION_TOUCH_TARGETS.get(activity);
@@ -7276,7 +7412,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 event.getY()
             );
             if (releasedTarget == trackedTarget.intValue()) {
-                activateDocumentPage(activity, releasedTarget);
+                if (!beginPageActivationTransaction(
+                        activity,
+                        releasedTarget,
+                        "finger_tap",
+                        false
+                    )) {
+                    activateDocumentPage(activity, releasedTarget);
+                }
             } else {
                 log("activation_touch_cancelled expected=" + trackedTarget
                     + " released=" + releasedTarget);
@@ -7327,10 +7470,17 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             @Override
             public void run() {
                 if (!isEditableSpreadLandscape(activity)) {
-                    cancelPendingPenPageActivation(
+                    abortPageActivationTransaction(
                         activity,
-                        "spread_inactive"
+                        "spread_inactive",
+                        false
                     );
+                    return;
+                }
+                if (isNativeChromeTouch(activity, requestedY)) {
+                    log("page_activation_pen_ignored_native_chrome point="
+                        + requestedX + "," + requestedY
+                        + " pressure=" + requestedPressure);
                     return;
                 }
 
@@ -7340,37 +7490,600 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     requestedY
                 );
                 int current = currentDocumentPage(activity);
+                Integer contactStartPage =
+                    PEN_CONTACT_START_PAGES.get(activity);
+                PageActivationTransaction transaction =
+                    PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+                if (transaction != null) {
+                    if (requestedPressure > 0
+                        && requestedTarget == transaction.targetPage) {
+                        transaction.triggerContactObserved = true;
+                        transaction.triggerPenLifted = false;
+                        log("page_activation_trigger_contact id="
+                            + transaction.id + " target="
+                            + transaction.targetPage);
+                    } else if (requestedPressure <= 0
+                        && transaction.triggerContactObserved) {
+                        markPageActivationPenLifted(
+                            activity,
+                            "position_pressure_zero"
+                        );
+                    }
+                    return;
+                }
                 if (requestedTarget < 0 || requestedTarget == current) {
-                    cancelPendingPenPageActivation(
-                        activity,
-                        requestedTarget < 0
-                            ? "pen_outside_pages"
-                            : "pen_returned_to_active_page"
-                    );
+                    return;
+                }
+                if (requestedPressure > 0
+                    && contactStartPage != null
+                    && contactStartPage.intValue() == current) {
+                    log("page_activation_ignored_cross_page_stroke current="
+                        + current + " target=" + requestedTarget
+                        + " start=" + contactStartPage);
                     return;
                 }
 
-                Integer pending = PEN_ACTIVATION_TARGETS.get(activity);
-                if (pending != null
-                    && pending.intValue() == requestedTarget) {
-                    return;
-                }
-                if (pending != null) {
-                    cancelPendingPenPageActivation(
-                        activity,
-                        "pen_changed_target"
-                    );
-                }
-                log("pen_page_activation current="
+                String trigger = requestedPressure > 0
+                    ? "pen_contact" : "pen_hover";
+                log("page_activation_requested current="
                     + current
                     + " target=" + requestedTarget
                     + " point=" + requestedX + "," + requestedY
-                    + " phase="
-                    + (requestedPressure > 0 ? "contact" : "hover")
+                    + " trigger=" + trigger
                     + " pressure=" + requestedPressure);
-                activateDocumentPageFromPen(activity, requestedTarget);
+                beginPageActivationTransaction(
+                    activity,
+                    requestedTarget,
+                    trigger,
+                    requestedPressure > 0
+                );
             }
         });
+    }
+
+    private static boolean interceptPenPageActivation(
+        Activity activity,
+        int x,
+        int y,
+        int pressure
+    ) {
+        if (activity == null || !isEditableSpreadLandscape(activity)) {
+            return false;
+        }
+        if (isNativeChromeTouch(activity, y)) {
+            // The toolbar and bottom page bar consume ordinary Android stylus
+            // events.  Suppress only the parallel low-latency DrawPath point,
+            // so selecting a native control with the pen cannot ink or activate
+            // the page visually underneath that control.
+            log("page_activation_pen_input_blocked reason=native_chrome"
+                + " point=" + x + "," + y + " pressure=" + pressure);
+            return true;
+        }
+        PageActivationTransaction transaction =
+            PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+        int target = pageAt(activity, x, y);
+        if (transaction != null) {
+            if (target == transaction.targetPage && pressure > 0) {
+                transaction.triggerContactObserved = true;
+                transaction.triggerPenLifted = false;
+            }
+            log("page_activation_pen_input_blocked id=" + transaction.id
+                + " target=" + transaction.targetPage
+                + " point_page=" + target
+                + " pressure=" + pressure);
+            return true;
+        }
+        int current = currentDocumentPage(activity);
+        if (target < 0 || target == current) {
+            return false;
+        }
+        Integer contactStartPage = PEN_CONTACT_START_PAGES.get(activity);
+        if (pressure > 0 && contactStartPage != null
+            && contactStartPage.intValue() == current) {
+            // A stroke that began on the active page remains an active-page
+            // stroke.  Block points that cross the divider, but never turn that
+            // continuing stroke into an ownership-transfer request.
+            log("page_activation_cross_page_point_blocked current=" + current
+                + " target=" + target + " start=" + contactStartPage);
+            return true;
+        }
+        // handlePenPageActivation runs the native save/load transition on the
+        // UI thread.  Return true immediately so this initiating coordinate
+        // can never enter the source page's DrawPath while that work is queued.
+        log("page_activation_trigger_input_blocked current=" + current
+            + " target=" + target + " pressure=" + pressure);
+        return true;
+    }
+
+    private static Integer pendingPageActivationTarget(Activity activity) {
+        PageActivationTransaction transaction = activity == null
+            ? null : PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+        if (transaction != null) {
+            return Integer.valueOf(transaction.targetPage);
+        }
+        return activity == null ? null : PEN_ACTIVATION_TARGETS.get(activity);
+    }
+
+    private static boolean beginPageActivationTransaction(
+        Activity activity,
+        int targetPage,
+        String trigger,
+        boolean triggerContactObserved
+    ) {
+        if (activity == null || !isEditableSpreadLandscape(activity)) {
+            return false;
+        }
+        if (!triggerContactObserved
+            && PEN_CONTACT_START_PAGES.get(activity) != null) {
+            log("page_activation_rejected reason=pen_contact_active"
+                + " requested_target=" + targetPage
+                + " trigger=" + trigger);
+            return false;
+        }
+        PageActivationTransaction currentTransaction =
+            PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+        if (currentTransaction != null) {
+            if (currentTransaction.targetPage == targetPage
+                && triggerContactObserved) {
+                currentTransaction.triggerContactObserved = true;
+                currentTransaction.triggerPenLifted = false;
+            }
+            log("page_activation_rejected reason=transaction_in_progress"
+                + " active_id=" + currentTransaction.id
+                + " active_target=" + currentTransaction.targetPage
+                + " requested_target=" + targetPage
+                + " trigger=" + trigger);
+            return currentTransaction.targetPage == targetPage;
+        }
+
+        try {
+            Object viewModel = XposedHelpers.getObjectField(
+                activity,
+                "documentViewModel"
+            );
+            int sourcePage = XposedHelpers.getIntField(viewModel, "currentPage");
+            int pageCount = XposedHelpers.getIntField(viewModel, "pageCount");
+            if (targetPage < 0 || targetPage >= pageCount
+                || targetPage == sourcePage) {
+                log("page_activation_rejected reason=invalid_target"
+                    + " source=" + sourcePage + " target=" + targetPage
+                    + " count=" + pageCount + " trigger=" + trigger);
+                return false;
+            }
+
+            Object presenter = XposedHelpers.getObjectField(
+                activity,
+                "handWritePresenter"
+            );
+            // The source page is flushed before ownership is published.  Once
+            // the transaction exists, lifecycle saves are treated as stale and
+            // cannot overwrite either page while the native owner is changing.
+            XposedHelpers.callMethod(presenter, "saveTrails", false, false);
+            XposedHelpers.callMethod(
+                presenter,
+                "disableHandWrite",
+                "SN_SPREAD_PROBE transactional page activation"
+            );
+
+            long id = PAGE_ACTIVATION_COUNTER.incrementAndGet();
+            PageActivationTransaction transaction =
+                new PageActivationTransaction(
+                    id,
+                    sourcePage,
+                    targetPage,
+                    trigger,
+                    triggerContactObserved
+                );
+            PAGE_ACTIVATION_TRANSACTIONS.put(activity, transaction);
+            showStatusOverlay(
+                activity,
+                "RTL SPREAD: switching active page to " + (targetPage + 1)
+            );
+            traceEvent(
+                activity,
+                "page_activation_transaction_started",
+                "id",
+                id,
+                "sourcePage",
+                sourcePage,
+                "targetPage",
+                targetPage,
+                "trigger",
+                trigger,
+                "discardTriggerGesture",
+                triggerContactObserved
+            );
+            requestPageActivationLoad(activity, transaction, viewModel);
+            schedulePageActivationTimeout(activity, id);
+            return true;
+        } catch (Throwable throwable) {
+            PAGE_ACTIVATION_TRANSACTIONS.remove(activity);
+            log("page_activation_start_failed target=" + targetPage
+                + " trigger=" + trigger + " " + throwable);
+            XposedBridge.log(throwable);
+            failClosedPageActivation(activity, "start_failed");
+            return false;
+        }
+    }
+
+    private static void requestPageActivationLoad(
+        Activity activity,
+        PageActivationTransaction transaction,
+        Object viewModel
+    ) throws Exception {
+        transaction.loadAttempts++;
+        XposedHelpers.callMethod(
+            viewModel,
+            "loadPage",
+            transaction.targetPage
+        );
+        log("page_activation_load_requested id=" + transaction.id
+            + " source=" + transaction.sourcePage
+            + " target=" + transaction.targetPage
+            + " attempt=" + transaction.loadAttempts
+            + " trigger=" + transaction.trigger);
+    }
+
+    private static void schedulePageActivationTimeout(
+        final Activity activity,
+        final long transactionId
+    ) {
+        new Handler(activity.getMainLooper()).postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                PageActivationTransaction transaction =
+                    PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+                if (transaction == null || transaction.id != transactionId) {
+                    return;
+                }
+                if (transaction.geometryCommitted
+                    && transaction.triggerContactObserved
+                    && !transaction.triggerPenLifted) {
+                    // A held pen is not a failed page load.  Continue blocking
+                    // the trigger gesture until the writer reports pen-up.
+                    schedulePageActivationTimeout(activity, transactionId);
+                    return;
+                }
+                if (!transaction.geometryCommitted
+                    && transaction.loadAttempts < 2) {
+                    try {
+                        Object viewModel = XposedHelpers.getObjectField(
+                            activity,
+                            "documentViewModel"
+                        );
+                        log("page_activation_retry id=" + transaction.id
+                            + " target=" + transaction.targetPage);
+                        requestPageActivationLoad(
+                            activity,
+                            transaction,
+                            viewModel
+                        );
+                        schedulePageActivationTimeout(activity, transactionId);
+                        return;
+                    } catch (Throwable throwable) {
+                        log("page_activation_retry_failed id="
+                            + transaction.id + " " + throwable);
+                        XposedBridge.log(throwable);
+                    }
+                }
+                abortPageActivationTransaction(
+                    activity,
+                    "timeout",
+                    true
+                );
+            }
+        }, PAGE_ACTIVATION_TIMEOUT_MS);
+    }
+
+    private static boolean commitPageActivationGeometry(
+        Activity activity,
+        Object presenter,
+        int currentPage
+    ) {
+        PageActivationTransaction transaction =
+            PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+        if (transaction == null) {
+            return true;
+        }
+        try {
+            int presenterMarkPage = XposedHelpers.getIntField(
+                presenter,
+                "currentPage"
+            );
+            if (currentPage != transaction.targetPage
+                || presenterMarkPage != transaction.targetPage + 1) {
+                log("page_activation_commit_waiting id=" + transaction.id
+                    + " target=" + transaction.targetPage
+                    + " reader_page=" + currentPage
+                    + " mark_page=" + presenterMarkPage);
+                XposedHelpers.callMethod(
+                    presenter,
+                    "disableHandWrite",
+                    "SN_SPREAD_PROBE activation identity mismatch"
+                );
+                return false;
+            }
+            transaction.geometryCommitted = true;
+            if (transaction.triggerContactObserved
+                && !transaction.triggerPenLifted) {
+                XposedHelpers.callMethod(
+                    presenter,
+                    "disableHandWrite",
+                    "SN_SPREAD_PROBE discard activation gesture"
+                );
+                showStatusOverlay(
+                    activity,
+                    "RTL SPREAD: page " + (currentPage + 1)
+                        + " active - lift pen, then write"
+                );
+                log("page_activation_waiting_for_pen_lift id="
+                    + transaction.id + " target=" + transaction.targetPage);
+                return false;
+            }
+            finishPageActivationTransaction(
+                activity,
+                transaction,
+                "geometry_committed"
+            );
+            return true;
+        } catch (Throwable throwable) {
+            log("page_activation_commit_failed id=" + transaction.id
+                + " " + throwable);
+            XposedBridge.log(throwable);
+            failClosedPageActivation(activity, "commit_failed");
+            return false;
+        }
+    }
+
+    private static void markPageActivationPenLifted(
+        final Activity activity,
+        String reason
+    ) {
+        final PageActivationTransaction transaction =
+            PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+        if (transaction == null || !transaction.triggerContactObserved
+            || transaction.triggerPenLifted) {
+            return;
+        }
+        transaction.triggerPenLifted = true;
+        log("page_activation_pen_lifted id=" + transaction.id
+            + " target=" + transaction.targetPage
+            + " reason=" + reason
+            + " geometry=" + transaction.geometryCommitted);
+        if (!transaction.geometryCommitted) {
+            return;
+        }
+        new Handler(activity.getMainLooper()).postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                PageActivationTransaction current =
+                    PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+                if (current == null || current.id != transaction.id
+                    || !current.geometryCommitted
+                    || !current.triggerPenLifted) {
+                    return;
+                }
+                try {
+                    Object presenter = XposedHelpers.getObjectField(
+                        activity,
+                        "handWritePresenter"
+                    );
+                    if (!restoreTransactionalActivePageGeometry(
+                            activity,
+                            presenter,
+                            current
+                        )) {
+                        failClosedPageActivation(
+                            activity,
+                            "pen_lift_geometry_failed"
+                        );
+                        return;
+                    }
+                    finishPageActivationTransaction(
+                        activity,
+                        current,
+                        "trigger_gesture_discarded"
+                    );
+                } catch (Throwable throwable) {
+                    log("page_activation_pen_lift_failed id=" + current.id
+                        + " " + throwable);
+                    XposedBridge.log(throwable);
+                    failClosedPageActivation(activity, "pen_lift_failed");
+                }
+            }
+        }, PAGE_ACTIVATION_PEN_SETTLE_MS);
+    }
+
+    private static boolean restoreTransactionalActivePageGeometry(
+        Activity activity,
+        Object presenter,
+        PageActivationTransaction transaction
+    ) {
+        RectF writable = activePageDestination(activity);
+        ImageView imageView = (ImageView) XposedHelpers.getObjectField(
+            activity,
+            "mImage"
+        );
+        int outputWidth = imageView == null ? 0 : imageView.getWidth();
+        int outputHeight = imageView == null ? 0 : imageView.getHeight();
+        if (writable == null || outputWidth <= outputHeight
+            || outputHeight <= 0) {
+            log("page_activation_geometry_restore_rejected id="
+                + transaction.id + " destination="
+                + rectDescription(writable) + " output=" + outputWidth
+                + "x" + outputHeight);
+            return false;
+        }
+        XposedHelpers.callMethod(
+            presenter,
+            "setDisableAreaList",
+            "SN_SPREAD_PROBE transactional active page",
+            activePageDisabledAreas(
+                visibleBoundsOrDestination(activity, writable),
+                outputWidth,
+                outputHeight
+            )
+        );
+        XposedHelpers.callMethod(presenter, "sendWriteInfo");
+        return applySpreadMarkGeometry(
+            activity,
+            presenter,
+            "transaction_commit"
+        );
+    }
+
+    private static void finishPageActivationTransaction(
+        Activity activity,
+        PageActivationTransaction transaction,
+        String reason
+    ) {
+        PageActivationTransaction current =
+            PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+        if (current == null || current.id != transaction.id) {
+            return;
+        }
+        PAGE_ACTIVATION_TRANSACTIONS.remove(activity);
+        long elapsed = SystemClock.uptimeMillis() - transaction.startedAt;
+        log("page_activation_committed id=" + transaction.id
+            + " source=" + transaction.sourcePage
+            + " target=" + transaction.targetPage
+            + " trigger=" + transaction.trigger
+            + " reason=" + reason
+            + " discarded=" + transaction.triggerContactObserved
+            + " elapsed_ms=" + elapsed);
+        traceEvent(
+            activity,
+            "page_activation_transaction_committed",
+            "id",
+            transaction.id,
+            "sourcePage",
+            transaction.sourcePage,
+            "targetPage",
+            transaction.targetPage,
+            "trigger",
+            transaction.trigger,
+            "triggerGestureDiscarded",
+            transaction.triggerContactObserved,
+            "elapsedMs",
+            elapsed
+        );
+        if ("trigger_gesture_discarded".equals(reason)) {
+            try {
+                Object viewModel = XposedHelpers.getObjectField(
+                    activity,
+                    "documentViewModel"
+                );
+                int pageCount = XposedHelpers.getIntField(
+                    viewModel,
+                    "pageCount"
+                );
+                SpreadPair pair = spreadPair(
+                    spreadConfig(activity),
+                    transaction.targetPage,
+                    pageCount
+                );
+                String activeSide = transaction.targetPage == pair.leftPage
+                    ? "LEFT" : "RIGHT";
+                showStatusOverlay(
+                    activity,
+                    "RTL SPREAD: ACTIVE " + activeSide
+                        + " page " + (transaction.targetPage + 1)
+                        + " - tap or hover over the other page to activate it"
+                );
+            } catch (Throwable throwable) {
+                log("page_activation_status_refresh_failed id="
+                    + transaction.id + " " + throwable);
+            }
+        }
+    }
+
+    private static boolean shouldBlockPageActivationGesture(Activity activity) {
+        PageActivationTransaction transaction = activity == null
+            ? null : PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+        return transaction != null && transaction.triggerContactObserved;
+    }
+
+    private static void abortPageActivationTransaction(
+        Activity activity,
+        String reason,
+        boolean restoreSourcePage
+    ) {
+        PageActivationTransaction transaction =
+            PAGE_ACTIVATION_TRANSACTIONS.remove(activity);
+        if (transaction == null) {
+            return;
+        }
+        log("page_activation_aborted id=" + transaction.id
+            + " source=" + transaction.sourcePage
+            + " target=" + transaction.targetPage
+            + " reason=" + reason
+            + " restore_source=" + restoreSourcePage);
+        traceEvent(
+            activity,
+            "page_activation_transaction_aborted",
+            "id",
+            transaction.id,
+            "sourcePage",
+            transaction.sourcePage,
+            "targetPage",
+            transaction.targetPage,
+            "reason",
+            reason
+        );
+        failClosedPageActivation(activity, reason);
+        if (!restoreSourcePage || activity == null || activity.isFinishing()) {
+            return;
+        }
+        try {
+            Object viewModel = XposedHelpers.getObjectField(
+                activity,
+                "documentViewModel"
+            );
+            int currentPage = XposedHelpers.getIntField(
+                viewModel,
+                "currentPage"
+            );
+            if (currentPage != transaction.sourcePage) {
+                XposedHelpers.callMethod(
+                    viewModel,
+                    "loadPage",
+                    transaction.sourcePage
+                );
+                log("page_activation_rollback_requested id="
+                    + transaction.id + " page=" + transaction.sourcePage);
+            }
+        } catch (Throwable throwable) {
+            log("page_activation_rollback_failed id=" + transaction.id
+                + " " + throwable);
+            XposedBridge.log(throwable);
+        }
+    }
+
+    private static void failClosedPageActivation(
+        Activity activity,
+        String reason
+    ) {
+        if (activity == null) {
+            return;
+        }
+        try {
+            Object presenter = XposedHelpers.getObjectField(
+                activity,
+                "handWritePresenter"
+            );
+            XposedHelpers.callMethod(
+                presenter,
+                "disableHandWrite",
+                "SN_SPREAD_PROBE transaction failure: " + reason
+            );
+        } catch (Throwable throwable) {
+            log("page_activation_fail_closed_error reason=" + reason
+                + " " + throwable);
+        }
+        showOverlay(
+            activity,
+            "RTL SPREAD: page switch failed - writing disabled"
+        );
     }
 
     private static void activateDocumentPageFromPen(
@@ -7387,6 +8100,15 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 "currentPage"
             );
             if (targetPage == currentPage) {
+                return;
+            }
+            if (isEditableSpreadLandscape(activity)) {
+                beginPageActivationTransaction(
+                    activity,
+                    targetPage,
+                    "explicit_activation",
+                    false
+                );
                 return;
             }
 
@@ -8879,6 +9601,21 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 return true;
             }
 
+            if (config != null && config.editable) {
+                boolean started = beginPageActivationTransaction(
+                    activity,
+                    target,
+                    "spread_turn",
+                    false
+                );
+                log("rtl_spread_turn_transaction current=" + currentPage
+                    + " target=" + target + " started=" + started
+                    + " forward=" + forward
+                    + " preserve_side="
+                    + (preserveLeftSide ? "LEFT" : "RIGHT"));
+                return true;
+            }
+
             Object presenter = XposedHelpers.getObjectField(
                 activity,
                 "handWritePresenter"
@@ -8924,6 +9661,15 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             int currentPage =
                 XposedHelpers.getIntField(viewModel, "currentPage");
             if (targetPage == currentPage) {
+                return;
+            }
+            if (isEditableSpreadLandscape(activity)) {
+                beginPageActivationTransaction(
+                    activity,
+                    targetPage,
+                    "explicit_activation",
+                    false
+                );
                 return;
             }
 

@@ -413,6 +413,55 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 - [ ] Return to Fit page and confirm all existing annotations return to their
   original whole-page positions.
 
+## v0.4.13 transactional single-active-page candidate
+
+Automated and build evidence:
+
+- [x] Work starts from stable `main` at `4e4d3ed`; the v0.0.117 inactive-page
+  merge experiment is preserved on `agent/v116-inactive-erase-regression` at
+  `818db1f` and is not in this branch's ancestry.
+- [x] Native PDF renderer invariants pass.
+- [x] Native Spread safety invariants pass and require source-save -> writer
+  disable -> exact transaction publication -> target native load ordering.
+- [x] Static invariants require the inactive-page pen coordinate to be rejected
+  in an Xposed `beforeHookedMethod`, before Supernote's native callback can add
+  it to the source page's DrawPath.
+- [x] Static invariants reject any live pen-activation route to the experimental
+  trail capture, normalization, manual `.mark` merge, or synthetic history path.
+- [x] Static invariants require reader-page and presenter-mark-page identity to
+  match the exact target before geometry commits.
+- [x] Static invariants require trigger-contact save and receive callbacks to be
+  blocked until pen-up, and require timeout/completion work to match the exact
+  transaction token.
+- [x] Static invariants keep a stroke that begins on the active page owned by
+  that page and discard any points that cross into the inactive half.
+- [x] Native Spread v0.0.118 compiles, is v2/v3 signed, and reports matching
+  manifest, handshake, and plug-in minimum version 118.
+
+Nomad hardware gate (not yet run):
+
+- [ ] Finger-tap each inactive half. Existing annotations on both pages remain
+  unchanged; native focus and the ACTIVE banner move to the requested page.
+- [ ] Hover over the inactive page, wait for activation, then write. The first
+  real stroke uses normal native behavior and persists after away/back.
+- [ ] Touch the inactive page with the pen before activation can complete. The
+  trigger gesture creates no partial or wrong-page ink; after lifting, the
+  target is active and the next stroke persists normally.
+- [ ] Repeat the direct-contact test in both directions and confirm no source
+  page annotation count or visible ink changes.
+- [ ] Begin a stroke on the active page and drag across the divider. It remains
+  an active-page stroke, does not switch focus, and leaves no ink on the other
+  page.
+- [ ] On each active side, validate pen, stroke eraser, lasso move, top-toolbar
+  Undo/Redo, highlighting, and an embedded link through native controls.
+- [ ] Advance and reverse spreads with taps and swipes. Every turn saves the
+  source, lands on the expected RTL spread, and leaves writing enabled only for
+  the focused page.
+- [ ] Rotate landscape -> portrait -> landscape and turn away/back. Canonical
+  annotations on both pages remain complete and correctly aligned.
+- [ ] Force an activation timeout or identity mismatch in a disposable test.
+  Writing visibly fails closed and no `.mark` merge fallback runs.
+
 ## v0.4.10 protected native editing pilot
 
 Safety and setup:

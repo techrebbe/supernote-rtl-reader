@@ -49,7 +49,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 116L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 118L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -729,9 +729,6 @@ def check(repo_root: Path) -> None:
             '"onDigitalPosition"',
             "handlePenPageActivation(",
             "PEN_ACTIVATION_TARGETS.remove(activity);",
-            'phase="',
-            '"contact" : "hover"',
-            "activateDocumentPageFromPen(activity, requestedTarget);",
             "pen_page_activation_prearmed",
             "pen_activation_deferred",
             "completePendingPenPageActivation(",
@@ -780,6 +777,287 @@ def check(repo_root: Path) -> None:
             'matchingTrailValue(existing, candidate, "get_timestamp")',
         ),
         "inactive-page pen activation",
+    )
+
+    transaction_markers = (
+        "private static final class PageActivationTransaction",
+        "PAGE_ACTIVATION_TRANSACTIONS",
+        "PEN_CONTACT_START_PAGES",
+        "new ConcurrentHashMap<>()",
+        "volatile boolean triggerContactObserved",
+        "volatile boolean triggerPenLifted",
+        "volatile boolean geometryCommitted",
+        "PAGE_ACTIVATION_COUNTER.incrementAndGet()",
+        "interceptPenPageActivation(",
+        "beginPageActivationTransaction(",
+        "requestPageActivationLoad(",
+        "schedulePageActivationTimeout(",
+        "commitPageActivationGeometry(",
+        "markPageActivationPenLifted(",
+        "restoreTransactionalActivePageGeometry(",
+        "finishPageActivationTransaction(",
+        "abortPageActivationTransaction(",
+        "failClosedPageActivation(",
+        '"page_activation_transaction_started"',
+        '"page_activation_transaction_committed"',
+        '"page_activation_transaction_aborted"',
+        '"trigger_gesture_discarded".equals(reason)',
+        '"page_activation_status_refresh_failed id="',
+        '"SN_SPREAD_PROBE discard activation gesture"',
+        '"page_activation_trigger_input_blocked current="',
+        '"page_activation_pen_input_blocked id="',
+        '"page_activation_pen_input_blocked reason=native_chrome"',
+        '"page_activation_pen_ignored_native_chrome point="',
+        '"page_activation_cross_page_point_blocked current="',
+        '"page_activation_ignored_cross_page_stroke current="',
+        '"page_activation_rejected reason=pen_contact_active"',
+        '"RTL SPREAD: page switch failed - writing disabled"',
+    )
+    require_markers(
+        module,
+        transaction_markers,
+        "transactional single-active-page ownership",
+    )
+
+    digital_position_start = module.find(
+        '"com.supernote.document.document.DocumentActivity$6"'
+    )
+    digital_state_start = module.find(
+        '"onDigital",', digital_position_start
+    )
+    if digital_position_start < 0 or digital_state_start < 0:
+        fail("could not isolate native pen-position interception hook")
+    digital_position_hook = module[digital_position_start:digital_state_start]
+    before_native_callback = digital_position_hook.find(
+        "protected void beforeHookedMethod"
+    )
+    intercept_input = digital_position_hook.find(
+        "interceptPenPageActivation(", before_native_callback
+    )
+    discard_input = digital_position_hook.find(
+        "param.setResult(null);", intercept_input
+    )
+    schedule_activation = digital_position_hook.find(
+        "handlePenPageActivation(", discard_input
+    )
+    if not (
+        0 <= before_native_callback < intercept_input < discard_input
+        < schedule_activation
+    ):
+        fail(
+            "inactive-page pen input must be discarded before Supernote's "
+            "native callback runs, then schedule the ownership transaction"
+        )
+
+    pen_activation_start = module.find(
+        "private static void handlePenPageActivation("
+    )
+    pending_target_start = module.find(
+        "private static Integer pendingPageActivationTarget(",
+        pen_activation_start,
+    )
+    if pen_activation_start < 0 or pending_target_start < 0:
+        fail("could not isolate live pen page-activation routing")
+    live_pen_activation = module[pen_activation_start:pending_target_start]
+    if "beginPageActivationTransaction(" not in live_pen_activation:
+        fail("live inactive-page pen input does not start an ownership transaction")
+    forbidden_live_merge_markers = (
+        "activateDocumentPageFromPen(",
+        "PEN_ACTIVATION_TARGETS.put(",
+        "capturePendingPenActivationTrails(",
+        "persistPendingPenActivationTrails(",
+    )
+    leaked_live_markers = [
+        marker
+        for marker in forbidden_live_merge_markers
+        if marker in live_pen_activation
+    ]
+    if leaked_live_markers:
+        fail(
+            "live pen activation still reaches the experimental inactive-page "
+            f"merge path: {leaked_live_markers}"
+        )
+    chrome_guard = live_pen_activation.find(
+        "isNativeChromeTouch(activity, requestedY)"
+    )
+    target_mapping = live_pen_activation.find("int requestedTarget = pageAt(")
+    if not 0 <= chrome_guard < target_mapping:
+        fail("native pen chrome must be excluded before inactive-page mapping")
+
+    intercept_method_start = module.find(
+        "private static boolean interceptPenPageActivation("
+    )
+    pending_target_after_intercept = module.find(
+        "private static Integer pendingPageActivationTarget(",
+        intercept_method_start,
+    )
+    if intercept_method_start < 0 or pending_target_after_intercept < 0:
+        fail("could not isolate synchronous pen interception")
+    intercept_method = module[
+        intercept_method_start:pending_target_after_intercept
+    ]
+    intercept_chrome = intercept_method.find(
+        "isNativeChromeTouch(activity, y)"
+    )
+    intercept_chrome_discard = intercept_method.find(
+        "return true;", intercept_chrome
+    )
+    intercept_page_mapping = intercept_method.find(
+        "int target = pageAt(activity, x, y);",
+        intercept_chrome_discard,
+    )
+    if not (
+        0 <= intercept_chrome < intercept_chrome_discard
+        < intercept_page_mapping
+    ):
+        fail(
+            "native chrome must discard the parallel low-latency pen point "
+            "without scheduling page activation"
+        )
+    crossing_guard = intercept_method.find(
+        "contactStartPage.intValue() == current"
+    )
+    crossing_discard = intercept_method.find("return true;", crossing_guard)
+    if not 0 <= crossing_guard < crossing_discard:
+        fail(
+            "a stroke begun on the active page can still activate or write "
+            "through the inactive half after crossing the divider"
+        )
+
+    digital_lift_start = module.find('"onDigital",', digital_position_start)
+    digital_lift_end = module.find(
+        "/*", digital_lift_start + len('"onDigital",')
+    )
+    if digital_lift_start < 0 or digital_lift_end < 0:
+        fail("could not isolate pen-lift ownership cleanup")
+    digital_lift_hook = module[digital_lift_start:digital_lift_end]
+    lift_transaction = digital_lift_hook.find("markPageActivationPenLifted(")
+    lift_contact_cleanup = digital_lift_hook.find(
+        "PEN_CONTACT_START_PAGES.remove(activity);", lift_transaction
+    )
+    if not 0 <= lift_transaction < lift_contact_cleanup:
+        fail("pen-up does not clear the active-stroke start-page guard")
+
+    transaction_start = module.find(
+        "private static boolean beginPageActivationTransaction("
+    )
+    request_load_start = module.find(
+        "private static void requestPageActivationLoad(", transaction_start
+    )
+    if transaction_start < 0 or request_load_start < 0:
+        fail("could not isolate page-activation transaction start")
+    transaction_start_method = module[transaction_start:request_load_start]
+    active_pen_guard = transaction_start_method.find(
+        "!triggerContactObserved"
+    )
+    active_pen_identity = transaction_start_method.find(
+        "PEN_CONTACT_START_PAGES.get(activity) != null",
+        active_pen_guard,
+    )
+    transaction_lookup = transaction_start_method.find(
+        "PageActivationTransaction currentTransaction =",
+        active_pen_identity,
+    )
+    if not 0 <= active_pen_guard < active_pen_identity < transaction_lookup:
+        fail(
+            "finger/page-turn activation can overlap a native pen contact"
+        )
+    source_save = transaction_start_method.find(
+        'XposedHelpers.callMethod(presenter, "saveTrails", false, false);'
+    )
+    writer_disable = transaction_start_method.find(
+        '"SN_SPREAD_PROBE transactional page activation"', source_save
+    )
+    publish_transaction = transaction_start_method.find(
+        "PAGE_ACTIVATION_TRANSACTIONS.put(activity, transaction);",
+        writer_disable,
+    )
+    request_target_load = transaction_start_method.find(
+        "requestPageActivationLoad(activity, transaction, viewModel);",
+        publish_transaction,
+    )
+    if not (
+        0 <= source_save < writer_disable < publish_transaction
+        < request_target_load
+    ):
+        fail(
+            "ownership transfer must save the source, disable writing, publish "
+            "the exact transaction, and only then load the target"
+        )
+
+    commit_start = module.find(
+        "private static boolean commitPageActivationGeometry("
+    )
+    pen_lift_start = module.find(
+        "private static void markPageActivationPenLifted(", commit_start
+    )
+    if commit_start < 0 or pen_lift_start < 0:
+        fail("could not isolate transactional geometry commit")
+    commit_method = module[commit_start:pen_lift_start]
+    reader_identity = commit_method.find(
+        "currentPage != transaction.targetPage"
+    )
+    presenter_identity = commit_method.find(
+        "presenterMarkPage != transaction.targetPage + 1",
+        reader_identity,
+    )
+    commit_state = commit_method.find(
+        "transaction.geometryCommitted = true;", presenter_identity
+    )
+    discard_contact = commit_method.find(
+        "transaction.triggerContactObserved", commit_state
+    )
+    finish_commit = commit_method.find(
+        "finishPageActivationTransaction(", discard_contact
+    )
+    if not (
+        0 <= reader_identity < presenter_identity < commit_state
+        < discard_contact < finish_commit
+    ):
+        fail(
+            "ownership must commit only after reader and presenter identities "
+            "match the target and the triggering contact is fail-closed"
+        )
+
+    receive_hook_start_transactional = module.find('"receiveTrials",')
+    receive_hook_end_transactional = module.find(
+        '"areaSelectionTransition",', receive_hook_start_transactional
+    )
+    save_hook_start_transactional = module.find('"saveTrails",')
+    save_hook_end_transactional = module.find(
+        '"receiveTrials",', save_hook_start_transactional
+    )
+    if (
+        receive_hook_start_transactional < 0
+        or receive_hook_end_transactional < 0
+        or save_hook_start_transactional < 0
+        or save_hook_end_transactional < 0
+    ):
+        fail("could not isolate transactional writer guards")
+    transaction_receive_hook = module[
+        receive_hook_start_transactional:receive_hook_end_transactional
+    ]
+    transaction_save_hook = module[
+        save_hook_start_transactional:save_hook_end_transactional
+    ]
+    require_markers(
+        transaction_receive_hook,
+        (
+            "shouldBlockPageActivationGesture(activity)",
+            "param.setResult(null);",
+            "markPageActivationPenLifted(",
+            '"page_activation_trigger_gesture_discarded"',
+        ),
+        "transactional receiveTrials guard",
+    )
+    require_markers(
+        transaction_save_hook,
+        (
+            "shouldBlockPageActivationGesture(activity)",
+            "param.setResult(null);",
+            '"page_activation_save_blocked id="',
+        ),
+        "transactional saveTrails guard",
     )
 
     receive_hook_start = module.find(
@@ -1622,10 +1900,10 @@ def check(repo_root: Path) -> None:
     ):
         fail("trace helper can publish completion before checking incomplete.txt")
 
-    if 'android:versionCode="116"' not in manifest:
-        fail("companion manifest must use versionCode 116")
-    if 'android:versionName="0.0.116"' not in manifest:
-        fail("companion manifest must use versionName 0.0.116")
+    if 'android:versionCode="118"' not in manifest:
+        fail("companion manifest must use versionCode 118")
+    if 'android:versionName="0.0.118"' not in manifest:
+        fail("companion manifest must use versionName 0.0.118")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

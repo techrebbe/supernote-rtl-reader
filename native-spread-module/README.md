@@ -228,6 +228,24 @@ pointer. A pointer-write failure moves or records the session in
 An undeletable stale `incomplete.txt` also enters this fail-closed publication
 path instead of overriding the new completed pointer.
 
+v0.0.118 begins the transactional single-active-page release line from stable
+v0.0.116. The two-page landscape image remains a visual composition, while one
+and only one page owns Supernote's native reader page, handwriting presenter,
+DrawPath, Undo/Redo stack, and `.mark` persistence. An inactive-page tap, hover,
+page turn, or explicit activation saves the source natively, disables the
+writer, loads the target through `DocumentViewModel.loadPage()`, verifies both
+reader and presenter identity, and commits only after target-only spread
+geometry is installed.
+
+The pen-position hook rejects an inactive-page trigger before the native writer
+sees its first coordinate. Hover may finish activation before contact. If the
+pen arrives too quickly, the entire trigger gesture is blocked through pen-up;
+the target remains active for the next stroke. A unique transaction token binds
+completion and timeout work, permits one reload retry, and fails closed rather
+than falling back to manual `.mark` merging. v0.0.117's inactive-page
+capture/normalize/merge experiment remains available only on its preserved
+branch.
+
 This is firmware-specific experimental software for a rooted device. Back up
 documents and `.mark` files before testing a new firmware or module revision.
 
@@ -253,8 +271,8 @@ The signed APK is written to `build/artifact/`.
 
 Install the APK, enable **Supernote Native Spread Probe** in LSPosed, scope it
 only to `com.supernote.document`, and restart the document reader. Supernote
-RTL Reader v0.4.12 or newer and Native Spread v0.0.116 or newer are required for
-protected editable mode. Its
+RTL Reader v0.4.13 or newer and Native Spread v0.0.118 or newer are required for
+the transactional protected-editable candidate. Its
 recovery manifest binds the backup to the PDF's full SHA-256 because
 Supernote changes the PDF modification time when the document activity
 reopens.

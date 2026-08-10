@@ -8174,33 +8174,36 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         String reason,
         boolean restoreSourcePage
     ) {
+        if (activity == null) {
+            return;
+        }
         PageActivationTransaction transaction =
-            PAGE_ACTIVATION_TRANSACTIONS.remove(activity);
+            PAGE_ACTIVATION_TRANSACTIONS.get(activity);
         if (transaction == null) {
             return;
         }
-        log("page_activation_aborted id=" + transaction.id
-            + " source=" + transaction.sourcePage
-            + " target=" + transaction.targetPage
-            + " reason=" + reason
-            + " restore_source=" + restoreSourcePage);
-        traceEvent(
-            activity,
-            "page_activation_transaction_aborted",
-            "id",
-            transaction.id,
-            "sourcePage",
-            transaction.sourcePage,
-            "targetPage",
-            transaction.targetPage,
-            "reason",
-            reason
-        );
-        failClosedPageActivation(activity, reason);
-        if (!restoreSourcePage || activity == null || activity.isFinishing()) {
-            return;
-        }
         try {
+            log("page_activation_aborted id=" + transaction.id
+                + " source=" + transaction.sourcePage
+                + " target=" + transaction.targetPage
+                + " reason=" + reason
+                + " restore_source=" + restoreSourcePage);
+            traceEvent(
+                activity,
+                "page_activation_transaction_aborted",
+                "id",
+                transaction.id,
+                "sourcePage",
+                transaction.sourcePage,
+                "targetPage",
+                transaction.targetPage,
+                "reason",
+                reason
+            );
+            failClosedPageActivation(activity, reason);
+            if (!restoreSourcePage || activity.isFinishing()) {
+                return;
+            }
             Object viewModel = XposedHelpers.getObjectField(
                 activity,
                 "documentViewModel"
@@ -8222,6 +8225,19 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             log("page_activation_rollback_failed id=" + transaction.id
                 + " " + throwable);
             XposedBridge.log(throwable);
+        } finally {
+            // Keep the transaction published through the entire rollback load.
+            // Supernote may synchronously call saveTrails() while loadPage()
+            // changes reader/presenter ownership; the published transaction is
+            // the save guard that prevents transitional trails from being
+            // persisted under either page identity.
+            if (PAGE_ACTIVATION_TRANSACTIONS.remove(
+                    activity,
+                    transaction
+                )) {
+                log("page_activation_abort_guard_released id="
+                    + transaction.id + " reason=" + reason);
+            }
         }
     }
 

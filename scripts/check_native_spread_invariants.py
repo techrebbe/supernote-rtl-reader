@@ -1312,6 +1312,36 @@ def check(repo_root: Path) -> None:
     if "triggerContactObserved" in save_blocker:
         fail("non-contact ownership transfers still allow lifecycle saves")
 
+    fail_closed_start = module.find(
+        "private static void failClosedPageActivation(",
+        abort_transaction_start,
+    )
+    if fail_closed_start < 0:
+        fail("could not isolate page-activation rollback")
+    abort_transaction = module[abort_transaction_start:fail_closed_start]
+    retained_transaction = abort_transaction.find(
+        "PAGE_ACTIVATION_TRANSACTIONS.get(activity)"
+    )
+    rollback_load = abort_transaction.find('"loadPage"')
+    rollback_finally = abort_transaction.find("} finally {", rollback_load)
+    release_guard = abort_transaction.find(
+        "PAGE_ACTIVATION_TRANSACTIONS.remove(", rollback_finally
+    )
+    if not (
+        0 <= retained_transaction < rollback_load
+        < rollback_finally < release_guard
+    ):
+        fail(
+            "page-activation rollback does not retain its save guard through "
+            "the source-page load"
+        )
+    if abort_transaction.find(
+        "PAGE_ACTIVATION_TRANSACTIONS.remove(activity)",
+        0,
+        rollback_load,
+    ) >= 0:
+        fail("page-activation rollback releases its save guard before loadPage")
+
     receive_hook_start = module.find(
         '"receiveTrials",',
         module.find("pen_activation_native_save_bypassed"),

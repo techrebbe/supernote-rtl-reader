@@ -1401,6 +1401,41 @@ def check(repo_root: Path) -> None:
     if not 0 <= convergence_disable < convergence_finish:
         fail("portrait rollback releases its guard before disabling the writer")
 
+    configuration_hook_start = module.find('"onConfigurationChanged",')
+    set_image_hook_start = module.find('"setImage",', configuration_hook_start)
+    if configuration_hook_start < 0 or set_image_hook_start < 0:
+        fail("could not isolate orientation-change rollback handling")
+    configuration_hook = module[
+        configuration_hook_start:set_image_hook_start
+    ]
+    require_markers(
+        configuration_hook,
+        (
+            "configuration.orientation",
+            "Configuration.ORIENTATION_LANDSCAPE",
+            "PAGE_ACTIVATION_TRANSACTIONS.get(activity) != null",
+            "abortPageActivationTransaction(",
+            '"orientation_changed"',
+            "true",
+        ),
+        "orientation-change source rollback",
+    )
+
+    pen_activation_start = module.find(
+        "private static void handlePenPageActivation("
+    )
+    intercept_activation_start = module.find(
+        "private static boolean interceptPenPageActivation(",
+        pen_activation_start,
+    )
+    if pen_activation_start < 0 or intercept_activation_start < 0:
+        fail("could not isolate spread-inactive pen rollback")
+    pen_activation = module[pen_activation_start:intercept_activation_start]
+    spread_inactive = pen_activation.find('"spread_inactive"')
+    restore_source = pen_activation.find("true", spread_inactive)
+    if not 0 <= spread_inactive < restore_source:
+        fail("spread-inactive pen handling does not restore the source page")
+
     commit_start = module.find(
         "private static boolean commitPageActivationGeometry("
     )

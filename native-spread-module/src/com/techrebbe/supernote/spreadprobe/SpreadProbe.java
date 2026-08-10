@@ -953,6 +953,15 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         "newOrientation",
                         configuration.orientation
                     );
+                    if (configuration.orientation
+                            != Configuration.ORIENTATION_LANDSCAPE
+                        && PAGE_ACTIVATION_TRANSACTIONS.get(activity) != null) {
+                        abortPageActivationTransaction(
+                            activity,
+                            "orientation_changed",
+                            true
+                        );
+                    }
                     if (!isCalibrationFile(activity)) {
                         updateNativeEraserGate(
                             activity,
@@ -7599,7 +7608,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     abortPageActivationTransaction(
                         activity,
                         "spread_inactive",
-                        false
+                        true
                     );
                     return;
                 }

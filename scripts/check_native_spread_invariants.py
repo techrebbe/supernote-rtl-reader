@@ -838,6 +838,8 @@ def check(repo_root: Path) -> None:
         "new ConcurrentHashMap<>()",
         "volatile boolean triggerContactObserved",
         "volatile boolean triggerPenLifted",
+        "volatile long triggerContactGeneration",
+        "volatile long pendingPenLiftGeneration",
         "volatile boolean geometryCommitted",
         "volatile boolean rollbackPending",
         "PAGE_ACTIVATION_COUNTER.incrementAndGet()",
@@ -847,6 +849,8 @@ def check(repo_root: Path) -> None:
         "schedulePageActivationTimeout(",
         "commitPageActivationGeometry(",
         "markPageActivationPenLifted(",
+        "notePageActivationTriggerContactLocked(",
+        "capturePageActivationPenLiftGeneration(",
         "restoreTransactionalActivePageGeometry(",
         "finishPageActivationTransaction(",
         "finishPageActivationRollback(",
@@ -937,16 +941,12 @@ def check(repo_root: Path) -> None:
         "PageActivationTransaction ownershipTransaction =",
         contact_ownership_lock,
     )
-    atomic_contact_observed = digital_position_hook.find(
-        "ownershipTransaction.triggerContactObserved =",
+    atomic_contact_generation = digital_position_hook.find(
+        "notePageActivationTriggerContactLocked(",
         contact_transaction_lookup,
     )
-    atomic_contact_held = digital_position_hook.find(
-        "ownershipTransaction.triggerPenLifted = false;",
-        atomic_contact_observed,
-    )
     contact_geometry_ready = digital_position_hook.find(
-        "inputSnapshot.geometryReady", atomic_contact_held
+        "inputSnapshot.geometryReady", atomic_contact_generation
     )
     contact_chrome_origin = digital_position_hook.find(
         "isNativeChromeTouch(activity, contactY)", contact_geometry_ready
@@ -974,8 +974,8 @@ def check(repo_root: Path) -> None:
     if not (
         0 <= before_native_callback < pen_snapshot_lookup < pen_snapshot_read
         < contact_ownership_lock
-        < contact_transaction_lookup < atomic_contact_observed
-        < atomic_contact_held < contact_geometry_ready
+        < contact_transaction_lookup < atomic_contact_generation
+        < contact_geometry_ready
         < contact_chrome_origin < chrome_contact_latched < contact_page_mapping
         < contact_page_valid < contact_page_latched < pending_snapshot_guard
         < pending_contact_latched
@@ -1137,12 +1137,16 @@ def check(repo_root: Path) -> None:
     target_mapping = live_pen_activation.find(
         "final int requestedTarget = pageAt(inputSnapshot, x, y);"
     )
-    pre_dispatch_transaction = live_pen_activation.find(
-        "PageActivationTransaction observedTransaction =",
+    lift_generation_capture = live_pen_activation.find(
+        "capturePageActivationPenLiftGeneration(activity)",
         target_mapping,
     )
+    pre_dispatch_transaction = live_pen_activation.find(
+        "PageActivationTransaction observedTransaction =",
+        lift_generation_capture,
+    )
     pre_dispatch_contact_latch = live_pen_activation.find(
-        "observedTransaction.triggerContactObserved = true;",
+        "notePageActivationTriggerContactLocked(",
         pre_dispatch_transaction,
     )
     pre_dispatch_boundary_guard = live_pen_activation.find(
@@ -1186,7 +1190,8 @@ def check(repo_root: Path) -> None:
         "return;", blocked_contact_guard
     )
     if not (
-        0 <= target_mapping < pre_dispatch_transaction
+        0 <= target_mapping < lift_generation_capture
+        < pre_dispatch_transaction
         < pre_dispatch_contact_latch < pre_dispatch_boundary_guard
         < pre_dispatch_snapshot_guard < pre_dispatch_active_page_filter
         < ui_dispatch < transaction_lookup_for_lift
@@ -1787,6 +1792,33 @@ def check(repo_root: Path) -> None:
     if restore_geometry_start < 0:
         fail("could not isolate pen-lift geometry restoration")
     pen_lift_method = module[pen_lift_start:restore_geometry_start]
+    lift_ownership_lock = pen_lift_method.find(
+        "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)"
+    )
+    lift_generation_guard = pen_lift_method.find(
+        "transaction.triggerContactGeneration",
+        lift_ownership_lock,
+    )
+    lift_expected_generation = pen_lift_method.find(
+        "!= expectedContactGeneration", lift_generation_guard
+    )
+    lift_state_publish = pen_lift_method.find(
+        "transaction.triggerPenLifted = true;",
+        lift_expected_generation,
+    )
+    delayed_generation_guard = pen_lift_method.find(
+        "current.triggerContactGeneration",
+        lift_state_publish,
+    )
+    if not (
+        0 <= lift_ownership_lock < lift_generation_guard
+        < lift_expected_generation < lift_state_publish
+        < delayed_generation_guard
+    ):
+        fail(
+            "pen-lift publication and settle completion are not bound to "
+            "the originating contact generation under the ownership lock"
+        )
     lift_restore = pen_lift_method.find(
         "restoreTransactionalActivePageGeometry("
     )
@@ -2217,10 +2249,12 @@ def check(repo_root: Path) -> None:
             "deferred.documentPath.equals(",
             "currentDocumentPath(activity)",
             "DEFERRED_CONFIG_EXECUTOR.schedule(",
-            "persistedDeferredConfigUnchanged(deferred)",
+            "validateDeferredConfig(deferred)",
             "runDeferredRtlSpreadTurnRetry(",
-            "!persistedConfigUnchanged",
-            'reason=persisted_config_changed',
+            "!persistedValidation.isCurrent(deferred)",
+            'reason=persisted_config_generation_changed',
+            'reason=persisted_config_generation_raced',
+            'persisted_config_changed_during_start',
             "!deferred.config.samePersistedState(",
             'reason=runtime_config_changed',
             "!deferredSnapshot.config.editable",
@@ -2241,10 +2275,10 @@ def check(repo_root: Path) -> None:
         "if (deferred.coverSeparate != null"
     )
     persisted_guard = deferred_turn_schedule.find(
-        "if (!persistedConfigUnchanged)"
+        "!persistedValidation.isCurrent(deferred)"
     )
     persisted_cancel = deferred_turn_schedule.find(
-        'reason=persisted_config_changed', persisted_guard
+        'reason=persisted_config_generation_changed', persisted_guard
     )
     runtime_config_guard = deferred_turn_schedule.find(
         "!deferred.config.samePersistedState(", persisted_cancel
@@ -2271,10 +2305,32 @@ def check(repo_root: Path) -> None:
         "currentPage == deferred.targetPage",
         parity_cancel,
     )
+    final_generation_guard = deferred_turn_schedule.find(
+        "!persistedValidation.isCurrent(deferred)",
+        target_satisfied,
+    )
+    final_generation_cancel = deferred_turn_schedule.find(
+        'reason=persisted_config_generation_raced',
+        final_generation_guard,
+    )
+    activation_start = deferred_turn_schedule.find(
+        "beginPageActivationTransaction(",
+        final_generation_cancel,
+    )
+    post_start_generation_guard = deferred_turn_schedule.find(
+        "!persistedValidation.isCurrent(deferred)",
+        activation_start,
+    )
+    changed_start_abort = deferred_turn_schedule.find(
+        '"persisted_config_changed_during_start"',
+        post_start_generation_guard,
+    )
     if not (
         0 <= persisted_guard < persisted_cancel < runtime_config_guard
         < runtime_config_cancel < editable_guard < editable_cancel < parity_guard
         < parity_compare < parity_cancel < target_satisfied
+        < final_generation_guard < final_generation_cancel < activation_start
+        < post_start_generation_guard < changed_start_abort
     ):
         fail(
             "deferred activation can replay before persisted identity, runtime "
@@ -2300,11 +2356,33 @@ def check(repo_root: Path) -> None:
         deferred_schedule_method,
         (
             "DEFERRED_CONFIG_EXECUTOR.schedule(",
-            "persistedDeferredConfigUnchanged(deferred)",
+            "validateDeferredConfig(deferred)",
             "new Handler(activity.getMainLooper()).post(",
             "runDeferredRtlSpreadTurnRetry(",
         ),
         "off-UI deferred-config validation",
+    )
+    observer_start = module.find(
+        "private static boolean ensureDeferredConfigObserver(",
+        deferred_turn_start,
+    )
+    if observer_start < 0 or observer_start >= deferred_turn_schedule_start:
+        fail("could not isolate deferred-config change-generation fence")
+    deferred_config_fence = module[
+        observer_start:deferred_turn_schedule_start
+    ]
+    require_markers(
+        deferred_config_fence,
+        (
+            "new FileObserver(",
+            "observer.startWatching()",
+            "persistedConfigGeneration",
+            "persistedConfigGeneration.incrementAndGet()",
+            "long before = deferred.persistedConfigGeneration.get()",
+            "persistedDeferredConfigUnchanged(deferred)",
+            "unchanged && before == after",
+        ),
+        "deferred-config change-generation fence",
     )
     require_markers(
         persisted_config_method,
@@ -2404,6 +2482,13 @@ def check(repo_root: Path) -> None:
     ):
         fail("transiently rejected explicit page activation can be lost")
 
+    contact_generation_start = module.find(
+        "private static void notePageActivationTriggerContactLocked("
+    )
+    lift_capture_start = module.find(
+        "private static long capturePageActivationPenLiftGeneration(",
+        contact_generation_start,
+    )
     handle_pen_start = module.find(
         "private static void handlePenPageActivation("
     )
@@ -2415,8 +2500,40 @@ def check(repo_root: Path) -> None:
         "private static boolean isCompletingActivePageStroke(",
         intercept_pen_start,
     )
-    if min(handle_pen_start, intercept_pen_start, complete_stroke_start) < 0:
+    if min(
+        contact_generation_start,
+        lift_capture_start,
+        handle_pen_start,
+        intercept_pen_start,
+        complete_stroke_start,
+    ) < 0:
         fail("could not isolate transfer-overlap contact latching")
+    contact_generation_helper = module[
+        contact_generation_start:lift_capture_start
+    ]
+    lift_capture_helper = module[lift_capture_start:handle_pen_start]
+    require_markers(
+        contact_generation_helper,
+        (
+            "transaction.triggerPenLifted",
+            "transaction.pendingPenLiftGeneration",
+            "== transaction.triggerContactGeneration",
+            "transaction.triggerContactGeneration++",
+            "transaction.pendingPenLiftGeneration = -1L",
+            "transaction.triggerPenLifted = false",
+        ),
+        "new-contact generation advancement",
+    )
+    require_markers(
+        lift_capture_helper,
+        (
+            "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+            "PAGE_ACTIVATION_TRANSACTIONS.get(activity)",
+            "transaction.pendingPenLiftGeneration =",
+            "transaction.triggerContactGeneration",
+        ),
+        "originating-contact pen-lift capture",
+    )
     handle_pen = module[handle_pen_start:intercept_pen_start]
     intercept_pen = module[intercept_pen_start:complete_stroke_start]
     for label, method, pressure_marker in (
@@ -2427,16 +2544,17 @@ def check(repo_root: Path) -> None:
             "if (transaction != null)"
         )
         contact_latch = method.find(pressure_marker, transaction_branch)
-        observed = method.find(
-            "transaction.triggerContactObserved = true;",
+        ownership_lock = method.find(
+            "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
             contact_latch,
         )
-        lifted = method.find(
-            "transaction.triggerPenLifted = false;",
-            observed,
+        generation_latch = method.find(
+            "notePageActivationTriggerContactLocked(",
+            ownership_lock,
         )
         if not (
-            0 <= transaction_branch < contact_latch < observed < lifted
+            0 <= transaction_branch < contact_latch < ownership_lock
+            < generation_latch
         ):
             fail(
                 f"{label} transfer path does not latch every overlapping contact"

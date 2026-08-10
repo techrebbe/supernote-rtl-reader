@@ -659,6 +659,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         final long startedAt;
         volatile boolean triggerContactObserved;
         volatile boolean triggerPenLifted;
+        volatile long triggerContactGeneration;
+        volatile long pendingPenLiftGeneration;
         volatile boolean geometryCommitted;
         volatile boolean rollbackPending;
         volatile String abortReason;
@@ -679,6 +681,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             this.startedAt = SystemClock.uptimeMillis();
             this.triggerContactObserved = triggerContactObserved;
             this.triggerPenLifted = !triggerContactObserved;
+            this.triggerContactGeneration = triggerContactObserved ? 1L : 0L;
+            this.pendingPenLiftGeneration = -1L;
         }
     }
 
@@ -691,6 +695,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         final String trigger;
         final Boolean coverSeparate;
         final long startedAt;
+        final AtomicLong persistedConfigGeneration = new AtomicLong();
+        volatile FileObserver persistedConfigObserver;
+        volatile boolean persistedConfigObserverReady;
         volatile boolean noticeShown;
 
         DeferredSpreadTurn(
@@ -709,6 +716,22 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             this.trigger = trigger;
             this.coverSeparate = coverSeparate;
             this.startedAt = SystemClock.uptimeMillis();
+        }
+    }
+
+    private static final class DeferredConfigValidation {
+        final boolean unchanged;
+        final long generation;
+
+        DeferredConfigValidation(boolean unchanged, long generation) {
+            this.unchanged = unchanged;
+            this.generation = generation;
+        }
+
+        boolean isCurrent(DeferredSpreadTurn deferred) {
+            return unchanged && deferred != null
+                && deferred.persistedConfigObserverReady
+                && deferred.persistedConfigGeneration.get() == generation;
         }
     }
 
@@ -1258,9 +1281,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                                 // used by final commit/removal. The later
                                 // interceptor repeats this defensively, but
                                 // commit can never miss this first frame.
-                                ownershipTransaction.triggerContactObserved =
-                                    true;
-                                ownershipTransaction.triggerPenLifted = false;
+                                notePageActivationTriggerContactLocked(
+                                    ownershipTransaction
+                                );
                             }
                             if (inputSnapshot != null
                                 && inputSnapshot.editable
@@ -1407,11 +1430,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     Activity activity = activeActivity;
                     tracePenLeftScreen(activity, state);
                     if (activity != null) {
+                        final long liftGeneration =
+                            capturePageActivationPenLiftGeneration(activity);
                         activity.runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
                                 markPageActivationPenLifted(
                                     activity,
+                                    liftGeneration,
                                     "digital_state:" + state
                                 );
                                 clearPenContactStartPage(
@@ -3101,8 +3127,13 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     );
                     if (activationGestureBlocked) {
                         if (activity != null) {
+                            long liftGeneration =
+                                capturePageActivationPenLiftGeneration(
+                                    activity
+                                );
                             markPageActivationPenLifted(
                                 activity,
+                                liftGeneration,
                                 "receive_trials_blocked"
                             );
                             traceEvent(
@@ -6974,7 +7005,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         PAGE_ACTIVATION_BLOCKED_TOUCHES.remove(activity);
         PAGE_ACTIVATION_UI_BLOCK_LOG_STATES.remove(activity);
         PAGE_ACTIVATION_TRANSACTIONS.remove(activity);
-        DEFERRED_SPREAD_TURNS.remove(activity);
+        DeferredSpreadTurn deferred = DEFERRED_SPREAD_TURNS.remove(activity);
+        stopDeferredConfigObserver(deferred);
         PEN_CONTACT_START_PAGES.remove(activity);
         PEN_ACTIVATION_TARGETS.remove(activity);
         PEN_ACTIVATION_ORIGINAL_PAGES.remove(activity);
@@ -8243,6 +8275,52 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
     }
 
+    /**
+     * Records a positive-pressure frame while the ownership lock is held.
+     * A generation advances only when contact follows a captured or committed
+     * lift, so repeated samples from one physical stroke keep one identity.
+     */
+    private static void notePageActivationTriggerContactLocked(
+        PageActivationTransaction transaction
+    ) {
+        if (transaction == null) {
+            return;
+        }
+        if (!transaction.triggerContactObserved) {
+            transaction.triggerContactObserved = true;
+            transaction.triggerContactGeneration = 1L;
+        } else if (transaction.triggerPenLifted
+            || transaction.pendingPenLiftGeneration
+                == transaction.triggerContactGeneration) {
+            transaction.triggerContactGeneration++;
+        }
+        transaction.pendingPenLiftGeneration = -1L;
+        transaction.triggerPenLifted = false;
+    }
+
+    /**
+     * Captures the exact contact generation ended by a native pen-up callback.
+     * A subsequent contact advances the generation before any queued lift can
+     * publish, making that older completion harmless.
+     */
+    private static long capturePageActivationPenLiftGeneration(
+        Activity activity
+    ) {
+        synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+            PageActivationTransaction transaction =
+                PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+            if (transaction == null || !transaction.triggerContactObserved
+                || transaction.triggerPenLifted
+                || transaction.rollbackPending
+                || transaction.triggerContactGeneration <= 0L) {
+                return -1L;
+            }
+            transaction.pendingPenLiftGeneration =
+                transaction.triggerContactGeneration;
+            return transaction.pendingPenLiftGeneration;
+        }
+    }
+
     private static void handlePenPageActivation(
         Activity activity,
         int x,
@@ -8257,6 +8335,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         final int requestedY = y;
         final int requestedPressure = pressure;
         final int requestedTarget = pageAt(inputSnapshot, x, y);
+        final long requestedLiftGeneration = pressure <= 0
+            ? capturePageActivationPenLiftGeneration(activity) : -1L;
         PageActivationTransaction observedTransaction =
             PAGE_ACTIVATION_TRANSACTIONS.get(activity);
         if (observedTransaction != null) {
@@ -8268,8 +8348,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
                     if (PAGE_ACTIVATION_TRANSACTIONS.get(activity)
                             == observedTransaction) {
-                        observedTransaction.triggerContactObserved = true;
-                        observedTransaction.triggerPenLifted = false;
+                        notePageActivationTriggerContactLocked(
+                            observedTransaction
+                        );
                     }
                 }
                 return;
@@ -8305,8 +8386,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     PAGE_ACTIVATION_TRANSACTIONS.get(activity);
                 if (transaction != null) {
                     if (requestedPressure > 0) {
-                        transaction.triggerContactObserved = true;
-                        transaction.triggerPenLifted = false;
+                        synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+                            if (PAGE_ACTIVATION_TRANSACTIONS.get(activity)
+                                    == transaction) {
+                                notePageActivationTriggerContactLocked(
+                                    transaction
+                                );
+                            }
+                        }
                         log("page_activation_trigger_contact id="
                             + transaction.id + " target="
                             + transaction.targetPage + " point_page="
@@ -8315,6 +8402,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         && transaction.triggerContactObserved) {
                         markPageActivationPenLifted(
                             activity,
+                            requestedLiftGeneration,
                             "position_pressure_zero"
                         );
                     }
@@ -8398,8 +8486,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             PAGE_ACTIVATION_TRANSACTIONS.get(activity);
         if (transaction != null) {
             if (pressure > 0) {
-                transaction.triggerContactObserved = true;
-                transaction.triggerPenLifted = false;
+                synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+                    if (PAGE_ACTIVATION_TRANSACTIONS.get(activity)
+                            == transaction) {
+                        notePageActivationTriggerContactLocked(transaction);
+                    }
+                }
             }
             notePenInputBlock(
                 activity,
@@ -8627,8 +8719,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 if (currentTransaction != null) {
                     if (currentTransaction.targetPage == targetPage
                         && triggerContactObserved) {
-                        currentTransaction.triggerContactObserved = true;
-                        currentTransaction.triggerPenLifted = false;
+                        notePageActivationTriggerContactLocked(
+                            currentTransaction
+                        );
                     }
                     log("page_activation_rejected"
                         + " reason=transaction_in_progress"
@@ -8891,17 +8984,26 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
 
     private static void markPageActivationPenLifted(
         final Activity activity,
+        final long expectedContactGeneration,
         String reason
     ) {
-        final PageActivationTransaction transaction =
-            PAGE_ACTIVATION_TRANSACTIONS.get(activity);
-        if (transaction == null || !transaction.triggerContactObserved
-            || transaction.triggerPenLifted || transaction.rollbackPending) {
-            return;
+        final PageActivationTransaction transaction;
+        synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+            transaction = PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+            if (transaction == null || !transaction.triggerContactObserved
+                || transaction.triggerPenLifted
+                || transaction.rollbackPending
+                || expectedContactGeneration <= 0L
+                || transaction.triggerContactGeneration
+                    != expectedContactGeneration) {
+                return;
+            }
+            transaction.pendingPenLiftGeneration = -1L;
+            transaction.triggerPenLifted = true;
         }
-        transaction.triggerPenLifted = true;
         log("page_activation_pen_lifted id=" + transaction.id
             + " target=" + transaction.targetPage
+            + " generation=" + expectedContactGeneration
             + " reason=" + reason
             + " geometry=" + transaction.geometryCommitted);
         if (!transaction.geometryCommitted) {
@@ -8915,7 +9017,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 if (current == null || current.id != transaction.id
                     || current.rollbackPending
                     || !current.geometryCommitted
-                    || !current.triggerPenLifted) {
+                    || !current.triggerPenLifted
+                    || current.triggerContactGeneration
+                        != expectedContactGeneration) {
                     return;
                 }
                 try {
@@ -10984,12 +11088,123 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             activity,
             deferred
         );
+        if (replaced != null) {
+            stopDeferredConfigObserver(replaced);
+        }
         log("rtl_spread_turn_deferred id=" + deferred.id
             + " source=" + sourcePage + " target=" + targetPage
             + " trigger=" + trigger
             + " replaced=" + (replaced == null ? -1L : replaced.id));
         scheduleDeferredRtlSpreadTurn(activity, deferred);
         return true;
+    }
+
+    private static boolean ensureDeferredConfigObserver(
+        final DeferredSpreadTurn deferred
+    ) {
+        if (deferred == null || deferred.config == null) {
+            return false;
+        }
+        synchronized (deferred) {
+            if (deferred.persistedConfigObserverReady) {
+                return true;
+            }
+            if (deferred.config.calibration) {
+                deferred.persistedConfigObserverReady = true;
+                return true;
+            }
+            try {
+                File document = new File(deferred.config.documentPath);
+                File marker = deferred.config.markerPath == null
+                    ? null : new File(deferred.config.markerPath);
+                File parent = document.getParentFile();
+                if (parent == null || marker == null
+                    || !parent.equals(marker.getParentFile())) {
+                    return false;
+                }
+                final String documentName = document.getName();
+                final String markerName = marker.getName();
+                final String manifestName = "." + documentName
+                    + ".snspread-backup.properties";
+                final String snapshotName = "." + documentName
+                    + ".snspread-backup.mark";
+                int mask = FileObserver.CLOSE_WRITE | FileObserver.MOVED_TO
+                    | FileObserver.MOVED_FROM | FileObserver.CREATE
+                    | FileObserver.DELETE | FileObserver.MODIFY
+                    | FileObserver.ATTRIB | FileObserver.MOVE_SELF
+                    | FileObserver.DELETE_SELF;
+                FileObserver observer = new FileObserver(
+                    parent.getAbsolutePath(),
+                    mask
+                ) {
+                    @Override
+                    public void onEvent(int event, String path) {
+                        if (path != null && !documentName.equals(path)
+                            && !markerName.equals(path)
+                            && !manifestName.equals(path)
+                            && !snapshotName.equals(path)) {
+                            return;
+                        }
+                        deferred.persistedConfigGeneration.incrementAndGet();
+                    }
+                };
+                observer.startWatching();
+                deferred.persistedConfigObserver = observer;
+                deferred.persistedConfigObserverReady = true;
+                return true;
+            } catch (Throwable throwable) {
+                deferred.persistedConfigObserverReady = false;
+                return false;
+            }
+        }
+    }
+
+    private static void stopDeferredConfigObserver(
+        DeferredSpreadTurn deferred
+    ) {
+        if (deferred == null) {
+            return;
+        }
+        FileObserver observer;
+        synchronized (deferred) {
+            deferred.persistedConfigGeneration.incrementAndGet();
+            deferred.persistedConfigObserverReady = false;
+            observer = deferred.persistedConfigObserver;
+            deferred.persistedConfigObserver = null;
+        }
+        if (observer != null) {
+            try {
+                observer.stopWatching();
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    private static boolean removeDeferredSpreadTurn(
+        Activity activity,
+        DeferredSpreadTurn deferred
+    ) {
+        boolean removed = activity != null && deferred != null
+            && DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+        if (removed) {
+            stopDeferredConfigObserver(deferred);
+        }
+        return removed;
+    }
+
+    private static DeferredConfigValidation validateDeferredConfig(
+        DeferredSpreadTurn deferred
+    ) {
+        if (!ensureDeferredConfigObserver(deferred)) {
+            return new DeferredConfigValidation(false, -1L);
+        }
+        long before = deferred.persistedConfigGeneration.get();
+        boolean unchanged = persistedDeferredConfigUnchanged(deferred);
+        long after = deferred.persistedConfigGeneration.get();
+        return new DeferredConfigValidation(
+            unchanged && before == after,
+            after
+        );
     }
 
     private static void scheduleDeferredRtlSpreadTurn(
@@ -11003,15 +11218,15 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         DEFERRED_CONFIG_EXECUTOR.schedule(new Runnable() {
             @Override
             public void run() {
-                final boolean persistedConfigUnchanged =
-                    persistedDeferredConfigUnchanged(deferred);
+                final DeferredConfigValidation persistedValidation =
+                    validateDeferredConfig(deferred);
                 new Handler(activity.getMainLooper()).post(new Runnable() {
                     @Override
                     public void run() {
                         runDeferredRtlSpreadTurnRetry(
                             activity,
                             deferred,
-                            persistedConfigUnchanged
+                            persistedValidation
                         );
                     }
                 });
@@ -11073,7 +11288,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static void runDeferredRtlSpreadTurnRetry(
         Activity activity,
         DeferredSpreadTurn deferred,
-        boolean persistedConfigUnchanged
+        DeferredConfigValidation persistedValidation
     ) {
         DeferredSpreadTurn current = DEFERRED_SPREAD_TURNS.get(activity);
         if (current != deferred) {
@@ -11082,22 +11297,24 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         if (activity.isFinishing()
             || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1
                 && activity.isDestroyed())) {
-            DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+            removeDeferredSpreadTurn(activity, deferred);
             return;
         }
         try {
             if (activity.getResources().getConfiguration().orientation
                     != Configuration.ORIENTATION_LANDSCAPE
                 || !deferred.documentPath.equals(currentDocumentPath(activity))) {
-                DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+                removeDeferredSpreadTurn(activity, deferred);
                 log("rtl_spread_turn_deferred_cancelled id="
                     + deferred.id + " reason=context_changed");
                 return;
             }
-            if (!persistedConfigUnchanged) {
-                DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+            if (persistedValidation == null
+                || !persistedValidation.isCurrent(deferred)) {
+                removeDeferredSpreadTurn(activity, deferred);
                 log("rtl_spread_turn_deferred_cancelled id="
-                    + deferred.id + " reason=persisted_config_changed");
+                    + deferred.id
+                    + " reason=persisted_config_generation_changed");
                 return;
             }
 
@@ -11110,14 +11327,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             if (!deferred.config.samePersistedState(
                     deferredSnapshot.config
                 )) {
-                DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+                removeDeferredSpreadTurn(activity, deferred);
                 log("rtl_spread_turn_deferred_cancelled id="
                     + deferred.id + " reason=runtime_config_changed");
                 return;
             }
             if (!deferredSnapshot.config.enabled
                 || !deferredSnapshot.config.editable) {
-                DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+                removeDeferredSpreadTurn(activity, deferred);
                 log("rtl_spread_turn_deferred_cancelled id="
                     + deferred.id + " reason=editing_disabled");
                 return;
@@ -11125,7 +11342,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             if (deferred.coverSeparate != null
                 && deferredSnapshot.config.coverSeparate
                     != deferred.coverSeparate.booleanValue()) {
-                DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+                removeDeferredSpreadTurn(activity, deferred);
                 log("rtl_spread_turn_deferred_cancelled id="
                     + deferred.id
                     + " reason=cover_parity_changed"
@@ -11137,13 +11354,13 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
 
             int currentPage = currentDocumentPage(activity);
             if (currentPage == deferred.targetPage) {
-                DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+                removeDeferredSpreadTurn(activity, deferred);
                 log("rtl_spread_turn_deferred_satisfied id="
                     + deferred.id + " target=" + deferred.targetPage);
                 return;
             }
             if (currentPage != deferred.sourcePage) {
-                DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+                removeDeferredSpreadTurn(activity, deferred);
                 log("rtl_spread_turn_deferred_cancelled id="
                     + deferred.id + " reason=source_changed"
                     + " expected=" + deferred.sourcePage
@@ -11151,14 +11368,36 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 return;
             }
 
-            if (editablePenInputReady(activity)
+            if (!persistedValidation.isCurrent(deferred)) {
+                removeDeferredSpreadTurn(activity, deferred);
+                log("rtl_spread_turn_deferred_cancelled id="
+                    + deferred.id
+                    + " reason=persisted_config_generation_raced");
+                return;
+            }
+            boolean activationStarted = editablePenInputReady(activity)
                 && beginPageActivationTransaction(
                      activity,
                      deferred.targetPage,
                      deferred.trigger,
                      false
-                )) {
-                DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+                );
+            if (!persistedValidation.isCurrent(deferred)) {
+                if (activationStarted) {
+                    abortPageActivationTransaction(
+                        activity,
+                        "persisted_config_changed_during_start",
+                        true
+                    );
+                }
+                removeDeferredSpreadTurn(activity, deferred);
+                log("rtl_spread_turn_deferred_cancelled id="
+                    + deferred.id
+                    + " reason=persisted_config_generation_raced");
+                return;
+            }
+            if (activationStarted) {
+                removeDeferredSpreadTurn(activity, deferred);
                 log("rtl_spread_turn_deferred_started id="
                     + deferred.id + " source=" + deferred.sourcePage
                     + " target=" + deferred.targetPage + " trigger="

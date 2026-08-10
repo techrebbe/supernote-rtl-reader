@@ -2066,6 +2066,8 @@ def check(repo_root: Path) -> None:
             "current != deferred",
             "deferred.documentPath.equals(",
             "currentDocumentPath(activity)",
+            "!deferredSnapshot.config.editable",
+            'reason=editing_disabled',
             "deferred.coverSeparate != null",
             "deferredSnapshot.config.coverSeparate",
             'reason=cover_parity_changed',
@@ -2081,6 +2083,13 @@ def check(repo_root: Path) -> None:
     parity_guard = deferred_turn_schedule.find(
         "if (deferred.coverSeparate != null)"
     )
+    editable_guard = deferred_turn_schedule.find(
+        "!deferredSnapshot.config.editable"
+    )
+    editable_cancel = deferred_turn_schedule.find(
+        'reason=editing_disabled',
+        editable_guard,
+    )
     parity_compare = deferred_turn_schedule.find(
         "deferredSnapshot.config.coverSeparate",
         parity_guard,
@@ -2093,8 +2102,14 @@ def check(repo_root: Path) -> None:
         "currentPage == deferred.targetPage",
         parity_cancel,
     )
-    if not 0 <= parity_guard < parity_compare < parity_cancel < target_satisfied:
-        fail("deferred spread turn can replay before cover parity revalidation")
+    if not (
+        0 <= editable_guard < editable_cancel < parity_guard
+        < parity_compare < parity_cancel < target_satisfied
+    ):
+        fail(
+            "deferred activation can replay before persisted editable/parity "
+            "revalidation"
+        )
     editable_turn = rtl_turn.find("if (config != null && config.editable)")
     turn_started = rtl_turn.find(
         "boolean started = beginPageActivationTransaction(",

@@ -101,7 +101,8 @@ A contact originating in native top/bottom chrome is latched as non-writing
 through pen-up, even if it drags into the page. Transaction-blocked UI motion is
 diagnosed only at coalesced gesture boundaries on a background logger. Deferred
 spread turns also bind the cover-parity value used to calculate their target and
-are cancelled if a newer validated configuration changes that parity.
+are cancelled if a newer validated configuration changes that parity or
+explicitly disables editing/the spread feature.
 
 ## Failure behavior
 

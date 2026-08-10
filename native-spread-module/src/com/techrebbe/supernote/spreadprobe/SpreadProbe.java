@@ -10953,6 +10953,15 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
 
                     PenInputSnapshot deferredSnapshot =
                         penInputSnapshot(activity);
+                    if (deferredSnapshot != null
+                        && deferredSnapshot.config != null
+                        && (!deferredSnapshot.config.enabled
+                            || !deferredSnapshot.config.editable)) {
+                        DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+                        log("rtl_spread_turn_deferred_cancelled id="
+                            + deferred.id + " reason=editing_disabled");
+                        return;
+                    }
                     if (deferred.coverSeparate != null) {
                         if (deferredSnapshot == null
                             || deferredSnapshot.config == null) {

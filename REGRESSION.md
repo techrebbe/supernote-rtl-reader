@@ -473,6 +473,9 @@ Automated and build evidence:
   logger.
 - [x] Static invariants require deferred spread turns to bind and revalidate the
   cover-parity value used to calculate their target.
+- [x] Static invariants require every deferred activation to be cancelled when
+  the latest validated document configuration explicitly disables editing or
+  Native Spread.
 - [x] Native Spread v0.0.118 compiles, is v2/v3 signed, and reports matching
   manifest, handshake, and plug-in minimum version 118.
 

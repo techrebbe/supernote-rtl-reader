@@ -1967,11 +1967,21 @@ def check(repo_root: Path) -> None:
         "true",
         start_failure_abort,
     )
+    start_failure_handled = begin_transaction.find(
+        "return ownershipAcquired;",
+        start_failure_restore,
+    )
     if not (
         0 <= start_failure < guarded_start_failure
         < start_failure_abort < start_failure_restore
+        < start_failure_handled
     ):
-        fail("partial activation-start failure does not roll back to source")
+        fail(
+            "partial activation-start failure does not roll back to source "
+            "and suppress the legacy target-page fallback"
+        )
+    if "boolean ownershipAcquired = transaction != null;" not in begin_transaction:
+        fail("activation-start failure does not remember acquired ownership")
     if begin_transaction.find(
         "PAGE_ACTIVATION_TRANSACTIONS.remove(activity)",
         start_failure,

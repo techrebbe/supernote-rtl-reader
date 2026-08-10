@@ -8514,6 +8514,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             schedulePageActivationTimeout(activity, id);
             return true;
         } catch (Throwable throwable) {
+            boolean ownershipAcquired = transaction != null;
             log("page_activation_start_failed target=" + targetPage
                 + " trigger=" + trigger + " " + throwable);
             XposedBridge.log(throwable);
@@ -8530,7 +8531,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             } else {
                 failClosedPageActivation(activity, "start_failed");
             }
-            return false;
+            // Once the transaction has been published, its rollback owns this
+            // activation attempt. Reporting it as unhandled would let callers
+            // invoke the legacy target-page fallback while source rollback is
+            // still pending, bypassing the serialized ownership guard.
+            return ownershipAcquired;
         }
     }
 

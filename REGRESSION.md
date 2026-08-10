@@ -457,6 +457,9 @@ Automated and build evidence:
 - [x] Static invariants reject synchronous logging, JSON serialization, and UI
   context capture in the native pen-position hook/interceptor. Contact-boundary
   trace data and coalesced block-state logs are enqueued to serialized workers.
+- [x] Static invariants require a partial transaction-start failure to retain
+  ownership through source rollback and suppress the legacy target-page
+  activation fallback.
 - [x] Native Spread v0.0.118 compiles, is v2/v3 signed, and reports matching
   manifest, handshake, and plug-in minimum version 118.
 

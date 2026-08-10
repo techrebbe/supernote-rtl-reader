@@ -82,6 +82,11 @@ still held, geometry remains pending and the writer stays disabled. Pen lift
 restores the native writer geometry, publishes the corresponding ready snapshot,
 and only then atomically releases the ownership guard.
 
+If native activation throws after that ownership guard is published, the
+transaction remains the sole owner of recovery. It reports the attempt as
+handled while rolling back to the source page, so no legacy target-page fallback
+can race the rollback.
+
 ## Failure behavior
 
 The transaction fails closed:

@@ -82,6 +82,12 @@ The transaction fails closed:
 - writing remains disabled when page identity or geometry cannot be verified;
 - one timed native reload is allowed and is bound to the same transaction ID;
 - a final timeout rolls back toward the source page;
+- source-page rollback is retried only a bounded number of times and every
+  retry remains bound to the exact published transaction;
+- if rollback still cannot reload or reconverge, the writer remains disabled
+  and pen geometry is invalidated while the global UI/save guard is released,
+  allowing navigation or reader recreation to recover without silently
+  accepting uncertain page ownership;
 - no module-written `.mark` merge is used as a fallback.
 
 ## Migration boundary

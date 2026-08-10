@@ -444,6 +444,11 @@ Automated and build evidence:
   `stat`, and other filesystem work are rejected from the low-latency path.
 - [x] Static invariants keep a stroke that begins on the active page owned by
   that page and discard any points that cross into the inactive half.
+- [x] Static invariants require source-page rollback to use bounded,
+  exact-transaction retries. A reload exception or convergence timeout cannot
+  leave UI/history/save guards published forever: after the final attempt, the
+  native writer must be disabled and pen geometry invalidated before the
+  transaction guard is released.
 - [x] Native Spread v0.0.118 compiles, is v2/v3 signed, and reports matching
   manifest, handshake, and plug-in minimum version 118.
 

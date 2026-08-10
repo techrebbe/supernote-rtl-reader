@@ -125,6 +125,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int NATIVE_BOTTOM_CHROME_TOUCH_EXCLUSION_PX = 96;
     private static final long NON_EDGE_TAP_SUPPRESSION_MS = 400L;
     private static final long PAGE_ACTIVATION_TIMEOUT_MS = 3000L;
+    private static final int PAGE_ACTIVATION_ROLLBACK_MAX_ATTEMPTS = 2;
+    private static final long PAGE_ACTIVATION_ROLLBACK_RETRY_MS = 180L;
     private static final long PAGE_ACTIVATION_PEN_SETTLE_MS = 160L;
     private static final int PEN_CONTACT_BLOCKED_PAGE = Integer.MIN_VALUE;
     private static final long TRACE_SNAPSHOT_DEBOUNCE_MS = 80L;
@@ -626,6 +628,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         volatile boolean rollbackPending;
         volatile String abortReason;
         int loadAttempts;
+        int rollbackAttempts;
 
         PageActivationTransaction(
             long id,
@@ -7140,6 +7143,34 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             + " reason=" + reason);
     }
 
+    private static void invalidatePenInputGeometrySnapshot(
+        Activity activity,
+        String reason
+    ) {
+        if (activity == null) {
+            return;
+        }
+        PenInputSnapshot published = PEN_INPUT_SNAPSHOTS.get(activity);
+        if (published == null) {
+            return;
+        }
+        PEN_INPUT_SNAPSHOTS.put(
+            activity,
+            new PenInputSnapshot(
+                published.config,
+                published.currentPage,
+                published.pageCount,
+                published.rightPage,
+                published.leftPage,
+                published.rightVisibleBounds,
+                published.leftVisibleBounds,
+                false
+            )
+        );
+        log("pen_input_geometry_invalidated current="
+            + published.currentPage + " reason=" + reason);
+    }
+
     private static PenInputSnapshot penInputSnapshot(Activity activity) {
         if (activity == null || activity != activeActivity
             || activity.isFinishing()
@@ -8679,26 +8710,233 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 PAGE_ACTIVATION_TRANSACTIONS.remove(activity, transaction);
                 return;
             }
-            Object viewModel = XposedHelpers.getObjectField(
-                activity,
-                "documentViewModel"
-            );
             // Always reload the source, even if the reader field already says
             // source: the presenter may still own the target mark page.  The
             // transaction remains published after this asynchronous request
             // and is released only when composition verifies both identities.
+            requestPageActivationRollback(
+                activity,
+                transaction,
+                "abort_" + reason
+            );
+        } catch (Throwable throwable) {
+            log("page_activation_abort_failed id=" + transaction.id
+                + " " + throwable);
+            XposedBridge.log(throwable);
+            schedulePageActivationRollbackRetry(
+                activity,
+                transaction,
+                "abort_exception"
+            );
+        }
+    }
+
+    private static void requestPageActivationRollback(
+        final Activity activity,
+        final PageActivationTransaction transaction,
+        final String reason
+    ) {
+        if (activity == null || transaction == null) {
+            return;
+        }
+        if (Looper.myLooper() != activity.getMainLooper()) {
+            new Handler(activity.getMainLooper()).post(new Runnable() {
+                @Override
+                public void run() {
+                    requestPageActivationRollback(
+                        activity,
+                        transaction,
+                        reason + "_main"
+                    );
+                }
+            });
+            return;
+        }
+
+        PageActivationTransaction current =
+            PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+        if (current != transaction || !transaction.rollbackPending) {
+            return;
+        }
+        if (activity.isFinishing()
+            || transaction.rollbackAttempts
+                >= PAGE_ACTIVATION_ROLLBACK_MAX_ATTEMPTS) {
+            releaseFailedPageActivationRollback(
+                activity,
+                transaction,
+                reason + "_attempts_exhausted"
+            );
+            return;
+        }
+
+        int attempt = ++transaction.rollbackAttempts;
+        try {
+            Object viewModel = XposedHelpers.getObjectField(
+                activity,
+                "documentViewModel"
+            );
             XposedHelpers.callMethod(
                 viewModel,
                 "loadPage",
                 transaction.sourcePage
             );
             log("page_activation_rollback_requested id="
-                + transaction.id + " page=" + transaction.sourcePage);
+                + transaction.id + " page=" + transaction.sourcePage
+                + " attempt=" + attempt + " reason=" + reason);
+            schedulePageActivationRollbackTimeout(
+                activity,
+                transaction,
+                attempt
+            );
         } catch (Throwable throwable) {
             log("page_activation_rollback_failed id=" + transaction.id
+                + " attempt=" + attempt + " reason=" + reason
                 + " " + throwable);
             XposedBridge.log(throwable);
+            failClosedPageActivation(
+                activity,
+                "rollback_load_failed_" + attempt
+            );
+            schedulePageActivationRollbackRetry(
+                activity,
+                transaction,
+                "load_exception"
+            );
         }
+    }
+
+    private static void schedulePageActivationRollbackRetry(
+        final Activity activity,
+        final PageActivationTransaction transaction,
+        final String reason
+    ) {
+        if (activity == null || transaction == null) {
+            return;
+        }
+        new Handler(activity.getMainLooper()).postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                PageActivationTransaction current =
+                    PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+                if (current != transaction || !transaction.rollbackPending) {
+                    return;
+                }
+                if (transaction.rollbackAttempts
+                    >= PAGE_ACTIVATION_ROLLBACK_MAX_ATTEMPTS) {
+                    releaseFailedPageActivationRollback(
+                        activity,
+                        transaction,
+                        reason + "_attempts_exhausted"
+                    );
+                    return;
+                }
+                requestPageActivationRollback(
+                    activity,
+                    transaction,
+                    reason + "_retry"
+                );
+            }
+        }, PAGE_ACTIVATION_ROLLBACK_RETRY_MS);
+    }
+
+    private static void schedulePageActivationRollbackTimeout(
+        final Activity activity,
+        final PageActivationTransaction transaction,
+        final int attempt
+    ) {
+        new Handler(activity.getMainLooper()).postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                PageActivationTransaction current =
+                    PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+                if (current != transaction || !transaction.rollbackPending
+                    || transaction.rollbackAttempts != attempt) {
+                    return;
+                }
+                if (finishPageActivationRollbackIfConverged(
+                        activity,
+                        "rollback_timeout_check"
+                    )) {
+                    return;
+                }
+                if (transaction.rollbackAttempts
+                    < PAGE_ACTIVATION_ROLLBACK_MAX_ATTEMPTS) {
+                    requestPageActivationRollback(
+                        activity,
+                        transaction,
+                        "convergence_timeout"
+                    );
+                    return;
+                }
+                releaseFailedPageActivationRollback(
+                    activity,
+                    transaction,
+                    "convergence_timeout_attempts_exhausted"
+                );
+            }
+        }, PAGE_ACTIVATION_TIMEOUT_MS);
+    }
+
+    private static void releaseFailedPageActivationRollback(
+        Activity activity,
+        PageActivationTransaction transaction,
+        String reason
+    ) {
+        if (activity == null || transaction == null) {
+            return;
+        }
+        PageActivationTransaction current =
+            PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+        if (current != transaction || !transaction.rollbackPending) {
+            return;
+        }
+
+        // Release the global transaction/save guard only after the native
+        // writer has been disabled again.  Page ownership remains uncertain,
+        // so subsequent pen input continues to fail closed until a normal
+        // page/configuration refresh publishes a new ready snapshot.
+        if (!failClosedPageActivation(activity, reason)) {
+            log("page_activation_rollback_guard_retained id="
+                + transaction.id + " reason=" + reason
+                + " writer_disabled=false");
+            return;
+        }
+        invalidatePenInputGeometrySnapshot(
+            activity,
+            "rollback_released_fail_closed"
+        );
+        synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+            current = PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+            if (current != transaction || !transaction.rollbackPending
+                || !PAGE_ACTIVATION_TRANSACTIONS.remove(
+                    activity,
+                    transaction
+                )) {
+                return;
+            }
+        }
+        long elapsed = SystemClock.uptimeMillis() - transaction.startedAt;
+        log("page_activation_rollback_released_fail_closed id="
+            + transaction.id + " source=" + transaction.sourcePage
+            + " target=" + transaction.targetPage + " attempts="
+            + transaction.rollbackAttempts + " reason=" + reason
+            + " elapsed_ms=" + elapsed);
+        traceEvent(
+            activity,
+            "page_activation_transaction_rollback_released_fail_closed",
+            "id",
+            transaction.id,
+            "sourcePage",
+            transaction.sourcePage,
+            "targetPage",
+            transaction.targetPage,
+            "attempts",
+            transaction.rollbackAttempts,
+            "reason",
+            reason,
+            "elapsedMs",
+            elapsed
+        );
     }
 
     private static void finishPageActivationRollback(
@@ -8810,13 +9048,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
     }
 
-    private static void failClosedPageActivation(
+    private static boolean failClosedPageActivation(
         Activity activity,
         String reason
     ) {
         if (activity == null) {
-            return;
+            return false;
         }
+        boolean writerDisabled = false;
         try {
             Object presenter = XposedHelpers.getObjectField(
                 activity,
@@ -8827,6 +9066,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 "disableHandWrite",
                 "SN_SPREAD_PROBE transaction failure: " + reason
             );
+            writerDisabled = true;
         } catch (Throwable throwable) {
             log("page_activation_fail_closed_error reason=" + reason
                 + " " + throwable);
@@ -8835,6 +9075,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             activity,
             "RTL SPREAD: page switch failed - writing disabled"
         );
+        return writerDisabled;
     }
 
     private static void activateDocumentPageFromPen(

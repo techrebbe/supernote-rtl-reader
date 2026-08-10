@@ -1645,17 +1645,47 @@ def check(repo_root: Path) -> None:
     if "triggerContactObserved" in save_blocker:
         fail("non-contact ownership transfers still allow lifecycle saves")
 
-    rollback_finish_start = module.find(
-        "private static void finishPageActivationRollback(",
+    rollback_request_start = module.find(
+        "private static void requestPageActivationRollback(",
         abort_transaction_start,
     )
+    rollback_retry_start = module.find(
+        "private static void schedulePageActivationRollbackRetry(",
+        rollback_request_start,
+    )
+    rollback_timeout_start = module.find(
+        "private static void schedulePageActivationRollbackTimeout(",
+        rollback_retry_start,
+    )
+    rollback_terminal_start = module.find(
+        "private static void releaseFailedPageActivationRollback(",
+        rollback_timeout_start,
+    )
+    rollback_finish_start = module.find(
+        "private static void finishPageActivationRollback(",
+        rollback_terminal_start,
+    )
     fail_closed_start = module.find(
-        "private static void failClosedPageActivation(",
+        "private static boolean failClosedPageActivation(",
         rollback_finish_start,
     )
-    if rollback_finish_start < 0 or fail_closed_start < 0:
+    if any(
+        position < 0
+        for position in (
+            rollback_request_start,
+            rollback_retry_start,
+            rollback_timeout_start,
+            rollback_terminal_start,
+            rollback_finish_start,
+            fail_closed_start,
+        )
+    ):
         fail("could not isolate page-activation rollback")
-    abort_transaction = module[abort_transaction_start:rollback_finish_start]
+    abort_transaction = module[abort_transaction_start:rollback_request_start]
+    request_rollback = module[rollback_request_start:rollback_retry_start]
+    retry_rollback = module[rollback_retry_start:rollback_timeout_start]
+    timeout_rollback = module[rollback_timeout_start:rollback_terminal_start]
+    terminal_rollback = module[rollback_terminal_start:rollback_finish_start]
     finish_rollback = module[rollback_finish_start:fail_closed_start]
     retained_transaction = abort_transaction.find(
         "PAGE_ACTIVATION_TRANSACTIONS.get(activity)"
@@ -1664,18 +1694,79 @@ def check(repo_root: Path) -> None:
         "transaction.rollbackPending = true;",
         retained_transaction,
     )
-    rollback_load = abort_transaction.find('"loadPage"')
+    rollback_request = abort_transaction.find("requestPageActivationRollback(")
     if not (
-        0 <= retained_transaction < rollback_published < rollback_load
+        0 <= retained_transaction < rollback_published < rollback_request
     ):
         fail(
-            "page-activation rollback is not published before the source-page load"
+            "page-activation rollback is not published before source recovery"
         )
-    if abort_transaction.find(
+    require_markers(
+        request_rollback,
+        (
+            "current != transaction",
+            "PAGE_ACTIVATION_ROLLBACK_MAX_ATTEMPTS",
+            "++transaction.rollbackAttempts",
+            '"loadPage"',
+            "schedulePageActivationRollbackTimeout(",
+            "schedulePageActivationRollbackRetry(",
+        ),
+        "bounded exact-transaction page-activation rollback request",
+    )
+    if "PAGE_ACTIVATION_TRANSACTIONS.remove(" in request_rollback:
+        fail("rollback load request releases its save guard before convergence")
+    require_markers(
+        retry_rollback,
+        (
+            "current != transaction",
+            "PAGE_ACTIVATION_ROLLBACK_MAX_ATTEMPTS",
+            "releaseFailedPageActivationRollback(",
+            "requestPageActivationRollback(",
+            "PAGE_ACTIVATION_ROLLBACK_RETRY_MS",
+        ),
+        "bounded page-activation rollback retry",
+    )
+    require_markers(
+        timeout_rollback,
+        (
+            "current != transaction",
+            "finishPageActivationRollbackIfConverged(",
+            "PAGE_ACTIVATION_ROLLBACK_MAX_ATTEMPTS",
+            "requestPageActivationRollback(",
+            "releaseFailedPageActivationRollback(",
+            "PAGE_ACTIVATION_TIMEOUT_MS",
+        ),
+        "rollback convergence timeout",
+    )
+    terminal_fail_closed = terminal_rollback.find(
+        "failClosedPageActivation(activity, reason)"
+    )
+    terminal_snapshot_invalidation = terminal_rollback.find(
+        "invalidatePenInputGeometrySnapshot(",
+        terminal_fail_closed,
+    )
+    terminal_remove = terminal_rollback.find(
         "PAGE_ACTIVATION_TRANSACTIONS.remove(",
-        rollback_load,
-    ) >= 0:
-        fail("page-activation rollback releases its save guard after loadPage")
+        terminal_snapshot_invalidation,
+    )
+    if not (
+        0 <= terminal_fail_closed
+        < terminal_snapshot_invalidation
+        < terminal_remove
+    ):
+        fail(
+            "exhausted rollback releases its guard before failing closed "
+            "and invalidating pen geometry"
+        )
+    require_markers(
+        terminal_rollback,
+        (
+            "current != transaction",
+            "PAGE_ACTIVATION_OWNERSHIP_LOCK",
+            '"page_activation_rollback_released_fail_closed id="',
+        ),
+        "terminal fail-closed rollback release",
+    )
     require_markers(
         finish_rollback,
         (
@@ -1707,7 +1798,7 @@ def check(repo_root: Path) -> None:
         "private static boolean finishPageActivationRollbackIfConverged("
     )
     fail_closed_start = module.find(
-        "private static void failClosedPageActivation(",
+        "private static boolean failClosedPageActivation(",
         converged_start,
     )
     if converged_start < 0 or fail_closed_start < 0:

@@ -97,6 +97,12 @@ coordinates that cross into the other page, divider, or an unmapped/cropped
 margin are blocked; only the native terminal pen-up callback is preserved so the
 source stroke can finish normally.
 
+A contact originating in native top/bottom chrome is latched as non-writing
+through pen-up, even if it drags into the page. Transaction-blocked UI motion is
+diagnosed only at coalesced gesture boundaries on a background logger. Deferred
+spread turns also bind the cover-parity value used to calculate their target and
+are cancelled if a newer validated configuration changes that parity.
+
 ## Failure behavior
 
 The transaction fails closed:

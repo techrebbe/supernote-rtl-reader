@@ -177,6 +177,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         new WeakHashMap<>();
     private static final Map<Activity, Boolean>
         PAGE_ACTIVATION_BLOCKED_TOUCHES = new WeakHashMap<>();
+    private static final Map<Activity, UiInputBlockLogState>
+        PAGE_ACTIVATION_UI_BLOCK_LOG_STATES = new ConcurrentHashMap<>();
     private static final Map<Activity, PageActivationTransaction>
         PAGE_ACTIVATION_TRANSACTIONS = new ConcurrentHashMap<>();
     private static final Map<Activity, DeferredSpreadTurn>
@@ -674,6 +676,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         final int sourcePage;
         final int targetPage;
         final String trigger;
+        final Boolean coverSeparate;
         final long startedAt;
         volatile boolean noticeShown;
 
@@ -682,14 +685,38 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             String documentPath,
             int sourcePage,
             int targetPage,
-            String trigger
+            String trigger,
+            Boolean coverSeparate
         ) {
             this.id = id;
             this.documentPath = documentPath;
             this.sourcePage = sourcePage;
             this.targetPage = targetPage;
             this.trigger = trigger;
+            this.coverSeparate = coverSeparate;
             this.startedAt = SystemClock.uptimeMillis();
+        }
+    }
+
+    private static final class UiInputBlockLogState {
+        final long transactionId;
+        final int targetPage;
+        final int tool;
+
+        UiInputBlockLogState(long transactionId, int targetPage, int tool) {
+            this.transactionId = transactionId;
+            this.targetPage = targetPage;
+            this.tool = tool;
+        }
+
+        boolean matches(long nextTransactionId, int nextTargetPage, int nextTool) {
+            return transactionId == nextTransactionId
+                && targetPage == nextTargetPage
+                && tool == nextTool;
+        }
+
+        String describe() {
+            return transactionId + ":" + targetPage + ":" + tool;
         }
     }
 
@@ -1195,22 +1222,42 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                                 && inputSnapshot.geometryReady
                                 && PEN_CONTACT_START_PAGES.get(activity)
                                     == null) {
-                                int mappedContactPage = pageAt(
-                                    inputSnapshot,
-                                    ((Integer) param.args[0]).intValue(),
-                                    ((Integer) param.args[1]).intValue()
-                                );
-                                // A contact may begin in the divider or a
-                                // cropped margin. Do not permanently latch
-                                // that unmapped -1; keep watching until the
-                                // held gesture first reaches a real page so
-                                // cross-divider ownership stays bound to that
-                                // page through pen-up.
-                                if (mappedContactPage >= 0) {
+                                int contactY = ((Integer) param.args[1])
+                                    .intValue();
+                                if (isNativeChromeTouch(activity, contactY)) {
+                                    // A toolbar/page-bar contact belongs to
+                                    // native chrome, not DrawPath. Keep its
+                                    // complete physical gesture, including any
+                                    // drag into the page and pen-up, out of the
+                                    // low-latency writer.
                                     PEN_CONTACT_START_PAGES.put(
                                         activity,
-                                        Integer.valueOf(mappedContactPage)
+                                        Integer.valueOf(
+                                            PEN_CONTACT_BLOCKED_PAGE
+                                        )
                                     );
+                                    queueLowLatencyLog(
+                                        "pen_contact_guard_latched"
+                                            + " start=blocked_native_chrome"
+                                    );
+                                } else {
+                                    int mappedContactPage = pageAt(
+                                        inputSnapshot,
+                                        ((Integer) param.args[0]).intValue(),
+                                        contactY
+                                    );
+                                    // A contact may begin in the divider or a
+                                    // cropped margin. Do not permanently latch
+                                    // that unmapped -1; keep watching until the
+                                    // held gesture first reaches a real page so
+                                    // cross-divider ownership stays bound to
+                                    // that page through pen-up.
+                                    if (mappedContactPage >= 0) {
+                                        PEN_CONTACT_START_PAGES.put(
+                                            activity,
+                                            Integer.valueOf(mappedContactPage)
+                                        );
+                                    }
                                 }
                             } else if (PEN_CONTACT_START_PAGES.get(activity)
                                     == null
@@ -6857,6 +6904,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         ACTIVATION_TOUCH_TARGETS.remove(activity);
         ACTIVATION_TOUCH_STARTS.remove(activity);
         PAGE_ACTIVATION_BLOCKED_TOUCHES.remove(activity);
+        PAGE_ACTIVATION_UI_BLOCK_LOG_STATES.remove(activity);
         PAGE_ACTIVATION_TRANSACTIONS.remove(activity);
         DEFERRED_SPREAD_TURNS.remove(activity);
         PEN_CONTACT_START_PAGES.remove(activity);
@@ -7901,14 +7949,55 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             // transaction commits while the pen remains in sensing range.
             PAGE_ACTIVATION_BLOCKED_TOUCHES.put(activity, Boolean.TRUE);
         }
-        log("page_activation_ui_input_blocked id="
-            + (transaction == null ? -1L : transaction.id)
-            + " target="
-            + (transaction == null ? -1 : transaction.targetPage)
-            + " action=" + action
-            + " tool=" + (event.getPointerCount() <= 0
-                ? -1 : event.getToolType(0)));
+        notePageActivationUiBlock(activity, transaction, event, action);
         return true;
+    }
+
+    private static void notePageActivationUiBlock(
+        Activity activity,
+        PageActivationTransaction transaction,
+        MotionEvent event,
+        int action
+    ) {
+        int tool = event.getPointerCount() <= 0
+            ? -1 : event.getToolType(0);
+        long transactionId = transaction == null ? -1L : transaction.id;
+        int targetPage = transaction == null ? -1 : transaction.targetPage;
+        boolean terminal = action == MotionEvent.ACTION_UP
+            || action == MotionEvent.ACTION_CANCEL
+            || action == MotionEvent.ACTION_HOVER_EXIT;
+        if (terminal) {
+            UiInputBlockLogState previous =
+                PAGE_ACTIVATION_UI_BLOCK_LOG_STATES.remove(
+                    activity
+                );
+            if (previous != null) {
+                queueLowLatencyLog(
+                    "page_activation_ui_input_blocked phase=end state="
+                        + previous.describe() + " action=" + action
+                );
+            }
+            return;
+        }
+        UiInputBlockLogState previous =
+            PAGE_ACTIVATION_UI_BLOCK_LOG_STATES.get(activity);
+        if (previous != null
+            && previous.matches(transactionId, targetPage, tool)) {
+            return;
+        }
+        UiInputBlockLogState state = new UiInputBlockLogState(
+            transactionId,
+            targetPage,
+            tool
+        );
+        PAGE_ACTIVATION_UI_BLOCK_LOG_STATES.put(
+            activity,
+            state
+        );
+        queueLowLatencyLog(
+            "page_activation_ui_input_blocked phase=start state="
+                + state.describe() + " action=" + action
+        );
     }
 
     private static boolean handlePageActivationTouch(
@@ -10811,7 +10900,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             config.documentPath,
             sourcePage,
             targetPage,
-            trigger
+            trigger,
+            "deferred_spread_turn".equals(trigger)
+                ? Boolean.valueOf(config.coverSeparate) : null
         );
         DeferredSpreadTurn replaced = DEFERRED_SPREAD_TURNS.put(
             activity,
@@ -10858,6 +10949,27 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         log("rtl_spread_turn_deferred_cancelled id="
                             + deferred.id + " reason=context_changed");
                         return;
+                    }
+
+                    PenInputSnapshot deferredSnapshot =
+                        penInputSnapshot(activity);
+                    if (deferred.coverSeparate != null) {
+                        if (deferredSnapshot == null
+                            || deferredSnapshot.config == null) {
+                            scheduleDeferredRtlSpreadTurn(activity, deferred);
+                            return;
+                        }
+                        if (deferredSnapshot.config.coverSeparate
+                                != deferred.coverSeparate.booleanValue()) {
+                            DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+                            log("rtl_spread_turn_deferred_cancelled id="
+                                + deferred.id
+                                + " reason=cover_parity_changed"
+                                + " expected=" + deferred.coverSeparate
+                                + " current="
+                                + deferredSnapshot.config.coverSeparate);
+                            return;
+                        }
                     }
 
                     int currentPage = currentDocumentPage(activity);

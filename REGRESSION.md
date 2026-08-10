@@ -466,6 +466,13 @@ Automated and build evidence:
 - [x] Static invariants require active-page ink coordinates crossing into the
   other page, divider, or unmapped/cropped margins to remain blocked while the
   terminal pen-up callback is preserved.
+- [x] Static invariants require a native-chrome-origin stylus contact to remain
+  blocked from DrawPath through pen-up, even if it drags into the page.
+- [x] Static invariants reject synchronous per-motion logging from the blocked
+  UI-input hook and require coalesced boundary diagnostics on the background
+  logger.
+- [x] Static invariants require deferred spread turns to bind and revalidate the
+  cover-parity value used to calculate their target.
 - [x] Native Spread v0.0.118 compiles, is v2/v3 signed, and reports matching
   manifest, handshake, and plug-in minimum version 118.
 

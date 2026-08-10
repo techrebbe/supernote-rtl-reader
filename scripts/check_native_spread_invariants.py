@@ -861,6 +861,7 @@ def check(repo_root: Path) -> None:
         '"SN_SPREAD_PROBE discard activation gesture"',
         "LOW_LATENCY_LOG_EXECUTOR",
         "PEN_INPUT_BLOCK_LOG_STATES",
+        "PAGE_ACTIVATION_UI_BLOCK_LOG_STATES",
         "queueLowLatencyLog(",
         "notePenInputBlock(",
         "finishPenInputBlock(",
@@ -874,7 +875,7 @@ def check(repo_root: Path) -> None:
         '"page_activation_ignored_cross_page_stroke current="',
         '"page_activation_rejected reason=pen_contact_active"',
         '"page_activation_source_save_allowed"',
-        '"page_activation_ui_input_blocked id="',
+        '"page_activation_ui_input_blocked phase=start state="',
         '"page_activation_history_blocked id="',
         "shouldBlockPageActivationSave(activity)",
         '"RTL SPREAD: page switch failed - writing disabled"',
@@ -947,8 +948,15 @@ def check(repo_root: Path) -> None:
     contact_geometry_ready = digital_position_hook.find(
         "inputSnapshot.geometryReady", atomic_contact_held
     )
+    contact_chrome_origin = digital_position_hook.find(
+        "isNativeChromeTouch(activity, contactY)", contact_geometry_ready
+    )
+    chrome_contact_latched = digital_position_hook.find(
+        "Integer.valueOf(\n                                            PEN_CONTACT_BLOCKED_PAGE",
+        contact_chrome_origin,
+    )
     contact_page_mapping = digital_position_hook.find(
-        "int mappedContactPage = pageAt(", contact_geometry_ready
+        "int mappedContactPage = pageAt(", chrome_contact_latched
     )
     contact_page_valid = digital_position_hook.find(
         "if (mappedContactPage >= 0)", contact_page_mapping
@@ -967,13 +975,14 @@ def check(repo_root: Path) -> None:
         0 <= before_native_callback < pen_snapshot_lookup < pen_snapshot_read
         < contact_ownership_lock
         < contact_transaction_lookup < atomic_contact_observed
-        < atomic_contact_held < contact_geometry_ready < contact_page_mapping
+        < atomic_contact_held < contact_geometry_ready
+        < contact_chrome_origin < chrome_contact_latched < contact_page_mapping
         < contact_page_valid < contact_page_latched < pending_snapshot_guard
         < pending_contact_latched
     ):
         fail(
             "contact start is not atomically latched against transaction "
-            "commit before mapping its first real page"
+            "commit or native chrome before mapping its first real page"
         )
     if "Integer.valueOf(pageAt(" in digital_position_hook:
         fail("the pen-contact guard can still permanently latch page -1")
@@ -1420,11 +1429,20 @@ def check(repo_root: Path) -> None:
             "action == MotionEvent.ACTION_MOVE",
             "PAGE_ACTIVATION_BLOCKED_TOUCHES.put(activity, Boolean.TRUE)",
             "PAGE_ACTIVATION_BLOCKED_TOUCHES.remove(activity)",
-            '"page_activation_ui_input_blocked id="',
+            "notePageActivationUiBlock(activity, transaction, event, action)",
+            "PAGE_ACTIVATION_UI_BLOCK_LOG_STATES.put(",
+            "PAGE_ACTIVATION_UI_BLOCK_LOG_STATES.get(activity)",
+            "PAGE_ACTIVATION_UI_BLOCK_LOG_STATES.remove(",
+            "previous.matches(transactionId, targetPage, tool)",
+            '"page_activation_ui_input_blocked phase=start state="',
+            '"page_activation_ui_input_blocked phase=end state="',
+            "queueLowLatencyLog(",
             "return true;",
         ),
         "transactional UI-input blocking",
     )
+    if "log(" in ui_block_method:
+        fail("blocked UI-input hook performs synchronous per-motion logging")
     activation_touch_method = module[activation_touch_start:native_chrome_start]
     touch_transaction = activation_touch_method.find(
         "PageActivationTransaction transaction ="
@@ -2035,6 +2053,8 @@ def check(repo_root: Path) -> None:
             "DEFERRED_SPREAD_TURN_COUNTER.incrementAndGet()",
             "config.documentPath",
             "trigger",
+            '"deferred_spread_turn".equals(trigger)',
+            "Boolean.valueOf(config.coverSeparate)",
             "DEFERRED_SPREAD_TURNS.put(",
             "scheduleDeferredRtlSpreadTurn(activity, deferred)",
         ),
@@ -2046,6 +2066,9 @@ def check(repo_root: Path) -> None:
             "current != deferred",
             "deferred.documentPath.equals(",
             "currentDocumentPath(activity)",
+            "deferred.coverSeparate != null",
+            "deferredSnapshot.config.coverSeparate",
+            'reason=cover_parity_changed',
             "currentPage == deferred.targetPage",
             "currentPage != deferred.sourcePage",
             "editablePenInputReady(activity)",
@@ -2055,6 +2078,23 @@ def check(repo_root: Path) -> None:
         ),
         "exact-context deferred RTL spread-turn replay",
     )
+    parity_guard = deferred_turn_schedule.find(
+        "if (deferred.coverSeparate != null)"
+    )
+    parity_compare = deferred_turn_schedule.find(
+        "deferredSnapshot.config.coverSeparate",
+        parity_guard,
+    )
+    parity_cancel = deferred_turn_schedule.find(
+        'reason=cover_parity_changed',
+        parity_compare,
+    )
+    target_satisfied = deferred_turn_schedule.find(
+        "currentPage == deferred.targetPage",
+        parity_cancel,
+    )
+    if not 0 <= parity_guard < parity_compare < parity_cancel < target_satisfied:
+        fail("deferred spread turn can replay before cover parity revalidation")
     editable_turn = rtl_turn.find("if (config != null && config.editable)")
     turn_started = rtl_turn.find(
         "boolean started = beginPageActivationTransaction(",

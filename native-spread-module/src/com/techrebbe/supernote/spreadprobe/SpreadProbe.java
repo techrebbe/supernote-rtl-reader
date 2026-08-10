@@ -1066,14 +1066,22 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     if (pressure > 0
                         && PEN_CONTACT_START_PAGES.get(activity) == null
                         && isEditableSpreadLandscape(activity)) {
-                        PEN_CONTACT_START_PAGES.put(
+                        int mappedContactPage = pageAt(
                             activity,
-                            Integer.valueOf(pageAt(
-                                activity,
-                                ((Integer) param.args[0]).intValue(),
-                                ((Integer) param.args[1]).intValue()
-                            ))
+                            ((Integer) param.args[0]).intValue(),
+                            ((Integer) param.args[1]).intValue()
                         );
+                        // A contact may begin in the divider or a cropped
+                        // margin. Do not permanently latch that unmapped -1;
+                        // keep watching until the held gesture first reaches
+                        // a real page so cross-divider ownership stays bound
+                        // to that page through pen-up.
+                        if (mappedContactPage >= 0) {
+                            PEN_CONTACT_START_PAGES.put(
+                                activity,
+                                Integer.valueOf(mappedContactPage)
+                            );
+                        }
                     }
                     Integer contactStartPage =
                         PEN_CONTACT_START_PAGES.get(activity);

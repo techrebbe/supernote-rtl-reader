@@ -913,6 +913,25 @@ def check(repo_root: Path) -> None:
     before_native_callback = digital_position_hook.find(
         "protected void beforeHookedMethod"
     )
+    contact_page_mapping = digital_position_hook.find(
+        "int mappedContactPage = pageAt(", before_native_callback
+    )
+    contact_page_valid = digital_position_hook.find(
+        "if (mappedContactPage >= 0)", contact_page_mapping
+    )
+    contact_page_latched = digital_position_hook.find(
+        "PEN_CONTACT_START_PAGES.put(", contact_page_valid
+    )
+    if not (
+        0 <= before_native_callback < contact_page_mapping
+        < contact_page_valid < contact_page_latched
+    ):
+        fail(
+            "a gutter or cropped-margin contact can still latch an unmapped "
+            "start page instead of waiting for the first real page"
+        )
+    if "Integer.valueOf(pageAt(" in digital_position_hook:
+        fail("the pen-contact guard can still permanently latch page -1")
     active_stroke_terminal = digital_position_hook.find(
         "boolean completingActivePageStroke =",
         before_native_callback,

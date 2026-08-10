@@ -1077,6 +1077,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         ((Integer) param.args[1]).intValue(),
                         pressure
                     );
+                    if (pressure == 0) {
+                        clearPenContactStartPage(
+                            activity,
+                            "position_pressure_zero"
+                        );
+                    }
                 }
             }
         );
@@ -1103,7 +1109,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                                     activity,
                                     "digital_state:" + state
                                 );
-                                PEN_CONTACT_START_PAGES.remove(activity);
+                                clearPenContactStartPage(
+                                    activity,
+                                    "digital_state:" + state
+                                );
                                 cancelPendingPenPageActivation(
                                     activity,
                                     "pen_left_screen"
@@ -2725,6 +2734,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         );
                     }
                     Activity activity = activeActivity;
+                    clearPenContactStartPage(
+                        activity,
+                        "receive_trials_finished"
+                    );
                     if (activationGestureBlocked) {
                         if (activity != null) {
                             markPageActivationPenLifted(
@@ -7451,6 +7464,20 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         } catch (Throwable throwable) {
             log("native_chrome_touch_check_failed " + throwable);
             return false;
+        }
+    }
+
+    private static void clearPenContactStartPage(
+        Activity activity,
+        String reason
+    ) {
+        if (activity == null) {
+            return;
+        }
+        Integer startPage = PEN_CONTACT_START_PAGES.remove(activity);
+        if (startPage != null) {
+            log("pen_contact_guard_cleared start=" + startPage
+                + " reason=" + reason);
         }
     }
 

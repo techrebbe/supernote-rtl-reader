@@ -848,6 +848,17 @@ def check(repo_root: Path) -> None:
             "inactive-page pen input must be discarded before Supernote's "
             "native callback runs, then schedule the ownership transaction"
         )
+    pressure_zero_cleanup = digital_position_hook.find(
+        'if (pressure == 0)', schedule_activation
+    )
+    pressure_zero_clear = digital_position_hook.find(
+        'clearPenContactStartPage(', pressure_zero_cleanup
+    )
+    if not 0 <= schedule_activation < pressure_zero_cleanup < pressure_zero_clear:
+        fail(
+            "a normal pressure-zero pen frame does not clear the active-stroke "
+            "start-page guard"
+        )
 
     pen_activation_start = module.find(
         "private static void handlePenPageActivation("
@@ -933,7 +944,7 @@ def check(repo_root: Path) -> None:
     digital_lift_hook = module[digital_lift_start:digital_lift_end]
     lift_transaction = digital_lift_hook.find("markPageActivationPenLifted(")
     lift_contact_cleanup = digital_lift_hook.find(
-        "PEN_CONTACT_START_PAGES.remove(activity);", lift_transaction
+        "clearPenContactStartPage(", lift_transaction
     )
     if not 0 <= lift_transaction < lift_contact_cleanup:
         fail("pen-up does not clear the active-stroke start-page guard")
@@ -1071,6 +1082,21 @@ def check(repo_root: Path) -> None:
     if receive_hook_start < 0 or receive_hook_end < 0:
         fail("could not isolate inactive-page receiveTrials completion hook")
     receive_hook = module[receive_hook_start:receive_hook_end]
+    receive_activity = receive_hook.find("Activity activity = activeActivity;")
+    receive_contact_cleanup = receive_hook.find(
+        "clearPenContactStartPage(", receive_activity
+    )
+    receive_blocked_branch = receive_hook.find(
+        "if (activationGestureBlocked)", receive_contact_cleanup
+    )
+    if not (
+        0 <= receive_activity < receive_contact_cleanup
+        < receive_blocked_branch
+    ):
+        fail(
+            "receiveTrials completion does not clear the active-stroke "
+            "start-page guard before either completion path returns"
+        )
     persist_before_completion = receive_hook.find(
         "persistPendingPenActivationTrails("
     )

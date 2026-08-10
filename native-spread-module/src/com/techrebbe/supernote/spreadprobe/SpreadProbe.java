@@ -7597,21 +7597,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     );
                     return;
                 }
-                if (isNativeChromeTouch(activity, requestedY)) {
-                    log("page_activation_pen_ignored_native_chrome point="
-                        + requestedX + "," + requestedY
-                        + " pressure=" + requestedPressure);
-                    return;
-                }
-
                 int requestedTarget = pageAt(
                     activity,
                     requestedX,
                     requestedY
                 );
-                int current = currentDocumentPage(activity);
-                Integer contactStartPage =
-                    PEN_CONTACT_START_PAGES.get(activity);
                 PageActivationTransaction transaction =
                     PAGE_ACTIVATION_TRANSACTIONS.get(activity);
                 if (transaction != null) {
@@ -7631,6 +7621,15 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     }
                     return;
                 }
+                if (isNativeChromeTouch(activity, requestedY)) {
+                    log("page_activation_pen_ignored_native_chrome point="
+                        + requestedX + "," + requestedY
+                        + " pressure=" + requestedPressure);
+                    return;
+                }
+                int current = currentDocumentPage(activity);
+                Integer contactStartPage =
+                    PEN_CONTACT_START_PAGES.get(activity);
                 if (requestedTarget < 0 || requestedTarget == current) {
                     return;
                 }

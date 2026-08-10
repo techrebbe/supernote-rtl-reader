@@ -1003,12 +1003,31 @@ def check(repo_root: Path) -> None:
             "live pen activation still reaches the experimental inactive-page "
             f"merge path: {leaked_live_markers}"
         )
-    chrome_guard = live_pen_activation.find(
-        "isNativeChromeTouch(activity, requestedY)"
-    )
     target_mapping = live_pen_activation.find("int requestedTarget = pageAt(")
-    if not 0 <= chrome_guard < target_mapping:
-        fail("native pen chrome must be excluded before inactive-page mapping")
+    transaction_lookup_for_lift = live_pen_activation.find(
+        "PAGE_ACTIVATION_TRANSACTIONS.get(activity)", target_mapping
+    )
+    transaction_lift = live_pen_activation.find(
+        "markPageActivationPenLifted(", transaction_lookup_for_lift
+    )
+    transaction_return = live_pen_activation.find(
+        "return;", transaction_lift
+    )
+    chrome_guard = live_pen_activation.find(
+        "isNativeChromeTouch(activity, requestedY)", transaction_return
+    )
+    current_mapping = live_pen_activation.find(
+        "int current = currentDocumentPage(activity);", chrome_guard
+    )
+    if not (
+        0 <= target_mapping < transaction_lookup_for_lift
+        < transaction_lift < transaction_return < chrome_guard
+        < current_mapping
+    ):
+        fail(
+            "transactional pen-up is not recorded before native chrome is "
+            "excluded from non-transactional page activation"
+        )
 
     intercept_method_start = module.find(
         "private static boolean interceptPenPageActivation("

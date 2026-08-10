@@ -848,6 +848,7 @@ def check(repo_root: Path) -> None:
         "restoreTransactionalActivePageGeometry(",
         "finishPageActivationTransaction(",
         "finishPageActivationRollback(",
+        "finishPageActivationRollbackIfConverged(",
         "abortPageActivationTransaction(",
         "failClosedPageActivation(",
         '"page_activation_transaction_started"',
@@ -1355,6 +1356,50 @@ def check(repo_root: Path) -> None:
         ),
         "identity-verified page-activation rollback completion",
     )
+
+    portrait_set_image = module.find(
+        "if (!isCalibrationLandscape(activity)) {",
+        module.find('"setImage",'),
+    )
+    portrait_rollback_completion = module.find(
+        "finishPageActivationRollbackIfConverged(",
+        portrait_set_image,
+    )
+    portrait_return = module.find("return;", portrait_rollback_completion)
+    if not (
+        0 <= portrait_set_image < portrait_rollback_completion < portrait_return
+    ):
+        fail(
+            "portrait setImage does not complete an identity-converged rollback"
+        )
+
+    converged_start = module.find(
+        "private static boolean finishPageActivationRollbackIfConverged("
+    )
+    fail_closed_start = module.find(
+        "private static void failClosedPageActivation(",
+        converged_start,
+    )
+    if converged_start < 0 or fail_closed_start < 0:
+        fail("could not isolate orientation-independent rollback completion")
+    converged_rollback = module[converged_start:fail_closed_start]
+    require_markers(
+        converged_rollback,
+        (
+            "readerPage != transaction.sourcePage",
+            "presenterMarkPage != transaction.sourcePage + 1",
+            '"disableHandWrite"',
+            "finishPageActivationRollback(",
+        ),
+        "orientation-independent rollback identity convergence",
+    )
+    convergence_disable = converged_rollback.find('"disableHandWrite"')
+    convergence_finish = converged_rollback.find(
+        "finishPageActivationRollback(",
+        convergence_disable,
+    )
+    if not 0 <= convergence_disable < convergence_finish:
+        fail("portrait rollback releases its guard before disabling the writer")
 
     commit_start = module.find(
         "private static boolean commitPageActivationGeometry("

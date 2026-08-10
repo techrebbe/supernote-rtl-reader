@@ -1888,6 +1888,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         activeBitmap = (Bitmap) param.args[0];
                     }
                     if (!isCalibrationLandscape(activity)) {
+                        finishPageActivationRollbackIfConverged(
+                            activity,
+                            "set_image_non_landscape"
+                        );
                         updateNativeEraserGate(
                             activity,
                             "set_image_non_calibration_landscape"
@@ -8315,6 +8319,61 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             "elapsedMs",
             elapsed
         );
+    }
+
+    private static boolean finishPageActivationRollbackIfConverged(
+        Activity activity,
+        String reason
+    ) {
+        PageActivationTransaction transaction = activity == null
+            ? null : PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+        if (transaction == null || !transaction.rollbackPending) {
+            return false;
+        }
+        try {
+            Object viewModel = XposedHelpers.getObjectField(
+                activity,
+                "documentViewModel"
+            );
+            Object presenter = XposedHelpers.getObjectField(
+                activity,
+                "handWritePresenter"
+            );
+            int readerPage = XposedHelpers.getIntField(
+                viewModel,
+                "currentPage"
+            );
+            int presenterMarkPage = XposedHelpers.getIntField(
+                presenter,
+                "currentPage"
+            );
+            if (readerPage != transaction.sourcePage
+                || presenterMarkPage != transaction.sourcePage + 1) {
+                log("page_activation_rollback_waiting id="
+                    + transaction.id + " source="
+                    + transaction.sourcePage + " reader_page="
+                    + readerPage + " mark_page=" + presenterMarkPage
+                    + " reason=" + reason);
+                XposedHelpers.callMethod(
+                    presenter,
+                    "disableHandWrite",
+                    "SN_SPREAD_PROBE rollback identity mismatch"
+                );
+                return false;
+            }
+            finishPageActivationRollback(
+                activity,
+                presenter,
+                transaction,
+                reason
+            );
+            return PAGE_ACTIVATION_TRANSACTIONS.get(activity) != transaction;
+        } catch (Throwable throwable) {
+            log("page_activation_rollback_convergence_failed id="
+                + transaction.id + " reason=" + reason + " " + throwable);
+            XposedBridge.log(throwable);
+            return false;
+        }
     }
 
     private static void failClosedPageActivation(

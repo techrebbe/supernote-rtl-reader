@@ -111,7 +111,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int TRACE_FINAL_SNAPSHOT_ATTEMPTS = 5;
     private static final long TRACE_FINAL_SNAPSHOT_RETRY_MS = 120L;
     private static final int HANDSHAKE_PROTOCOL = 1;
-    private static final long MODULE_VERSION_CODE = 116L;
+    private static final long MODULE_VERSION_CODE = 117L;
     private static final String OVERLAY_TAG = "sn-spread-probe-overlay";
     private static final int CANONICAL_PAGE_WIDTH = 1872;
     private static final int CANONICAL_PAGE_HEIGHT = 2496;
@@ -156,6 +156,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final Map<Activity, List<Object>> PEN_ACTIVATION_TRAILS =
         new WeakHashMap<>();
     private static final Map<Activity, List<Object>> PEN_ACTIVATION_ERASERS =
+        new WeakHashMap<>();
+    private static final Map<Activity, Integer> PEN_ACTIVATION_ERASER_TYPES =
+        new WeakHashMap<>();
+    private static final Map<Activity, Object> PEN_ACTIVATION_TOKENS =
+        new WeakHashMap<>();
+    private static final Map<Activity, Integer> SELECTED_ERASER_TYPES =
         new WeakHashMap<>();
     private static final Map<Activity, Boolean>
         PEN_ACTIVATION_STALE_SAVE_PENDING =
@@ -1030,6 +1036,44 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         activity.runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
+                                Integer eraserType =
+                                    PEN_ACTIVATION_ERASER_TYPES.get(activity);
+                                Object activationToken =
+                                    PEN_ACTIVATION_TOKENS.get(activity);
+                                if (eraserType != null
+                                    && activationToken != null) {
+                                    /*
+                                     * A stroke eraser may produce no native
+                                     * transaction when its first contact lands
+                                     * on the inactive half before that half's
+                                     * layer preload completes. Give a late
+                                     * receiveTrials() callback one main-loop
+                                     * turn to win; otherwise retain the user's
+                                     * page choice instead of silently rolling
+                                     * back to the previously active page.
+                                     */
+                                    new Handler(activity.getMainLooper())
+                                        .postDelayed(new Runnable() {
+                                            @Override
+                                            public void run() {
+                                                if (PEN_ACTIVATION_TOKENS.get(
+                                                        activity
+                                                    ) != activationToken
+                                                    || PEN_ACTIVATION_TARGETS
+                                                        .get(activity) == null) {
+                                                    return;
+                                                }
+                                                log("pen_activation_eraser_noop"
+                                                    + " type=" + eraserType
+                                                    + " action=activate_target");
+                                                completePendingPenPageActivation(
+                                                    activity,
+                                                    "eraser_no_transaction"
+                                                );
+                                            }
+                                        }, 120L);
+                                    return;
+                                }
                                 cancelPendingPenPageActivation(
                                     activity,
                                     "pen_left_screen"
@@ -1979,6 +2023,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 protected void beforeHookedMethod(MethodHookParam param) {
                     if (activeActivity != null) {
                         TRACE_TOOLS.put(activeActivity, "lasso");
+                        SELECTED_ERASER_TYPES.remove(activeActivity);
                     }
                     setReplaceActiveInkMode(
                         activeActivity,
@@ -2035,6 +2080,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
                     if (activeActivity != null) {
+                        SELECTED_ERASER_TYPES.remove(activeActivity);
                         TRACE_TOOLS.put(
                             activeActivity,
                             "pen:" + param.args[0] + ":" + param.args[2]
@@ -2072,6 +2118,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     Activity activity = activeActivity;
                     int eraserType = (Integer) param.args[0];
                     if (activity != null) {
+                        if (eraserType == 0 || eraserType == 1) {
+                            SELECTED_ERASER_TYPES.put(
+                                activity,
+                                eraserType
+                            );
+                        } else {
+                            SELECTED_ERASER_TYPES.remove(activity);
+                        }
                         TRACE_TOOLS.put(
                             activity,
                             "eraser:" + eraserType
@@ -6456,6 +6510,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         PEN_ACTIVATION_ORIGINAL_PAGES.remove(activity);
         PEN_ACTIVATION_TRAILS.remove(activity);
         PEN_ACTIVATION_ERASERS.remove(activity);
+        PEN_ACTIVATION_ERASER_TYPES.remove(activity);
+        PEN_ACTIVATION_TOKENS.remove(activity);
+        SELECTED_ERASER_TYPES.remove(activity);
         PEN_ACTIVATION_STALE_SAVE_PENDING.remove(activity);
         clearPageEditHistory(activity);
         FINGER_TOUCH_STARTS.remove(activity);
@@ -7427,17 +7484,27 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
              * bitmap submission so the visible two-page spread never changes
              * before pen-up completes the deferred activation.
              */
-            PEN_ACTIVATION_MARK_PRIMING.set(true);
-            try {
-                XposedHelpers.callMethod(
+            Integer eraserType = SELECTED_ERASER_TYPES.get(activity);
+            boolean layerOnlyPrimed = eraserType != null
+                && primeInactiveEraserLayers(
                     presenter,
-                    "loadHandWrite",
-                    targetMarkPage
+                    targetMarkPage,
+                    eraserType.intValue()
                 );
-            } finally {
-                PEN_ACTIVATION_MARK_PRIMING.remove();
+            if (!layerOnlyPrimed) {
+                PEN_ACTIVATION_MARK_PRIMING.set(true);
+                try {
+                    XposedHelpers.callMethod(
+                        presenter,
+                        "loadHandWrite",
+                        targetMarkPage
+                    );
+                } finally {
+                    PEN_ACTIVATION_MARK_PRIMING.remove();
+                }
             }
-            log("pen_activation_mark_primed mark_page=" + targetMarkPage);
+            log("pen_activation_mark_primed mark_page=" + targetMarkPage
+                + " mode=" + (layerOnlyPrimed ? "layers" : "bitmap"));
             RectF writable = activePageDestination(activity);
             ImageView imageView = (ImageView) XposedHelpers.getObjectField(
                 activity,
@@ -7465,6 +7532,27 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     presenter,
                     "pen_page_activation"
                 );
+                if (prepared && eraserType != null) {
+                    /*
+                     * Page/layer selection and sendWriteInfo() are separate
+                     * native transactions from pen-tool selection. Reassert
+                     * the eraser after switching the target layer so the first
+                     * inactive-half gesture cannot continue as the old page's
+                     * tool state.
+                     */
+                    XposedHelpers.callMethod(
+                        presenter,
+                        "sendEraserInfo",
+                        eraserType.intValue()
+                    );
+                    prepared = applySpreadMarkGeometry(
+                        activity,
+                        presenter,
+                        "pen_page_activation_eraser_reasserted"
+                    );
+                    log("pen_activation_eraser_reasserted type="
+                        + eraserType + " prepared=" + prepared);
+                }
             }
             log("pen_page_activation_prearmed from=" + currentPage
                 + " to=" + targetPage
@@ -7502,6 +7590,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             );
             PEN_ACTIVATION_TARGETS.put(activity, targetPage);
             PEN_ACTIVATION_ORIGINAL_PAGES.put(activity, currentPage);
+            PEN_ACTIVATION_TOKENS.put(activity, new Object());
+            if (eraserType != null) {
+                PEN_ACTIVATION_ERASER_TYPES.put(activity, eraserType);
+            }
             log("pen_activation_deferred from=" + currentPage
                 + " to=" + targetPage
                 + " writer_prepared=true");
@@ -7574,6 +7666,46 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         } finally {
             PEN_ACTIVATION_TARGETS.remove(activity);
             PEN_ACTIVATION_ORIGINAL_PAGES.remove(activity);
+            PEN_ACTIVATION_ERASER_TYPES.remove(activity);
+            PEN_ACTIVATION_TOKENS.remove(activity);
+        }
+    }
+
+    private static boolean primeInactiveEraserLayers(
+        Object presenter,
+        int targetMarkPage,
+        int eraserType
+    ) {
+        long started = SystemClock.uptimeMillis();
+        try {
+            Object superNoteNote = XposedHelpers.getObjectField(
+                presenter,
+                "superNoteNote"
+            );
+            String markPath = (String) XposedHelpers.getObjectField(
+                presenter,
+                "markPath"
+            );
+            boolean loaded = Boolean.TRUE.equals(
+                XposedHelpers.callMethod(
+                    superNoteNote,
+                    "loadMarkCurrentLayers",
+                    markPath,
+                    targetMarkPage,
+                    true
+                )
+            );
+            log("pen_activation_eraser_layers_primed mark_page="
+                + targetMarkPage + " type=" + eraserType
+                + " loaded=" + loaded + " elapsed_ms="
+                + (SystemClock.uptimeMillis() - started));
+            return loaded;
+        } catch (Throwable throwable) {
+            log("pen_activation_eraser_layers_prime_failed mark_page="
+                + targetMarkPage + " type=" + eraserType + " "
+                + throwable);
+            XposedBridge.log(throwable);
+            return false;
         }
     }
 
@@ -8466,6 +8598,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         Integer original = PEN_ACTIVATION_ORIGINAL_PAGES.remove(activity);
         PEN_ACTIVATION_TRAILS.remove(activity);
         PEN_ACTIVATION_ERASERS.remove(activity);
+        PEN_ACTIVATION_ERASER_TYPES.remove(activity);
+        PEN_ACTIVATION_TOKENS.remove(activity);
         PEN_ACTIVATION_STALE_SAVE_PENDING.remove(activity);
         PENDING_PAGE_EDIT_HISTORY.remove(activity);
         if (target == null || original == null) {

@@ -191,6 +191,15 @@ Recognition, refresh, before/after-shift rectangles and contour point geometry
 are copied into immutable scalar arrays and included in worker-side details and
 fingerprints.
 
+v0.0.117 shortens the inactive-page eraser handoff. For a saved target page it
+loads only Supernote's native current-layer data instead of first rasterizing a
+full annotation bitmap, then reasserts the selected eraser after switching the
+native page/layer transaction. If a gesture does not intersect saved ink and
+therefore produces no native eraser transaction, the touched page still becomes
+active after pen-up rather than silently reverting to the previous page. The
+canonical `.mark` mutation, selective intersection, Undo/Redo, and stale-save
+guards remain unchanged.
+
 The active settled-ink transform is clipped to the active page's visible slot,
 matching Native Fill's PDF and canonical-ink clipping and keeping cropped ink
 from bleeding across the center divider.
@@ -253,7 +262,7 @@ The signed APK is written to `build/artifact/`.
 
 Install the APK, enable **Supernote Native Spread Probe** in LSPosed, scope it
 only to `com.supernote.document`, and restart the document reader. Supernote
-RTL Reader v0.4.12 or newer and Native Spread v0.0.116 or newer are required for
+RTL Reader v0.4.13 or newer and Native Spread v0.0.117 or newer are required for
 protected editable mode. Its
 recovery manifest binds the backup to the PDF's full SHA-256 because
 Supernote changes the PDF modification time when the document activity

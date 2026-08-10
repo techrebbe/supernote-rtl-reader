@@ -49,7 +49,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 116L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 117L",
             'setProperty("documentSha256", sha256(pdfFile))',
             'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
@@ -744,6 +744,14 @@ def check(repo_root: Path) -> None:
             "PEN_ACTIVATION_MARK_PRIMING",
             "pen_activation_mark_bitmap_suppressed",
             "pen_activation_mark_primed",
+            "primeInactiveEraserLayers(",
+            '"loadMarkCurrentLayers"',
+            "pen_activation_eraser_layers_primed",
+            "pen_activation_eraser_reasserted",
+            "PEN_ACTIVATION_ERASER_TYPES",
+            "PEN_ACTIVATION_TOKENS",
+            '"eraser_no_transaction"',
+            '"pen_activation_eraser_noop"',
             "SN_SPREAD_PROBE pen page activation",
             'applySpreadMarkGeometry(',
             '"pen_page_activation"',
@@ -781,6 +789,98 @@ def check(repo_root: Path) -> None:
         ),
         "inactive-page pen activation",
     )
+
+    activation_start = module.find(
+        "private static void activateDocumentPageFromPen("
+    )
+    completion_start = module.find(
+        "private static void completePendingPenPageActivation(",
+        activation_start,
+    )
+    if activation_start < 0 or completion_start < 0:
+        fail("could not isolate inactive-page activation preparation")
+    activation = module[activation_start:completion_start]
+    selected_eraser = activation.find("SELECTED_ERASER_TYPES.get(activity)")
+    layer_prime = activation.find("primeInactiveEraserLayers(", selected_eraser)
+    bitmap_fallback = activation.find('"loadHandWrite"', layer_prime)
+    write_info = activation.find('"sendWriteInfo"', bitmap_fallback)
+    eraser_reassert = activation.find('"sendEraserInfo"', write_info)
+    reassert_geometry = activation.find(
+        '"pen_page_activation_eraser_reasserted"', eraser_reassert
+    )
+    scoped_type = activation.find(
+        "PEN_ACTIVATION_ERASER_TYPES.put(activity, eraserType)",
+        reassert_geometry,
+    )
+    if not (
+        0 <= selected_eraser < layer_prime < bitmap_fallback < write_info
+        < eraser_reassert < reassert_geometry < scoped_type
+    ):
+        fail(
+            "inactive eraser preparation must prime native layers before the "
+            "bitmap fallback, reassert the eraser after write-info setup, and "
+            "retain the activation-scoped eraser type"
+        )
+
+    layer_helper_start = module.find(
+        "private static boolean primeInactiveEraserLayers("
+    )
+    pending_edits_start = module.find(
+        "private static boolean hasPendingPenActivationEdits(",
+        layer_helper_start,
+    )
+    if layer_helper_start < 0 or pending_edits_start < 0:
+        fail("could not isolate inactive eraser layer priming helper")
+    layer_helper = module[layer_helper_start:pending_edits_start]
+    if '"loadMarkCurrentLayers"' not in layer_helper:
+        fail("inactive eraser layer priming must use the native layer-only API")
+    if '"loadHandWrite"' in layer_helper:
+        fail("inactive eraser layer helper must not rasterize an annotation bitmap")
+
+    digital_start = module.find(
+        '"onDigital",',
+        module.find('"com.supernote.document.document.DocumentActivity$6"'),
+    )
+    read_only_hook_start = module.find(
+        "Persistence fail-safe.",
+        digital_start,
+    )
+    if digital_start < 0 or read_only_hook_start < 0:
+        fail("could not isolate pen-up inactive eraser handling")
+    digital_hook = module[digital_start:read_only_hook_start]
+    activation_tool = digital_hook.find(
+        "PEN_ACTIVATION_ERASER_TYPES.get(activity)"
+    )
+    activation_token = digital_hook.find(
+        "PEN_ACTIVATION_TOKENS.get(activity)", activation_tool
+    )
+    grace_period = digital_hook.find(".postDelayed(new Runnable()", activation_token)
+    token_guard = digital_hook.find(
+        "PEN_ACTIVATION_TOKENS.get(", grace_period
+    )
+    pending_guard = digital_hook.find(
+        "PEN_ACTIVATION_TARGETS", token_guard
+    )
+    no_transaction_completion = digital_hook.find(
+        '"eraser_no_transaction"', pending_guard
+    )
+    ordinary_cancel = digital_hook.find('"pen_left_screen"', no_transaction_completion)
+    if not (
+        0 <= activation_tool < activation_token < grace_period < token_guard
+        < pending_guard
+        < no_transaction_completion < ordinary_cancel
+    ):
+        fail(
+            "pen-up must use activation-scoped eraser state and identity, "
+            "allow a late native callback only for that same activation, and "
+            "retain ordinary non-eraser cancellation"
+        )
+
+    token_store = activation.find(
+        "PEN_ACTIVATION_TOKENS.put(activity, new Object())"
+    )
+    if not (reassert_geometry < token_store < scoped_type):
+        fail("inactive-page activation identity must be stored with its state")
 
     receive_hook_start = module.find(
         '"receiveTrials",',
@@ -1622,10 +1722,10 @@ def check(repo_root: Path) -> None:
     ):
         fail("trace helper can publish completion before checking incomplete.txt")
 
-    if 'android:versionCode="116"' not in manifest:
-        fail("companion manifest must use versionCode 116")
-    if 'android:versionName="0.0.116"' not in manifest:
-        fail("companion manifest must use versionName 0.0.116")
+    if 'android:versionCode="117"' not in manifest:
+        fail("companion manifest must use versionCode 117")
+    if 'android:versionName="0.0.117"' not in manifest:
+        fail("companion manifest must use versionName 0.0.117")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

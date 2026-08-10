@@ -52,7 +52,7 @@ jobs:
       - name: Upload plugin package
         uses: actions/upload-artifact@v4
         with:
-          name: supernote-rtl-reader-v0.4.12-native-spread-appearance
+          name: supernote-rtl-reader-v0.4.13-inactive-eraser-priming
           path: out/*.snplg
           if-no-files-found: error
           retention-days: 3

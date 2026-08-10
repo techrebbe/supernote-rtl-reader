@@ -5,6 +5,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_ROOT="$(mktemp -d)"
 trap 'rm -rf "$WORK_ROOT"' EXIT
 
+# Git Bash otherwise rewrites the packaged root-relative icon path into its
+# Windows installation directory when buildPlugin.sh passes `/icon.png` to
+# Node. Exclude only that virtual package path; real host paths must continue
+# to receive normal MSYS conversion.
+if [[ "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]]; then
+  export MSYS2_ARG_CONV_EXCL="${MSYS2_ARG_CONV_EXCL:+${MSYS2_ARG_CONV_EXCL};}/icon.png"
+fi
+
 python3 "$ROOT/scripts/check_native_spread_invariants.py" "$ROOT"
 
 pushd "$WORK_ROOT" >/dev/null
@@ -57,6 +65,33 @@ popd >/dev/null
 mkdir -p "$ROOT/out"
 rm -f "$ROOT/out"/*.snplg
 cp "$PROJECT"/build/outputs/*.snplg "$ROOT/out/"
+
+python3 - "$ROOT/PluginConfig.json" "$ROOT/out"/*.snplg <<'PY'
+import json
+from pathlib import Path
+import sys
+import zipfile
+
+source_path = Path(sys.argv[1])
+packages = [Path(value) for value in sys.argv[2:]]
+if len(packages) != 1:
+    raise SystemExit(f"Expected exactly one .snplg package, found {len(packages)}")
+
+source = json.loads(source_path.read_text(encoding="utf-8"))
+with zipfile.ZipFile(packages[0]) as archive:
+    packaged = json.loads(archive.read("PluginConfig.json").decode("utf-8"))
+
+for key in ("pluginID", "versionCode", "versionName"):
+    if packaged.get(key) != source.get(key):
+        raise SystemExit(
+            f"Packaged {key} {packaged.get(key)!r} does not match "
+            f"source {source.get(key)!r}"
+        )
+if packaged.get("iconPath") != "/icon.png":
+    raise SystemExit(
+        f"Packaged iconPath must be '/icon.png', got {packaged.get('iconPath')!r}"
+    )
+PY
 
 echo "Built Supernote RTL Reader plugin:"
 ls -lh "$ROOT/out"/*.snplg

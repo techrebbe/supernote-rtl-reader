@@ -317,8 +317,18 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 - [x] Immediately after an inactive-page write, Undo removes the new stroke and
   Redo restores it without changing unrelated trails. Confirmed on the Nomad
   with Native Spread v0.0.90 using the native top-toolbar controls.
-- [ ] Immediately after an inactive-page erase, Undo restores the erased trail
-  and Redo removes it again without changing unrelated trails.
+- [x] Immediately after an inactive-page erase, Undo restores the erased trail
+  and Redo removes it again without changing unrelated trails. Confirmed on
+  the Nomad with Native Spread v0.0.116 in trace
+  `20260810-075236-477-p2248-SupernoteNativeSpreadCalibration.pdf`: page 1
+  changed from four canonical trails (`6e3e67dc17`) to three
+  (`fcf1e67029`), Undo restored the exact four-trail fingerprint, and Redo
+  restored the exact three-trail fingerprint. Page 2 remained unchanged, and
+  the final `7433632e6acf` `.mark` state survived portrait and landscape
+  reloads. The trace contains 366 events, 43 annotation boundaries, four
+  changed `.mark` snapshots, no potential failures, and no JSON parse errors;
+  its ZIP SHA-256 is
+  `217B2394702D9AC4ADBF8253432A82ACAE5B28472B1075FBBE8BA1692DCF51FA`.
 - [x] Immediately after an active-page erase, native top-toolbar Undo restores
   exactly the erased section and Redo removes it again without changing any
   unrelated trail. Confirmed on the Nomad with Native Spread v0.0.95; the
@@ -401,6 +411,12 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   geometry rather than missing or substituted ink.
 - [ ] Tapping native Undo/Redo or the bottom page-number bar on the inactive
   half does not activate that page before the native control handles the tap.
+- [ ] Tapping a top-toolbar tool with the pen is handled as toolbar input and
+  never leaks a document stroke. During the first v0.0.116 eraser run, two
+  stylus attempts to select the eraser produced page ink instead; selecting the
+  same control with a finger worked. That contaminated trace is retained as
+  `20260810-073539-391-p13755-SupernoteNativeSpreadCalibration-contaminated`
+  for a dedicated input-routing regression.
 - [ ] After an inactive-page erase activates its page, a following active-page
   erase keeps every unrelated trail visible without requiring a page reload.
 - [ ] In the plug-in reader, Native fill reaches the physical top and bottom of
@@ -412,6 +428,29 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   need a focused smoke test with the new trim transform.
 - [ ] Return to Fit page and confirm all existing annotations return to their
   original whole-page positions.
+
+## v0.4.13 inactive-page eraser priming
+
+- [x] Static invariant: inactive eraser activation attempts the native
+  `loadMarkCurrentLayers` path before falling back to the bitmap-rendering
+  `loadHandWrite` path, and reasserts eraser state after the page/layer switch.
+- [x] Static invariant: the eraser operation retains its own activation-scoped
+  tool type; later toolbar changes cannot turn a pending no-transaction result
+  into an eraser activation.
+- [x] Static invariant: delayed no-transaction completion is bound to the exact
+  activation that scheduled it, so a stale timer cannot complete a newer rapid
+  gesture even when both gestures target the same page.
+- [ ] With page 1 active on the right, make one short stroke-eraser pass through
+  an existing line on inactive page 2 at the left. The line is removed, page 2
+  becomes active, and every unrelated line on both pages remains visible.
+- [ ] Repeat in the opposite direction with page 2 active and page 1 inactive.
+  The same one-gesture erase and activation behavior occurs on the right half.
+- [ ] Make an eraser stroke through empty space on an inactive page. No saved
+  trail changes, but that page becomes active after pen-up and remains safe for
+  the next ordinary pen or eraser operation.
+- [ ] Undo and Redo immediately after the successful inactive-page erase, then
+  turn away and back. The exact erased trail returns and disappears while all
+  unrelated trails remain unchanged.
 
 ## v0.4.10 protected native editing pilot
 

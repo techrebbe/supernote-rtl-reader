@@ -328,6 +328,20 @@ removes the stale active-session pointer.
 Content-bound detection is requested only for Native Fill renders, so ordinary
 Fit navigation does not pay the native-helper or fallback scan cost.
 
+## v0.4.13 inactive-page eraser priming
+
+Native Spread v0.0.117 removes full annotation-bitmap rasterization from the
+inactive-page eraser preparation path. It loads the touched page's native trail
+layer directly, reapplies its half-page geometry, and reasserts the selected
+eraser before the gesture is finalized. This targets the asymmetric case where
+erasing on the left inactive page produced no transaction while the equivalent
+right-page operation worked.
+
+A no-hit eraser gesture now activates the touched page after a short native
+callback grace period instead of silently reverting focus. Saved trail editing
+remains page-local and continues through the existing canonical `.mark`,
+Undo/Redo, and protected-backup path.
+
 ## v0.4.10 protected native editing pilot
 
 v0.4.9 added an explicitly confirmed **RTL editable** choice alongside **Off**
@@ -651,7 +665,8 @@ The resulting package is written to:
 out/*.snplg
 ```
 
-GitHub Actions uploads the current stabilization build as the `supernote-rtl-reader-v0.4.3` artifact.
+GitHub Actions uploads the current build as the
+`supernote-rtl-reader-v0.4.13-inactive-eraser-priming` artifact.
 
 ## Install and diagnostics
 

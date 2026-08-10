@@ -831,6 +831,7 @@ def check(repo_root: Path) -> None:
         "PAGE_ACTIVATION_TRANSACTIONS",
         "PAGE_ACTIVATION_BLOCKED_TOUCHES",
         "PAGE_ACTIVATION_HISTORY_BLOCKED",
+        "ACTIVE_PAGE_STROKE_TERMINAL_CLEANUP",
         "PEN_CONTACT_START_PAGES",
         "new ConcurrentHashMap<>()",
         "volatile boolean triggerContactObserved",
@@ -933,7 +934,8 @@ def check(repo_root: Path) -> None:
             "native callback runs, then schedule the ownership transaction"
         )
     pressure_zero_cleanup = digital_position_hook.find(
-        'if (pressure == 0)', schedule_activation
+        'if (pressure == 0 && !completingActivePageStroke)',
+        schedule_activation,
     )
     pressure_zero_clear = digital_position_hook.find(
         'clearPenContactStartPage(', pressure_zero_cleanup
@@ -942,6 +944,28 @@ def check(repo_root: Path) -> None:
         fail(
             "a normal pressure-zero pen frame does not clear the active-stroke "
             "start-page guard"
+        )
+    terminal_cleanup_marked = digital_position_hook.find(
+        "ACTIVE_PAGE_STROKE_TERMINAL_CLEANUP.set(activity)",
+        preserve_terminal,
+    )
+    position_after_hook = digital_position_hook.find(
+        "protected void afterHookedMethod", pressure_zero_clear
+    )
+    terminal_cleanup_read = digital_position_hook.find(
+        "ACTIVE_PAGE_STROKE_TERMINAL_CLEANUP.get()", position_after_hook
+    )
+    terminal_cleanup_clear = digital_position_hook.find(
+        "clearPenContactStartPage(", terminal_cleanup_read
+    )
+    if not (
+        0 <= preserve_terminal < terminal_cleanup_marked
+        < pressure_zero_cleanup < position_after_hook
+        < terminal_cleanup_read < terminal_cleanup_clear
+    ):
+        fail(
+            "cross-divider pen-up clears its contact guard before the native "
+            "source-page callback completes"
         )
 
     pen_activation_start = module.find(

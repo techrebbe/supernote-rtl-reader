@@ -211,6 +211,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         PAGE_ACTIVATION_RECEIVE_BLOCKED = new ThreadLocal<>();
     private static final ThreadLocal<Boolean>
         PAGE_ACTIVATION_HISTORY_BLOCKED = new ThreadLocal<>();
+    private static final ThreadLocal<Activity>
+        ACTIVE_PAGE_STROKE_TERMINAL_CLEANUP = new ThreadLocal<>();
     private static Activity activeActivity;
     private static boolean nativeBridgeLoaded;
     private static volatile boolean hooksReady;
@@ -1033,6 +1035,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
+                    ACTIVE_PAGE_STROKE_TERMINAL_CLEANUP.remove();
                     Activity activity = activeActivity;
                     if (activity == null) {
                         return;
@@ -1088,6 +1091,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         param.setResult(null);
                     }
                     if (completingActivePageStroke) {
+                        ACTIVE_PAGE_STROKE_TERMINAL_CLEANUP.set(activity);
                         log("page_activation_active_stroke_terminal_preserved"
                             + " page=" + contactStartPage
                             + " point=" + param.args[0]
@@ -1100,10 +1104,23 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                             pressure
                         );
                     }
-                    if (pressure == 0) {
+                    if (pressure == 0 && !completingActivePageStroke) {
                         clearPenContactStartPage(
                             activity,
                             "position_pressure_zero"
+                        );
+                    }
+                }
+
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    Activity activity =
+                        ACTIVE_PAGE_STROKE_TERMINAL_CLEANUP.get();
+                    ACTIVE_PAGE_STROKE_TERMINAL_CLEANUP.remove();
+                    if (activity != null) {
+                        clearPenContactStartPage(
+                            activity,
+                            "position_pressure_zero_after_native"
                         );
                     }
                 }

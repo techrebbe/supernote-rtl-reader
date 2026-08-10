@@ -1082,14 +1082,39 @@ def check(repo_root: Path) -> None:
         "int target = pageAt(activity, x, y);",
         intercept_chrome_discard,
     )
+    contact_start_lookup = intercept_method.find(
+        "Integer contactStartPage = PEN_CONTACT_START_PAGES.get(activity);",
+        intercept_page_mapping,
+    )
+    nonwritable_start_guard = intercept_method.find(
+        "contactStartPage.intValue() != current",
+        contact_start_lookup,
+    )
+    nonwritable_start_discard = intercept_method.find(
+        "return true;", nonwritable_start_guard
+    )
+    current_page_passthrough = intercept_method.find(
+        "if (target < 0 || target == current)",
+        nonwritable_start_discard,
+    )
     if not (
         0 <= intercept_terminal_identity < intercept_chrome
         < intercept_chrome_terminal < intercept_chrome_preserve
         < intercept_chrome_discard < intercept_page_mapping
+        < contact_start_lookup < nonwritable_start_guard
+        < nonwritable_start_discard < current_page_passthrough
     ):
         fail(
-            "native chrome does not preserve an active stroke's terminal "
-            "callback before discarding ordinary low-latency pen points"
+            "pen interception does not preserve source terminal callbacks and "
+            "discard a non-writable-start gesture before current-page input"
+        )
+    nonwritable_guard_prefix = intercept_method[
+        contact_start_lookup:nonwritable_start_guard
+    ]
+    if "pressure > 0" in nonwritable_guard_prefix:
+        fail(
+            "queued inactive-page activation still lets the contact's "
+            "terminal pen-up reach the native writer"
         )
     crossing_guard = intercept_method.find(
         "contactStartPage.intValue() == current"

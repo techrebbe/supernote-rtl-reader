@@ -7727,10 +7727,22 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
         int target = pageAt(activity, x, y);
         int current = currentDocumentPage(activity);
+        Integer contactStartPage = PEN_CONTACT_START_PAGES.get(activity);
+        if (contactStartPage != null
+            && contactStartPage.intValue() != current) {
+            // The contact began where the writer did not own the page. Keep
+            // every frame in that physical gesture, including its terminal
+            // pen-up, out of the native writer. This also covers a fast move
+            // back onto the current page before the UI thread has published
+            // the requested ownership transaction.
+            log("page_activation_nonwritable_contact_blocked current="
+                + current + " start=" + contactStartPage
+                + " point_page=" + target + " pressure=" + pressure);
+            return true;
+        }
         if (target < 0 || target == current) {
             return false;
         }
-        Integer contactStartPage = PEN_CONTACT_START_PAGES.get(activity);
         if (contactStartPage != null
             && contactStartPage.intValue() == current) {
             if (pressure > 0) {

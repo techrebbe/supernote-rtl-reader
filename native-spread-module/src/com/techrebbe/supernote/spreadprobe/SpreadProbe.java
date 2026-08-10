@@ -1069,6 +1069,17 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     if (pressure > 0
                         && isEditableSpreadLandscape(activity)) {
                         synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+                            PageActivationTransaction ownershipTransaction =
+                                PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+                            if (ownershipTransaction != null) {
+                                // Latch the held contact under the same lock
+                                // used by final commit/removal. The later
+                                // interceptor repeats this defensively, but
+                                // commit can never miss this first frame.
+                                ownershipTransaction.triggerContactObserved =
+                                    true;
+                                ownershipTransaction.triggerPenLifted = false;
+                            }
                             if (PEN_CONTACT_START_PAGES.get(activity) == null) {
                                 int mappedContactPage = pageAt(
                                     activity,
@@ -8091,11 +8102,32 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     + transaction.id + " target=" + transaction.targetPage);
                 return false;
             }
-            finishPageActivationTransaction(
+            if (!finishPageActivationTransaction(
                 activity,
                 transaction,
                 "geometry_committed"
-            );
+            )) {
+                PageActivationTransaction current =
+                    PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+                if (current == transaction
+                    && current.triggerContactObserved
+                    && !current.triggerPenLifted) {
+                    XposedHelpers.callMethod(
+                        presenter,
+                        "disableHandWrite",
+                        "SN_SPREAD_PROBE commit/contact race"
+                    );
+                    showStatusOverlay(
+                        activity,
+                        "RTL SPREAD: page " + (currentPage + 1)
+                            + " active - lift pen, then write"
+                    );
+                    log("page_activation_commit_contact_race id="
+                        + transaction.id + " target="
+                        + transaction.targetPage);
+                }
+                return false;
+            }
             return true;
         } catch (Throwable throwable) {
             log("page_activation_commit_failed id=" + transaction.id
@@ -8151,11 +8183,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         );
                         return;
                     }
-                    finishPageActivationTransaction(
+                    if (!finishPageActivationTransaction(
                         activity,
                         current,
                         "trigger_gesture_discarded"
-                    );
+                    )) {
+                        log("page_activation_pen_lift_finish_deferred id="
+                            + current.id + " target=" + current.targetPage);
+                    }
                 } catch (Throwable throwable) {
                     log("page_activation_pen_lift_failed id=" + current.id
                         + " " + throwable);
@@ -8204,18 +8239,28 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         );
     }
 
-    private static void finishPageActivationTransaction(
+    private static boolean finishPageActivationTransaction(
         Activity activity,
         PageActivationTransaction transaction,
         String reason
     ) {
-        PageActivationTransaction current =
-            PAGE_ACTIVATION_TRANSACTIONS.get(activity);
-        if (current == null || current.id != transaction.id
-            || current.rollbackPending) {
-            return;
+        PageActivationTransaction current;
+        synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+            current = PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+            if (current == null || current.id != transaction.id
+                || current.rollbackPending) {
+                return false;
+            }
+            if (current.triggerContactObserved
+                && !current.triggerPenLifted) {
+                log("page_activation_commit_retained_for_contact id="
+                    + current.id + " target=" + current.targetPage);
+                return false;
+            }
+            if (!PAGE_ACTIVATION_TRANSACTIONS.remove(activity, current)) {
+                return false;
+            }
         }
-        PAGE_ACTIVATION_TRANSACTIONS.remove(activity);
         long elapsed = SystemClock.uptimeMillis() - transaction.startedAt;
         log("page_activation_committed id=" + transaction.id
             + " source=" + transaction.sourcePage
@@ -8268,6 +8313,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     + transaction.id + " " + throwable);
             }
         }
+        return true;
     }
 
     private static boolean shouldBlockPageActivationGesture(Activity activity) {

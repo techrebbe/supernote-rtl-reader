@@ -920,8 +920,20 @@ def check(repo_root: Path) -> None:
         "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
         before_native_callback,
     )
+    contact_transaction_lookup = digital_position_hook.find(
+        "PageActivationTransaction ownershipTransaction =",
+        contact_ownership_lock,
+    )
+    atomic_contact_observed = digital_position_hook.find(
+        "ownershipTransaction.triggerContactObserved =",
+        contact_transaction_lookup,
+    )
+    atomic_contact_held = digital_position_hook.find(
+        "ownershipTransaction.triggerPenLifted = false;",
+        atomic_contact_observed,
+    )
     contact_page_mapping = digital_position_hook.find(
-        "int mappedContactPage = pageAt(", contact_ownership_lock
+        "int mappedContactPage = pageAt(", atomic_contact_held
     )
     contact_page_valid = digital_position_hook.find(
         "if (mappedContactPage >= 0)", contact_page_mapping
@@ -931,12 +943,13 @@ def check(repo_root: Path) -> None:
     )
     if not (
         0 <= before_native_callback < contact_ownership_lock
-        < contact_page_mapping
+        < contact_transaction_lookup < atomic_contact_observed
+        < atomic_contact_held < contact_page_mapping
         < contact_page_valid < contact_page_latched
     ):
         fail(
-            "a gutter or cropped-margin contact can still latch an unmapped "
-            "start page instead of waiting for the first real page"
+            "contact start is not atomically latched against transaction "
+            "commit before mapping its first real page"
         )
     if "Integer.valueOf(pageAt(" in digital_position_hook:
         fail("the pen-contact guard can still permanently latch page -1")
@@ -1340,13 +1353,64 @@ def check(repo_root: Path) -> None:
     finish_commit = commit_method.find(
         "finishPageActivationTransaction(", discard_contact
     )
+    retained_commit = commit_method.find(
+        "if (!finishPageActivationTransaction(", discard_contact
+    )
+    retained_writer_disable = commit_method.find(
+        '"SN_SPREAD_PROBE commit/contact race"', retained_commit
+    )
+    retained_return = commit_method.find(
+        "return false;", retained_writer_disable
+    )
     if not (
         0 <= reader_identity < presenter_identity < commit_state
         < discard_contact < finish_commit
+        and 0 <= retained_commit < retained_writer_disable < retained_return
     ):
         fail(
             "ownership must commit only after reader and presenter identities "
-            "match the target and the triggering contact is fail-closed"
+            "match the target, while a concurrently latched contact remains "
+            "fail-closed"
+        )
+
+    finish_transaction_start = module.find(
+        "private static boolean finishPageActivationTransaction("
+    )
+    gesture_blocker_start = module.find(
+        "private static boolean shouldBlockPageActivationGesture(",
+        finish_transaction_start,
+    )
+    if finish_transaction_start < 0 or gesture_blocker_start < 0:
+        fail("could not isolate atomic transaction completion")
+    finish_transaction = module[
+        finish_transaction_start:gesture_blocker_start
+    ]
+    finish_lock = finish_transaction.find(
+        "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)"
+    )
+    finish_current = finish_transaction.find(
+        "PAGE_ACTIVATION_TRANSACTIONS.get(activity)", finish_lock
+    )
+    finish_contact = finish_transaction.find(
+        "current.triggerContactObserved", finish_current
+    )
+    finish_lift = finish_transaction.find(
+        "!current.triggerPenLifted", finish_contact
+    )
+    finish_retained = finish_transaction.find(
+        "return false;", finish_lift
+    )
+    finish_remove = finish_transaction.find(
+        "PAGE_ACTIVATION_TRANSACTIONS.remove(activity, current)",
+        finish_retained,
+    )
+    if not (
+        0 <= finish_lock < finish_current < finish_contact < finish_lift
+        < finish_retained < finish_remove
+    ):
+        fail(
+            "transaction removal is not serialized with contact latching and "
+            "revalidated through pen lift"
         )
 
     receive_hook_start_transactional = module.find('"receiveTrials",')

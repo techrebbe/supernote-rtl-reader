@@ -136,6 +136,53 @@ def check(repo_root: Path) -> None:
         ),
         "configured/runtime Native Spread state separation",
     )
+    history_hook_start = module.find(
+        'for (String methodName : new String[] {"undo", "redo"})'
+    )
+    history_hook_end = module.find(
+        '"loadHandWrite",\n            int.class,', history_hook_start
+    )
+    if history_hook_start < 0 or history_hook_end < 0:
+        fail("could not isolate native Undo/Redo transaction guards")
+    history_hook = module[history_hook_start:history_hook_end]
+    history_reset = history_hook.find(
+        "PAGE_ACTIVATION_HISTORY_BLOCKED.remove();"
+    )
+    history_transaction = history_hook.find(
+        "PAGE_ACTIVATION_TRANSACTIONS.get(activity)", history_reset
+    )
+    history_mark_blocked = history_hook.find(
+        "PAGE_ACTIVATION_HISTORY_BLOCKED.set(Boolean.TRUE)",
+        history_transaction,
+    )
+    history_suppress = history_hook.find(
+        "param.setResult(null);", history_mark_blocked
+    )
+    history_native_path = history_hook.find(
+        "FORCE_CANONICAL_ACTIVE_INK.set(true);", history_suppress
+    )
+    history_after = history_hook.find(
+        "protected void afterHookedMethod", history_native_path
+    )
+    history_after_guard = history_hook.find(
+        "PAGE_ACTIVATION_HISTORY_BLOCKED.get()", history_after
+    )
+    history_after_clear = history_hook.find(
+        "PAGE_ACTIVATION_HISTORY_BLOCKED.remove();", history_after_guard
+    )
+    history_after_return = history_hook.find("return;", history_after_clear)
+    history_after_native = history_hook.find("try {", history_after_return)
+    if not (
+        0 <= history_reset < history_transaction < history_mark_blocked
+        < history_suppress < history_native_path < history_after
+        < history_after_guard < history_after_clear < history_after_return
+        < history_after_native
+    ):
+        fail(
+            "native Undo/Redo can mutate or reload presenter state during an "
+            "ownership transfer"
+        )
+
     require_markers(
         module,
         (
@@ -782,6 +829,8 @@ def check(repo_root: Path) -> None:
     transaction_markers = (
         "private static final class PageActivationTransaction",
         "PAGE_ACTIVATION_TRANSACTIONS",
+        "PAGE_ACTIVATION_BLOCKED_TOUCHES",
+        "PAGE_ACTIVATION_HISTORY_BLOCKED",
         "PEN_CONTACT_START_PAGES",
         "new ConcurrentHashMap<>()",
         "volatile boolean triggerContactObserved",
@@ -809,8 +858,12 @@ def check(repo_root: Path) -> None:
         '"page_activation_pen_input_blocked reason=native_chrome"',
         '"page_activation_pen_ignored_native_chrome point="',
         '"page_activation_cross_page_point_blocked current="',
+        '"page_activation_cross_page_terminal_preserved current="',
+        '"page_activation_active_stroke_terminal_preserved"',
         '"page_activation_ignored_cross_page_stroke current="',
         '"page_activation_rejected reason=pen_contact_active"',
+        '"page_activation_ui_input_blocked id="',
+        '"page_activation_history_blocked id="',
         '"RTL SPREAD: page switch failed - writing disabled"',
     )
     require_markers(
@@ -822,6 +875,29 @@ def check(repo_root: Path) -> None:
     digital_position_start = module.find(
         '"com.supernote.document.document.DocumentActivity$6"'
     )
+    dispatch_touch_start = module.find('"dispatchTouchEvent",')
+    if dispatch_touch_start < 0 or digital_position_start < 0:
+        fail("could not isolate transactional UI-input guard")
+    dispatch_touch_hook = module[dispatch_touch_start:digital_position_start]
+    dispatch_trace = dispatch_touch_hook.find("traceTouchEvent(activity, event);")
+    dispatch_block = dispatch_touch_hook.find(
+        "blockPageActivationUiInput(activity, event)", dispatch_trace
+    )
+    dispatch_consume = dispatch_touch_hook.find(
+        "param.setResult(true);", dispatch_block
+    )
+    dispatch_return = dispatch_touch_hook.find("return;", dispatch_consume)
+    dispatch_config = dispatch_touch_hook.find(
+        "SpreadConfig config = spreadConfig(activity);", dispatch_return
+    )
+    if not (
+        0 <= dispatch_trace < dispatch_block < dispatch_consume
+        < dispatch_return < dispatch_config
+    ):
+        fail(
+            "touch input is not consumed before native chrome and page "
+            "controls can run during an ownership transfer"
+        )
     digital_state_start = module.find(
         '"onDigital",', digital_position_start
     )
@@ -831,17 +907,25 @@ def check(repo_root: Path) -> None:
     before_native_callback = digital_position_hook.find(
         "protected void beforeHookedMethod"
     )
+    active_stroke_terminal = digital_position_hook.find(
+        "boolean completingActivePageStroke = pressure == 0",
+        before_native_callback,
+    )
     intercept_input = digital_position_hook.find(
-        "interceptPenPageActivation(", before_native_callback
+        "interceptPenPageActivation(", active_stroke_terminal
     )
     discard_input = digital_position_hook.find(
         "param.setResult(null);", intercept_input
     )
+    preserve_terminal = digital_position_hook.find(
+        "if (completingActivePageStroke)", discard_input
+    )
     schedule_activation = digital_position_hook.find(
-        "handlePenPageActivation(", discard_input
+        "handlePenPageActivation(", preserve_terminal
     )
     if not (
-        0 <= before_native_callback < intercept_input < discard_input
+        0 <= before_native_callback < active_stroke_terminal
+        < intercept_input < discard_input < preserve_terminal
         < schedule_activation
     ):
         fail(
@@ -928,12 +1012,66 @@ def check(repo_root: Path) -> None:
     crossing_guard = intercept_method.find(
         "contactStartPage.intValue() == current"
     )
+    crossing_pressure_guard = intercept_method.find(
+        "if (pressure > 0)", crossing_guard
+    )
     crossing_discard = intercept_method.find("return true;", crossing_guard)
-    if not 0 <= crossing_guard < crossing_discard:
+    terminal_pressure_guard = intercept_method.find(
+        "if (pressure == 0)", crossing_discard
+    )
+    terminal_preserved = intercept_method.find(
+        "return false;", terminal_pressure_guard
+    )
+    if not (
+        0 <= crossing_guard < crossing_pressure_guard < crossing_discard
+        < terminal_pressure_guard < terminal_preserved
+    ):
         fail(
-            "a stroke begun on the active page can still activate or write "
-            "through the inactive half after crossing the divider"
+            "a stroke begun on the active page is not kept on that page "
+            "through its cross-divider terminal frame"
         )
+
+    ui_block_start = module.find(
+        "private static boolean blockPageActivationUiInput("
+    )
+    activation_touch_start = module.find(
+        "private static boolean handlePageActivationTouch(", ui_block_start
+    )
+    native_chrome_start = module.find(
+        "private static boolean isNativeChromeTouch(", activation_touch_start
+    )
+    if ui_block_start < 0 or activation_touch_start < 0 or native_chrome_start < 0:
+        fail("could not isolate page-activation UI-input blocking")
+    ui_block_method = module[ui_block_start:activation_touch_start]
+    require_markers(
+        ui_block_method,
+        (
+            "PAGE_ACTIVATION_BLOCKED_TOUCHES.get(activity)",
+            "PAGE_ACTIVATION_TRANSACTIONS.get(activity)",
+            "action == MotionEvent.ACTION_HOVER_EXIT",
+            "action == MotionEvent.ACTION_DOWN",
+            "action == MotionEvent.ACTION_MOVE",
+            "PAGE_ACTIVATION_BLOCKED_TOUCHES.put(activity, Boolean.TRUE)",
+            "PAGE_ACTIVATION_BLOCKED_TOUCHES.remove(activity)",
+            '"page_activation_ui_input_blocked id="',
+            "return true;",
+        ),
+        "transactional UI-input blocking",
+    )
+    activation_touch_method = module[activation_touch_start:native_chrome_start]
+    touch_transaction = activation_touch_method.find(
+        "PageActivationTransaction transaction ="
+    )
+    touch_pending_guard = activation_touch_method.find(
+        "if (transaction != null)", touch_transaction
+    )
+    touch_pending_discard = activation_touch_method.find(
+        "return true;", touch_pending_guard
+    )
+    if not 0 <= touch_transaction < touch_pending_guard < touch_pending_discard:
+        fail("finger input can reach native controls during an ownership transfer")
+    if "transaction != null && !isNativeChromeTouch" in activation_touch_method:
+        fail("native chrome remains exempt from ownership-transfer input blocking")
 
     digital_lift_start = module.find('"onDigital",', digital_position_start)
     digital_lift_end = module.find(

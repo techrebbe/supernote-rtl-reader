@@ -154,6 +154,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         new WeakHashMap<>();
     private static final Map<Activity, Point> ACTIVATION_TOUCH_STARTS =
         new WeakHashMap<>();
+    private static final Map<Activity, Boolean>
+        PAGE_ACTIVATION_BLOCKED_TOUCHES = new WeakHashMap<>();
     private static final Map<Activity, PageActivationTransaction>
         PAGE_ACTIVATION_TRANSACTIONS = new ConcurrentHashMap<>();
     private static final Map<Activity, Integer> PEN_CONTACT_START_PAGES =
@@ -207,6 +209,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         new ThreadLocal<>();
     private static final ThreadLocal<Boolean>
         PAGE_ACTIVATION_RECEIVE_BLOCKED = new ThreadLocal<>();
+    private static final ThreadLocal<Boolean>
+        PAGE_ACTIVATION_HISTORY_BLOCKED = new ThreadLocal<>();
     private static Activity activeActivity;
     private static boolean nativeBridgeLoaded;
     private static volatile boolean hooksReady;
@@ -976,6 +980,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     Activity activity = (Activity) param.thisObject;
                     MotionEvent event = (MotionEvent) param.args[0];
                     traceTouchEvent(activity, event);
+                    if (blockPageActivationUiInput(activity, event)) {
+                        param.setResult(true);
+                        return;
+                    }
                     SpreadConfig config = spreadConfig(activity);
                     if (isCalibrationLandscape(activity)
                         && config != null
@@ -1053,6 +1061,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                             ))
                         );
                     }
+                    Integer contactStartPage =
+                        PEN_CONTACT_START_PAGES.get(activity);
+                    boolean completingActivePageStroke = pressure == 0
+                        && contactStartPage != null
+                        && PAGE_ACTIVATION_TRANSACTIONS.get(activity) == null
+                        && isEditableSpreadLandscape(activity)
+                        && contactStartPage.intValue()
+                            == currentDocumentPage(activity);
                     tracePenPosition(
                         activity,
                         ((Integer) param.args[0]).intValue(),
@@ -1071,12 +1087,19 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         // only after the target page owns the writer.
                         param.setResult(null);
                     }
-                    handlePenPageActivation(
-                        activity,
-                        ((Integer) param.args[0]).intValue(),
-                        ((Integer) param.args[1]).intValue(),
-                        pressure
-                    );
+                    if (completingActivePageStroke) {
+                        log("page_activation_active_stroke_terminal_preserved"
+                            + " page=" + contactStartPage
+                            + " point=" + param.args[0]
+                            + "," + param.args[1]);
+                    } else {
+                        handlePenPageActivation(
+                            activity,
+                            ((Integer) param.args[0]).intValue(),
+                            ((Integer) param.args[1]).intValue(),
+                            pressure
+                        );
+                    }
                     if (pressure == 0) {
                         clearPenContactStartPage(
                             activity,
@@ -2195,22 +2218,34 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) {
+                        PAGE_ACTIVATION_HISTORY_BLOCKED.remove();
+                        Activity activity = activeActivity;
+                        PageActivationTransaction transaction = activity == null
+                            ? null : PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+                        if (transaction != null) {
+                            PAGE_ACTIVATION_HISTORY_BLOCKED.set(Boolean.TRUE);
+                            param.setResult(null);
+                            log("page_activation_history_blocked id="
+                                + transaction.id + " target="
+                                + transaction.targetPage + " action="
+                                + mutationName);
+                            return;
+                        }
                         FORCE_CANONICAL_ACTIVE_INK.set(true);
                         traceEvent(
-                            activeActivity,
+                            activity,
                             "history_action_started",
                             "action",
                             mutationName
                         );
                         traceAnnotationBoundary(
-                            activeActivity,
+                            activity,
                             param.thisObject,
                             mutationName + "_before",
                             false
                         );
                         log("ink_composition_force_canonical reason="
                             + mutationName);
-                        Activity activity = activeActivity;
                         if (activity != null
                             && applyPageEditHistory(
                                 activity,
@@ -2223,6 +2258,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
 
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) {
+                        if (Boolean.TRUE.equals(
+                                PAGE_ACTIVATION_HISTORY_BLOCKED.get()
+                            )) {
+                            PAGE_ACTIVATION_HISTORY_BLOCKED.remove();
+                            return;
+                        }
                         try {
                             Activity activity = activeActivity;
                             if (activity != null
@@ -6581,6 +6622,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         RIGHT_VISIBLE_BOUNDS.remove(activity);
         ACTIVATION_TOUCH_TARGETS.remove(activity);
         ACTIVATION_TOUCH_STARTS.remove(activity);
+        PAGE_ACTIVATION_BLOCKED_TOUCHES.remove(activity);
         PAGE_ACTIVATION_TRANSACTIONS.remove(activity);
         PEN_CONTACT_START_PAGES.remove(activity);
         PEN_ACTIVATION_TARGETS.remove(activity);
@@ -7337,6 +7379,47 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
     }
 
+    private static boolean blockPageActivationUiInput(
+        Activity activity,
+        MotionEvent event
+    ) {
+        if (activity == null || event == null) {
+            return false;
+        }
+        boolean blockedGesture = Boolean.TRUE.equals(
+            PAGE_ACTIVATION_BLOCKED_TOUCHES.get(activity)
+        );
+        PageActivationTransaction transaction =
+            PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+        if (!blockedGesture && transaction == null) {
+            return false;
+        }
+
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_UP
+            || action == MotionEvent.ACTION_CANCEL
+            || action == MotionEvent.ACTION_HOVER_EXIT) {
+            PAGE_ACTIVATION_BLOCKED_TOUCHES.remove(activity);
+        } else if (blockedGesture
+            || action == MotionEvent.ACTION_DOWN
+            || action == MotionEvent.ACTION_MOVE
+            || action == MotionEvent.ACTION_POINTER_DOWN
+            || action == MotionEvent.ACTION_POINTER_UP) {
+            // Latch only a real contact gesture. A hover event may request the
+            // transfer, but must not keep all later UI input blocked after the
+            // transaction commits while the pen remains in sensing range.
+            PAGE_ACTIVATION_BLOCKED_TOUCHES.put(activity, Boolean.TRUE);
+        }
+        log("page_activation_ui_input_blocked id="
+            + (transaction == null ? -1L : transaction.id)
+            + " target="
+            + (transaction == null ? -1 : transaction.targetPage)
+            + " action=" + action
+            + " tool=" + (event.getPointerCount() <= 0
+                ? -1 : event.getToolType(0)));
+        return true;
+    }
+
     private static boolean handlePageActivationTouch(
         Activity activity,
         MotionEvent event
@@ -7348,10 +7431,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
         PageActivationTransaction transaction =
             PAGE_ACTIVATION_TRANSACTIONS.get(activity);
-        if (transaction != null && !isNativeChromeTouch(
-                activity,
-                event.getY()
-            )) {
+        if (transaction != null) {
             log("page_activation_touch_blocked id=" + transaction.id
                 + " target=" + transaction.targetPage
                 + " action=" + event.getActionMasked());
@@ -7605,14 +7685,27 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             return false;
         }
         Integer contactStartPage = PEN_CONTACT_START_PAGES.get(activity);
-        if (pressure > 0 && contactStartPage != null
+        if (contactStartPage != null
             && contactStartPage.intValue() == current) {
-            // A stroke that began on the active page remains an active-page
-            // stroke.  Block points that cross the divider, but never turn that
-            // continuing stroke into an ownership-transfer request.
-            log("page_activation_cross_page_point_blocked current=" + current
-                + " target=" + target + " start=" + contactStartPage);
-            return true;
+            if (pressure > 0) {
+                // A stroke that began on the active page remains an active-page
+                // stroke. Block ink-bearing points that cross the divider, but
+                // never turn that continuation into an ownership transfer.
+                log("page_activation_cross_page_point_blocked current="
+                    + current + " target=" + target
+                    + " start=" + contactStartPage);
+                return true;
+            }
+            if (pressure == 0) {
+                // The source page must receive its ordinary terminal callback
+                // even when the lift coordinate is over the other half. The
+                // caller skips hover activation for this same frame and clears
+                // the guard only after the native callback is preserved.
+                log("page_activation_cross_page_terminal_preserved current="
+                    + current + " target=" + target
+                    + " start=" + contactStartPage);
+                return false;
+            }
         }
         // handlePenPageActivation runs the native save/load transition on the
         // UI thread.  Return true immediately so this initiating coordinate

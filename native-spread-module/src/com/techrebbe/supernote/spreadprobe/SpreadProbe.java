@@ -140,6 +140,18 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         new AtomicLong();
     private static final AtomicLong DEFERRED_SPREAD_TURN_COUNTER =
         new AtomicLong();
+    private static final ScheduledExecutorService LOW_LATENCY_LOG_EXECUTOR =
+        Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
+            @Override
+            public Thread newThread(Runnable runnable) {
+                Thread thread = new Thread(
+                    runnable,
+                    "SNSpreadLowLatencyLog"
+                );
+                thread.setDaemon(true);
+                return thread;
+            }
+        });
     private static final Object TRACE_LOCK = new Object();
     private static final Object PAGE_ACTIVATION_OWNERSHIP_LOCK = new Object();
     private static final Map<Activity, Bitmap> COMPOSITES = new WeakHashMap<>();
@@ -191,12 +203,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final Map<Activity, Long> NON_EDGE_TAP_SUPPRESS_UNTIL =
         new WeakHashMap<>();
     private static final Map<Activity, Integer> TRACE_LAST_PRESSURES =
-        new WeakHashMap<>();
+        new ConcurrentHashMap<>();
     private static final Map<Activity, Long> TRACE_TRANSACTION_IDS =
-        new WeakHashMap<>();
+        new ConcurrentHashMap<>();
     private static final Map<Activity, String> TRACE_TOOLS =
         new WeakHashMap<>();
     private static final Map<Activity, PenInputSnapshot> PEN_INPUT_SNAPSHOTS =
+        new ConcurrentHashMap<>();
+    private static final Map<Activity, String> PEN_INPUT_BLOCK_LOG_STATES =
         new ConcurrentHashMap<>();
     private static final Map<Activity, SpreadConfig> SPREAD_CONFIGS =
         new WeakHashMap<>();
@@ -1208,8 +1222,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                                     activity,
                                     Integer.valueOf(PEN_CONTACT_BLOCKED_PAGE)
                                 );
-                                log("pen_contact_guard_latched"
-                                    + " start=blocked_pending_geometry");
+                                queueLowLatencyLog(
+                                    "pen_contact_guard_latched"
+                                        + " start=blocked_pending_geometry"
+                                );
                             }
                         }
                     }
@@ -1223,6 +1239,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         );
                     tracePenPosition(
                         activity,
+                        inputSnapshot,
                         ((Integer) param.args[0]).intValue(),
                         ((Integer) param.args[1]).intValue(),
                         pressure
@@ -1242,10 +1259,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     }
                     if (completingActivePageStroke) {
                         ACTIVE_PAGE_STROKE_TERMINAL_CLEANUP.set(activity);
-                        log("page_activation_active_stroke_terminal_preserved"
-                            + " page=" + contactStartPage
-                            + " point=" + param.args[0]
-                            + "," + param.args[1]);
+                        queueLowLatencyLog(
+                            "page_activation_active_stroke_terminal_preserved"
+                                + " page=" + contactStartPage
+                                + " point=" + param.args[0]
+                                + "," + param.args[1]
+                        );
                     } else {
                         handlePenPageActivation(
                             activity,
@@ -3784,11 +3803,13 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
 
     private static void tracePenPosition(
         Activity activity,
+        PenInputSnapshot inputSnapshot,
         int x,
         int y,
         int pressure
     ) {
-        if (traceSession == null || activity == null) {
+        final TraceSession expected = traceSession;
+        if (expected == null || activity == null) {
             return;
         }
         Integer previous = TRACE_LAST_PRESSURES.put(activity, pressure);
@@ -3805,20 +3826,47 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 TRACE_TRANSACTION_COUNTER.incrementAndGet()
             );
         }
-        traceEvent(
-            activity,
-            contactStarted ? "pen_contact_started" : "pen_contact_ended",
-            "x",
-            x,
-            "y",
-            y,
-            "pressure",
-            pressure,
-            "previousPressure",
-            previous,
-            "resolvedPage",
-            pageAt(activity, x, y)
-        );
+        final String event = contactStarted
+            ? "pen_contact_started" : "pen_contact_ended";
+        final int capturedX = x;
+        final int capturedY = y;
+        final int capturedPressure = pressure;
+        final Integer capturedPrevious = previous;
+        final int capturedResolvedPage = pageAt(inputSnapshot, x, y);
+        final int capturedCurrentPage = inputSnapshot == null
+            ? -1 : inputSnapshot.currentPage;
+        final Long capturedTransactionId = TRACE_TRANSACTION_IDS.get(activity);
+        try {
+            expected.eventExecutor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    if (!isTraceSessionActive(expected)) {
+                        return;
+                    }
+                    traceEvent(
+                        expected,
+                        null,
+                        event,
+                        "x",
+                        capturedX,
+                        "y",
+                        capturedY,
+                        "pressure",
+                        capturedPressure,
+                        "previousPressure",
+                        capturedPrevious,
+                        "resolvedPage",
+                        capturedResolvedPage,
+                        "currentPage",
+                        capturedCurrentPage,
+                        "transactionId",
+                        capturedTransactionId
+                    );
+                }
+            });
+        } catch (Throwable throwable) {
+            expected.eventWriteFailure = String.valueOf(throwable);
+        }
     }
 
     private static void tracePenLeftScreen(Activity activity, int state) {
@@ -6821,6 +6869,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         TRACE_TRANSACTION_IDS.remove(activity);
         TRACE_TOOLS.remove(activity);
         PEN_INPUT_SNAPSHOTS.remove(activity);
+        PEN_INPUT_BLOCK_LOG_STATES.remove(activity);
         SPREAD_CONFIGS.remove(activity);
         PROTECTED_VERIFICATIONS.remove(activity);
         log("activity_resources_released active_cleared=" + activeCleared
@@ -7199,6 +7248,39 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         );
         log("pen_input_geometry_invalidated current="
             + published.currentPage + " reason=" + reason);
+    }
+
+    private static boolean publishReadyPenInputGeometryAfterActivation(
+        Activity activity,
+        PageActivationTransaction transaction,
+        String reason
+    ) {
+        PenInputSnapshot pending = penInputSnapshot(activity);
+        if (pending == null || transaction == null || !pending.editable
+            || pending.currentPage != transaction.targetPage
+            || pending.rightPage < 0
+            || pending.rightVisibleBounds == null
+            || (pending.leftPage >= 0
+                && pending.leftVisibleBounds == null)) {
+            log("pen_input_geometry_activation_publish_rejected id="
+                + (transaction == null ? -1L : transaction.id)
+                + " reason=" + reason);
+            return false;
+        }
+        publishPenInputGeometrySnapshot(
+            activity,
+            pending.config,
+            pending.currentPage,
+            pending.pageCount,
+            new SpreadPair(pending.rightPage, pending.leftPage),
+            pending.rightVisibleBounds,
+            pending.leftVisibleBounds,
+            true,
+            reason
+        );
+        PenInputSnapshot ready = penInputSnapshot(activity);
+        return ready != null && ready.geometryReady && ready.editable
+            && ready.currentPage == transaction.targetPage;
     }
 
     private static PenInputSnapshot penInputSnapshot(Activity activity) {
@@ -7948,9 +8030,74 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             return height > 0
                 && y >= height - NATIVE_BOTTOM_CHROME_TOUCH_EXCLUSION_PX;
         } catch (Throwable throwable) {
-            log("native_chrome_touch_check_failed " + throwable);
+            queueLowLatencyLog(
+                "native_chrome_touch_check_failed " + throwable
+            );
             return false;
         }
+    }
+
+    private static void queueLowLatencyLog(final String message) {
+        if (message == null) {
+            return;
+        }
+        try {
+            LOW_LATENCY_LOG_EXECUTOR.execute(new Runnable() {
+                @Override
+                public void run() {
+                    log(message);
+                }
+            });
+        } catch (Throwable ignored) {
+            // Logging is diagnostic. Never perturb the native pen callback if
+            // its background queue is unavailable.
+        }
+    }
+
+    private static void notePenInputBlock(
+        Activity activity,
+        String state,
+        int x,
+        int y,
+        int pressure,
+        long transactionId,
+        int currentPage,
+        int targetPage,
+        int contactStartPage
+    ) {
+        if (activity == null || state == null || pressure <= 0) {
+            return;
+        }
+        String previous = PEN_INPUT_BLOCK_LOG_STATES.put(activity, state);
+        if (state.equals(previous)) {
+            return;
+        }
+        final String captured = "page_activation_pen_input_blocked"
+            + " state=" + state + " phase=contact"
+            + " transaction=" + transactionId
+            + " current=" + currentPage + " target=" + targetPage
+            + " start=" + contactStartPage + " point=" + x + "," + y
+            + " pressure=" + pressure;
+        queueLowLatencyLog(captured);
+    }
+
+    private static void finishPenInputBlock(
+        Activity activity,
+        int x,
+        int y,
+        int pressure
+    ) {
+        if (activity == null || pressure > 0) {
+            return;
+        }
+        String previous = PEN_INPUT_BLOCK_LOG_STATES.remove(activity);
+        if (previous == null) {
+            return;
+        }
+        final String captured = "page_activation_pen_input_blocked"
+            + " state=" + previous + " phase=lift point=" + x + "," + y
+            + " pressure=" + pressure;
+        queueLowLatencyLog(captured);
     }
 
     private static void clearPenContactStartPage(
@@ -7962,8 +8109,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
         Integer startPage = PEN_CONTACT_START_PAGES.remove(activity);
         if (startPage != null) {
-            log("pen_contact_guard_cleared start=" + startPage
-                + " reason=" + reason);
+            queueLowLatencyLog(
+                "pen_contact_guard_cleared start=" + startPage
+                    + " reason=" + reason
+            );
         }
     }
 
@@ -8073,26 +8222,43 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         if (activity == null) {
             return false;
         }
+        finishPenInputBlock(activity, x, y, pressure);
+        Integer contactStartPage = PEN_CONTACT_START_PAGES.get(activity);
+        int capturedContactStart = contactStartPage == null
+            ? -1 : contactStartPage.intValue();
         PageActivationTransaction transaction =
             PAGE_ACTIVATION_TRANSACTIONS.get(activity);
         if (transaction != null) {
-            int transactionPointPage = pageAt(inputSnapshot, x, y);
             if (pressure > 0) {
                 transaction.triggerContactObserved = true;
                 transaction.triggerPenLifted = false;
             }
-            log("page_activation_pen_input_blocked id=" + transaction.id
-                + " target=" + transaction.targetPage
-                + " point_page=" + transactionPointPage
-                + " pressure=" + pressure);
+            notePenInputBlock(
+                activity,
+                "transaction",
+                x,
+                y,
+                pressure,
+                transaction.id,
+                inputSnapshot == null ? -1 : inputSnapshot.currentPage,
+                transaction.targetPage,
+                capturedContactStart
+            );
             return true;
         }
         if (inputSnapshot == null) {
             if (publishedEditablePenInputLandscape(activity)) {
-                log("page_activation_pen_input_blocked"
-                    + " reason=stale_pen_snapshot"
-                    + " point=" + x + "," + y
-                    + " pressure=" + pressure);
+                notePenInputBlock(
+                    activity,
+                    "stale_snapshot",
+                    x,
+                    y,
+                    pressure,
+                    -1L,
+                    -1,
+                    -1,
+                    capturedContactStart
+                );
                 return true;
             }
             return false;
@@ -8101,10 +8267,17 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             return false;
         }
         if (!inputSnapshot.geometryReady) {
-            log("page_activation_pen_input_blocked"
-                + " reason=geometry_pending"
-                + " point=" + x + "," + y
-                + " pressure=" + pressure);
+            notePenInputBlock(
+                activity,
+                "geometry_pending",
+                x,
+                y,
+                pressure,
+                -1L,
+                inputSnapshot.currentPage,
+                -1,
+                capturedContactStart
+            );
             return true;
         }
         boolean completingActivePageStroke =
@@ -8115,21 +8288,27 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             );
         if (isNativeChromeTouch(activity, y)) {
             if (completingActivePageStroke) {
-                log("page_activation_native_chrome_terminal_preserved"
-                    + " point=" + x + "," + y);
                 return false;
             }
             // The toolbar and bottom page bar consume ordinary Android stylus
             // events.  Suppress only the parallel low-latency DrawPath point,
             // so selecting a native control with the pen cannot ink or activate
             // the page visually underneath that control.
-            log("page_activation_pen_input_blocked reason=native_chrome"
-                + " point=" + x + "," + y + " pressure=" + pressure);
+            notePenInputBlock(
+                activity,
+                "native_chrome",
+                x,
+                y,
+                pressure,
+                -1L,
+                inputSnapshot.currentPage,
+                pageAt(inputSnapshot, x, y),
+                capturedContactStart
+            );
             return true;
         }
         int target = pageAt(inputSnapshot, x, y);
         int current = inputSnapshot.currentPage;
-        Integer contactStartPage = PEN_CONTACT_START_PAGES.get(activity);
         if (contactStartPage != null
             && contactStartPage.intValue() != current) {
             // The contact began where the writer did not own the page. Keep
@@ -8137,9 +8316,17 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             // pen-up, out of the native writer. This also covers a fast move
             // back onto the current page before the UI thread has published
             // the requested ownership transaction.
-            log("page_activation_nonwritable_contact_blocked current="
-                + current + " start=" + contactStartPage
-                + " point_page=" + target + " pressure=" + pressure);
+            notePenInputBlock(
+                activity,
+                "nonwritable_contact",
+                x,
+                y,
+                pressure,
+                -1L,
+                current,
+                target,
+                capturedContactStart
+            );
             return true;
         }
         if (target < 0 || target == current) {
@@ -8151,9 +8338,17 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 // A stroke that began on the active page remains an active-page
                 // stroke. Block ink-bearing points that cross the divider, but
                 // never turn that continuation into an ownership transfer.
-                log("page_activation_cross_page_point_blocked current="
-                    + current + " target=" + target
-                    + " start=" + contactStartPage);
+                notePenInputBlock(
+                    activity,
+                    "active_stroke_cross_page",
+                    x,
+                    y,
+                    pressure,
+                    -1L,
+                    current,
+                    target,
+                    capturedContactStart
+                );
                 return true;
             }
             if (completingActivePageStroke) {
@@ -8161,17 +8356,23 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 // even when the lift coordinate is over the other half. The
                 // caller skips hover activation for this same frame and clears
                 // the guard only after the native callback is preserved.
-                log("page_activation_cross_page_terminal_preserved current="
-                    + current + " target=" + target
-                    + " start=" + contactStartPage);
                 return false;
             }
         }
         // handlePenPageActivation runs the native save/load transition on the
         // UI thread.  Return true immediately so this initiating coordinate
         // can never enter the source page's DrawPath while that work is queued.
-        log("page_activation_trigger_input_blocked current=" + current
-            + " target=" + target + " pressure=" + pressure);
+        notePenInputBlock(
+            activity,
+            "activation_trigger",
+            x,
+            y,
+            pressure,
+            -1L,
+            current,
+            target,
+            capturedContactStart
+        );
         return true;
     }
 
@@ -8550,6 +8751,17 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         failClosedPageActivation(
                             activity,
                             "pen_lift_geometry_failed"
+                        );
+                        return;
+                    }
+                    if (!publishReadyPenInputGeometryAfterActivation(
+                            activity,
+                            current,
+                            "pen_lift_geometry_committed"
+                        )) {
+                        failClosedPageActivation(
+                            activity,
+                            "pen_lift_snapshot_publish_failed"
                         );
                         return;
                     }

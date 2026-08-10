@@ -68,12 +68,19 @@ validated document configuration, current page pair, visible page bounds, and
 writer-ready state. Supernote's native pen-position callback reads only that
 snapshot plus the in-memory transaction/contact guards. It performs no marker
 parsing, document metadata inspection, `stat`, hashing, or other filesystem
-work before the native writer callback.
+work before the native writer callback. Contact-boundary trace events and
+coalesced block-state diagnostics capture only immutable primitive/snapshot
+values there and serialize/log them on dedicated background workers.
 
 The snapshot is replaced whenever the page, document, orientation, validated
 configuration, or spread geometry changes. Missing, stale, or not-yet-committed
 geometry blocks protected landscape pen input rather than falling back to an
 unverified mapping.
+
+When target composition finishes while the discarded activation gesture is
+still held, geometry remains pending and the writer stays disabled. Pen lift
+restores the native writer geometry, publishes the corresponding ready snapshot,
+and only then atomically releases the ownership guard.
 
 ## Failure behavior
 

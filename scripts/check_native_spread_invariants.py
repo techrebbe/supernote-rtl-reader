@@ -859,13 +859,17 @@ def check(repo_root: Path) -> None:
         '"trigger_gesture_discarded".equals(reason)',
         '"page_activation_status_refresh_failed id="',
         '"SN_SPREAD_PROBE discard activation gesture"',
-        '"page_activation_trigger_input_blocked current="',
-        '"page_activation_pen_input_blocked id="',
-        '"page_activation_pen_input_blocked reason=native_chrome"',
+        "LOW_LATENCY_LOG_EXECUTOR",
+        "PEN_INPUT_BLOCK_LOG_STATES",
+        "queueLowLatencyLog(",
+        "notePenInputBlock(",
+        "finishPenInputBlock(",
+        '"activation_trigger"',
+        '"transaction"',
+        '"native_chrome"',
+        '"nonwritable_contact"',
+        '"active_stroke_cross_page"',
         '"page_activation_pen_ignored_native_chrome point="',
-        '"page_activation_cross_page_point_blocked current="',
-        '"page_activation_cross_page_terminal_preserved current="',
-        '"page_activation_native_chrome_terminal_preserved"',
         '"page_activation_active_stroke_terminal_preserved"',
         '"page_activation_ignored_cross_page_stroke current="',
         '"page_activation_rejected reason=pen_contact_active"',
@@ -1020,6 +1024,44 @@ def check(repo_root: Path) -> None:
             "native pen-position callback performs blocking config/filesystem "
             f"work instead of using its immutable snapshot: {blocking_hits}"
         )
+    synchronous_diagnostic_hits = [
+        marker for marker in (
+            "log(",
+            "traceEvent(",
+            "JSONObject",
+            "XposedBridge.log(",
+            "Log.i(",
+        )
+        if marker in digital_position_hook
+    ]
+    if synchronous_diagnostic_hits:
+        fail(
+            "native pen-position callback performs synchronous logging/JSON "
+            f"work: {synchronous_diagnostic_hits}"
+        )
+    require_markers(
+        digital_position_hook,
+        (
+            "queueLowLatencyLog(",
+            "tracePenPosition(",
+        ),
+        "queued native pen-position diagnostics",
+    )
+    trace_pen_start = module.find("private static void tracePenPosition(")
+    trace_pen_end = module.find(
+        "private static void tracePenLeftScreen(", trace_pen_start
+    )
+    if trace_pen_start < 0 or trace_pen_end < 0:
+        fail("could not isolate native pen trace enqueueing")
+    trace_pen = module[trace_pen_start:trace_pen_end]
+    trace_enqueue = trace_pen.find("expected.eventExecutor.execute(")
+    trace_serialize = trace_pen.find(
+        "traceEvent(", trace_enqueue
+    )
+    if not 0 <= trace_enqueue < trace_serialize:
+        fail("native pen trace serializes before its worker enqueue")
+    if "TraceEventContext.capture(" in trace_pen:
+        fail("native pen trace captures UI context on the low-latency callback")
     pressure_zero_cleanup = digital_position_hook.find(
         'if (pressure == 0 && !completingActivePageStroke)',
         schedule_activation,
@@ -1133,8 +1175,11 @@ def check(repo_root: Path) -> None:
     intercept_method = module[
         intercept_method_start:pending_target_after_intercept
     ]
+    contact_start_lookup = intercept_method.find(
+        "Integer contactStartPage = PEN_CONTACT_START_PAGES.get(activity);"
+    )
     intercept_terminal_identity = intercept_method.find(
-        "isCompletingActivePageStroke("
+        "isCompletingActivePageStroke(", contact_start_lookup
     )
     intercept_chrome = intercept_method.find(
         "isNativeChromeTouch(activity, y)", intercept_terminal_identity
@@ -1152,13 +1197,9 @@ def check(repo_root: Path) -> None:
         "int target = pageAt(inputSnapshot, x, y);",
         intercept_chrome_discard,
     )
-    contact_start_lookup = intercept_method.find(
-        "Integer contactStartPage = PEN_CONTACT_START_PAGES.get(activity);",
-        intercept_page_mapping,
-    )
     nonwritable_start_guard = intercept_method.find(
         "contactStartPage.intValue() != current",
-        contact_start_lookup,
+        intercept_page_mapping,
     )
     nonwritable_start_discard = intercept_method.find(
         "return true;", nonwritable_start_guard
@@ -1168,10 +1209,10 @@ def check(repo_root: Path) -> None:
         nonwritable_start_discard,
     )
     if not (
-        0 <= intercept_terminal_identity < intercept_chrome
+        0 <= contact_start_lookup < intercept_terminal_identity < intercept_chrome
         < intercept_chrome_terminal < intercept_chrome_preserve
         < intercept_chrome_discard < intercept_page_mapping
-        < contact_start_lookup < nonwritable_start_guard
+        < nonwritable_start_guard
         < nonwritable_start_discard < current_page_passthrough
     ):
         fail(
@@ -1179,7 +1220,7 @@ def check(repo_root: Path) -> None:
             "discard a non-writable-start gesture before current-page input"
         )
     nonwritable_guard_prefix = intercept_method[
-        contact_start_lookup:nonwritable_start_guard
+        intercept_page_mapping:nonwritable_start_guard
     ]
     if "pressure > 0" in nonwritable_guard_prefix:
         fail(
@@ -1222,9 +1263,13 @@ def check(repo_root: Path) -> None:
         "private static void publishPenInputGeometrySnapshot(",
         pending_snapshot_start,
     )
+    activation_ready_snapshot_start = module.find(
+        "private static boolean publishReadyPenInputGeometryAfterActivation(",
+        geometry_snapshot_start,
+    )
     snapshot_read_start = module.find(
         "private static PenInputSnapshot penInputSnapshot(",
-        geometry_snapshot_start,
+        activation_ready_snapshot_start,
     )
     spread_pair_start = module.find(
         "private static SpreadPair spreadPair(",
@@ -1235,6 +1280,7 @@ def check(repo_root: Path) -> None:
         snapshot_class_end,
         pending_snapshot_start,
         geometry_snapshot_start,
+        activation_ready_snapshot_start,
         snapshot_read_start,
         spread_pair_start,
     ) < 0:
@@ -1278,6 +1324,21 @@ def check(repo_root: Path) -> None:
             "Configuration.ORIENTATION_LANDSCAPE",
         ),
         "UI-published and runtime-bound pen-input snapshot",
+    )
+    activation_ready_snapshot = module[
+        activation_ready_snapshot_start:snapshot_read_start
+    ]
+    require_markers(
+        activation_ready_snapshot,
+        (
+            "PenInputSnapshot pending = penInputSnapshot(activity)",
+            "pending.currentPage != transaction.targetPage",
+            "publishPenInputGeometrySnapshot(",
+            "true",
+            "ready.geometryReady",
+            "ready.currentPage == transaction.targetPage",
+        ),
+        "post-activation ready pen-geometry publication",
     )
     snapshot_blocking_hits = [
         marker for marker in blocking_markers
@@ -1542,6 +1603,30 @@ def check(repo_root: Path) -> None:
             "ownership must commit only after reader and presenter identities "
             "match the target, while a concurrently latched contact remains "
             "fail-closed"
+        )
+
+    restore_geometry_start = module.find(
+        "private static boolean restoreTransactionalActivePageGeometry(",
+        pen_lift_start,
+    )
+    if restore_geometry_start < 0:
+        fail("could not isolate pen-lift geometry restoration")
+    pen_lift_method = module[pen_lift_start:restore_geometry_start]
+    lift_restore = pen_lift_method.find(
+        "restoreTransactionalActivePageGeometry("
+    )
+    lift_ready_snapshot = pen_lift_method.find(
+        "publishReadyPenInputGeometryAfterActivation(",
+        lift_restore,
+    )
+    lift_guard_release = pen_lift_method.find(
+        "finishPageActivationTransaction(",
+        lift_ready_snapshot,
+    )
+    if not 0 <= lift_restore < lift_ready_snapshot < lift_guard_release:
+        fail(
+            "trigger-gesture pen lift releases ownership before publishing "
+            "ready pen geometry"
         )
 
     finish_transaction_start = module.find(
@@ -2062,6 +2147,51 @@ def check(repo_root: Path) -> None:
                 f"{label} pen activation performs blocking config/filesystem "
                 f"work: {blocking_hits}"
             )
+    synchronous_pen_diagnostic_hits = [
+        marker for marker in (
+            "log(",
+            "traceEvent(",
+            "JSONObject",
+            "XposedBridge.log(",
+            "Log.i(",
+        )
+        if marker in intercept_pen
+    ]
+    if synchronous_pen_diagnostic_hits:
+        fail(
+            "synchronous pen interceptor performs logging/JSON work: "
+            f"{synchronous_pen_diagnostic_hits}"
+        )
+    require_markers(
+        intercept_pen,
+        (
+            "finishPenInputBlock(activity, x, y, pressure)",
+            "notePenInputBlock(",
+        ),
+        "coalesced asynchronous pen-interceptor diagnostics",
+    )
+
+    low_latency_log_start = module.find(
+        "private static void queueLowLatencyLog("
+    )
+    clear_contact_start = module.find(
+        "private static void clearPenContactStartPage(",
+        low_latency_log_start,
+    )
+    if low_latency_log_start < 0 or clear_contact_start < 0:
+        fail("could not isolate low-latency diagnostic queue")
+    low_latency_log = module[low_latency_log_start:clear_contact_start]
+    require_markers(
+        low_latency_log,
+        (
+            "LOW_LATENCY_LOG_EXECUTOR.execute(",
+            "PEN_INPUT_BLOCK_LOG_STATES.put(activity, state)",
+            "if (state.equals(previous))",
+            "PEN_INPUT_BLOCK_LOG_STATES.remove(activity)",
+            "queueLowLatencyLog(captured)",
+        ),
+        "serialized coalesced low-latency diagnostics",
+    )
 
     commit_start = module.find(
         "private static boolean commitPageActivationGeometry("

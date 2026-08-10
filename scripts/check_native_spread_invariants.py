@@ -1205,7 +1205,7 @@ def check(repo_root: Path) -> None:
         "return true;", nonwritable_start_guard
     )
     current_page_passthrough = intercept_method.find(
-        "if (target < 0 || target == current)",
+        "if (target == current)",
         nonwritable_start_discard,
     )
     if not (
@@ -1240,13 +1240,21 @@ def check(repo_root: Path) -> None:
     terminal_preserved = intercept_method.find(
         "return false;", terminal_pressure_guard
     )
+    unmapped_passthrough = intercept_method.find(
+        "if (target < 0)", terminal_preserved
+    )
+    unmapped_return = intercept_method.find(
+        "return false;", unmapped_passthrough
+    )
     if not (
-        0 <= crossing_guard < crossing_pressure_guard < crossing_discard
+        0 <= current_page_passthrough < crossing_guard
+        < crossing_pressure_guard < crossing_discard
         < terminal_pressure_guard < terminal_preserved
+        < unmapped_passthrough < unmapped_return
     ):
         fail(
             "a stroke begun on the active page is not kept on that page "
-            "through its cross-divider terminal frame"
+            "through divider/margin points and its terminal frame"
         )
 
     snapshot_class_start = module.find(

@@ -8332,15 +8332,16 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             );
             return true;
         }
-        if (target < 0 || target == current) {
+        if (target == current) {
             return false;
         }
         if (contactStartPage != null
             && contactStartPage.intValue() == current) {
             if (pressure > 0) {
                 // A stroke that began on the active page remains an active-page
-                // stroke. Block ink-bearing points that cross the divider, but
-                // never turn that continuation into an ownership transfer.
+                // stroke. Block ink-bearing points that cross the divider or
+                // enter any unmapped/cropped margin, but never turn that
+                // continuation into an ownership transfer.
                 notePenInputBlock(
                     activity,
                     "active_stroke_cross_page",
@@ -8361,6 +8362,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 // the guard only after the native callback is preserved.
                 return false;
             }
+        }
+        if (target < 0) {
+            // Unmapped hover with no active native stroke has no page to
+            // activate. Active-stroke points reached the guard above and were
+            // blocked, except for the required terminal pen-up callback.
+            return false;
         }
         // handlePenPageActivation runs the native save/load transition on the
         // UI thread.  Return true immediately so this initiating coordinate

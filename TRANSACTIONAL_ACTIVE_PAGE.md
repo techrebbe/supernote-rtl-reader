@@ -92,6 +92,11 @@ the exact document/source/target request is retained by the same deferred
 activation queue used for spread turns. It is replayed when verified pen geometry
 is ready, or cancelled if the document or source page changes first.
 
+A stroke admitted on the active page remains confined to that page. Ink-bearing
+coordinates that cross into the other page, divider, or an unmapped/cropped
+margin are blocked; only the native terminal pen-up callback is preserved so the
+source stroke can finish normally.
+
 ## Failure behavior
 
 The transaction fails closed:

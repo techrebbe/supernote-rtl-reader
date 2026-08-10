@@ -463,6 +463,9 @@ Automated and build evidence:
 - [x] Static invariants require an explicit side-selection tap rejected during
   transient geometry publication to be retained and replayed against its exact
   document/source/target context.
+- [x] Static invariants require active-page ink coordinates crossing into the
+  other page, divider, or unmapped/cropped margins to remain blocked while the
+  terminal pen-up callback is preserved.
 - [x] Native Spread v0.0.118 compiles, is v2/v3 signed, and reports matching
   manifest, handshake, and plug-in minimum version 118.
 

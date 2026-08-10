@@ -247,9 +247,13 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 - [x] Pen selection enters additive mode; eraser and lasso selection enter
   replacement mode; undo and redo use the updated canonical `.mark` page rather
   than Supernote's sometimes incomplete transient replacement bitmap.
-- [ ] Draw three separate strokes on one active page. Each earlier stroke remains
-  visible after the next stroke settles.
-- [ ] Turn away and back. All three strokes remain present in the same positions.
+- [x] Draw multiple separate strokes on one active page. Each earlier stroke
+  remains visible after the next stroke settles. Confirmed on the Nomad with
+  Native Spread v0.0.116: two new strokes extended the canonical page from four
+  to five to six trails without hiding any earlier trail.
+- [x] Turn away and back. All added strokes remain present in the same positions.
+  Confirmed by loading page 1 and page 2 in portrait and then restoring the
+  landscape spread; the active page retained all six trails throughout.
 - [ ] Erase part of one stroke. The erased pixels remain absent while the other
   strokes remain visible, including after a page turn.
 - [ ] Lasso-move one stroke and confirm no old pixels remain at its source.
@@ -267,16 +271,21 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   READ ONLY banner disappears, remains hidden after reopening the document,
   and returns when the setting is switched On. Safety/error overlays remain
   available in either state.
-- [ ] Start an annotation trace while an editable document is open. Confirm
+- [x] Start an annotation trace while an editable document is open. Confirm
   `events.jsonl`, `session.properties`, and the initial `.mark` snapshot appear
   under `Download/SupernoteNativeSpreadTrace` without changing visible ink.
+  Confirmed in session
+  `20260809-223717-633-p17868-SupernoteNativeSpreadCalibration.pdf`.
 - [ ] Record one portrait control stroke and the equivalent landscape-spread
   stroke. Each trace correlates pen contact, reader page, mark page,
   `receiveTrials`, `saveTrails`, trail fingerprints, and the resulting `.mark`
   SHA-256 under one transaction/session timeline.
-- [ ] Record checkpoints after settling and after returning to the page. The
+- [x] Record checkpoints after settling and after returning to the page. The
   collected ZIP contains both screenshots, only content-changed `.mark`
-  snapshots, and `module-logcat.txt`.
+  snapshots, and `module-logcat.txt`. The completed bundle contained 433 events,
+  three pen transactions, 48 annotation boundaries, six changed `.mark`
+  snapshots, no parse errors, and no potential failures. Its ZIP SHA-256 is
+  `DFC30AE0033B907ABD25612EBFEB1B5798552BEC585FDC1A3A244B17305D4306`.
 - [ ] Stop tracing and repeat ordinary writing with no active session. No trace
   files grow and annotation behavior remains unchanged.
 - [x] On the active spread page, stroke-erase one saved line. The line disappears
@@ -381,6 +390,15 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   verifies the completed session pointer before pulling the bundle.
 - [x] Ordered trail fingerprints cover all trails while detailed trace items
   remain capped at 256.
+- [x] Native Spread v0.0.116 active/inactive composition trace: two new active
+  page-2 strokes persisted additively (`4 -> 5 -> 6` trails), then one direct
+  inactive-page-1 stroke persisted additively (`3 -> 4` trails). Every prior
+  trail on both pages remained visible through portrait page loads and the final
+  landscape spread. Canonical file and current-memory fingerprints matched in
+  portrait. Their expected landscape difference was entirely the native 4/3
+  display transform: `1404x1872`/thickness `900` canonical trails became
+  `1872x2496`/thickness `1200` in memory, with matching trail counts and scaled
+  geometry rather than missing or substituted ink.
 - [ ] Tapping native Undo/Redo or the bottom page-number bar on the inactive
   half does not activate that page before the native control handles the tap.
 - [ ] After an inactive-page erase activates its page, a following active-page

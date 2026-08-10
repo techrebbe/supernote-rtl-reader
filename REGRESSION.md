@@ -449,6 +449,9 @@ Automated and build evidence:
   leave UI/history/save guards published forever: after the final attempt, the
   native writer must be disabled and pen geometry invalidated before the
   transaction guard is released.
+- [x] Static invariants require an editable RTL spread turn rejected by a
+  temporary pen/geometry/transaction guard to be retained and replayed against
+  its exact document and source page rather than reported as handled and lost.
 - [x] Native Spread v0.0.118 compiles, is v2/v3 signed, and reports matching
   manifest, handshake, and plug-in minimum version 118.
 

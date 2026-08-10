@@ -88,6 +88,10 @@ The transaction fails closed:
   and pen geometry is invalidated while the global UI/save guard is released,
   allowing navigation or reader recreation to recover without silently
   accepting uncertain page ownership;
+- an RTL page turn rejected while pen contact, geometry publication, or another
+  ownership transfer is in progress is retained and replayed against the exact
+  source document/page once transactional activation is ready; it is cancelled
+  only when a different document, orientation, or page supersedes the request;
 - no module-written `.mark` merge is used as a fallback.
 
 ## Migration boundary

@@ -127,6 +127,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final long PAGE_ACTIVATION_TIMEOUT_MS = 3000L;
     private static final int PAGE_ACTIVATION_ROLLBACK_MAX_ATTEMPTS = 2;
     private static final long PAGE_ACTIVATION_ROLLBACK_RETRY_MS = 180L;
+    private static final long DEFERRED_SPREAD_TURN_RETRY_MS = 80L;
+    private static final long DEFERRED_SPREAD_TURN_SLOW_RETRY_MS = 250L;
+    private static final long DEFERRED_SPREAD_TURN_NOTICE_MS = 3000L;
     private static final long PAGE_ACTIVATION_PEN_SETTLE_MS = 160L;
     private static final int PEN_CONTACT_BLOCKED_PAGE = Integer.MIN_VALUE;
     private static final long TRACE_SNAPSHOT_DEBOUNCE_MS = 80L;
@@ -134,6 +137,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final AtomicLong TRACE_TRANSACTION_COUNTER =
         new AtomicLong();
     private static final AtomicLong PAGE_ACTIVATION_COUNTER =
+        new AtomicLong();
+    private static final AtomicLong DEFERRED_SPREAD_TURN_COUNTER =
         new AtomicLong();
     private static final Object TRACE_LOCK = new Object();
     private static final Object PAGE_ACTIVATION_OWNERSHIP_LOCK = new Object();
@@ -162,6 +167,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         PAGE_ACTIVATION_BLOCKED_TOUCHES = new WeakHashMap<>();
     private static final Map<Activity, PageActivationTransaction>
         PAGE_ACTIVATION_TRANSACTIONS = new ConcurrentHashMap<>();
+    private static final Map<Activity, DeferredSpreadTurn>
+        DEFERRED_SPREAD_TURNS = new ConcurrentHashMap<>();
     private static final Map<Activity, Integer> PEN_CONTACT_START_PAGES =
         new ConcurrentHashMap<>();
     private static final Map<Activity, Integer> PEN_ACTIVATION_TARGETS =
@@ -644,6 +651,28 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             this.startedAt = SystemClock.uptimeMillis();
             this.triggerContactObserved = triggerContactObserved;
             this.triggerPenLifted = !triggerContactObserved;
+        }
+    }
+
+    private static final class DeferredSpreadTurn {
+        final long id;
+        final String documentPath;
+        final int sourcePage;
+        final int targetPage;
+        final long startedAt;
+        volatile boolean noticeShown;
+
+        DeferredSpreadTurn(
+            long id,
+            String documentPath,
+            int sourcePage,
+            int targetPage
+        ) {
+            this.id = id;
+            this.documentPath = documentPath;
+            this.sourcePage = sourcePage;
+            this.targetPage = targetPage;
+            this.startedAt = SystemClock.uptimeMillis();
         }
     }
 
@@ -6778,6 +6807,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         ACTIVATION_TOUCH_STARTS.remove(activity);
         PAGE_ACTIVATION_BLOCKED_TOUCHES.remove(activity);
         PAGE_ACTIVATION_TRANSACTIONS.remove(activity);
+        DEFERRED_SPREAD_TURNS.remove(activity);
         PEN_CONTACT_START_PAGES.remove(activity);
         PEN_ACTIVATION_TARGETS.remove(activity);
         PEN_ACTIVATION_ORIGINAL_PAGES.remove(activity);
@@ -10523,6 +10553,122 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         return XposedHelpers.getIntField(viewModel, "currentPage");
     }
 
+    private static boolean deferRtlSpreadTurn(
+        Activity activity,
+        SpreadConfig config,
+        int sourcePage,
+        int targetPage
+    ) {
+        if (activity == null || config == null || !config.editable
+            || activity.isFinishing()) {
+            return false;
+        }
+        DeferredSpreadTurn deferred = new DeferredSpreadTurn(
+            DEFERRED_SPREAD_TURN_COUNTER.incrementAndGet(),
+            config.documentPath,
+            sourcePage,
+            targetPage
+        );
+        DeferredSpreadTurn replaced = DEFERRED_SPREAD_TURNS.put(
+            activity,
+            deferred
+        );
+        log("rtl_spread_turn_deferred id=" + deferred.id
+            + " source=" + sourcePage + " target=" + targetPage
+            + " replaced=" + (replaced == null ? -1L : replaced.id));
+        scheduleDeferredRtlSpreadTurn(activity, deferred);
+        return true;
+    }
+
+    private static void scheduleDeferredRtlSpreadTurn(
+        final Activity activity,
+        final DeferredSpreadTurn deferred
+    ) {
+        long elapsed = SystemClock.uptimeMillis() - deferred.startedAt;
+        long delay = elapsed < DEFERRED_SPREAD_TURN_NOTICE_MS
+            ? DEFERRED_SPREAD_TURN_RETRY_MS
+            : DEFERRED_SPREAD_TURN_SLOW_RETRY_MS;
+        new Handler(activity.getMainLooper()).postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                DeferredSpreadTurn current =
+                    DEFERRED_SPREAD_TURNS.get(activity);
+                if (current != deferred) {
+                    return;
+                }
+                if (activity.isFinishing()
+                    || (Build.VERSION.SDK_INT
+                            >= Build.VERSION_CODES.JELLY_BEAN_MR1
+                        && activity.isDestroyed())) {
+                    DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+                    return;
+                }
+                try {
+                    if (activity.getResources().getConfiguration().orientation
+                            != Configuration.ORIENTATION_LANDSCAPE
+                        || !deferred.documentPath.equals(
+                            currentDocumentPath(activity)
+                        )) {
+                        DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+                        log("rtl_spread_turn_deferred_cancelled id="
+                            + deferred.id + " reason=context_changed");
+                        return;
+                    }
+
+                    int currentPage = currentDocumentPage(activity);
+                    if (currentPage == deferred.targetPage) {
+                        DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+                        log("rtl_spread_turn_deferred_satisfied id="
+                            + deferred.id + " target="
+                            + deferred.targetPage);
+                        return;
+                    }
+                    if (currentPage != deferred.sourcePage) {
+                        DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+                        log("rtl_spread_turn_deferred_cancelled id="
+                            + deferred.id + " reason=source_changed"
+                            + " expected=" + deferred.sourcePage
+                            + " current=" + currentPage);
+                        return;
+                    }
+
+                    if (editablePenInputReady(activity)
+                        && beginPageActivationTransaction(
+                            activity,
+                            deferred.targetPage,
+                            "deferred_spread_turn",
+                            false
+                        )) {
+                        DEFERRED_SPREAD_TURNS.remove(activity, deferred);
+                        log("rtl_spread_turn_deferred_started id="
+                            + deferred.id + " source="
+                            + deferred.sourcePage + " target="
+                            + deferred.targetPage);
+                        return;
+                    }
+
+                    long waiting = SystemClock.uptimeMillis()
+                        - deferred.startedAt;
+                    if (!deferred.noticeShown
+                        && waiting >= DEFERRED_SPREAD_TURN_NOTICE_MS) {
+                        deferred.noticeShown = true;
+                        showStatusOverlay(
+                            activity,
+                            "RTL SPREAD: page turn waiting for pen/page state"
+                        );
+                        log("rtl_spread_turn_deferred_waiting id="
+                            + deferred.id + " elapsed_ms=" + waiting);
+                    }
+                    scheduleDeferredRtlSpreadTurn(activity, deferred);
+                } catch (Throwable throwable) {
+                    log("rtl_spread_turn_deferred_retry_failed id="
+                        + deferred.id + " " + throwable);
+                    scheduleDeferredRtlSpreadTurn(activity, deferred);
+                }
+            }
+        }, delay);
+    }
+
     private static boolean handleRtlSpreadTurn(
         Activity activity,
         Object viewModel,
@@ -10585,7 +10731,13 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     + " forward=" + forward
                     + " preserve_side="
                     + (preserveLeftSide ? "LEFT" : "RIGHT"));
-                return true;
+                boolean deferred = !started && deferRtlSpreadTurn(
+                    activity,
+                    config,
+                    currentPage,
+                    target
+                );
+                return started || deferred;
             }
 
             Object presenter = XposedHelpers.getObjectField(

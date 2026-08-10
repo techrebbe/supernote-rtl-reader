@@ -1893,6 +1893,79 @@ def check(repo_root: Path) -> None:
     ) >= 0:
         fail("activation-start failure drops its guard before rollback")
 
+    deferred_turn_start = module.find(
+        "private static boolean deferRtlSpreadTurn("
+    )
+    deferred_turn_schedule_start = module.find(
+        "private static void scheduleDeferredRtlSpreadTurn(",
+        deferred_turn_start,
+    )
+    rtl_turn_start = module.find(
+        "private static boolean handleRtlSpreadTurn(",
+        deferred_turn_schedule_start,
+    )
+    activate_page_start = module.find(
+        "private static void activateDocumentPage(",
+        rtl_turn_start,
+    )
+    if any(
+        position < 0
+        for position in (
+            deferred_turn_start,
+            deferred_turn_schedule_start,
+            rtl_turn_start,
+            activate_page_start,
+        )
+    ):
+        fail("could not isolate rejected RTL spread-turn preservation")
+    deferred_turn = module[
+        deferred_turn_start:deferred_turn_schedule_start
+    ]
+    deferred_turn_schedule = module[
+        deferred_turn_schedule_start:rtl_turn_start
+    ]
+    rtl_turn = module[rtl_turn_start:activate_page_start]
+    require_markers(
+        deferred_turn,
+        (
+            "DEFERRED_SPREAD_TURN_COUNTER.incrementAndGet()",
+            "config.documentPath",
+            "DEFERRED_SPREAD_TURNS.put(",
+            "scheduleDeferredRtlSpreadTurn(activity, deferred)",
+        ),
+        "rejected RTL spread-turn publication",
+    )
+    require_markers(
+        deferred_turn_schedule,
+        (
+            "current != deferred",
+            "deferred.documentPath.equals(",
+            "currentDocumentPath(activity)",
+            "currentPage == deferred.targetPage",
+            "currentPage != deferred.sourcePage",
+            "editablePenInputReady(activity)",
+            "beginPageActivationTransaction(",
+            '"deferred_spread_turn"',
+            "scheduleDeferredRtlSpreadTurn(activity, deferred)",
+        ),
+        "exact-context deferred RTL spread-turn replay",
+    )
+    editable_turn = rtl_turn.find("if (config != null && config.editable)")
+    turn_started = rtl_turn.find(
+        "boolean started = beginPageActivationTransaction(",
+        editable_turn,
+    )
+    turn_deferred = rtl_turn.find(
+        "boolean deferred = !started && deferRtlSpreadTurn(",
+        turn_started,
+    )
+    turn_result = rtl_turn.find(
+        "return started || deferred;",
+        turn_deferred,
+    )
+    if not 0 <= editable_turn < turn_started < turn_deferred < turn_result:
+        fail("rejected editable RTL spread turn can still be silently consumed")
+
     handle_pen_start = module.find(
         "private static void handlePenPageActivation("
     )

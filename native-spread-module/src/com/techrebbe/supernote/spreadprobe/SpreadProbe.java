@@ -133,6 +133,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final AtomicLong PAGE_ACTIVATION_COUNTER =
         new AtomicLong();
     private static final Object TRACE_LOCK = new Object();
+    private static final Object PAGE_ACTIVATION_OWNERSHIP_LOCK = new Object();
     private static final Map<Activity, Bitmap> COMPOSITES = new WeakHashMap<>();
     private static final Map<Activity, RectF> LEFT_DESTINATIONS = new WeakHashMap<>();
     private static final Map<Activity, RectF> RIGHT_DESTINATIONS = new WeakHashMap<>();
@@ -206,6 +207,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final ThreadLocal<Boolean> EXPLICIT_CANONICAL_TRAIL_SAVE =
         new ThreadLocal<>();
     private static final ThreadLocal<Boolean> PEN_ACTIVATION_STALE_SAVE_SCOPE =
+        new ThreadLocal<>();
+    private static final ThreadLocal<Boolean> PAGE_ACTIVATION_SOURCE_SAVE_SCOPE =
         new ThreadLocal<>();
     private static final ThreadLocal<Boolean>
         PAGE_ACTIVATION_RECEIVE_BLOCKED = new ThreadLocal<>();
@@ -1064,23 +1067,27 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     } catch (Throwable ignored) {
                     }
                     if (pressure > 0
-                        && PEN_CONTACT_START_PAGES.get(activity) == null
                         && isEditableSpreadLandscape(activity)) {
-                        int mappedContactPage = pageAt(
-                            activity,
-                            ((Integer) param.args[0]).intValue(),
-                            ((Integer) param.args[1]).intValue()
-                        );
-                        // A contact may begin in the divider or a cropped
-                        // margin. Do not permanently latch that unmapped -1;
-                        // keep watching until the held gesture first reaches
-                        // a real page so cross-divider ownership stays bound
-                        // to that page through pen-up.
-                        if (mappedContactPage >= 0) {
-                            PEN_CONTACT_START_PAGES.put(
-                                activity,
-                                Integer.valueOf(mappedContactPage)
-                            );
+                        synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+                            if (PEN_CONTACT_START_PAGES.get(activity) == null) {
+                                int mappedContactPage = pageAt(
+                                    activity,
+                                    ((Integer) param.args[0]).intValue(),
+                                    ((Integer) param.args[1]).intValue()
+                                );
+                                // A contact may begin in the divider or a
+                                // cropped margin. Do not permanently latch
+                                // that unmapped -1; keep watching until the
+                                // held gesture first reaches a real page so
+                                // cross-divider ownership stays bound to that
+                                // page through pen-up.
+                                if (mappedContactPage >= 0) {
+                                    PEN_CONTACT_START_PAGES.put(
+                                        activity,
+                                        Integer.valueOf(mappedContactPage)
+                                    );
+                                }
+                            }
                         }
                     }
                     Integer contactStartPage =
@@ -2678,6 +2685,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         "staleActivationScope",
                         Boolean.TRUE.equals(
                             PEN_ACTIVATION_STALE_SAVE_SCOPE.get()
+                        ),
+                        "activationSourceSaveScope",
+                        Boolean.TRUE.equals(
+                            PAGE_ACTIVATION_SOURCE_SAVE_SCOPE.get()
                         )
                     );
                     traceAnnotationBoundary(
@@ -2686,7 +2697,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         "save_trails_before",
                         false
                     );
-                    if (shouldBlockPageActivationSave(activity)) {
+                    boolean activationSourceSave = Boolean.TRUE.equals(
+                        PAGE_ACTIVATION_SOURCE_SAVE_SCOPE.get()
+                    );
+                    if (shouldBlockPageActivationSave(activity)
+                        && !activationSourceSave) {
                         param.setResult(null);
                         PageActivationTransaction transaction =
                             PAGE_ACTIVATION_TRANSACTIONS.get(activity);
@@ -2696,6 +2711,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                             + (transaction == null
                                 ? -1 : transaction.targetPage));
                         return;
+                    }
+                    if (activationSourceSave) {
+                        log("page_activation_source_save_allowed");
                     }
                     boolean explicitCanonicalSave = Boolean.TRUE.equals(
                         EXPLICIT_CANONICAL_TRAIL_SAVE.get()
@@ -7813,29 +7831,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         if (activity == null || !isEditableSpreadLandscape(activity)) {
             return false;
         }
-        if (!triggerContactObserved
-            && PEN_CONTACT_START_PAGES.get(activity) != null) {
-            log("page_activation_rejected reason=pen_contact_active"
-                + " requested_target=" + targetPage
-                + " trigger=" + trigger);
-            return false;
-        }
-        PageActivationTransaction currentTransaction =
-            PAGE_ACTIVATION_TRANSACTIONS.get(activity);
-        if (currentTransaction != null) {
-            if (currentTransaction.targetPage == targetPage
-                && triggerContactObserved) {
-                currentTransaction.triggerContactObserved = true;
-                currentTransaction.triggerPenLifted = false;
-            }
-            log("page_activation_rejected reason=transaction_in_progress"
-                + " active_id=" + currentTransaction.id
-                + " active_target=" + currentTransaction.targetPage
-                + " requested_target=" + targetPage
-                + " trigger=" + trigger);
-            return currentTransaction.targetPage == targetPage;
-        }
-
+        PageActivationTransaction transaction = null;
         try {
             Object viewModel = XposedHelpers.getObjectField(
                 activity,
@@ -7855,26 +7851,65 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 activity,
                 "handWritePresenter"
             );
-            // The source page is flushed before ownership is published.  Once
-            // the transaction exists, lifecycle saves are treated as stale and
-            // cannot overwrite either page while the native owner is changing.
-            XposedHelpers.callMethod(presenter, "saveTrails", false, false);
-            XposedHelpers.callMethod(
-                presenter,
-                "disableHandWrite",
-                "SN_SPREAD_PROBE transactional page activation"
-            );
 
             long id = PAGE_ACTIVATION_COUNTER.incrementAndGet();
-            PageActivationTransaction transaction =
-                new PageActivationTransaction(
+            synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+                // Contact-start recording uses this same lock. Therefore a
+                // non-contact activation either observes an existing native
+                // stroke and rejects, or publishes its transaction before a
+                // new low-latency contact can be admitted.
+                if (!triggerContactObserved
+                    && PEN_CONTACT_START_PAGES.get(activity) != null) {
+                    log("page_activation_rejected reason=pen_contact_active"
+                        + " requested_target=" + targetPage
+                        + " trigger=" + trigger);
+                    return false;
+                }
+                PageActivationTransaction currentTransaction =
+                    PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+                if (currentTransaction != null) {
+                    if (currentTransaction.targetPage == targetPage
+                        && triggerContactObserved) {
+                        currentTransaction.triggerContactObserved = true;
+                        currentTransaction.triggerPenLifted = false;
+                    }
+                    log("page_activation_rejected"
+                        + " reason=transaction_in_progress"
+                        + " active_id=" + currentTransaction.id
+                        + " active_target=" + currentTransaction.targetPage
+                        + " requested_target=" + targetPage
+                        + " trigger=" + trigger);
+                    return currentTransaction.targetPage == targetPage;
+                }
+                transaction = new PageActivationTransaction(
                     id,
                     sourcePage,
                     targetPage,
                     trigger,
                     triggerContactObserved
                 );
-            PAGE_ACTIVATION_TRANSACTIONS.put(activity, transaction);
+                PAGE_ACTIVATION_TRANSACTIONS.put(activity, transaction);
+            }
+
+            // The ownership/input guard is already visible. Permit exactly
+            // this call stack to perform the intentional source flush while
+            // all concurrent lifecycle saves and pen/UI input remain blocked.
+            PAGE_ACTIVATION_SOURCE_SAVE_SCOPE.set(Boolean.TRUE);
+            try {
+                XposedHelpers.callMethod(
+                    presenter,
+                    "saveTrails",
+                    false,
+                    false
+                );
+            } finally {
+                PAGE_ACTIVATION_SOURCE_SAVE_SCOPE.remove();
+            }
+            XposedHelpers.callMethod(
+                presenter,
+                "disableHandWrite",
+                "SN_SPREAD_PROBE transactional page activation"
+            );
             showStatusOverlay(
                 activity,
                 "RTL SPREAD: switching active page to " + (targetPage + 1)
@@ -7900,7 +7935,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             log("page_activation_start_failed target=" + targetPage
                 + " trigger=" + trigger + " " + throwable);
             XposedBridge.log(throwable);
-            if (PAGE_ACTIVATION_TRANSACTIONS.get(activity) != null) {
+            if (transaction != null
+                && PAGE_ACTIVATION_TRANSACTIONS.get(activity) == transaction) {
                 // loadPage(target) may have changed reader or presenter state
                 // before throwing. Preserve the ownership/save guard and use
                 // the same identity-verified source rollback as a timeout.

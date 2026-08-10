@@ -833,6 +833,8 @@ def check(repo_root: Path) -> None:
         "PAGE_ACTIVATION_HISTORY_BLOCKED",
         "ACTIVE_PAGE_STROKE_TERMINAL_CLEANUP",
         "PEN_CONTACT_START_PAGES",
+        "PAGE_ACTIVATION_OWNERSHIP_LOCK",
+        "PAGE_ACTIVATION_SOURCE_SAVE_SCOPE",
         "new ConcurrentHashMap<>()",
         "volatile boolean triggerContactObserved",
         "volatile boolean triggerPenLifted",
@@ -867,6 +869,7 @@ def check(repo_root: Path) -> None:
         '"page_activation_active_stroke_terminal_preserved"',
         '"page_activation_ignored_cross_page_stroke current="',
         '"page_activation_rejected reason=pen_contact_active"',
+        '"page_activation_source_save_allowed"',
         '"page_activation_ui_input_blocked id="',
         '"page_activation_history_blocked id="',
         "shouldBlockPageActivationSave(activity)",
@@ -913,8 +916,12 @@ def check(repo_root: Path) -> None:
     before_native_callback = digital_position_hook.find(
         "protected void beforeHookedMethod"
     )
+    contact_ownership_lock = digital_position_hook.find(
+        "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+        before_native_callback,
+    )
     contact_page_mapping = digital_position_hook.find(
-        "int mappedContactPage = pageAt(", before_native_callback
+        "int mappedContactPage = pageAt(", contact_ownership_lock
     )
     contact_page_valid = digital_position_hook.find(
         "if (mappedContactPage >= 0)", contact_page_mapping
@@ -923,7 +930,8 @@ def check(repo_root: Path) -> None:
         "PEN_CONTACT_START_PAGES.put(", contact_page_valid
     )
     if not (
-        0 <= before_native_callback < contact_page_mapping
+        0 <= before_native_callback < contact_ownership_lock
+        < contact_page_mapping
         < contact_page_valid < contact_page_latched
     ):
         fail(
@@ -1226,8 +1234,11 @@ def check(repo_root: Path) -> None:
     if transaction_start < 0 or request_load_start < 0:
         fail("could not isolate page-activation transaction start")
     transaction_start_method = module[transaction_start:request_load_start]
+    ownership_lock = transaction_start_method.find(
+        "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)"
+    )
     active_pen_guard = transaction_start_method.find(
-        "!triggerContactObserved"
+        "!triggerContactObserved", ownership_lock
     )
     active_pen_identity = transaction_start_method.find(
         "PEN_CONTACT_START_PAGES.get(activity) != null",
@@ -1237,31 +1248,71 @@ def check(repo_root: Path) -> None:
         "PageActivationTransaction currentTransaction =",
         active_pen_identity,
     )
-    if not 0 <= active_pen_guard < active_pen_identity < transaction_lookup:
+    if not (
+        0 <= ownership_lock < active_pen_guard
+        < active_pen_identity < transaction_lookup
+    ):
         fail(
-            "finger/page-turn activation can overlap a native pen contact"
+            "finger/page-turn activation does not atomically reject an active "
+            "native pen contact before publishing ownership"
         )
-    source_save = transaction_start_method.find(
-        'XposedHelpers.callMethod(presenter, "saveTrails", false, false);'
-    )
-    writer_disable = transaction_start_method.find(
-        '"SN_SPREAD_PROBE transactional page activation"', source_save
-    )
     publish_transaction = transaction_start_method.find(
         "PAGE_ACTIVATION_TRANSACTIONS.put(activity, transaction);",
-        writer_disable,
+        transaction_lookup,
+    )
+    source_save_scope = transaction_start_method.find(
+        "PAGE_ACTIVATION_SOURCE_SAVE_SCOPE.set(Boolean.TRUE);",
+        publish_transaction,
+    )
+    source_save = transaction_start_method.find(
+        '"saveTrails",', source_save_scope
+    )
+    source_save_scope_clear = transaction_start_method.find(
+        "PAGE_ACTIVATION_SOURCE_SAVE_SCOPE.remove();", source_save
+    )
+    writer_disable = transaction_start_method.find(
+        '"SN_SPREAD_PROBE transactional page activation"',
+        source_save_scope_clear,
     )
     request_target_load = transaction_start_method.find(
         "requestPageActivationLoad(activity, transaction, viewModel);",
         publish_transaction,
     )
     if not (
-        0 <= source_save < writer_disable < publish_transaction
-        < request_target_load
+        0 <= publish_transaction < source_save_scope < source_save
+        < source_save_scope_clear < writer_disable < request_target_load
     ):
         fail(
-            "ownership transfer must save the source, disable writing, publish "
-            "the exact transaction, and only then load the target"
+            "ownership transfer must publish the exact input/save guard before "
+            "its scoped source flush, disable writing, and load the target"
+        )
+
+    save_hook_start = module.find(
+        '"saveTrails",\n            boolean.class,\n            boolean.class,'
+    )
+    receive_hook_start = module.find(
+        '"receiveTrials",', save_hook_start
+    )
+    if save_hook_start < 0 or receive_hook_start < 0:
+        fail("could not isolate saveTrails ownership guard")
+    save_hook = module[save_hook_start:receive_hook_start]
+    source_save_scope_read = save_hook.find(
+        "PAGE_ACTIVATION_SOURCE_SAVE_SCOPE.get()"
+    )
+    save_guard = save_hook.find(
+        "shouldBlockPageActivationSave(activity)", source_save_scope_read
+    )
+    scoped_bypass = save_hook.find(
+        "&& !activationSourceSave", save_guard
+    )
+    blocked_result = save_hook.find("param.setResult(null);", scoped_bypass)
+    if not (
+        0 <= source_save_scope_read < save_guard < scoped_bypass
+        < blocked_result
+    ):
+        fail(
+            "transaction lifecycle saves are not blocked except for the "
+            "thread-scoped intentional source flush"
         )
 
     commit_start = module.find(
@@ -1494,7 +1545,7 @@ def check(repo_root: Path) -> None:
         '"page_activation_start_failed target="'
     )
     guarded_start_failure = begin_transaction.find(
-        "PAGE_ACTIVATION_TRANSACTIONS.get(activity) != null",
+        "PAGE_ACTIVATION_TRANSACTIONS.get(activity) == transaction",
         start_failure,
     )
     start_failure_abort = begin_transaction.find(

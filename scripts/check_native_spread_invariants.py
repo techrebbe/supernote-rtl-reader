@@ -1517,6 +1517,30 @@ def check(repo_root: Path) -> None:
         ]
     ):
         fail("queued gutter/wrong-half transfer contact remains unlatchable")
+    queued_transaction = handle_pen.find("if (transaction != null)")
+    queued_orientation = handle_pen.find(
+        "if (!isEditableSpreadLandscape(activity))",
+        queued_transaction,
+    )
+    if not 0 <= queued_transaction < queued_orientation:
+        fail("queued transaction input is not guarded after orientation exit")
+    synchronous_transaction = intercept_pen.find("if (transaction != null)")
+    synchronous_orientation = intercept_pen.find(
+        "if (!isEditableSpreadLandscape(activity))",
+        synchronous_transaction,
+    )
+    synchronous_chrome = intercept_pen.find(
+        "if (isNativeChromeTouch(activity, y))",
+        synchronous_orientation,
+    )
+    if not (
+        0 <= synchronous_transaction < synchronous_orientation
+        < synchronous_chrome
+    ):
+        fail(
+            "synchronous transaction input is not guarded before orientation "
+            "and native chrome checks"
+        )
 
     commit_start = module.find(
         "private static boolean commitPageActivationGeometry("

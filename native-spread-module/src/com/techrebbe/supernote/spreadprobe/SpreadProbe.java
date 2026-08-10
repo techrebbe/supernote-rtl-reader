@@ -7604,14 +7604,6 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         activity.runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                if (!isEditableSpreadLandscape(activity)) {
-                    abortPageActivationTransaction(
-                        activity,
-                        "spread_inactive",
-                        true
-                    );
-                    return;
-                }
                 int requestedTarget = pageAt(
                     activity,
                     requestedX,
@@ -7634,6 +7626,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                             "position_pressure_zero"
                         );
                     }
+                    return;
+                }
+                if (!isEditableSpreadLandscape(activity)) {
+                    abortPageActivationTransaction(
+                        activity,
+                        "spread_inactive",
+                        true
+                    );
                     return;
                 }
                 if (isNativeChromeTouch(activity, requestedY)) {
@@ -7681,7 +7681,24 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         int y,
         int pressure
     ) {
-        if (activity == null || !isEditableSpreadLandscape(activity)) {
+        if (activity == null) {
+            return false;
+        }
+        PageActivationTransaction transaction =
+            PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+        if (transaction != null) {
+            int transactionPointPage = pageAt(activity, x, y);
+            if (pressure > 0) {
+                transaction.triggerContactObserved = true;
+                transaction.triggerPenLifted = false;
+            }
+            log("page_activation_pen_input_blocked id=" + transaction.id
+                + " target=" + transaction.targetPage
+                + " point_page=" + transactionPointPage
+                + " pressure=" + pressure);
+            return true;
+        }
+        if (!isEditableSpreadLandscape(activity)) {
             return false;
         }
         boolean completingActivePageStroke =
@@ -7700,20 +7717,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 + " point=" + x + "," + y + " pressure=" + pressure);
             return true;
         }
-        PageActivationTransaction transaction =
-            PAGE_ACTIVATION_TRANSACTIONS.get(activity);
         int target = pageAt(activity, x, y);
-        if (transaction != null) {
-            if (pressure > 0) {
-                transaction.triggerContactObserved = true;
-                transaction.triggerPenLifted = false;
-            }
-            log("page_activation_pen_input_blocked id=" + transaction.id
-                + " target=" + transaction.targetPage
-                + " point_page=" + target
-                + " pressure=" + pressure);
-            return true;
-        }
         int current = currentDocumentPage(activity);
         if (target < 0 || target == current) {
             return false;

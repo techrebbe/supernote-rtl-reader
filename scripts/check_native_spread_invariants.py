@@ -2023,8 +2023,10 @@ def check(repo_root: Path) -> None:
     require_markers(
         deferred_turn,
         (
+            "deferRtlPageActivation(",
             "DEFERRED_SPREAD_TURN_COUNTER.incrementAndGet()",
             "config.documentPath",
+            "trigger",
             "DEFERRED_SPREAD_TURNS.put(",
             "scheduleDeferredRtlSpreadTurn(activity, deferred)",
         ),
@@ -2040,7 +2042,7 @@ def check(repo_root: Path) -> None:
             "currentPage != deferred.sourcePage",
             "editablePenInputReady(activity)",
             "beginPageActivationTransaction(",
-            '"deferred_spread_turn"',
+            "deferred.trigger",
             "scheduleDeferredRtlSpreadTurn(activity, deferred)",
         ),
         "exact-context deferred RTL spread-turn replay",
@@ -2060,6 +2062,34 @@ def check(repo_root: Path) -> None:
     )
     if not 0 <= editable_turn < turn_started < turn_deferred < turn_result:
         fail("rejected editable RTL spread turn can still be silently consumed")
+
+    activate_page_end = module.find(
+        "private static void setReplaceActiveInkMode(",
+        activate_page_start,
+    )
+    if activate_page_end < 0:
+        fail("could not isolate explicit page activation")
+    activate_page = module[activate_page_start:activate_page_end]
+    explicit_started = activate_page.find(
+        "boolean started = beginPageActivationTransaction("
+    )
+    explicit_deferred = activate_page.find(
+        "if (!started)",
+        explicit_started,
+    )
+    explicit_queue = activate_page.find(
+        "deferRtlPageActivation(",
+        explicit_deferred,
+    )
+    explicit_trigger = activate_page.find(
+        '"deferred_explicit_activation"',
+        explicit_queue,
+    )
+    if not (
+        0 <= explicit_started < explicit_deferred
+        < explicit_queue < explicit_trigger
+    ):
+        fail("transiently rejected explicit page activation can be lost")
 
     handle_pen_start = module.find(
         "private static void handlePenPageActivation("

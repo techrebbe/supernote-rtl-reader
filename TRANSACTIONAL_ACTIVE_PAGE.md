@@ -87,6 +87,11 @@ transaction remains the sole owner of recovery. It reports the attempt as
 handled while rolling back to the source page, so no legacy target-page fallback
 can race the rollback.
 
+If an explicit side-selection tap arrives during a transient geometry refresh,
+the exact document/source/target request is retained by the same deferred
+activation queue used for spread turns. It is replayed when verified pen geometry
+is ready, or cancelled if the document or source page changes first.
+
 ## Failure behavior
 
 The transaction fails closed:

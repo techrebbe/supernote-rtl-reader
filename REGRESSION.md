@@ -460,6 +460,9 @@ Automated and build evidence:
 - [x] Static invariants require a partial transaction-start failure to retain
   ownership through source rollback and suppress the legacy target-page
   activation fallback.
+- [x] Static invariants require an explicit side-selection tap rejected during
+  transient geometry publication to be retained and replayed against its exact
+  document/source/target context.
 - [x] Native Spread v0.0.118 compiles, is v2/v3 signed, and reports matching
   manifest, handshake, and plug-in minimum version 118.
 

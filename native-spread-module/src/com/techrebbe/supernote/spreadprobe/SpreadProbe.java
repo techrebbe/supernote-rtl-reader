@@ -673,6 +673,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         final String documentPath;
         final int sourcePage;
         final int targetPage;
+        final String trigger;
         final long startedAt;
         volatile boolean noticeShown;
 
@@ -680,12 +681,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             long id,
             String documentPath,
             int sourcePage,
-            int targetPage
+            int targetPage,
+            String trigger
         ) {
             this.id = id;
             this.documentPath = documentPath;
             this.sourcePage = sourcePage;
             this.targetPage = targetPage;
+            this.trigger = trigger;
             this.startedAt = SystemClock.uptimeMillis();
         }
     }
@@ -10776,15 +10779,32 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         int sourcePage,
         int targetPage
     ) {
+        return deferRtlPageActivation(
+            activity,
+            config,
+            sourcePage,
+            targetPage,
+            "deferred_spread_turn"
+        );
+    }
+
+    private static boolean deferRtlPageActivation(
+        Activity activity,
+        SpreadConfig config,
+        int sourcePage,
+        int targetPage,
+        String trigger
+    ) {
         if (activity == null || config == null || !config.editable
-            || activity.isFinishing()) {
+            || trigger == null || activity.isFinishing()) {
             return false;
         }
         DeferredSpreadTurn deferred = new DeferredSpreadTurn(
             DEFERRED_SPREAD_TURN_COUNTER.incrementAndGet(),
             config.documentPath,
             sourcePage,
-            targetPage
+            targetPage,
+            trigger
         );
         DeferredSpreadTurn replaced = DEFERRED_SPREAD_TURNS.put(
             activity,
@@ -10792,6 +10812,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         );
         log("rtl_spread_turn_deferred id=" + deferred.id
             + " source=" + sourcePage + " target=" + targetPage
+            + " trigger=" + trigger
             + " replaced=" + (replaced == null ? -1L : replaced.id));
         scheduleDeferredRtlSpreadTurn(activity, deferred);
         return true;
@@ -10851,16 +10872,17 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
 
                     if (editablePenInputReady(activity)
                         && beginPageActivationTransaction(
-                            activity,
-                            deferred.targetPage,
-                            "deferred_spread_turn",
-                            false
+                             activity,
+                             deferred.targetPage,
+                             deferred.trigger,
+                             false
                         )) {
                         DEFERRED_SPREAD_TURNS.remove(activity, deferred);
                         log("rtl_spread_turn_deferred_started id="
                             + deferred.id + " source="
                             + deferred.sourcePage + " target="
-                            + deferred.targetPage);
+                            + deferred.targetPage + " trigger="
+                            + deferred.trigger);
                         return;
                     }
 
@@ -10871,7 +10893,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         deferred.noticeShown = true;
                         showStatusOverlay(
                             activity,
-                            "RTL SPREAD: page turn waiting for pen/page state"
+                            "RTL SPREAD: "
+                                + ("deferred_spread_turn".equals(
+                                        deferred.trigger
+                                    )
+                                    ? "page turn" : "page activation")
+                                + " waiting for pen/page state"
                         );
                         log("rtl_spread_turn_deferred_waiting id="
                             + deferred.id + " elapsed_ms=" + waiting);
@@ -11005,12 +11032,21 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 return;
             }
             if (isEditableSpreadLandscape(activity)) {
-                beginPageActivationTransaction(
+                boolean started = beginPageActivationTransaction(
                     activity,
                     targetPage,
                     "explicit_activation",
                     false
                 );
+                if (!started) {
+                    deferRtlPageActivation(
+                        activity,
+                        spreadConfig(activity),
+                        currentPage,
+                        targetPage,
+                        "deferred_explicit_activation"
+                    );
+                }
                 return;
             }
 

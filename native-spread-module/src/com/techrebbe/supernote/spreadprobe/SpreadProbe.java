@@ -617,6 +617,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         volatile boolean triggerContactObserved;
         volatile boolean triggerPenLifted;
         volatile boolean geometryCommitted;
+        volatile boolean rollbackPending;
+        volatile String abortReason;
         int loadAttempts;
 
         PageActivationTransaction(
@@ -7897,6 +7899,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 if (transaction == null || transaction.id != transactionId) {
                     return;
                 }
+                if (transaction.rollbackPending) {
+                    return;
+                }
                 if (transaction.geometryCommitted
                     && transaction.triggerContactObserved
                     && !transaction.triggerPenLifted) {
@@ -7951,6 +7956,28 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 presenter,
                 "currentPage"
             );
+            if (transaction.rollbackPending) {
+                if (currentPage != transaction.sourcePage
+                    || presenterMarkPage != transaction.sourcePage + 1) {
+                    log("page_activation_rollback_waiting id="
+                        + transaction.id + " source="
+                        + transaction.sourcePage + " reader_page="
+                        + currentPage + " mark_page=" + presenterMarkPage);
+                    XposedHelpers.callMethod(
+                        presenter,
+                        "disableHandWrite",
+                        "SN_SPREAD_PROBE rollback identity mismatch"
+                    );
+                    return false;
+                }
+                finishPageActivationRollback(
+                    activity,
+                    presenter,
+                    transaction,
+                    "source_identity_reconverged"
+                );
+                return false;
+            }
             if (currentPage != transaction.targetPage
                 || presenterMarkPage != transaction.targetPage + 1) {
                 log("page_activation_commit_waiting id=" + transaction.id
@@ -8003,7 +8030,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         final PageActivationTransaction transaction =
             PAGE_ACTIVATION_TRANSACTIONS.get(activity);
         if (transaction == null || !transaction.triggerContactObserved
-            || transaction.triggerPenLifted) {
+            || transaction.triggerPenLifted || transaction.rollbackPending) {
             return;
         }
         transaction.triggerPenLifted = true;
@@ -8020,6 +8047,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 PageActivationTransaction current =
                     PAGE_ACTIVATION_TRANSACTIONS.get(activity);
                 if (current == null || current.id != transaction.id
+                    || current.rollbackPending
                     || !current.geometryCommitted
                     || !current.triggerPenLifted) {
                     return;
@@ -8100,7 +8128,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     ) {
         PageActivationTransaction current =
             PAGE_ACTIVATION_TRANSACTIONS.get(activity);
-        if (current == null || current.id != transaction.id) {
+        if (current == null || current.id != transaction.id
+            || current.rollbackPending) {
             return;
         }
         PAGE_ACTIVATION_TRANSACTIONS.remove(activity);
@@ -8182,6 +8211,13 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         if (transaction == null) {
             return;
         }
+        if (transaction.rollbackPending) {
+            log("page_activation_abort_ignored id=" + transaction.id
+                + " reason=rollback_pending requested_reason=" + reason);
+            return;
+        }
+        transaction.rollbackPending = true;
+        transaction.abortReason = reason;
         try {
             log("page_activation_aborted id=" + transaction.id
                 + " source=" + transaction.sourcePage
@@ -8202,43 +8238,83 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             );
             failClosedPageActivation(activity, reason);
             if (!restoreSourcePage || activity.isFinishing()) {
+                PAGE_ACTIVATION_TRANSACTIONS.remove(activity, transaction);
                 return;
             }
             Object viewModel = XposedHelpers.getObjectField(
                 activity,
                 "documentViewModel"
             );
-            int currentPage = XposedHelpers.getIntField(
+            // Always reload the source, even if the reader field already says
+            // source: the presenter may still own the target mark page.  The
+            // transaction remains published after this asynchronous request
+            // and is released only when composition verifies both identities.
+            XposedHelpers.callMethod(
                 viewModel,
-                "currentPage"
+                "loadPage",
+                transaction.sourcePage
             );
-            if (currentPage != transaction.sourcePage) {
-                XposedHelpers.callMethod(
-                    viewModel,
-                    "loadPage",
-                    transaction.sourcePage
-                );
-                log("page_activation_rollback_requested id="
-                    + transaction.id + " page=" + transaction.sourcePage);
-            }
+            log("page_activation_rollback_requested id="
+                + transaction.id + " page=" + transaction.sourcePage);
         } catch (Throwable throwable) {
             log("page_activation_rollback_failed id=" + transaction.id
                 + " " + throwable);
             XposedBridge.log(throwable);
-        } finally {
-            // Keep the transaction published through the entire rollback load.
-            // Supernote may synchronously call saveTrails() while loadPage()
-            // changes reader/presenter ownership; the published transaction is
-            // the save guard that prevents transitional trails from being
-            // persisted under either page identity.
-            if (PAGE_ACTIVATION_TRANSACTIONS.remove(
-                    activity,
-                    transaction
-                )) {
-                log("page_activation_abort_guard_released id="
-                    + transaction.id + " reason=" + reason);
-            }
         }
+    }
+
+    private static void finishPageActivationRollback(
+        Activity activity,
+        Object presenter,
+        PageActivationTransaction transaction,
+        String reason
+    ) {
+        PageActivationTransaction current = activity == null
+            ? null : PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+        if (current == null || current.id != transaction.id
+            || !current.rollbackPending) {
+            return;
+        }
+        try {
+            // loadPage() may re-enable the writer.  Disable it again after both
+            // identities have reconverged, before releasing mutation guards.
+            XposedHelpers.callMethod(
+                presenter,
+                "disableHandWrite",
+                "SN_SPREAD_PROBE rollback completed fail closed"
+            );
+        } catch (Throwable throwable) {
+            log("page_activation_rollback_disable_failed id="
+                + transaction.id + " " + throwable);
+            XposedBridge.log(throwable);
+            return;
+        }
+        if (!PAGE_ACTIVATION_TRANSACTIONS.remove(activity, current)) {
+            return;
+        }
+        long elapsed = SystemClock.uptimeMillis() - transaction.startedAt;
+        log("page_activation_rollback_completed id=" + transaction.id
+            + " source=" + transaction.sourcePage
+            + " target=" + transaction.targetPage
+            + " abort_reason=" + transaction.abortReason
+            + " reason=" + reason
+            + " elapsed_ms=" + elapsed);
+        traceEvent(
+            activity,
+            "page_activation_transaction_rolled_back",
+            "id",
+            transaction.id,
+            "sourcePage",
+            transaction.sourcePage,
+            "targetPage",
+            transaction.targetPage,
+            "abortReason",
+            transaction.abortReason,
+            "reason",
+            reason,
+            "elapsedMs",
+            elapsed
+        );
     }
 
     private static void failClosedPageActivation(

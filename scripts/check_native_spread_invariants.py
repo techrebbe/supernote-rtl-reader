@@ -837,6 +837,7 @@ def check(repo_root: Path) -> None:
         "volatile boolean triggerContactObserved",
         "volatile boolean triggerPenLifted",
         "volatile boolean geometryCommitted",
+        "volatile boolean rollbackPending",
         "PAGE_ACTIVATION_COUNTER.incrementAndGet()",
         "interceptPenPageActivation(",
         "beginPageActivationTransaction(",
@@ -846,6 +847,7 @@ def check(repo_root: Path) -> None:
         "markPageActivationPenLifted(",
         "restoreTransactionalActivePageGeometry(",
         "finishPageActivationTransaction(",
+        "finishPageActivationRollback(",
         "abortPageActivationTransaction(",
         "failClosedPageActivation(",
         '"page_activation_transaction_started"',
@@ -1312,35 +1314,85 @@ def check(repo_root: Path) -> None:
     if "triggerContactObserved" in save_blocker:
         fail("non-contact ownership transfers still allow lifecycle saves")
 
-    fail_closed_start = module.find(
-        "private static void failClosedPageActivation(",
+    rollback_finish_start = module.find(
+        "private static void finishPageActivationRollback(",
         abort_transaction_start,
     )
-    if fail_closed_start < 0:
+    fail_closed_start = module.find(
+        "private static void failClosedPageActivation(",
+        rollback_finish_start,
+    )
+    if rollback_finish_start < 0 or fail_closed_start < 0:
         fail("could not isolate page-activation rollback")
-    abort_transaction = module[abort_transaction_start:fail_closed_start]
+    abort_transaction = module[abort_transaction_start:rollback_finish_start]
+    finish_rollback = module[rollback_finish_start:fail_closed_start]
     retained_transaction = abort_transaction.find(
         "PAGE_ACTIVATION_TRANSACTIONS.get(activity)"
     )
-    rollback_load = abort_transaction.find('"loadPage"')
-    rollback_finally = abort_transaction.find("} finally {", rollback_load)
-    release_guard = abort_transaction.find(
-        "PAGE_ACTIVATION_TRANSACTIONS.remove(", rollback_finally
+    rollback_published = abort_transaction.find(
+        "transaction.rollbackPending = true;",
+        retained_transaction,
     )
+    rollback_load = abort_transaction.find('"loadPage"')
     if not (
-        0 <= retained_transaction < rollback_load
-        < rollback_finally < release_guard
+        0 <= retained_transaction < rollback_published < rollback_load
     ):
         fail(
-            "page-activation rollback does not retain its save guard through "
-            "the source-page load"
+            "page-activation rollback is not published before the source-page load"
         )
     if abort_transaction.find(
-        "PAGE_ACTIVATION_TRANSACTIONS.remove(activity)",
-        0,
+        "PAGE_ACTIVATION_TRANSACTIONS.remove(",
         rollback_load,
     ) >= 0:
-        fail("page-activation rollback releases its save guard before loadPage")
+        fail("page-activation rollback releases its save guard after loadPage")
+    require_markers(
+        finish_rollback,
+        (
+            "current.rollbackPending",
+            '"disableHandWrite"',
+            "PAGE_ACTIVATION_TRANSACTIONS.remove(activity, current)",
+            '"page_activation_rollback_completed id="',
+        ),
+        "identity-verified page-activation rollback completion",
+    )
+
+    commit_start = module.find(
+        "private static boolean commitPageActivationGeometry("
+    )
+    mark_lift_start = module.find(
+        "private static void markPageActivationPenLifted(",
+        commit_start,
+    )
+    if commit_start < 0 or mark_lift_start < 0:
+        fail("could not isolate transactional ownership commit")
+    commit_transaction = module[commit_start:mark_lift_start]
+    rollback_branch = commit_transaction.find(
+        "if (transaction.rollbackPending)"
+    )
+    source_reader_check = commit_transaction.find(
+        "currentPage != transaction.sourcePage",
+        rollback_branch,
+    )
+    source_presenter_check = commit_transaction.find(
+        "presenterMarkPage != transaction.sourcePage + 1",
+        source_reader_check,
+    )
+    finish_verified_rollback = commit_transaction.find(
+        "finishPageActivationRollback(",
+        source_presenter_check,
+    )
+    target_identity_check = commit_transaction.find(
+        "currentPage != transaction.targetPage",
+        finish_verified_rollback,
+    )
+    if not (
+        0 <= rollback_branch < source_reader_check < source_presenter_check
+        < finish_verified_rollback < target_identity_check
+    ):
+        fail(
+            "rollback guard is not released only after reader and presenter "
+            "reconverge on the source page"
+        )
 
     receive_hook_start = module.find(
         '"receiveTrials",',

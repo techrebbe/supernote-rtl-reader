@@ -1436,6 +1436,88 @@ def check(repo_root: Path) -> None:
     if not 0 <= spread_inactive < restore_source:
         fail("spread-inactive pen handling does not restore the source page")
 
+    begin_transaction_start = module.find(
+        "private static boolean beginPageActivationTransaction("
+    )
+    request_load_start = module.find(
+        "private static void requestPageActivationLoad(",
+        begin_transaction_start,
+    )
+    if begin_transaction_start < 0 or request_load_start < 0:
+        fail("could not isolate page-activation start failure handling")
+    begin_transaction = module[begin_transaction_start:request_load_start]
+    start_failure = begin_transaction.find(
+        '"page_activation_start_failed target="'
+    )
+    guarded_start_failure = begin_transaction.find(
+        "PAGE_ACTIVATION_TRANSACTIONS.get(activity) != null",
+        start_failure,
+    )
+    start_failure_abort = begin_transaction.find(
+        "abortPageActivationTransaction(",
+        guarded_start_failure,
+    )
+    start_failure_restore = begin_transaction.find(
+        "true",
+        start_failure_abort,
+    )
+    if not (
+        0 <= start_failure < guarded_start_failure
+        < start_failure_abort < start_failure_restore
+    ):
+        fail("partial activation-start failure does not roll back to source")
+    if begin_transaction.find(
+        "PAGE_ACTIVATION_TRANSACTIONS.remove(activity)",
+        start_failure,
+    ) >= 0:
+        fail("activation-start failure drops its guard before rollback")
+
+    handle_pen_start = module.find(
+        "private static void handlePenPageActivation("
+    )
+    intercept_pen_start = module.find(
+        "private static boolean interceptPenPageActivation(",
+        handle_pen_start,
+    )
+    complete_stroke_start = module.find(
+        "private static boolean isCompletingActivePageStroke(",
+        intercept_pen_start,
+    )
+    if min(handle_pen_start, intercept_pen_start, complete_stroke_start) < 0:
+        fail("could not isolate transfer-overlap contact latching")
+    handle_pen = module[handle_pen_start:intercept_pen_start]
+    intercept_pen = module[intercept_pen_start:complete_stroke_start]
+    for label, method, pressure_marker in (
+        ("queued", handle_pen, "if (requestedPressure > 0)"),
+        ("synchronous", intercept_pen, "if (pressure > 0)"),
+    ):
+        transaction_branch = method.find(
+            "if (transaction != null)"
+        )
+        contact_latch = method.find(pressure_marker, transaction_branch)
+        observed = method.find(
+            "transaction.triggerContactObserved = true;",
+            contact_latch,
+        )
+        lifted = method.find(
+            "transaction.triggerPenLifted = false;",
+            observed,
+        )
+        if not (
+            0 <= transaction_branch < contact_latch < observed < lifted
+        ):
+            fail(
+                f"{label} transfer path does not latch every overlapping contact"
+            )
+    if "target == transaction.targetPage && pressure > 0" in intercept_pen:
+        fail("gutter/wrong-half transfer contact remains unlatchable")
+    if (
+        "requestedTarget == transaction.targetPage" in handle_pen[
+            handle_pen.find("if (transaction != null)"):
+        ]
+    ):
+        fail("queued gutter/wrong-half transfer contact remains unlatchable")
+
     commit_start = module.find(
         "private static boolean commitPageActivationGeometry("
     )

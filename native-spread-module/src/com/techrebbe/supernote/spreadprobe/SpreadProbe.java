@@ -7620,13 +7620,13 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 PageActivationTransaction transaction =
                     PAGE_ACTIVATION_TRANSACTIONS.get(activity);
                 if (transaction != null) {
-                    if (requestedPressure > 0
-                        && requestedTarget == transaction.targetPage) {
+                    if (requestedPressure > 0) {
                         transaction.triggerContactObserved = true;
                         transaction.triggerPenLifted = false;
                         log("page_activation_trigger_contact id="
                             + transaction.id + " target="
-                            + transaction.targetPage);
+                            + transaction.targetPage + " point_page="
+                            + requestedTarget);
                     } else if (requestedPressure <= 0
                         && transaction.triggerContactObserved) {
                         markPageActivationPenLifted(
@@ -7704,7 +7704,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             PAGE_ACTIVATION_TRANSACTIONS.get(activity);
         int target = pageAt(activity, x, y);
         if (transaction != null) {
-            if (target == transaction.targetPage && pressure > 0) {
+            if (pressure > 0) {
                 transaction.triggerContactObserved = true;
                 transaction.triggerPenLifted = false;
             }
@@ -7873,11 +7873,21 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             schedulePageActivationTimeout(activity, id);
             return true;
         } catch (Throwable throwable) {
-            PAGE_ACTIVATION_TRANSACTIONS.remove(activity);
             log("page_activation_start_failed target=" + targetPage
                 + " trigger=" + trigger + " " + throwable);
             XposedBridge.log(throwable);
-            failClosedPageActivation(activity, "start_failed");
+            if (PAGE_ACTIVATION_TRANSACTIONS.get(activity) != null) {
+                // loadPage(target) may have changed reader or presenter state
+                // before throwing. Preserve the ownership/save guard and use
+                // the same identity-verified source rollback as a timeout.
+                abortPageActivationTransaction(
+                    activity,
+                    "start_failed",
+                    true
+                );
+            } else {
+                failClosedPageActivation(activity, "start_failed");
+            }
             return false;
         }
     }

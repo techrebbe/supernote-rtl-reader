@@ -1082,6 +1082,15 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             Configuration.class,
             new XC_MethodHook() {
                 @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    // The immutable pen snapshot describes the old orientation.
+                    // Withdraw it before DocumentActivity begins changing its
+                    // view/page geometry; the UI-thread refresh below publishes
+                    // a replacement only after the new state is observable.
+                    PEN_INPUT_SNAPSHOTS.remove((Activity) param.thisObject);
+                }
+
+                @Override
                 protected void afterHookedMethod(MethodHookParam param) {
                     Activity activity = (Activity) param.thisObject;
                     Configuration configuration =
@@ -1261,7 +1270,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                                 }
                             } else if (PEN_CONTACT_START_PAGES.get(activity)
                                     == null
-                                && publishedEditablePenInputLandscape(
+                                && publishedEditablePenInput(
                                     activity
                                 )) {
                                 // Geometry/config publication is between
@@ -1498,6 +1507,25 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         model >= 0,
                         "model_changed:" + model
                     );
+                }
+            }
+        );
+
+        XposedHelpers.findAndHookMethod(
+            "com.supernote.document.document.DocumentViewModel",
+            loadPackageParam.classLoader,
+            "loadPage",
+            int.class,
+            new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    // currentPage/pageCount and the document image are about to
+                    // change. Fail closed until setImage()/compose() publishes
+                    // the matching immutable page/geometry snapshot.
+                    Activity activity = activeActivity;
+                    if (activity != null) {
+                        PEN_INPUT_SNAPSHOTS.remove(activity);
+                    }
                 }
             }
         );
@@ -2081,6 +2109,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     SET_IMAGE_ACTIVE_BITMAP.remove();
                     SET_IMAGE_VIEW_SUPPRESSED.remove();
                     Activity activity = (Activity) param.thisObject;
+                    // setImage is the page/document presentation boundary. Do
+                    // not let a native pen frame consume geometry belonging to
+                    // the prior page while this transition is in progress.
+                    PEN_INPUT_SNAPSHOTS.remove(activity);
                     if (!isCalibrationLandscape(activity)) {
                         return;
                     }
@@ -7335,53 +7367,15 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     }
 
     private static PenInputSnapshot penInputSnapshot(Activity activity) {
-        if (activity == null || activity != activeActivity
-            || activity.isFinishing()
-            || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1
-                && activity.isDestroyed())) {
-            return null;
-        }
-        PenInputSnapshot snapshot = PEN_INPUT_SNAPSHOTS.get(activity);
-        if (snapshot == null) {
-            return null;
-        }
-        try {
-            if (activity.getResources().getConfiguration().orientation
-                    != Configuration.ORIENTATION_LANDSCAPE
-                || !snapshot.documentPath.equals(currentDocumentPath(activity))) {
-                return null;
-            }
-            Object viewModel = XposedHelpers.getObjectField(
-                activity,
-                "documentViewModel"
-            );
-            int currentPage = XposedHelpers.getIntField(
-                viewModel,
-                "currentPage"
-            );
-            int pageCount = XposedHelpers.getIntField(viewModel, "pageCount");
-            return currentPage == snapshot.currentPage
-                    && pageCount == snapshot.pageCount
-                ? snapshot : null;
-        } catch (Throwable throwable) {
-            return null;
-        }
+        return activity == null || activity != activeActivity
+            ? null : PEN_INPUT_SNAPSHOTS.get(activity);
     }
 
-    private static boolean publishedEditablePenInputLandscape(
+    private static boolean publishedEditablePenInput(
         Activity activity
     ) {
-        PenInputSnapshot published = activity == null
-            ? null : PEN_INPUT_SNAPSHOTS.get(activity);
-        if (published == null || !published.editable) {
-            return false;
-        }
-        try {
-            return activity.getResources().getConfiguration().orientation
-                == Configuration.ORIENTATION_LANDSCAPE;
-        } catch (Throwable throwable) {
-            return true;
-        }
+        PenInputSnapshot published = penInputSnapshot(activity);
+        return published != null && published.editable;
     }
 
     private static boolean editablePenInputReady(Activity activity) {
@@ -7424,13 +7418,18 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         String reason
     ) {
         SpreadConfig config = spreadConfig(activity);
-        publishPendingPenInputSnapshot(activity, config, reason);
+        boolean landscape = activity != null
+            && activity.getResources().getConfiguration().orientation
+                == Configuration.ORIENTATION_LANDSCAPE;
+        if (landscape) {
+            publishPendingPenInputSnapshot(activity, config, reason);
+        } else if (activity != null) {
+            PEN_INPUT_SNAPSHOTS.remove(activity);
+        }
         updateNativeEraserGate(
             activity,
             reason,
-            activity != null
-                && activity.getResources().getConfiguration().orientation
-                    == Configuration.ORIENTATION_LANDSCAPE
+            landscape
                 && config != null
                 && config.enabled
                 && config.editable
@@ -8222,6 +8221,47 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         final int requestedY = y;
         final int requestedPressure = pressure;
         final int requestedTarget = pageAt(inputSnapshot, x, y);
+        PageActivationTransaction observedTransaction =
+            PAGE_ACTIVATION_TRANSACTIONS.get(activity);
+        if (observedTransaction != null) {
+            if (pressure > 0) {
+                // The synchronous interceptor normally owns this latch. Repeat
+                // it here without crossing to the UI thread to close the small
+                // race where a transaction is published between interception
+                // and dispatch filtering.
+                synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+                    if (PAGE_ACTIVATION_TRANSACTIONS.get(activity)
+                            == observedTransaction) {
+                        observedTransaction.triggerContactObserved = true;
+                        observedTransaction.triggerPenLifted = false;
+                    }
+                }
+                return;
+            }
+            if (!observedTransaction.triggerContactObserved
+                || observedTransaction.triggerPenLifted
+                || observedTransaction.rollbackPending) {
+                return;
+            }
+        } else {
+            // Ordinary active-page hover/contact samples are the high-frequency
+            // path. Resolve them entirely from the immutable snapshot and never
+            // enqueue a no-op Runnable for the UI thread.
+            if (inputSnapshot == null || !inputSnapshot.editable
+                || !inputSnapshot.geometryReady) {
+                return;
+            }
+            int current = inputSnapshot.currentPage;
+            Integer contactStartPage = PEN_CONTACT_START_PAGES.get(activity);
+            if (requestedTarget < 0 || requestedTarget == current
+                || (contactStartPage != null
+                    && contactStartPage.intValue()
+                        == PEN_CONTACT_BLOCKED_PAGE)
+                || (pressure > 0 && contactStartPage != null
+                    && contactStartPage.intValue() == current)) {
+                return;
+            }
+        }
         activity.runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -8339,7 +8379,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             return true;
         }
         if (inputSnapshot == null) {
-            if (publishedEditablePenInputLandscape(activity)) {
+            if (publishedEditablePenInput(activity)) {
                 notePenInputBlock(
                     activity,
                     "stale_snapshot",

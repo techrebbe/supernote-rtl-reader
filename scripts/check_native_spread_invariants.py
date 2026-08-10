@@ -965,7 +965,7 @@ def check(repo_root: Path) -> None:
         "PEN_CONTACT_START_PAGES.put(", contact_page_valid
     )
     pending_snapshot_guard = digital_position_hook.find(
-        "publishedEditablePenInputLandscape(", contact_page_latched
+        "publishedEditablePenInput(", contact_page_latched
     )
     pending_contact_latched = digital_position_hook.find(
         "Integer.valueOf(PEN_CONTACT_BLOCKED_PAGE)",
@@ -1137,8 +1137,32 @@ def check(repo_root: Path) -> None:
     target_mapping = live_pen_activation.find(
         "final int requestedTarget = pageAt(inputSnapshot, x, y);"
     )
+    pre_dispatch_transaction = live_pen_activation.find(
+        "PageActivationTransaction observedTransaction =",
+        target_mapping,
+    )
+    pre_dispatch_contact_latch = live_pen_activation.find(
+        "observedTransaction.triggerContactObserved = true;",
+        pre_dispatch_transaction,
+    )
+    pre_dispatch_boundary_guard = live_pen_activation.find(
+        "!observedTransaction.triggerContactObserved",
+        pre_dispatch_contact_latch,
+    )
+    pre_dispatch_snapshot_guard = live_pen_activation.find(
+        "if (inputSnapshot == null || !inputSnapshot.editable",
+        pre_dispatch_boundary_guard,
+    )
+    pre_dispatch_active_page_filter = live_pen_activation.find(
+        "requestedTarget == current",
+        pre_dispatch_snapshot_guard,
+    )
+    ui_dispatch = live_pen_activation.find(
+        "activity.runOnUiThread(new Runnable()",
+        pre_dispatch_active_page_filter,
+    )
     transaction_lookup_for_lift = live_pen_activation.find(
-        "PAGE_ACTIVATION_TRANSACTIONS.get(activity)", target_mapping
+        "PAGE_ACTIVATION_TRANSACTIONS.get(activity)", ui_dispatch
     )
     transaction_lift = live_pen_activation.find(
         "markPageActivationPenLifted(", transaction_lookup_for_lift
@@ -1162,14 +1186,17 @@ def check(repo_root: Path) -> None:
         "return;", blocked_contact_guard
     )
     if not (
-        0 <= target_mapping < transaction_lookup_for_lift
+        0 <= target_mapping < pre_dispatch_transaction
+        < pre_dispatch_contact_latch < pre_dispatch_boundary_guard
+        < pre_dispatch_snapshot_guard < pre_dispatch_active_page_filter
+        < ui_dispatch < transaction_lookup_for_lift
         < transaction_lift < transaction_return < snapshot_validation
         < chrome_guard
         < current_mapping < blocked_contact_guard < blocked_contact_return
     ):
         fail(
-            "transactional pen-up is not recorded before native chrome is "
-            "excluded from non-transactional page activation"
+            "active-page pen samples are not filtered from the UI queue while "
+            "transactional contact/pen-up boundaries remain preserved"
         )
 
     intercept_method_start = module.find(
@@ -1288,9 +1315,17 @@ def check(repo_root: Path) -> None:
         "private static PenInputSnapshot penInputSnapshot(",
         activation_ready_snapshot_start,
     )
+    published_snapshot_start = module.find(
+        "private static boolean publishedEditablePenInput(",
+        snapshot_read_start,
+    )
+    editable_ready_start = module.find(
+        "private static boolean editablePenInputReady(",
+        published_snapshot_start,
+    )
     spread_pair_start = module.find(
         "private static SpreadPair spreadPair(",
-        snapshot_read_start,
+        editable_ready_start,
     )
     if min(
         snapshot_class_start,
@@ -1299,6 +1334,8 @@ def check(repo_root: Path) -> None:
         geometry_snapshot_start,
         activation_ready_snapshot_start,
         snapshot_read_start,
+        published_snapshot_start,
+        editable_ready_start,
         spread_pair_start,
     ) < 0:
         fail("could not isolate immutable pen-input snapshot publication")
@@ -1329,18 +1366,130 @@ def check(repo_root: Path) -> None:
                 module.find("SPREAD_CONFIGS", module.find("PEN_INPUT_SNAPSHOTS"))
             ]:
         fail("pen-input snapshot is not atomically published across threads")
-    snapshot_publish = module[pending_snapshot_start:spread_pair_start]
+    snapshot_publish = module[pending_snapshot_start:snapshot_read_start]
     require_markers(
         snapshot_publish,
         (
             "Looper.myLooper() != activity.getMainLooper()",
             "PEN_INPUT_SNAPSHOTS.put(",
-            "currentPage == snapshot.currentPage",
-            "pageCount == snapshot.pageCount",
-            "snapshot.documentPath.equals(currentDocumentPath(activity))",
-            "Configuration.ORIENTATION_LANDSCAPE",
+            "int currentPage = XposedHelpers.getIntField(",
+            '"currentPage"',
+            'XposedHelpers.getIntField(viewModel, "pageCount")',
         ),
-        "UI-published and runtime-bound pen-input snapshot",
+        "UI-published pen-input state snapshot",
+    )
+    snapshot_read = module[snapshot_read_start:published_snapshot_start]
+    require_markers(
+        snapshot_read,
+        (
+            "activity != activeActivity",
+            "PEN_INPUT_SNAPSHOTS.get(activity)",
+        ),
+        "memory-only native pen-input snapshot lookup",
+    )
+    forbidden_snapshot_lookup_markers = (
+        "getResources(",
+        "currentDocumentPath(",
+        "XposedHelpers.",
+        "isFinishing(",
+        "isDestroyed(",
+    )
+    leaked_snapshot_lookups = [
+        marker for marker in forbidden_snapshot_lookup_markers
+        if marker in snapshot_read
+    ]
+    if leaked_snapshot_lookups:
+        fail(
+            "native pen-input snapshot lookup still reads live Activity, "
+            f"document, or view-model state: {leaked_snapshot_lookups}"
+        )
+    published_snapshot = module[published_snapshot_start:editable_ready_start]
+    require_markers(
+        published_snapshot,
+        (
+            "PenInputSnapshot published = penInputSnapshot(activity);",
+            "published != null && published.editable",
+        ),
+        "memory-only published editable-state lookup",
+    )
+    if any(
+        marker in published_snapshot
+        for marker in forbidden_snapshot_lookup_markers
+    ):
+        fail("published editable-state lookup reads live Activity state")
+
+    configuration_hook_start = module.find('"onConfigurationChanged",')
+    configuration_hook_end = module.find(
+        '"dispatchTouchEvent",', configuration_hook_start
+    )
+    if configuration_hook_start < 0 or configuration_hook_end < 0:
+        fail("could not isolate orientation snapshot invalidation")
+    configuration_hook = module[
+        configuration_hook_start:configuration_hook_end
+    ]
+    configuration_before = configuration_hook.find(
+        "protected void beforeHookedMethod"
+    )
+    configuration_invalidate = configuration_hook.find(
+        "PEN_INPUT_SNAPSHOTS.remove((Activity) param.thisObject);",
+        configuration_before,
+    )
+    configuration_after = configuration_hook.find(
+        "protected void afterHookedMethod", configuration_invalidate
+    )
+    if not (
+        0 <= configuration_before < configuration_invalidate
+        < configuration_after
+    ):
+        fail("orientation change does not withdraw stale pen geometry first")
+
+    load_page_hook_start = module.find(
+        '"loadPage",', module.find(
+            '"com.supernote.document.document.DocumentViewModel"'
+        )
+    )
+    turn_page_hook_start = module.find('"turnPage",', load_page_hook_start)
+    if load_page_hook_start < 0 or turn_page_hook_start < 0:
+        fail("could not isolate page-load snapshot invalidation")
+    load_page_hook = module[load_page_hook_start:turn_page_hook_start]
+    if "PEN_INPUT_SNAPSHOTS.remove(activity);" not in load_page_hook:
+        fail("page load does not withdraw stale pen geometry before mutation")
+
+    set_image_hook_start = module.find('"setImage",')
+    set_image_hook_end = module.find('"onDestroy",', set_image_hook_start)
+    if set_image_hook_start < 0 or set_image_hook_end < 0:
+        fail("could not isolate image-boundary snapshot invalidation")
+    set_image_hook = module[set_image_hook_start:set_image_hook_end]
+    set_image_invalidate = set_image_hook.find(
+        "PEN_INPUT_SNAPSHOTS.remove(activity);"
+    )
+    set_image_landscape = set_image_hook.find(
+        "if (!isCalibrationLandscape(activity))", set_image_invalidate
+    )
+    if not 0 <= set_image_invalidate < set_image_landscape:
+        fail("setImage does not withdraw stale pen geometry before branching")
+
+    update_gate_start = module.find(
+        "private static void updateNativeEraserGate(\n"
+        "        Activity activity,\n"
+        "        String reason\n"
+        "    )"
+    )
+    update_gate_end = module.find(
+        "private static void updateNativeEraserGate(", update_gate_start + 1
+    )
+    if update_gate_start < 0 or update_gate_end < 0:
+        fail("could not isolate orientation-aware snapshot publication")
+    update_gate = module[update_gate_start:update_gate_end]
+    require_markers(
+        update_gate,
+        (
+            "boolean landscape =",
+            "if (landscape)",
+            "publishPendingPenInputSnapshot(activity, config, reason);",
+            "PEN_INPUT_SNAPSHOTS.remove(activity);",
+        ),
+        "orientation-aware pen snapshot publication",
     )
     activation_ready_snapshot = module[
         activation_ready_snapshot_start:snapshot_read_start
@@ -1359,7 +1508,7 @@ def check(repo_root: Path) -> None:
     )
     snapshot_blocking_hits = [
         marker for marker in blocking_markers
-        if marker in module[snapshot_read_start:spread_pair_start]
+        if marker in module[snapshot_read_start:editable_ready_start]
     ]
     if snapshot_blocking_hits:
         fail(

@@ -61,6 +61,20 @@ A stroke that begins on the active page never becomes an activation gesture if
 it crosses the divider. Cross-divider coordinates are discarded and the stroke
 remains owned by its original page.
 
+### Low-latency callback boundary
+
+The UI composition path publishes one immutable snapshot containing the
+validated document configuration, current page pair, visible page bounds, and
+writer-ready state. Supernote's native pen-position callback reads only that
+snapshot plus the in-memory transaction/contact guards. It performs no marker
+parsing, document metadata inspection, `stat`, hashing, or other filesystem
+work before the native writer callback.
+
+The snapshot is replaced whenever the page, document, orientation, validated
+configuration, or spread geometry changes. Missing, stale, or not-yet-committed
+geometry blocks protected landscape pen input rather than falling back to an
+unverified mapping.
+
 ## Failure behavior
 
 The transaction fails closed:

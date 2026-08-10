@@ -438,6 +438,10 @@ Automated and build evidence:
 - [x] Static invariants serialize contact-start latching, activation startup,
   and final guard removal under the same ownership lock, including contacts
   that begin in a gutter/cropped margin or race a queued transfer/commit.
+- [x] Static invariants require the native pen-position callback and its queued
+  activation/interception helpers to use a UI-published immutable
+  document/page-geometry snapshot. Config parsing, file identity capture,
+  `stat`, and other filesystem work are rejected from the low-latency path.
 - [x] Static invariants keep a stroke that begins on the active page owned by
   that page and discard any points that cross into the inactive half.
 - [x] Native Spread v0.0.118 compiles, is v2/v3 signed, and reports matching
@@ -449,6 +453,9 @@ Nomad hardware gate (not yet run):
   unchanged; native focus and the ACTIVE banner move to the requested page.
 - [ ] Hover over the inactive page, wait for activation, then write. The first
   real stroke uses normal native behavior and persists after away/back.
+- [ ] Draw several normal and quick connected strokes on the active page. Pen
+  samples remain smooth, no stroke is dropped, and the settled native ink
+  matches the gesture after away/back.
 - [ ] Touch the inactive page with the pen before activation can complete. The
   trigger gesture creates no partial or wrong-page ink; after lifting, the
   target is active and the next stroke persists normally.

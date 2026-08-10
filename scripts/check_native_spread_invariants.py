@@ -916,9 +916,17 @@ def check(repo_root: Path) -> None:
     before_native_callback = digital_position_hook.find(
         "protected void beforeHookedMethod"
     )
+    pen_snapshot_lookup = digital_position_hook.find(
+        "PenInputSnapshot inputSnapshot =",
+        before_native_callback,
+    )
+    pen_snapshot_read = digital_position_hook.find(
+        "penInputSnapshot(activity)",
+        pen_snapshot_lookup,
+    )
     contact_ownership_lock = digital_position_hook.find(
         "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
-        before_native_callback,
+        pen_snapshot_read,
     )
     contact_transaction_lookup = digital_position_hook.find(
         "PageActivationTransaction ownershipTransaction =",
@@ -932,8 +940,11 @@ def check(repo_root: Path) -> None:
         "ownershipTransaction.triggerPenLifted = false;",
         atomic_contact_observed,
     )
+    contact_geometry_ready = digital_position_hook.find(
+        "inputSnapshot.geometryReady", atomic_contact_held
+    )
     contact_page_mapping = digital_position_hook.find(
-        "int mappedContactPage = pageAt(", atomic_contact_held
+        "int mappedContactPage = pageAt(", contact_geometry_ready
     )
     contact_page_valid = digital_position_hook.find(
         "if (mappedContactPage >= 0)", contact_page_mapping
@@ -941,11 +952,20 @@ def check(repo_root: Path) -> None:
     contact_page_latched = digital_position_hook.find(
         "PEN_CONTACT_START_PAGES.put(", contact_page_valid
     )
+    pending_snapshot_guard = digital_position_hook.find(
+        "publishedEditablePenInputLandscape(", contact_page_latched
+    )
+    pending_contact_latched = digital_position_hook.find(
+        "Integer.valueOf(PEN_CONTACT_BLOCKED_PAGE)",
+        pending_snapshot_guard,
+    )
     if not (
-        0 <= before_native_callback < contact_ownership_lock
+        0 <= before_native_callback < pen_snapshot_lookup < pen_snapshot_read
+        < contact_ownership_lock
         < contact_transaction_lookup < atomic_contact_observed
-        < atomic_contact_held < contact_page_mapping
-        < contact_page_valid < contact_page_latched
+        < atomic_contact_held < contact_geometry_ready < contact_page_mapping
+        < contact_page_valid < contact_page_latched < pending_snapshot_guard
+        < pending_contact_latched
     ):
         fail(
             "contact start is not atomically latched against transaction "
@@ -958,7 +978,7 @@ def check(repo_root: Path) -> None:
         before_native_callback,
     )
     active_stroke_terminal_helper = digital_position_hook.find(
-        "isCompletingActivePageStroke(activity, pressure)",
+        "isCompletingActivePageStroke(",
         active_stroke_terminal,
     )
     intercept_input = digital_position_hook.find(
@@ -982,6 +1002,23 @@ def check(repo_root: Path) -> None:
         fail(
             "inactive-page pen input must be discarded before Supernote's "
             "native callback runs, then schedule the ownership transaction"
+        )
+    blocking_markers = (
+        "spreadConfig(",
+        "FileIdentity",
+        "FileInputStream",
+        "Os.stat",
+        "new File(",
+        "Properties",
+    )
+    blocking_hits = [
+        marker for marker in blocking_markers
+        if marker in digital_position_hook
+    ]
+    if blocking_hits:
+        fail(
+            "native pen-position callback performs blocking config/filesystem "
+            f"work instead of using its immutable snapshot: {blocking_hits}"
         )
     pressure_zero_cleanup = digital_position_hook.find(
         'if (pressure == 0 && !completingActivePageStroke)',
@@ -1046,7 +1083,9 @@ def check(repo_root: Path) -> None:
             "live pen activation still reaches the experimental inactive-page "
             f"merge path: {leaked_live_markers}"
         )
-    target_mapping = live_pen_activation.find("int requestedTarget = pageAt(")
+    target_mapping = live_pen_activation.find(
+        "final int requestedTarget = pageAt(inputSnapshot, x, y);"
+    )
     transaction_lookup_for_lift = live_pen_activation.find(
         "PAGE_ACTIVATION_TRANSACTIONS.get(activity)", target_mapping
     )
@@ -1059,13 +1098,23 @@ def check(repo_root: Path) -> None:
     chrome_guard = live_pen_activation.find(
         "isNativeChromeTouch(activity, requestedY)", transaction_return
     )
+    snapshot_validation = live_pen_activation.find(
+        "currentSnapshot != inputSnapshot", transaction_return
+    )
     current_mapping = live_pen_activation.find(
-        "int current = currentDocumentPage(activity);", chrome_guard
+        "int current = inputSnapshot.currentPage;", chrome_guard
+    )
+    blocked_contact_guard = live_pen_activation.find(
+        "== PEN_CONTACT_BLOCKED_PAGE", current_mapping
+    )
+    blocked_contact_return = live_pen_activation.find(
+        "return;", blocked_contact_guard
     )
     if not (
         0 <= target_mapping < transaction_lookup_for_lift
-        < transaction_lift < transaction_return < chrome_guard
-        < current_mapping
+        < transaction_lift < transaction_return < snapshot_validation
+        < chrome_guard
+        < current_mapping < blocked_contact_guard < blocked_contact_return
     ):
         fail(
             "transactional pen-up is not recorded before native chrome is "
@@ -1085,7 +1134,7 @@ def check(repo_root: Path) -> None:
         intercept_method_start:pending_target_after_intercept
     ]
     intercept_terminal_identity = intercept_method.find(
-        "isCompletingActivePageStroke(activity, pressure)"
+        "isCompletingActivePageStroke("
     )
     intercept_chrome = intercept_method.find(
         "isNativeChromeTouch(activity, y)", intercept_terminal_identity
@@ -1100,7 +1149,7 @@ def check(repo_root: Path) -> None:
         "return true;", intercept_chrome_preserve
     )
     intercept_page_mapping = intercept_method.find(
-        "int target = pageAt(activity, x, y);",
+        "int target = pageAt(inputSnapshot, x, y);",
         intercept_chrome_discard,
     )
     contact_start_lookup = intercept_method.find(
@@ -1157,6 +1206,127 @@ def check(repo_root: Path) -> None:
         fail(
             "a stroke begun on the active page is not kept on that page "
             "through its cross-divider terminal frame"
+        )
+
+    snapshot_class_start = module.find(
+        "private static final class PenInputSnapshot"
+    )
+    snapshot_class_end = module.find(
+        "private static final class SpreadPageLayout",
+        snapshot_class_start,
+    )
+    pending_snapshot_start = module.find(
+        "private static void publishPendingPenInputSnapshot("
+    )
+    geometry_snapshot_start = module.find(
+        "private static void publishPenInputGeometrySnapshot(",
+        pending_snapshot_start,
+    )
+    snapshot_read_start = module.find(
+        "private static PenInputSnapshot penInputSnapshot(",
+        geometry_snapshot_start,
+    )
+    spread_pair_start = module.find(
+        "private static SpreadPair spreadPair(",
+        snapshot_read_start,
+    )
+    if min(
+        snapshot_class_start,
+        snapshot_class_end,
+        pending_snapshot_start,
+        geometry_snapshot_start,
+        snapshot_read_start,
+        spread_pair_start,
+    ) < 0:
+        fail("could not isolate immutable pen-input snapshot publication")
+    snapshot_class = module[snapshot_class_start:snapshot_class_end]
+    require_markers(
+        snapshot_class,
+        (
+            "final SpreadConfig config;",
+            "final String documentPath;",
+            "final int currentPage;",
+            "final int pageCount;",
+            "final int rightPage;",
+            "final int leftPage;",
+            "final RectF rightVisibleBounds;",
+            "final RectF leftVisibleBounds;",
+            "final boolean editable;",
+            "final boolean geometryReady;",
+            "new RectF(rightVisibleBounds)",
+            "new RectF(leftVisibleBounds)",
+            "this.documentPath = config.documentPath;",
+            "this.editable = config.enabled && config.editable;",
+        ),
+        "immutable pen-input config/page-geometry snapshot",
+    )
+    if "Map<Activity, PenInputSnapshot> PEN_INPUT_SNAPSHOTS" not in module \
+            or "new ConcurrentHashMap<>()" not in module[
+                module.find("PEN_INPUT_SNAPSHOTS"):
+                module.find("SPREAD_CONFIGS", module.find("PEN_INPUT_SNAPSHOTS"))
+            ]:
+        fail("pen-input snapshot is not atomically published across threads")
+    snapshot_publish = module[pending_snapshot_start:spread_pair_start]
+    require_markers(
+        snapshot_publish,
+        (
+            "Looper.myLooper() != activity.getMainLooper()",
+            "PEN_INPUT_SNAPSHOTS.put(",
+            "currentPage == snapshot.currentPage",
+            "pageCount == snapshot.pageCount",
+            "snapshot.documentPath.equals(currentDocumentPath(activity))",
+            "Configuration.ORIENTATION_LANDSCAPE",
+        ),
+        "UI-published and runtime-bound pen-input snapshot",
+    )
+    snapshot_blocking_hits = [
+        marker for marker in blocking_markers
+        if marker in module[snapshot_read_start:spread_pair_start]
+    ]
+    if snapshot_blocking_hits:
+        fail(
+            "pen-input snapshot reads perform blocking config/filesystem work: "
+            f"{snapshot_blocking_hits}"
+        )
+    compose_start = module.find("private static boolean compose(")
+    reapply_start = module.find(
+        "private static void reapplyCanonicalCommittedInk(",
+        compose_start,
+    )
+    compose_method = module[compose_start:reapply_start]
+    geometry_pending = compose_method.find(
+        '"compose_geometry_pending"'
+    )
+    geometry_commit = compose_method.find(
+        "commitPageActivationGeometry(", geometry_pending
+    )
+    geometry_ready = compose_method.find(
+        '"compose_geometry_committed"', geometry_commit
+    )
+    if not 0 <= geometry_pending < geometry_commit < geometry_ready:
+        fail(
+            "pen input is not kept pending until page geometry ownership "
+            "commits"
+        )
+    page_at_start = module.find(
+        "private static int pageAt(Activity activity, float x, float y)"
+    )
+    current_page_start = module.find(
+        "private static int currentDocumentPage(", page_at_start
+    )
+    if page_at_start < 0 or current_page_start < 0:
+        fail("could not isolate memory-only pageAt routing")
+    page_at_method = module[page_at_start:current_page_start]
+    if "return pageAt(penInputSnapshot(activity), x, y);" not in page_at_method:
+        fail("pageAt does not use the immutable geometry snapshot")
+    page_at_blocking_hits = [
+        marker for marker in blocking_markers
+        if marker in page_at_method
+    ]
+    if page_at_blocking_hits:
+        fail(
+            "pageAt performs blocking config/filesystem work: "
+            f"{page_at_blocking_hits}"
         )
 
     ui_block_start = module.find(
@@ -1218,8 +1388,9 @@ def check(repo_root: Path) -> None:
         (
             "pressure != 0",
             "PAGE_ACTIVATION_TRANSACTIONS.get(activity) != null",
+            "inputSnapshot.geometryReady",
             "PEN_CONTACT_START_PAGES.get(activity)",
-            "currentDocumentPage(activity)",
+            "inputSnapshot.currentPage",
         ),
         "active-stroke terminal identity",
     )
@@ -1590,10 +1761,10 @@ def check(repo_root: Path) -> None:
     if pen_activation_start < 0 or intercept_activation_start < 0:
         fail("could not isolate spread-inactive pen rollback")
     pen_activation = module[pen_activation_start:intercept_activation_start]
-    spread_inactive = pen_activation.find('"spread_inactive"')
+    spread_inactive = pen_activation.find('"pen_snapshot_stale"')
     restore_source = pen_activation.find("true", spread_inactive)
     if not 0 <= spread_inactive < restore_source:
-        fail("spread-inactive pen handling does not restore the source page")
+        fail("stale-snapshot pen handling does not restore the source page")
 
     begin_transaction_start = module.find(
         "private static boolean beginPageActivationTransaction("
@@ -1677,29 +1848,56 @@ def check(repo_root: Path) -> None:
     ):
         fail("queued gutter/wrong-half transfer contact remains unlatchable")
     queued_transaction = handle_pen.find("if (transaction != null)")
-    queued_orientation = handle_pen.find(
-        "if (!isEditableSpreadLandscape(activity))",
+    queued_snapshot_validation = handle_pen.find(
+        "currentSnapshot != inputSnapshot",
         queued_transaction,
     )
-    if not 0 <= queued_transaction < queued_orientation:
-        fail("queued transaction input is not guarded after orientation exit")
+    queued_chrome = handle_pen.find(
+        "isNativeChromeTouch(activity, requestedY)",
+        queued_snapshot_validation,
+    )
+    if not (
+        0 <= queued_transaction < queued_snapshot_validation < queued_chrome
+    ):
+        fail(
+            "queued transaction input is not guarded by the immutable "
+            "document/geometry snapshot after orientation or page changes"
+        )
     synchronous_transaction = intercept_pen.find("if (transaction != null)")
-    synchronous_orientation = intercept_pen.find(
-        "if (!isEditableSpreadLandscape(activity))",
+    synchronous_missing_snapshot = intercept_pen.find(
+        "if (inputSnapshot == null)",
         synchronous_transaction,
+    )
+    synchronous_pending_geometry = intercept_pen.find(
+        "if (!inputSnapshot.geometryReady)",
+        synchronous_missing_snapshot,
     )
     synchronous_chrome = intercept_pen.find(
         "if (isNativeChromeTouch(activity, y))",
-        synchronous_orientation,
+        synchronous_pending_geometry,
     )
     if not (
-        0 <= synchronous_transaction < synchronous_orientation
+        0 <= synchronous_transaction < synchronous_missing_snapshot
+        < synchronous_pending_geometry
         < synchronous_chrome
     ):
         fail(
-            "synchronous transaction input is not guarded before orientation "
-            "and native chrome checks"
+            "synchronous transaction input is not guarded by the immutable "
+            "snapshot before native chrome checks"
         )
+    for label, method in (
+        ("queued", handle_pen),
+        ("synchronous", intercept_pen),
+    ):
+        blocking_hits = [
+            marker for marker in blocking_markers
+            if marker in method
+        ]
+        if blocking_hits:
+            fail(
+                f"{label} pen activation performs blocking config/filesystem "
+                f"work: {blocking_hits}"
+            )
 
     commit_start = module.find(
         "private static boolean commitPageActivationGeometry("

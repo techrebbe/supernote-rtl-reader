@@ -24,6 +24,102 @@ const TAP_SLOP = 18;
 const EDGE_ZONE = 0.28;
 const CACHE_LIMIT = 8;
 const PREFERENCES_SAVE_DELAY_MS = 350;
+const NATIVE_SPREAD_AUTHORITY_READY = 'ready';
+
+function classifyNativeSpreadAuthority(value) {
+  if (!value || typeof value !== 'object') {
+    return {
+      state: 'error',
+      metadataTrusted: false,
+      detail:
+        'Native reader state could not be verified. Native-reader changes are locked.',
+    };
+  }
+
+  const requiredBooleanFields = [
+    'configured',
+    'configuredEditable',
+    'activationPending',
+    'recoveryNeeded',
+    'enabled',
+    'editable',
+    'coverSeparate',
+    'showDivider',
+    'showHeader',
+    'compatible',
+    'backupAvailable',
+    'backupOriginalMarkPresent',
+    'reconciliationAvailable',
+  ];
+  const invalidBooleanField = requiredBooleanFields.find(
+    field => typeof value[field] !== 'boolean',
+  );
+  if (
+    invalidBooleanField ||
+    !['fit', 'native_fill'].includes(value.spreadSizing) ||
+    typeof value.backupStatus !== 'string' ||
+    !['ready', 'pending', 'recovery', 'error'].includes(value.authorityStatus) ||
+    typeof value.authorityReason !== 'string'
+  ) {
+    return {
+      state: 'error',
+      metadataTrusted: false,
+      detail:
+        'Native reader returned incomplete state. Native-reader changes are locked.',
+    };
+  }
+
+  if (value.authorityStatus === 'error') {
+    return {
+      state: 'error',
+      metadataTrusted: true,
+      detail: `Native reader authority could not be verified (${value.authorityReason}). Only validated recovery is available.`,
+    };
+  }
+  if (value.authorityStatus === 'pending') {
+    if (!value.activationPending || !value.recoveryNeeded) {
+      return {
+        state: 'error',
+        metadataTrusted: false,
+        detail:
+          'Native reader returned inconsistent pending authority. Only validated recovery is available.',
+      };
+    }
+    return {
+      state: 'pending',
+      metadataTrusted: true,
+      detail: `A protected Native Spread transition did not finish (${value.authorityReason}). Changes are locked until it is safely reconciled or the verified snapshot is restored.`,
+    };
+  }
+  if (value.authorityStatus === 'recovery') {
+    if (!value.recoveryNeeded || value.activationPending) {
+      return {
+        state: 'error',
+        metadataTrusted: false,
+        detail:
+          'Native reader returned inconsistent recovery authority. Only validated recovery is available.',
+      };
+    }
+    return {
+      state: 'recovery',
+      metadataTrusted: true,
+      detail: `Native annotation authority is unresolved (${value.authorityReason}). Changes are locked until it is safely reconciled or the verified snapshot is restored.`,
+    };
+  }
+  if (value.activationPending || value.recoveryNeeded) {
+    return {
+      state: 'error',
+      metadataTrusted: false,
+      detail:
+        'Native reader returned inconsistent ready authority. Only validated recovery is available.',
+    };
+  }
+  return {
+    state: NATIVE_SPREAD_AUTHORITY_READY,
+    metadataTrusted: true,
+    detail: null,
+  };
+}
 
 async function requireResult(promise, label) {
   const response = await promise;
@@ -206,12 +302,27 @@ export default function App() {
   const [nativeSpreadCompatible, setNativeSpreadCompatible] = useState(false);
   const [nativeSpreadBusy, setNativeSpreadBusy] = useState(false);
   const [nativeSpreadError, setNativeSpreadError] = useState(null);
+  const [nativeSpreadAuthorityState, setNativeSpreadAuthorityState] =
+    useState('unknown');
+  const [nativeSpreadAuthorityDetail, setNativeSpreadAuthorityDetail] = useState(
+    'Checking the persisted native-reader state. State-dependent changes are locked.',
+  );
   const [nativeBackupAvailable, setNativeBackupAvailable] = useState(false);
   const [nativeBackupOriginalMarkPresent, setNativeBackupOriginalMarkPresent] =
     useState(false);
   const [nativeBackupStatus, setNativeBackupStatus] = useState('missing');
+  const [nativeSpreadReconciliationAvailable, setNativeSpreadReconciliationAvailable] =
+    useState(false);
   const [nativeEditableConfirmOpen, setNativeEditableConfirmOpen] =
     useState(false);
+
+  const nativeSpreadAuthorityResolved =
+    nativeSpreadAuthorityState === NATIVE_SPREAD_AUTHORITY_READY;
+  const nativeSpreadRecoveryAllowed =
+    (nativeSpreadAuthorityState === 'pending' ||
+      nativeSpreadAuthorityState === 'recovery' ||
+      nativeSpreadAuthorityState === 'error') &&
+    nativeBackupAvailable;
 
   const mountedRef = useRef(true);
   const nativeSpreadBusyRef = useRef(false);
@@ -233,6 +344,19 @@ export default function App() {
   const preferencesSaveTimerRef = useRef(null);
   const cacheRef = useRef(new Map());
   const prefetchingRef = useRef(new Set());
+
+  const reportNativeSpreadAuthorityLocked = () => {
+    setNativeSpreadError(
+      nativeSpreadAuthorityDetail ??
+        'Native reader state is unresolved. State-dependent changes are locked.',
+    );
+  };
+
+  const markNativeSpreadAuthorityError = detail => {
+    setNativeSpreadAuthorityState('error');
+    setNativeSpreadAuthorityDetail(detail);
+    setNativeEditableConfirmOpen(false);
+  };
 
   directionRef.current = direction;
   viewModeRef.current = viewMode;
@@ -406,34 +530,56 @@ export default function App() {
         const rawPreferences = await ReaderPreferencesModule.load(context.filePath);
         const restored = decodePreferences(rawPreferences, context);
         let nativeSpread = null;
+        let loadedNativeSpreadAuthority = {
+          state: 'error',
+          detail:
+            'Native reader state loader is unavailable. Native-reader changes are locked.',
+        };
         if (ReaderPreferencesModule?.loadNativeSpreadMode) {
           try {
             nativeSpread = await ReaderPreferencesModule.loadNativeSpreadMode(
               context.filePath,
             );
+            loadedNativeSpreadAuthority = classifyNativeSpreadAuthority(
+              nativeSpread,
+            );
           } catch (error) {
             console.warn('RTL_READER_NATIVE_SPREAD_LOAD_FAILED', error);
+            loadedNativeSpreadAuthority = {
+              state: 'error',
+              detail: `Native reader state could not be loaded. Native-reader changes are locked. ${
+                error?.message ?? String(error)
+              }`,
+            };
           }
         }
 
         if (!mountedRef.current) return;
 
+        const trustedNativeSpread =
+          loadedNativeSpreadAuthority.metadataTrusted === true ? nativeSpread : null;
+        const nativeSpreadHasPersistedAppearance =
+          trustedNativeSpread &&
+          (trustedNativeSpread.configured === true ||
+            loadedNativeSpreadAuthority.state === 'pending' ||
+            loadedNativeSpreadAuthority.state === 'recovery');
+
         filePathRef.current = context.filePath;
         nativePageIndexAtOpenRef.current = context.pageIndex;
         directionRef.current = restored.direction;
         viewModeRef.current = restored.viewMode;
-        const restoredCoverSeparate = nativeSpread?.configured
-          ? nativeSpread?.coverSeparate === true
+        const restoredCoverSeparate = nativeSpreadHasPersistedAppearance
+          ? trustedNativeSpread.coverSeparate === true
           : restored.coverSeparate;
         coverSeparateRef.current = restoredCoverSeparate;
-        const restoredDivider = nativeSpread?.configured
-          ? nativeSpread?.showDivider !== false
+        const restoredDivider = nativeSpreadHasPersistedAppearance
+          ? trustedNativeSpread.showDivider !== false
           : restored.showSpreadDivider;
-        const restoredHeader = nativeSpread?.configured
-          ? nativeSpread?.showHeader !== false
+        const restoredHeader = nativeSpreadHasPersistedAppearance
+          ? trustedNativeSpread.showHeader !== false
           : restored.showNativeSpreadHeader;
-        const restoredSizing = nativeSpread?.configured
-          ? nativeSpread?.spreadSizing === 'native_fill'
+        const restoredSizing = nativeSpreadHasPersistedAppearance
+          ? trustedNativeSpread.spreadSizing === 'native_fill'
             ? 'native_fill'
             : 'fit'
           : restored.spreadSizing;
@@ -452,21 +598,26 @@ export default function App() {
         setPageIndex(restored.pageIndex);
         setTotalPages(context.totalPages);
         setPreferencesReady(true);
-        setNativeSpreadConfigured(nativeSpread?.configured === true);
+        setNativeSpreadAuthorityState(loadedNativeSpreadAuthority.state);
+        setNativeSpreadAuthorityDetail(loadedNativeSpreadAuthority.detail);
+        setNativeSpreadConfigured(trustedNativeSpread?.configured === true);
         setNativeSpreadConfiguredEditable(
-          nativeSpread?.configuredEditable === true,
+          trustedNativeSpread?.configuredEditable === true,
         );
-        setNativeSpreadEnabled(nativeSpread?.enabled === true);
-        setNativeSpreadEditable(nativeSpread?.editable === true);
-        setNativeSpreadCompatible(nativeSpread?.compatible === true);
-        setNativeBackupAvailable(nativeSpread?.backupAvailable === true);
+        setNativeSpreadEnabled(trustedNativeSpread?.enabled === true);
+        setNativeSpreadEditable(trustedNativeSpread?.editable === true);
+        setNativeSpreadCompatible(trustedNativeSpread?.compatible === true);
+        setNativeBackupAvailable(trustedNativeSpread?.backupAvailable === true);
         setNativeBackupOriginalMarkPresent(
-          nativeSpread?.backupOriginalMarkPresent === true,
+          trustedNativeSpread?.backupOriginalMarkPresent === true,
         );
-        setNativeBackupStatus(nativeSpread?.backupStatus ?? 'missing');
+        setNativeBackupStatus(trustedNativeSpread?.backupStatus ?? 'missing');
+        setNativeSpreadReconciliationAvailable(
+          trustedNativeSpread?.reconciliationAvailable === true,
+        );
 
         console.log(
-          `RTL_READER_PREFS_LOADED source=${restored.source} page=${restored.pageIndex + 1} direction=${restored.direction} view=${restored.viewMode} cover=${restored.coverSeparate} divider=${restoredDivider} sizing=${restoredSizing}`,
+          `RTL_READER_PREFS_LOADED source=${restored.source} page=${restored.pageIndex + 1} direction=${restored.direction} view=${restored.viewMode} cover=${restored.coverSeparate} divider=${restoredDivider} sizing=${restoredSizing} nativeAuthority=${loadedNativeSpreadAuthority.state}`,
         );
         console.log(
           `RTL_READER_OPENED file=${context.filePath} nativePage=${context.pageIndex + 1} readerPage=${restored.pageIndex + 1}`,
@@ -769,6 +920,10 @@ export default function App() {
     ) {
       return;
     }
+    if (!nativeSpreadAuthorityResolved) {
+      reportNativeSpreadAuthorityLocked();
+      return;
+    }
     if (
       next === 'ltr' && nativeSpreadConfigured
     ) {
@@ -791,6 +946,10 @@ export default function App() {
 
   const setCoverSeparateValue = async next => {
     if (nativeSpreadBusyRef.current) return;
+    if (!nativeSpreadAuthorityResolved) {
+      reportNativeSpreadAuthorityLocked();
+      return;
+    }
     const normalized = next === true;
     if (nativeSpreadConfigured && !nativeSpreadCompatible) {
       setNativeSpreadError(
@@ -838,6 +997,9 @@ export default function App() {
     } catch (error) {
       console.warn('RTL_READER_NATIVE_SPREAD_COVER_SYNC_FAILED', error);
       setNativeSpreadError(error?.message ?? String(error));
+      markNativeSpreadAuthorityError(
+        'The cover-setting result could not be verified. Native-reader changes are locked until this PDF is reopened.',
+      );
     } finally {
       nativeSpreadBusyRef.current = false;
       setNativeSpreadBusy(false);
@@ -850,6 +1012,10 @@ export default function App() {
     nextHeader,
   ) => {
     if (nativeSpreadBusyRef.current) return;
+    if (!nativeSpreadAuthorityResolved) {
+      reportNativeSpreadAuthorityLocked();
+      return;
+    }
     const normalizedDivider = nextDivider !== false;
     const normalizedSizing = nextSizing === 'native_fill'
       ? 'native_fill'
@@ -913,6 +1079,9 @@ export default function App() {
     } catch (error) {
       console.warn('RTL_READER_NATIVE_SPREAD_APPEARANCE_SYNC_FAILED', error);
       setNativeSpreadError(error?.message ?? String(error));
+      markNativeSpreadAuthorityError(
+        'The appearance-setting result could not be verified. Native-reader changes are locked until this PDF is reopened.',
+      );
     } finally {
       nativeSpreadBusyRef.current = false;
       setNativeSpreadBusy(false);
@@ -924,6 +1093,7 @@ export default function App() {
     if (
       !filePath ||
       nativeSpreadBusyRef.current ||
+      !nativeSpreadAuthorityResolved ||
       !ReaderPreferencesModule?.configureNativeSpreadReadOnly
     ) {
       return false;
@@ -951,6 +1121,7 @@ export default function App() {
       setNativeBackupAvailable(false);
       setNativeBackupOriginalMarkPresent(false);
       setNativeBackupStatus('missing');
+      setNativeSpreadReconciliationAvailable(false);
       setNativeEditableConfirmOpen(false);
       console.log(
         `RTL_READER_NATIVE_SPREAD enabled=${enabled} editable=false cover=${coverSeparateRef.current}`,
@@ -959,6 +1130,9 @@ export default function App() {
     } catch (error) {
       console.error('RTL_READER_NATIVE_SPREAD_CONFIG_FAILED', error);
       setNativeSpreadError(error?.message ?? String(error));
+      markNativeSpreadAuthorityError(
+        'The native-reader mode result could not be verified. Changes are locked until this PDF is reopened.',
+      );
       return false;
     } finally {
       nativeSpreadBusyRef.current = false;
@@ -971,6 +1145,7 @@ export default function App() {
     if (
       !filePath ||
       nativeSpreadBusyRef.current ||
+      !nativeSpreadAuthorityResolved ||
       directionRef.current !== 'rtl' ||
       !nativeSpreadCompatible ||
       !ReaderPreferencesModule?.configureNativeSpreadEditable
@@ -998,6 +1173,7 @@ export default function App() {
         backup?.backupOriginalMarkPresent === true,
       );
       setNativeBackupStatus(backup?.backupStatus ?? 'verified');
+      setNativeSpreadReconciliationAvailable(false);
       setNativeEditableConfirmOpen(false);
       console.log(
         `RTL_READER_NATIVE_SPREAD enabled=true editable=true cover=${coverSeparateRef.current} backup=verified`,
@@ -1005,6 +1181,70 @@ export default function App() {
     } catch (error) {
       console.error('RTL_READER_NATIVE_EDITABLE_CONFIG_FAILED', error);
       setNativeSpreadError(error?.message ?? String(error));
+      markNativeSpreadAuthorityError(
+        'Editable activation could not be verified. Native-reader changes are locked until this PDF is reopened or its snapshot is restored.',
+      );
+    } finally {
+      nativeSpreadBusyRef.current = false;
+      setNativeSpreadBusy(false);
+    }
+  };
+
+  const reconcileNativeSpreadRecovery = async () => {
+    const filePath = filePathRef.current;
+    if (
+      !filePath ||
+      nativeSpreadBusyRef.current ||
+      !nativeSpreadReconciliationAvailable ||
+      !ReaderPreferencesModule?.reconcileNativeSpreadRecovery ||
+      !ReaderPreferencesModule?.loadNativeSpreadMode
+    ) {
+      return;
+    }
+    nativeSpreadBusyRef.current = true;
+    setNativeSpreadBusy(true);
+    setNativeSpreadError(null);
+    try {
+      await ReaderPreferencesModule.reconcileNativeSpreadRecovery(filePath);
+      const refreshed = await ReaderPreferencesModule.loadNativeSpreadMode(filePath);
+      const authority = classifyNativeSpreadAuthority(refreshed);
+      if (authority.state !== NATIVE_SPREAD_AUTHORITY_READY) {
+        throw new Error(
+          authority.detail ??
+            'Native reader authority remained unresolved after reconciliation.',
+        );
+      }
+      const refreshedSizing =
+        refreshed.spreadSizing === 'native_fill' ? 'native_fill' : 'fit';
+      coverSeparateRef.current = refreshed.coverSeparate === true;
+      showSpreadDividerRef.current = refreshed.showDivider !== false;
+      showNativeSpreadHeaderRef.current = refreshed.showHeader !== false;
+      spreadSizingRef.current = refreshedSizing;
+      setCoverSeparate(coverSeparateRef.current);
+      setShowSpreadDivider(showSpreadDividerRef.current);
+      setShowNativeSpreadHeader(showNativeSpreadHeaderRef.current);
+      setSpreadSizing(refreshedSizing);
+      setNativeSpreadConfigured(refreshed.configured === true);
+      setNativeSpreadConfiguredEditable(refreshed.configuredEditable === true);
+      setNativeSpreadEnabled(refreshed.enabled === true);
+      setNativeSpreadEditable(refreshed.editable === true);
+      setNativeSpreadCompatible(refreshed.compatible === true);
+      setNativeBackupAvailable(refreshed.backupAvailable === true);
+      setNativeBackupOriginalMarkPresent(
+        refreshed.backupOriginalMarkPresent === true,
+      );
+      setNativeBackupStatus(refreshed.backupStatus);
+      setNativeSpreadReconciliationAvailable(false);
+      setNativeSpreadAuthorityState(NATIVE_SPREAD_AUTHORITY_READY);
+      setNativeSpreadAuthorityDetail(null);
+      setNativeEditableConfirmOpen(false);
+      console.log('RTL_READER_NATIVE_RECOVERY_RECONCILED');
+    } catch (error) {
+      console.error('RTL_READER_NATIVE_RECOVERY_RECONCILE_FAILED', error);
+      setNativeSpreadError(error?.message ?? String(error));
+      markNativeSpreadAuthorityError(
+        'Native reader authority is still unresolved. Ordinary changes remain locked; recovery evidence was preserved.',
+      );
     } finally {
       nativeSpreadBusyRef.current = false;
       setNativeSpreadBusy(false);
@@ -1016,6 +1256,7 @@ export default function App() {
     if (
       !filePath ||
       nativeSpreadBusyRef.current ||
+      (!nativeSpreadAuthorityResolved && !nativeSpreadRecoveryAllowed) ||
       !nativeBackupAvailable ||
       !ReaderPreferencesModule?.restoreNativeAnnotationBackup
     ) {
@@ -1031,12 +1272,18 @@ export default function App() {
       setNativeSpreadEnabled(false);
       setNativeSpreadEditable(false);
       setNativeEditableConfirmOpen(false);
+      setNativeSpreadReconciliationAvailable(false);
+      setNativeSpreadAuthorityState(NATIVE_SPREAD_AUTHORITY_READY);
+      setNativeSpreadAuthorityDetail(null);
       nativeSpreadBusyRef.current = false;
       setNativeSpreadBusy(false);
       await close();
     } catch (error) {
       console.error('RTL_READER_NATIVE_BACKUP_RESTORE_FAILED', error);
       setNativeSpreadError(error?.message ?? String(error));
+      markNativeSpreadAuthorityError(
+        'Annotation recovery did not complete. Native-reader changes remain locked; the recovery files were preserved.',
+      );
       nativeSpreadBusyRef.current = false;
       setNativeSpreadBusy(false);
     }
@@ -1148,6 +1395,19 @@ export default function App() {
         </View>
       )}
 
+      {!fatalError && !nativeSpreadAuthorityResolved && (
+        <View
+          pointerEvents="none"
+          style={[
+            styles.nativeAuthorityBanner,
+            chromeVisible && styles.nativeAuthorityBannerWithChrome,
+          ]}>
+          <Text style={styles.nativeAuthorityBannerText}>
+            {nativeSpreadAuthorityDetail}
+          </Text>
+        </View>
+      )}
+
       {fatalError && (
         <View style={styles.errorPanel}>
           <Text style={styles.errorTitle}>Could not render this page</Text>
@@ -1241,16 +1501,23 @@ export default function App() {
               contentContainerStyle={styles.settingsScrollContent}
               keyboardShouldPersistTaps="handled"
               style={styles.settingsScroll}>
+            {!nativeSpreadAuthorityResolved && (
+              <Text style={styles.settingError}>
+                {nativeSpreadAuthorityDetail}
+              </Text>
+            )}
             <Text style={styles.settingLabel}>Reading direction</Text>
             <View style={styles.segmentRow}>
               <SegmentedButton
                 active={direction === 'rtl'}
+                disabled={nativeSpreadBusy || !nativeSpreadAuthorityResolved}
                 label="RTL"
                 onPress={() => setDirectionValue('rtl')}
                 style={styles.segmentHalf}
               />
               <SegmentedButton
                 active={direction === 'ltr'}
+                disabled={nativeSpreadBusy || !nativeSpreadAuthorityResolved}
                 label="LTR"
                 onPress={() => setDirectionValue('ltr')}
                 style={styles.segmentHalfLast}
@@ -1288,6 +1555,7 @@ export default function App() {
                 active={!coverSeparate}
                 disabled={
                   nativeSpreadBusy ||
+                  !nativeSpreadAuthorityResolved ||
                   (nativeSpreadConfigured && !nativeSpreadCompatible)
                 }
                 label="Off"
@@ -1298,6 +1566,7 @@ export default function App() {
                 active={coverSeparate}
                 disabled={
                   nativeSpreadBusy ||
+                  !nativeSpreadAuthorityResolved ||
                   (nativeSpreadConfigured && !nativeSpreadCompatible)
                 }
                 label="On"
@@ -1315,6 +1584,7 @@ export default function App() {
                 active={spreadSizing === 'fit'}
                 disabled={
                   nativeSpreadBusy ||
+                  !nativeSpreadAuthorityResolved ||
                   (nativeSpreadConfigured && !nativeSpreadCompatible)
                 }
                 label="Fit page"
@@ -1331,6 +1601,7 @@ export default function App() {
                 active={spreadSizing === 'native_fill'}
                 disabled={
                   nativeSpreadBusy ||
+                  !nativeSpreadAuthorityResolved ||
                   (nativeSpreadConfigured && !nativeSpreadCompatible)
                 }
                 label="Native fill"
@@ -1357,6 +1628,7 @@ export default function App() {
                 active={!showSpreadDivider}
                 disabled={
                   nativeSpreadBusy ||
+                  !nativeSpreadAuthorityResolved ||
                   (nativeSpreadConfigured && !nativeSpreadCompatible)
                 }
                 label="Off"
@@ -1373,6 +1645,7 @@ export default function App() {
                 active={showSpreadDivider}
                 disabled={
                   nativeSpreadBusy ||
+                  !nativeSpreadAuthorityResolved ||
                   (nativeSpreadConfigured && !nativeSpreadCompatible)
                 }
                 label="On"
@@ -1396,6 +1669,7 @@ export default function App() {
                 active={!showNativeSpreadHeader}
                 disabled={
                   nativeSpreadBusy ||
+                  !nativeSpreadAuthorityResolved ||
                   (nativeSpreadConfigured && !nativeSpreadCompatible)
                 }
                 label="Off"
@@ -1412,6 +1686,7 @@ export default function App() {
                 active={showNativeSpreadHeader}
                 disabled={
                   nativeSpreadBusy ||
+                  !nativeSpreadAuthorityResolved ||
                   (nativeSpreadConfigured && !nativeSpreadCompatible)
                 }
                 label="On"
@@ -1433,8 +1708,10 @@ export default function App() {
             <Text style={styles.settingLabel}>Supernote native reader</Text>
             <View style={styles.segmentRow}>
               <SegmentedButton
-                active={!nativeSpreadConfigured}
-                disabled={nativeSpreadBusy}
+                active={
+                  nativeSpreadAuthorityResolved && !nativeSpreadConfigured
+                }
+                disabled={nativeSpreadBusy || !nativeSpreadAuthorityResolved}
                 label="Off"
                 onPress={() => setNativeSpreadReadOnly(false)}
                 style={styles.segmentThird}
@@ -1445,6 +1722,7 @@ export default function App() {
                 }
                 disabled={
                   nativeSpreadBusy ||
+                  !nativeSpreadAuthorityResolved ||
                   direction !== 'rtl' ||
                   !nativeSpreadCompatible
                 }
@@ -1458,6 +1736,7 @@ export default function App() {
                 }
                 disabled={
                   nativeSpreadBusy ||
+                  !nativeSpreadAuthorityResolved ||
                   direction !== 'rtl' ||
                   !nativeSpreadCompatible
                 }
@@ -1467,7 +1746,9 @@ export default function App() {
               />
             </View>
             <Text style={styles.settingHint}>
-              {nativeSpreadConfiguredEditable && nativeSpreadEditable
+              {!nativeSpreadAuthorityResolved
+                ? nativeSpreadAuthorityDetail
+                : nativeSpreadConfiguredEditable && nativeSpreadEditable
                 ? 'Native writing is enabled for this PDF. A verified recovery snapshot protects the annotation state from before editing.'
                 : nativeSpreadConfiguredEditable
                   ? 'RTL editable remains configured, but its verified hooks are inactive. Select Off or restore the annotation snapshot.'
@@ -1481,7 +1762,7 @@ export default function App() {
                       ? "Close RTL Reader to reopen this PDF in Supernote's native RTL spread mode. Writing remains disabled for this pilot."
                       : "Read-only preserves annotations. Editable creates and verifies a per-document recovery snapshot before native writing is enabled."}
             </Text>
-            {nativeEditableConfirmOpen && (
+            {nativeSpreadAuthorityResolved && nativeEditableConfirmOpen && (
               <View style={styles.nativeWarningPanel}>
                 <Text style={styles.nativeWarningTitle}>
                   Enable native editing for this PDF?
@@ -1507,6 +1788,23 @@ export default function App() {
                 </View>
               </View>
             )}
+            {nativeSpreadReconciliationAvailable && (
+              <View style={styles.nativeRecoveryRow}>
+                <Text style={styles.settingHint}>
+                  A protected transition or recovery artifact is unresolved.
+                  Reconciliation only completes an exact token- and
+                  identity-validated transition; ambiguous evidence is preserved.
+                </Text>
+                <Pressable
+                  disabled={nativeSpreadBusy}
+                  onPress={reconcileNativeSpreadRecovery}
+                  style={styles.recoveryButton}>
+                  <Text style={styles.panelButtonText}>
+                    {nativeSpreadBusy ? 'Reconciling...' : 'Reconcile safely'}
+                  </Text>
+                </Pressable>
+              </View>
+            )}
             {nativeBackupAvailable && (
               <View style={styles.nativeRecoveryRow}>
                 <Text style={styles.settingHint}>
@@ -1515,7 +1813,11 @@ export default function App() {
                     : 'originally no annotation file'}).
                 </Text>
                 <Pressable
-                  disabled={nativeSpreadBusy}
+                  disabled={
+                    nativeSpreadBusy ||
+                    (!nativeSpreadAuthorityResolved &&
+                      !nativeSpreadRecoveryAllowed)
+                  }
                   onPress={restoreNativeBackup}
                   style={styles.recoveryButton}>
                   <Text style={styles.panelButtonText}>Restore snapshot</Text>
@@ -1708,6 +2010,26 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontSize: 14,
     color: '#000000',
+  },
+  nativeAuthorityBanner: {
+    position: 'absolute',
+    top: 8,
+    left: 18,
+    right: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderWidth: 2,
+    borderColor: '#000000',
+    backgroundColor: '#ffffff',
+  },
+  nativeAuthorityBannerWithChrome: {
+    top: 62,
+  },
+  nativeAuthorityBannerText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#000000',
+    textAlign: 'center',
   },
   errorPanel: {
     position: 'absolute',

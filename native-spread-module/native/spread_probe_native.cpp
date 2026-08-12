@@ -102,11 +102,6 @@ void replacement_grid_line_erase(
             trail_int(operation_trail, kTrailRedrawWidth) = 1872;
             trail_int(operation_trail, kTrailRedrawHeight) = 2496;
             patched = true;
-            __android_log_print(
-                ANDROID_LOG_WARN,
-                kLogTag,
-                "eraser_redraw_patched from=932x1243 to=1872x2496"
-            );
         }
     }
 
@@ -124,13 +119,6 @@ void replacement_grid_line_erase(
     if (patched) {
         trail_int(operation_trail, kTrailRedrawWidth) = original_width;
         trail_int(operation_trail, kTrailRedrawHeight) = original_height;
-        __android_log_print(
-            ANDROID_LOG_WARN,
-            kLogTag,
-            "eraser_redraw_restored to=%dx%d",
-            original_width,
-            original_height
-        );
     }
 }
 
@@ -182,12 +170,6 @@ Java_com_techrebbe_supernote_spreadprobe_SpreadProbe_nativeSetCalibrationEnabled
     jboolean enabled
 ) {
     calibration_enabled.store(enabled == JNI_TRUE, std::memory_order_release);
-    __android_log_print(
-        ANDROID_LOG_WARN,
-        kLogTag,
-        "calibration_enabled=%s",
-        enabled == JNI_TRUE ? "true" : "false"
-    );
 }
 
 extern "C" JNIEXPORT jint JNICALL

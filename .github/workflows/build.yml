@@ -12,6 +12,105 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  trace-helper-tests:
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Native Spread trace-helper tests
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test_trace_helper_fail_closed.ps1
+
+  invariant-suites:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run full invariant suites
+        run: |
+          python3 scripts/check_native_invariants.py .
+          python3 scripts/check_native_spread_invariants.py .
+
+  native-spread-build:
+    name: Native Spread compile and verification only
+    needs:
+      - invariant-suites
+      - trace-helper-tests
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK and NDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: >-
+            platform-tools
+            platforms;android-35
+            build-tools;35.0.0
+            ndk;27.0.12077973
+
+      - name: Compile and verify Native Spread companion package
+        shell: powershell
+        run: |
+          $sdk = if ($env:ANDROID_SDK_ROOT) {
+            $env:ANDROID_SDK_ROOT
+          } elseif ($env:ANDROID_HOME) {
+            $env:ANDROID_HOME
+          } else {
+            throw 'Android SDK setup did not publish an SDK root.'
+          }
+          $ndk = Join-Path $sdk 'ndk\27.0.12077973'
+          $keystore = Join-Path $env:RUNNER_TEMP 'native-spread-debug.keystore'
+          # build.ps1 verifies a fully packaged APK, which requires signing.
+          # This disposable runner-local identity is never published and is
+          # not an upgrade-compatible release identity.
+          & keytool -genkeypair -noprompt `
+            -keystore $keystore `
+            -storetype JKS `
+            -storepass android `
+            -alias androiddebugkey `
+            -keypass android `
+            -dname 'CN=Android Debug,O=Android,C=US' `
+            -keyalg RSA `
+            -keysize 2048 `
+            -validity 10000
+          if ($LASTEXITCODE -ne 0) {
+            throw "Debug-keystore creation failed with exit code $LASTEXITCODE"
+          }
+          $windowsPowerShell = Join-Path `
+            $env:SystemRoot `
+            'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $windowsPowerShell `
+            -NoProfile `
+            -ExecutionPolicy Bypass `
+            -File .\native-spread-module\build.ps1 `
+            -AndroidSdk $sdk `
+            -AndroidNdk $ndk `
+            -DebugKeystore $keystore
+          if ($LASTEXITCODE -ne 0) {
+            throw "Native Spread build failed with exit code $LASTEXITCODE"
+          }
+          Write-Host (
+            'Native package compiled and verified with a disposable ' +
+            'runner-local identity; no APK is published by this workflow.'
+          )
+
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 20

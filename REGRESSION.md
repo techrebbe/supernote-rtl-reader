@@ -350,11 +350,14 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   Fit foreground and prefetch renders skip it.
 - [x] Static invariant: a configured marker is authoritative for cover parity
   as well as divider, header, and page-sizing state during initialization.
-- [x] Static invariant: failed trace startup stops observers, cancels pending
-  work, and removes the stale `active.txt` session pointer.
+- [x] Static invariant: failed trace startup stops observers and cancels pending
+  work. A pre-publication attempt is cleaned up; after `active.txt` is durable,
+  that exact pointer remains guarded by `incomplete.txt` and
+  `publication-failed.txt`.
 - [x] Static invariant: `last.txt` is published only during successful trace
-  finalization, before `active.txt` is removed; failed startup preserves the
-  previous completed-session pointer.
+  finalization by atomically renaming `active.txt`; failed startup preserves the
+  previous completed-session pointer and no separate success event can disagree
+  with that single commit.
 - [x] Static invariant: every desktop trace-helper action recognizes an
   `active.txt` whose recorded PID is no longer the live document process.
   `Status` retains that pointer across invocations; `Stop` removes it only after
@@ -377,9 +380,9 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 - [x] Static invariant: hook-thread event capture queues immutable records to a
   per-session serialized writer; only that writer opens `events.jsonl`, and
   finalization drains it before publishing a session pointer.
-- [x] Static invariant: completed/incomplete pointer publication always attempts
-  `active.txt` cleanup in `finally`; a failure preserves the exact session via
-  `publication-failed.txt`, which the helper checks before `last.txt`.
+- [x] Static invariant: completion removes `active.txt` only through the atomic
+  rename to `last.txt`; incomplete/publication failure retains exact active,
+  incomplete, and publication-failed guards, all checked before `last.txt`.
 - [x] Static invariant: completed publication rejects an undeletable stale
   `incomplete.txt` and preserves an explicit publication-failure session.
 - [x] Nomad helper simulation: `Stop` reported a disposable `incomplete.txt`
@@ -388,6 +391,14 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   marker and directory were then removed.
 - [x] The trace collection script waits for asynchronous finalization and
   verifies the completed session pointer before pulling the bundle.
+- [x] Local failure-injection regression: malformed active/incomplete/failure
+  pointers for every helper action, padded active bytes, multiline `last.txt`,
+  unreadable/nonregular nodes, missing/ambiguous owner metadata, `pidof`
+  failure, and ADB transport failure all retain state and cannot broadcast,
+  mutate, pull, or fall back to an older completed trace.
+- [x] Static invariant: checkpoint screenshots stage outside the remote session
+  directory; Checkpoint revalidates active identity on both sides, and Stop
+  revalidates completion before and after every remote pull.
 - [x] Ordered trail fingerprints cover all trails while detailed trace items
   remain capped at 256.
 - [x] Native Spread v0.0.116 active/inactive composition trace: two new active
@@ -476,6 +487,26 @@ Automated and build evidence:
 - [x] Static invariants require every deferred activation to be cancelled when
   the latest validated document configuration explicitly disables editing or
   Native Spread.
+- [x] A verified v0.4.12 `protected-editable-pilot` session is authorized only
+  for one-time marker migration or backup retirement. Load-time migration
+  retains the existing live `.mark` and recovery snapshot, publishes the
+  transactional marker atomically with rollback, and verifies the new marker
+  against the same backup before reporting editable mode.
+- [x] Static invariants require protocol-2 editable activation to publish a
+  non-authorizing `pending` marker before the final live-`.mark` check. Only the
+  atomic `committed` marker publication authorizes writing, and committed
+  markers cannot retain pending-only rollback fields.
+- [x] Static invariants require a failed new activation to archive and verify a
+  token-bound copy of its manifest and snapshot before restoring the previous
+  marker or freeing the canonical backup slot. Partial archive stages are
+  resumable; ambiguous or mismatched evidence remains non-mutating and
+  fail-closed.
+- [x] Static invariants require read-only and Off transitions to journal their
+  intent and exact previous-marker identity before retiring recovery data, then
+  revalidate that pending transaction before publishing the final state.
+- [x] Static invariants serialize configuration, retirement, restore, and
+  process-death reconciliation under one lock and require an exclusive restore
+  claim before `.mark` replacement.
 - [x] Native Spread v0.0.118 compiles, is v2/v3 signed, and reports matching
   manifest, handshake, and plug-in minimum version 118.
 

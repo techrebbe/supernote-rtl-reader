@@ -195,23 +195,29 @@ The active settled-ink transform is clipped to the active page's visible slot,
 matching Native Fill's PDF and canonical-ink clipping and keeping cropped ink
 from bleeding across the center divider.
 
-Trace startup failure now cancels pending work, stops any created file
-observer, and deletes `active.txt`, so the collection helper cannot mistake a
-failed session for a recording trace. It does not publish `last.txt` until a
-session has completed final snapshot collection, preserving the preceding
-completed-session pointer if startup fails.
+Trace startup failure now cancels pending work and stops any created file
+observer. If failure occurs before `active.txt` is durably published, the
+unpublished pointer is cleaned up. Once `active.txt` has been published, the
+exact failed session remains guarded by `active.txt`, `incomplete.txt`, and
+`publication-failed.txt`; the desktop helper therefore cannot fall back to an
+older successful `last.txt` or mistake the failed startup for a completed
+trace.
 An `active.txt` left by a killed document process is reconciled by every desktop
 trace-helper action. The helper compares the session's recorded PID with the
 live Supernote document PID. `Status` reports the abandoned session while
 retaining `active.txt`, preserving its identity across helper invocations.
-`Stop` removes the pointer, retains the partial directory without publishing it
-as completed, and raises an explicit incomplete-session error rather than
-substituting and pulling an older trace from `last.txt`.
+`Stop` atomically moves that exact pointer into a recovery directory, verifies
+its filesystem identity and exact contents after the move, and archives the
+verified pointer alongside the retained partial directory without publishing
+the session as completed. If another pointer replaces it between validation
+and the move, the replacement and recovery directory remain guarded for
+explicit operator recovery. Every non-status action blocks while that guard
+exists, so an older trace from `last.txt` cannot be substituted or pulled.
 Finalization retries an unstable stop-time `.mark` hash/copy up to five times.
 Only a stable, SHA-256-verified snapshot can publish `last.txt`. Exhausted
-retries publish `incomplete.txt` instead, remove the recording pointer, retain
-the partial directory, and cause `trace.ps1 Stop` to report the failed session
-without substituting an older trace.
+retries retain the exact recording pointer, publish `incomplete.txt` plus
+`publication-failed.txt`, retain the partial directory, and cause `trace.ps1
+Stop` to report the failed session without substituting an older trace.
 The live source identity is checked once more after the copied snapshot's hash
 is verified, so a rewrite during that verification cannot be accepted.
 The missing-file and unchanged-hash fast paths likewise recheck the live source
@@ -222,11 +228,22 @@ deleted snapshot.
 Every event is serialized to an immutable record and queued to a dedicated
 per-session writer; hook, pen, native-writer, and UI threads no longer open or
 flush `events.jsonl`. Finalization drains the writer before publishing its
-pointer. A pointer-write failure moves or records the session in
-`publication-failed.txt`, attempts `active.txt` cleanup in `finally`, and makes
-`trace.ps1` refuse the preceding completed session.
+pointer. Completed publication is a single same-directory rename from
+`active.txt` to `last.txt`; the event stream has no independently published
+success terminal that can disagree with that commit. A pointer-write failure
+after active-pointer publication retains the exact session in `active.txt`,
+`incomplete.txt`, and `publication-failed.txt`, and makes `trace.ps1` refuse the
+preceding completed session. A pre-publication failure cleans up only its
+unpublished pointer attempt.
 An undeletable stale `incomplete.txt` also enters this fail-closed publication
 path instead of overriding the new completed pointer.
+The desktop helper validates the exact bytes of every pointer rather than
+trimming them, validates one exact numeric owner PID from regular session
+metadata, and distinguishes `pidof`'s explicit no-process result from an
+unknown command or transport failure. Any ambiguity retains the guard and
+blocks mutation or fallback. Checkpoint screenshots are first staged outside
+the remotely published session directory, then merged into the local bundle
+only after completion identity is revalidated.
 
 v0.0.118 begins the transactional single-active-page release line from stable
 v0.0.116. The two-page landscape image remains a visual composition, while one
@@ -245,6 +262,16 @@ completion and timeout work, permits one reload retry, and fails closed rather
 than falling back to manual `.mark` merging. v0.0.117's inactive-page
 capture/normalize/merge experiment remains available only on its preserved
 branch.
+
+Editable authorization is protocol 2 and has two durable states. A `pending`
+marker records the activation token, complete recovery identity, intended
+transition, and byte-exact previous marker; it never authorizes native writing.
+Only an atomically published `committed` marker is accepted. Failed activation
+archives the verified recovery baseline into token-bound, self-contained files
+before restoring the previous marker. Explicit retry resumes or reconciles
+partial archive stages, while ambiguous evidence fails closed without mutation.
+Read-only and Off transitions are also pending-journaled before recovery
+retirement, so a process death cannot silently lose the protected baseline.
 
 This is firmware-specific experimental software for a rooted device. Back up
 documents and `.mark` files before testing a new firmware or module revision.
@@ -265,7 +292,12 @@ Requirements:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
-The signed APK is written to `build/artifact/`.
+The signed APK is written to `build/artifact/`. The GitHub workflow uses a
+disposable, runner-local debug identity only so `build.ps1` can compile,
+package, and verify the APK; it does not upload that APK. Such a build is not
+upgrade-compatible with another disposable identity. Any installable update
+must instead be signed with the same authorized private identity as the
+previously installed build.
 
 ## Install
 

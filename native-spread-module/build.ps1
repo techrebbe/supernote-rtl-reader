@@ -17,12 +17,50 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = [System.IO.Path]::GetFullPath($PSScriptRoot)
+$repositoryRoot = [System.IO.Path]::GetFullPath(
+    (Join-Path $projectRoot '..')
+)
 $workspaceRoot = [System.IO.Path]::GetFullPath(
     (Join-Path $projectRoot '..\..\..\..')
 )
 $buildRoot = [System.IO.Path]::GetFullPath(
     (Join-Path $projectRoot 'build')
 )
+
+$traceHelperTest = Join-Path `
+    $repositoryRoot `
+    'scripts\test_trace_helper_fail_closed.ps1'
+$traceHelperScript = Join-Path $projectRoot 'trace.ps1'
+$verifiedTraceSources = @(
+    @(
+        $traceHelperScript,
+        '650E4CEB744AA3AEB2A8835D2664B6CBC1B4E89A650F1D3A94375804462F5A2D'
+    ),
+    @(
+        $traceHelperTest,
+        '32BCB4A63812B199CBA0620B52A7C282DAE46CAACC4B22934FF33DD068EFAABF'
+    )
+)
+foreach ($verifiedTraceSource in $verifiedTraceSources) {
+    $actualTraceSourceSha256 = (
+        Get-FileHash -Algorithm SHA256 -LiteralPath $verifiedTraceSource[0]
+    ).Hash
+    if ($actualTraceSourceSha256 -ne $verifiedTraceSource[1]) {
+        throw (
+            "Trace safety source digest mismatch for $($verifiedTraceSource[0]): " +
+            "expected $($verifiedTraceSource[1]), got $actualTraceSourceSha256"
+        )
+    }
+}
+$windowsPowerShell = Join-Path $PSHOME 'powershell.exe'
+& $windowsPowerShell `
+    -NoProfile `
+    -ExecutionPolicy Bypass `
+    -File $traceHelperTest `
+    -RepositoryRoot $repositoryRoot
+if ($LASTEXITCODE -ne 0) {
+    throw "Trace-helper tests failed with exit code $LASTEXITCODE"
+}
 
 if (-not $AndroidNdk) {
     $AndroidNdk = Join-Path $AndroidSdk 'ndk\27.0.12077973'
@@ -82,6 +120,17 @@ foreach ($required in @(
     }
 }
 
+$nativeSource = Join-Path $projectRoot 'native\spread_probe_native.cpp'
+$expectedNativeSourceSha256 =
+    '2AA4F5AA8DBACEB7446D66ED04063D42F38D865A7013A3A477C67DD785FEFE3B'
+$nativeSourceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nativeSource).Hash
+if ($nativeSourceSha256 -ne $expectedNativeSourceSha256) {
+    throw (
+        'Frozen native eraser source digest mismatch: expected ' +
+        "$expectedNativeSourceSha256, got $nativeSourceSha256"
+    )
+}
+
 $nativeOutput = Join-Path $arm64LibDir 'libspreadprobe.so'
 & $clang `
     -shared `
@@ -93,11 +142,14 @@ $nativeOutput = Join-Path $arm64LibDir 'libspreadprobe.so'
     -llog `
     -ldl `
     -o $nativeOutput `
-    (Join-Path $projectRoot 'native\spread_probe_native.cpp')
+    $nativeSource
 
 if ($LASTEXITCODE -ne 0) {
     throw "NDK compilation failed with exit code $LASTEXITCODE"
 }
+$compiledNativeSha256 = (
+    Get-FileHash -Algorithm SHA256 -LiteralPath $nativeOutput
+).Hash
 
 $javaSources = @(
     Get-ChildItem -LiteralPath (Join-Path $projectRoot 'src') -Recurse -Filter '*.java' -File
@@ -122,6 +174,12 @@ try {
     & jar cf $moduleJar com\techrebbe\supernote\spreadprobe
 } finally {
     Pop-Location
+}
+if ($LASTEXITCODE -ne 0) {
+    throw "jar class packaging failed with exit code $LASTEXITCODE"
+}
+if (-not (Test-Path -LiteralPath $moduleJar -PathType Leaf)) {
+    throw "jar class packaging did not create $moduleJar"
 }
 
 & $d8 `
@@ -152,11 +210,25 @@ if ($LASTEXITCODE -ne 0) {
 & jar uf $unsignedApk `
     -C $dexDir classes.dex `
     -C (Join-Path $projectRoot 'meta') META-INF
+if ($LASTEXITCODE -ne 0) {
+    throw "jar dex/metadata update failed with exit code $LASTEXITCODE"
+}
 
 # LSPosed's module class loader maps native libraries directly from the APK.
 # Keep the arm64 library uncompressed so Android's linker can mmap it.
+if (
+    (Get-FileHash -Algorithm SHA256 -LiteralPath $nativeSource).Hash -ne
+        $expectedNativeSourceSha256 -or
+    (Get-FileHash -Algorithm SHA256 -LiteralPath $nativeOutput).Hash -ne
+        $compiledNativeSha256
+) {
+    throw 'Native eraser source or compiled library changed before packaging.'
+}
 & jar u0f $unsignedApk `
     -C $nativeLibRoot lib
+if ($LASTEXITCODE -ne 0) {
+    throw "jar native-library update failed with exit code $LASTEXITCODE"
+}
 
 $alignedApk = Join-Path $buildRoot 'spread-probe-aligned.apk'
 & $zipalign -f -p 4 $unsignedApk $alignedApk
@@ -182,6 +254,53 @@ if ($LASTEXITCODE -ne 0) {
 & $apksigner verify --verbose --print-certs $outputApk
 if ($LASTEXITCODE -ne 0) {
     throw "apksigner verification failed with exit code $LASTEXITCODE"
+}
+
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$apkArchive = [IO.Compression.ZipFile]::OpenRead($outputApk)
+try {
+    $requiredEntries = @(
+        'AndroidManifest.xml',
+        'assets/native_init',
+        'assets/xposed_init',
+        'classes.dex',
+        'META-INF/xposed/scope.list',
+        'lib/arm64-v8a/libspreadprobe.so'
+    )
+    $entriesByName = @{}
+    foreach ($entry in $apkArchive.Entries) {
+        if ($entriesByName.ContainsKey($entry.FullName)) {
+            throw "APK contains duplicate entry: $($entry.FullName)"
+        }
+        $entriesByName[$entry.FullName] = $entry
+    }
+    foreach ($requiredEntry in $requiredEntries) {
+        if (-not $entriesByName.ContainsKey($requiredEntry)) {
+            throw "APK is missing required entry: $requiredEntry"
+        }
+        if ($entriesByName[$requiredEntry].Length -le 0) {
+            throw "APK required entry is empty: $requiredEntry"
+        }
+    }
+    $nativeEntry = $entriesByName['lib/arm64-v8a/libspreadprobe.so']
+    if ($nativeEntry.CompressedLength -ne $nativeEntry.Length) {
+        throw 'APK native library is compressed and cannot be mmap-loaded.'
+    }
+    $nativeEntryStream = $nativeEntry.Open()
+    try {
+        $apkNativeSha256 = [BitConverter]::ToString(
+            [Security.Cryptography.SHA256]::Create().ComputeHash(
+                $nativeEntryStream
+            )
+        ).Replace('-', '')
+    } finally {
+        $nativeEntryStream.Dispose()
+    }
+    if ($apkNativeSha256 -ne $compiledNativeSha256) {
+        throw 'APK native library does not match the verified compiler output.'
+    }
+} finally {
+    $apkArchive.Dispose()
 }
 
 & $aapt2 dump badging $outputApk | Select-Object -First 12

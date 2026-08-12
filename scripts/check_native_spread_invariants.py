@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import sys
 from pathlib import Path
@@ -18,6 +19,187 @@ def require_markers(text: str, markers: tuple[str, ...], label: str) -> None:
         fail(f"{label} is missing required markers: {missing}")
 
 
+def mask_cpp_comments_and_literals(text: str) -> str:
+    """Mask C++ comments and literals while preserving source offsets."""
+
+    pattern = re.compile(
+        r"//[^\r\n]*|/\*.*?\*/|\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'",
+        re.DOTALL,
+    )
+
+    def mask(match: re.Match[str]) -> str:
+        return "".join("\n" if char == "\n" else " " for char in match.group(0))
+
+    return pattern.sub(mask, text)
+
+
+def mask_comments_preserve_literals(text: str) -> str:
+    """Mask comments while keeping quoted source literals and offsets."""
+
+    pattern = re.compile(
+        r"//[^\r\n]*|/\*.*?\*/|\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'",
+        re.DOTALL,
+    )
+
+    def mask(match: re.Match[str]) -> str:
+        value = match.group(0)
+        if not value.startswith("/"):
+            return value
+        return "".join("\n" if char == "\n" else " " for char in value)
+
+    return pattern.sub(mask, text)
+
+
+def compact_code(text: str) -> str:
+    """Remove C-style comments and insignificant whitespace for exact checks."""
+
+    return re.sub(r"\s+", "", mask_comments_preserve_literals(text))
+
+
+def mask_yaml_comments(text: str) -> str:
+    """Mask workflow line comments while preserving offsets and newlines."""
+
+    return re.sub(
+        r"(?m)#.*$",
+        lambda match: " " * len(match.group(0)),
+        text,
+    )
+
+
+def extract_cpp_function(text: str, signature: str, label: str) -> tuple[str, str]:
+    """Return the unique C++ definition and a comment/literal-masked copy."""
+
+    masked = mask_cpp_comments_and_literals(text)
+    candidates: list[tuple[int, int]] = []
+    search_from = 0
+    while True:
+        start = masked.find(signature, search_from)
+        if start < 0:
+            break
+        parameter_start = start + len(signature) - 1
+        parameter_depth = 0
+        parameter_end = -1
+        for index in range(parameter_start, len(masked)):
+            char = masked[index]
+            if char == "(":
+                parameter_depth += 1
+            elif char == ")":
+                parameter_depth -= 1
+                if parameter_depth == 0:
+                    parameter_end = index
+                    break
+        if parameter_end >= 0:
+            body_start = parameter_end + 1
+            while body_start < len(masked) and masked[body_start].isspace():
+                body_start += 1
+            if body_start < len(masked) and masked[body_start] == "{":
+                body_end = matching_brace(masked, body_start, label) + 1
+                candidates.append((start, body_end))
+        search_from = start + len(signature)
+    if len(candidates) != 1:
+        fail(
+            f"expected exactly one {label} definition, found "
+            f"{len(candidates)}"
+        )
+    start, end = candidates[0]
+    return text[start:end], masked[start:end]
+
+
+def matching_brace(text: str, opening: int, label: str) -> int:
+    if opening < 0 or opening >= len(text) or text[opening] != "{":
+        fail(f"could not locate {label} opening brace")
+    depth = 0
+    for index in range(opening, len(text)):
+        char = text[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return index
+    fail(f"could not locate {label} closing brace")
+
+
+def matching_parenthesis(text: str, opening: int, label: str) -> int:
+    if opening < 0 or opening >= len(text) or text[opening] != "(":
+        fail(f"could not locate {label} opening parenthesis")
+    depth = 0
+    for index in range(opening, len(text)):
+        char = text[index]
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+    fail(f"could not locate {label} closing parenthesis")
+
+
+def brace_depth_at(text: str, position: int) -> int:
+    """Return lexical brace depth immediately before *position*."""
+
+    depth = 0
+    for char in text[:position]:
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+    return depth
+
+
+def identifier_mutations(text: str, name: str) -> list[re.Match[str]]:
+    """Find assignments, compound assignments, and increments for a name."""
+
+    escaped = re.escape(name)
+    return list(
+        re.finditer(
+            rf"(?:\+\+|--)\s*\b{escaped}\b|"
+            rf"\b{escaped}\b\s*(?:\+\+|--|(?:>>>|>>|<<|[+\-*/%&|^])?=(?!=))",
+            text,
+        )
+    )
+
+
+def require_cpp_pattern(text: str, pattern: str, label: str) -> int:
+    match = re.search(pattern, text, re.DOTALL)
+    if match is None:
+        fail(f"{label} does not match the required native control flow")
+    return match.start()
+
+
+def require_only_cpp_calls(
+    masked_function: str,
+    allowed_calls: set[str],
+    label: str,
+) -> None:
+    calls = set(
+        re.findall(
+            r"([A-Za-z_][A-Za-z0-9_:]*)\s*\(", masked_function
+        )
+    )
+    calls.update(
+        re.findall(
+            r"\(\s*\*?\s*([A-Za-z_][A-Za-z0-9_:]*)\s*\)\s*\(",
+            masked_function,
+        )
+    )
+    calls.update(
+        re.findall(
+            r"([A-Za-z_][A-Za-z0-9_:]*)\s*<[^;{}()]*>\s*\(",
+            masked_function,
+        )
+    )
+    unexpected = sorted(calls - allowed_calls)
+    if unexpected:
+        fail(f"{label} invokes unexpected synchronous calls: {unexpected}")
+    if re.search(
+        r"(?i)(?:__android_log|android_log|logcat|printf|fprintf|vprintf|"
+        r"vfprintf|puts|fputs|syslog|std::(?:cerr|clog|cout))",
+        masked_function,
+    ):
+        fail(f"{label} performs synchronous native logging or output")
+
+
 def check(repo_root: Path) -> None:
     plugin_path = repo_root / "native" / "ReaderPreferencesModule.kt.template"
     module_path = (
@@ -31,8 +213,16 @@ def check(repo_root: Path) -> None:
         / "SpreadProbe.java"
     )
     manifest_path = repo_root / "native-spread-module" / "AndroidManifest.xml"
+    native_build_path = repo_root / "native-spread-module" / "build.ps1"
+    native_cpp_path = (
+        repo_root / "native-spread-module" / "native" / "spread_probe_native.cpp"
+    )
     trace_script_path = repo_root / "native-spread-module" / "trace.ps1"
+    trace_helper_test_path = (
+        repo_root / "scripts" / "test_trace_helper_fail_closed.ps1"
+    )
     app_path = repo_root / "overlay" / "App.js"
+    workflow_path = repo_root / ".github" / "workflows" / "build.yml"
     pdf_view_path = repo_root / "native" / "PdfPageView.kt.template"
     pdf_view_manager_path = repo_root / "native" / "PdfPageViewManager.kt.template"
     direct_patch_path = repo_root / "scripts" / "patch_direct_view.py"
@@ -40,18 +230,367 @@ def check(repo_root: Path) -> None:
     plugin = plugin_path.read_text(encoding="utf-8")
     module = module_path.read_text(encoding="utf-8")
     manifest = manifest_path.read_text(encoding="utf-8")
+    native_build = native_build_path.read_text(encoding="utf-8")
+    native_cpp = native_cpp_path.read_text(encoding="utf-8")
     trace_script = trace_script_path.read_text(encoding="utf-8")
+    trace_helper_test = trace_helper_test_path.read_text(encoding="utf-8")
     app = app_path.read_text(encoding="utf-8")
+    workflow = workflow_path.read_text(encoding="utf-8")
     pdf_view = pdf_view_path.read_text(encoding="utf-8")
     pdf_view_manager = pdf_view_manager_path.read_text(encoding="utf-8")
     direct_patch = direct_patch_path.read_text(encoding="utf-8")
+
+    native_gate_declaration = (
+        "private static native void "
+        "nativeSetCalibrationEnabled(boolean enabled);"
+    )
+    if mask_cpp_comments_and_literals(module).count(native_gate_declaration) != 1:
+        fail(
+            "the Java native eraser gate declaration is missing, duplicated, "
+            "or replaced by a Java no-op"
+        )
+
+    frozen_source_digests = (
+        (
+            plugin_path,
+            "d59f765380505753662cea7cd336edc0f715d392e21ece4b6d4344ce1dcd48c4",
+            "ReaderPreferencesModule.kt.template",
+        ),
+        (
+            module_path,
+            "2d407b56fc6908364d4e29740e8f541bd46586d9d15df8ed445d71173ed4629d",
+            "SpreadProbe.java",
+        ),
+        (
+            native_build_path,
+            "6aa62accd4684c893f5ee66461e07e73aa25e7bd3a6f98ca837e0a6ab22ebb7e",
+            "native build script",
+        ),
+        (
+            trace_script_path,
+            "650e4ceb744aa3aeb2a8835d2664b6cbc1b4e89a650f1d3a94375804462f5a2d",
+            "Native Spread trace helper",
+        ),
+        (
+            trace_helper_test_path,
+            "32bcb4a63812b199cba0620b52a7c282dae46caacc4b22934ff33dd068efaabf",
+            "Native Spread trace-helper test",
+        ),
+        (
+            app_path,
+            "d806730383e9f763a1a376bbf1afb109d4680d4ae0b76e63248c69473664ec19",
+            "Native Spread UI authority source",
+        ),
+        (
+            workflow_path,
+            "97acbd87f1c6ea7b6638ddc24b6b945436b6b41567ec7d3d674db097d6bb1491",
+            "Native Spread companion-build workflow",
+        ),
+    )
+    for frozen_path, expected_digest, label in frozen_source_digests:
+        actual_digest = hashlib.sha256(frozen_path.read_bytes()).hexdigest()
+        if actual_digest != expected_digest:
+            fail(
+                f"{label} changed without an explicit frozen-source digest "
+                f"review: expected {expected_digest}, got {actual_digest}"
+            )
+
+    workflow_code = mask_yaml_comments(workflow)
+    require_markers(
+        workflow_code,
+        (
+            "trace-helper-tests:",
+            "invariant-suites:",
+            "native-spread-build:",
+            "python3 scripts/check_native_invariants.py .",
+            "python3 scripts/check_native_spread_invariants.py .",
+            "name: Native Spread compile and verification only",
+            "- invariant-suites",
+            "- trace-helper-tests",
+            "uses: actions/checkout@v4",
+            "uses: actions/setup-java@v4",
+            "java-version: '17'",
+            "uses: android-actions/setup-android@v4",
+            "ndk;27.0.12077973",
+            "-File .\\native-spread-module\\build.ps1 `",
+            "if ($LASTEXITCODE -ne 0)",
+            "no APK is published by this workflow",
+        ),
+        "Native Spread companion-build provenance",
+    )
+    if workflow_code.count("  trace-helper-tests:") != 1:
+        fail("workflow must define exactly one Native Spread trace-test job")
+    if workflow_code.count("  invariant-suites:") != 1:
+        fail("workflow must define exactly one invariant-suite job")
+    if workflow_code.count("  native-spread-build:") != 1:
+        fail("workflow must define exactly one Native Spread companion build job")
+    trace_job_start = workflow_code.find("  trace-helper-tests:")
+    invariant_job_start = workflow_code.find("  invariant-suites:")
+    companion_job_start = workflow_code.find("  native-spread-build:")
+    plugin_job_start = workflow_code.find("  build:", companion_job_start)
+    if not (
+        0 <= trace_job_start < invariant_job_start
+        < companion_job_start < plugin_job_start
+    ):
+        fail("could not isolate Native Spread companion build workflow job")
+    trace_job = workflow_code[trace_job_start:invariant_job_start]
+    invariant_job = workflow_code[invariant_job_start:companion_job_start]
+    companion_job = workflow_code[companion_job_start:plugin_job_start]
+    disabled_job_pattern = re.compile(
+        r"(?m)^\s*if:\s*\$\{\{\s*false\s*\}\}\s*$"
+    )
+    job_override_pattern = re.compile(r"(?m)^ {4}if:\s*")
+    if (
+        "continue-on-error:" in trace_job
+        or disabled_job_pattern.search(trace_job)
+        or job_override_pattern.search(trace_job)
+    ):
+        fail("Native Spread trace regression job can be disabled")
+    if (
+        "continue-on-error:" in invariant_job
+        or disabled_job_pattern.search(invariant_job)
+        or job_override_pattern.search(invariant_job)
+        or invariant_job.count("python3 scripts/check_native_invariants.py .") != 1
+        or invariant_job.count(
+            "python3 scripts/check_native_spread_invariants.py ."
+        ) != 1
+    ):
+        fail("Native Spread invariant-suite workflow gate can be bypassed")
+    if (
+        "continue-on-error:" in companion_job
+        or disabled_job_pattern.search(companion_job)
+        or job_override_pattern.search(companion_job)
+    ):
+        fail("Native Spread companion build or publication can be disabled")
+    if re.search(r"(?m)^\s*ref:\s*", companion_job):
+        fail("Native Spread companion checkout must use the triggering revision")
+    if companion_job.count("-File .\\native-spread-module\\build.ps1 `") != 1:
+        fail("workflow must invoke the reviewed Native Spread build exactly once")
+    needs_invariants = companion_job.find("- invariant-suites")
+    needs_trace_tests = companion_job.find("- trace-helper-tests", needs_invariants)
+    runs_on = companion_job.find("runs-on: windows-latest", needs_trace_tests)
+    if not 0 <= needs_invariants < needs_trace_tests < runs_on:
+        fail("Native Spread companion build is not gated by both safety jobs")
+    if "actions/upload-artifact" in companion_job or re.search(
+        r"(?m)^\s*path:\s*.*\.apk\s*$",
+        companion_job,
+    ):
+        fail("Native Spread verification workflow may not publish its APK")
+
+    expected_native_cpp_sha256 = (
+        "2aa4f5aa8dbaceb7446d66ed04063d42f38d865a7013a3a477c67dd785fefe3b"
+    )
+    actual_native_cpp_sha256 = hashlib.sha256(
+        native_cpp_path.read_bytes()
+    ).hexdigest()
+    if actual_native_cpp_sha256 != expected_native_cpp_sha256:
+        fail(
+            "native eraser source changed without an explicit frozen-source "
+            "digest review: expected "
+            f"{expected_native_cpp_sha256}, got {actual_native_cpp_sha256}"
+        )
+
+    native_trail_hot_path, native_trail_masked = extract_cpp_function(
+        native_cpp,
+        "int32_t& trail_int(",
+        "native trail field accessor",
+    )
+    native_erase_hot_path, native_erase_masked = extract_cpp_function(
+        native_cpp,
+        "void replacement_grid_line_erase(",
+        "native eraser replacement",
+    )
+    native_gate_hot_path, native_gate_masked = extract_cpp_function(
+        native_cpp,
+        "SpreadProbe_nativeSetCalibrationEnabled(",
+        "native eraser gate setter",
+    )
+    if re.search(
+        r"(?m)^\s*#\s*define\s+(?:trail_int|original_grid_line_erase|"
+        r"replacement_grid_line_erase|calibration_enabled)\b",
+        mask_cpp_comments_and_literals(native_cpp),
+    ):
+        fail("native eraser critical symbols may not be macro-redefined")
+    if len(
+        re.findall(
+            r"\bstd::atomic\s*<\s*bool\s*>\s+calibration_enabled\s*"
+            r"\{\s*false\s*\}\s*;",
+            mask_cpp_comments_and_literals(native_cpp),
+        )
+    ) != 1:
+        fail("native eraser calibration gate must be one atomic bool")
+    trail_body_start = native_trail_masked.find("{")
+    trail_body_end = native_trail_masked.rfind("}")
+    normalized_trail_body = re.sub(
+        r"\s+", "", native_trail_masked[trail_body_start + 1:trail_body_end]
+    )
+    if normalized_trail_body != (
+        "return*reinterpret_cast<int32_t*>("
+        "reinterpret_cast<std::uint8_t*>(trail)+offset);"
+    ):
+        fail(
+            "native trail field accessor must remain a side-effect-free "
+            "offset reference"
+        )
+    gate_condition = require_cpp_pattern(
+        native_erase_masked,
+        r"if\s*\(\s*calibration_enabled\s*\.\s*load\s*\(\s*"
+        r"std::memory_order_acquire\s*\)\s*&&\s*operation_trail\s*!=\s*"
+        r"nullptr\s*\)",
+        "native eraser acquire gate and non-null guard",
+    )
+    exact_signature = require_cpp_pattern(
+        native_erase_masked,
+        r"if\s*\(\s*pen_type\s*==\s*3\s*&&\s*original_width\s*==\s*"
+        r"932\s*&&\s*original_height\s*==\s*1243\s*\)",
+        "native eraser exact disposable-spread signature",
+    )
+    patch_width = require_cpp_pattern(
+        native_erase_masked,
+        r"trail_int\s*\(\s*operation_trail\s*,\s*kTrailRedrawWidth\s*\)"
+        r"\s*=\s*1872\s*;",
+        "native eraser width patch",
+    )
+    patch_height = require_cpp_pattern(
+        native_erase_masked,
+        r"trail_int\s*\(\s*operation_trail\s*,\s*kTrailRedrawHeight\s*\)"
+        r"\s*=\s*2496\s*;",
+        "native eraser height patch",
+    )
+    patched_true = require_cpp_pattern(
+        native_erase_masked,
+        r"patched\s*=\s*true\s*;",
+        "native eraser patched-state publication",
+    )
+    original_call = require_cpp_pattern(
+        native_erase_masked,
+        r"original_grid_line_erase\s*\(\s*current_page_trails\s*,\s*"
+        r"operation_trail\s*,\s*erased_trail_numbers\s*,\s*scale\s*,\s*"
+        r"first_flag\s*,\s*mode\s*,\s*second_flag\s*,\s*third_flag\s*\)"
+        r"\s*;",
+        "native eraser original invocation",
+    )
+    restore_block = require_cpp_pattern(
+        native_erase_masked,
+        r"if\s*\(\s*patched\s*\)\s*\{\s*"
+        r"trail_int\s*\(\s*operation_trail\s*,\s*kTrailRedrawWidth\s*\)"
+        r"\s*=\s*original_width\s*;\s*"
+        r"trail_int\s*\(\s*operation_trail\s*,\s*kTrailRedrawHeight\s*\)"
+        r"\s*=\s*original_height\s*;\s*\}",
+        "native eraser post-call restoration",
+    )
+    gate_open = native_erase_masked.find("{", gate_condition)
+    gate_close = matching_brace(
+        native_erase_masked, gate_open, "native eraser acquire gate"
+    )
+    signature_open = native_erase_masked.find("{", exact_signature)
+    signature_close = matching_brace(
+        native_erase_masked,
+        signature_open,
+        "native eraser exact-signature branch",
+    )
+    if not (
+        gate_condition < exact_signature < patch_width < patch_height
+        < patched_true < signature_close <= gate_close < original_call
+        < restore_block
+    ):
+        fail(
+            "native eraser patch, original call, and restoration are not "
+            "strictly ordered"
+        )
+    if native_erase_masked[gate_close + 1:original_call].strip():
+        fail("native eraser original invocation is not unconditional")
+    original_call_match = re.search(
+        r"original_grid_line_erase\s*\(\s*current_page_trails\s*,\s*"
+        r"operation_trail\s*,\s*erased_trail_numbers\s*,\s*scale\s*,\s*"
+        r"first_flag\s*,\s*mode\s*,\s*second_flag\s*,\s*third_flag\s*\)"
+        r"\s*;",
+        native_erase_masked,
+        re.DOTALL,
+    )
+    restore_match = re.search(
+        r"if\s*\(\s*patched\s*\)\s*\{\s*"
+        r"trail_int\s*\(\s*operation_trail\s*,\s*kTrailRedrawWidth\s*\)"
+        r"\s*=\s*original_width\s*;\s*"
+        r"trail_int\s*\(\s*operation_trail\s*,\s*kTrailRedrawHeight\s*\)"
+        r"\s*=\s*original_height\s*;\s*\}",
+        native_erase_masked,
+        re.DOTALL,
+    )
+    if original_call_match is None or restore_match is None:
+        fail("could not isolate native eraser delegation and restoration")
+    if native_erase_masked[original_call_match.end():restore_match.start()].strip():
+        fail("native eraser restoration is not immediately post-delegation")
+    function_body_end = native_erase_masked.rfind("}")
+    if native_erase_masked[restore_match.end():function_body_end].strip():
+        fail("native eraser performs work after restoring trail dimensions")
+    if len(
+        re.findall(
+            r"original_grid_line_erase\s*\(", native_erase_masked
+        )
+    ) != 1:
+        fail("native eraser must invoke the original function exactly once")
+    if len(re.findall(r"\bif\s*\(", native_erase_masked)) != 3:
+        fail("native eraser may only use the acquire, signature, and restore guards")
+    if len(re.findall(r"\bpatched\s*=\s*false\s*;", native_erase_masked)) != 1:
+        fail("native eraser patched state must initialize false exactly once")
+    if len(re.findall(r"\bpatched\s*=\s*true\s*;", native_erase_masked)) != 1:
+        fail("native eraser patched state must publish true exactly once")
+    if re.search(
+        r"\b(?:for|while|switch|goto|return|throw|try|catch)\b|\?",
+        native_erase_masked,
+    ):
+        fail("native eraser contains unexpected conditional control flow")
+    if len(re.findall(r"\btrail_int\s*\(", native_erase_masked)) != 7:
+        fail("native eraser must perform exactly three reads and four writes")
+    if len(re.findall(r"kTrailRedrawWidth\s*\)\s*=", native_erase_masked)) != 2:
+        fail("native eraser width may only be patched and restored once")
+    if len(re.findall(r"kTrailRedrawHeight\s*\)\s*=", native_erase_masked)) != 2:
+        fail("native eraser height may only be patched and restored once")
+    require_only_cpp_calls(
+        native_erase_masked,
+        {
+            "replacement_grid_line_erase",
+            "if",
+            "load",
+            "trail_int",
+            "original_grid_line_erase",
+        },
+        "native eraser replacement",
+    )
+    gate_body_start = native_gate_masked.find("{")
+    gate_body_end = native_gate_masked.rfind("}")
+    normalized_gate_body = re.sub(
+        r"\s+", "", native_gate_masked[gate_body_start + 1:gate_body_end]
+    )
+    if normalized_gate_body != (
+        "calibration_enabled.store(enabled==JNI_TRUE,"
+        "std::memory_order_release);"
+    ):
+        fail(
+            "native eraser gate setter must only publish the requested "
+            "boolean with release ordering"
+        )
+    require_only_cpp_calls(
+        native_gate_masked,
+        {
+            "SpreadProbe_nativeSetCalibrationEnabled",
+            "store",
+        },
+        "native eraser gate setter",
+    )
 
     require_markers(
         plugin,
         (
             "NATIVE_SPREAD_MIN_VERSION_CODE = 118L",
-            'setProperty("documentSha256", sha256(pdfFile))',
-            'properties.getProperty("documentSha256", "") != sha256(pdfFile)',
+            "private const val NATIVE_SPREAD_HANDSHAKE_PROTOCOL = 2",
+            "private const val NATIVE_SPREAD_EDITABLE_MARKER_PROTOCOL = 2",
+            '"protected-editable-transactional-v1"',
+            'private const val NATIVE_SPREAD_ACTIVATION_PENDING = "pending"',
+            'private const val NATIVE_SPREAD_ACTIVATION_COMMITTED = "committed"',
+            'setProperty("documentSha256", backup.documentSha256)',
+            'backup.documentSha256 == sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
             "NATIVE_SPREAD_HANDSHAKE_RESPONSE",
             "requestNativeSpreadHandshake(pdfFile) { handshake ->",
@@ -71,23 +610,36 @@ def check(repo_root: Path) -> None:
             "retireNativeAnnotationBackup(",
             "val previousMarkerBytes = if (marker.isFile) marker.readBytes() else null",
             "writeBytesAtomically(marker, previousMarkerBytes)",
-            "RTL_READER_NATIVE_MARKER_ROLLED_BACK",
+            "RTL_READER_NATIVE_SPREAD_TRANSITION_PENDING",
             "RTL_READER_NATIVE_EDITABLE_ACTIVATION_ROLLED_BACK",
             "sameNativeAnnotationBackup(backup, revalidatedBackup)",
             "A verified annotation backup belongs to an inactive protected session",
-            "writeNativeSpreadEditableMarker(",
+            "writeNativeSpreadPendingMarker(",
+            "commitNativeSpreadEditableMarker(",
             "fun restoreNativeAnnotationBackup(",
             "scheduleAnnotationRestore(pdfFile, backup)",
             "Recovery snapshot changed before restore",
-            "copyFileAtomically(revalidatedBackup.snapshot, currentMark)",
-            "RTL_READER_NATIVE_BACKUP_RESTORE_ABORTED_ACTIVE_PROCESS",
-            "Native document process remained active; annotation recovery was not written",
+            "private fun documentPids(activityManager: ActivityManager): List<Int>?",
+            "activityManager.runningAppProcesses ?: return null",
+            "documentPids(activityManager) ?: run {",
+            "DOCUMENT_PROCESS_QUIET_WINDOW_MS",
+            "RTL_READER_NATIVE_BACKUP_RESTORE_STABLE_PROCESS_ABSENCE",
+            "RTL_READER_NATIVE_BACKUP_RESTORE_RACE_KILL_SENT",
+            '"before-mark-publish"',
+            '"after-mark-publish"',
+            '"before-backup-retirement"',
             'promise.resolve(nativeAnnotationBackupMap(backup, "restored"))',
             "Toast.makeText(",
             "RTL_READER_NATIVE_BACKUP_RETIREMENT_ROLLED_BACK",
             "RTL_READER_NATIVE_BACKUP_CREATION_ROLLED_BACK",
             "nativeAnnotationRetiringSnapshot(pdfFile)",
             "removeNativeAnnotationBackupFiles(pdfFile, backup)",
+            "NATIVE_SPREAD_LEGACY_EDITABLE_MODE",
+            "legacyConfiguredEditable",
+            'startNativeBackupWorker("RTLReaderNativeEditableMigrate")',
+            "migrateLegacyProtectedEditableSession(",
+            "protectedEditableSessionMarkerValid(",
+            "RTL_READER_NATIVE_LEGACY_SESSION_MIGRATED",
             'putBoolean("backupAvailable", backupResult.backup != null)',
             'setProperty("showDivider", showDivider.toString())',
             'setProperty("showHeader", showHeader.toString())',
@@ -98,21 +650,496 @@ def check(repo_root: Path) -> None:
         ),
         "plugin handshake",
     )
+    if plugin.count('"protected-editable-pilot"') != 1:
+        fail(
+            "legacy editable mode must appear only as the one-time migration "
+            "constant, never as a newly published marker"
+        )
+
+    editable_marker_writer_start = plugin.find(
+        "private fun nativeSpreadEditableMarkerProperties("
+    )
+    editable_marker_writer_end = plugin.find(
+        "private fun resolveNativeSpreadMode(", editable_marker_writer_start
+    )
+    editable_marker_validator_start = plugin.find(
+        "private fun transactionalEditableMarkerMatchesBackup("
+    )
+    editable_marker_validator_end = plugin.find(
+        "private fun protectedEditableMarkerValid(",
+        editable_marker_validator_start,
+    )
+    if min(
+        editable_marker_writer_start,
+        editable_marker_writer_end,
+        editable_marker_validator_start,
+        editable_marker_validator_end,
+    ) < 0:
+        fail("could not isolate versioned protected-editable marker handling")
+    editable_marker_writer = plugin[
+        editable_marker_writer_start:editable_marker_writer_end
+    ]
+    editable_marker_validator = plugin[
+        editable_marker_validator_start:editable_marker_validator_end
+    ]
     require_markers(
-        app,
+        editable_marker_writer,
+        (
+            'setProperty("mode", NATIVE_SPREAD_EDITABLE_MODE)',
+            '"transactionProtocol"',
+            "NATIVE_SPREAD_EDITABLE_MARKER_PROTOCOL.toString()",
+            '"minimumModuleVersionCode"',
+            "NATIVE_SPREAD_MIN_VERSION_CODE.toString()",
+            'setProperty("activationToken", activationToken)',
+            'setProperty("activationState", activationState)',
+            "NATIVE_SPREAD_ACTIVATION_PENDING",
+            "NATIVE_SPREAD_ACTIVATION_COMMITTED",
+            'setProperty("pendingIntent", checkNotNull(pendingIntent))',
+            'setProperty("previousMarkerSha256",',
+            'setProperty("previousMarkerBase64",',
+            "private fun writeNativeSpreadPendingMarker(",
+            "readPendingEditableActivation(",
+            "private fun commitNativeSpreadEditableMarker(",
+            "protectedEditableMarkerValid(pdfFile, committedProperties, backup)",
+            '"Supernote RTL protected editable committed activation"',
+            "onCommitted",
+        ),
+        "protocol-2 pending/committed protected-editable publication",
+    )
+    if "NATIVE_SPREAD_LEGACY_EDITABLE_MODE" in editable_marker_writer:
+        fail("protected editable marker writer can republish the legacy mode")
+    committed_writer_start = editable_marker_writer.find(
+        "private fun commitNativeSpreadEditableMarker("
+    )
+    committed_writer_end = len(editable_marker_writer)
+    if committed_writer_start < 0:
+        fail("could not isolate committed editable authorization point")
+    committed_writer = editable_marker_writer[
+        committed_writer_start:committed_writer_end
+    ]
+    committed_writer_masked = mask_cpp_comments_and_literals(committed_writer)
+    committed_publish = committed_writer_masked.find("writePropertiesAtomically(")
+    committed_publish_open = committed_writer_masked.find("(", committed_publish)
+    committed_publish_close = matching_parenthesis(
+        committed_writer_masked,
+        committed_publish_open,
+        "committed editable atomic publication",
+    )
+    committed_return = committed_writer_masked.find(
+        "return backup", committed_publish_close
+    )
+    if not 0 <= committed_publish < committed_publish_close < committed_return:
+        fail("committed editable marker does not end at its atomic publication")
+    committed_call = committed_writer[
+        committed_publish:committed_publish_close + 1
+    ]
+    committed_call_masked = committed_writer_masked[
+        committed_publish:committed_publish_close + 1
+    ]
+    before_publish_label = committed_call_masked.find("beforePublish =")
+    before_publish_open = committed_call_masked.find("{", before_publish_label)
+    before_publish_close = matching_brace(
+        committed_call_masked,
+        before_publish_open,
+        "committed editable live-baseline guard",
+    )
+    before_publish_body = committed_call_masked[
+        before_publish_open + 1:before_publish_close
+    ]
+    normalized_before_publish = re.sub(r"\s+", "", before_publish_body)
+    expected_before_publish = (
+        "if(requireLiveBaselineMatch&&"
+        "!liveNativeAnnotationMatchesBackup(backup)){"
+        "throwIllegalStateException(,)}"
+    )
+    if normalized_before_publish != expected_before_publish:
+        fail(
+            "the committed editable authorization does not perform only the "
+            "required first-activation live-baseline guard immediately before "
+            "publication"
+        )
+    require_markers(
+        committed_call,
+        (
+            "onPublished = onCommitted",
+            "beforePublish = {",
+            "if (requireLiveBaselineMatch &&",
+            "!liveNativeAnnotationMatchesBackup(backup)",
+            "Supernote annotations changed immediately before protected editing authorization",
+        ),
+        "committed editable live-baseline revalidation",
+    )
+    if committed_writer.count("requireLiveBaselineMatch") != 2:
+        fail(
+            "committed editable live-baseline authority must appear only in "
+            "the helper parameter and its before-publish guard"
+        )
+    fallible_committed_tail = tuple(
+        marker for marker in (
+            "readPropertiesIfFile(",
+            "readNativeAnnotationBackup(",
+            "sha256(",
+            "throw IllegalStateException(",
+        )
+        if marker in committed_writer[committed_publish_close + 1:committed_return]
+    )
+    if fallible_committed_tail:
+        fail(
+            "fallible work remains after the committed editable marker's "
+            f"authorization rename: {fallible_committed_tail}"
+        )
+
+    properties_writer_start = plugin.find(
+        "private fun writePropertiesAtomically("
+    )
+    bytes_writer_start = plugin.find(
+        "private fun writeBytesAtomically(", properties_writer_start
+    )
+    copy_writer_start = plugin.find(
+        "private fun copyFileAtomically(", bytes_writer_start
+    )
+    if min(properties_writer_start, bytes_writer_start, copy_writer_start) < 0:
+        fail("could not isolate atomic marker publication helpers")
+    properties_writer = plugin[properties_writer_start:bytes_writer_start]
+    bytes_writer = plugin[bytes_writer_start:copy_writer_start]
+    require_markers(
+        properties_writer,
+        (
+            "beforePublish: () -> Unit = {}",
+            "writeBytesAtomically(",
+            "onPublished = onPublished",
+            "beforePublish = beforePublish",
+        ),
+        "atomic properties publication callback forwarding",
+    )
+    require_markers(
+        bytes_writer,
+        (
+            "beforePublish: () -> Unit = {}",
+            "writeBytesSynced(temporary, bytes)",
+            "beforePublish()",
+            "Os.rename(temporary.absolutePath, file.absolutePath)",
+            "onPublished()",
+        ),
+        "atomic byte publication boundary",
+    )
+    bytes_writer_masked = mask_cpp_comments_and_literals(bytes_writer)
+    if bytes_writer_masked.count("beforePublish()") != 1:
+        fail("atomic byte publication must invoke beforePublish exactly once")
+    if re.search(
+        r"writeBytesSynced\s*\(\s*temporary\s*,\s*bytes\s*\)\s*"
+        r"beforePublish\s*\(\s*\)\s*"
+        r"Os\.rename\s*\(\s*temporary\.absolutePath\s*,\s*"
+        r"file\.absolutePath\s*\)",
+        bytes_writer_masked,
+    ) is None:
+        fail(
+            "live-baseline revalidation must run after temporary marker sync "
+            "and immediately before the atomic authorization rename"
+        )
+    require_markers(
+        editable_marker_validator,
+        (
+            'properties.getProperty("mode", "") == NATIVE_SPREAD_EDITABLE_MODE',
+            'properties.getProperty("transactionProtocol", "") ==',
+            "NATIVE_SPREAD_EDITABLE_MARKER_PROTOCOL.toString()",
+            'properties.getProperty("minimumModuleVersionCode", "") ==',
+            "NATIVE_SPREAD_MIN_VERSION_CODE.toString()",
+            'val activationToken = properties.getProperty("activationToken", "")',
+            "UUID.fromString(activationToken).toString() == activationToken",
+            'properties.getProperty("activationState", "") == activationState',
+            "activationState != NATIVE_SPREAD_ACTIVATION_COMMITTED ||",
+            "pendingOnlyKeys.none { key -> properties.containsKey(key) }",
+            "nativeAnnotationBackupSourceFilesMatch(backup)",
+            "private fun readPendingEditableActivation(",
+            "NATIVE_SPREAD_ACTIVATION_PENDING",
+            "pendingActivationMatchesEvidence(",
+        ),
+        "strict protocol-2 marker-state and backup validation",
+    )
+    load_mode_start = plugin.find("fun loadNativeSpreadMode(")
+    configure_read_only_start = plugin.find(
+        "fun configureNativeSpreadReadOnly(", load_mode_start
+    )
+    if load_mode_start < 0 or configure_read_only_start < 0:
+        fail("could not isolate Native Spread load-time legacy migration")
+    load_mode = plugin[load_mode_start:configure_read_only_start]
+    legacy_detect = load_mode.find("val legacyConfiguredEditable =")
+    handshake_start = load_mode.find(
+        "requestNativeSpreadHandshake(pdfFile) { handshake ->", legacy_detect
+    )
+    migration_guard = load_mode.find(
+        "if (handshake.active && legacyConfiguredEditable)", handshake_start
+    )
+    migration_worker = load_mode.find(
+        'startNativeBackupWorker("RTLReaderNativeEditableMigrate")',
+        migration_guard,
+    )
+    migration_call = load_mode.find(
+        "migrateLegacyProtectedEditableSession(", migration_worker
+    )
+    migrated_resolve = load_mode.find(
+        '"verified:migrated-legacy-session"', migration_call
+    )
+    migration_failure = load_mode.find(
+        "RTL_READER_NATIVE_LEGACY_MIGRATION_FAILED", migrated_resolve
+    )
+    if not (
+        0 <= legacy_detect < handshake_start < migration_guard
+        < migration_worker < migration_call < migrated_resolve
+        < migration_failure
+    ):
+        fail(
+            "verified legacy protected sessions are not migrated under the "
+            "live handshake before load resolves"
+        )
+
+    migration_start = plugin.find(
+        "private fun migrateLegacyProtectedEditableSession("
+    )
+    retire_start = plugin.find(
+        "private fun retireNativeAnnotationBackup(", migration_start
+    )
+    if migration_start < 0 or retire_start < 0:
+        fail("could not isolate legacy protected-session migration")
+    migration = plugin[migration_start:retire_start]
+    legacy_validate = migration.find(
+        "legacyProtectedEditableMarkerValid("
+    )
+    migration_activate = migration.find(
+        "activateNativeSpreadEditableWithStableBackup(", legacy_validate
+    )
+    migrated_log = migration.find(
+        "runCatching {", migration_activate
+    )
+    migrated_log_message = migration.find(
+        "RTL_READER_NATIVE_LEGACY_SESSION_MIGRATED", migrated_log
+    )
+    migrated_return = migration.find(
+        "return migrated", migrated_log_message
+    )
+    if not (
+        0 <= legacy_validate < migration_activate < migrated_log
+        < migrated_log_message < migrated_return
+    ):
+        fail(
+            "legacy protected-session migration does not reuse the verified "
+            "backup and return directly from the committed transactional rename"
+        )
+    fallible_migration_tail = tuple(
+        marker for marker in (
+            "readNativeAnnotationBackup(",
+            "readPropertiesIfFile(",
+            "protectedEditableMarkerValid(",
+            "throw IllegalStateException(",
+        )
+        if marker in migration[migration_activate:migrated_return]
+    )
+    if fallible_migration_tail:
+        fail(
+            "legacy migration makes a fallible state decision after committed "
+            f"authorization: {fallible_migration_tail}"
+        )
+
+    legacy_validator_start = plugin.find(
+        "private fun legacyProtectedEditableMarkerValid("
+    )
+    write_properties_start = plugin.find(
+        "private fun writePropertiesAtomically(", legacy_validator_start
+    )
+    if legacy_validator_start < 0 or write_properties_start < 0:
+        fail("could not isolate legacy protected-session validator")
+    legacy_validator = plugin[
+        legacy_validator_start:write_properties_start
+    ]
+    require_markers(
+        legacy_validator,
+        (
+            'properties.getProperty("mode", "") !=',
+            "NATIVE_SPREAD_LEGACY_EDITABLE_MODE",
+            'properties.getProperty("managedBy", "") != "supernote-rtl-reader"',
+            'properties.getProperty("backupVerified", "false")',
+            'properties.getProperty("documentPath", "")',
+            'properties.getProperty("backupManifestPath", "")',
+            'properties.getProperty("backupManifestSha256", "")',
+            "sha256(backup.manifest)",
+        ),
+        "strict legacy protected-session migration authorization",
+    )
+
+    recovery_reconcile_start = plugin.find(
+        "fun reconcileNativeSpreadRecovery(filePath: String, promise: Promise)"
+    )
+    configure_readonly_start = plugin.find(
+        "fun configureNativeSpreadReadOnly(", recovery_reconcile_start
+    )
+    if recovery_reconcile_start < 0 or configure_readonly_start < 0:
+        fail("could not isolate explicit Native Spread recovery reconciliation")
+    recovery_reconcile = mask_comments_preserve_literals(
+        plugin[recovery_reconcile_start:configure_readonly_start]
+    )
+    recovery_worker = recovery_reconcile.find(
+        'startNativeBackupWorker("RTLReaderNativeRecoveryReconcile")'
+    )
+    recovery_before = recovery_reconcile.find(
+        "val before = assessNativeSpreadAuthority(", recovery_worker
+    )
+    recovery_guard = recovery_reconcile.find(
+        "if (before.recoveryNeeded)", recovery_before
+    )
+    recovery_delegate = recovery_reconcile.find(
+        "reconcileFailedActivationBackupForExplicitActivation(", recovery_guard
+    )
+    recovery_after = recovery_reconcile.find(
+        "val after = assessNativeSpreadAuthority(", recovery_delegate
+    )
+    recovery_ready_guard = recovery_reconcile.find(
+        'if (after.status != "ready" || after.recoveryNeeded)', recovery_after
+    )
+    recovery_resolve = recovery_reconcile.find(
+        "promise.resolve(true)", recovery_ready_guard
+    )
+    if not (
+        0 <= recovery_worker < recovery_before < recovery_guard
+        < recovery_delegate < recovery_after < recovery_ready_guard
+        < recovery_resolve
+    ):
+        fail(
+            "explicit recovery does not delegate through exact reconciliation "
+            "and re-assess ready authority before resolving"
+        )
+    recovery_calls_masked = mask_cpp_comments_and_literals(recovery_reconcile)
+    recovery_calls = re.findall(
+        r"([A-Za-z_][A-Za-z0-9_.]*)\s*\(", recovery_calls_masked
+    )
+    allowed_recovery_calls = {
+        "IllegalStateException",
+        "Log.e",
+        "Log.i",
+        "annotationRecoveryPending.get",
+        "assessNativeSpreadAuthority",
+        "catch",
+        "if",
+        "nativeSpreadMarker",
+        "promise.reject",
+        "promise.resolve",
+        "readNativeAnnotationBackup",
+        "reconcileFailedActivationBackupForExplicitActivation",
+        "reconcileNativeSpreadRecovery",
+        "requirePdf",
+        "startNativeBackupWorker",
+    }
+    unexpected_recovery_calls = sorted(
+        set(recovery_calls) - allowed_recovery_calls
+    )
+    if unexpected_recovery_calls:
+        fail(
+            "explicit recovery invokes unreviewed operations: "
+            f"{unexpected_recovery_calls}"
+        )
+    if (
+        recovery_calls.count("assessNativeSpreadAuthority") != 2
+        or recovery_calls.count("readNativeAnnotationBackup") != 2
+        or recovery_calls.count(
+            "reconcileFailedActivationBackupForExplicitActivation"
+        ) != 1
+    ):
+        fail("explicit recovery does not use the exact assess/delegate/assess flow")
+
+    authority_assessment_model_start = plugin.find(
+        "private data class NativeSpreadAuthorityAssessment("
+    )
+    authority_assessment_start = plugin.find(
+        "private fun assessNativeSpreadAuthority(",
+        authority_assessment_model_start,
+    )
+    package_version_start = plugin.find(
+        "private fun packageVersionCode(", authority_assessment_start
+    )
+    if min(
+        authority_assessment_model_start,
+        authority_assessment_start,
+        package_version_start,
+    ) < 0:
+        fail("could not isolate persisted Native Spread authority assessment")
+    authority_assessment = mask_comments_preserve_literals(
+        plugin[authority_assessment_model_start:package_version_start]
+    )
+    require_markers(
+        authority_assessment,
+        (
+            "private data class NativeSpreadAuthorityAssessment(",
+            "val reconciliationAvailable: Boolean",
+            '"marker_unreadable:${error.message}"',
+            "NATIVE_SPREAD_ACTIVATION_PENDING",
+            "protectedEditableSessionMarkerValid(",
+            "nativeAnnotationRetiringSnapshot(pdfFile).exists()",
+            ".getOrDefault(true)",
+            'backupResult.status.startsWith("invalid:")',
+            "managedEditableMarker && !activationPending && !protectedMarkerValid",
+            "backupResult.backup != null && !activationPending && !protectedMarkerValid",
+            "canonicalEvidencePresent && backupResult.backup == null",
+            'activationPending -> "pending_protected_transition"',
+            'unresolvedManagedMarker -> "managed_editable_authority_invalid"',
+            'backupInvalid -> "canonical_backup_invalid"',
+            'orphanedVerifiedBackup -> "orphaned_verified_backup"',
+            'incompleteCanonicalEvidence -> "orphaned_recovery_files"',
+            'if (activationPending) "pending" else "recovery"',
+        ),
+        "fail-closed persisted Native Spread authority assessment",
+    )
+
+    resolve_mode_start = plugin.find("private fun resolveNativeSpreadMode(")
+    capability_class_start = plugin.find(
+        "private data class NativeSpreadCapability(", resolve_mode_start
+    )
+    if resolve_mode_start < 0 or capability_class_start < 0:
+        fail("could not isolate Native Spread authority result publication")
+    authority_result = plugin[resolve_mode_start:capability_class_start]
+    require_markers(
+        authority_result,
+        (
+            "val authority = assessNativeSpreadAuthority(",
+            'putBoolean("activationPending", authority.activationPending)',
+            'putBoolean("recoveryNeeded", authority.recoveryNeeded)',
+            'putBoolean("reconciliationAvailable", authority.reconciliationAvailable)',
+            'putString("authorityStatus", authority.status)',
+            'putString("authorityReason", authority.reason)',
+        ),
+        "persisted Native Spread authority result publication",
+    )
+
+    app_code = mask_comments_preserve_literals(app)
+    app_compact = compact_code(app)
+    require_markers(
+        app_code,
         (
             "const [nativeSpreadConfigured, setNativeSpreadConfigured]",
-            "nativeSpread?.configured === true",
-            "nativeSpread?.configuredEditable === true",
+            "function classifyNativeSpreadAuthority(value)",
+            "'activationPending'",
+            "'recoveryNeeded'",
+            "'reconciliationAvailable'",
+            "value.authorityStatus",
+            "value.authorityReason",
+            "metadataTrusted: false",
+            "metadataTrusted: true",
+            "useState('unknown')",
+            "nativeSpreadAuthorityState === NATIVE_SPREAD_AUTHORITY_READY",
+            "loadedNativeSpreadAuthority = classifyNativeSpreadAuthority(",
+            "const trustedNativeSpread =",
+            "loadedNativeSpreadAuthority.metadataTrusted === true",
+            "trustedNativeSpread?.configured === true",
+            "trustedNativeSpread?.configuredEditable === true",
             "next === 'ltr' &&",
             "nativeSpreadConfigured &&",
             "!nativeSpreadConfiguredEditable",
             "setNativeSpreadConfigured(enabled);",
-            "active={!nativeSpreadConfigured}",
+            "nativeSpreadAuthorityResolved && !nativeSpreadConfigured",
             "RTL read-only remains configured, but the compatible hooks are inactive.",
             "RTL editable",
             "Back up & enable",
             "restoreNativeAnnotationBackup",
+            "reconcileNativeSpreadRecovery",
             "const nativeSpreadBusyRef = useRef(false);",
             "nativeSpreadBusyRef.current = true;",
             "if (nativeSpreadBusyRef.current) return;",
@@ -123,18 +1150,319 @@ def check(repo_root: Path) -> None:
             "const [showNativeSpreadHeader, setShowNativeSpreadHeader]",
             "const [spreadSizing, setSpreadSizing]",
             "setNativeSpreadAppearanceValue",
-            "nativeSpread?.showHeader !== false",
+            "trustedNativeSpread.showHeader !== false",
             "Active-page header",
-            """const restoredCoverSeparate = nativeSpread?.configured
-          ? nativeSpread?.coverSeparate === true
+            """const restoredCoverSeparate = nativeSpreadHasPersistedAppearance
+          ? trustedNativeSpread.coverSeparate === true
           : restored.coverSeparate;""",
-            """const restoredSizing = nativeSpread?.configured
-          ? nativeSpread?.spreadSizing === 'native_fill'
+            """const restoredSizing = nativeSpreadHasPersistedAppearance
+          ? trustedNativeSpread.spreadSizing === 'native_fill'
             ? 'native_fill'
             : 'fit'
           : restored.spreadSizing;""",
         ),
         "configured/runtime Native Spread state separation",
+    )
+    authority_classifier_start = app_code.find(
+        "function classifyNativeSpreadAuthority(value)"
+    )
+    authority_component_start = app_code.find(
+        "export default function App()", authority_classifier_start
+    )
+    authority_classifier_open = app_code.find("{", authority_classifier_start)
+    if min(
+        authority_classifier_start,
+        authority_classifier_open,
+        authority_component_start,
+    ) < 0:
+        fail("could not isolate Native Spread UI authority classifier")
+    authority_classifier_end = matching_brace(
+        app_code,
+        authority_classifier_open,
+        "Native Spread UI authority classifier",
+    ) + 1
+    if authority_classifier_end >= authority_component_start:
+        fail("Native Spread UI authority classifier is not a closed function")
+    authority_classifier = app_code[
+        authority_classifier_start:authority_classifier_end
+    ]
+    authority_classifier_compact = compact_code(authority_classifier)
+    require_markers(
+        authority_classifier_compact,
+        (
+            "if(!value||typeofvalue!=='object'){return{state:'error',"
+            "metadataTrusted:false,detail:'Nativereaderstatecouldnotbeverified."
+            "Native-readerchangesarelocked.',};}",
+            "constrequiredBooleanFields=['configured','configuredEditable',"
+            "'activationPending','recoveryNeeded','enabled','editable',"
+            "'coverSeparate','showDivider','showHeader','compatible',"
+            "'backupAvailable','backupOriginalMarkPresent',"
+            "'reconciliationAvailable',];",
+            "constinvalidBooleanField=requiredBooleanFields.find("
+            "field=>typeofvalue[field]!=='boolean',);",
+            "if(invalidBooleanField||!['fit','native_fill'].includes("
+            "value.spreadSizing)||typeofvalue.backupStatus!=='string'||"
+            "!['ready','pending','recovery','error'].includes("
+            "value.authorityStatus)||typeofvalue.authorityReason!=='string')"
+            "{return{state:'error',metadataTrusted:false,detail:"
+            "'Nativereaderreturnedincompletestate.Native-readerchangesare"
+            "locked.',};}",
+            "if(value.authorityStatus==='error'){return{state:'error',"
+            "metadataTrusted:true,detail:`Nativereaderauthoritycouldnotbe"
+            "verified(${value.authorityReason}).Onlyvalidatedrecoveryis"
+            "available.`,};}",
+            "if(value.authorityStatus==='pending'){if(!value.activationPending"
+            "||!value.recoveryNeeded){return{state:'error',metadataTrusted:"
+            "false,detail:'Nativereaderreturnedinconsistentpendingauthority."
+            "Onlyvalidatedrecoveryisavailable.',};}return{state:'pending',"
+            "metadataTrusted:true,detail:`AprotectedNativeSpreadtransitiondid"
+            "notfinish(${value.authorityReason}).Changesarelockeduntilitis"
+            "safelyreconciledortheverifiedsnapshotisrestored.`,};}",
+            "if(value.authorityStatus==='recovery'){if(!value.recoveryNeeded||"
+            "value.activationPending){return{state:'error',metadataTrusted:"
+            "false,detail:'Nativereaderreturnedinconsistentrecoveryauthority."
+            "Onlyvalidatedrecoveryisavailable.',};}return{state:'recovery',"
+            "metadataTrusted:true,detail:`Nativeannotationauthorityisunresolved"
+            "(${value.authorityReason}).Changesarelockeduntilitissafely"
+            "reconciledortheverifiedsnapshotisrestored.`,};}",
+            "if(value.activationPending||value.recoveryNeeded){return{state:"
+            "'error',metadataTrusted:false,detail:'Nativereaderreturned"
+            "inconsistentreadyauthority.Onlyvalidatedrecoveryisavailable.',};}",
+            "return{state:NATIVE_SPREAD_AUTHORITY_READY,metadataTrusted:true,"
+            "detail:null,};",
+        ),
+        "exact fail-closed Native Spread UI authority classifier",
+    )
+    error_authority = authority_classifier_compact.find(
+        "if(value.authorityStatus==='error')"
+    )
+    pending_authority = authority_classifier_compact.find(
+        "if(value.authorityStatus==='pending')"
+    )
+    recovery_authority = authority_classifier_compact.find(
+        "if(value.authorityStatus==='recovery')"
+    )
+    inconsistent_ready_authority = authority_classifier_compact.find(
+        "if(value.activationPending||value.recoveryNeeded)"
+    )
+    ready_authority = authority_classifier_compact.find(
+        "return{state:NATIVE_SPREAD_AUTHORITY_READY,metadataTrusted:true,"
+        "detail:null,};"
+    )
+    if not (
+        0 <= error_authority < pending_authority < recovery_authority
+        < inconsistent_ready_authority < ready_authority
+    ):
+        fail("Native Spread UI does not preserve exact authority-state priority")
+
+    require_markers(
+        app_compact,
+        (
+            "const[nativeSpreadAuthorityState,setNativeSpreadAuthorityState]="
+            "useState('unknown');",
+            "constnativeSpreadAuthorityResolved=nativeSpreadAuthorityState==="
+            "NATIVE_SPREAD_AUTHORITY_READY;",
+            "constnativeSpreadRecoveryAllowed=(nativeSpreadAuthorityState==="
+            "'pending'||nativeSpreadAuthorityState==='recovery'||"
+            "nativeSpreadAuthorityState==='error')&&"
+            "nativeBackupAvailable;",
+        ),
+        "exact Native Spread UI authority derivation",
+    )
+
+    initialize_start = app_code.find("async function initialize()")
+    initialization_effect_end = app_code.find("  }, []);", initialize_start)
+    if initialize_start < 0 or initialization_effect_end < 0:
+        fail("could not isolate Native Spread UI authority loading")
+    authority_load = app_code[initialize_start:initialization_effect_end]
+    require_markers(
+        authority_load,
+        (
+            "Native reader state loader is unavailable.",
+            "RTL_READER_NATIVE_SPREAD_LOAD_FAILED",
+            "Native reader state could not be loaded.",
+            "loadedNativeSpreadAuthority.metadataTrusted === true ? nativeSpread : null",
+            "setNativeSpreadAuthorityState(loadedNativeSpreadAuthority.state)",
+            "setNativeSpreadAuthorityDetail(loadedNativeSpreadAuthority.detail)",
+            "setNativeSpreadReconciliationAvailable(",
+        ),
+        "fail-closed Native Spread UI authority loading",
+    )
+    authority_load_compact = compact_code(authority_load)
+    require_markers(
+        authority_load_compact,
+        (
+            "letloadedNativeSpreadAuthority={state:'error',detail:"
+            "'Nativereaderstateloaderisunavailable.Native-readerchangesare"
+            "locked.',};",
+            "loadedNativeSpreadAuthority=classifyNativeSpreadAuthority("
+            "nativeSpread,);",
+            "consttrustedNativeSpread=loadedNativeSpreadAuthority."
+            "metadataTrusted===true?nativeSpread:null;",
+            "setPreferencesReady(true);setNativeSpreadAuthorityState("
+            "loadedNativeSpreadAuthority.state);setNativeSpreadAuthorityDetail("
+            "loadedNativeSpreadAuthority.detail);setNativeSpreadConfigured("
+            "trustedNativeSpread?.configured===true);",
+            "setNativeSpreadReconciliationAvailable(trustedNativeSpread?."
+            "reconciliationAvailable===true,);",
+        ),
+        "exact fail-closed Native Spread UI authority loading flow",
+    )
+
+    direction_transition_start = app_code.find("const setDirectionValue = async")
+    view_transition_start = app_code.find(
+        "const setViewModeValue =", direction_transition_start
+    )
+    cover_transition_start = app_code.find(
+        "const setCoverSeparateValue = async", view_transition_start
+    )
+    appearance_transition_start = app_code.find(
+        "const setNativeSpreadAppearanceValue = async", cover_transition_start
+    )
+    readonly_transition_start = app_code.find(
+        "const setNativeSpreadReadOnly = async", appearance_transition_start
+    )
+    editable_transition_start = app_code.find(
+        "const setNativeSpreadEditableMode = async", readonly_transition_start
+    )
+    reconcile_transition_start = app_code.find(
+        "const reconcileNativeSpreadRecovery = async", editable_transition_start
+    )
+    restore_transition_start = app_code.find(
+        "const restoreNativeBackup = async", reconcile_transition_start
+    )
+    open_jump_start = app_code.find("const openJump =", restore_transition_start)
+    authority_transition_sections = (
+        (
+            "direction",
+            app_code[direction_transition_start:view_transition_start],
+            "if((next!=='rtl'&&next!=='ltr')||nativeSpreadBusyRef.current)"
+            "{return;}if(!nativeSpreadAuthorityResolved){"
+            "reportNativeSpreadAuthorityLocked();return;}",
+        ),
+        (
+            "cover",
+            app_code[cover_transition_start:appearance_transition_start],
+            "if(nativeSpreadBusyRef.current)return;if("
+            "!nativeSpreadAuthorityResolved){reportNativeSpreadAuthorityLocked();"
+            "return;}",
+        ),
+        (
+            "appearance",
+            app_code[appearance_transition_start:readonly_transition_start],
+            "if(nativeSpreadBusyRef.current)return;if("
+            "!nativeSpreadAuthorityResolved){reportNativeSpreadAuthorityLocked();"
+            "return;}",
+        ),
+        (
+            "read-only",
+            app_code[readonly_transition_start:editable_transition_start],
+            "if(!filePath||nativeSpreadBusyRef.current||"
+            "!nativeSpreadAuthorityResolved||!ReaderPreferencesModule?."
+            "configureNativeSpreadReadOnly){returnfalse;}",
+        ),
+        (
+            "editable",
+            app_code[editable_transition_start:reconcile_transition_start],
+            "if(!filePath||nativeSpreadBusyRef.current||"
+            "!nativeSpreadAuthorityResolved||directionRef.current!=='rtl'||"
+            "!nativeSpreadCompatible||!ReaderPreferencesModule?."
+            "configureNativeSpreadEditable){return;}",
+        ),
+    )
+    if min(
+        direction_transition_start,
+        view_transition_start,
+        cover_transition_start,
+        appearance_transition_start,
+        readonly_transition_start,
+        editable_transition_start,
+        reconcile_transition_start,
+        restore_transition_start,
+        open_jump_start,
+    ) < 0:
+        fail("could not isolate Native Spread UI state transitions")
+    for label, transition, exact_guard in authority_transition_sections:
+        if exact_guard not in compact_code(transition):
+            fail(f"{label} transition is not exactly locked by native authority")
+    reconcile_transition = app_code[
+        reconcile_transition_start:restore_transition_start
+    ]
+    reconcile_transition_compact = compact_code(reconcile_transition)
+    require_markers(
+        reconcile_transition_compact,
+        (
+            "if(!filePath||nativeSpreadBusyRef.current||"
+            "!nativeSpreadReconciliationAvailable||!ReaderPreferencesModule?."
+            "reconcileNativeSpreadRecovery||!ReaderPreferencesModule?."
+            "loadNativeSpreadMode){return;}",
+            "awaitReaderPreferencesModule.reconcileNativeSpreadRecovery("
+            "filePath);constrefreshed=awaitReaderPreferencesModule."
+            "loadNativeSpreadMode(filePath);constauthority="
+            "classifyNativeSpreadAuthority(refreshed);if(authority.state!=="
+            "NATIVE_SPREAD_AUTHORITY_READY){thrownewError(",
+            "setNativeSpreadReconciliationAvailable(false);"
+            "setNativeSpreadAuthorityState(NATIVE_SPREAD_AUTHORITY_READY);"
+            "setNativeSpreadAuthorityDetail(null);",
+            "markNativeSpreadAuthorityError(",
+        ),
+        "exact Native Spread UI reconciliation flow",
+    )
+    restore_transition = app_code[restore_transition_start:open_jump_start]
+    require_markers(
+        restore_transition,
+        (
+            "(!nativeSpreadAuthorityResolved && !nativeSpreadRecoveryAllowed)",
+            "setNativeSpreadAuthorityState(NATIVE_SPREAD_AUTHORITY_READY)",
+            "Annotation recovery did not complete.",
+        ),
+        "explicit Native Spread UI recovery transition",
+    )
+    require_markers(
+        compact_code(restore_transition),
+        (
+            "if(!filePath||nativeSpreadBusyRef.current||"
+            "(!nativeSpreadAuthorityResolved&&!nativeSpreadRecoveryAllowed)||"
+            "!nativeBackupAvailable||!ReaderPreferencesModule?."
+            "restoreNativeAnnotationBackup){return;}",
+        ),
+        "exact Native Spread UI recovery authority gate",
+    )
+
+    settings_start = app_code.find(
+        "<Text style={styles.settingLabel}>Reading direction"
+    )
+    settings_end = app_code.find("{jumpOpen && (", settings_start)
+    if settings_start < 0 or settings_end < 0:
+        fail("could not isolate Native Spread authority settings UI")
+    authority_settings = app_code[settings_start:settings_end]
+    if authority_settings.count(
+        "nativeSpreadBusy || !nativeSpreadAuthorityResolved"
+    ) != 3:
+        fail("direction/native Off controls are not locked by native authority")
+    if authority_settings.count("!nativeSpreadAuthorityResolved ||") != 10:
+        fail("state-dependent local/native controls are not authority-locked")
+    require_markers(
+        app_code,
+        (
+            "!fatalError && !nativeSpreadAuthorityResolved",
+            "styles.nativeAuthorityBanner",
+            "{nativeSpreadAuthorityDetail}",
+        ),
+        "visible unresolved Native Spread authority state",
+    )
+    require_markers(
+        compact_code(authority_settings),
+        (
+            "{nativeSpreadAuthorityResolved&&nativeEditableConfirmOpen&&("
+            "<Viewstyle={styles.nativeWarningPanel}>",
+            "{nativeSpreadReconciliationAvailable&&(<Viewstyle={"
+            "styles.nativeRecoveryRow}>",
+            "disabled={nativeSpreadBusy}onPress={reconcileNativeSpreadRecovery}",
+            "disabled={nativeSpreadBusy||(!nativeSpreadAuthorityResolved&&"
+            "!nativeSpreadRecoveryAllowed)}onPress={restoreNativeBackup}",
+        ),
+        "exact Native Spread authority settings controls",
     )
     history_hook_start = module.find(
         'for (String methodName : new String[] {"undo", "redo"})'
@@ -148,40 +1476,97 @@ def check(repo_root: Path) -> None:
     history_reset = history_hook.find(
         "PAGE_ACTIVATION_HISTORY_BLOCKED.remove();"
     )
-    history_transaction = history_hook.find(
-        "PAGE_ACTIVATION_TRANSACTIONS.get(activity)", history_reset
+    history_capture = history_hook.find(
+        "capturePresenterCallbackScope(param.thisObject)", history_reset
     )
-    history_mark_blocked = history_hook.find(
-        "PAGE_ACTIVATION_HISTORY_BLOCKED.set(Boolean.TRUE)",
+    history_scope = history_hook.find(
+        "new HistoryMutationScope(presenterScope)", history_capture
+    )
+    history_push = history_hook.find(
+        "pushHistoryMutationScope(scope);", history_scope
+    )
+    history_owner_guard = history_hook.find(
+        "if (!presenterScope.activeOwner)", history_push
+    )
+    history_transaction = history_hook.find(
+        "PAGE_ACTIVATION_TRANSACTIONS.get(activity)", history_owner_guard
+    )
+    history_recovery = history_hook.find(
+        "PAGE_ACTIVATION_ROLLBACK_RECOVERIES.get(activity)",
         history_transaction,
     )
+    history_uncertain_guard = history_hook.find(
+        "if (transaction != null || rollbackRecovery != null)",
+        history_recovery,
+    )
+    history_mark_blocked = history_hook.find(
+        "scope.blocked = true;",
+        history_uncertain_guard,
+    )
+    history_thread_blocked = history_hook.find(
+        "PAGE_ACTIVATION_HISTORY_BLOCKED.set(Boolean.TRUE)",
+        history_mark_blocked,
+    )
     history_suppress = history_hook.find(
-        "param.setResult(null);", history_mark_blocked
+        "param.setResult(null);", history_thread_blocked
+    )
+    history_writer_guard = history_hook.find(
+        "if (!documentMutationAuthorityCurrent(", history_suppress
+    )
+    history_writer_rejection = history_hook.find(
+        "reason=writer_authority_unavailable", history_writer_guard
     )
     history_native_path = history_hook.find(
-        "FORCE_CANONICAL_ACTIVE_INK.set(true);", history_suppress
+        "scope.forceCanonical = true;", history_writer_rejection
+    )
+    history_force_canonical = history_hook.find(
+        "FORCE_CANONICAL_ACTIVE_INK.set(Boolean.TRUE);", history_native_path
     )
     history_after = history_hook.find(
-        "protected void afterHookedMethod", history_native_path
+        "protected void afterHookedMethod", history_force_canonical
     )
-    history_after_guard = history_hook.find(
-        "PAGE_ACTIVATION_HISTORY_BLOCKED.get()", history_after
+    history_pop = history_hook.find(
+        "popHistoryMutationScope();", history_after
     )
     history_after_clear = history_hook.find(
-        "PAGE_ACTIVATION_HISTORY_BLOCKED.remove();", history_after_guard
+        "PAGE_ACTIVATION_HISTORY_BLOCKED.remove();", history_pop
     )
-    history_after_return = history_hook.find("return;", history_after_clear)
-    history_after_native = history_hook.find("try {", history_after_return)
+    history_after_guard = history_hook.find(
+        "if (scope == null || scope.blocked", history_after_clear
+    )
+    history_after_owner = history_hook.find(
+        "presenterCallbackScopeStillActive(", history_after_guard
+    )
+    history_after_return = history_hook.find("return;", history_after_owner)
+    history_after_native = history_hook.find(
+        "Activity activity = scope.presenterScope.activity;",
+        history_after_return,
+    )
+    history_restore = history_hook.find(
+        "restoreHistoryCanonicalScopeState();", history_after_native
+    )
     if not (
-        0 <= history_reset < history_transaction < history_mark_blocked
-        < history_suppress < history_native_path < history_after
-        < history_after_guard < history_after_clear < history_after_return
-        < history_after_native
+        0 <= history_reset < history_capture < history_scope < history_push
+        < history_owner_guard < history_transaction < history_recovery
+        < history_uncertain_guard < history_mark_blocked
+        < history_thread_blocked < history_suppress < history_writer_guard
+        < history_writer_rejection < history_native_path
+        < history_force_canonical < history_after < history_pop
+        < history_after_clear < history_after_guard < history_after_owner
+        < history_after_return < history_after_native < history_restore
     ):
         fail(
             "native Undo/Redo can mutate or reload presenter state during an "
-            "ownership transfer"
+            "ownership transfer or rollback recovery"
         )
+    require_markers(
+        history_hook,
+        (
+            'reason=rollback_recovery path=',
+            "rollbackRecovery.documentPath",
+        ),
+        "rollback-recovery Undo/Redo rejection",
+    )
 
     require_markers(
         module,
@@ -269,46 +1654,46 @@ def check(repo_root: Path) -> None:
     editable_worker = editable_configure.find(
         'startNativeBackupWorker("RTLReaderNativeBackupCreate")'
     )
-    editable_backup = editable_configure.find(
-        "ensureStableNativeAnnotationBackupForActivation("
+    editable_activation = editable_configure.find(
+        "activateNativeSpreadEditableWithStableBackup("
     )
-    editable_marker = editable_configure.find("writeNativeSpreadEditableMarker(")
     if not (
-        0 <= editable_handshake < editable_worker < editable_backup < editable_marker
+        0 <= editable_handshake < editable_worker < editable_activation
     ):
         fail(
             "editable marker is not gated by handshake then background verified backup"
         )
-    editable_backup_existed = editable_configure.find(
-        "val backupManifestExisted = nativeAnnotationBackupManifest(pdfFile).isFile"
-    )
-    editable_marker_snapshot = editable_configure.find("val previousMarkerBytes =")
-    editable_cleanup = editable_configure.find(
-        "removeNativeAnnotationBackupFiles(pdfFile, backup)",
-        editable_marker,
-    )
-    editable_rollback = editable_configure.find(
-        "RTL_READER_NATIVE_EDITABLE_ACTIVATION_ROLLED_BACK",
-        editable_marker,
-    )
-    if not (
-        0 <= editable_marker_snapshot < editable_backup_existed < editable_backup
-        < editable_marker < editable_cleanup < editable_rollback
-    ):
-        fail("new backup and editable marker activation are not rollback-capable")
 
     stable_backup_start = plugin.find(
         "private fun ensureStableNativeAnnotationBackupForActivation("
     )
-    read_backup_start = plugin.find(
-        "private fun readNativeAnnotationBackup(",
+    activation_helper_start = plugin.find(
+        "private fun activateNativeSpreadEditableWithStableBackup(",
         stable_backup_start,
     )
-    if stable_backup_start < 0 or read_backup_start < 0:
+    rollback_helper_start = plugin.find(
+        "private fun rollbackNativeSpreadEditableActivation(",
+        activation_helper_start,
+    )
+    live_match_start = plugin.find(
+        "private fun liveNativeAnnotationMatchesBackup(",
+        rollback_helper_start,
+    )
+    read_backup_start = plugin.find(
+        "private fun readNativeAnnotationBackup(",
+        live_match_start,
+    )
+    if min(
+        stable_backup_start,
+        activation_helper_start,
+        rollback_helper_start,
+        live_match_start,
+        read_backup_start,
+    ) < 0:
         fail("could not isolate live annotation backup stabilization")
-    stable_backup = plugin[stable_backup_start:read_backup_start]
+    stable_backup = plugin[stable_backup_start:activation_helper_start]
     require_markers(
-        stable_backup,
+        plugin[stable_backup_start:read_backup_start],
         (
             "repeat(maximumAttempts)",
             "val backup = ensureNativeAnnotationBackup(pdfFile)",
@@ -335,16 +1720,177 @@ def check(repo_root: Path) -> None:
     if not 0 <= snapshot_attempt < live_check < retry_cleanup:
         fail("editable activation does not retry a snapshot after live .mark drift")
 
+    activation_helper = plugin[activation_helper_start:rollback_helper_start]
+    marker_snapshot = activation_helper.find(
+        "val previousMarkerBytes = if (marker.isFile) marker.readBytes() else null"
+    )
+    backup_existed = activation_helper.find(
+        "val backupManifestExisted = nativeAnnotationBackupManifest(pdfFile).isFile"
+    )
+    backup_create = activation_helper.find(
+        "ensureStableNativeAnnotationBackupForActivation("
+    )
+    activation_token = activation_helper.find(
+        "val activationToken = UUID.randomUUID().toString()"
+    )
+    pending_write = activation_helper.find(
+        "writeNativeSpreadPendingMarker(", backup_create
+    )
+    pending_published = activation_helper.find(
+        "markerPublishedByActivation = true", pending_write
+    )
+    post_publication_live_check = activation_helper.find(
+        "liveNativeAnnotationMatchesBackup(activationBackup)", pending_published
+    )
+    committed_write = activation_helper.find(
+        "commitNativeSpreadEditableMarker(", post_publication_live_check
+    )
+    final_revalidation_required = activation_helper.find(
+        "requireLiveBaselineMatch = !backupManifestExisted", committed_write
+    )
+    committed_published = activation_helper.find(
+        "markerCommittedByActivation = true", final_revalidation_required
+    )
+    rollback = activation_helper.find(
+        "rollbackNativeSpreadEditableActivation(", committed_published
+    )
+    fail_closed_throw = activation_helper.find("throw changed", rollback)
+    committed_catch_guard = activation_helper.find(
+        "if (markerCommittedByActivation && backup != null)",
+        fail_closed_throw,
+    )
+    committed_catch_return = activation_helper.find(
+        "return backup", committed_catch_guard
+    )
+    if not (
+        0 <= marker_snapshot < backup_existed < activation_token
+        < backup_create < pending_write < pending_published
+        < post_publication_live_check < committed_write
+        < final_revalidation_required
+        < committed_published < rollback < fail_closed_throw
+        < committed_catch_guard < committed_catch_return
+    ):
+        fail(
+            "editable activation is not linearized as pending publication, "
+            "final live-mark check, committed authorization, and fail-closed rollback"
+        )
+    if activation_helper.count(
+        "requireLiveBaselineMatch = !backupManifestExisted"
+    ) != 1:
+        fail(
+            "editable activation must require final live-baseline matching "
+            "exactly for first-time backup creation"
+        )
+    if "Thread.sleep(100L)" in activation_helper or "retrying activation" in activation_helper:
+        fail("post-publication .mark divergence is retried from changed bytes")
+    rollback_helper = plugin[rollback_helper_start:live_match_start]
+    require_markers(
+        rollback_helper,
+        (
+            "): Boolean",
+            "markerPublishedByActivation: Boolean",
+            "val ownsPublishedMarker = currentMarkerProperties.getProperty(",
+            '"activationToken",',
+            "== activationToken",
+            "val markerOwnershipLost = !ownsPublishedMarker && !markerAlreadyPrevious",
+            "val archiveNewBackup = !backupManifestExisted &&",
+            "markerPublishedByActivation || ownsPublishedMarker",
+            "if (markerOwnershipLost && !archiveNewBackup)",
+            "RTL_READER_NATIVE_EDITABLE_ACTIVATION_ROLLBACK_SKIPPED reason=marker_ownership_lost",
+            "fun restorePublishedMarkerIfOwned()",
+            "writeBytesAtomically(marker, previousMarkerBytes)",
+            "failedActivationArchive = archiveFailedActivationBackup(",
+            "restorePublishedMarkerIfOwned()",
+            "removeNativeAnnotationBackupFiles(pdfFile, backup)",
+            "val preserved = readNativeAnnotationBackup(pdfFile).backup",
+            "sameNativeAnnotationBackup(backup, preserved)",
+            "failedActivationBackupArchived(pdfFile, archive)",
+            "failedActivationEvidenceMatchesBackup(evidence, backup)",
+            "marker.readBytes().contentEquals(previousMarkerBytes)",
+            "!nativeAnnotationBackupManifest(pdfFile).exists()",
+            "!nativeAnnotationBackupSnapshot(pdfFile).exists()",
+            "!nativeAnnotationRetiringSnapshot(pdfFile).exists()",
+            '"Protected editable activation rollback could not be verified"',
+            "return true",
+            "return false",
+            "RTL_READER_NATIVE_EDITABLE_ACTIVATION_ROLLED_BACK",
+        ),
+        "verified post-publication editable activation rollback",
+    )
+    archive_decision = rollback_helper.find(
+        "val archiveNewBackup = !backupManifestExisted &&"
+    )
+    archive_call = rollback_helper.find(
+        "failedActivationArchive = archiveFailedActivationBackup(",
+        archive_decision,
+    )
+    marker_restore = rollback_helper.find(
+        "restorePublishedMarkerIfOwned()", archive_call
+    )
+    archived_verify = rollback_helper.find(
+        "failedActivationBackupArchived(pdfFile, archive)", marker_restore
+    )
+    if not (
+        0 <= archive_decision < archive_call < marker_restore < archived_verify
+    ):
+        fail(
+            "activation rollback restores/removes its pending marker before "
+            "the sole pre-activation recovery snapshot is durably archived"
+        )
+    if "liveNativeAnnotationMatchesBackup(backup)" in rollback_helper:
+        fail(
+            "rollback conditionally deletes recovery evidence based on a "
+            "racy live .mark comparison"
+        )
+    require_markers(
+        plugin,
+        (
+            "private val nativeSpreadConfigurationLock = Any()",
+            "synchronized(nativeSpreadConfigurationLock) { action() }",
+            "activationToken: String",
+            'setProperty("activationToken", activationToken)',
+            'setProperty("activationState", activationState)',
+            'properties.getProperty("activationState", "") == activationState',
+        ),
+        "serialized ownership-tagged native spread configuration",
+    )
+
     configure_worker = configure.find(
         'startNativeBackupWorker("RTLReaderNativeBackupRetire")'
     )
-    marker_snapshot = configure.find("val previousMarkerBytes =")
-    retirement = configure.find("retireNativeAnnotationBackup(")
-    marker_rollback = configure.find("writeBytesAtomically(marker, previousMarkerBytes)")
+    retirement_reconcile = configure.find(
+        "reconcileFailedActivationBackupForExplicitActivation(",
+        configure_worker,
+    )
+    marker_snapshot = configure.find(
+        "val previousMarkerBytes =", retirement_reconcile
+    )
+    retirement_pending = configure.find(
+        "writeNativeSpreadPendingMarker(", marker_snapshot
+    )
+    retirement = configure.find(
+        "retireNativeAnnotationBackup(", retirement_pending
+    )
+    retirement_verified = configure.find(
+        "Protected-session recovery retirement was not verified",
+        retirement,
+    )
+    pending_revalidated = configure.find(
+        "readPendingEditableActivation(", retirement_verified
+    )
+    final_disable = configure.find("if (!enabled)", pending_revalidated)
+    final_read_only = configure.find(
+        "writeNativeSpreadReadOnlyMarker(", final_disable
+    )
     if not (
-        0 <= configure_worker < marker_snapshot < retirement < marker_rollback
+        0 <= configure_worker < retirement_reconcile < marker_snapshot
+        < retirement_pending < retirement < retirement_verified
+        < pending_revalidated < final_disable < final_read_only
     ):
-        fail("read-only/off transition does not preserve and roll back its marker")
+        fail(
+            "read-only/off transition is not durably journaled before backup "
+            "retirement and revalidated before final marker publication"
+        )
 
     require_markers(
         module,
@@ -367,11 +1913,14 @@ def check(repo_root: Path) -> None:
             "&& documentInode == nextDocumentInode",
             "&& documentChangeSeconds == nextDocumentChangeSeconds",
             "&& documentChangeNanos == nextDocumentChangeNanos",
-            "StructStat documentStat = Os.stat(document.getAbsolutePath());",
-            "long documentDevice = documentStat.st_dev;",
-            "long documentInode = documentStat.st_ino;",
-            "long documentChangeSeconds = documentStat.st_ctim.tv_sec;",
-            "long documentChangeNanos = documentStat.st_ctim.tv_nsec;",
+            "FileIdentity documentIdentity = FileIdentity.capture(document);",
+            "if (!documentIdentity.isRegular())",
+            "long documentModified = documentIdentity.modified;",
+            "long documentLength = documentIdentity.length;",
+            "long documentDevice = documentIdentity.device;",
+            "long documentInode = documentIdentity.inode;",
+            "long documentChangeSeconds = documentIdentity.changeSeconds;",
+            "long documentChangeNanos = documentIdentity.changeNanos;",
             "final FileIdentity markerIdentity;",
             "final FileIdentity backupIdentity;",
             "final FileIdentity snapshotIdentity;",
@@ -394,10 +1943,31 @@ def check(repo_root: Path) -> None:
     if ensure_start < 0 or read_backup_start < 0:
         fail("could not isolate annotation backup creation/reuse method")
     ensure_backup = plugin[ensure_start:read_backup_start]
-    inactive_guard = ensure_backup.find("protectedEditableMarkerValid(")
+    inactive_guard = ensure_backup.find(
+        "protectedEditableSessionMarkerValid("
+    )
     reuse_log = ensure_backup.find("RTL_READER_NATIVE_BACKUP_REUSED")
     if inactive_guard < 0 or reuse_log < 0 or inactive_guard > reuse_log:
         fail("a verified backup can be reused without an active protected session")
+    retire_start = plugin.find("private fun retireNativeAnnotationBackup(")
+    cleanup_start = plugin.find(
+        "private fun removeNativeAnnotationBackupFiles(", retire_start
+    )
+    if retire_start < 0 or cleanup_start < 0:
+        fail("could not isolate protected backup retirement authorization")
+    retire_backup = plugin[retire_start:cleanup_start]
+    retire_authorization = retire_backup.find(
+        "protectedEditableSessionMarkerValid("
+    )
+    retire_remove = retire_backup.find(
+        "removeNativeAnnotationBackupFiles(pdfFile, backup)",
+        retire_authorization,
+    )
+    if not 0 <= retire_authorization < retire_remove:
+        fail(
+            "legacy/current protected backup cannot be safely retired after "
+            "the marker is disabled or downgraded"
+        )
     snapshot_copy = ensure_backup.find("copyFileAtomically(mark, snapshot)")
     final_verification = ensure_backup.find(
         "val verified = readNativeAnnotationBackup(pdfFile)",
@@ -454,7 +2024,8 @@ def check(repo_root: Path) -> None:
         "<ScrollView", settings_panel_start
     )
     warning_panel_start = app.find(
-        "{nativeEditableConfirmOpen && (", settings_scroll_start
+        "{nativeSpreadAuthorityResolved && nativeEditableConfirmOpen && (",
+        settings_scroll_start,
     )
     recovery_row_start = app.find(
         "{nativeBackupAvailable && (", warning_panel_start
@@ -480,9 +2051,28 @@ def check(repo_root: Path) -> None:
     if restore_worker_start < 0 or restore_worker_end < 0:
         fail("could not isolate annotation restore worker")
     restore_worker = plugin[restore_worker_start:restore_worker_end]
-    remaining_check = restore_worker.find("val remaining = documentPids(activityManager)")
-    active_abort = restore_worker.find(
-        "RTL_READER_NATIVE_BACKUP_RESTORE_ABORTED_ACTIVE_PROCESS"
+    nullable_sample = plugin.find(
+        "private fun documentPids(activityManager: ActivityManager): List<Int>?"
+    )
+    nullable_fail_closed = plugin.find(
+        "activityManager.runningAppProcesses ?: return null",
+        nullable_sample,
+    )
+    nullable_throw = plugin.find(
+        "documentPids(activityManager) ?: run {",
+        nullable_fail_closed,
+    )
+    if not 0 <= nullable_sample < nullable_fail_closed < nullable_throw:
+        fail("unavailable document-process samples do not fail closed")
+    stable_absence = restore_worker.find(
+        "RTL_READER_NATIVE_BACKUP_RESTORE_STABLE_PROCESS_ABSENCE"
+    )
+    replacement_generation = restore_worker.find(
+        "pid !in initialPids ||"
+    )
+    repeated_pid_generation = restore_worker.find(
+        "pid in signaledPids && pid !in previousRunning",
+        replacement_generation,
     )
     document_revalidation = restore_worker.find(
         "val revalidatedBackup = readNativeAnnotationBackup(pdfFile).backup"
@@ -491,19 +2081,64 @@ def check(repo_root: Path) -> None:
         "sameNativeAnnotationBackup(backup, revalidatedBackup)"
     )
     mark_write = restore_worker.find(
-        "copyFileAtomically(revalidatedBackup.snapshot, currentMark)"
+        "copyFileAtomically(", backup_identity_check
+    )
+    before_publish_callback = restore_worker.find(
+        "beforePublish = {", mark_write
+    )
+    before_publish_guard = restore_worker.find(
+        '"before-mark-publish"', before_publish_callback
+    )
+    after_publish_callback = restore_worker.find(
+        "onPublished = {", before_publish_guard
+    )
+    after_publish_guard = restore_worker.find(
+        '"after-mark-publish"', after_publish_callback
+    )
+    mark_verification = restore_worker.find(
+        "Restored annotation file verification failed", after_publish_guard
     )
     if not (
-        0 <= remaining_check < active_abort < document_revalidation
-        < backup_identity_check < mark_write
+        0 <= replacement_generation < repeated_pid_generation < stable_absence
+        < document_revalidation < backup_identity_check < mark_write
+        < before_publish_callback < before_publish_guard
+        < after_publish_callback < after_publish_guard < mark_verification
     ):
-        fail("annotation restore can touch .mark before all document processes exit")
+        fail(
+            "annotation restore can publish .mark without stable process "
+            "absence, replacement-PID handling, or adjacent publication guards"
+        )
+    race_kill = plugin.find(
+        "RTL_READER_NATIVE_BACKUP_RESTORE_RACE_KILL_SENT"
+    )
+    if race_kill < 0:
+        fail("annotation restore does not terminate a publication-race process")
+    copy_helper_start = plugin.find("private fun copyFileAtomically(")
+    copy_helper_end = plugin.find("private fun sha256(file: File)", copy_helper_start)
+    if copy_helper_start < 0 or copy_helper_end < 0:
+        fail("could not isolate atomic annotation restore copy helper")
+    copy_helper = plugin[copy_helper_start:copy_helper_end]
+    helper_before = copy_helper.find("beforePublish()")
+    helper_rename = copy_helper.find(
+        "Os.rename(temporary.absolutePath, destination.absolutePath)",
+        helper_before,
+    )
+    helper_after = copy_helper.find("onPublished()", helper_rename)
+    if not 0 <= helper_before < helper_rename < helper_after:
+        fail("atomic annotation copy does not guard both sides of publication")
+    retirement_guard = restore_worker.find(
+        'requireDocumentProcessAbsent(activityManager, "before-backup-retirement")',
+        mark_verification,
+    )
     transactional_cleanup = restore_worker.find(
         "removeNativeAnnotationBackupFiles(pdfFile, revalidatedBackup)",
-        mark_write,
+        retirement_guard,
     )
-    restore_success = restore_worker.find("completion(null)", mark_write)
-    if not (0 <= mark_write < transactional_cleanup < restore_success):
+    restore_success = restore_worker.find("completion(null)", transactional_cleanup)
+    if not (
+        0 <= mark_verification < retirement_guard
+        < transactional_cleanup < restore_success
+    ):
         fail("annotation restore cleanup is not transactional before success")
 
     restore_api_start = plugin.find("fun restoreNativeAnnotationBackup(")
@@ -566,8 +2201,12 @@ def check(repo_root: Path) -> None:
         (
             "HANDSHAKE_REQUEST_ACTION",
             "HANDSHAKE_RESPONSE_ACTION",
+            "private static final int HANDSHAKE_PROTOCOL = 2;",
+            "private static final long TRANSACTIONAL_MIN_MODULE_VERSION_CODE = 118L;",
+            "private static final int EDITABLE_MARKER_PROTOCOL = 2;",
+            '"protected-editable-transactional-v1"',
             "private static volatile boolean hooksReady;",
-            "registerHandshakeReceiver(activeActivity);",
+            "registerHandshakeReceiver(createdActivity);",
             "hooksReady = true;",
             "response.setPackage(PLUGIN_HOST_PACKAGE);",
             "response.putExtra(HANDSHAKE_EXTRA_HOOKS_READY, true);",
@@ -593,9 +2232,13 @@ def check(repo_root: Path) -> None:
             "verification.valid",
             '"protected_backup_verified"',
             "protected_editable_backup_refresh_scheduled",
-            '"protected-editable-pilot"',
+            '"transactionProtocol"',
+            '"minimumModuleVersionCode"',
+            "validActivationToken(",
             "expectedManifestHash.equals(sha256(expectedManifest))",
-            'backup.getProperty("documentSha256", "").trim().equals(',
+            'backup.getProperty("documentSha256", "")',
+            "backupDocumentHash.equals(markerDocumentHash)",
+            "backupDocumentHash.equals(currentDocumentHash)",
             "protected_editable_document_mtime_changed",
             "protected_editable_backup_verified",
             "cached.backupIdentity.sameAs(backupIdentity)",
@@ -604,6 +2247,59 @@ def check(repo_root: Path) -> None:
             '" preserve_size=" + preserveCanonicalSize',
         ),
         "companion handshake/lifecycle",
+    )
+    if '"protected-editable-pilot"' in module:
+        fail("companion module still accepts the legacy editable pilot marker")
+
+    protected_backup_start = module.find(
+        "private static boolean protectedEditableBackupValid("
+    )
+    protected_backup_end = module.find(
+        "private static ProtectedVerification startProtectedEditableVerification(",
+        protected_backup_start,
+    )
+    activation_token_start = module.find(
+        "private static boolean validActivationToken("
+    )
+    activation_token_end = module.find(
+        "/** Input-path check:", activation_token_start
+    )
+    if min(
+        protected_backup_start,
+        protected_backup_end,
+        activation_token_start,
+        activation_token_end,
+    ) < 0:
+        fail("could not isolate companion editable marker attestation")
+    require_markers(
+        module[protected_backup_start:protected_backup_end],
+        (
+            "EDITABLE_MARKER_MODE.equals(",
+            'markerProperties.getProperty("mode", "")',
+            'markerProperties.getProperty(\n                    "transactionProtocol",',
+            "!= EDITABLE_MARKER_PROTOCOL",
+            'markerProperties.getProperty(\n                    "minimumModuleVersionCode",',
+            "minimumModuleVersionCode\n                    < TRANSACTIONAL_MIN_MODULE_VERSION_CODE",
+            "minimumModuleVersionCode > MODULE_VERSION_CODE",
+            "!validActivationToken(",
+        ),
+        "companion versioned editable marker attestation",
+    )
+    protected_backup = module[protected_backup_start:protected_backup_end]
+    if '.trim()' in protected_backup:
+        fail(
+            "companion editable authorization normalizes marker fields "
+            "instead of requiring the exact protocol-2 representation"
+        )
+    if "!= MODULE_VERSION_CODE" in protected_backup:
+        fail("companion treats a marker version floor as an exact module version")
+    require_markers(
+        module[activation_token_start:activation_token_end],
+        (
+            "UUID.fromString(value).toString()",
+            "return false;",
+        ),
+        "canonical editable activation-token validation",
     )
 
     spread_config_start = module.find("private static SpreadConfig spreadConfig(")
@@ -775,66 +2471,111 @@ def check(repo_root: Path) -> None:
             '"com.supernote.document.document.DocumentActivity$6"',
             '"onDigitalPosition"',
             "handlePenPageActivation(",
-            "PEN_ACTIVATION_TARGETS.remove(activity);",
-            "pen_page_activation_prearmed",
-            "pen_activation_deferred",
-            "completePendingPenPageActivation(",
-            '"pen_up"',
-            "cancelPendingPenPageActivation(",
-            '"pen_left_screen"',
-            '"sendDisableWriteAreaNotRefreshBitmap"',
-            "pen_activation_disable_area_refresh_bypassed",
-            "param.setResult(Boolean.TRUE);",
-            "PEN_ACTIVATION_MARK_PRIMING",
-            "pen_activation_mark_bitmap_suppressed",
-            "pen_activation_mark_primed",
-            "SN_SPREAD_PROBE pen page activation",
-            'applySpreadMarkGeometry(',
-            '"pen_page_activation"',
-            "int targetMarkPage = targetPage + 1;",
-            "capturePendingPenActivationTrails(",
-            "normalizePendingPenTrail(",
-            "pen_activation_native_save_bypassed",
-            "persistPendingPenActivationTrails(",
-            "PEN_ACTIVATION_STALE_SAVE_PENDING",
-            "PEN_ACTIVATION_STALE_SAVE_SCOPE",
-            "pen_activation_stale_save_armed",
-            "pen_activation_stale_save_bypassed",
-            "PENDING_PAGE_EDIT_HISTORY",
-            "PAGE_EDIT_HISTORY_ACTIONS",
-            "page_edit_history_registered",
-            "page_edit_history_applied",
-            "receiveTrials() fetches the completed native trail",
-            '"modifyPageTrailsFromFile"',
-            'XposedHelpers.callMethod(',
-            '"get_erase_line_trail_num"',
-            "PEN_ACTIVATION_ERASERS",
-            "eraserIntersectsTrail(",
-            "process != 0 && process != 6 && process != 7",
-            '"pen_activation_eraser_captured',
-            "normalizedTrailMatchPoints(",
-            "hasPendingPenActivationEdits(activity)",
-            '"pen_activation_aborted reason=persistence_failed target="',
-            'cancelPendingPenPageActivation(activity, "persistence_failed")',
-            "matchingTrailPoints(points, candidatePoints, 6)",
-            "matchingTrailInkAttributes(existing, candidate)",
-            'matchingTrailValue(existing, candidate, "get_pressures")',
-            'matchingTrailValue(existing, candidate, "get_angles")',
-            'matchingTrailValue(existing, candidate, "get_flag_draw")',
-            'matchingTrailValue(existing, candidate, "get_timestamp")',
+            "interceptPenPageActivation(",
+            "private static final class PageActivationTransaction",
+            "private static final class PenContactIdentityCapture",
+            "private static final class PenContactOwnership",
+            "private static final class ReceiveTrialsScope",
+            "PAGE_ACTIVATION_TRANSACTIONS",
+            "PAGE_ACTIVATION_SOURCE_SAVE_SCOPES",
+            "PEN_CONTACT_OWNERSHIPS",
+            "DOCUMENT_RECEIVE_TOMBSTONES",
+            "publishPenContactOwnershipLocked(",
+            "receiveTrialsOwnershipFailure(",
+            'return "document_context_receive_quarantine";',
+            "beginPageActivationTransaction(",
+            "finishPageActivationTransaction(",
+            "abortPageActivationTransaction(",
+            '"page_activation_source_save_allowed"',
+            '"source_save_not_completed"',
         ),
-        "inactive-page pen activation",
+        "transactional inactive-page activation and receive quarantine",
     )
+    forbidden_legacy_activation_markers = (
+        "PEN_ACTIVATION_TARGETS",
+        "PEN_ACTIVATION_MARK_PRIMING",
+        "capturePendingPenActivationTrails(",
+        "normalizePendingPenTrail(",
+        "persistPendingPenActivationTrails(",
+        "PEN_ACTIVATION_STALE_SAVE_PENDING",
+        "PEN_ACTIVATION_STALE_SAVE_SCOPE",
+        "PENDING_PAGE_EDIT_HISTORY",
+        "PAGE_EDIT_HISTORY_ACTIONS",
+        "PEN_ACTIVATION_ERASERS",
+        "eraserIntersectsTrail(",
+        "normalizedTrailMatchPoints(",
+        "matchingTrailInkAttributes(",
+        "matchingTrailValue(",
+        "hasPendingPenActivationEdits(",
+        "activateDocumentPageFromPen(",
+        "completePendingPenPageActivation(",
+        "cancelPendingPenPageActivation(",
+        "matchingTrailPoints(",
+        "private static final class PageEditHistory",
+        "registerPendingPageEditHistory(",
+        "applyPageEditHistory(",
+        "pen_activation_native_save_bypassed",
+    )
+    leaked_legacy_activation_markers = [
+        marker
+        for marker in forbidden_legacy_activation_markers
+        if marker in module
+    ]
+    if leaked_legacy_activation_markers:
+        fail(
+            "removed inactive-page capture/merge/history architecture is still "
+            f"reachable: {leaked_legacy_activation_markers}"
+        )
+
+    activity_create_start = module.find(
+        'XposedHelpers.findAndHookMethod(\n            TARGET_ACTIVITY,\n'
+        '            loadPackageParam.classLoader,\n            "onCreate"'
+    )
+    activity_create_end = module.find(
+        'XposedHelpers.findAndHookMethod(\n            TARGET_ACTIVITY,\n'
+        '            loadPackageParam.classLoader,\n            "onConfigurationChanged"',
+        activity_create_start,
+    )
+    if activity_create_start < 0 or activity_create_end < 0:
+        fail("could not isolate DocumentActivity startup hook")
+    activity_create = module[activity_create_start:activity_create_end]
+    startup_guard = activity_create.find(
+        "PEN_INPUT_EDITABLE_GUARDS.put("
+    )
+    startup_publish = activity_create.find(
+        "activeActivity = createdActivity;", startup_guard
+    )
+    startup_config = activity_create.find(
+        'updateNativeEraserGate(\n'
+        '                            createdActivity,\n'
+        '                            "activity_created"',
+        startup_publish,
+    )
+    if not 0 <= startup_guard < startup_publish < startup_config:
+        fail(
+            "DocumentActivity startup exposes pen callbacks before publishing "
+            "a fail-closed editable guard"
+        )
+    if "PEN_INPUT_EDITABLE_GUARDS.remove(createdActivity)" in activity_create:
+        fail("DocumentActivity startup clears its pen guard before config authority")
 
     transaction_markers = (
         "private static final class PageActivationTransaction",
         "PAGE_ACTIVATION_TRANSACTIONS",
         "PAGE_ACTIVATION_BLOCKED_TOUCHES",
         "PAGE_ACTIVATION_HISTORY_BLOCKED",
-        "ACTIVE_PAGE_STROKE_TERMINAL_CLEANUP",
         "PEN_CONTACT_START_PAGES",
+        "PEN_ACTIVE_STROKE_SOURCE_PAGES",
+        "PEN_CONTACT_GENERATIONS",
+        "PEN_CONTACT_RECEIVE_FALLBACK_GENERATIONS",
+        "PEN_RECEIVE_EXPIRED_GENERATIONS",
         "PAGE_ACTIVATION_OWNERSHIP_LOCK",
-        "PAGE_ACTIVATION_SOURCE_SAVE_SCOPE",
+        "PAGE_ACTIVATION_SOURCE_SAVE_SCOPES",
+        "private static final class PageActivationSourceSaveToken",
+        "pushPageActivationSourceSaveToken(",
+        "popPageActivationSourceSaveToken(",
+        "PAGE_SAVE_IN_FLIGHT_COUNTS",
+        "PAGE_SAVE_ADMISSIONS",
         "new ConcurrentHashMap<>()",
         "volatile boolean triggerContactObserved",
         "volatile boolean triggerPenLifted",
@@ -881,7 +2622,8 @@ def check(repo_root: Path) -> None:
         '"page_activation_source_save_allowed"',
         '"page_activation_ui_input_blocked phase=start state="',
         '"page_activation_history_blocked id="',
-        "shouldBlockPageActivationSave(activity)",
+        "admitPageSave(",
+        "finishPageSaveAdmission()",
         '"RTL SPREAD: page switch failed - writing disabled"',
     )
     require_markers(
@@ -889,6 +2631,180 @@ def check(repo_root: Path) -> None:
         transaction_markers,
         "transactional single-active-page ownership",
     )
+    require_markers(
+        module,
+        (
+            "PAGE_LOAD_GENERATION_COUNTER",
+            "PAGE_LOAD_GENERATIONS",
+            "PAGE_ACTIVATION_LOAD_SCOPE",
+            "final SpreadConfig documentConfig;",
+            "volatile long loadGeneration = -1L;",
+            "isCachedSpreadConfigCurrent(",
+            "isPageActivationLoadIdentityCurrent(",
+        ),
+        "exact document/load-generation activation identity",
+    )
+
+    load_hook_start = module.find(
+        '"com.supernote.document.document.DocumentViewModel",\n'
+        '            loadPackageParam.classLoader,\n'
+        '            "loadPage",'
+    )
+    turn_hook_start = module.find(
+        '"com.supernote.document.document.DocumentViewModel",\n'
+        '            loadPackageParam.classLoader,\n'
+        '            "turnPage",',
+        load_hook_start,
+    )
+    if load_hook_start < 0 or turn_hook_start < 0:
+        fail("could not isolate document load-generation hook")
+    load_hook = module[load_hook_start:turn_hook_start]
+    load_owner_resolution = load_hook.find(
+        "activeActivityForDocumentViewModel("
+    )
+    load_owner_reject = load_hook.find(
+        "if (activity == null)", load_owner_resolution
+    )
+    scoped_load_lock = load_hook.find(
+        "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)", load_owner_reject
+    )
+    scoped_load_identity = load_hook.find(
+        "if (PAGE_ACTIVATION_TRANSACTIONS.get(activity)", scoped_load_lock
+    )
+    scoped_load_reject = load_hook.find(
+        "param.setResult(null);", scoped_load_identity
+    )
+    load_generation_increment = load_hook.find(
+        "PAGE_LOAD_GENERATION_COUNTER.incrementAndGet()",
+        scoped_load_reject,
+    )
+    load_generation_publish = load_hook.find(
+        "PAGE_LOAD_GENERATIONS.put(activity, loadGeneration)",
+        load_generation_increment,
+    )
+    scoped_load_capture = load_hook.find(
+        "scoped.loadGeneration = loadGeneration", load_generation_publish
+    )
+    snapshot_invalidate = load_hook.find(
+        "PEN_INPUT_SNAPSHOTS.remove(activity);", scoped_load_capture
+    )
+    editable_guard = load_hook.find(
+        "PEN_INPUT_EDITABLE_GUARDS.put(", snapshot_invalidate
+    )
+    native_gate_close = load_hook.find(
+        "disableNativeGateForOwnershipHandoffLocked(", editable_guard
+    )
+    if not (
+        0 <= load_owner_resolution < load_owner_reject < scoped_load_lock
+        < scoped_load_identity < scoped_load_reject < load_generation_increment
+        < load_generation_publish
+        < scoped_load_capture < snapshot_invalidate < editable_guard
+        < native_gate_close
+    ):
+        fail(
+            "loadPage is not bound to the exact active DocumentViewModel or "
+            "does not reject a stale scoped load before publishing its exact "
+            "generation and atomically withdrawing prior writer authority"
+        )
+
+    check_link_hook_start = module.find('"checkLink",', turn_hook_start)
+    if check_link_hook_start < 0:
+        fail("could not isolate fail-closed page-turn hook")
+    turn_hook = module[turn_hook_start:check_link_hook_start]
+    turn_owner_resolution = turn_hook.find(
+        "activeActivityForDocumentViewModel("
+    )
+    turn_owner_reject = turn_hook.find(
+        "if (activity == null)", turn_owner_resolution
+    )
+    turn_navigation_guard = turn_hook.find(
+        "shouldSuppressFailClosedNavigation(activity)", turn_owner_reject
+    )
+    if not (
+        0 <= turn_owner_resolution < turn_owner_reject
+        < turn_navigation_guard
+    ):
+        fail(
+            "turnPage can route a stale DocumentViewModel through the active "
+            "activity's navigation state"
+        )
+    require_markers(
+        turn_hook,
+        (
+            "shouldSuppressFailClosedNavigation(activity)",
+            'rtl_turn_suppressed reason=config_unavailable',
+            "param.setResult(null)",
+            "SpreadConfig navigationConfig = spreadConfig(activity)",
+            "navigationConfig == null",
+            'rtl_turn_suppressed reason=config_failed_during_turn',
+            "isCachedSpreadConfigCurrent(",
+            'rtl_turn_suppressed reason=config_not_current',
+            "handleRtlSpreadTurn(",
+            "navigationConfig",
+        ),
+        "watcher-failure fail-closed navigation suppression",
+    )
+    first_navigation_guard = turn_hook.find(
+        "if (shouldSuppressFailClosedNavigation(activity))"
+    )
+    first_turn_suppression = turn_hook.find(
+        "param.setResult(null);", first_navigation_guard
+    )
+    config_lookup = turn_hook.find(
+        "SpreadConfig navigationConfig = spreadConfig(activity)",
+        first_turn_suppression,
+    )
+    second_navigation_guard = turn_hook.find(
+        "if (shouldSuppressFailClosedNavigation(activity))", config_lookup
+    )
+    second_turn_suppression = turn_hook.find(
+        "param.setResult(null);", second_navigation_guard
+    )
+    current_config_check = turn_hook.find(
+        "if (!isCachedSpreadConfigCurrent(", second_turn_suppression
+    )
+    stale_config_suppression = turn_hook.find(
+        "param.setResult(null);", current_config_check
+    )
+    handler_call = turn_hook.find(
+        "handleRtlSpreadTurn(", stale_config_suppression
+    )
+    if not (
+        0 <= first_navigation_guard < first_turn_suppression < config_lookup
+        < second_navigation_guard < second_turn_suppression
+        < current_config_check < stale_config_suppression < handler_call
+    ):
+        fail(
+            "turnPage can leak native LTR navigation before or during a "
+            "failed persisted-config lookup"
+        )
+    rtl_turn_handler_start = module.find(
+        "private static boolean handleRtlSpreadTurn("
+    )
+    rtl_turn_handler_end = module.find(
+        "private static void activateDocumentPage(", rtl_turn_handler_start
+    )
+    if rtl_turn_handler_start < 0 or rtl_turn_handler_end < 0:
+        fail("could not isolate fail-closed RTL spread-turn handler")
+    rtl_turn_handler = module[rtl_turn_handler_start:rtl_turn_handler_end]
+    require_markers(
+        rtl_turn_handler,
+        (
+            "SpreadConfig config",
+            "shouldSuppressFailClosedNavigation(activity)",
+            "!isCachedSpreadConfigCurrent(activity, config)",
+            'rtl_spread_turn_rejected reason=config_unavailable',
+            'rtl_spread_turn_rejected reason=invalid_pair',
+            'rtl_spread_turn_failed offset=',
+        ),
+        "single-snapshot fail-closed RTL spread turn",
+    )
+    if "spreadConfig(activity)" in rtl_turn_handler:
+        fail("RTL turn handler reparses config after navigation admission")
+    failed_turn = rtl_turn_handler.find('log("rtl_spread_turn_failed offset="')
+    failed_turn_consume = rtl_turn_handler.find("return true;", failed_turn)
+    if not 0 <= failed_turn < failed_turn_consume:
+        fail("managed RTL turn failure falls through to native LTR navigation")
 
     digital_position_start = module.find(
         '"com.supernote.document.document.DocumentActivity$6"'
@@ -897,7 +2813,12 @@ def check(repo_root: Path) -> None:
     if dispatch_touch_start < 0 or digital_position_start < 0:
         fail("could not isolate transactional UI-input guard")
     dispatch_touch_hook = module[dispatch_touch_start:digital_position_start]
-    dispatch_trace = dispatch_touch_hook.find("traceTouchEvent(activity, event);")
+    dispatch_finger_stream = dispatch_touch_hook.find(
+        "trackFingerTouchStream(activity, event);"
+    )
+    dispatch_trace = dispatch_touch_hook.find(
+        "traceTouchEvent(activity, event);", dispatch_finger_stream
+    )
     dispatch_block = dispatch_touch_hook.find(
         "blockPageActivationUiInput(activity, event)", dispatch_trace
     )
@@ -906,15 +2827,52 @@ def check(repo_root: Path) -> None:
     )
     dispatch_return = dispatch_touch_hook.find("return;", dispatch_consume)
     dispatch_config = dispatch_touch_hook.find(
-        "SpreadConfig config = spreadConfig(activity);", dispatch_return
+        "SpreadConfig config = SPREAD_CONFIGS.get(activity);", dispatch_return
+    )
+    dispatch_after = dispatch_touch_hook.find(
+        "protected void afterHookedMethod", dispatch_config
+    )
+    dispatch_finger_finish = dispatch_touch_hook.find(
+        "finishFingerTouchStream(", dispatch_after
     )
     if not (
-        0 <= dispatch_trace < dispatch_block < dispatch_consume
-        < dispatch_return < dispatch_config
+        0 <= dispatch_finger_stream < dispatch_trace
+        < dispatch_block < dispatch_consume
+        < dispatch_return < dispatch_config < dispatch_after
+        < dispatch_finger_finish
     ):
         fail(
             "touch input is not consumed before native chrome and page "
             "controls can run during an ownership transfer"
+        )
+    require_markers(
+        dispatch_touch_hook,
+        (
+            "isCachedSpreadLandscape(activity, config)",
+            "cachedSpreadLandscape",
+            "trackFingerTouchStream(activity, event)",
+            "finishFingerTouchStream(",
+            "trackFingerTapNavigation(",
+            "handlePageActivationTouch(",
+        ),
+        "memory-only touch dispatch routing",
+    )
+    dispatch_blocking_hits = [
+        marker
+        for marker in (
+            "spreadConfig(",
+            "FileIdentity.capture(",
+            "new File(",
+            "Os.stat(",
+            "FileInputStream",
+            "Properties",
+        )
+        if marker in dispatch_touch_hook
+    ]
+    if dispatch_blocking_hits:
+        fail(
+            "touch dispatch performs filesystem/config refresh work: "
+            f"{dispatch_blocking_hits}"
         )
     digital_state_start = module.find(
         '"onDigital",', digital_position_start
@@ -925,21 +2883,47 @@ def check(repo_root: Path) -> None:
     before_native_callback = digital_position_hook.find(
         "protected void beforeHookedMethod"
     )
+    callback_owner_resolution = digital_position_hook.find(
+        "activityForNativeEventCallback(", before_native_callback
+    )
+    callback_owner_reject = digital_position_hook.find(
+        "if (activity == null)", callback_owner_resolution
+    )
+    pressure_capture = digital_position_hook.find(
+        'XposedHelpers.getIntField(', callback_owner_reject
+    )
     pen_snapshot_lookup = digital_position_hook.find(
-        "PenInputSnapshot inputSnapshot =",
-        before_native_callback,
+        "PenInputSnapshot inputSnapshot =", pressure_capture
     )
     pen_snapshot_read = digital_position_hook.find(
         "penInputSnapshot(activity)",
         pen_snapshot_lookup,
     )
+    contact_identity_capture = digital_position_hook.find(
+        "PenContactIdentityCapture contactIdentity =", pen_snapshot_read
+    )
+    positive_contact_branch = digital_position_hook.find(
+        "if (pressure > 0) {", contact_identity_capture
+    )
     contact_ownership_lock = digital_position_hook.find(
         "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
-        pen_snapshot_read,
+        positive_contact_branch,
+    )
+    prior_contact_phase_guard = digital_position_hook.find(
+        "existingOwnership.phase", contact_ownership_lock
+    )
+    contact_snapshot_identity = digital_position_hook.find(
+        "PEN_INPUT_SNAPSHOTS.get(activity)", prior_contact_phase_guard
+    )
+    contact_config_identity = digital_position_hook.find(
+        "SPREAD_CONFIGS.get(activity)", contact_snapshot_identity
+    )
+    editable_guard_reject = digital_position_hook.find(
+        "PEN_INPUT_EDITABLE_GUARDS.get(activity)", contact_config_identity
     )
     contact_transaction_lookup = digital_position_hook.find(
         "PageActivationTransaction ownershipTransaction =",
-        contact_ownership_lock,
+        editable_guard_reject,
     )
     atomic_contact_generation = digital_position_hook.find(
         "notePageActivationTriggerContactLocked(",
@@ -949,43 +2933,79 @@ def check(repo_root: Path) -> None:
         "inputSnapshot.geometryReady", atomic_contact_generation
     )
     contact_chrome_origin = digital_position_hook.find(
-        "isNativeChromeTouch(activity, contactY)", contact_geometry_ready
-    )
-    chrome_contact_latched = digital_position_hook.find(
-        "Integer.valueOf(\n                                            PEN_CONTACT_BLOCKED_PAGE",
-        contact_chrome_origin,
+        "inputSnapshot.isNativeChromeTouch(", contact_geometry_ready
     )
     contact_page_mapping = digital_position_hook.find(
-        "int mappedContactPage = pageAt(", chrome_contact_latched
+        "int mappedContactPage = pageAt(", contact_chrome_origin
     )
     contact_page_valid = digital_position_hook.find(
         "if (mappedContactPage >= 0)", contact_page_mapping
     )
-    contact_page_latched = digital_position_hook.find(
-        "PEN_CONTACT_START_PAGES.put(", contact_page_valid
+    unmapped_contact_reason = digital_position_hook.find(
+        'guardReason = "blocked_unmapped"', contact_page_valid
+    )
+    contact_ownership_publish = digital_position_hook.find(
+        "publishPenContactOwnershipLocked(", unmapped_contact_reason
+    )
+    quarantine_retire = digital_position_hook.find(
+        "retireDocumentReceiveQuarantineAfterFreshContactLocked(",
+        contact_ownership_publish,
     )
     pending_snapshot_guard = digital_position_hook.find(
-        "publishedEditablePenInput(", contact_page_latched
+        "publishedEditablePenInput(", quarantine_retire
     )
-    pending_contact_latched = digital_position_hook.find(
-        "Integer.valueOf(PEN_CONTACT_BLOCKED_PAGE)",
+    pending_contact_publish = digital_position_hook.find(
+        "publishPenContactOwnershipLocked(",
         pending_snapshot_guard,
     )
     if not (
-        0 <= before_native_callback < pen_snapshot_lookup < pen_snapshot_read
-        < contact_ownership_lock
-        < contact_transaction_lookup < atomic_contact_generation
+        0 <= before_native_callback < callback_owner_resolution
+        < callback_owner_reject < pressure_capture < pen_snapshot_lookup
+        < pen_snapshot_read < contact_identity_capture
+        < positive_contact_branch < contact_ownership_lock
+        < prior_contact_phase_guard
+        < contact_snapshot_identity < contact_config_identity
+        < editable_guard_reject < contact_transaction_lookup
+        < atomic_contact_generation
         < contact_geometry_ready
-        < contact_chrome_origin < chrome_contact_latched < contact_page_mapping
-        < contact_page_valid < contact_page_latched < pending_snapshot_guard
-        < pending_contact_latched
+        < contact_chrome_origin < contact_page_mapping < contact_page_valid
+        < unmapped_contact_reason < contact_ownership_publish
+        < quarantine_retire
+        < pending_snapshot_guard
+        < pending_contact_publish
     ):
         fail(
             "contact start is not atomically latched against transaction "
-            "commit or native chrome before mapping its first real page"
+            "commit, exact writer identity, native chrome, quarantine, or an "
+            "unmapped held gesture before page ownership"
         )
     if "Integer.valueOf(pageAt(" in digital_position_hook:
         fail("the pen-contact guard can still permanently latch page -1")
+    contact_publish_start = module.find(
+        "private static boolean publishPenContactOwnershipLocked("
+    )
+    contact_publish_end = module.find(
+        "private static void retireDocumentReceiveQuarantineAfterFreshContactLocked(",
+        contact_publish_start,
+    )
+    if contact_publish_start < 0 or contact_publish_end < 0:
+        fail("could not isolate immutable contact-ownership publication")
+    require_markers(
+        module[contact_publish_start:contact_publish_end],
+        (
+            "PEN_ACTIVE_STROKE_SOURCE_PAGES.put(",
+            "identity.readerPage != sourcePage",
+            "identity.presenterMarkPage != sourcePage + 1",
+            "PEN_ACTIVE_STROKE_SOURCE_PAGES.remove(",
+            "PEN_CONTACT_OWNERSHIPS.put(activity, candidate)",
+        ),
+        "independent admitted-stroke source identity",
+    )
+    if (
+        "Map<Activity, Integer> PEN_ACTIVE_STROKE_SOURCE_PAGES =\n"
+        "        new ConcurrentHashMap<>()"
+    ) not in module:
+        fail("admitted active-stroke identity is not thread-safe")
     active_stroke_terminal = digital_position_hook.find(
         "boolean completingActivePageStroke =",
         before_native_callback,
@@ -1023,6 +3043,9 @@ def check(repo_root: Path) -> None:
         "Os.stat",
         "new File(",
         "Properties",
+        "getWindow()",
+        "getDecorView()",
+        "isNativeChromeTouch(activity",
     )
     blocking_hits = [
         marker for marker in blocking_markers
@@ -1063,48 +3086,138 @@ def check(repo_root: Path) -> None:
     if trace_pen_start < 0 or trace_pen_end < 0:
         fail("could not isolate native pen trace enqueueing")
     trace_pen = module[trace_pen_start:trace_pen_end]
-    trace_enqueue = trace_pen.find("expected.eventExecutor.execute(")
-    trace_serialize = trace_pen.find(
-        "traceEvent(", trace_enqueue
+    require_markers(
+        trace_pen,
+        (
+            "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+            "expected.penInputAdmissionClosed",
+            "expected.penInputMutationGeneration.incrementAndGet()",
+            "traceEvent(",
+            "expected,",
+            "capturedResolvedPage",
+            "capturedTransactionId",
+        ),
+        "immutable native pen trace capture",
     )
-    if not 0 <= trace_enqueue < trace_serialize:
-        fail("native pen trace serializes before its worker enqueue")
+    forbidden_pen_trace_work = tuple(
+        marker for marker in (
+            "JSONObject",
+            "entry.toString()",
+            "synchronized (TRACE_LOCK)",
+            "appendTraceRecord(",
+        )
+        if marker in trace_pen
+    )
+    if forbidden_pen_trace_work:
+        fail(
+            "native pen trace performs serialization or I/O before the event "
+            f"worker enqueue: {forbidden_pen_trace_work}"
+        )
     if "TraceEventContext.capture(" in trace_pen:
         fail("native pen trace captures UI context on the low-latency callback")
-    pressure_zero_cleanup = digital_position_hook.find(
-        'if (pressure == 0 && !completingActivePageStroke)',
-        schedule_activation,
+    trace_pen_left_start = trace_pen_end
+    trace_pen_left_end = module.find(
+        "private static void finishTraceSuppressedPenContact(",
+        trace_pen_left_start,
     )
-    pressure_zero_clear = digital_position_hook.find(
-        'clearPenContactStartPage(', pressure_zero_cleanup
+    if trace_pen_left_end < 0:
+        fail("could not isolate pen-left-screen trace admission")
+    require_markers(
+        module[trace_pen_left_start:trace_pen_left_end],
+        (
+            "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+            "expected.penInputAdmissionClosed",
+            "expected.penInputMutationGeneration.incrementAndGet()",
+        ),
+        "atomic trace pen-left-screen admission",
     )
-    if not 0 <= schedule_activation < pressure_zero_cleanup < pressure_zero_clear:
-        fail(
-            "a normal pressure-zero pen frame does not clear the active-stroke "
-            "start-page guard"
-        )
-    terminal_cleanup_marked = digital_position_hook.find(
-        "ACTIVE_PAGE_STROKE_TERMINAL_CLEANUP.set(activity)",
-        preserve_terminal,
+    suppressed_terminal_guard = digital_position_hook.find(
+        "if (pressure == 0 && suppressedPenCallback)", schedule_activation
     )
-    position_after_hook = digital_position_hook.find(
-        "protected void afterHookedMethod", pressure_zero_clear
-    )
-    terminal_cleanup_read = digital_position_hook.find(
-        "ACTIVE_PAGE_STROKE_TERMINAL_CLEANUP.get()", position_after_hook
-    )
-    terminal_cleanup_clear = digital_position_hook.find(
-        "clearPenContactStartPage(", terminal_cleanup_read
+    suppressed_trace_finish = digital_position_hook.find(
+        "finishTraceSuppressedPenContact(activity)", suppressed_terminal_guard
     )
     if not (
-        0 <= preserve_terminal < terminal_cleanup_marked
-        < pressure_zero_cleanup < position_after_hook
-        < terminal_cleanup_read < terminal_cleanup_clear
+        0 <= schedule_activation < suppressed_terminal_guard
+        < suppressed_trace_finish
     ):
         fail(
-            "cross-divider pen-up clears its contact guard before the native "
-            "source-page callback completes"
+            "a pressure-zero suppressed contact does not finish trace state "
+            "after activation handling"
         )
+    if "clearPenContactStartPage(" in digital_position_hook:
+        fail(
+            "the pen-position callback clears source/contact ownership before "
+            "receiveTrials can validate and persist the native trail"
+        )
+    trace_suppressed_start = module.find(
+        "private static void finishTraceSuppressedPenContact("
+    )
+    trace_suppressed_end = module.find(
+        "private static void traceAnnotationBoundary(", trace_suppressed_start
+    )
+    if trace_suppressed_start < 0 or trace_suppressed_end < 0:
+        fail("could not isolate suppressed-contact trace cleanup")
+    require_markers(
+        module[trace_suppressed_start:trace_suppressed_end],
+        (
+            "TRACE_TRANSACTION_IDS.remove(activity)",
+            '"suppressed_pen_contact_finished"',
+            '"transactionId"',
+            "transactionId",
+        ),
+        "fully suppressed pen-contact trace completion",
+    )
+    if "protected void afterHookedMethod" in digital_position_hook:
+        fail(
+            "the pen-position hook has a terminal after-hook that can release "
+            "source ownership before receiveTrials"
+        )
+
+    digital_state_end = module.find(
+        '"com.supernote.document.handwrite.HandWriteClient",\n'
+        '            loadPackageParam.classLoader,\n'
+        '            "sendDisableAreaInfo"',
+        digital_state_start,
+    )
+    if digital_state_end < 0:
+        fail("could not isolate native pen-left-screen fallback hook")
+    digital_state_hook = module[digital_state_start:digital_state_end]
+    require_markers(
+        digital_state_hook,
+        (
+            "activityForNativeEventCallback(",
+            "tracePenLeftScreen(activity, state)",
+            "schedulePenContactReceiveFallback(",
+        ),
+        "owner-bound pen-left-screen receive fallback",
+    )
+    if "clearPenContactStartPage(" in digital_state_hook:
+        fail(
+            "pen-left-screen immediately releases ownership instead of "
+            "allowing a late receiveTrials callback"
+        )
+    receive_fallback_start = module.find(
+        "private static void schedulePenContactReceiveFallback("
+    )
+    receive_fallback_end = module.find(
+        "private static void notePageActivationTriggerContactLocked(",
+        receive_fallback_start,
+    )
+    if receive_fallback_start < 0 or receive_fallback_end < 0:
+        fail("could not isolate generation-scoped receive fallback")
+    require_markers(
+        module[receive_fallback_start:receive_fallback_end],
+        (
+            "PEN_CONTACT_GENERATIONS.get(activity)",
+            "PEN_CONTACT_RECEIVE_FALLBACK_GENERATIONS.put(",
+            "mainHandler.postDelayed(",
+            "PEN_RECEIVE_EXPIRED_GENERATIONS.put(",
+            '"pen_contact_receive_expired generation="',
+            "PEN_CONTACT_RECEIVE_FALLBACK_MS",
+        ),
+        "generation-scoped delayed receive fallback tombstone",
+    )
 
     pen_activation_start = module.find(
         "private static void handlePenPageActivation("
@@ -1162,7 +3275,7 @@ def check(repo_root: Path) -> None:
         pre_dispatch_snapshot_guard,
     )
     ui_dispatch = live_pen_activation.find(
-        "activity.runOnUiThread(new Runnable()",
+        "new Handler(activity.getMainLooper()).post(new Runnable()",
         pre_dispatch_active_page_filter,
     )
     transaction_lookup_for_lift = live_pen_activation.find(
@@ -1175,7 +3288,7 @@ def check(repo_root: Path) -> None:
         "return;", transaction_lift
     )
     chrome_guard = live_pen_activation.find(
-        "isNativeChromeTouch(activity, requestedY)", transaction_return
+        "inputSnapshot.isNativeChromeTouch(requestedY)", transaction_return
     )
     snapshot_validation = live_pen_activation.find(
         "currentSnapshot != inputSnapshot", transaction_return
@@ -1213,17 +3326,42 @@ def check(repo_root: Path) -> None:
     )
     if intercept_method_start < 0 or pending_target_after_intercept < 0:
         fail("could not isolate synchronous pen interception")
-    intercept_method = module[
-        intercept_method_start:pending_target_after_intercept
-    ]
+    intercept_method = mask_comments_preserve_literals(
+        module[intercept_method_start:pending_target_after_intercept]
+    )
     contact_start_lookup = intercept_method.find(
         "Integer contactStartPage = PEN_CONTACT_START_PAGES.get(activity);"
     )
     intercept_terminal_identity = intercept_method.find(
         "isCompletingActivePageStroke(", contact_start_lookup
     )
+    null_snapshot_guard = intercept_method.find(
+        "if (inputSnapshot == null)", intercept_terminal_identity
+    )
+    null_snapshot_terminal = intercept_method.find(
+        "if (completingActivePageStroke)", null_snapshot_guard
+    )
+    null_snapshot_preserve = intercept_method.find(
+        "return false;", null_snapshot_terminal
+    )
+    pending_geometry_guard = intercept_method.find(
+        "if (!inputSnapshot.geometryReady)",
+        null_snapshot_preserve,
+    )
+    pending_geometry_terminal = intercept_method.find(
+        "if (completingActivePageStroke)",
+        pending_geometry_guard,
+    )
+    pending_geometry_preserve = intercept_method.find(
+        "return false;",
+        pending_geometry_terminal,
+    )
+    pending_geometry_block = intercept_method.find(
+        '"geometry_pending"',
+        pending_geometry_preserve,
+    )
     intercept_chrome = intercept_method.find(
-        "isNativeChromeTouch(activity, y)", intercept_terminal_identity
+        "inputSnapshot.isNativeChromeTouch(y)", pending_geometry_block
     )
     intercept_chrome_terminal = intercept_method.find(
         "if (completingActivePageStroke)", intercept_chrome
@@ -1250,7 +3388,11 @@ def check(repo_root: Path) -> None:
         nonwritable_start_discard,
     )
     if not (
-        0 <= contact_start_lookup < intercept_terminal_identity < intercept_chrome
+        0 <= contact_start_lookup < intercept_terminal_identity
+        < null_snapshot_guard < null_snapshot_terminal
+        < null_snapshot_preserve < pending_geometry_guard
+        < pending_geometry_terminal
+        < pending_geometry_preserve < pending_geometry_block < intercept_chrome
         < intercept_chrome_terminal < intercept_chrome_preserve
         < intercept_chrome_discard < intercept_page_mapping
         < nonwritable_start_guard
@@ -1268,34 +3410,137 @@ def check(repo_root: Path) -> None:
             "queued inactive-page activation still lets the contact's "
             "terminal pen-up reach the native writer"
         )
-    crossing_guard = intercept_method.find(
+    masked_intercept = mask_cpp_comments_and_literals(intercept_method)
+    if identifier_mutations(masked_intercept, "pressure"):
+        fail("pen interception rewrites pressure before fail-closed routing")
+    target_writes = identifier_mutations(masked_intercept, "target")
+    if (
+        len(target_writes) != 1
+        or "int target = pageAt(inputSnapshot, x, y);" not in masked_intercept
+    ):
+        fail("pen interception rewrites its mapped target before routing")
+    crossing_guard = masked_intercept.find(
         "contactStartPage.intValue() == current"
     )
-    crossing_pressure_guard = intercept_method.find(
+    crossing_pressure_guard = masked_intercept.find(
         "if (pressure > 0)", crossing_guard
     )
-    crossing_discard = intercept_method.find("return true;", crossing_guard)
-    terminal_pressure_guard = intercept_method.find(
+    crossing_discard = masked_intercept.find("return true;", crossing_guard)
+    terminal_pressure_guard = masked_intercept.find(
         "if (completingActivePageStroke)", crossing_discard
     )
-    terminal_preserved = intercept_method.find(
+    terminal_preserved = masked_intercept.find(
         "return false;", terminal_pressure_guard
     )
-    unmapped_passthrough = intercept_method.find(
+    unmapped_guard = masked_intercept.find(
         "if (target < 0)", terminal_preserved
     )
-    unmapped_return = intercept_method.find(
-        "return false;", unmapped_passthrough
+    unmapped_pressure_guard = masked_intercept.find(
+        "if (pressure > 0)", unmapped_guard
     )
+    unmapped_ownership_latch = masked_intercept.find(
+        "publishAmbiguousPenContactLocked(activity)",
+        unmapped_pressure_guard,
+    )
+    unmapped_note = masked_intercept.find(
+        "notePenInputBlock(", unmapped_ownership_latch
+    )
+    unmapped_reason_match = re.match(
+        r"\s*activity\s*,\s*\"unmapped_positive_pressure\"\s*,\s*"
+        r"x\s*,\s*y\s*,\s*pressure\s*,\s*-1L\s*,\s*current\s*,\s*"
+        r"target\s*,\s*capturedContactStart\s*\)\s*;",
+        intercept_method[unmapped_note + len("notePenInputBlock("):],
+        re.DOTALL,
+    )
+    unmapped_reason_end = (
+        unmapped_note + len("notePenInputBlock(") + unmapped_reason_match.end()
+        if unmapped_reason_match is not None
+        else -1
+    )
+    unmapped_block = masked_intercept.find(
+        "return true;", unmapped_reason_end
+    )
+    unmapped_hover_passthrough = masked_intercept.find(
+        "return false;", unmapped_block
+    )
+    unmapped_open = masked_intercept.find("{", unmapped_guard)
+    unmapped_close = matching_brace(
+        masked_intercept, unmapped_open, "unmapped pen-page guard"
+    )
+    unmapped_pressure_open = masked_intercept.find(
+        "{", unmapped_pressure_guard
+    )
+    unmapped_pressure_close = matching_brace(
+        masked_intercept,
+        unmapped_pressure_open,
+        "unmapped positive-pressure guard",
+    )
+    if re.search(
+        r"\btarget\s*<\s*0\b",
+        masked_intercept[
+            terminal_preserved + len("return false;"):unmapped_guard
+        ],
+    ):
+        fail("an earlier unmapped-page guard can preempt fail-closed routing")
+    if not (
+        brace_depth_at(masked_intercept, unmapped_guard) == 1
+        and brace_depth_at(masked_intercept, unmapped_pressure_guard) == 2
+        and brace_depth_at(masked_intercept, unmapped_ownership_latch) == 5
+        and brace_depth_at(masked_intercept, unmapped_block) == 3
+        and brace_depth_at(masked_intercept, unmapped_hover_passthrough) == 2
+    ):
+        fail(
+            "unmapped positive-pressure blocking is disabled or nested under "
+            "an additional condition"
+        )
     if not (
         0 <= current_page_passthrough < crossing_guard
         < crossing_pressure_guard < crossing_discard
         < terminal_pressure_guard < terminal_preserved
-        < unmapped_passthrough < unmapped_return
+        < unmapped_guard < unmapped_pressure_guard
+        < unmapped_ownership_latch < unmapped_note < unmapped_reason_end
+        < unmapped_block
+        < unmapped_pressure_close < unmapped_hover_passthrough
+        < unmapped_close
     ):
         fail(
             "a stroke begun on the active page is not kept on that page "
-            "through divider/margin points and its terminal frame"
+            "through divider/margin points and its terminal frame, or an "
+            "unowned ink-bearing point can reach the native writer"
+        )
+
+    ambiguous_latch_start = module.find(
+        "private static void publishAmbiguousPenContactLocked(Activity activity)"
+    )
+    ambiguous_latch_end = module.find(
+        "private static void clearPenContactStartPage(", ambiguous_latch_start
+    )
+    if ambiguous_latch_start < 0 or ambiguous_latch_end < 0:
+        fail("could not isolate ambiguous-contact latch helper")
+    ambiguous_latch = mask_cpp_comments_and_literals(
+        module[ambiguous_latch_start:ambiguous_latch_end]
+    )
+    latch_owner = ambiguous_latch.find(
+        "PEN_CONTACT_OWNERSHIPS.put(activity, blocked);"
+    )
+    latch_generation = ambiguous_latch.find(
+        "PEN_CONTACT_GENERATIONS.put(", latch_owner
+    )
+    latch_blocked_page = ambiguous_latch.find(
+        "PEN_CONTACT_START_PAGES.put(", latch_generation
+    )
+    blocked_value = ambiguous_latch.find(
+        "Integer.valueOf(PEN_CONTACT_BLOCKED_PAGE)", latch_blocked_page
+    )
+    if not (
+        0 <= latch_owner < latch_generation < latch_blocked_page < blocked_value
+        and brace_depth_at(ambiguous_latch, latch_owner) == 1
+        and brace_depth_at(ambiguous_latch, latch_generation) == 1
+        and brace_depth_at(ambiguous_latch, latch_blocked_page) == 1
+    ):
+        fail(
+            "ambiguous-contact latch does not directly publish blocked "
+            "ownership, generation, and start-page authority"
         )
 
     snapshot_class_start = module.find(
@@ -1320,9 +3565,12 @@ def check(repo_root: Path) -> None:
         "private static PenInputSnapshot penInputSnapshot(",
         activation_ready_snapshot_start,
     )
+    snapshot_read_end = module.find(
+        "private static void publishPenInputSnapshot(", snapshot_read_start
+    )
     published_snapshot_start = module.find(
         "private static boolean publishedEditablePenInput(",
-        snapshot_read_start,
+        snapshot_read_end,
     )
     editable_ready_start = module.find(
         "private static boolean editablePenInputReady(",
@@ -1339,6 +3587,7 @@ def check(repo_root: Path) -> None:
         geometry_snapshot_start,
         activation_ready_snapshot_start,
         snapshot_read_start,
+        snapshot_read_end,
         published_snapshot_start,
         editable_ready_start,
         spread_pair_start,
@@ -1356,12 +3605,19 @@ def check(repo_root: Path) -> None:
             "final int leftPage;",
             "final RectF rightVisibleBounds;",
             "final RectF leftVisibleBounds;",
+            "final int chromeOutputHeight;",
             "final boolean editable;",
             "final boolean geometryReady;",
             "new RectF(rightVisibleBounds)",
             "new RectF(leftVisibleBounds)",
             "this.documentPath = config.documentPath;",
-            "this.editable = config.enabled && config.editable;",
+            "this.chromeOutputHeight = chromeOutputHeight;",
+            "this.editable = config.enabled && config.editable",
+            "&& nativeBridgeLoaded && nativeHookReady;",
+            "this.writerAuthority = writerAuthority;",
+            "boolean isNativeChromeTouch(float y)",
+            "chromeOutputHeight",
+            "NATIVE_BOTTOM_CHROME_TOUCH_EXCLUSION_PX",
         ),
         "immutable pen-input config/page-geometry snapshot",
     )
@@ -1371,10 +3627,22 @@ def check(repo_root: Path) -> None:
                 module.find("SPREAD_CONFIGS", module.find("PEN_INPUT_SNAPSHOTS"))
             ]:
         fail("pen-input snapshot is not atomically published across threads")
+    editable_guard_start = module.find(
+        "Map<Activity, Boolean> PEN_INPUT_EDITABLE_GUARDS"
+    )
+    if editable_guard_start < 0 or "new ConcurrentHashMap<>()" not in module[
+        editable_guard_start:module.find(
+            "PEN_INPUT_BLOCK_LOG_STATES", editable_guard_start
+        )
+    ]:
+        fail("editable transition sentinel is not atomically published")
     snapshot_publish = module[pending_snapshot_start:snapshot_read_start]
     require_markers(
         snapshot_publish,
         (
+            "publishPenInputEditableGuard(activity, config)",
+            "captureNativeChromeOutputHeight(activity)",
+            "chromeOutputHeight > 0",
             "Looper.myLooper() != activity.getMainLooper()",
             "PEN_INPUT_SNAPSHOTS.put(",
             "int currentPage = XposedHelpers.getIntField(",
@@ -1383,7 +3651,7 @@ def check(repo_root: Path) -> None:
         ),
         "UI-published pen-input state snapshot",
     )
-    snapshot_read = module[snapshot_read_start:published_snapshot_start]
+    snapshot_read = module[snapshot_read_start:snapshot_read_end]
     require_markers(
         snapshot_read,
         (
@@ -1408,12 +3676,21 @@ def check(repo_root: Path) -> None:
             "native pen-input snapshot lookup still reads live Activity, "
             f"document, or view-model state: {leaked_snapshot_lookups}"
         )
-    published_snapshot = module[published_snapshot_start:editable_ready_start]
+    editable_guard_publish_start = module.find(
+        "private static void publishPenInputEditableGuard(",
+        published_snapshot_start,
+    )
+    if editable_guard_publish_start < 0:
+        fail("could not isolate editable transition-guard publication")
+    published_snapshot = module[
+        published_snapshot_start:editable_guard_publish_start
+    ]
     require_markers(
         published_snapshot,
         (
             "PenInputSnapshot published = penInputSnapshot(activity);",
             "published != null && published.editable",
+            "PEN_INPUT_EDITABLE_GUARDS.get(activity)",
         ),
         "memory-only published editable-state lookup",
     )
@@ -1422,6 +3699,21 @@ def check(repo_root: Path) -> None:
         for marker in forbidden_snapshot_lookup_markers
     ):
         fail("published editable-state lookup reads live Activity state")
+    editable_guard_publish = module[
+        editable_guard_publish_start:editable_ready_start
+    ]
+    require_markers(
+        editable_guard_publish,
+        (
+            "activity != activeActivity",
+            "DOCUMENT_IDENTITY_ADMISSIONS.get(activity) != null",
+            "SPREAD_CONFIGS.get(activity) != config",
+            "currentDocumentPath(activity)",
+            "config.enabled && config.editable",
+            "PEN_INPUT_EDITABLE_GUARDS.put(activity, Boolean.TRUE)",
+        ),
+        "UI-side exact editable transition-guard publication",
+    )
 
     configuration_hook_start = module.find('"onConfigurationChanged",')
     configuration_hook_end = module.find(
@@ -1435,18 +3727,35 @@ def check(repo_root: Path) -> None:
     configuration_before = configuration_hook.find(
         "protected void beforeHookedMethod"
     )
+    configuration_owner_guard = configuration_hook.find(
+        "isCurrentOrPendingActivityOwner(activity)", configuration_before
+    )
+    configuration_lock = configuration_hook.find(
+        "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+        configuration_owner_guard,
+    )
     configuration_invalidate = configuration_hook.find(
-        "PEN_INPUT_SNAPSHOTS.remove((Activity) param.thisObject);",
-        configuration_before,
+        "PEN_INPUT_SNAPSHOTS.remove(activity);",
+        configuration_lock,
+    )
+    configuration_guard = configuration_hook.find(
+        "PEN_INPUT_EDITABLE_GUARDS.put(", configuration_invalidate
+    )
+    configuration_gate = configuration_hook.find(
+        "disableNativeGateForOwnershipHandoffLocked(", configuration_guard
     )
     configuration_after = configuration_hook.find(
-        "protected void afterHookedMethod", configuration_invalidate
+        "protected void afterHookedMethod", configuration_gate
     )
     if not (
-        0 <= configuration_before < configuration_invalidate
-        < configuration_after
+        0 <= configuration_before < configuration_owner_guard
+        < configuration_lock < configuration_invalidate
+        < configuration_guard < configuration_gate < configuration_after
     ):
-        fail("orientation change does not withdraw stale pen geometry first")
+        fail(
+            "orientation change does not atomically withdraw stale pen geometry "
+            "and native writer authority before the original callback"
+        )
 
     load_page_hook_start = module.find(
         '"loadPage",', module.find(
@@ -1459,20 +3768,47 @@ def check(repo_root: Path) -> None:
     load_page_hook = module[load_page_hook_start:turn_page_hook_start]
     if "PEN_INPUT_SNAPSHOTS.remove(activity);" not in load_page_hook:
         fail("page load does not withdraw stale pen geometry before mutation")
+    if "PEN_INPUT_EDITABLE_GUARDS.remove(activity);" in load_page_hook:
+        fail("page load drops editable fail-closed authority with stale geometry")
 
     set_image_hook_start = module.find('"setImage",')
     set_image_hook_end = module.find('"onDestroy",', set_image_hook_start)
     if set_image_hook_start < 0 or set_image_hook_end < 0:
         fail("could not isolate image-boundary snapshot invalidation")
     set_image_hook = module[set_image_hook_start:set_image_hook_end]
+    set_image_owner = set_image_hook.find(
+        "boolean activeOwner = isActiveActivityOwner(activity)"
+    )
+    set_image_owner_reject = set_image_hook.find(
+        "if (!activeOwner)", set_image_owner
+    )
+    set_image_lock = set_image_hook.find(
+        "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+        set_image_owner_reject,
+    )
     set_image_invalidate = set_image_hook.find(
-        "PEN_INPUT_SNAPSHOTS.remove(activity);"
+        "PEN_INPUT_SNAPSHOTS.remove(activity);", set_image_lock
+    )
+    set_image_guard = set_image_hook.find(
+        "PEN_INPUT_EDITABLE_GUARDS.put(", set_image_invalidate
+    )
+    set_image_gate = set_image_hook.find(
+        "disableNativeGateForOwnershipHandoffLocked(", set_image_guard
     )
     set_image_landscape = set_image_hook.find(
-        "if (!isCalibrationLandscape(activity))", set_image_invalidate
+        "if (!isCalibrationLandscape(activity))", set_image_gate
     )
-    if not 0 <= set_image_invalidate < set_image_landscape:
-        fail("setImage does not withdraw stale pen geometry before branching")
+    if not (
+        0 <= set_image_owner < set_image_owner_reject < set_image_lock
+        < set_image_invalidate < set_image_guard < set_image_gate
+        < set_image_landscape
+    ):
+        fail(
+            "setImage does not reject stale owners and atomically withdraw "
+            "stale pen geometry/native authority before branching"
+        )
+    if "PEN_INPUT_EDITABLE_GUARDS.remove(activity);" in set_image_hook:
+        fail("setImage drops editable fail-closed authority before replacement geometry")
 
     update_gate_start = module.find(
         "private static void updateNativeEraserGate(\n"
@@ -1491,10 +3827,249 @@ def check(repo_root: Path) -> None:
         (
             "boolean landscape =",
             "if (landscape)",
+            "publishDocumentReceiveIdentity(activity, config);",
             "publishPendingPenInputSnapshot(activity, config, reason);",
-            "PEN_INPUT_SNAPSHOTS.remove(activity);",
+            "clearPenInputSnapshot(activity);",
+            "config != null",
+            "nativeSafePresentationAuthorityCurrentLocked(",
+            "PEN_INPUT_EDITABLE_GUARDS.remove(activity)",
+            "PEN_INPUT_EDITABLE_GUARDS.put(activity, Boolean.TRUE)",
         ),
         "orientation-aware pen snapshot publication",
+    )
+    update_gate_apply_start = update_gate_end
+    update_gate_apply_end = module.find(
+        "private static boolean nativeGateAuthorityCurrentLocked(",
+        update_gate_apply_start,
+    )
+    if update_gate_apply_end < 0:
+        fail("could not isolate native eraser gate application")
+    update_gate_apply = module[
+        update_gate_apply_start:update_gate_apply_end
+    ]
+    update_gate_apply_masked = mask_cpp_comments_and_literals(update_gate_apply)
+    effective_init = update_gate_apply_masked.find(
+        "boolean effectiveEnabled = false;"
+    )
+    effective_assignment = update_gate_apply_masked.find(
+        "effectiveEnabled = apply && enabled", effective_init
+    )
+    authority_check = update_gate_apply_masked.find(
+        "&& nativeGateAuthorityCurrentLocked(activity, true);",
+        effective_assignment,
+    )
+    jni_gate_marker = "nativeSetCalibrationEnabled(effectiveEnabled);"
+    jni_gate_write = update_gate_apply_masked.find(
+        jni_gate_marker, authority_check
+    )
+    guard_remove = update_gate_apply_masked.find(
+        "if (effectiveEnabled)", jni_gate_write
+    )
+    fail_closed_guard = update_gate_apply_masked.find(
+        "else if (enabled)", guard_remove
+    )
+    if not (
+        0 <= effective_init < effective_assignment < authority_check
+        < jni_gate_write < guard_remove < fail_closed_guard
+    ):
+        fail(
+            "native eraser gate does not propagate false and authority-checked "
+            "true values directly to JNI before publishing editable authority"
+        )
+    if update_gate_apply_masked.count(jni_gate_marker) != 1:
+        fail("native eraser gate must write its effective boolean to JNI once")
+    effective_writes = identifier_mutations(
+        update_gate_apply_masked, "effectiveEnabled"
+    )
+    if len(effective_writes) != 2:
+        fail(
+            "native eraser gate effective authority is reassigned outside its "
+            "single fail-closed initialization and authority expression"
+        )
+    if identifier_mutations(update_gate_apply_masked, "enabled"):
+        fail("native eraser gate mutates its requested enabled state")
+    authority_end = authority_check + len(
+        "&& nativeGateAuthorityCurrentLocked(activity, true);"
+    )
+    if re.match(
+        r"\s*if\s*\(\s*!\s*apply\s*\)",
+        update_gate_apply_masked[authority_end:],
+    ) is None:
+        fail(
+            "native eraser gate can mutate authority between its checked "
+            "expression and owner decision"
+        )
+    inner_try = update_gate_apply_masked.rfind(
+        "try {", authority_check, jni_gate_write
+    )
+    owner_else = update_gate_apply_masked.rfind(
+        "} else {", authority_check, inner_try
+    )
+    if (
+        inner_try < 0
+        or owner_else < 0
+        or update_gate_apply_masked[owner_else + len("} else {"):inner_try].strip()
+        or update_gate_apply_masked[inner_try + len("try {"):jni_gate_write].strip()
+        or brace_depth_at(update_gate_apply_masked, jni_gate_write) != 5
+    ):
+        fail(
+            "native eraser JNI publication is nested under an extra condition "
+            "instead of executing directly inside the authority-checked owner path"
+        )
+    if update_gate_apply_masked[
+        jni_gate_write + len(jni_gate_marker):guard_remove
+    ].strip():
+        fail(
+            "native eraser JNI write is conditionally wrapped instead of "
+            "publishing both false and authority-checked true values"
+        )
+    native_gate_authority_start = module.find(
+        "private static boolean nativeGateAuthorityCurrentLocked("
+    )
+    native_gate_authority_end = module.find(
+        "private static boolean nativeGateAuthorityCurrentForTransactionLocked(",
+        native_gate_authority_start,
+    )
+    if native_gate_authority_start < 0 or native_gate_authority_end < 0:
+        fail("could not isolate exact native-writer gate authority")
+    require_markers(
+        module[native_gate_authority_start:native_gate_authority_end],
+        (
+            "activity == activeActivity",
+            "DOCUMENT_IDENTITY_ADMISSIONS.get(activity) == null",
+            "NAVIGATION_FAIL_CLOSED_DOCUMENTS.get(activity) == null",
+            "PAGE_ACTIVATION_TRANSACTIONS.get(activity) == null",
+            "PAGE_ACTIVATION_ROLLBACK_RECOVERIES.get(activity) == null",
+            "PEN_CONTACT_OWNERSHIPS.get(activity) == null",
+            "PEN_CONTACT_START_PAGES.get(activity) == null",
+            "snapshot != null && snapshot.config == config",
+            "snapshot.editable && snapshot.geometryReady",
+            "isSpreadConfigPublicationCurrentLocked(",
+        ),
+        "exact native-writer gate authority",
+    )
+    editable_guard_start = module.find(
+        "private static void publishPenInputEditableGuard("
+    )
+    editable_guard_end = module.find(
+        "private static boolean editablePenInputReady(", editable_guard_start
+    )
+    portrait_restore_start = module.find(
+        "private static void restorePortraitPresentation("
+    )
+    portrait_restore_end = module.find(
+        "private static void scheduleCompose(", portrait_restore_start
+    )
+    if min(
+        editable_guard_start,
+        editable_guard_end,
+        portrait_restore_start,
+        portrait_restore_end,
+    ) < 0:
+        fail("could not isolate rollback-aware editable guard lifecycle")
+    editable_guard = module[editable_guard_start:editable_guard_end]
+    require_markers(
+        editable_guard,
+        (
+            "config.enabled && config.editable",
+            "PAGE_ACTIVATION_ROLLBACK_RECOVERIES.get(activity) != null",
+            "PEN_INPUT_EDITABLE_GUARDS.put(activity, Boolean.TRUE)",
+            "PEN_INPUT_EDITABLE_GUARDS.remove(activity)",
+        ),
+        "rollback-aware editable guard publication",
+    )
+    portrait_restore = module[portrait_restore_start:portrait_restore_end]
+    portrait_snapshot_clear = portrait_restore.find(
+        "clearPenInputSnapshot(activity)"
+    )
+    portrait_receive_identity = portrait_restore.find(
+        "publishDocumentReceiveIdentity(activity, config)",
+        portrait_snapshot_clear,
+    )
+    portrait_lock = portrait_restore.find(
+        "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+        portrait_receive_identity,
+    )
+    portrait_recovery_check = portrait_restore.find(
+        "nativeSafePresentationAuthorityCurrentLocked(", portrait_lock
+    )
+    portrait_guard_remove = portrait_restore.find(
+        "PEN_INPUT_EDITABLE_GUARDS.remove(activity)", portrait_recovery_check
+    )
+    portrait_guard_retain = portrait_restore.find(
+        "PEN_INPUT_EDITABLE_GUARDS.put(activity, Boolean.TRUE)",
+        portrait_guard_remove,
+    )
+    if not (
+        0 <= portrait_snapshot_clear < portrait_receive_identity
+        < portrait_lock < portrait_recovery_check
+        < portrait_guard_remove < portrait_guard_retain
+    ):
+        fail("portrait restoration can reopen pen input during rollback recovery")
+    publish_snapshot_start = module.find(
+        "private static void publishPenInputSnapshot("
+    )
+    clear_snapshot_start = module.find(
+        "private static void clearPenInputSnapshot(", publish_snapshot_start
+    )
+    editable_lookup_start = module.find(
+        "private static boolean publishedEditablePenInput(",
+        clear_snapshot_start,
+    )
+    if min(
+        publish_snapshot_start,
+        clear_snapshot_start,
+        editable_lookup_start,
+    ) < 0:
+        fail("could not isolate ownership-fenced pen snapshot helpers")
+    snapshot_helpers = module[publish_snapshot_start:editable_lookup_start]
+    require_markers(
+        snapshot_helpers,
+        (
+            "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+            "SPREAD_CONFIGS.get(activity) != snapshot.config",
+            "PEN_INPUT_EDITABLE_GUARDS.put(activity, Boolean.TRUE)",
+            "PEN_INPUT_SNAPSHOTS.put(activity, snapshot)",
+            "PEN_INPUT_SNAPSHOTS.remove(activity)",
+        ),
+        "ownership-fenced pen snapshot publication",
+    )
+    rollback_convergence_start = module.find(
+        "private static boolean clearRollbackRecoveryIfConvergedLocked(",
+        publish_snapshot_start,
+    )
+    if rollback_convergence_start < 0 or rollback_convergence_start >= clear_snapshot_start:
+        fail("could not isolate rollback-recovery snapshot fence")
+    snapshot_publisher = module[
+        publish_snapshot_start:rollback_convergence_start
+    ]
+    if "PAGE_ACTIVATION_ROLLBACK_RECOVERIES.remove(" in snapshot_publisher:
+        fail("generic ready snapshot publication clears uncertain rollback ownership")
+    require_markers(
+        snapshot_publisher,
+        (
+            "snapshot.editable && snapshot.geometryReady",
+            "PAGE_ACTIVATION_ROLLBACK_RECOVERIES.get(activity) != null",
+            "PEN_INPUT_SNAPSHOTS.remove(activity, snapshot)",
+            "PEN_INPUT_EDITABLE_GUARDS.put(activity, Boolean.TRUE)",
+        ),
+        "fail-closed rollback-recovery snapshot publication",
+    )
+    require_markers(
+        module[rollback_convergence_start:clear_snapshot_start],
+        (
+            "SPREAD_CONFIGS.get(activity) != config",
+            "recovery.sameDocumentIdentity(config)",
+            "rebindRollbackRecoveryToValidatedConfigLocked(",
+            "recovery = PAGE_ACTIVATION_ROLLBACK_RECOVERIES.get(activity)",
+            "recovery != config",
+            "recovery.samePersistedState(config)",
+            '"page_activation_rollback_recovery_adopted_config"',
+            "presenterMarkPage != readerPage + 1",
+            "PAGE_ACTIVATION_ROLLBACK_RECOVERIES.remove(",
+            '"page_activation_rollback_recovery_converged"',
+        ),
+        "explicit reader/presenter rollback convergence",
     )
     activation_ready_snapshot = module[
         activation_ready_snapshot_start:snapshot_read_start
@@ -1504,10 +4079,14 @@ def check(repo_root: Path) -> None:
         (
             "PenInputSnapshot pending = penInputSnapshot(activity)",
             "pending.currentPage != transaction.targetPage",
-            "publishPenInputGeometrySnapshot(",
-            "true",
-            "ready.geometryReady",
-            "ready.currentPage == transaction.targetPage",
+            "PenInputSnapshot readySnapshot = new PenInputSnapshot(",
+            "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+            "PAGE_ACTIVATION_TRANSACTIONS.get(activity) == transaction",
+            "!transaction.rollbackPending",
+            "PEN_INPUT_SNAPSHOTS.get(activity) == pending",
+            "SPREAD_CONFIGS.get(activity) == pending.config",
+            "pending.writerAuthority",
+            "publishPenInputSnapshot(activity, readySnapshot)",
         ),
         "post-activation ready pen-geometry publication",
     )
@@ -1526,6 +4105,118 @@ def check(repo_root: Path) -> None:
         compose_start,
     )
     compose_method = module[compose_start:reapply_start]
+    compose_config = compose_method.find(
+        "SpreadConfig config = spreadConfig(activity);"
+    )
+    compose_config_stop = compose_method.find(
+        "config == null || !config.enabled", compose_config
+    )
+    compose_pair = compose_method.find(
+        "SpreadPair pair = spreadPair(config", compose_config_stop
+    )
+    if not 0 <= compose_config < compose_config_stop < compose_pair:
+        fail(
+            "spread composition consumes fallback/default parity after config "
+            "publication fails"
+        )
+    compose_watch_capture = compose_method.find(
+        "PersistedConfigWatch composeConfigWatch", compose_config_stop
+    )
+    compose_generation_capture = compose_method.find(
+        "composeConfigWatch.generation.get()", compose_watch_capture
+    )
+    compose_presenter_page = compose_method.find(
+        "int composePresenterMarkPage =", compose_generation_capture
+    )
+    compose_initial_ownership_fence = compose_method.find(
+        "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+        compose_presenter_page,
+    )
+    compose_initial_config_check = compose_method.find(
+        "isSpreadConfigPublicationCurrentLocked(",
+        compose_initial_ownership_fence,
+    )
+    compose_initial_recovery_convergence = compose_method.find(
+        "clearRollbackRecoveryIfConvergedLocked(",
+        compose_initial_config_check,
+    )
+    compose_image_publish = compose_method.find(
+        "imageView.setImageBitmap(composite)", compose_initial_recovery_convergence
+    )
+    compose_fail_closed_gate = compose_method.find(
+        '"compose_geometry_pending",', compose_image_publish
+    )
+    compose_writer_info = compose_method.find(
+        'XposedHelpers.callMethod(presenter, "sendWriteInfo")',
+        compose_fail_closed_gate,
+    )
+    compose_geometry_send = compose_method.find(
+        "sendCalibrationGeometry(", compose_writer_info
+    )
+    compose_geometry_commit = compose_method.find(
+        "commitPageActivationGeometry(", compose_geometry_send
+    )
+    compose_final_ownership_fence = compose_method.find(
+        "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+        compose_geometry_commit,
+    )
+    compose_final_config_check = compose_method.find(
+        "isSpreadConfigPublicationCurrentLocked(",
+        compose_final_ownership_fence,
+    )
+    compose_snapshot_publish = compose_method.find(
+        "publishPenInputSnapshot(activity, readySnapshot)",
+        compose_final_config_check,
+    )
+    compose_recovery_convergence = compose_method.find(
+        "clearRollbackRecoveryIfConvergedLocked(",
+        compose_final_config_check,
+    )
+    compose_ready_snapshot = compose_method.find(
+        '"compose_geometry_committed"', compose_snapshot_publish
+    )
+    if not (
+        0 <= compose_watch_capture < compose_generation_capture
+        < compose_presenter_page < compose_initial_ownership_fence
+        < compose_initial_config_check < compose_initial_recovery_convergence
+        < compose_image_publish < compose_fail_closed_gate
+        < compose_writer_info < compose_geometry_send
+        < compose_geometry_commit < compose_final_ownership_fence
+        < compose_final_config_check < compose_recovery_convergence
+        < compose_snapshot_publish
+        < compose_ready_snapshot
+    ):
+        fail(
+            "compose does not keep slow presenter work outside two exact, "
+            "atomic config/watch publication fences"
+        )
+    initial_lock_body = compose_method[
+        compose_initial_ownership_fence:compose_image_publish
+    ]
+    final_lock_end = compose_method.find(
+        "if (readyPublished)", compose_final_ownership_fence
+    )
+    final_lock_body = compose_method[
+        compose_final_ownership_fence:final_lock_end
+    ]
+    forbidden_locked_compose_work = (
+        "setImageBitmap",
+        "setDisableAreaList",
+        "sendWriteInfo",
+        "sendCalibrationGeometry",
+        "commitPageActivationGeometry",
+        "showStatusOverlay",
+        "showOverlay",
+    )
+    locked_hits = [
+        marker for marker in forbidden_locked_compose_work
+        if marker in initial_lock_body or marker in final_lock_body
+    ]
+    if final_lock_end < 0 or locked_hits:
+        fail(
+            "compose holds the low-latency pen ownership lock across slow "
+            f"bitmap/presenter/UI work: {locked_hits}"
+        )
     geometry_pending = compose_method.find(
         '"compose_geometry_pending"'
     )
@@ -1597,6 +4288,147 @@ def check(repo_root: Path) -> None:
     )
     if "log(" in ui_block_method:
         fail("blocked UI-input hook performs synchronous per-motion logging")
+    activation_touch_method = module[
+        activation_touch_start:native_chrome_start
+    ]
+    require_markers(
+        activation_touch_method,
+        (
+            "boolean finger = toolType == MotionEvent.TOOL_TYPE_FINGER",
+            "boolean stylus = toolType == MotionEvent.TOOL_TYPE_STYLUS",
+            "|| toolType == MotionEvent.TOOL_TYPE_ERASER",
+            "if (!finger && !stylus)",
+            "if (stylus)",
+            "action != MotionEvent.ACTION_DOWN",
+            "PenInputSnapshot stylusSnapshot = penInputSnapshot(activity)",
+            "int target = pageAt(",
+            "target >= 0 && target != current",
+            "stylusSnapshot.geometryReady",
+            "stylusSnapshot.config.samePersistedState(cachedConfig)",
+            "isCachedSpreadConfigCurrent(",
+            "PAGE_ACTIVATION_BLOCKED_TOUCHES.put(",
+            "notePageActivationUiBlock(",
+            '"page_activation_stylus_stream_latched current="',
+            "return true;",
+        ),
+        "inactive-page stylus-stream admission latch",
+    )
+    stylus_branch = activation_touch_method.find("if (stylus)")
+    stylus_down_only = activation_touch_method.find(
+        "action != MotionEvent.ACTION_DOWN", stylus_branch
+    )
+    stylus_snapshot = activation_touch_method.find(
+        "PenInputSnapshot stylusSnapshot = penInputSnapshot(activity)",
+        stylus_down_only,
+    )
+    stylus_persisted_guard = activation_touch_method.find(
+        "stylusSnapshot.config.samePersistedState(cachedConfig)",
+        stylus_snapshot,
+    )
+    stylus_current_guard = activation_touch_method.find(
+        "isCachedSpreadConfigCurrent(", stylus_persisted_guard
+    )
+    stylus_latch = activation_touch_method.find(
+        "PAGE_ACTIVATION_BLOCKED_TOUCHES.put(", stylus_current_guard
+    )
+    stylus_note = activation_touch_method.find(
+        "notePageActivationUiBlock(", stylus_latch
+    )
+    finger_activation = activation_touch_method.find(
+        "Integer trackedTarget = ACTIVATION_TOUCH_TARGETS.get(activity)",
+        stylus_note,
+    )
+    if not (
+        0 <= stylus_branch < stylus_down_only < stylus_snapshot
+        < stylus_persisted_guard < stylus_current_guard < stylus_latch
+        < stylus_note < finger_activation
+    ):
+        fail(
+            "inactive-page stylus DOWN is not validated and latched before "
+            "finger activation routing can expose the stream to the old page"
+        )
+    finger_stream_start = module.find(
+        "private static void trackFingerTouchStream(", ui_block_start
+    )
+    finger_stream_end = module.find(
+        "private static void notePageActivationUiBlock(",
+        finger_stream_start,
+    )
+    if finger_stream_start < 0 or finger_stream_end < 0:
+        fail("could not isolate pre-activation finger-stream guard")
+    finger_finish_start = module.find(
+        "private static void finishFingerTouchStream(",
+        finger_stream_start,
+    )
+    if finger_finish_start < 0 or finger_finish_start >= finger_stream_end:
+        fail("could not isolate post-dispatch finger-stream release")
+    finger_stream = module[finger_stream_start:finger_finish_start]
+    finger_finish = module[finger_finish_start:finger_stream_end]
+    require_markers(
+        finger_stream,
+        (
+            "MotionEvent.ACTION_DOWN",
+            "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+            "ACTIVE_FINGER_TOUCH_STREAMS.put(activity, Boolean.TRUE)",
+        ),
+        "ownership-serialized finger-stream admission",
+    )
+    require_markers(
+        finger_finish,
+        (
+            "MotionEvent.ACTION_UP",
+            "MotionEvent.ACTION_CANCEL",
+            "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+            "ACTIVE_FINGER_TOUCH_STREAMS.remove(activity)",
+        ),
+        "post-dispatch finger-stream release",
+    )
+    if "ACTIVE_FINGER_TOUCH_STREAMS.remove(activity)" in finger_stream:
+        fail("finger stream is released before native dispatch completes")
+    if (
+        "Map<Activity, Boolean> ACTIVE_FINGER_TOUCH_STREAMS =\n"
+        "        new ConcurrentHashMap<>()"
+    ) not in module:
+        fail("finger-stream activation guard is not thread-safe")
+    validated_activation_start = module.find(
+        "private static boolean beginPageActivationTransaction(\n"
+        "        Activity activity,\n"
+        "        int targetPage,\n"
+        "        String trigger,\n"
+        "        boolean triggerContactObserved,\n"
+        "        DeferredSpreadTurn persistedConfigGuard"
+    )
+    request_load_start = module.find(
+        "private static void requestPageActivationLoad(",
+        validated_activation_start,
+    )
+    if validated_activation_start < 0 or request_load_start < 0:
+        fail("could not isolate validated page-activation admission")
+    validated_activation = module[
+        validated_activation_start:request_load_start
+    ]
+    ownership_lock = validated_activation.find(
+        "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)"
+    )
+    active_finger_guard = validated_activation.find(
+        "ACTIVE_FINGER_TOUCH_STREAMS.get(activity)", ownership_lock
+    )
+    active_finger_reject = validated_activation.find(
+        'page_activation_rejected reason=finger_touch_active',
+        active_finger_guard,
+    )
+    transaction_publish = validated_activation.find(
+        "PAGE_ACTIVATION_TRANSACTIONS.put(activity, transaction)",
+        active_finger_reject,
+    )
+    if not (
+        0 <= ownership_lock < active_finger_guard
+        < active_finger_reject < transaction_publish
+    ):
+        fail(
+            "page activation can begin after a native finger ACTION_DOWN "
+            "without closing or rejecting that gesture"
+        )
     activation_touch_method = module[activation_touch_start:native_chrome_start]
     touch_transaction = activation_touch_method.find(
         "PageActivationTransaction transaction ="
@@ -1611,6 +4443,113 @@ def check(repo_root: Path) -> None:
         fail("finger input can reach native controls during an ownership transfer")
     if "transaction != null && !isNativeChromeTouch" in activation_touch_method:
         fail("native chrome remains exempt from ownership-transfer input blocking")
+    require_markers(
+        activation_touch_method,
+        (
+            "boolean spreadLandscape",
+            "SpreadConfig cachedConfig",
+            "!spreadLandscape",
+            "ActivationTouchIdentity identity",
+            "ACTIVATION_TOUCH_IDENTITIES.put(",
+            "PenInputSnapshot releaseSnapshot = penInputSnapshot(activity)",
+            "boolean geometryRefreshGap = releasedTarget < 0",
+            "boolean identityCurrent = identity != null",
+            "boolean targetStillVisible = identity != null",
+            "isCachedSpreadConfigCurrent(activity, identity.config)",
+            "cancelNativeFingerTouchStream(activity, event)",
+            "MotionEvent.obtain(terminalEvent)",
+            "cancelEvent.setAction(MotionEvent.ACTION_CANCEL)",
+            "superDispatchTouchEvent(",
+            "activity.onTouchEvent(cancelEvent)",
+            "cancelEvent.recycle()",
+            "deferRtlPageActivation(",
+            '"finger_tap"',
+        ),
+        "geometry-refresh-safe cached page-activation touch routing",
+    )
+    touch_up = activation_touch_method.find(
+        "if (action == MotionEvent.ACTION_UP)"
+    )
+    touch_cancel = activation_touch_method.find(
+        "cancelNativeFingerTouchStream(activity, event)", touch_up
+    )
+    touch_activate = activation_touch_method.find(
+        "deferRtlPageActivation(", touch_cancel
+    )
+    touch_swallow = activation_touch_method.find(
+        "return true;", touch_activate
+    )
+    if not 0 <= touch_up < touch_cancel < touch_activate < touch_swallow:
+        fail(
+            "inactive-page finger activation swallows ACTION_UP without "
+            "first cancelling the native child touch stream"
+        )
+    cancel_helper_start = module.find(
+        "private static boolean cancelNativeFingerTouchStream("
+    )
+    native_chrome_helper_start = module.find(
+        "private static boolean isNativeChromeTouch(", cancel_helper_start
+    )
+    if cancel_helper_start < 0 or native_chrome_helper_start < 0:
+        fail("could not isolate native finger-stream cancellation")
+    cancel_helper = module[cancel_helper_start:native_chrome_helper_start]
+    child_cancel = cancel_helper.find("superDispatchTouchEvent(")
+    activity_fallback = cancel_helper.find(
+        "activity.onTouchEvent(cancelEvent)", child_cancel
+    )
+    return_handled = cancel_helper.find("return handled;", activity_fallback)
+    if not 0 <= child_cancel < activity_fallback < return_handled:
+        fail(
+            "synthetic finger CANCEL bypasses the Activity fallback or reports "
+            "success without its dispatch result"
+        )
+    if "activateDocumentPage(" in activation_touch_method:
+        fail("inactive-page finger taps can bypass persisted config validation")
+    finger_tracking_start = module.find(
+        "private static void trackFingerTapNavigation("
+    )
+    finger_tracking_end = module.find(
+        "private static boolean shouldSuppressNonEdgeTapTurn(",
+        finger_tracking_start,
+    )
+    cached_activate_start = module.find(
+        "private static void activateDocumentPage(\n"
+        "        Activity activity,\n"
+        "        int targetPage,\n"
+        "        SpreadConfig cachedConfig"
+    )
+    cached_activate_end = module.find(
+        "private static void setReplaceActiveInkMode(", cached_activate_start
+    )
+    if min(
+        finger_tracking_start,
+        finger_tracking_end,
+        cached_activate_start,
+        cached_activate_end,
+    ) < 0:
+        fail("could not isolate memory-only touch helper chain")
+    input_path_helpers = (
+        activation_touch_method
+        + module[finger_tracking_start:finger_tracking_end]
+        + module[cached_activate_start:cached_activate_end]
+    )
+    helper_blocking_hits = [
+        marker
+        for marker in (
+            "spreadConfig(",
+            "FileIdentity.capture(",
+            "new File(",
+            "Os.stat(",
+            "FileInputStream",
+            "Properties",
+        )
+        if marker in input_path_helpers
+    ]
+    if helper_blocking_hits:
+        fail(
+            "touch helper chain performs filesystem/config refresh work: "
+            f"{helper_blocking_hits}"
+        )
 
     terminal_helper_start = module.find(
         "private static boolean isCompletingActivePageStroke("
@@ -1629,12 +4568,30 @@ def check(repo_root: Path) -> None:
         (
             "pressure != 0",
             "PAGE_ACTIVATION_TRANSACTIONS.get(activity) != null",
-            "inputSnapshot.geometryReady",
             "PEN_CONTACT_START_PAGES.get(activity)",
-            "inputSnapshot.currentPage",
+            "PEN_ACTIVE_STROKE_SOURCE_PAGES.get(activity)",
+            "contactStartPage.intValue() == admittedSourcePage.intValue()",
         ),
-        "active-stroke terminal identity",
+        "snapshot-independent active-stroke terminal identity",
     )
+    if "inputSnapshot" in terminal_helper:
+        fail(
+            "active-stroke terminal callback still depends on a transient "
+            "geometry snapshot"
+        )
+    clear_contact_start = module.find(
+        "private static void clearPenContactStartPage("
+    )
+    contact_generation_start_for_clear = module.find(
+        "private static void notePageActivationTriggerContactLocked(",
+        clear_contact_start,
+    )
+    if clear_contact_start < 0 or contact_generation_start_for_clear < 0:
+        fail("could not isolate admitted-stroke identity cleanup")
+    if "PEN_ACTIVE_STROKE_SOURCE_PAGES.remove(activity)" not in module[
+        clear_contact_start:contact_generation_start_for_clear
+    ]:
+        fail("pen-up does not clear admitted active-stroke identity")
 
     digital_lift_start = module.find('"onDigital",', digital_position_start)
     digital_lift_end = module.find(
@@ -1643,12 +4600,25 @@ def check(repo_root: Path) -> None:
     if digital_lift_start < 0 or digital_lift_end < 0:
         fail("could not isolate pen-lift ownership cleanup")
     digital_lift_hook = module[digital_lift_start:digital_lift_end]
-    lift_transaction = digital_lift_hook.find("markPageActivationPenLifted(")
-    lift_contact_cleanup = digital_lift_hook.find(
-        "clearPenContactStartPage(", lift_transaction
+    lift_owner = digital_lift_hook.find(
+        "activityForNativeEventCallback("
     )
-    if not 0 <= lift_transaction < lift_contact_cleanup:
-        fail("pen-up does not clear the active-stroke start-page guard")
+    lift_generation = digital_lift_hook.find(
+        "capturePageActivationPenLiftGeneration(activity)", lift_owner
+    )
+    lift_fallback = digital_lift_hook.find(
+        "schedulePenContactReceiveFallback(", lift_generation
+    )
+    if not 0 <= lift_owner < lift_generation < lift_fallback:
+        fail(
+            "pen-up does not preserve the admitted source latch through a "
+            "generation-scoped receive fallback"
+        )
+    if "clearPenContactStartPage(" in digital_lift_hook:
+        fail(
+            "pen-up clears the admitted source latch before receiveTrials "
+            "can validate and persist the completed stroke"
+        )
 
     transaction_start = module.find(
         "private static boolean beginPageActivationTransaction("
@@ -1659,8 +4629,52 @@ def check(repo_root: Path) -> None:
     if transaction_start < 0 or request_load_start < 0:
         fail("could not isolate page-activation transaction start")
     transaction_start_method = module[transaction_start:request_load_start]
+    validated_transaction_start = module.find(
+        "private static boolean beginPageActivationTransaction(",
+        transaction_start + 1,
+    )
+    if not transaction_start < validated_transaction_start < request_load_start:
+        fail("could not isolate validated page-activation transaction entry")
+    activation_request = module[
+        transaction_start:validated_transaction_start
+    ]
+    validated_activation_start = module[
+        validated_transaction_start:request_load_start
+    ]
+    require_markers(
+        activation_request,
+        (
+            "PenInputSnapshot activationSnapshot = penInputSnapshot(activity)",
+            "DeferredSpreadTurn pending = DEFERRED_SPREAD_TURNS.get(activity)",
+            "pending.config.samePersistedState(",
+            "return deferRtlPageActivation(",
+        ),
+        "persisted-validation activation admission",
+    )
+    if "null,\n            null" in activation_request:
+        fail("an activation request can still bypass persisted config validation")
+    require_markers(
+        validated_activation_start,
+        (
+            "persistedConfigGuard == null",
+            "persistedValidation == null",
+            "!persistedValidation.isCurrent(persistedConfigGuard)",
+            "reason=persisted_config_not_validated",
+            "persistedValidation.generation",
+        ),
+        "strict persisted-config transaction authority",
+    )
+    if "this.persistedConfigValidated = false;" not in module:
+        fail("a new activation transaction can begin as config-validated")
     ownership_lock = transaction_start_method.find(
         "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)"
+    )
+    source_presenter_read = transaction_start_method.find(
+        "int sourcePresenterMarkPage = XposedHelpers.getIntField("
+    )
+    source_presenter_guard = transaction_start_method.find(
+        "sourcePresenterMarkPage != sourcePage + 1",
+        source_presenter_read,
     )
     active_pen_guard = transaction_start_method.find(
         "!triggerContactObserved", ownership_lock
@@ -1669,47 +4683,178 @@ def check(repo_root: Path) -> None:
         "PEN_CONTACT_START_PAGES.get(activity) != null",
         active_pen_guard,
     )
+    save_in_flight_read = transaction_start_method.find(
+        "pageSaveInFlightCountLocked(activity)", active_pen_identity
+    )
+    save_in_flight_reject = transaction_start_method.find(
+        '"page_activation_rejected reason=save_in_flight"',
+        save_in_flight_read,
+    )
     transaction_lookup = transaction_start_method.find(
-        "PageActivationTransaction currentTransaction =",
-        active_pen_identity,
+        "PageActivationTransaction currentTransaction =", save_in_flight_reject
     )
     if not (
-        0 <= ownership_lock < active_pen_guard
-        < active_pen_identity < transaction_lookup
+        0 <= source_presenter_read < source_presenter_guard < ownership_lock
+        < active_pen_guard
+        < active_pen_identity < save_in_flight_read
+        < save_in_flight_reject < transaction_lookup
     ):
         fail(
-            "finger/page-turn activation does not atomically reject an active "
-            "native pen contact before publishing ownership"
+            "activation does not verify source presenter ownership and "
+            "atomically reject active pen contact/in-flight native saves "
+            "before publishing ownership"
         )
     publish_transaction = transaction_start_method.find(
         "PAGE_ACTIVATION_TRANSACTIONS.put(activity, transaction);",
         transaction_lookup,
     )
-    source_save_scope = transaction_start_method.find(
-        "PAGE_ACTIVATION_SOURCE_SAVE_SCOPE.set(Boolean.TRUE);",
+    snapshot_withdraw = transaction_start_method.find(
+        "PEN_INPUT_SNAPSHOTS.remove(activity, activationSnapshot);",
         publish_transaction,
     )
+    editable_guard_publish = transaction_start_method.find(
+        "PEN_INPUT_EDITABLE_GUARDS.put(activity, Boolean.TRUE);",
+        snapshot_withdraw,
+    )
+    native_gate_close = transaction_start_method.find(
+        "disableNativeGateForOwnershipHandoffLocked(",
+        editable_guard_publish,
+    )
+    source_save_scope = transaction_start_method.find(
+        "PageActivationSourceSaveToken sourceSave =",
+        native_gate_close,
+    )
+    source_save_scope_push = transaction_start_method.find(
+        "pushPageActivationSourceSaveToken(sourceSave);",
+        source_save_scope,
+    )
     source_save = transaction_start_method.find(
-        '"saveTrails",', source_save_scope
+        '"saveTrails",', source_save_scope_push
     )
     source_save_scope_clear = transaction_start_method.find(
-        "PAGE_ACTIVATION_SOURCE_SAVE_SCOPE.remove();", source_save
+        "popPageActivationSourceSaveToken();", source_save
+    )
+    source_save_verified = transaction_start_method.find(
+        "if (!sourceSave.claimed || !sourceSave.completed",
+        source_save_scope_clear,
     )
     writer_disable = transaction_start_method.find(
         '"SN_SPREAD_PROBE transactional page activation"',
-        source_save_scope_clear,
+        source_save_verified,
     )
     request_target_load = transaction_start_method.find(
         "requestPageActivationLoad(activity, transaction, viewModel);",
         publish_transaction,
     )
     if not (
-        0 <= publish_transaction < source_save_scope < source_save
-        < source_save_scope_clear < writer_disable < request_target_load
+        0 <= source_presenter_guard < publish_transaction
+        < snapshot_withdraw < editable_guard_publish < native_gate_close
+        < source_save_scope < source_save_scope_push < source_save
+        < source_save_scope_clear < source_save_verified
+        < writer_disable < request_target_load
     ):
         fail(
             "ownership transfer must publish the exact input/save guard before "
             "its scoped source flush, disable writing, and load the target"
+        )
+    activation_snapshot = transaction_start_method.find(
+        "PenInputSnapshot activationSnapshot = penInputSnapshot(activity)"
+    )
+    activation_config = transaction_start_method.find(
+        "final SpreadConfig activationConfig = activationSnapshot.config",
+        activation_snapshot,
+    )
+    activation_document_guard = transaction_start_method.find(
+        "isCachedSpreadConfigCurrent(", activation_config
+    )
+    transaction_config_capture = transaction_start_method.find(
+        "activationConfig,", activation_document_guard
+    )
+    if not (
+        0 <= activation_snapshot < activation_config
+        < activation_document_guard < transaction_config_capture
+    ):
+        fail(
+            "page activation does not capture and validate the exact immutable "
+            "document configuration before publishing ownership"
+        )
+
+    request_load_end = module.find(
+        "private static void schedulePageActivationTimeout(", request_load_start
+    )
+    if request_load_end < 0:
+        fail("could not isolate scoped transactional load request")
+    request_load = module[request_load_start:request_load_end]
+    require_markers(
+        request_load,
+        (
+            "PAGE_ACTIVATION_LOAD_SCOPE.set(transaction)",
+            '"loadPage"',
+            "PAGE_ACTIVATION_LOAD_SCOPE.remove()",
+        ),
+        "transaction-scoped target load generation capture",
+    )
+    load_identity_start = module.find(
+        "private static boolean isPageActivationLoadIdentityCurrent("
+    )
+    load_identity_end = module.find(
+        "private static void releaseActivityResources(", load_identity_start
+    )
+    if load_identity_start < 0 or load_identity_end < 0:
+        fail("could not isolate exact page-activation load identity fence")
+    require_markers(
+        module[load_identity_start:load_identity_end],
+        (
+            "transaction.rollbackPending",
+            "transaction.sourcePage : transaction.targetPage",
+            "PenContactIdentityCapture authority = transaction.writerAuthority",
+            "authority.viewModel",
+            '"currentPage"',
+            "== expectedPage",
+            "authority.presenter",
+            "== expectedPage + 1",
+        ),
+        "exact reader/presenter activation and rollback identity fence",
+    )
+    timeout_end = module.find(
+        "private static boolean commitPageActivationGeometry(",
+        request_load_end,
+    )
+    if timeout_end < 0:
+        fail("could not isolate transactional activation timeout")
+    activation_timeout = module[request_load_end:timeout_end]
+    require_markers(
+        activation_timeout,
+        (
+            "transaction.geometryCommitted",
+            "!transaction.persistedConfigValidated",
+            "transaction.persistedConfigGuard != null",
+            "transaction.persistedConfigValidationPending",
+            "transaction.triggerContactObserved",
+            "!transaction.triggerPenLifted",
+            "SystemClock.uptimeMillis()",
+            "- transaction.startedAt",
+            "PAGE_ACTIVATION_COMPLETION_DEADLINE_MS",
+            '"post_commit_guard_timeout"',
+            "abortPageActivationTransaction(",
+            "schedulePageActivationTimeout(activity, transactionId)",
+        ),
+        "bounded committed-activation completion timeout",
+    )
+    completion_deadline = activation_timeout.find(
+        "PAGE_ACTIVATION_COMPLETION_DEADLINE_MS"
+    )
+    completion_reschedule = activation_timeout.find(
+        "schedulePageActivationTimeout(activity, transactionId)",
+        completion_deadline,
+    )
+    completion_abort = activation_timeout.find(
+        '"post_commit_guard_timeout"', completion_reschedule
+    )
+    if not 0 <= completion_deadline < completion_reschedule < completion_abort:
+        fail(
+            "committed activation can reschedule without a finite overall "
+            "completion deadline"
         )
 
     save_hook_start = module.find(
@@ -1721,23 +4866,60 @@ def check(repo_root: Path) -> None:
     if save_hook_start < 0 or receive_hook_start < 0:
         fail("could not isolate saveTrails ownership guard")
     save_hook = module[save_hook_start:receive_hook_start]
-    source_save_scope_read = save_hook.find(
-        "PAGE_ACTIVATION_SOURCE_SAVE_SCOPE.get()"
+    save_owner_resolution = save_hook.find(
+        "capturePresenterCallbackScope(param.thisObject)"
     )
-    save_guard = save_hook.find(
-        "shouldBlockPageActivationSave(activity)", source_save_scope_read
+    save_owner_activity = save_hook.find(
+        "Activity activity = ownerScope.activity;", save_owner_resolution
     )
-    scoped_bypass = save_hook.find(
-        "&& !activationSourceSave", save_guard
+    save_hook_begin = save_hook.find(
+        "beginPageSaveHook(activity);", save_owner_activity
     )
-    blocked_result = save_hook.find("param.setResult(null);", scoped_bypass)
+    save_owner_guard = save_hook.find(
+        "if (!ownerScope.activeOwner)", save_hook_begin
+    )
+    save_stale_owner_suppress = save_hook.find(
+        "param.setResult(null);", save_owner_guard
+    )
+    source_save_token = save_hook.find(
+        "PageActivationSourceSaveToken sourceToken =",
+        save_stale_owner_suppress,
+    )
+    source_save_exact_owner = save_hook.find(
+        "sourceToken.presenter == param.thisObject", source_save_token
+    )
+    source_save_exact_transaction = save_hook.find(
+        "PAGE_ACTIVATION_TRANSACTIONS.get(activity)",
+        source_save_exact_owner,
+    )
+    source_save_unclaimed = save_hook.find(
+        "!sourceToken.claimed", source_save_exact_transaction
+    )
+    source_save_allowed = save_hook.find(
+        '"page_activation_source_save_allowed"', source_save_unclaimed
+    )
+    save_admission = save_hook.find(
+        "admitPageSave(", source_save_allowed
+    )
+    blocked_result = save_hook.find("param.setResult(null);", save_admission)
+    save_after = save_hook.find(
+        "protected void afterHookedMethod", blocked_result
+    )
+    save_admission_finish = save_hook.find(
+        "finishPageSaveAdmission();", save_after
+    )
     if not (
-        0 <= source_save_scope_read < save_guard < scoped_bypass
-        < blocked_result
+        0 <= save_owner_resolution < save_owner_activity < save_hook_begin
+        < save_owner_guard < save_stale_owner_suppress
+        < source_save_token < source_save_exact_owner
+        < source_save_exact_transaction < source_save_unclaimed
+        < source_save_allowed
+        < save_admission < blocked_result < save_after
+        < save_admission_finish
     ):
         fail(
-            "transaction lifecycle saves are not blocked except for the "
-            "thread-scoped intentional source flush"
+            "native save admission is not bound to the calling presenter and "
+            "paired around every hook call after synthetic bypasses"
         )
 
     commit_start = module.find(
@@ -1749,8 +4931,14 @@ def check(repo_root: Path) -> None:
     if commit_start < 0 or pen_lift_start < 0:
         fail("could not isolate transactional geometry commit")
     commit_method = module[commit_start:pen_lift_start]
+    commit_document_identity = commit_method.find(
+        "isCachedSpreadConfigCurrent("
+    )
+    commit_load_identity = commit_method.find(
+        "isPageActivationLoadIdentityCurrent(", commit_document_identity
+    )
     reader_identity = commit_method.find(
-        "currentPage != transaction.targetPage"
+        "currentPage != transaction.targetPage", commit_load_identity
     )
     presenter_identity = commit_method.find(
         "presenterMarkPage != transaction.targetPage + 1",
@@ -1762,28 +4950,98 @@ def check(repo_root: Path) -> None:
     discard_contact = commit_method.find(
         "transaction.triggerContactObserved", commit_state
     )
-    finish_commit = commit_method.find(
-        "finishPageActivationTransaction(", discard_contact
-    )
-    retained_commit = commit_method.find(
-        "if (!finishPageActivationTransaction(", discard_contact
-    )
     retained_writer_disable = commit_method.find(
-        '"SN_SPREAD_PROBE commit/contact race"', retained_commit
+        '"SN_SPREAD_PROBE discard activation gesture"', discard_contact
     )
     retained_return = commit_method.find(
-        "return false;", retained_writer_disable
+        "return true;", retained_writer_disable
+    )
+    persisted_validation_guard = commit_method.find(
+        "transaction.persistedConfigGuard != null", retained_return
+    )
+    persisted_validation_schedule = commit_method.find(
+        "schedulePageActivationPersistedConfigValidation(",
+        persisted_validation_guard,
+    )
+    persisted_validation_return = commit_method.find(
+        "return scheduled;", persisted_validation_schedule
     )
     if not (
-        0 <= reader_identity < presenter_identity < commit_state
-        < discard_contact < finish_commit
-        and 0 <= retained_commit < retained_writer_disable < retained_return
+        0 <= commit_document_identity < commit_load_identity < reader_identity
+        < presenter_identity < commit_state
+        < discard_contact < retained_writer_disable < retained_return
+        < persisted_validation_guard < persisted_validation_schedule
+        < persisted_validation_return
     ):
         fail(
             "ownership must commit only after reader and presenter identities "
-            "match the target, while a concurrently latched contact remains "
-            "fail-closed"
+            "match the target, while a concurrently latched contact and final "
+            "persisted-config validation remain fail-closed"
         )
+    finish_identity_start = module.find(
+        "private static boolean finishPageActivationTransaction("
+    )
+    finish_identity_end = module.find(
+        "private static boolean shouldBlockPageActivationGesture(",
+        finish_identity_start,
+    )
+    if finish_identity_start < 0 or finish_identity_end < 0:
+        fail("could not isolate final activation identity release")
+    require_markers(
+        module[finish_identity_start:finish_identity_end],
+        (
+            "isPageActivationLoadIdentityCurrent(activity, current)",
+            "isPageActivationPersistedConfigCurrent(current)",
+            "nativeGateAuthorityCurrentForTransactionLocked(",
+            "PAGE_ACTIVATION_TRANSACTIONS.remove(",
+            "nativeSetCalibrationEnabled(true)",
+            "PEN_INPUT_EDITABLE_GUARDS.remove(activity)",
+            "spreadPair(",
+            "transaction.documentConfig",
+        ),
+        "final activation identity release",
+    )
+    if "spreadConfig(" in module[finish_identity_start:finish_identity_end]:
+        fail(
+            "successful activation commit rereads persisted config on the "
+            "main thread instead of reusing its validated transaction config"
+        )
+    rollback_request_start = module.find(
+        "private static void requestPageActivationRollback("
+    )
+    rollback_retry_start = module.find(
+        "private static void schedulePageActivationRollbackRetry(",
+        rollback_request_start,
+    )
+    rollback_finish_start = module.find(
+        "private static boolean finishPageActivationRollback(",
+        rollback_retry_start,
+    )
+    rollback_release_start = module.find(
+        "private static void releasePageActivationConfigGuard(",
+        rollback_finish_start,
+    )
+    if min(
+        rollback_request_start,
+        rollback_retry_start,
+        rollback_finish_start,
+        rollback_release_start,
+    ) < 0:
+        fail("could not isolate exact-generation rollback fencing")
+    require_markers(
+        module[rollback_request_start:rollback_retry_start],
+        (
+            "PAGE_ACTIVATION_LOAD_SCOPE.set(transaction)",
+            '"loadPage"',
+            "PAGE_ACTIVATION_LOAD_SCOPE.remove()",
+        ),
+        "transaction-scoped rollback load generation capture",
+    )
+    require_markers(
+        module[rollback_finish_start:rollback_release_start],
+        ("isPageActivationLoadIdentityCurrent(activity, current)",),
+        "rollback completion load identity",
+    )
 
     restore_geometry_start = module.find(
         "private static boolean restoreTransactionalActivePageGeometry(",
@@ -1826,15 +5084,172 @@ def check(repo_root: Path) -> None:
         "publishReadyPenInputGeometryAfterActivation(",
         lift_restore,
     )
-    lift_guard_release = pen_lift_method.find(
-        "finishPageActivationTransaction(",
+    lift_config_guard = pen_lift_method.find(
+        "current.persistedConfigGuard != null",
         lift_ready_snapshot,
     )
-    if not 0 <= lift_restore < lift_ready_snapshot < lift_guard_release:
+    lift_config_unvalidated = pen_lift_method.find(
+        "!current.persistedConfigValidated",
+        lift_config_guard,
+    )
+    lift_config_schedule = pen_lift_method.find(
+        "schedulePageActivationPersistedConfigValidation(",
+        lift_config_unvalidated,
+    )
+    lift_config_return = pen_lift_method.find(
+        "return;",
+        lift_config_schedule,
+    )
+    lift_guard_release = pen_lift_method.find(
+        "finishPageActivationTransaction(",
+        lift_config_return,
+    )
+    if not (
+        0 <= lift_restore < lift_ready_snapshot < lift_config_guard
+        < lift_config_unvalidated < lift_config_schedule < lift_config_return
+        < lift_guard_release
+    ):
         fail(
-            "trigger-gesture pen lift releases ownership before publishing "
-            "ready pen geometry"
+            "trigger-gesture pen lift does not publish ready geometry and "
+            "complete deferred persisted-config validation before releasing "
+            "ownership"
         )
+    for failure_reason in (
+        "pen_lift_geometry_failed",
+        "pen_lift_snapshot_publish_failed",
+        "pen_lift_config_validation_schedule_failed",
+        "pen_lift_failed",
+    ):
+        reason_position = pen_lift_method.find(f'"{failure_reason}"')
+        abort_position = pen_lift_method.rfind(
+            "abortPageActivationTransaction(",
+            0,
+            reason_position,
+        )
+        fail_closed_position = pen_lift_method.rfind(
+            "failClosedPageActivation(",
+            0,
+            reason_position,
+        )
+        if (
+            reason_position < 0
+            or abort_position < 0
+            or abort_position <= fail_closed_position
+            or reason_position - abort_position > 240
+            or "true" not in pen_lift_method[
+                reason_position:reason_position + 100
+            ]
+        ):
+            fail(
+                "pen-lift recovery failure does not abort and roll back its "
+                f"retained transaction: {failure_reason}"
+            )
+
+    validation_complete_start = module.find(
+        "private static void completePageActivationPersistedConfigValidation("
+    )
+    validation_complete_end = module.find(
+        "private static boolean isPageActivationPersistedConfigCurrent(",
+        validation_complete_start,
+    )
+    if validation_complete_start < 0 or validation_complete_end < 0:
+        fail("could not isolate persisted-config validation completion")
+    validation_complete = module[
+        validation_complete_start:validation_complete_end
+    ]
+    validation_restore = validation_complete.find(
+        "restoreTransactionalActivePageGeometry("
+    )
+    validation_final_identity = validation_complete.find(
+        "isPageActivationPersistedConfigAuthorityCurrent(",
+        validation_restore,
+    )
+    validation_ready_publish = validation_complete.find(
+        "publishReadyPenInputGeometryAfterActivation(",
+        validation_final_identity,
+    )
+    if not (
+        0 <= validation_restore < validation_final_identity
+        < validation_ready_publish
+    ):
+        fail(
+            "activation publishes writable geometry without a final persisted "
+            "identity validation after native geometry restoration"
+        )
+    authority_start = module.find(
+        "private static boolean isPageActivationPersistedConfigAuthorityCurrent("
+    )
+    authority_end = module.find(
+        "private static void markPageActivationPenLifted(", authority_start
+    )
+    if authority_start < 0 or authority_end < 0:
+        fail("could not isolate final activation config-authority check")
+    require_markers(
+        module[authority_start:authority_end],
+        (
+            "persistedSpreadConfigIdentityCurrent(",
+            "isPageActivationPersistedConfigCurrent(transaction)",
+            "isCachedSpreadConfigCurrent(",
+            "PAGE_ACTIVATION_TRANSACTIONS.get(activity) == transaction",
+            "!transaction.rollbackPending",
+        ),
+        "post-geometry persisted config authority revalidation",
+    )
+    validation_finish = validation_complete.find(
+        "if (!finishPageActivationTransaction("
+    )
+    validation_retain = validation_complete.find(
+        "retainPageActivationForHeldContact(",
+        validation_finish,
+    )
+    validation_retained_return = validation_complete.find(
+        "return;",
+        validation_retain,
+    )
+    validation_abort = validation_complete.find(
+        "abortPageActivationTransaction(",
+        validation_retained_return,
+    )
+    if not (
+        0 <= validation_finish < validation_retain
+        < validation_retained_return < validation_abort
+    ):
+        fail(
+            "a validated activation raced by held pen contact is rolled back "
+            "instead of retaining its transaction through pen lift"
+        )
+
+    pen_lift_final_identity = pen_lift_method.find(
+        "isPageActivationPersistedConfigAuthorityCurrent(", lift_restore
+    )
+    if not 0 <= lift_restore < pen_lift_final_identity < lift_ready_snapshot:
+        fail(
+            "held-contact pen lift can publish writable geometry without "
+            "post-restore persisted config revalidation"
+        )
+
+    retained_contact_start = module.find(
+        "private static boolean retainPageActivationForHeldContact("
+    )
+    retained_contact_end = module.find(
+        "private static boolean restoreTransactionalActivePageGeometry(",
+        retained_contact_start,
+    )
+    if retained_contact_start < 0 or retained_contact_end < 0:
+        fail("could not isolate held-contact activation retention")
+    require_markers(
+        module[retained_contact_start:retained_contact_end],
+        (
+            "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+            "current != transaction",
+            "current.rollbackPending",
+            "!current.triggerContactObserved",
+            "current.triggerPenLifted",
+            '"SN_SPREAD_PROBE retained activation contact"',
+            '"page_activation_commit_retained_for_contact id="',
+        ),
+        "held-contact activation retention",
+    )
 
     finish_transaction_start = module.find(
         "private static boolean finishPageActivationTransaction("
@@ -1864,7 +5279,7 @@ def check(repo_root: Path) -> None:
         "return false;", finish_lift
     )
     finish_remove = finish_transaction.find(
-        "PAGE_ACTIVATION_TRANSACTIONS.remove(activity, current)",
+        "PAGE_ACTIVATION_TRANSACTIONS.remove(",
         finish_retained,
     )
     if not (
@@ -1900,42 +5315,121 @@ def check(repo_root: Path) -> None:
     require_markers(
         transaction_receive_hook,
         (
+            "ReceiveTrialsScope receiveScope =",
+            "pushReceiveTrialsScope(receiveScope)",
+            "capturePresenterCallbackScope(param.thisObject)",
+            "if (!ownerScope.activeOwner)",
             "shouldBlockPageActivationGesture(activity)",
+            "claimBlockedPageActivationContact(",
             "param.setResult(null);",
+            "receiveTrialsOwnershipFailure(",
+            "receiveScope.ownershipFailure = ownershipFailure",
+            "popPresenterCallbackScope(",
+            "popReceiveTrialsScope()",
+            "presenterCallbackScopeStillActive(",
+            "PenContactOwnership contactOwnership =",
             "markPageActivationPenLifted(",
             '"page_activation_trigger_gesture_discarded"',
+            "clearExactPenContactOwnership(",
+            "contactOwnership.phase =",
+            "PEN_CONTACT_PHASE_EXPIRED;",
+            "PEN_RECEIVE_EXPIRED_GENERATIONS.put(",
+            "finishTraceMutationAdmission(",
         ),
         "transactional receiveTrials guard",
     )
     require_markers(
         transaction_save_hook,
         (
-            "shouldBlockPageActivationSave(activity)",
+            "capturePresenterCallbackScope(param.thisObject)",
+            "if (!ownerScope.activeOwner)",
+            "beginPageSaveHook(activity)",
+            "admitPageSave(",
             "param.setResult(null);",
             '"page_activation_save_blocked id="',
+            "finishPageSaveAdmission()",
         ),
         "transactional saveTrails guard",
     )
     save_blocker_start = module.find(
-        "private static boolean shouldBlockPageActivationSave("
+        "private static void beginPageSaveHook("
     )
     abort_transaction_start = module.find(
         "private static void abortPageActivationTransaction(",
         save_blocker_start,
     )
     if save_blocker_start < 0 or abort_transaction_start < 0:
-        fail("could not isolate all-transaction save blocking")
+        fail("could not isolate atomic native-save admission")
     save_blocker = module[save_blocker_start:abort_transaction_start]
     require_markers(
         save_blocker,
         (
-            "activity != null",
-            "PAGE_ACTIVATION_TRANSACTIONS.get(activity) != null",
+            "ArrayDeque<PageSaveAdmission>",
+            "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+            "PageActivationTransaction transaction =",
+            "!activationSourceSave",
+            "PAGE_ACTIVATION_ROLLBACK_RECOVERIES.get(activity) != null",
+            "|| rollbackOwnershipUncertain",
+            "PAGE_SAVE_IN_FLIGHT_COUNTS.get(activity)",
+            "inFlight.incrementAndGet()",
+            "admission.counted = true",
+            "admissions.pop()",
+            "inFlight.decrementAndGet()",
         ),
-        "all-transaction save blocking",
+        "atomic native-save admission and release",
     )
-    if "triggerContactObserved" in save_blocker:
-        fail("non-contact ownership transfers still allow lifecycle saves")
+    rollback_save_guard = save_blocker.find(
+        "PAGE_ACTIVATION_ROLLBACK_RECOVERIES.get(activity) != null"
+    )
+    save_count_increment = save_blocker.find(
+        "inFlight.incrementAndGet()", rollback_save_guard
+    )
+    if not 0 <= rollback_save_guard < save_count_increment:
+        fail(
+            "rollback-recovery ownership does not fence lifecycle saves before "
+            "their admission"
+        )
+    presenter_owner_start = module.find(
+        "private static Activity activityForHandWritePresenter("
+    )
+    release_resources_start = module.find(
+        "private static void releaseActivityResources(",
+        presenter_owner_start,
+    )
+    if presenter_owner_start < 0 or release_resources_start < 0:
+        fail("could not isolate exact presenter/activity save ownership")
+    require_markers(
+        module[presenter_owner_start:release_resources_start],
+        (
+            "Activity candidate = activeActivity;",
+            "refreshActivityComponentBindings(candidate);",
+            "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+            "candidate == activeActivity",
+            "HANDWRITE_PRESENTERS.get(candidate) == presenter",
+            "!RETIRED_HANDWRITE_PRESENTERS.containsKey(presenter)",
+            '"handWritePresenter"',
+            ") == presenter",
+        ),
+        "identity-verified presenter/activity save ownership",
+    )
+    require_markers(
+        module,
+        (
+            "bindingsReady = refreshActivityComponentBindings(",
+            "bindComponentIdentity(",
+            "HANDWRITE_PRESENTERS,",
+            "RETIRED_HANDWRITE_PRESENTERS,",
+            "retireActivityComponentIdentity(",
+        ),
+        "presenter/activity ownership lifecycle",
+    )
+    forbidden_save_waits = (
+        "Thread.sleep(",
+        ".wait(",
+        "SystemClock.sleep(",
+    )
+    if any(marker in save_blocker for marker in forbidden_save_waits):
+        fail("save/activation ownership fencing blocks while waiting for a save")
 
     rollback_request_start = module.find(
         "private static void requestPageActivationRollback(",
@@ -1954,8 +5448,12 @@ def check(repo_root: Path) -> None:
         rollback_timeout_start,
     )
     rollback_finish_start = module.find(
-        "private static void finishPageActivationRollback(",
+        "private static boolean finishPageActivationRollback(",
         rollback_terminal_start,
+    )
+    rollback_guard_release_start = module.find(
+        "private static void releasePageActivationConfigGuard(",
+        rollback_finish_start,
     )
     fail_closed_start = module.find(
         "private static boolean failClosedPageActivation(",
@@ -1969,6 +5467,7 @@ def check(repo_root: Path) -> None:
             rollback_timeout_start,
             rollback_terminal_start,
             rollback_finish_start,
+            rollback_guard_release_start,
             fail_closed_start,
         )
     ):
@@ -1978,7 +5477,9 @@ def check(repo_root: Path) -> None:
     retry_rollback = module[rollback_retry_start:rollback_timeout_start]
     timeout_rollback = module[rollback_timeout_start:rollback_terminal_start]
     terminal_rollback = module[rollback_terminal_start:rollback_finish_start]
-    finish_rollback = module[rollback_finish_start:fail_closed_start]
+    finish_rollback = module[
+        rollback_finish_start:rollback_guard_release_start
+    ]
     retained_transaction = abort_transaction.find(
         "PAGE_ACTIVATION_TRANSACTIONS.get(activity)"
     )
@@ -2037,24 +5538,40 @@ def check(repo_root: Path) -> None:
         "invalidatePenInputGeometrySnapshot(",
         terminal_fail_closed,
     )
+    terminal_recovery_publish = terminal_rollback.find(
+        "PAGE_ACTIVATION_ROLLBACK_RECOVERIES.put(",
+        terminal_snapshot_invalidation,
+    )
+    terminal_pen_guard = terminal_rollback.find(
+        "PEN_INPUT_EDITABLE_GUARDS.put(activity, Boolean.TRUE)",
+        terminal_recovery_publish,
+    )
+    terminal_recovery_verify = terminal_rollback.find(
+        "PAGE_ACTIVATION_ROLLBACK_RECOVERIES.get(activity)",
+        terminal_pen_guard,
+    )
     terminal_remove = terminal_rollback.find(
         "PAGE_ACTIVATION_TRANSACTIONS.remove(",
-        terminal_snapshot_invalidation,
+        terminal_recovery_verify,
     )
     if not (
         0 <= terminal_fail_closed
         < terminal_snapshot_invalidation
-        < terminal_remove
+        < terminal_recovery_publish < terminal_pen_guard
+        < terminal_recovery_verify < terminal_remove
     ):
         fail(
-            "exhausted rollback releases its guard before failing closed "
-            "and invalidating pen geometry"
+            "exhausted rollback does not atomically publish and verify its "
+            "navigation-recovery authority before withdrawing the transaction"
         )
     require_markers(
         terminal_rollback,
         (
             "current != transaction",
             "PAGE_ACTIVATION_OWNERSHIP_LOCK",
+            "transaction.documentConfig.sameDocumentIdentity(",
+            "recoveryConfig",
+            "NAVIGATION_FAIL_CLOSED_DOCUMENTS.put(",
             '"page_activation_rollback_released_fail_closed id="',
         ),
         "terminal fail-closed rollback release",
@@ -2063,12 +5580,17 @@ def check(repo_root: Path) -> None:
         finish_rollback,
         (
             "current.rollbackPending",
-            '"disableHandWrite"',
             "PAGE_ACTIVATION_TRANSACTIONS.remove(activity, current)",
             '"page_activation_rollback_completed id="',
+            "return true;",
         ),
-        "identity-verified page-activation rollback completion",
+        "identity-verified, geometry-rearming rollback completion",
     )
+    if '"disableHandWrite"' in finish_rollback:
+        fail(
+            "verified source rollback disables the writer after compose has "
+            "already re-armed its geometry"
+        )
 
     portrait_set_image = module.find(
         "if (!isCalibrationLandscape(activity)) {",
@@ -2101,18 +5623,26 @@ def check(repo_root: Path) -> None:
         (
             "readerPage != transaction.sourcePage",
             "presenterMarkPage != transaction.sourcePage + 1",
-            '"disableHandWrite"',
-            "finishPageActivationRollback(",
+            "Configuration.ORIENTATION_LANDSCAPE",
+            "PAGE_ACTIVATION_TRANSACTIONS.remove(",
+            "releasePageActivationConfigGuard(transaction)",
+            '"page_activation_rollback_completed_native_layout id="',
+            '"page_activation_rollback_waiting_for_geometry id="',
         ),
         "orientation-independent rollback identity convergence",
     )
-    convergence_disable = converged_rollback.find('"disableHandWrite"')
-    convergence_finish = converged_rollback.find(
-        "finishPageActivationRollback(",
-        convergence_disable,
+    native_layout_release = converged_rollback.find(
+        "PAGE_ACTIVATION_TRANSACTIONS.remove("
     )
-    if not 0 <= convergence_disable < convergence_finish:
-        fail("portrait rollback releases its guard before disabling the writer")
+    landscape_wait = converged_rollback.find(
+        '"page_activation_rollback_waiting_for_geometry id="',
+        native_layout_release,
+    )
+    if not 0 <= native_layout_release < landscape_wait:
+        fail(
+            "landscape rollback can release before verified compose geometry, "
+            "or native-layout rollback cannot recover"
+        )
 
     configuration_hook_start = module.find('"onConfigurationChanged",')
     set_image_hook_start = module.find('"setImage",', configuration_hook_start)
@@ -2227,6 +5757,22 @@ def check(repo_root: Path) -> None:
         deferred_turn_schedule_start:rtl_turn_start
     ]
     rtl_turn = module[rtl_turn_start:activate_page_start]
+    rtl_turn_config = rtl_turn.find(
+        "SpreadConfig config\n    )"
+    )
+    rtl_turn_config_stop = rtl_turn.find(
+        "config == null || !config.enabled", rtl_turn_config
+    )
+    rtl_turn_pair = rtl_turn.find(
+        "SpreadPair pair = spreadPair(config", rtl_turn_config_stop
+    )
+    if not 0 <= rtl_turn_config < rtl_turn_config_stop < rtl_turn_pair:
+        fail(
+            "RTL turn routing consumes fallback/default cover parity after "
+            "config publication fails"
+        )
+    if "spreadConfig(activity)" in rtl_turn:
+        fail("RTL turn routing reparses persisted config after admission")
     require_markers(
         deferred_turn,
         (
@@ -2257,15 +5803,17 @@ def check(repo_root: Path) -> None:
             'persisted_config_changed_during_start',
             "!deferred.config.samePersistedState(",
             'reason=runtime_config_changed',
-            "!deferredSnapshot.config.editable",
+            "!publishedConfig.enabled || !publishedConfig.editable",
             'reason=editing_disabled',
             "deferred.coverSeparate != null",
-            "deferredSnapshot.config.coverSeparate",
+            "publishedConfig.coverSeparate",
             'reason=cover_parity_changed',
             "currentPage == deferred.targetPage",
             "currentPage != deferred.sourcePage",
             "editablePenInputReady(activity)",
             "beginPageActivationTransaction(",
+            "persistedValidation",
+            "transferDeferredSpreadTurnToActivation(",
             "deferred.trigger",
             "scheduleDeferredRtlSpreadTurn(activity, deferred)",
         ),
@@ -2287,14 +5835,15 @@ def check(repo_root: Path) -> None:
         'reason=runtime_config_changed', runtime_config_guard
     )
     editable_guard = deferred_turn_schedule.find(
-        "!deferredSnapshot.config.editable", runtime_config_cancel
+        "!publishedConfig.enabled || !publishedConfig.editable",
+        runtime_config_cancel,
     )
     editable_cancel = deferred_turn_schedule.find(
         'reason=editing_disabled',
         editable_guard,
     )
     parity_compare = deferred_turn_schedule.find(
-        "deferredSnapshot.config.coverSeparate",
+        "publishedConfig.coverSeparate",
         parity_guard,
     )
     parity_cancel = deferred_turn_schedule.find(
@@ -2363,7 +5912,7 @@ def check(repo_root: Path) -> None:
         "off-UI deferred-config validation",
     )
     observer_start = module.find(
-        "private static boolean ensureDeferredConfigObserver(",
+        "private static boolean ensureDeferredConfigWatch(",
         deferred_turn_start,
     )
     if observer_start < 0 or observer_start >= deferred_turn_schedule_start:
@@ -2374,26 +5923,234 @@ def check(repo_root: Path) -> None:
     require_markers(
         deferred_config_fence,
         (
-            "new FileObserver(",
-            "observer.startWatching()",
-            "persistedConfigGeneration",
-            "persistedConfigGeneration.incrementAndGet()",
-            "long before = deferred.persistedConfigGeneration.get()",
+            "if (deferred.canceled)",
+            "ensurePersistedConfigWatch(activity, deferred.config)",
+            "PERSISTED_CONFIG_WATCHES.get(activity)",
+            "deferred.persistedConfigWatch = watch",
+            "deferred.persistedConfigWatchReady = true",
+            "isDeferredConfigWatchCurrent(",
+            "watch.generation.get()",
+            "handleDeferredConfigWatchEvent(",
+            "deferred.canceled = true;",
+            "if (deferred == null || deferred.canceled",
+            "long before = watch == null ? 0L : watch.generation.get()",
             "persistedDeferredConfigUnchanged(deferred)",
             "unchanged && before == after",
         ),
-        "deferred-config change-generation fence",
+        "shared persisted-config change-generation fence",
     )
+    if "volatile boolean canceled;" not in module:
+        fail("deferred activation has no terminal canceled state")
+    ensure_observer = deferred_config_fence.find(
+        "private static boolean ensureDeferredConfigWatch("
+    )
+    canceled_admission = deferred_config_fence.find(
+        "if (deferred.canceled)", ensure_observer
+    )
+    persisted_watch_ensure = deferred_config_fence.find(
+        "ensurePersistedConfigWatch(activity, deferred.config)",
+        canceled_admission,
+    )
+    observer_stop = deferred_config_fence.find(
+        "private static void releaseDeferredConfigWatch(",
+        persisted_watch_ensure,
+    )
+    canceled_publish = deferred_config_fence.find(
+        "deferred.canceled = true;", observer_stop
+    )
+    validation_start = deferred_config_fence.find(
+        "private static DeferredConfigValidation validateDeferredConfig(",
+        canceled_publish,
+    )
+    canceled_validation = deferred_config_fence.find(
+        "deferred == null || deferred.canceled", validation_start
+    )
+    validation_observer_ensure = deferred_config_fence.find(
+        "ensureDeferredConfigWatch(deferred)", canceled_validation
+    )
+    if not (
+        0 <= ensure_observer < canceled_admission < persisted_watch_ensure
+        < observer_stop < canceled_publish < validation_start
+        < canceled_validation < validation_observer_ensure
+    ):
+        fail(
+            "canceled deferred activation can rebind its persisted config watch"
+        )
+    deferred_watch_method_end = deferred_config_fence.find(
+        "private static boolean isDeferredConfigWatchCurrent(",
+        ensure_observer,
+    )
+    if deferred_watch_method_end < 0:
+        fail("could not isolate shared deferred-config watch binding")
+    deferred_watch_method = deferred_config_fence[
+        ensure_observer:deferred_watch_method_end
+    ]
+    for forbidden in (
+        "new FileObserver(",
+        ".startWatching()",
+        ".stopWatching()",
+    ):
+        if forbidden in deferred_watch_method:
+            fail(
+                "deferred activation creates or owns a duplicate persisted-config "
+                f"observer: {forbidden}"
+            )
+    require_markers(
+        module,
+        (
+            "final DeferredSpreadTurn persistedConfigGuard;",
+            "final long persistedConfigGeneration;",
+            "volatile PersistedConfigWatch persistedConfigWatch;",
+            "volatile boolean persistedConfigWatchReady;",
+            "volatile boolean persistedConfigValidationPending;",
+            "volatile boolean persistedConfigValidated;",
+            "schedulePageActivationPersistedConfigValidation(",
+            "completePageActivationPersistedConfigValidation(",
+            "PAGE_ACTIVATION_CONFIG_SETTLE_MS",
+            "validation.generation != transaction.persistedConfigGeneration",
+            "isPageActivationPersistedConfigCurrent(transaction)",
+            "releasePageActivationConfigGuard(transaction)",
+        ),
+        "activation-lifetime deferred-config guard",
+    )
+    activation_config_validation_start = module.find(
+        "private static boolean schedulePageActivationPersistedConfigValidation("
+    )
+    activation_config_completion_start = module.find(
+        "private static void completePageActivationPersistedConfigValidation(",
+        activation_config_validation_start,
+    )
+    if (
+        activation_config_validation_start < 0
+        or activation_config_completion_start < 0
+    ):
+        fail("could not isolate post-settle persisted-config validation")
+    activation_config_schedule = module[
+        activation_config_validation_start:activation_config_completion_start
+    ]
+    settle_delay = activation_config_schedule.find("postDelayed(")
+    background_submit = activation_config_schedule.find(
+        "DEFERRED_CONFIG_EXECUTOR.execute(", settle_delay
+    )
+    fresh_validation = activation_config_schedule.find(
+        "validateDeferredConfig(deferred)", background_submit
+    )
+    completion_post = activation_config_schedule.find(
+        "new Handler(activity.getMainLooper()).post(", fresh_validation
+    )
+    if not (
+        0 <= settle_delay < background_submit < fresh_validation
+        < completion_post
+    ):
+        fail(
+            "persisted config is not freshly reread off-thread after the full "
+            "activation settle window"
+        )
+    transfer_guard_start = module.find(
+        "private static boolean transferDeferredSpreadTurnToActivation("
+    )
+    validate_guard_start = module.find(
+        "private static DeferredConfigValidation validateDeferredConfig(",
+        transfer_guard_start,
+    )
+    if transfer_guard_start < 0 or validate_guard_start < 0:
+        fail("could not isolate deferred observer ownership transfer")
+    transfer_guard = module[transfer_guard_start:validate_guard_start]
+    if "releaseDeferredConfigWatch(" in transfer_guard:
+        fail("shared config-watch guard is released during activation transfer")
+    observer_event_start = module.find(
+        "private static void handleDeferredConfigWatchEvent("
+    )
+    observer_event_end = module.find(
+        "private static void releaseDeferredConfigWatch(", observer_event_start
+    )
+    if observer_event_start < 0 or observer_event_end < 0:
+        fail("could not isolate activation-lifetime config observer callback")
+    require_markers(
+        module[observer_event_start:observer_event_end],
+        (
+            "deferred.persistedConfigWatch != watch",
+            "transaction.persistedConfigGeneration == generation",
+            '"persisted_config_changed_during_activation"',
+            "abortPageActivationTransaction(",
+        ),
+        "multiplexed late persisted-config change abort",
+    )
+    persisted_watch_start = module.find(
+        "private static boolean ensurePersistedConfigWatch("
+    )
+    persisted_watch_end = module.find(
+        "private static void applyPersistedConfigWatchChange(",
+        persisted_watch_start,
+    )
+    if persisted_watch_start < 0 or persisted_watch_end < 0:
+        fail("could not isolate authoritative persisted-config observer")
+    persisted_watch_method = module[persisted_watch_start:persisted_watch_end]
+    watch_generation = persisted_watch_method.find(
+        "generation = watch.generation.incrementAndGet()"
+    )
+    activation_multiplex = persisted_watch_method.find(
+        "handleDeferredConfigWatchEvent(", watch_generation
+    )
+    if not (0 <= watch_generation < activation_multiplex):
+        fail(
+            "authoritative persisted-config observer does not multiplex its "
+            "generation into activation validation"
+        )
     require_markers(
         persisted_config_method,
         (
-            "Os.stat(document.getAbsolutePath())",
-            "config.markerIdentity.sameAs(FileIdentity.capture(marker))",
-            "config.backupIdentity.sameAs(",
-            "config.snapshotIdentity.sameAs(",
+            "config != null && config.enabled && config.editable",
+            "nativeBridgeLoaded && nativeHookReady",
+            "persistedSpreadConfigIdentityCurrent(config)",
         ),
         "persisted deferred-config identity validation",
     )
+    recovery_call = deferred_retry_method.find(
+        "runFailedRollbackNavigationRecovery("
+    )
+    snapshot_gate = deferred_retry_method.find(
+        "PenInputSnapshot deferredSnapshot =", recovery_call
+    )
+    if not 0 <= recovery_call < snapshot_gate:
+        fail(
+            "rollback-exhaustion navigation still waits on missing pen geometry "
+            "instead of using its fail-closed recovery path"
+        )
+    recovery_start = module.find(
+        "private static boolean runFailedRollbackNavigationRecovery("
+    )
+    recovery_end = module.find(
+        "private static boolean handleRtlSpreadTurn(", recovery_start
+    )
+    if recovery_start < 0:
+        fail("could not isolate exhausted-rollback navigation recovery")
+    if recovery_end < 0:
+        recovery_end = len(module)
+    recovery_method = module[recovery_start:recovery_end]
+    require_markers(
+        recovery_method,
+        (
+            "persistedValidation.isCurrent(deferred)",
+            "PAGE_ACTIVATION_OWNERSHIP_LOCK",
+            "PAGE_ACTIVATION_ROLLBACK_RECOVERIES.get(activity)",
+            "PEN_CONTACT_START_PAGES.get(activity)",
+            "ACTIVE_FINGER_TOUCH_STREAMS.get(activity)",
+            "pageSaveInFlightCountLocked(activity)",
+            '"disableHandWrite"',
+            "invalidatePenInputGeometrySnapshot(",
+            "transferDeferredSpreadTurnToActivation(",
+            '"loadPage"',
+            "releaseDeferredConfigWatch(deferred)",
+            '"page_activation_rollback_navigation_load_requested id="',
+        ),
+        "persistently validated fail-closed rollback navigation recovery",
+    )
+    if "PAGE_ACTIVATION_ROLLBACK_RECOVERIES.remove(" in recovery_method:
+        fail(
+            "failed-rollback navigation releases ownership when loadPage returns "
+            "instead of waiting for reader/presenter convergence"
+        )
     spread_config_class_start = module.find(
         "private static final class SpreadConfig"
     )
@@ -2422,6 +6179,332 @@ def check(repo_root: Path) -> None:
         ),
         "complete persisted negative-state equality",
     )
+    config_cache_start = module.find(
+        "private static SpreadConfig cacheSpreadConfig("
+    )
+    pen_snapshot_start = module.find(
+        "private static void publishPendingPenInputSnapshot(",
+        config_cache_start,
+    )
+    if config_cache_start < 0 or pen_snapshot_start < 0:
+        fail("could not isolate always-on persisted-config watcher")
+    config_watch_source = module[config_cache_start:pen_snapshot_start]
+    config_watch = mask_comments_preserve_literals(config_watch_source)
+    require_markers(
+        config_watch,
+        (
+            "ensurePersistedConfigWatch(activity, config)",
+            "spread_config_fail_closed reason=watch_unavailable_or_stale",
+            "spread_config_fail_closed reason=watch_changed_during_publish",
+            "NAVIGATION_FAIL_CLOSED_DOCUMENTS",
+            "private static boolean ensurePersistedConfigWatch(",
+            "PERSISTED_CONFIG_WATCHES.get(activity)",
+            "new FileObserver(watch.directoryPath, mask)",
+            "watch.generation.incrementAndGet()",
+            "observer.startWatching()",
+            "persistedSpreadConfigIdentityCurrent(config)",
+            "generationBefore != watch.generation.get()",
+            "persisted_config_watch_stale_at_start",
+            "rebindRollbackRecoveryToValidatedConfigLocked(",
+            "private static boolean rebindRollbackRecoveryToValidatedConfigLocked(",
+            "PAGE_ACTIVATION_ROLLBACK_RECOVERIES.put(activity, config)",
+            "PEN_INPUT_SNAPSHOTS.remove(activity)",
+            "updateNativeEraserGate(",
+            "applyPersistedConfigWatchChange(",
+            "PenContactOwnership contact =",
+            "contact.phase = PEN_CONTACT_PHASE_EXPIRED;",
+            "PEN_RECEIVE_EXPIRED_GENERATIONS.put(",
+            "contactActive = false;",
+            "PAGE_ACTIVATION_TRANSACTIONS.get(activity) != null",
+            "SPREAD_CONFIGS.remove(activity)",
+            "PROTECTED_VERIFICATIONS.remove(activity)",
+            '"SN_SPREAD_PROBE " + reason',
+            'XposedHelpers.callMethod(viewModel, "reloadPage")',
+            "private static void stopPersistedConfigWatch(",
+        ),
+        "always-on fail-closed persisted-config invalidation",
+    )
+    cache_publish_end = config_watch.find(
+        "private static boolean rebindRollbackRecoveryToValidatedConfigLocked("
+    )
+    ensure_watch_start = config_watch.find(
+        "private static boolean ensurePersistedConfigWatch("
+    )
+    if cache_publish_end < 0 or ensure_watch_start < 0:
+        fail("could not isolate calibration watcher cleanup")
+    cache_method = config_watch[:cache_publish_end]
+    ensure_watch_method = config_watch[ensure_watch_start:]
+    cache_non_null = cache_method.find("if (config != null) {")
+    cache_ensure = cache_method.find(
+        "ensurePersistedConfigWatch(activity, config)", cache_non_null
+    )
+    if not 0 <= cache_non_null < cache_ensure:
+        fail("spread config can publish without establishing its watcher")
+    if "if (config != null && !config.calibration)" in cache_method:
+        fail("calibration config bypasses persisted watcher cleanup")
+    if "if (config.calibration)" in cache_method + ensure_watch_method:
+        fail("calibration config bypasses the authoritative persisted watcher")
+    require_markers(
+        module,
+        (
+            "private static boolean shouldSuppressFailClosedNavigation(",
+            "private static void clearFailClosedNavigation(",
+        ),
+        "watcher-failure navigation guard lifecycle",
+    )
+    if "Map<Activity, SpreadConfig> SPREAD_CONFIGS =\n        new ConcurrentHashMap<>()" not in module:
+        fail("observer-visible spread config publication is not thread-safe")
+    if (
+        "Map<Activity, String>\n        NAVIGATION_FAIL_CLOSED_DOCUMENTS = "
+        "new ConcurrentHashMap<>()"
+    ) not in module:
+        fail("watcher-failure navigation guard is not thread-safe")
+    if "SPREAD_CONFIGS.put(activity," in (
+        module[:config_cache_start] + module[pen_snapshot_start:]
+    ):
+        fail("spread configs can bypass watcher-backed cache publication")
+    unavailable_navigation_guard = config_watch.find(
+        "NAVIGATION_FAIL_CLOSED_DOCUMENTS.put("
+    )
+    unavailable_fail_closed = config_watch.find(
+        "SPREAD_CONFIGS.remove(activity);"
+    )
+    unavailable_withdraw = config_watch.find(
+        "withdrawFailClosedPenInputAuthorityLocked(",
+        unavailable_fail_closed,
+    )
+    unavailable_return = config_watch.find(
+        "return null;",
+        unavailable_withdraw,
+    )
+    cache_publish = config_watch.find(
+        "SPREAD_CONFIGS.put(activity, config);",
+        unavailable_return,
+    )
+    cache_generation_recheck = config_watch.find(
+        "watch.generation.get() != watchGeneration", cache_publish
+    )
+    changed_navigation_guard = config_watch.find(
+        "NAVIGATION_FAIL_CLOSED_DOCUMENTS.put(", cache_generation_recheck
+    )
+    changed_remove = config_watch.find(
+        "SPREAD_CONFIGS.remove(activity, config);",
+        changed_navigation_guard,
+    )
+    changed_withdraw = config_watch.find(
+        "withdrawFailClosedPenInputAuthorityLocked(",
+        changed_remove,
+    )
+    recovery_rebind = config_watch.find(
+        "rebindRollbackRecoveryToValidatedConfigLocked(", changed_withdraw
+    )
+    successful_navigation_release = config_watch.find(
+        "clearFailClosedNavigation(", recovery_rebind
+    )
+    changed_return = config_watch.find(
+        "return null;", successful_navigation_release
+    )
+    if not (
+        0 <= unavailable_navigation_guard < unavailable_fail_closed
+        < unavailable_withdraw
+        < unavailable_return < cache_publish < cache_generation_recheck
+        < changed_navigation_guard < changed_remove
+        < changed_withdraw < recovery_rebind < successful_navigation_release
+        < changed_return
+    ):
+        fail(
+            "spread config publication is not fenced by watcher generation "
+            "without caching temporary fail-closed state"
+        )
+    if "SPREAD_CONFIGS.put(activity, published)" in config_watch:
+        fail("temporary fail-closed spread config can become a sticky cache entry")
+    rebind_helper_start = config_watch.find(
+        "private static boolean rebindRollbackRecoveryToValidatedConfigLocked("
+    )
+    rebind_helper_end = config_watch.find(
+        "private static void withdrawFailClosedPenInputAuthority(",
+        rebind_helper_start,
+    )
+    if rebind_helper_start < 0 or rebind_helper_end < 0:
+        fail("could not isolate validated rollback-recovery config rebinding")
+    require_markers(
+        config_watch[rebind_helper_start:rebind_helper_end],
+        (
+            "SPREAD_CONFIGS.get(activity) != config",
+            "PAGE_ACTIVATION_ROLLBACK_RECOVERIES.get(activity)",
+            "recovery == null || recovery == config",
+            "recovery.sameDocumentIdentity(config)",
+            '"page_activation_rollback_recovery_rebind_rejected"',
+            "PAGE_ACTIVATION_ROLLBACK_RECOVERIES.put(activity, config)",
+            "PAGE_ACTIVATION_ROLLBACK_RECOVERIES.get(activity) != config",
+            "PEN_INPUT_EDITABLE_GUARDS.put(activity, Boolean.TRUE)",
+            '"page_activation_rollback_recovery_rebound path="',
+        ),
+        "validated rollback-recovery config rebinding",
+    )
+    if "failClosedSpreadConfig(" in module:
+        fail("watcher failure still publishes a consumable default config")
+    require_markers(
+        config_watch,
+        (
+            "private static void withdrawFailClosedPenInputAuthority(",
+            "withdrawFailClosedPenInputAuthorityLocked(activity, reason)",
+            "private static void withdrawFailClosedPenInputAuthorityLocked(",
+            "PEN_INPUT_SNAPSHOTS.remove(activity)",
+            "DOCUMENT_RECEIVE_IDENTITIES.remove(activity)",
+            "PEN_INPUT_EDITABLE_GUARDS.put(activity, Boolean.TRUE)",
+            "disableNativeGateForOwnershipHandoffLocked(reason)",
+        ),
+        "watcher-failure fail-closed pen-authority retention",
+    )
+    withdraw_start = config_watch.find(
+        "private static void withdrawFailClosedPenInputAuthority("
+    )
+    ensure_watch_start = config_watch.find(
+        "private static boolean ensurePersistedConfigWatch(", withdraw_start
+    )
+    if withdraw_start < 0 or ensure_watch_start < 0:
+        fail("could not isolate watcher-failure pen guard")
+    if "PEN_INPUT_EDITABLE_GUARDS.remove(activity)" in config_watch[
+        withdraw_start:ensure_watch_start
+    ]:
+        fail("watcher failure opens a null-snapshot pen-admission gap")
+    watch_event_start = config_watch.find(
+        "public void onEvent(int event, String path)"
+    )
+    watch_event_end = config_watch.find(
+        "watch.observer = observer;", watch_event_start
+    )
+    if watch_event_start < 0 or watch_event_end < 0:
+        fail("could not isolate persisted-config observer callback")
+    watch_event_source = config_watch_source[watch_event_start:watch_event_end]
+    watch_event = mask_cpp_comments_and_literals(watch_event_source)
+    if watch_event.count("final boolean contactActive;") != 1:
+        fail("persisted-config watcher contact authority is not final")
+    contact_active_writes = identifier_mutations(watch_event, "contactActive")
+    if (
+        len(contact_active_writes) != 2
+        or watch_event.count("contactActive = false;") != 2
+        or "contactActive = true" in watch_event
+    ):
+        fail("persisted-config watcher can republish active contact authority")
+    watch_ownership_fence = watch_event.find(
+        "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)"
+    )
+    navigation_guard = watch_event.find(
+        "NAVIGATION_FAIL_CLOSED_DOCUMENTS.put(", watch_ownership_fence
+    )
+    config_remove = watch_event.find(
+        "SPREAD_CONFIGS.remove(activity)", navigation_guard
+    )
+    fail_closed_guard = watch_event.find(
+        "PEN_INPUT_EDITABLE_GUARDS.put(activity, Boolean.TRUE)",
+        config_remove,
+    )
+    contact_ownership = watch_event.find(
+        "PenContactOwnership contact =",
+        fail_closed_guard,
+    )
+    expire_contact = watch_event.find(
+        "contact.phase = PEN_CONTACT_PHASE_EXPIRED;", contact_ownership
+    )
+    publish_receive_tombstone = watch_event.find(
+        "PEN_RECEIVE_EXPIRED_GENERATIONS.put(", expire_contact
+    )
+    contact_inactive = watch_event.find(
+        "contactActive = false;", publish_receive_tombstone
+    )
+    snapshot_withdraw = watch_event.find(
+        "PEN_INPUT_SNAPSHOTS.remove(activity);", contact_inactive
+    )
+    retired_owner_match = re.search(
+        r"if\s*\(\s*retiredOwner\s*\)\s*\{\s*"
+        r"retirePersistedConfigWatch\s*\(\s*activity\s*,\s*watch\s*\)"
+        r"\s*;\s*return\s*;\s*\}",
+        watch_event[snapshot_withdraw:],
+        re.DOTALL,
+    )
+    retired_owner_guard = (
+        snapshot_withdraw + retired_owner_match.start()
+        if retired_owner_match is not None
+        else -1
+    )
+    retired_owner_return = (
+        snapshot_withdraw + retired_owner_match.end()
+        if retired_owner_match is not None
+        else -1
+    )
+    gate_guard_match = re.match(
+        r"\s*if\s*\(\s*!\s*contactActive\s*\)\s*\{\s*"
+        r"updateNativeEraserGate\s*\(\s*activity\s*,\s*"
+        r'"persisted_config_watch_event"\s*,\s*false\s*\)\s*;\s*\}',
+        mask_comments_preserve_literals(
+            watch_event_source[retired_owner_return:]
+        ),
+        re.DOTALL,
+    ) if retired_owner_return >= 0 else None
+    gate_before_post = retired_owner_return if gate_guard_match is not None else -1
+    gate_end = (
+        retired_owner_return + gate_guard_match.end()
+        if gate_guard_match is not None
+        else -1
+    )
+    callback_post = watch_event.find(
+        "new Handler(activity.getMainLooper()).post(", gate_end
+    )
+    pending_writer_disable = mask_comments_preserve_literals(
+        watch_event_source
+    ).find(
+        '"config reload pending"', callback_post
+    )
+    delayed_reload = watch_event.find(
+        "new Handler(activity.getMainLooper()).postDelayed(",
+        pending_writer_disable,
+    )
+    if not (
+        0 <= watch_ownership_fence < navigation_guard < config_remove
+        < fail_closed_guard
+        < contact_ownership < expire_contact < publish_receive_tombstone
+        < contact_inactive < snapshot_withdraw < retired_owner_guard
+        < retired_owner_return <= gate_before_post
+        < gate_end < callback_post < pending_writer_disable < delayed_reload
+    ):
+        fail(
+            "persisted config changes do not expire the contact, publish its "
+            "receive tombstone, withdraw the snapshot, reject a retired "
+            "owner, and disable native writer input before delayed validation"
+        )
+    if brace_depth_at(watch_event, contact_inactive) != 4:
+        fail(
+            "persisted-config watcher contact withdrawal is disabled or "
+            "nested under an additional condition"
+        )
+    if "PEN_INPUT_EDITABLE_GUARDS.remove(activity)" in watch_event:
+        fail("persisted config observer opens a stale-editable admission gap")
+    forbidden_watch_callback_work = [
+        marker
+        for marker in (
+            "Os.stat(",
+            "FileIdentity.capture(",
+            "FileInputStream",
+            "Properties",
+            "sha256(",
+            "spreadConfig(",
+            "getFilePageTrails",
+            "getCurPageTrails",
+        )
+        if marker in watch_event
+    ]
+    if forbidden_watch_callback_work:
+        fail(
+            "persisted-config FileObserver performs blocking validation work: "
+            f"{forbidden_watch_callback_work}"
+        )
+    if "stopPersistedConfigWatch(activity);" not in module[
+        module.find("private static void releaseActivityResources("):
+        module.find("private static int recycleRemovedBitmap(")
+    ]:
+        fail("activity teardown leaks its persisted-config observer")
     ui_blocking_config_hits = [
         marker for marker in (
             "Os.stat(",
@@ -2438,7 +6521,9 @@ def check(repo_root: Path) -> None:
             "deferred UI retry performs persisted-config I/O instead of using "
             f"the worker result: {ui_blocking_config_hits}"
         )
-    editable_turn = rtl_turn.find("if (config != null && config.editable)")
+    editable_turn = rtl_turn.find(
+        "if (isCachedEditableSpreadLandscape(activity, config))"
+    )
     turn_started = rtl_turn.find(
         "boolean started = beginPageActivationTransaction(",
         editable_turn,
@@ -2573,7 +6658,7 @@ def check(repo_root: Path) -> None:
         queued_transaction,
     )
     queued_chrome = handle_pen.find(
-        "isNativeChromeTouch(activity, requestedY)",
+        "inputSnapshot.isNativeChromeTouch(requestedY)",
         queued_snapshot_validation,
     )
     if not (
@@ -2593,7 +6678,7 @@ def check(repo_root: Path) -> None:
         synchronous_missing_snapshot,
     )
     synchronous_chrome = intercept_pen.find(
-        "if (isNativeChromeTouch(activity, y))",
+        "if (inputSnapshot.isNativeChromeTouch(y))",
         synchronous_pending_geometry,
     )
     if not (
@@ -2686,7 +6771,7 @@ def check(repo_root: Path) -> None:
         source_reader_check,
     )
     finish_verified_rollback = commit_transaction.find(
-        "finishPageActivationRollback(",
+        "return finishPageActivationRollback(",
         source_presenter_check,
     )
     target_identity_check = commit_transaction.find(
@@ -2701,126 +6786,25 @@ def check(repo_root: Path) -> None:
             "rollback guard is not released only after reader and presenter "
             "reconverge on the source page"
         )
-
-    receive_hook_start = module.find(
-        '"receiveTrials",',
-        module.find("pen_activation_native_save_bypassed"),
+    compose_start = module.find("private static boolean compose(")
+    compose_end = module.find(
+        "private static void reapplyCanonicalCommittedInk(", compose_start
     )
-    receive_hook_end = module.find(
-        '"areaSelectionTransition",',
-        receive_hook_start,
+    if compose_start < 0 or compose_end < 0:
+        fail("could not isolate rollback geometry re-publication")
+    compose_method = module[compose_start:compose_end]
+    rollback_commit = compose_method.find("commitPageActivationGeometry(")
+    ready_snapshot = compose_method.find(
+        "PenInputSnapshot readySnapshot =", rollback_commit
     )
-    if receive_hook_start < 0 or receive_hook_end < 0:
-        fail("could not isolate inactive-page receiveTrials completion hook")
-    receive_hook = module[receive_hook_start:receive_hook_end]
-    receive_activity = receive_hook.find("Activity activity = activeActivity;")
-    receive_contact_cleanup = receive_hook.find(
-        "clearPenContactStartPage(", receive_activity
+    ready_publish = compose_method.find(
+        "publishPenInputSnapshot(activity, readySnapshot)", ready_snapshot
     )
-    receive_blocked_branch = receive_hook.find(
-        "if (activationGestureBlocked)", receive_contact_cleanup
-    )
-    if not (
-        0 <= receive_activity < receive_contact_cleanup
-        < receive_blocked_branch
-    ):
+    if not 0 <= rollback_commit < ready_snapshot < ready_publish:
         fail(
-            "receiveTrials completion does not clear the active-stroke "
-            "start-page guard before either completion path returns"
+            "verified source rollback cannot flow through the same compose pass "
+            "to a ready pen-input snapshot"
         )
-    persist_before_completion = receive_hook.find(
-        "persistPendingPenActivationTrails("
-    )
-    post_completion = receive_hook.find("activity.runOnUiThread(")
-    completion_guard = receive_hook.find(
-        "completePendingPenPageActivation("
-    )
-    if not (
-        0 <= persist_before_completion < post_completion < completion_guard
-    ):
-        fail(
-            "receiveTrials must persist inactive-page edits before posting "
-            "the fail-closed activation completion"
-        )
-
-    save_hook_start = module.find('"saveTrails",')
-    save_hook_end = module.find('"receiveTrials",', save_hook_start)
-    if save_hook_start < 0 or save_hook_end < 0:
-        fail("could not isolate inactive-page saveTrails hook")
-    save_hook = module[save_hook_start:save_hook_end]
-    explicit_save_guard = save_hook.find(
-        "boolean explicitCanonicalSave = Boolean.TRUE.equals("
-    )
-    stale_save_guard = save_hook.find(
-        "boolean staleActivationSave = activity != null"
-    )
-    stale_scope_check = save_hook.find(
-        "PEN_ACTIVATION_STALE_SAVE_SCOPE.get()",
-        stale_save_guard,
-    )
-    post_persist_bypass = save_hook.find(
-        "if (staleActivationSave && !explicitCanonicalSave)"
-    )
-    bypass_consumption = save_hook.find(
-        "PEN_ACTIVATION_STALE_SAVE_PENDING.remove(activity)",
-        post_persist_bypass,
-    )
-    explicit_save_preserved = save_hook.find(
-        "pen_activation_stale_save_preserved"
-    )
-    pending_capture = save_hook.find(
-        "List<Object> captured = activity == null"
-    )
-    if not (
-        0 <= explicit_save_guard < stale_save_guard < stale_scope_check
-        < post_persist_bypass
-        < bypass_consumption < explicit_save_preserved < pending_capture
-    ):
-        fail(
-            "only the deferred loadPage stale save may consume the inactive-"
-            "eraser guard; explicit canonical and ordinary saves must remain "
-            "outside that scope"
-        )
-
-    persist_start = module.find(
-        "private static void persistPendingPenActivationTrails("
-    )
-    match_start = module.find(
-        "private static boolean matchingTrailExists(", persist_start
-    )
-    if persist_start < 0 or match_start < 0:
-        fail("could not isolate inactive-page persistence")
-    persist_method = module[persist_start:match_start]
-    require_markers(
-        persist_method,
-        (
-            "armPostActivationSaveBypass && erased > 0",
-            "PEN_ACTIVATION_STALE_SAVE_PENDING.put(",
-            "Boolean.TRUE",
-            '" scope=deferred_load_page"',
-        ),
-        "inactive-page eraser stale-save guard",
-    )
-    if "POST_ACTIVATION_SAVE_BYPASS_MS" in module:
-        fail("inactive-page eraser still uses a broad time-window save bypass")
-
-    require_markers(
-        module,
-        (
-            "private static final class PageEditHistory",
-            "registerPendingPageEditHistory(",
-            "applyPageEditHistory(",
-            'getDeclaredField("isTrail")',
-            "isTrailField.setBoolean(action, false)",
-            'XposedHelpers.callMethod(stack, "appendTrail")',
-            'String listField = undo ? "undoList" : "redoList"',
-            'XposedHelpers.callMethod(stack, actionName)',
-            '"modifyPageTrailsFromFile"',
-            'new ArrayList<>(snapshot)',
-            '"loadHandWrite"',
-        ),
-        "inactive-page native undo and redo integration",
-    )
 
     require_markers(
         module,
@@ -2893,72 +6877,6 @@ def check(repo_root: Path) -> None:
     if not 0 <= replacement_guard < clear_slot < draw_active:
         fail("normal pen commits can still clear previously settled active-page ink")
 
-    trail_match_start = module.find("private static boolean matchingTrailExists(")
-    eraser_match_start = module.find(
-        "private static boolean eraserIntersectsTrail(", trail_match_start
-    )
-    if trail_match_start < 0 or eraser_match_start < 0:
-        fail("could not isolate inactive-page trail deduplication")
-    trail_match = module[trail_match_start:eraser_match_start]
-    require_markers(
-        trail_match,
-        (
-            "for (int index = 0; index < existing.size(); index++)",
-            "matchingTrailPoints(points, candidatePoints, 6)",
-            "matchingTrailInkAttributes(existing, candidate)",
-            '"get_pen_color"',
-            '"get_m_thickness"',
-            '"get_walcom_emr_type"',
-            '"get_pressures"',
-            '"get_angles"',
-            '"get_flag_draw"',
-            '"get_timestamp"',
-        ),
-        "full inactive-page stroke identity",
-    )
-    if "candidateFirst" in trail_match or "candidateLast" in trail_match:
-        fail("inactive-page deduplication still accepts endpoint-only identity")
-
-    completion_start = module.find(
-        "private static void completePendingPenPageActivation("
-    )
-    capture_start = module.find(
-        "private static void capturePendingPenActivationTrails(",
-        completion_start,
-    )
-    if completion_start < 0 or capture_start < 0:
-        fail("could not isolate inactive-page completion handling")
-    completion = module[completion_start:capture_start]
-    failure_guard = completion.find("hasPendingPenActivationEdits(activity)")
-    abort_activation = completion.find(
-        'cancelPendingPenPageActivation(activity, "persistence_failed")',
-        failure_guard,
-    )
-    load_target = completion.find('"loadPage"', abort_activation)
-    if not 0 <= failure_guard < abort_activation < load_target:
-        fail("failed inactive-page persistence can still activate the target page")
-    if "PEN_ACTIVATION_TRAILS.remove(activity)" in completion:
-        fail("completion cleanup still silently discards failed inactive-page edits")
-    stale_scope_set = completion.find(
-        "PEN_ACTIVATION_STALE_SAVE_SCOPE.set(Boolean.TRUE)"
-    )
-    stale_scope_remove = completion.find(
-        "PEN_ACTIVATION_STALE_SAVE_SCOPE.remove()",
-        load_target,
-    )
-    stale_guard_cleanup = completion.find(
-        "PEN_ACTIVATION_STALE_SAVE_PENDING.remove(activity)",
-        stale_scope_remove,
-    )
-    if not (
-        0 <= stale_scope_set < load_target < stale_scope_remove
-        < stale_guard_cleanup
-    ):
-        fail(
-            "inactive-page stale-save suppression must be scoped exactly "
-            "around the deferred loadPage call"
-        )
-
     require_markers(
         module,
         (
@@ -3002,7 +6920,7 @@ def check(repo_root: Path) -> None:
             "TRACE_CONTROL_ACTION",
             "TRACE_CONTROL_PERMISSION",
             '"android.permission.DUMP"',
-            "registerTraceControlReceiver(activeActivity)",
+            "registerTraceControlReceiver(createdActivity)",
             '"trace_session_started"',
             '"pen_contact_started"',
             '"annotation_boundary"',
@@ -3010,7 +6928,8 @@ def check(repo_root: Path) -> None:
             '"save_trails_after"',
             '"receive_trials_before"',
             '"receive_trials_after"',
-            '"modify_page_trails_started"',
+            '"modify_page_trails"',
+            "beginTraceMutationAdmission(",
             '"modify_page_trails_finished"',
             '"mark_snapshot"',
             '"orderedFingerprint"',
@@ -3039,6 +6958,8 @@ def check(repo_root: Path) -> None:
     mark_observer = module[observer_start:touch_trace_start]
     if "scheduleTraceMarkSnapshot(" not in mark_observer:
         fail("mark observer does not use the serialized snapshot worker")
+    if "session.markGeneration.incrementAndGet()" not in mark_observer:
+        fail("mark observer does not fence final trace source generations")
     if "Looper.getMainLooper()" in mark_observer:
         fail("mark observer still posts snapshot hashing onto the UI thread")
 
@@ -3051,12 +6972,22 @@ def check(repo_root: Path) -> None:
     require_markers(
         module[trace_start:checkpoint_start],
         (
+            "boolean activePointerAttempted = false;",
+            "writeNewTracePointer(existingActive, sessionId)",
+            "FileIdentity activePointerIdentity =",
+            "tracePointerMatchesSession(",
+            "existingActive,",
+            "activePointerIdentity",
             "failedObserver.stopWatching()",
+            "started.mutationAdmissionClosed = true",
             "started.pendingSnapshot.cancel(false)",
             "started.snapshotExecutor.shutdownNow()",
             "started.eventExecutor.shutdownNow()",
-            'new File(\n                        started.rootDirectory,\n                        "active.txt"',
-            "active.isFile() && !active.delete()",
+            "if (activePointerAttempted)",
+            "preserveTraceStartupFailure(started, throwable)",
+            "ensureExactTracePointer(",
+            'new File(root, "incomplete.txt")',
+            'new File(root, "publication-failed.txt")',
         ),
         "failed trace startup cleanup",
     )
@@ -3073,31 +7004,254 @@ def check(repo_root: Path) -> None:
     finish_trace = module[finish_start:observer_start]
     if module.count('"last.txt"') != 1:
         fail("last.txt must be published only by completed trace finalization")
-    publish_last = finish_trace.find(
-        'new File(session.rootDirectory, "last.txt")'
-    )
-    cleanup_finally = finish_trace.find("} finally {", publish_last)
-    remove_active = finish_trace.find(
-        "if (active.isFile() && !active.delete())", cleanup_finally
-    )
-    if not 0 <= publish_last < cleanup_finally < remove_active:
-        fail("last.txt is not published before active.txt is removed")
     require_markers(
         finish_trace,
         (
             "boolean requestedCompleted",
-            "boolean eventLogComplete = drainTraceEventWriter(session)",
-            "boolean completed = requestedCompleted && eventLogComplete",
-            'new File(\n                    session.rootDirectory,\n                    "incomplete.txt"',
-            "if (completed)",
-            "if (incomplete.isFile() && !incomplete.delete())",
-            "writeTraceText(incomplete, session.id",
+            "boolean mutationAdmissionsDrained =",
+            "awaitTraceMutationAdmissions(session)",
+            "boolean eventAdmissionsDrained = awaitTraceEventAdmissions(session)",
+            "boolean eventWriterDrained = drainTraceEventWriter(session)",
+            "boolean eventLogComplete = eventAdmissionsDrained",
+            "session.finalPenInputMutationGeneration",
+            "session.penInputMutationGeneration.get()",
+            "boolean completed = requestedCompleted",
+            "File active = new File(",
+            "File incomplete = new File(",
+            'new File(session.rootDirectory, "last.txt")',
+            "if (!completed)",
+            "ensureExactTracePointer(incomplete, session.id)",
             '"publication-failed.txt"',
             "preserveTracePublicationFailure(",
-            "} finally {",
+            "session.mutationAdmissionSealed = true",
+            "validateCompletedTracePointerForCommit(",
+            "Os.rename(activePath, lastPath)",
+            "if (publicationFailure == null && !completed",
+            "tracePointerMatchesSession(",
+            "session.activePointerIdentity",
         ),
         "completed-versus-incomplete trace pointer publication",
     )
+    writer_drain = finish_trace.find("drainTraceEventWriter(session)")
+    prepublication_source_check = finish_trace.find(
+        "isTraceFinalSourceCurrent(session)", writer_drain
+    )
+    initial_incomplete = finish_trace.find(
+        "ensureExactTracePointer(incomplete, session.id)",
+        prepublication_source_check,
+    )
+    stop_observer = finish_trace.find(
+        "stopTraceMarkObserver(session)", initial_incomplete
+    )
+    post_cleanup_source_check = finish_trace.find(
+        "isTraceFinalSourceCurrent(session)", stop_observer
+    )
+    completed_pointer_guard = finish_trace.find(
+        "if (publicationFailure == null && completed)",
+        post_cleanup_source_check,
+    )
+    incomplete_absence_guard = finish_trace.find(
+        "traceGuardNodeExists(incomplete)",
+        completed_pointer_guard,
+    )
+    final_input_lock = finish_trace.find(
+        "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+        incomplete_absence_guard,
+    )
+    final_admission_close = finish_trace.find(
+        "session.penInputAdmissionClosed = true", final_input_lock
+    )
+    final_input_check = finish_trace.find(
+        "isTraceInputQuiescent(activity)", final_admission_close
+    )
+    final_generation_check = finish_trace.find(
+        "session.penInputMutationGeneration.get()", final_input_check
+    )
+    final_reject_incomplete = finish_trace.find(
+        "ensureExactTracePointer(incomplete, session.id)",
+        final_generation_check,
+    )
+    mutation_lock = finish_trace.find(
+        "synchronized (TRACE_LOCK)", final_reject_incomplete
+    )
+    mutation_zero = finish_trace.find(
+        "session.mutationAdmissions.get() == 0", mutation_lock
+    )
+    mutation_not_late = finish_trace.find(
+        "!session.lateMutationObserved", mutation_zero
+    )
+    mutation_seal = finish_trace.find(
+        "session.mutationAdmissionSealed = true", mutation_not_late
+    )
+    final_snapshot_check = finish_trace.find(
+        "isTraceFinalSnapshotArtifactCurrent(session)", mutation_seal
+    )
+    pointer_validation = finish_trace.find(
+        "validateCompletedTracePointerForCommit(", final_snapshot_check
+    )
+    active_path = finish_trace.find(
+        "String activePath = active.getAbsolutePath()", pointer_validation
+    )
+    final_source_check = finish_trace.find(
+        "isTraceFinalSourceCurrent(session)", active_path
+    )
+    atomic_rename = finish_trace.find(
+        "Os.rename(activePath, lastPath)", final_source_check
+    )
+    retain_active_guard = finish_trace.find(
+        "if (publicationFailure == null && !completed", atomic_rename
+    )
+    exact_active_guard = finish_trace.find(
+        "tracePointerMatchesSession(", retain_active_guard
+    )
+    if not (
+        0 <= writer_drain < prepublication_source_check
+        < initial_incomplete < stop_observer < post_cleanup_source_check
+        < completed_pointer_guard < incomplete_absence_guard < final_input_lock
+        < final_admission_close < final_input_check < final_generation_check
+        < final_reject_incomplete < mutation_lock < mutation_zero
+        < mutation_not_late < mutation_seal < final_snapshot_check
+        < pointer_validation
+        < active_path < final_source_check < atomic_rename
+        < retain_active_guard < exact_active_guard
+    ):
+        fail(
+            "trace completion publishes last.txt before its observer boundary, "
+            "incomplete cleanup, adjacent live-input/source revalidation, and "
+            "atomic terminal pointer commit are complete"
+        )
+    final_publication_fence = finish_trace[
+        final_input_lock:atomic_rename
+    ]
+    require_markers(
+        final_publication_fence,
+        (
+            "isTraceInputQuiescent(activity)",
+            "session.penInputAdmissionClosed = true",
+            "session.penInputMutationGeneration.get()",
+            "!= expectedPenInputGeneration",
+            "completed = false;",
+            "ensureExactTracePointer(incomplete, session.id)",
+            "session.mutationAdmissions.get() == 0",
+            "!session.lateMutationObserved",
+            "session.mutationAdmissionSealed = true",
+            "isTraceFinalSnapshotArtifactCurrent(session)",
+            "validateCompletedTracePointerForCommit(",
+            "isTraceFinalSourceCurrent(session)",
+            "} else {",
+        ),
+        "post-cleanup trace source/input publication fence",
+    )
+    if (
+        "writeTraceText(last, session.id" in finish_trace
+        or "writeTraceText(incomplete" in finish_trace
+        or "incomplete.delete()" in finish_trace
+        or "active.delete()" in finish_trace
+        or "publishCompletedTracePointerAtomically(" in finish_trace
+        or "last.delete()" in finish_trace
+        or "appendAcceptedTraceTerminalEvent(" in finish_trace
+        or '"trace_session_stopped"' in finish_trace
+    ):
+        fail("trace completion exposes or retracts an unaccepted last.txt")
+    require_markers(
+        finish_trace,
+        (
+            "validateCompletedTracePointerForCommit(",
+            "String activePath = active.getAbsolutePath()",
+            "String lastPath = last.getAbsolutePath()",
+            "Os.rename(activePath, lastPath)",
+        ),
+        "single-operation completed-trace terminal pointer commit",
+    )
+    pointer_commit_validator_start = module.find(
+        "private static void validateCompletedTracePointerForCommit("
+    )
+    pointer_commit_validator_end = module.find(
+        "private static void copyTraceFile(", pointer_commit_validator_start
+    )
+    if pointer_commit_validator_start < 0 or pointer_commit_validator_end < 0:
+        fail("could not isolate completed-trace pointer validator")
+    require_markers(
+        module[pointer_commit_validator_start:pointer_commit_validator_end],
+        (
+            "tracePointerMatchesSession(",
+            "active,",
+            "sessionId,",
+            "expectedActiveIdentity",
+            "active.getParentFile().equals(last.getParentFile())",
+            "FileIdentity immediatelyBeforeRename = FileIdentity.capture(active)",
+            "expectedActiveIdentity.sameAs(immediatelyBeforeRename)",
+        ),
+        "exact completed-trace pointer validation",
+    )
+    require_markers(
+        finish_trace,
+        (
+            "isTraceInputQuiescent(activity)",
+            "private static boolean isTraceLiveSourceCurrent(",
+            "private static boolean isTraceFinalSourceCurrent(",
+            "session.activity.get()",
+            "activeActivity != activity",
+            "session.documentPath",
+            "currentDocumentPath(activity)",
+            '"handWritePresenter"',
+            "session.markPath",
+            "liveMarkPath",
+            "session.finalSnapshotMarkGeneration",
+            "session.lastSnapshotIdentity.sameAs(current)",
+            "generationBefore == generationAfter",
+        ),
+        "final trace source/contact publication fence",
+    )
+    final_source_method_start = finish_trace.find(
+        "private static boolean isTraceFinalSourceCurrent("
+    )
+    final_source_method_end = finish_trace.find(
+        "private static HandshakeContext captureHandshakeContext(",
+        final_source_method_start,
+    )
+    if final_source_method_start < 0 or final_source_method_end < 0:
+        fail("could not isolate final trace live-source validation")
+    final_source_method = finish_trace[
+        final_source_method_start:final_source_method_end
+    ]
+    if final_source_method.count("isTraceLiveSourceCurrent(session)") < 2:
+        fail(
+            "trace completion does not revalidate the live activity, document, "
+            "and presenter mark source after copying its final source identity"
+        )
+    final_live_before = final_source_method.find(
+        "boolean liveSourceCurrentBefore ="
+    )
+    final_identity_capture = final_source_method.find(
+        "FileIdentity current = FileIdentity.capture(", final_live_before
+    )
+    final_live_after = final_source_method.find(
+        "boolean liveSourceCurrentAfter =", final_identity_capture
+    )
+    final_source_lock = final_source_method.find(
+        "synchronized (TRACE_LOCK)", final_live_after
+    )
+    if not (
+        0 <= final_live_before < final_identity_capture < final_live_after
+        < final_source_lock
+    ):
+        fail("final trace source identity is not captured outside TRACE_LOCK")
+    final_source_locked_body = final_source_method[final_source_lock:]
+    final_source_blocking_hits = [
+        marker for marker in (
+            "isTraceLiveSourceCurrent(",
+            "FileIdentity.capture(",
+            "currentDocumentPath(",
+            "XposedHelpers.",
+        )
+        if marker in final_source_locked_body
+    ]
+    if final_source_blocking_hits:
+        fail(
+            "final trace validation performs blocking source/filesystem work "
+            f"while holding TRACE_LOCK: {final_source_blocking_hits}"
+        )
     require_markers(
         finish_trace,
         (
@@ -3106,11 +7260,15 @@ def check(repo_root: Path) -> None:
             "session.eventExecutor.awaitTermination(",
             "session.eventWriteFailure",
             "private static void preserveTracePublicationFailure(",
-            "active.renameTo(failed)",
-            "writeTraceText(failed, session.id",
+            "ensureExactTracePointer(failed, session.id)",
+            "tracePointerMatchesSession(failed, session.id)",
+            '"publication-failure.txt"',
         ),
         "event-writer drain and explicit publication-failure state",
     )
+    if ("active.renameTo(failed)" in finish_trace
+        or "active.delete()" in finish_trace):
+        fail("trace publication failure can remove the active durable guard")
 
     stable_final_start = module.find(
         "private static boolean captureStableFinalTraceMarkSnapshot("
@@ -3141,12 +7299,20 @@ def check(repo_root: Path) -> None:
     published_source = snapshot_capture.find(
         "FileIdentity publishedSource = FileIdentity.capture(mark);"
     )
+    snapshot_before = snapshot_capture.find(
+        "FileIdentity snapshotBefore = FileIdentity.capture(snapshot);",
+        published_source,
+    )
     verify_snapshot = snapshot_capture.find(
-        "String publishedHash = sha256(snapshot);", published_source
+        "String publishedHash = sha256(snapshot);", snapshot_before
+    )
+    snapshot_after = snapshot_capture.find(
+        "FileIdentity snapshotAfter = FileIdentity.capture(snapshot);",
+        verify_snapshot,
     )
     verified_source = snapshot_capture.find(
         "FileIdentity verifiedSource = FileIdentity.capture(mark);",
-        verify_snapshot,
+        snapshot_after,
     )
     compare_verified = snapshot_capture.find(
         "!publishedSource.sameAs(verifiedSource)", verified_source
@@ -3162,20 +7328,31 @@ def check(repo_root: Path) -> None:
         "expected.lastSnapshotIdentity = acceptedSource;",
         compare_accepted,
     )
+    accepted_artifact = snapshot_capture.find(
+        "expected.lastSnapshotArtifactIdentity = snapshotAfter;",
+        accepted_state,
+    )
     snapshot_event = snapshot_capture.find(
-        '"mark_snapshot",', accepted_state
+        '"mark_snapshot",', accepted_artifact
     )
     if not (
-        0 <= published_source < verify_snapshot < verified_source
+        0 <= published_source < snapshot_before < verify_snapshot
+        < snapshot_after < verified_source
         < compare_verified < accepted_source < compare_accepted
-        < accepted_state < snapshot_event
+        < accepted_state < accepted_artifact < snapshot_event
     ):
         fail(
             "snapshot publication does not recheck the source after "
             "verifying the copied snapshot"
         )
+    initial_identity = snapshot_capture.find(
+        "FileIdentity initialIdentity = FileIdentity.capture(mark);"
+    )
+    missing_branch = snapshot_capture.find(
+        "if (initialIdentity.isMissing())", initial_identity
+    )
     missing_before = snapshot_capture.find(
-        "FileIdentity missingBefore = FileIdentity.capture(mark);"
+        "FileIdentity missingBefore = initialIdentity;", missing_branch
     )
     missing_after = snapshot_capture.find(
         "FileIdentity missingAfter = FileIdentity.capture(mark);",
@@ -3187,8 +7364,14 @@ def check(repo_root: Path) -> None:
     missing_accept = snapshot_capture.find(
         'expected.lastSnapshotHash = "missing";', missing_compare
     )
+    missing_source_identity = snapshot_capture.find(
+        "expected.lastSnapshotIdentity = missingAfter;", missing_accept
+    )
+    missing_artifact_identity = snapshot_capture.find(
+        "FileIdentity.missing();", missing_source_identity
+    )
     missing_event = snapshot_capture.find(
-        '"mark_snapshot",', missing_accept
+        '"mark_snapshot",', missing_artifact_identity
     )
     unchanged_branch = snapshot_capture.find("if (unchanged)")
     unchanged_verified = snapshot_capture.find(
@@ -3206,8 +7389,9 @@ def check(repo_root: Path) -> None:
         '"mark_snapshot_unchanged"', unchanged_accept
     )
     if not (
-        0 <= missing_before < missing_after < missing_compare
-        < missing_accept < missing_event
+        0 <= initial_identity < missing_branch < missing_before
+        < missing_after < missing_compare < missing_accept
+        < missing_source_identity < missing_artifact_identity < missing_event
         and 0 <= unchanged_branch < unchanged_verified
         < unchanged_compare < unchanged_accept < unchanged_event
     ):
@@ -3224,16 +7408,112 @@ def check(repo_root: Path) -> None:
     require_markers(
         stop_session,
         (
+            "awaitTraceMutationAdmissions(session)",
+            "finishTraceSession(session, activity, reason, false)",
             "captureStableFinalTraceMarkSnapshot(session)",
-            '"trace_session_incomplete"',
-            '"final_snapshot_unstable"',
-            "finishTraceSession(\n                                session,",
-            "false",
-            '"trace_session_stopped"',
-            "true",
+            "session.eventAdmissionClosed = true",
+            "awaitTraceEventAdmissions(session)",
+            "finishTraceSession(",
+            "stableFinalSnapshot",
         ),
         "stable snapshot requirement before completed trace publication",
     )
+    if (
+        "traceFinalEvent(" in stop_session
+        or '"trace_session_stopped"' in stop_session
+        or '"trace_session_incomplete"' in stop_session
+    ):
+        fail("trace stop emits a terminal result before final acceptance")
+    final_pen_generation_before = stop_session.find(
+        "session.penInputMutationGeneration.get()"
+    )
+    final_generation_before = stop_session.find(
+        "session.markGeneration.get()"
+    )
+    final_snapshot = stop_session.find(
+        "captureStableFinalTraceMarkSnapshot(session)", final_generation_before
+    )
+    final_generation_after = stop_session.find(
+        "session.markGeneration.get()", final_snapshot
+    )
+    final_generation_publish = stop_session.find(
+        "session.finalSnapshotMarkGeneration = generationAfter",
+        final_generation_after,
+    )
+    final_pen_generation_after = stop_session.find(
+        "session.penInputMutationGeneration.get()", final_generation_publish
+    )
+    final_pen_generation_publish = stop_session.find(
+        "session.finalPenInputMutationGeneration =",
+        final_pen_generation_after,
+    )
+    admission_close = stop_session.find(
+        "session.eventAdmissionClosed = true", final_pen_generation_publish
+    )
+    admission_drain = stop_session.find(
+        "awaitTraceEventAdmissions(session)", admission_close
+    )
+    finalization = stop_session.find("finishTraceSession(", admission_drain)
+    if not (
+        0 <= final_pen_generation_before < final_generation_before
+        < final_snapshot
+        < final_generation_after < final_generation_publish
+        < final_pen_generation_after < final_pen_generation_publish
+        < admission_close < admission_drain < finalization
+    ):
+        fail(
+            "trace stop does not admit and generation-fence its final snapshot "
+            "before closing ordinary admissions and finalizing the session"
+        )
+
+    if "appendAcceptedTraceTerminalEvent(" in module:
+        fail(
+            "trace event log still publishes a terminal outcome separately "
+            "from the atomic completion pointer"
+        )
+    if "traceFinalEvent(" in module:
+        fail("closed-admission terminal-event bypass still exists")
+    require_markers(
+        stop_session,
+        (
+            "String inputStateReason =",
+            "traceInputStateReason(activity)",
+            "inputStateReason == null",
+        ),
+        "explicit trace-stop input-state gate",
+    )
+    input_state_start = module.find(
+        "private static String tracePenContactStateReason("
+    )
+    final_source_start = module.find(
+        "private static boolean isTraceFinalSourceCurrent(", input_state_start
+    )
+    if input_state_start < 0 or final_source_start < 0:
+        fail("could not isolate trace input-state quiescence fence")
+    require_markers(
+        module[input_state_start:final_source_start],
+        (
+            "TRACE_LAST_PRESSURES.get(activity)",
+            "PEN_CONTACT_START_PAGES.get(activity)",
+            "String penContactState = tracePenContactStateReason(activity)",
+            "TRACE_TRANSACTION_IDS.get(activity)",
+            'return "native_trail_completion_pending"',
+            "PAGE_ACTIVATION_TRANSACTIONS.get(activity)",
+            "DEFERRED_SPREAD_TURNS.get(activity)",
+            "ACTIVATION_TOUCH_TARGETS.get(activity)",
+            "ACTIVE_FINGER_TOUCH_STREAMS.get(activity)",
+            'return "finger_touch_active"',
+        ),
+        "trace input and ownership quiescence fence",
+    )
+    if (
+        "Map<Activity, Integer> ACTIVATION_TOUCH_TARGETS =\n"
+        "        new ConcurrentHashMap<>()"
+    ) not in module:
+        fail(
+            "trace finalization reads activation-touch ownership from a "
+            "non-concurrent map"
+        )
 
     boundary_start = module.find(
         "private static void traceAnnotationBoundary("
@@ -3249,23 +7529,207 @@ def check(repo_root: Path) -> None:
         fail("annotation boundaries still hash the .mark file on the UI thread")
     if "scheduleTraceMarkSnapshot(" not in boundary:
         fail("annotation boundary snapshots do not use the background worker")
-    trail_capture = boundary.find(
-        "final TraceTrailListCapture fileTrails = captureTraceTrailList("
+    boundary_generation_capture = boundary.find(
+        "session.annotationBoundaryGeneration.incrementAndGet()"
     )
-    worker_submit = boundary.find("scheduleTraceWorkerTask(", trail_capture)
+    pre_boundary = boundary.find('boundary.endsWith("_before")')
+    pre_deferred = boundary.find(
+        '"annotation_boundary_deferred"', pre_boundary
+    )
+    pre_unavailable = boundary.find(
+        '"pre_operation_state_not_captured"', pre_deferred
+    )
+    captured_note = boundary.find(
+        "final Object capturedSuperNoteNote", pre_unavailable
+    )
+    captured_path = boundary.find(
+        "final String capturedMarkPath", captured_note
+    )
+    captured_page = boundary.find(
+        "final int capturedMarkPage", captured_path
+    )
+    worker_submit = boundary.find("scheduleTraceWorkerTask(")
     worker_run = boundary.find("public void run()", worker_submit)
-    trail_serialize = boundary.find("traceTrailList(fileTrails)", worker_run)
-    if not 0 <= trail_capture < worker_submit < worker_run < trail_serialize:
-        fail("annotation trail serialization is not confined to the trace worker")
+    generation_before = boundary.find(
+        "session.annotationBoundaryGeneration.get()",
+        worker_run,
+    )
+    pen_generation_before = boundary.find(
+        "long penInputGenerationBefore =", generation_before
+    )
+    pen_state_before = boundary.find(
+        "tracePenContactStateReason(activity)", pen_generation_before
+    )
+    source_before = boundary.find(
+        "traceAnnotationBoundaryPresenterCurrent(", pen_state_before
+    )
+    native_file_trails = boundary.find('"getFilePageTrails"', worker_run)
+    native_current_trails = boundary.find('"getCurPageTrails"', worker_run)
+    trail_capture = boundary.find("captureTraceTrailList(", native_current_trails)
+    pen_generation_after = boundary.find(
+        "long penInputGenerationAfter =", trail_capture
+    )
+    pen_state_after = boundary.find(
+        "tracePenContactStateReason(activity)", pen_generation_after
+    )
+    generation_after = boundary.find(
+        "session.annotationBoundaryGeneration.get()",
+        pen_state_after,
+    )
+    source_revalidation = boundary.find(
+        "traceAnnotationBoundaryPresenterCurrent(", trail_capture
+    )
+    boundary_hash = boundary.find(
+        "traceLastSnapshotHash(", source_revalidation
+    )
+    trail_serialize = boundary.find(
+        "traceTrailList(fileTrails)", boundary_hash
+    )
+    current_trail_serialize = boundary.find(
+        "traceTrailList(currentTrails)", trail_serialize
+    )
+    publication_identity = boundary.find(
+        "FileIdentity.capture(mark)", current_trail_serialize
+    )
+    publication_pen_generation = boundary.find(
+        "long publicationPenInputGeneration =", publication_identity
+    )
+    publication_pen_state = boundary.find(
+        "tracePenContactStateReason(activity)", publication_pen_generation
+    )
+    final_session_identity = boundary.find(
+        "traceSession != session", publication_pen_state
+    )
+    final_activity_identity = boundary.find(
+        "session.activity.get() != activity", final_session_identity
+    )
+    final_generation = boundary.find(
+        "session.annotationBoundaryGeneration.get()",
+        final_activity_identity,
+    )
+    final_file_identity = boundary.find(
+        "!markAfter.sameAs(publicationIdentity)", final_generation
+    )
+    final_presenter_identity = boundary.find(
+        "traceAnnotationBoundaryPresenterCurrent(", final_file_identity
+    )
+    final_publication = boundary.find(
+        '"annotation_boundary",', final_presenter_identity
+    )
+    if not (
+        0 <= boundary_generation_capture < pre_boundary < pre_deferred
+        < pre_unavailable < captured_note < captured_path < captured_page
+        < worker_submit < worker_run < generation_before
+        < pen_generation_before < pen_state_before < source_before
+        < native_file_trails < native_current_trails < trail_capture
+        < pen_generation_after < pen_state_after < generation_after
+        < source_revalidation < boundary_hash
+        < trail_serialize < current_trail_serialize < publication_identity
+        < publication_pen_generation < publication_pen_state
+        < final_session_identity < final_activity_identity < final_generation
+        < final_file_identity < final_presenter_identity < final_publication
+    ):
+        fail(
+            "annotation boundaries are not callback-versioned before worker "
+            "trail traversal, revalidation, and serialization"
+        )
+    boundary_caller = boundary[:worker_submit]
+    caller_boundary_blocking_hits = [
+        marker
+        for marker in (
+            '"getFilePageTrails"',
+            '"getCurPageTrails"',
+            "captureTraceTrailList(",
+            "new File(",
+            "FileIdentity.capture(",
+            "traceLastSnapshotHash(",
+        )
+        if marker in boundary_caller
+    ]
+    if caller_boundary_blocking_hits:
+        fail(
+            "annotation boundary performs native traversal or filesystem work "
+            "before worker admission: "
+            f"{caller_boundary_blocking_hits}"
+        )
     require_markers(
         boundary,
         (
-            "traceLastSnapshotHash(session, mark)",
+            "traceLastSnapshotHash(",
             '"trace_stop".equals(boundary)',
+            "capturedSuperNoteNote",
+            "capturedMarkPath",
+            "capturedMarkPage",
+            '"annotation_boundary_stale"',
+            '"source_identity_before"',
+            '"boundary_generation_before"',
+            '"boundary_generation_after"',
+            '"pen_contact_before"',
+            '"pen_input_generation_after"',
+            '"pen_contact_after"',
+            '"publication_revalidation"',
+            "markBefore.sameAs(markAfter)",
+            "markAfter.sameAs(publicationIdentity)",
+            "traceSession != session",
+            "session.activity.get() != activity",
+            "traceAnnotationBoundaryPresenterCurrent(",
             '"markSha256"',
             "markHash",
         ),
         "identity-aware annotation boundary hash and final boundary queueing",
+    )
+    for comparison in (
+        r"penInputGenerationBefore\s*!=\s*penInputGenerationAfter",
+        r"publicationPenInputGeneration\s*!=\s*penInputGenerationAfter",
+    ):
+        if re.search(comparison, boundary) is None:
+            fail("annotation boundary does not reject pen-generation drift")
+    delayed_source_reads = boundary[worker_run:native_file_trails]
+    for marker in (
+        'getObjectField(\n                                presenter,\n                                "markPath"',
+        'getIntField(\n                                presenter,\n                                "currentPage"',
+    ):
+        if marker in delayed_source_reads:
+            fail("annotation worker captures source identity after deferral")
+    if "final AtomicLong annotationBoundaryGeneration = new AtomicLong();" not in module:
+        fail("trace sessions do not version annotation callback boundaries")
+    if "final AtomicLong penInputMutationGeneration = new AtomicLong();" not in module:
+        fail("trace sessions do not version pen-input mutations")
+
+    pen_trace_start = module.find("private static void tracePenPosition(")
+    pen_left_start = module.find(
+        "private static void tracePenLeftScreen(", pen_trace_start
+    )
+    suppressed_contact_start = module.find(
+        "private static void finishTraceSuppressedPenContact(", pen_left_start
+    )
+    if min(pen_trace_start, pen_left_start, suppressed_contact_start) < 0:
+        fail("could not isolate trace pen-input generation updates")
+    pen_trace = module[pen_trace_start:pen_left_start]
+    pen_left_trace = module[pen_left_start:suppressed_contact_start]
+    require_markers(
+        pen_trace,
+        (
+            "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+            "expected.penInputAdmissionClosed",
+            "TRACE_LAST_PRESSURES.put(activity, pressure)",
+            "contactStarted = pressure > 0",
+            "contactEnded = pressure <= 0",
+            "expected.penInputMutationGeneration.incrementAndGet()",
+        ),
+        "nonblocking pen-input mutation generation",
+    )
+    require_markers(
+        pen_left_trace,
+        (
+            "final Integer previous;",
+            "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+            "expected.penInputAdmissionClosed",
+            "previous = TRACE_LAST_PRESSURES.remove(activity)",
+            "previous.intValue() > 0",
+            "expected.penInputMutationGeneration.incrementAndGet()",
+        ),
+        "pen-left-screen mutation generation",
     )
 
     trace_list_start = module.find(
@@ -3384,40 +7848,235 @@ def check(repo_root: Path) -> None:
         "trace-stop boundary worker admission",
     )
 
+    mutation_admission_start = module.find(
+        "private static TraceMutationAdmission beginTraceMutationAdmission("
+    )
+    mutation_admission_end = module.find(
+        "private static void preserveTraceStartupFailure(",
+        mutation_admission_start,
+    )
+    if mutation_admission_start < 0 or mutation_admission_end < 0:
+        fail("could not isolate trace mutation admission lifecycle")
+    mutation_admission = module[
+        mutation_admission_start:mutation_admission_end
+    ]
+    require_markers(
+        module,
+        (
+            "ThreadLocal<ArrayDeque<TraceMutationAdmission>>",
+            "TRACE_MUTATION_ADMISSION_SCOPES",
+            "private static final class TraceMutationAdmission",
+            "final AtomicInteger mutationAdmissions = new AtomicInteger()",
+            "volatile boolean mutationAdmissionClosed",
+            "volatile boolean mutationAdmissionSealed",
+            "volatile boolean lateMutationObserved",
+        ),
+        "trace mutation admission state",
+    )
+    require_markers(
+        mutation_admission,
+        (
+            "synchronized (TRACE_LOCK)",
+            "TRACE_MUTATION_ADMISSION_SCOPES.get()",
+            "if (scope.admitted && scope.session == expected)",
+            "if (expected.mutationAdmissionSealed)",
+            "if (expected.mutationAdmissionClosed && !inherited)",
+            "expected.lateMutationObserved = true",
+            "expected.mutationAdmissions.incrementAndGet()",
+            "private static void pushTraceMutationAdmission(",
+            "private static TraceMutationAdmission popTraceMutationAdmission()",
+            "private static void finishTraceMutationAdmission(",
+            ".decrementAndGet()",
+            "private static boolean awaitTraceMutationAdmissions(",
+            "session.mutationAdmissions.get() > 0",
+            "session.mutationAdmissions.get() == 0",
+        ),
+        "race-free nested trace mutation admission",
+    )
+    modify_hook_start = module.find('"modifyPageTrailsFromFile",')
+    modify_hook_end = module.find('"getRegionTrailRect",', modify_hook_start)
+    lasso_transition_start = module.find(
+        '"areaSelectionTransition",', receive_hook_end_transactional
+    )
+    lasso_rewrite_start = module.find(
+        '"reWriteTrails",', lasso_transition_start
+    )
+    lasso_rewrite_end = module.find("hooksReady = true;", lasso_rewrite_start)
+    document_reset_hook_start = module.find(
+        "private static void installDocumentIdentityAdmissionHook("
+    )
+    document_reset_hook_end = module.find(
+        "private static DocumentIdentityAdmission "
+        "invalidateDocumentIdentityAdmission(",
+        document_reset_hook_start,
+    )
+    if min(
+        modify_hook_start,
+        modify_hook_end,
+        lasso_transition_start,
+        lasso_rewrite_start,
+        lasso_rewrite_end,
+        document_reset_hook_start,
+        document_reset_hook_end,
+    ) < 0:
+        fail("could not isolate trace mutation hook coverage")
+    mutation_hook_slices = (
+        ("history", history_hook),
+        ("modify", module[modify_hook_start:modify_hook_end]),
+        ("save", transaction_save_hook),
+        ("receive", transaction_receive_hook),
+        (
+            "lasso transition",
+            module[lasso_transition_start:lasso_rewrite_start],
+        ),
+        ("lasso rewrite", module[lasso_rewrite_start:lasso_rewrite_end]),
+        (
+            "document identity reset",
+            module[document_reset_hook_start:document_reset_hook_end],
+        ),
+    )
+    for label, hook_slice in mutation_hook_slices:
+        begin = hook_slice.find("beginTraceMutationAdmission(")
+        push = hook_slice.find("pushTraceMutationAdmission(")
+        finish = hook_slice.find("finishTraceMutationAdmission(", push)
+        pop = hook_slice.find("popTraceMutationAdmission()", finish)
+        nested_admission = re.search(
+            r"pushTraceMutationAdmission\(\s*beginTraceMutationAdmission\(",
+            hook_slice,
+        )
+        explicit_admission = 0 <= begin < push
+        nested_admission_order = (
+            nested_admission is not None
+            and nested_admission.start() == push
+            and nested_admission.start() <= begin < nested_admission.end()
+        )
+        if not (
+            (explicit_admission or nested_admission_order)
+            and 0 <= begin < finish < pop
+            and 0 <= push < finish
+        ):
+            fail(f"{label} hook is not enclosed by trace mutation admission")
+    for label, hook_slice in (
+        ("modify", module[modify_hook_start:modify_hook_end]),
+        (
+            "lasso transition",
+            module[lasso_transition_start:lasso_rewrite_start],
+        ),
+        ("lasso rewrite", module[lasso_rewrite_start:lasso_rewrite_end]),
+    ):
+        require_markers(
+            hook_slice,
+            (
+                "documentMutationAuthorityCurrent(",
+                "reason=writer_authority_unavailable",
+            ),
+            f"{label} writer-authority rejection",
+        )
+
+    event_activity_start = module.find(
+        "private static void traceEvent(\n        Activity activity"
+    )
     event_start = module.find(
-        "private static void traceEvent(\n        TraceSession expected"
+        "private static void traceEvent(\n        TraceSession expected",
+        event_activity_start,
+    )
+    event_admission_start = module.find(
+        "private static boolean acquireTraceEventAdmission(",
+        event_start,
     )
     event_queue_start = module.find(
-        "private static void queueTraceEventRecord(", event_start
+        "private static void queueAdmittedTraceEventCapture(",
+        event_admission_start,
+    )
+    event_writer_start = module.find(
+        "private static void writeTraceEventCapture(", event_queue_start
     )
     trace_log_start = module.find(
-        "private static void traceLogMessage(", event_queue_start
+        "private static void traceLogMessage(", event_writer_start
     )
     trace_log_end = module.find(
         "private static int traceCurrentDocumentPage(", trace_log_start
     )
-    if min(event_start, event_queue_start, trace_log_start, trace_log_end) < 0:
+    if min(
+        event_activity_start,
+        event_start,
+        event_admission_start,
+        event_queue_start,
+        event_writer_start,
+        trace_log_start,
+        trace_log_end,
+    ) < 0:
         fail("could not isolate serialized trace-event writer")
-    event_capture = module[event_start:event_queue_start]
+    activity_event_capture = module[event_activity_start:event_start]
+    session_event_capture = module[event_start:event_admission_start]
+    for label, event_capture, admission_marker in (
+        ("activity", activity_event_capture,
+         "acquireTraceEventAdmission(expected)"),
+        ("session", session_event_capture,
+         "acquireTraceEventAdmission(expected)"),
+    ):
+        admission = event_capture.find(admission_marker)
+        immutable_capture = event_capture.find("new TraceEventCapture(")
+        order_token = event_capture.find(
+            "expected.eventOrder.incrementAndGet()", immutable_capture
+        )
+        release = event_capture.find(
+            "expected.eventAdmissions.decrementAndGet()",
+            order_token,
+        )
+        if not 0 <= admission < immutable_capture < order_token < release:
+            fail(
+                f"{label} trace event does not acquire admission before "
+                "immutable caller-side capture, reserve hook order, and "
+                "release it afterward"
+            )
+    event_admission = module[event_admission_start:event_queue_start]
     require_markers(
-        event_capture,
+        event_admission,
         (
-            'final String record = entry.toString() + "\\n"',
-            "queueTraceEventRecord(expected, event, record)",
+            "synchronized (TRACE_LOCK)",
+            "traceSession != expected",
+            "expected.eventAdmissionClosed",
+            "expected.eventAdmissions.incrementAndGet()",
         ),
-        "immutable trace-event capture",
+        "atomic pre-capture trace-event admission",
     )
-    if "appendTraceRecord(" in event_capture or "FileOutputStream" in event_capture:
-        fail("traceEvent still performs filesystem I/O on its caller thread")
+    caller_thread_trace_work = tuple(
+        marker for marker in (
+            "new JSONObject()",
+            "entry.toString()",
+            "appendTraceRecord(",
+            "FileOutputStream",
+        )
+        if marker in module[event_activity_start:event_queue_start]
+    )
+    if caller_thread_trace_work:
+        fail(
+            "traceEvent still performs JSON serialization or file "
+            f"I/O on its caller thread: {caller_thread_trace_work}"
+        )
     require_markers(
         module[event_queue_start:trace_log_start],
         (
             "expected.eventExecutor.execute(",
-            "appendTraceRecord(expected.eventFile, record)",
+            "acceptOrderedTraceEventCapture(expected, capture)",
+            "private static void acceptOrderedTraceEventCapture(",
+            "expected.pendingTraceEvents.put(capture.order, capture)",
+            "expected.nextTraceEventOrder",
+            "writeTraceEventCapture(expected, next)",
+            "private static void writeTraceEventCapture(",
+            "JSONObject entry = new JSONObject()",
+            'entry.put("seq", capture.order)',
+            "entry.toString()",
+            "appendTraceRecord(",
             "expected.eventWriteFailure",
         ),
-        "serialized background trace-event writer",
+        "admission-fenced serialized background trace-event writer",
     )
+    if "eventAdmissions.incrementAndGet()" in module[
+        event_queue_start:trace_log_start
+    ]:
+        fail("trace admission is acquired after immutable event capture")
     require_markers(
         module[trace_log_start:trace_log_end],
         ("traceEvent(expected, null, \"module_log\"",),
@@ -3427,9 +8086,39 @@ def check(repo_root: Path) -> None:
         module,
         (
             "final ScheduledExecutorService eventExecutor;",
+            "final AtomicInteger eventAdmissions = new AtomicInteger();",
+            "final AtomicLong eventOrder = new AtomicLong();",
+            "final TreeMap<Long, TraceEventCapture> pendingTraceEvents",
+            "long nextTraceEventOrder = 1L;",
+            "final long order;",
+            "expected.eventOrder.incrementAndGet()",
+            "volatile boolean eventAdmissionClosed;",
+            "volatile boolean penInputAdmissionClosed;",
+            "final AtomicLong penInputMutationGeneration = new AtomicLong();",
+            "volatile long finalPenInputMutationGeneration = -1L;",
             '"SNSpreadTraceEvent-" + id',
         ),
-        "per-session trace-event executor",
+        "hook-ordered per-session trace-event executor",
+    )
+
+    finish_trace_start = module.find("private static void finishTraceSession(")
+    drain_trace_start = module.find(
+        "private static boolean drainTraceEventWriter(", finish_trace_start
+    )
+    admission_drain_end = module.find(
+        "private static void preserveTracePublicationFailure(", drain_trace_start
+    )
+    if min(finish_trace_start, drain_trace_start, admission_drain_end) < 0:
+        fail("could not isolate trace-event admission shutdown")
+    require_markers(
+        module[finish_trace_start:admission_drain_end],
+        (
+            "session.eventAdmissionClosed = true",
+            "awaitTraceEventAdmissions(session)",
+            "session.eventAdmissions.get() > 0",
+            "drainTraceEventWriter(session)",
+        ),
+        "race-free trace-event admission shutdown",
     )
 
     require_markers(
@@ -3446,63 +8135,425 @@ def check(repo_root: Path) -> None:
             "Write-TraceSummary",
             "function Wait-TraceFinalization",
             "function Reconcile-AbandonedTracePointer",
+            "function Read-AbandonedRecoveryState",
+            "function Read-RemotePointer",
+            "function Assert-NoUnresolvedTraceFailure",
+            "function Assert-ValidTraceSession",
+            "function Read-LocalExpectedTraceSession",
+            "function Read-ExpectedTraceSession",
+            "function Publish-ExpectedTraceSession",
+            "function Clear-ExpectedTraceSession",
+            "function Clear-MatchingLocalExpectedTraceSession",
+            ".native-spread-expected-session.txt",
             "[string]$CurrentAction",
             "pidof '$documentPackage'",
-            "grep -Fqx '$session'",
-            "__TRACE_ABANDONED_REMOVED__",
+            '"$remoteRoot/.active-recovery"',
+            "__SNTRACE_RECOVERY_PRESENT__",
+            "__TRACE_POINTER_REPLACEMENT_RETAINED__",
+            "__TRACE_ABANDONED_ARCHIVED__",
+            "candidate_identity=`$(stat -c '%d:%i:%s:%Y:%Z'",
+            "claimed_identity=`$(stat -c '%d:%i:%s:%Y:%Z'",
+            "archived_identity=`$(stat -c '%d:%i:%s:%Y:%Z'",
             "$script:recoveredAbandonedTraceSession = $session",
-            "Status retained active.txt",
+            "active.txt was retained",
             "Reconcile-AbandonedTracePointer -CurrentAction $Action",
             "Stop did not pull the preceding completed session.",
             "Read-IncompleteTraceState",
             "Read-RemotePointer -Name incomplete",
-            "stable final annotation snapshot",
+            "could not obtain a stable final ",
+            "annotation snapshot; incomplete guard",
             "Read-PublicationFailedTraceState",
-            "Read-RemotePointer `\n                    -Name publication-failed",
-            "trustworthy completion pointer",
-            "__TRACE_FINALIZED__",
+            "Read-RemotePointer -Name publication-failed",
+            "Assert-NoUnresolvedTraceFailure -CurrentAction $Action",
+            "__SNTRACE_ABSENT__",
+            "__SNTRACE_PRESENT__",
+            "__SNTRACE_NOT_REGULAR__",
+            "__SNTRACE_MALFORMED__",
+            "[ ! -e '$pointer' ]",
+            "[ ! -f '$pointer' ]",
+            "Explicit operator recovery is required",
+            "function Read-TraceOwnerProcessId",
+            "function Read-DocumentProcessIds",
+            "function Read-GuardedActiveTraceSession",
+            "function Assert-CompletedTraceStillPullable",
+            '"$remoteRoot/.screenshots/$Session"',
+            "function Pull-StagedScreenshots",
+            '"$remoteFile.partial"',
+            "Trace bundle contains $parseErrors malformed JSON event",
+            "Trace bundle contains no JSON events",
+            "'.partial-' + $session + '-'",
             "Timed out waiting for trace",
         ),
         "Native Spread trace collection script",
     )
+    require_markers(
+        trace_helper_test,
+        (
+            "malformed-active-$action",
+            "malformed-incomplete-$action",
+            "malformed-publication-$action",
+            "space-padded-active-$action",
+            "multiline-last-$action",
+            "valid-incomplete-start",
+            "unreadable-publication-start",
+            "nonregular-active-status",
+            "unreadable-session-metadata-stop",
+            "malformed-session-metadata-stop",
+            "pidof-failure-stop",
+            "transport-failure-start",
+            "start-success-control",
+            "active-pointer-changed-checkpoint",
+            "unstable-active-pointer-status",
+            "stale-last-stop",
+            "abandoned-pointer-recovery-failure-stop",
+            "abandoned-pointer-replaced-during-claim-stop",
+            "abandoned-pointer-recovery-clears-matching-expected-stop",
+            "abandoned-pointer-recovery-retains-mismatched-expected-stop",
+            "retained-recovery-guard-$action",
+            "retained-recovery-guard-Status",
+            "replacement was retained inside the recovery guard",
+            "malformed JSON summary unexpectedly succeeded",
+            "valid JSON summary control did not publish its summary",
+            "'/last.txt'",
+            "'rm -f'",
+            "('pull' + $separator)",
+            "Native Spread trace helper fail-closed tests: PASS",
+        ),
+        "trace-helper failure-injection regression tests",
+    )
+    require_markers(
+        native_build,
+        (
+            "scripts\\test_trace_helper_fail_closed.ps1",
+            "Trace-helper tests failed with exit code",
+        ),
+        "Native Spread build trace-helper regression gate",
+    )
+    require_markers(
+        native_build,
+        (
+            "$nativeSource = Join-Path $projectRoot 'native\\spread_probe_native.cpp'",
+            "$verifiedTraceSources = @(",
+            "Trace safety source digest mismatch for",
+            "$expectedNativeSourceSha256 =",
+            "$nativeSourceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nativeSource).Hash",
+            "-o $nativeOutput",
+            "$nativeSource",
+            "$compiledNativeSha256 = (",
+            "Native eraser source or compiled library changed before packaging.",
+            "jar class packaging failed with exit code",
+            "jar dex/metadata update failed with exit code",
+            "jar native-library update failed with exit code",
+            "APK contains duplicate entry",
+            "APK required entry is empty",
+            "$nativeEntry.CompressedLength -ne $nativeEntry.Length",
+            "$apkNativeSha256 -ne $compiledNativeSha256",
+        ),
+        "Native Spread canonical-source and APK payload build gate",
+    )
+    native_source_assignment = native_build.find(
+        "$nativeSource = Join-Path $projectRoot 'native\\spread_probe_native.cpp'"
+    )
+    native_compile_output = native_build.find("-o $nativeOutput", native_source_assignment)
+    native_compile_input = native_build.find("$nativeSource", native_compile_output)
+    compiled_digest = native_build.find(
+        "$compiledNativeSha256 = (", native_compile_input
+    )
+    prepackage_digest = native_build.find(
+        "Native eraser source or compiled library changed before packaging.",
+        compiled_digest,
+    )
+    native_jar = native_build.find("& jar u0f $unsignedApk", prepackage_digest)
+    apk_digest = native_build.find(
+        "$apkNativeSha256 -ne $compiledNativeSha256", native_jar
+    )
+    if not (
+        0 <= native_source_assignment < native_compile_output
+        < native_compile_input < compiled_digest < prepackage_digest
+        < native_jar < apk_digest
+    ):
+        fail("frozen native source is not bound through compile and APK packaging")
 
+    pointer_reader_start = trace_script.find("function Read-RemotePointer")
+    publication_reader_start = trace_script.find(
+        "function Read-PublicationFailedTraceState", pointer_reader_start
+    )
+    incomplete_reader_start = trace_script.find(
+        "function Read-IncompleteTraceState", publication_reader_start
+    )
+    abandoned_reader_start = trace_script.find(
+        "function Read-AbandonedRecoveryState", incomplete_reader_start
+    )
+    unresolved_guard_start = trace_script.find(
+        "function Assert-NoUnresolvedTraceFailure", abandoned_reader_start
+    )
+    session_validator_start = trace_script.find(
+        "function Assert-ValidTraceSession", unresolved_guard_start
+    )
     helper_reconcile = trace_script.find(
-        "function Reconcile-AbandonedTracePointer"
+        "function Reconcile-AbandonedTracePointer", session_validator_start
     )
     helper_wait = trace_script.find(
         "function Wait-TraceFinalization", helper_reconcile
     )
     action_switch = trace_script.find("switch ($Action)")
-    helper_call = trace_script.rfind(
-        "Reconcile-AbandonedTracePointer", 0, action_switch
+    if not (
+        0 <= pointer_reader_start < publication_reader_start
+        < incomplete_reader_start < abandoned_reader_start
+        < unresolved_guard_start
+        < session_validator_start < helper_reconcile < helper_wait
+        < action_switch
+    ):
+        fail("could not isolate fail-closed trace helper functions")
+
+    pointer_reader_code = trace_script[
+        pointer_reader_start:publication_reader_start
+    ]
+    require_markers(
+        pointer_reader_code,
+        (
+            "if [ ! -e '$pointer' ]",
+            "elif [ -L '$pointer' ] || [ ! -f '$pointer' ]",
+            "__SNTRACE_ABSENT__",
+            "__SNTRACE_NOT_REGULAR__",
+            "__SNTRACE_CHANGED__",
+            "__SNTRACE_PRESENT__",
+            "cat '$pointer'",
+            "pointer_snapshot_before=`$(stat -c '%i:%s:%Y' '$pointer')",
+            "pointer_snapshot_after=`$(stat -c '%i:%s:%Y' '$pointer')",
+            "if [ `\"`$pointer_snapshot_before`\" != ",
+            "No status was returned while reading trace pointer",
+            "Ambiguous absent trace pointer response",
+            "Invalid status while reading trace pointer",
+            "pointer_size=`$(printf '%s\\n' `\"`$pointer_snapshot_after`\" |",
+            "expected_size=`$((`${#pointer_value} + 1))",
+            "Malformed trace pointer response",
+            "Malformed trace pointer content was retained",
+        ),
+        "transport-distinguishing trace pointer reader",
     )
-    if not 0 <= helper_reconcile < helper_wait < helper_call < action_switch:
-        fail("trace helper does not reconcile abandoned pointers before actions")
+    publication_reader_code = trace_script[
+        publication_reader_start:incomplete_reader_start
+    ]
+    incomplete_reader_code = trace_script[
+        incomplete_reader_start:abandoned_reader_start
+    ]
+    abandoned_reader_code = trace_script[
+        abandoned_reader_start:unresolved_guard_start
+    ]
+    if "catch" in publication_reader_code or "catch" in incomplete_reader_code:
+        fail("trace failure-pointer reads can disguise transport errors as absence")
+    if "rm -f" in publication_reader_code or "rm -f" in incomplete_reader_code:
+        fail("trace helper can delete malformed failure guards")
+    require_markers(
+        publication_reader_code,
+        (
+            "[invalid publication-failed pointer]",
+            "Retained an invalid trace publication-failure pointer",
+        ),
+        "malformed publication-failure guard retention",
+    )
+    require_markers(
+        incomplete_reader_code,
+        (
+            "[invalid incomplete pointer]",
+            "Retained an invalid Native Spread incomplete pointer",
+        ),
+        "malformed incomplete guard retention",
+    )
+    if "catch" in abandoned_reader_code or "rm -f" in abandoned_reader_code:
+        fail("abandoned recovery-guard reads can hide or delete unresolved state")
+    require_markers(
+        abandoned_reader_code,
+        (
+            '$recoveryLock = "$remoteRoot/.active-recovery"',
+            "if [ ! -e '$recoveryLock' ]",
+            "[ -L '$recoveryLock' ]",
+            "[ ! -d '$recoveryLock' ]",
+            "__SNTRACE_RECOVERY_ABSENT__",
+            "__SNTRACE_RECOVERY_PRESENT__",
+            "$script:abandonedRecoveryPending = $true",
+        ),
+        "fail-closed abandoned recovery-guard reader",
+    )
+
+    pre_action_code = trace_script[helper_wait:action_switch]
+    abandoned_call = pre_action_code.rfind("Read-AbandonedRecoveryState")
+    publication_call = pre_action_code.rfind(
+        "Read-PublicationFailedTraceState"
+    )
+    incomplete_call = pre_action_code.rfind("Read-IncompleteTraceState")
+    unresolved_call = pre_action_code.rfind(
+        "Assert-NoUnresolvedTraceFailure -CurrentAction $Action"
+    )
+    reconcile_call = pre_action_code.rfind(
+        "Reconcile-AbandonedTracePointer -CurrentAction $Action"
+    )
+    if not (
+        0 <= abandoned_call < publication_call < incomplete_call < unresolved_call
+        < reconcile_call
+    ):
+        fail(
+            "trace actions can mutate recovery state before unreadable or "
+            "unresolved failure guards are checked"
+        )
+
+    if "pidof '$documentPackage' 2>/dev/null || true" in trace_script:
+        fail("trace helper can treat an unknown pidof failure as no process")
+    require_markers(
+        trace_script,
+        (
+            "grep -c '^processId='",
+            "__SNTRACE_METADATA_ABSENT__",
+            "__SNTRACE_METADATA_NOT_REGULAR__",
+            "__SNTRACE_PID_LIST__",
+            "__SNTRACE_NO_PROCESS__",
+            "Assert-TraceFailureGuardsClear -CurrentAction $CurrentAction",
+            "Assert-CompletedTraceStillPullable -Session $session",
+        ),
+        "exact trace-owner and fallback revalidation",
+    )
+
+    matching_clear_start = trace_script.find(
+        "function Clear-MatchingLocalExpectedTraceSession"
+    )
+    matching_clear_end = trace_script.find(
+        "function Read-TraceOwnerProcessId", matching_clear_start
+    )
+    if matching_clear_start < 0 or matching_clear_end < 0:
+        fail("could not isolate exact abandoned-session local cleanup")
+    matching_clear = trace_script[matching_clear_start:matching_clear_end]
+    matching_read = matching_clear.find(
+        "$published = Read-LocalExpectedTraceSession"
+    )
+    matching_absent = matching_clear.find(
+        "if ($null -eq $published)", matching_read
+    )
+    matching_mismatch = matching_clear.find(
+        "if ($published -ne $Session)", matching_absent
+    )
+    matching_delete = matching_clear.find(
+        "Clear-ExpectedTraceSession -Session $Session", matching_mismatch
+    )
+    if not (
+        0 <= matching_read < matching_absent < matching_mismatch
+        < matching_delete
+    ):
+        fail(
+            "abandoned-session recovery can clear absent or mismatched local "
+            "expected-session state"
+        )
+
     helper_reconcile_code = trace_script[helper_reconcile:helper_wait]
+    active_pointer_path = helper_reconcile_code.find(
+        '$activePointer = "$remoteRoot/active.txt"'
+    )
+    recovery_lock_path = helper_reconcile_code.find(
+        '$recoveryLock = "$remoteRoot/.active-recovery"', active_pointer_path
+    )
+    claimed_pointer_path = helper_reconcile_code.find(
+        '$claimedPointer = "$recoveryLock/active.txt"', recovery_lock_path
+    )
+    archived_recovery_path = helper_reconcile_code.find(
+        '$archivedRecovery = "$remoteRoot/.abandoned-$session"',
+        claimed_pointer_path,
+    )
+    recovery_invoke = helper_reconcile_code.find(
+        "$result = @(", archived_recovery_path
+    )
+    recovery_lock_create = helper_reconcile_code.find(
+        "if ! mkdir '$recoveryLock'; then", recovery_invoke
+    )
+    candidate_identity = helper_reconcile_code.find(
+        "candidate_identity=`$(stat -c '%d:%i:%s:%Y:%Z'", recovery_lock_create
+    )
+    candidate_value = helper_reconcile_code.find(
+        "candidate_value=`$(cat '$activePointer')", candidate_identity
+    )
+    candidate_confirmed = helper_reconcile_code.find(
+        "candidate_confirmed=`$(stat -c '%d:%i:%s:%Y:%Z'", candidate_value
+    )
+    claim_move = helper_reconcile_code.find(
+        "if ! mv '$activePointer' '$claimedPointer'; then", candidate_confirmed
+    )
+    claimed_identity = helper_reconcile_code.find(
+        "claimed_identity=`$(stat -c '%d:%i:%s:%Y:%Z'", claim_move
+    )
+    claimed_confirmed = helper_reconcile_code.find(
+        "claimed_confirmed=`$(stat -c '%d:%i:%s:%Y:%Z'", claimed_identity
+    )
+    archive_move = helper_reconcile_code.find(
+        "if ! mv '$recoveryLock' '$archivedRecovery'; then", claimed_confirmed
+    )
+    archived_identity = helper_reconcile_code.find(
+        "archived_identity=`$(stat -c '%d:%i:%s:%Y:%Z'", archive_move
+    )
+    archived_status = helper_reconcile_code.find(
+        "echo __TRACE_ABANDONED_ARCHIVED__", archived_identity
+    )
+    recovery_result_count = helper_reconcile_code.find(
+        "if ($result.Count -ne 1)", archived_status
+    )
+    replacement_retained = helper_reconcile_code.find(
+        "if ($recoveryStatus -eq '__TRACE_POINTER_REPLACEMENT_RETAINED__')",
+        recovery_result_count,
+    )
+    pointer_changed = helper_reconcile_code.find(
+        "if ($recoveryStatus -eq '__TRACE_POINTER_CHANGED__')",
+        replacement_retained,
+    )
+    unexpected_recovery = helper_reconcile_code.find(
+        "if ($recoveryStatus -ne '__TRACE_ABANDONED_ARCHIVED__')",
+        pointer_changed,
+    )
     recovered_check = helper_reconcile_code.find(
-        "__TRACE_ABANDONED_REMOVED__"
+        "if ($recoveryStatus -eq '__TRACE_ABANDONED_ARCHIVED__')",
+        unexpected_recovery,
     )
     recovered_identity = helper_reconcile_code.find(
         "$script:recoveredAbandonedTraceSession = $session",
         recovered_check,
     )
-    if not 0 <= recovered_check < recovered_identity:
-        fail("trace helper does not retain the recovered session identity")
+    recovered_local_clear = helper_reconcile_code.find(
+        "Clear-MatchingLocalExpectedTraceSession -Session $session",
+        recovered_identity,
+    )
+    if not (
+        0 <= active_pointer_path < recovery_lock_path < claimed_pointer_path
+        < archived_recovery_path < recovery_invoke < recovery_lock_create
+        < candidate_identity < candidate_value < candidate_confirmed
+        < claim_move < claimed_identity < claimed_confirmed < archive_move
+        < archived_identity < archived_status < recovery_result_count
+        < replacement_retained < pointer_changed < unexpected_recovery
+        < recovered_check < recovered_identity < recovered_local_clear
+    ):
+        fail(
+            "trace helper does not atomically claim, revalidate, archive, and "
+            "clear only the matching abandoned-session state"
+        )
 
     invalid_status_retention = helper_reconcile_code.find(
         "if ($CurrentAction -eq 'Status')"
     )
-    status_retention = helper_reconcile_code.find(
-        "if ($CurrentAction -eq 'Status')",
-        invalid_status_retention + 1,
+    stop_only_recovery = helper_reconcile_code.find(
+        "if ($CurrentAction -ne 'Stop')"
     )
     pointer_removal = helper_reconcile_code.find(
-        '$result = Invoke-Adb shell (', status_retention
+        "$result = @(", stop_only_recovery
     )
     if not (
-        0 <= invalid_status_retention < status_retention < pointer_removal
+        0 <= invalid_status_retention < stop_only_recovery < pointer_removal
     ):
-        fail("trace Status can consume an abandoned active pointer")
+        fail("a non-Stop trace action can consume an abandoned active pointer")
+    invalid_pointer_branch = helper_reconcile_code[
+        helper_reconcile_code.find("if ($session -notmatch"):
+        helper_reconcile_code.find(
+            "$processId = Read-TraceOwnerProcessId",
+            invalid_status_retention,
+        )
+    ]
+    if "rm -f" in invalid_pointer_branch:
+        fail("trace helper can delete a malformed active pointer")
 
     stop_trace = trace_script.find("'Stop' {")
     status_trace = trace_script.find("'Status' {", stop_trace)
@@ -3513,32 +8564,51 @@ def check(repo_root: Path) -> None:
     abandoned_guard = stop_action.find(
         "if ($recoveredAbandonedTraceSession)"
     )
-    publication_failed_guard = stop_action.find(
-        "if ($publicationFailedTraceSession)"
-    )
+    active_read = stop_action.find("Read-RemotePointer -Name active")
     completed_fallback = stop_action.find("Read-RemotePointer -Name last")
-    incomplete_guard = stop_action.find("if ($incompleteTraceSession)")
+    completed_validation = stop_action.find(
+        "Assert-ValidTraceSession -Session $session -PointerName last"
+    )
     wait_for_finalization = stop_action.find(
         "Wait-TraceFinalization -Session $session"
     )
     pull_bundle = stop_action.find('Invoke-Adb pull "$remoteRoot/$session"')
     if not (
-        0 <= abandoned_guard < publication_failed_guard
-        < incomplete_guard < completed_fallback < pull_bundle
+        0 <= abandoned_guard < active_read < completed_fallback
+        < completed_validation < pull_bundle
     ):
         fail("trace Stop can substitute a prior session after crash recovery")
     if not 0 <= wait_for_finalization < pull_bundle:
         fail("trace bundle can be pulled before asynchronous finalization")
+    if stop_action.count("Assert-CompletedTraceStillPullable -Session $session") < 3:
+        fail(
+            "trace Stop does not revalidate guards/completion before and "
+            "after its remote pulls"
+        )
+    if "Read-GuardedActiveTraceSession" not in stop_action:
+        fail("trace Stop performs side effects without exact active-session guards")
+    if "Pull-StagedScreenshots" not in stop_action:
+        fail("trace Stop does not merge separately staged screenshots locally")
     if "Start-Sleep -Milliseconds 500" in stop_action:
         fail("trace Stop still relies on a fixed finalization delay")
     status_abandoned_guard = status_action.find(
         "if ($recoveredAbandonedTraceSession)"
     )
+    status_publication_guard = status_action.find(
+        "if ($publicationFailedTraceSession)"
+    )
+    status_incomplete_guard = status_action.find(
+        "if ($incompleteTraceSession)"
+    )
     status_reads_active = status_action.find(
         "Read-RemotePointer -Name active"
     )
-    if not 0 <= status_abandoned_guard < status_reads_active:
-        fail("trace Status can report an abandoned trace as recording")
+    status_reads_last = status_action.find("Read-RemotePointer -Name last")
+    if not (
+        0 <= status_publication_guard < status_incomplete_guard
+        < status_abandoned_guard < status_reads_active < status_reads_last
+    ):
+        fail("trace Status can fall back past a retained failure guard")
 
     wait_start = trace_script.find("function Wait-TraceFinalization")
     safe_label_start = trace_script.find("function Get-SafeLabel", wait_start)
@@ -3546,16 +8616,40 @@ def check(repo_root: Path) -> None:
         fail("could not isolate trace finalization polling")
     wait_action = trace_script[wait_start:safe_label_start]
     publication_failed_result = wait_action.find(
-        "Read-RemotePointer `\n                    -Name publication-failed"
+        "Read-RemotePointer -Name publication-failed"
     )
     incomplete_result = wait_action.find(
         "Read-RemotePointer -Name incomplete"
     )
+    active_result = wait_action.find("Read-RemotePointer -Name active")
     completed_result = wait_action.find("Read-RemotePointer -Name last")
     if not (
-        0 <= publication_failed_result < incomplete_result < completed_result
+        0 <= publication_failed_result < incomplete_result < active_result
+        < completed_result
     ):
-        fail("trace helper can publish completion before checking incomplete.txt")
+        fail(
+            "trace finalization can wait on active.txt or publish completion "
+            "before checking failure guards"
+        )
+    if "catch" in wait_action:
+        fail("trace finalization can disguise pointer-read failures as absence")
+
+    start_trace = trace_script.find("'Start' {")
+    checkpoint_trace = trace_script.find("'Checkpoint' {", start_trace)
+    start_action = trace_script[start_trace:checkpoint_trace]
+    checkpoint_action = trace_script[checkpoint_trace:stop_trace]
+    if "Read-GuardedActiveTraceSession -CurrentAction Start" not in start_action:
+        fail(
+            "trace Start can report success without rechecking failure "
+            "guards and the exact active pointer"
+        )
+    if checkpoint_action.count("Read-GuardedActiveTraceSession") < 3:
+        fail(
+            "trace Checkpoint does not revalidate guards/identity before "
+            "its control request and on both sides of its staged screenshot"
+        )
+    if '"$remoteRoot/$Session/screenshots"' in trace_script:
+        fail("desktop screenshots can mutate an already-published trace bundle")
 
     if 'android:versionCode="118"' not in manifest:
         fail("companion manifest must use versionCode 118")

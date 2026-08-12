@@ -298,9 +298,10 @@ Supernote's exact 4/3 in-memory landscape transform; the canonical and current
 trail fingerprints match again in portrait.
 Trace shutdown retries an unstable final `.mark` snapshot up to five times. A
 session is published to `last.txt` only after one attempt captures a stable,
-verified state. Persistent instability writes `incomplete.txt`, leaves the
-partial directory intact, and makes the desktop helper report the failure
-instead of pulling an older completed trace.
+verified state. Persistent instability retains the exact `active.txt` guard,
+writes `incomplete.txt` plus `publication-failed.txt`, leaves the partial
+directory intact, and makes the desktop helper report the failure instead of
+pulling an older completed trace.
 The source identity is checked again after hashing the copied snapshot, so a
 concurrent rewrite during snapshot verification also forces a retry.
 Missing-file and unchanged-hash fast paths perform their own final source
@@ -310,11 +311,23 @@ in-memory acceptance. Rejected candidates can therefore never publish a
 `mark_snapshot` entry that names a deleted snapshot file.
 All event records are now captured as immutable JSON on the calling thread and
 written by a per-session serialized background writer. Finalization drains that
-writer before publishing a completion pointer. If pointer publication fails,
-`active.txt` is cleaned up in `finally` and `publication-failed.txt` preserves
-the exact failed session so the helper cannot fall back to an older trace.
+writer before atomically renaming `active.txt` to `last.txt`. That single rename
+is both the terminal completion record and the completed-session pointer, so no
+separate success event can survive a failed pointer publication. If publication
+fails after `active.txt` is durable, that active guard remains and
+`incomplete.txt` plus `publication-failed.txt` preserve the exact failed
+session, so the helper cannot fall back to an older trace. A failure before the
+active pointer is published cleans up only the unpublished attempt.
 Failure to remove a stale `incomplete.txt` is treated as the same publication
 failure, preventing it from overriding a newly completed session.
+The desktop helper accepts pointer files only when their bytes are exactly one
+safe session identifier followed by one line feed. Missing, nonregular,
+unreadable, padded, multiline, or transport-ambiguous state is retained and
+blocks Start/Checkpoint/Stop. It likewise treats unreadable session metadata or
+an indeterminate document-process lookup as unknown rather than abandoned.
+Checkpoint screenshots are staged outside the remotely published trace
+directory and merged only into the pulled local bundle, so a racing checkpoint
+cannot modify a trace after `active.txt` becomes `last.txt`.
 
 ## v0.4.13 transactional single-active-page editing
 
@@ -339,6 +352,22 @@ gesture through pen-up. The next stroke uses the ordinary native writer on the
 now-active page. The runtime path does not invoke v0.0.117's experimental
 inactive-page trail capture, coordinate normalization, `.mark` merge, or
 synthetic history transaction.
+
+Protected-editable authorization now uses marker protocol 2. Enabling editing
+first publishes a `pending` marker containing the exact previous-marker bytes
+and the complete recovery identity. Native Spread accepts only the subsequent
+atomically published `committed` marker; a pending, legacy, malformed, or
+partially migrated marker remains read-only. The committed rename is the sole
+authorization point, with no fallible state decision after it.
+
+If activation fails after pending publication, the original recovery baseline
+is copied into a token-bound, self-contained evidence archive before the old
+marker is restored. Explicit retry reconciles every partial archive stage and
+remains non-mutating when identity is ambiguous. Downgrading to read-only or
+Off uses the same durable pending-intent journal before retiring the backup, so
+process death cannot silently discard either editable authority or its restore
+baseline. Restore claims and configuration transitions are serialized and
+validated against the PDF, manifest, snapshot, marker, and activation token.
 
 The full design and safety boundary are recorded in
 `TRANSACTIONAL_ACTIVE_PAGE.md`. Automated invariants and the v0.0.118 APK build
@@ -397,6 +426,15 @@ compares the live `.mark` presence, length, and SHA-256 with the new recovery
 baseline. If the running native reader flushed annotations during backup
 creation, the stale snapshot is retired and recreated; activation fails closed
 after three unstable attempts rather than authorizing recovery from older ink.
+
+When v0.4.13 opens a document already protected by the merged v0.4.12
+`protected-editable-pilot` marker, it verifies that marker against the existing
+recovery manifest and migrates only the marker metadata to the transactional
+protocol. The live `.mark` and recovery snapshot are not restored, replaced, or
+recreated, so annotations added during the v0.4.12 protected session remain
+intact. A failed migration leaves recovery available and opens fail-closed;
+selecting editable mode can retry the same non-destructive migration. Off and
+read-only transitions can also retire a verified legacy session cleanly.
 
 After successful verification, v0.0.75 explicitly refreshes an already visible
 landscape spread so native handwriting geometry is re-enabled without waiting
@@ -680,7 +718,8 @@ The resulting package is written to:
 out/*.snplg
 ```
 
-GitHub Actions uploads the current stabilization build as the `supernote-rtl-reader-v0.4.3` artifact.
+GitHub Actions uploads the current stabilization build as the
+`supernote-rtl-reader-v0.4.13-transactional-active-page` artifact.
 
 ## Install and diagnostics
 

@@ -11,7 +11,9 @@ param(
 
     [string]$Destination,
 
-    [string]$ExpectedSession
+    [string]$ExpectedSession,
+
+    [switch]$NoPing
 )
 
 $ErrorActionPreference = 'Stop'
@@ -600,7 +602,10 @@ function Reconcile-AbandonedTracePointer {
     # then unlinking a path which may have been replaced. The atomic recovery
     # directory also serializes concurrent helpers and remains as a guard if
     # the helper exits after the rename. A verified pointer is archived rather
-    # than deleted, preserving the object identity used for validation.
+    # than deleted, preserving the object identity used for validation. Do not
+    # include ctime (%Z) in the cross-rename identity: Android updates it for
+    # the rename itself. Device, inode, size, mtime, and the exact pointer value
+    # still prove that the claimed object is the one which was authorized.
     $activePointer = "$remoteRoot/active.txt"
     $recoveryLock = "$remoteRoot/.active-recovery"
     $claimedPointer = "$recoveryLock/active.txt"
@@ -615,10 +620,10 @@ function Reconcile-AbandonedTracePointer {
             "if [ -L '$activePointer' ] || [ ! -f '$activePointer' ]; then " +
             "rmdir '$recoveryLock' || exit 82; " +
             "echo __TRACE_POINTER_CHANGED__; exit 0; fi; " +
-            "candidate_identity=`$(stat -c '%d:%i:%s:%Y:%Z' " +
+            "candidate_identity=`$(stat -c '%d:%i:%s:%Y' " +
             "'$activePointer') || exit 82; " +
             "candidate_value=`$(cat '$activePointer') || exit 82; " +
-            "candidate_confirmed=`$(stat -c '%d:%i:%s:%Y:%Z' " +
+            "candidate_confirmed=`$(stat -c '%d:%i:%s:%Y' " +
             "'$activePointer') || exit 82; " +
             "candidate_size=`$(stat -c '%s' '$activePointer') || exit 82; " +
             "expected_size=`$((`${#candidate_value} + 1)); " +
@@ -631,10 +636,10 @@ function Reconcile-AbandonedTracePointer {
             "if ! mv '$activePointer' '$claimedPointer'; then " +
             "rmdir '$recoveryLock' || exit 82; " +
             "echo __TRACE_POINTER_CHANGED__; exit 0; fi; " +
-            "claimed_identity=`$(stat -c '%d:%i:%s:%Y:%Z' " +
+            "claimed_identity=`$(stat -c '%d:%i:%s:%Y' " +
             "'$claimedPointer') || exit 82; " +
             "claimed_value=`$(cat '$claimedPointer') || exit 82; " +
-            "claimed_confirmed=`$(stat -c '%d:%i:%s:%Y:%Z' " +
+            "claimed_confirmed=`$(stat -c '%d:%i:%s:%Y' " +
             "'$claimedPointer') || exit 82; " +
             "claimed_size=`$(stat -c '%s' '$claimedPointer') || exit 82; " +
             "claimed_expected_size=`$((`${#claimed_value} + 1)); " +
@@ -646,7 +651,7 @@ function Reconcile-AbandonedTracePointer {
             "echo __TRACE_POINTER_REPLACEMENT_RETAINED__; exit 0; fi; " +
             "if ! mv '$recoveryLock' '$archivedRecovery'; then " +
             "echo __TRACE_ABANDONED_ARCHIVE_FAILED__ >&2; exit 82; fi; " +
-            "archived_identity=`$(stat -c '%d:%i:%s:%Y:%Z' " +
+            "archived_identity=`$(stat -c '%d:%i:%s:%Y' " +
             "'$archivedPointer') || exit 82; " +
             "if [ `"`$archived_identity`" != " +
             "`"`$claimed_confirmed`" ]; then " +
@@ -817,6 +822,9 @@ function Pull-StagedScreenshots {
 }
 
 function Ping-ForUser {
+    if ($NoPing) {
+        return
+    }
     [console]::Beep(880, 250)
     Start-Sleep -Milliseconds 120
     [console]::Beep(1175, 250)
@@ -1048,8 +1056,11 @@ switch ($Action) {
         if (Test-Path -LiteralPath $archive) {
             throw "Refusing to replace an existing archive: $archive"
         }
+        # Keep the temporary parent short. Windows adb is not long-path aware;
+        # repeating the full session name here can push nested mark snapshots
+        # past MAX_PATH even though their final promoted paths are valid.
         $stagingRoot = Join-Path $Destination (
-            '.partial-' + $session + '-' + [Guid]::NewGuid().ToString('N')
+            '.partial-' + [Guid]::NewGuid().ToString('N')
         )
         $stagedSession = Join-Path $stagingRoot $session
         $stagedArchive = Join-Path $stagingRoot ($session + '.zip')

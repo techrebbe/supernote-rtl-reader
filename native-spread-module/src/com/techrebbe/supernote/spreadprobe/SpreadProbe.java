@@ -121,7 +121,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int TRACE_FINAL_SNAPSHOT_ATTEMPTS = 5;
     private static final long TRACE_FINAL_SNAPSHOT_RETRY_MS = 120L;
     private static final int HANDSHAKE_PROTOCOL = 2;
-    private static final long MODULE_VERSION_CODE = 118L;
+    private static final long MODULE_VERSION_CODE = 119L;
     private static final long TRANSACTIONAL_MIN_MODULE_VERSION_CODE = 118L;
     private static final int EDITABLE_MARKER_PROTOCOL = 2;
     private static final String EDITABLE_MARKER_MODE =
@@ -2093,15 +2093,20 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     MotionEvent event = (MotionEvent) param.args[0];
                     trackFingerTouchStream(activity, event);
                     traceTouchEvent(activity, event);
-                    if (blockPageActivationUiInput(activity, event)) {
-                        param.setResult(true);
-                        return;
-                    }
                     SpreadConfig config = SPREAD_CONFIGS.get(activity);
                     boolean cachedSpreadLandscape =
                         isCachedSpreadLandscape(activity, config);
                     boolean cachedEditableSpreadLandscape =
                         isCachedEditableSpreadLandscape(activity, config);
+                    latchPenContactFromActivityTouch(
+                        activity,
+                        event,
+                        cachedEditableSpreadLandscape
+                    );
+                    if (blockPageActivationUiInput(activity, event)) {
+                        param.setResult(true);
+                        return;
+                    }
                     if (cachedSpreadLandscape
                         && config != null
                         && !cachedEditableSpreadLandscape
@@ -2144,9 +2149,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 protected void afterHookedMethod(MethodHookParam param) {
                     Activity activity = (Activity) param.thisObject;
                     if (isActiveActivityOwner(activity)) {
+                        MotionEvent event = (MotionEvent) param.args[0];
                         finishFingerTouchStream(
                             activity,
-                            (MotionEvent) param.args[0]
+                            event
+                        );
+                        schedulePenContactFallbackFromActivityTouch(
+                            activity,
+                            event
                         );
                     }
                 }
@@ -4696,12 +4706,13 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                             RECEIVE_TRIALS_CALLBACK_SCOPES
                         );
                     ReceiveTrialsScope receiveScope =
-                        popReceiveTrialsScope();
+                        currentReceiveTrialsScope();
                     PenContactOwnership contactOwnership = receiveScope == null
                         ? null : receiveScope.contactOwnership;
                     Activity activity = ownerScope == null
                         ? null : ownerScope.activity;
                     if (ownerScope == null || activity == null) {
+                        popReceiveTrialsScope();
                         finishTraceMutationAdmission(
                             popTraceMutationAdmission()
                         );
@@ -4711,6 +4722,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                             ownerScope,
                             param.thisObject
                         )) {
+                        popReceiveTrialsScope();
                         finishTraceMutationAdmission(
                             popTraceMutationAdmission()
                         );
@@ -4772,7 +4784,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                                 "receive_trials_fallback"
                             );
                         }
-                        persistActiveEraserBeforeCanonicalRefresh(
+                        persistActiveMutationBeforeCanonicalRefresh(
                             activity,
                             param.thisObject
                         );
@@ -4838,6 +4850,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                                 + " generation="
                                 + contactOwnership.generation
                                 + " throwable=" + param.getThrowable());
+                        }
+                        ReceiveTrialsScope poppedReceiveScope =
+                            popReceiveTrialsScope();
+                        if (poppedReceiveScope != receiveScope) {
+                            log("receive_trials_scope_pop_mismatch");
                         }
                         finishTraceMutationAdmission(
                             popTraceMutationAdmission()
@@ -12225,6 +12242,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         scopes.push(scope);
     }
 
+    private static ReceiveTrialsScope currentReceiveTrialsScope() {
+        ArrayDeque<ReceiveTrialsScope> scopes =
+            RECEIVE_TRIALS_OWNERSHIP_SCOPES.get();
+        return scopes == null || scopes.isEmpty() ? null : scopes.peek();
+    }
+
     private static ReceiveTrialsScope popReceiveTrialsScope() {
         ArrayDeque<ReceiveTrialsScope> scopes =
             RECEIVE_TRIALS_OWNERSHIP_SCOPES.get();
@@ -15898,6 +15921,162 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         );
     }
 
+    /**
+     * Establishes the same immutable contact owner from Android's stylus
+     * ACTION_DOWN when this firmware does not deliver the first native
+     * onDigitalPosition frame. The native callback remains the preferred
+     * low-latency path; an already-published owner wins unchanged. Any stale
+     * or unmapped contact is latched as blocked so receiveTrials cannot commit
+     * a partially observed gesture to an arbitrary page.
+     */
+    private static void latchPenContactFromActivityTouch(
+        Activity activity,
+        MotionEvent event,
+        boolean editableSpreadLandscape
+    ) {
+        if (activity == null || event == null
+            || !editableSpreadLandscape
+            || event.getPointerCount() <= 0
+            || event.getActionMasked() != MotionEvent.ACTION_DOWN) {
+            return;
+        }
+        int toolType = event.getToolType(0);
+        if (toolType != MotionEvent.TOOL_TYPE_STYLUS
+            && toolType != MotionEvent.TOOL_TYPE_ERASER) {
+            return;
+        }
+        PenInputSnapshot snapshot = penInputSnapshot(activity);
+        PenContactIdentityCapture identity = snapshot == null
+            ? null : snapshot.writerAuthority;
+        int startPage = PEN_CONTACT_BLOCKED_PAGE;
+        int sourcePage = -1;
+        String reason = "blocked_stale_activity_touch";
+        boolean published = false;
+        synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+            PenContactOwnership existing =
+                PEN_CONTACT_OWNERSHIPS.get(activity);
+            if (existing != null) {
+                return;
+            }
+            if (activity != activeActivity
+                || Boolean.TRUE.equals(
+                    PEN_INPUT_EDITABLE_GUARDS.get(activity)
+                )
+                || PAGE_ACTIVATION_TRANSACTIONS.get(activity) != null
+                || snapshot == null || identity == null
+                || !snapshot.editable || !snapshot.geometryReady
+                || PEN_INPUT_SNAPSHOTS.get(activity) != snapshot
+                || SPREAD_CONFIGS.get(activity) != snapshot.config) {
+                publishAmbiguousPenContactLocked(activity);
+            } else {
+                int touchY = Math.round(event.getY());
+                if (snapshot.isNativeChromeTouch(touchY)) {
+                    reason = "blocked_native_chrome_activity_touch";
+                } else {
+                    int mappedPage = pageAt(
+                        snapshot,
+                        Math.round(event.getX()),
+                        touchY
+                    );
+                    if (mappedPage >= 0) {
+                        startPage = mappedPage;
+                        if (mappedPage == snapshot.currentPage) {
+                            sourcePage = snapshot.currentPage;
+                            reason = "active_page_activity_touch";
+                        } else {
+                            reason = "inactive_page_activity_touch";
+                        }
+                    } else {
+                        reason = "blocked_unmapped_activity_touch";
+                    }
+                }
+                published = publishPenContactOwnershipLocked(
+                    activity,
+                    identity,
+                    startPage,
+                    sourcePage
+                );
+                if (!published) {
+                    publishAmbiguousPenContactLocked(activity);
+                    reason = "blocked_identity_activity_touch";
+                } else {
+                    PEN_PHYSICAL_CONTACT_DOWNS.put(
+                        activity,
+                        Boolean.TRUE
+                    );
+                    retireDocumentReceiveQuarantineAfterFreshContactLocked(
+                        activity,
+                        identity,
+                        true
+                    );
+                }
+            }
+        }
+        queueLowLatencyLog(
+            "pen_contact_activity_touch_latched reason=" + reason
+                + " start=" + startPage
+                + " source=" + sourcePage
+                + " published=" + published
+        );
+        traceEvent(
+            activity,
+            "pen_contact_activity_touch_latched",
+            "reason",
+            reason,
+            "startPage",
+            startPage,
+            "sourcePage",
+            sourcePage,
+            "published",
+            published
+        );
+    }
+
+    /**
+     * Mirrors the native onDigital terminal fallback only when the Android
+     * stylus stream ended while the contact owner is still ACTIVE. If the
+     * native callback or receiveTrials already advanced/consumed it, this is a
+     * no-op. This keeps toolbar/unmapped sentinels from becoming permanent and
+     * preserves an active-page owner until a delayed receiveTrials arrives.
+     */
+    private static void schedulePenContactFallbackFromActivityTouch(
+        Activity activity,
+        MotionEvent event
+    ) {
+        if (activity == null || event == null
+            || event.getPointerCount() <= 0) {
+            return;
+        }
+        int action = event.getActionMasked();
+        if (action != MotionEvent.ACTION_UP
+            && action != MotionEvent.ACTION_CANCEL) {
+            return;
+        }
+        int toolType = event.getToolType(0);
+        if (toolType != MotionEvent.TOOL_TYPE_STYLUS
+            && toolType != MotionEvent.TOOL_TYPE_ERASER) {
+            return;
+        }
+        synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+            PenContactOwnership owner =
+                PEN_CONTACT_OWNERSHIPS.get(activity);
+            if (owner == null || owner.phase != PEN_CONTACT_PHASE_ACTIVE) {
+                return;
+            }
+        }
+        long liftGeneration =
+            capturePageActivationPenLiftGeneration(activity);
+        schedulePenContactReceiveFallback(
+            activity,
+            liftGeneration,
+            -1
+        );
+        queueLowLatencyLog(
+            "pen_contact_activity_touch_terminal_fallback"
+                + " lift_generation=" + liftGeneration
+        );
+    }
+
     private static boolean handlePageActivationTouch(
         Activity activity,
         MotionEvent event,
@@ -15965,6 +16144,17 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 queueLowLatencyLog(
                     "page_activation_stylus_stream_latched current="
                         + current + " target=" + target
+                );
+                boolean activationStarted = beginPageActivationTransaction(
+                    activity,
+                    target,
+                    "stylus_touch_contact",
+                    true
+                );
+                queueLowLatencyLog(
+                    "page_activation_stylus_touch_result current="
+                        + current + " target=" + target
+                        + " started=" + activationStarted
                 );
                 return true;
             }
@@ -16149,17 +16339,29 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         MotionEvent cancelEvent = MotionEvent.obtain(terminalEvent);
         try {
             cancelEvent.setAction(MotionEvent.ACTION_CANCEL);
-            boolean handled = activity.getWindow().superDispatchTouchEvent(
+            boolean childHandled =
+                activity.getWindow().superDispatchTouchEvent(
                 cancelEvent
             );
-            if (!handled) {
+            boolean activityHandled = false;
+            if (!childHandled) {
                 // Window.superDispatchTouchEvent() intentionally bypasses the
                 // Activity fallback. Mirror Activity.dispatchTouchEvent() so a
                 // stream whose DOWN was owned by Activity.onTouchEvent() also
                 // receives its terminal CANCEL.
-                handled = activity.onTouchEvent(cancelEvent);
+                activityHandled = activity.onTouchEvent(cancelEvent);
             }
-            return handled;
+            if (!childHandled && !activityHandled) {
+                // Android's boolean is a consumption result, not proof that
+                // ACTION_CANCEL was delivered. The event has traversed both
+                // possible owners at this point. Treat successful dispatch as
+                // the cancellation boundary even when neither owner reports
+                // consuming its terminal event.
+                queueLowLatencyLog(
+                    "activation_touch_cancel_delivered_unhandled"
+                );
+            }
+            return true;
         } catch (Throwable throwable) {
             queueLowLatencyLog(
                 "activation_touch_cancel_dispatch_failed " + throwable
@@ -19391,12 +19593,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         return writerDisabled;
     }
 
-    private static void persistActiveEraserBeforeCanonicalRefresh(
+    private static void persistActiveMutationBeforeCanonicalRefresh(
         Activity activity,
         Object presenter
     ) {
-        if (!isEditableSpreadLandscape(activity)
-            || !Boolean.TRUE.equals(CANONICAL_ONLY_INK_MODES.get(activity))) {
+        if (!isEditableSpreadLandscape(activity)) {
             return;
         }
         try {
@@ -19404,36 +19605,54 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 presenter,
                 "currentPage"
             );
+            boolean eraserMutation = Boolean.TRUE.equals(
+                CANONICAL_ONLY_INK_MODES.get(activity)
+            );
+            String mutationKind = eraserMutation
+                ? "active_eraser" : "active_pen";
             /*
-             * Native area erasing updates Supernote's in-memory trail state in
-             * receiveTrials(), but the ordinary writer defers the .mark write.
-             * The first spread refresh has already run against the pre-erase
-             * file by the time receiveTrials() returns. Flush the completed
-             * transaction, then explicitly reload the same mark page so the
-             * active committed-ink layer is rebuilt from the updated canonical
-             * file instead of retaining those stale pixels until a page switch.
+             * receiveTrials() updates Supernote's in-memory trail state, but
+             * this firmware defers the .mark write for both pen and eraser
+             * mutations. The first spread refresh can therefore run against
+             * the previous canonical file. Flush the completed mutation, then
+             * reload the same mark page so settled ink is visible immediately
+             * rather than only after a page activation or reader restart.
              */
             saveTrailsForCanonicalReload(
                 presenter,
-                "active_eraser"
+                mutationKind
             );
-            log("active_eraser_saved_before_canonical_refresh page="
-                + currentDocumentPage(activity));
-            XposedHelpers.callMethod(
-                presenter,
-                "loadHandWrite",
-                markPage
-            );
-            log("active_eraser_canonical_reloaded mark_page=" + markPage
+            log("active_mutation_saved_before_canonical_refresh kind="
+                + mutationKind + " page=" + currentDocumentPage(activity));
+            Boolean previousForceCanonical =
+                FORCE_CANONICAL_ACTIVE_INK.get();
+            FORCE_CANONICAL_ACTIVE_INK.set(Boolean.TRUE);
+            try {
+                XposedHelpers.callMethod(
+                    presenter,
+                    "loadHandWrite",
+                    markPage
+                );
+            } finally {
+                if (previousForceCanonical == null) {
+                    FORCE_CANONICAL_ACTIVE_INK.remove();
+                } else {
+                    FORCE_CANONICAL_ACTIVE_INK.set(
+                        previousForceCanonical
+                    );
+                }
+            }
+            log("active_mutation_canonical_reloaded kind=" + mutationKind
+                + " mark_page=" + markPage
                 + " document_page=" + currentDocumentPage(activity));
             traceAnnotationBoundary(
                 activity,
                 presenter,
-                "active_eraser_canonical_reload",
+                "active_mutation_canonical_reload",
                 true
             );
         } catch (Throwable throwable) {
-            log("active_eraser_save_before_refresh_failed " + throwable);
+            log("active_mutation_save_before_refresh_failed " + throwable);
             XposedBridge.log(throwable);
         }
     }

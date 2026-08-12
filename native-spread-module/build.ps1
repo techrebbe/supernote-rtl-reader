@@ -55,11 +55,11 @@ $traceHelperScript = Join-Path $projectRoot 'trace.ps1'
 $verifiedTraceSources = @(
     @(
         $traceHelperScript,
-        '650E4CEB744AA3AEB2A8835D2664B6CBC1B4E89A650F1D3A94375804462F5A2D'
+        '1D75E574776B3E90DC04AE42AB6685623324734DAE4DAD16AC10888005229D6A'
     ),
     @(
         $traceHelperTest,
-        '32BCB4A63812B199CBA0620B52A7C282DAE46CAACC4B22934FF33DD068EFAABF'
+        '224BA08B5D9A8252ED67F785448E65F3D7EFD1C86527A4E0F109BC241172D358'
     )
 )
 foreach ($verifiedTraceSource in $verifiedTraceSources) {
@@ -142,7 +142,7 @@ foreach ($required in @(
 
 $nativeSource = Join-Path $projectRoot 'native\spread_probe_native.cpp'
 $expectedNativeSourceSha256 =
-    '2AA4F5AA8DBACEB7446D66ED04063D42F38D865A7013A3A477C67DD785FEFE3B'
+    '715183119972CC32599842C07CBC999334D0EF74E9CC587E9FCFE2ADEAC47CD5'
 $nativeSourceSha256 = Get-NormalizedTextSha256 -LiteralPath $nativeSource
 if ($nativeSourceSha256 -ne $expectedNativeSourceSha256) {
     throw (

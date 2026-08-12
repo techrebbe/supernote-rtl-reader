@@ -507,10 +507,17 @@ Automated and build evidence:
 - [x] Static invariants serialize configuration, retirement, restore, and
   process-death reconciliation under one lock and require an exclusive restore
   claim before `.mark` replacement.
-- [x] Native Spread v0.0.118 compiles, is v2/v3 signed, and reports matching
-  manifest, handshake, and plug-in minimum version 118.
+- [x] Native Spread v0.0.119 compiles, is v2/v3 signed, and reports matching
+  manifest, handshake, and plug-in minimum version 119. The tested APK is
+  164,524 bytes with SHA-256
+  `d001ddea28d93873413372f9a284e3b801d2ee043df645fd0a42b551e595e44f`.
+- [x] Static invariants require both firmware-specific eraser hooks before the
+  native readiness gate is published. The regular vector eraser wrapper is
+  restricted to pen type 16, color 255, and exact `932 x 1243` half-page
+  geometry; it temporarily supplies canonical `1872 x 2496` dimensions, calls
+  the original exactly once, restores both fields, and preserves its result.
 
-Nomad hardware gate (not yet run):
+Nomad hardware gate (in progress):
 
 - [ ] Finger-tap each inactive half. Existing annotations on both pages remain
   unchanged; native focus and the ACTIVE banner move to the requested page.
@@ -529,6 +536,17 @@ Nomad hardware gate (not yet run):
   page.
 - [ ] On each active side, validate pen, stroke eraser, lasso move, top-toolbar
   Undo/Redo, highlighting, and an embedded link through native controls.
+  Regular stroke erasure on active left page 2 passed with v0.0.119: the
+  accepted eraser contact published `active_eraser`, reloaded the canonical
+  page, remained visibly erased after Active Left -> Active Right -> Active
+  Left, and survived a cold document-reader restart. The post-erasure and
+  cold-reopen `.mark` SHA-256 both equal
+  `9a61d949f6437a0f55986ba85b5797ba2e01743e46402607faefe351fcd211dd`.
+  The trace recorded zero potential failures. The first eraser contact after
+  process restart was intentionally discarded by the pre-existing
+  document-context receive quarantine; a subsequent fresh contact retired the
+  quarantine and persisted normally. The opposite side and remaining tools are
+  still open.
 - [ ] Advance and reverse spreads with taps and swipes. Every turn saves the
   source, lands on the expected RTL spread, and leaves writing enabled only for
   the focused page.

@@ -5,8 +5,8 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 ## Stable baseline
 
 v0.4.12 with Native Spread v0.0.116 is the current merged stable baseline.
-v0.4.13 with Native Spread v0.0.118 is an unvalidated transactional
-single-active-page candidate. Native Spread v0.0.117 is preserved only on its
+v0.4.13 with Native Spread v0.0.119 is a partially hardware-validated
+transactional single-active-page candidate. Native Spread v0.0.117 is preserved only on its
 experimental branch and is not part of this release line.
 
 The validated reader behavior covers:
@@ -369,9 +369,28 @@ process death cannot silently discard either editable authority or its restore
 baseline. Restore claims and configuration transitions are serialized and
 validated against the PDF, manifest, snapshot, marker, and activation token.
 
+Native Spread v0.0.119 fixes the native regular stroke eraser in a spread. The
+firmware supplies its vector eraser with half-page `932 x 1243` redraw geometry
+even though the active canonical page trails use `1872 x 2496` coordinates.
+The module now corrects those dimensions only for the exact regular-eraser
+signature (pen type 16, color 255, and the exact half-page dimensions), calls
+Supernote's original eraser once, and restores the operation fields immediately.
+The existing grid-eraser hook is unchanged, and protected editing is enabled
+only after both native eraser hooks are installed.
+
+The focused Nomad test passed end to end. A regular erasure on active page 2
+was saved through Supernote's canonical writer, remained pixel-for-pixel after
+switching active pages, and survived a cold document-reader restart. The final
+on-device `.mark` SHA-256 was
+`9a61d949f6437a0f55986ba85b5797ba2e01743e46402607faefe351fcd211dd`,
+matching the trace snapshot taken immediately after the erasure. The existing
+document-context quarantine safely discarded the first contact following the
+process restart; the next fresh eraser contact was accepted and persisted.
+
 The full design and safety boundary are recorded in
-`TRANSACTIONAL_ACTIVE_PAGE.md`. Automated invariants and the v0.0.118 APK build
-pass locally; Nomad hardware validation is still required.
+`TRANSACTIONAL_ACTIVE_PAGE.md`. Automated invariants and the v0.0.119 APK build
+pass locally. Regular active-page erasure is hardware validated; the remaining
+transactional tool and lifecycle gates are still in progress.
 
 The active settled-ink compositor now clips its transformed bitmap to the
 same visible page-slot bounds used by Native Fill PDF and canonical-ink

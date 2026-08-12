@@ -198,7 +198,7 @@ if ($AdbArguments.Count -ge 2 -and $AdbArguments[0] -eq 'shell') {
             '/storage/emulated/0/Download/SupernoteNativeSpreadTrace'
         $requiredFragments = @(
             "mkdir '$remoteRoot/.active-recovery'",
-            "stat -c '%d:%i:%s:%Y:%Z' '$remoteRoot/active.txt'",
+            "stat -c '%d:%i:%s:%Y' '$remoteRoot/active.txt'",
             "mv '$remoteRoot/active.txt' " +
                 "'$remoteRoot/.active-recovery/active.txt'",
             "mv '$remoteRoot/.active-recovery' " +
@@ -212,6 +212,13 @@ if ($AdbArguments.Count -ge 2 -and $AdbArguments[0] -eq 'shell') {
                 $global:LASTEXITCODE = 97
                 return
             }
+        }
+        if ($command.Contains("stat -c '%d:%i:%s:%Y:%Z'")) {
+            [Console]::Error.WriteLine(
+                'abandoned-pointer identity incorrectly includes rename-changing ctime'
+            )
+            $global:LASTEXITCODE = 97
+            return
         }
         if ($env:SN_TRACE_FAKE_RECOVERY_RESULT -eq '__FAIL__') {
             [Console]::Error.WriteLine('simulated abandoned-pointer recovery failure')
@@ -389,6 +396,7 @@ $global:LASTEXITCODE = 99
                 -File $traceScript `
                 -Action $Action `
                 -Adb $fakeAdb `
+                -NoPing `
                 -Destination $destination 2>&1 | Out-String)
             $exitCode = $LASTEXITCODE
         } finally {
@@ -577,6 +585,16 @@ $global:LASTEXITCODE = 99
         -ExpectedState $validActiveSession `
         -ExpectExpectedStateAbsent $true `
         -PidState '__ABSENT__' `
+        -AllowRemoteMutation $true `
+        -ExpectedMessage 'partial directory remains'
+    Invoke-FailClosedScenario `
+        -Name 'abandoned-pointer-android-rename-ctime-change-stop' `
+        -Action Stop `
+        -Active $validActiveSession `
+        -ExpectedState $validActiveSession `
+        -ExpectExpectedStateAbsent $true `
+        -PidState '__ABSENT__' `
+        -RecoveryResult '__CTIME_CHANGED_BY_RENAME__' `
         -AllowRemoteMutation $true `
         -ExpectedMessage 'partial directory remains'
     Invoke-FailClosedScenario `

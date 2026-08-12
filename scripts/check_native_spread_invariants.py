@@ -495,27 +495,27 @@ def check(repo_root: Path) -> None:
     frozen_source_digests = (
         (
             plugin_path,
-            "1a1f5a452dcbdb467c2a1b36260aa422fb56e595eb2dea308f427b98688e7b0b",
+            "a7e1e7dfe29197478a3fcafd2fa6ab7806477b80b573d79b748c28f96ce0ac80",
             "ReaderPreferencesModule.kt.template",
         ),
         (
             module_path,
-            "dc2709f0bcf632d839acc6676087f6177a7a14610160e3e04a8a52d96b427d2e",
+            "1d7702b989a29ea0e41ae44ee670303ca8fb281f0870d161018b8bed0131c6b0",
             "SpreadProbe.java",
         ),
         (
             native_build_path,
-            "c36c96bcd65111882929fceb878747e0f48a5ab779c2a20cb2ffa1ad69c313a0",
+            "94c913965f7f9146b3d8fb368fd434881a4af566b27a0f185882db36972b2f9e",
             "native build script",
         ),
         (
             trace_script_path,
-            "650e4ceb744aa3aeb2a8835d2664b6cbc1b4e89a650f1d3a94375804462f5a2d",
+            "1d75e574776b3e90dc04ae42ab6685623324734dae4dad16ac10888005229d6a",
             "Native Spread trace helper",
         ),
         (
             trace_helper_test_path,
-            "32bcb4a63812b199cba0620b52a7c282dae46caacc4b22934ff33dd068efaabf",
+            "224ba08b5d9a8252ed67f785448e65f3d7efd1c86527a4e0f109bc241172d358",
             "Native Spread trace-helper test",
         ),
         (
@@ -620,7 +620,7 @@ def check(repo_root: Path) -> None:
         fail("Native Spread verification workflow may not publish its APK")
 
     expected_native_cpp_sha256 = (
-        "2aa4f5aa8dbaceb7446d66ed04063d42f38d865a7013a3a477c67dd785fefe3b"
+        "715183119972cc32599842c07cbc999334d0ef74e9cc587e9fcfe2adeac47cd5"
     )
     actual_native_cpp_sha256 = normalized_text_sha256(native_cpp_path)
     if actual_native_cpp_sha256 != expected_native_cpp_sha256:
@@ -640,6 +640,20 @@ def check(repo_root: Path) -> None:
         "void replacement_grid_line_erase(",
         "native eraser replacement",
     )
+    native_regular_erase_hot_path, native_regular_erase_masked = (
+        extract_cpp_function(
+            native_cpp,
+            "int replacement_regular_erase(",
+            "native regular eraser replacement",
+        )
+    )
+    native_hook_install_hot_path, native_hook_install_masked = (
+        extract_cpp_function(
+            native_cpp,
+            "void on_library_loaded(",
+            "native eraser hook installer",
+        )
+    )
     native_gate_hot_path, native_gate_masked = extract_cpp_function(
         native_cpp,
         "SpreadProbe_nativeSetCalibrationEnabled(",
@@ -647,7 +661,8 @@ def check(repo_root: Path) -> None:
     )
     if re.search(
         r"(?m)^\s*#\s*define\s+(?:trail_int|original_grid_line_erase|"
-        r"replacement_grid_line_erase|calibration_enabled)\b",
+        r"original_regular_erase|replacement_grid_line_erase|"
+        r"replacement_regular_erase|calibration_enabled)\b",
         mask_cpp_comments_and_literals(native_cpp),
     ):
         fail("native eraser critical symbols may not be macro-redefined")
@@ -798,6 +813,167 @@ def check(repo_root: Path) -> None:
         },
         "native eraser replacement",
     )
+
+    regular_gate = require_cpp_pattern(
+        native_regular_erase_masked,
+        r"if\s*\(\s*calibration_enabled\s*\.\s*load\s*\(\s*"
+        r"std::memory_order_acquire\s*\)\s*&&\s*operation_trail\s*!=\s*"
+        r"nullptr\s*\)",
+        "native regular eraser acquire gate and non-null guard",
+    )
+    regular_signature = require_cpp_pattern(
+        native_regular_erase_masked,
+        r"if\s*\(\s*pen_type\s*==\s*16\s*&&\s*pen_color\s*==\s*255\s*"
+        r"&&\s*original_width\s*==\s*932\s*&&\s*original_height\s*==\s*"
+        r"1243\s*\)",
+        "native regular eraser exact disposable-spread signature",
+    )
+    regular_patch_width = require_cpp_pattern(
+        native_regular_erase_masked,
+        r"trail_int\s*\(\s*operation_trail\s*,\s*kTrailRedrawWidth\s*\)"
+        r"\s*=\s*1872\s*;",
+        "native regular eraser width patch",
+    )
+    regular_patch_height = require_cpp_pattern(
+        native_regular_erase_masked,
+        r"trail_int\s*\(\s*operation_trail\s*,\s*kTrailRedrawHeight\s*\)"
+        r"\s*=\s*2496\s*;",
+        "native regular eraser height patch",
+    )
+    regular_patched_true = require_cpp_pattern(
+        native_regular_erase_masked,
+        r"patched\s*=\s*true\s*;",
+        "native regular eraser patched-state publication",
+    )
+    regular_original_call = require_cpp_pattern(
+        native_regular_erase_masked,
+        r"const\s+int\s+result\s*=\s*original_regular_erase\s*\(\s*"
+        r"operation_trail\s*,\s*current_page_trails\s*,\s*"
+        r"erased_trail_numbers\s*,\s*affected_trail_numbers\s*,\s*mode\s*"
+        r"\)\s*;",
+        "native regular eraser original invocation",
+    )
+    regular_restore = require_cpp_pattern(
+        native_regular_erase_masked,
+        r"if\s*\(\s*patched\s*\)\s*\{\s*"
+        r"trail_int\s*\(\s*operation_trail\s*,\s*kTrailRedrawWidth\s*\)"
+        r"\s*=\s*original_width\s*;\s*"
+        r"trail_int\s*\(\s*operation_trail\s*,\s*kTrailRedrawHeight\s*\)"
+        r"\s*=\s*original_height\s*;\s*\}",
+        "native regular eraser post-call restoration",
+    )
+    regular_return = require_cpp_pattern(
+        native_regular_erase_masked,
+        r"return\s+result\s*;",
+        "native regular eraser return preservation",
+    )
+    regular_gate_open = native_regular_erase_masked.find("{", regular_gate)
+    regular_gate_close = matching_brace(
+        native_regular_erase_masked,
+        regular_gate_open,
+        "native regular eraser acquire gate",
+    )
+    regular_signature_open = native_regular_erase_masked.find(
+        "{", regular_signature
+    )
+    regular_signature_close = matching_brace(
+        native_regular_erase_masked,
+        regular_signature_open,
+        "native regular eraser exact-signature branch",
+    )
+    if not (
+        regular_gate < regular_signature < regular_patch_width
+        < regular_patch_height < regular_patched_true
+        < regular_signature_close <= regular_gate_close
+        < regular_original_call < regular_restore < regular_return
+    ):
+        fail(
+            "native regular eraser patch, delegation, restoration, and "
+            "return are not strictly ordered"
+        )
+    if native_regular_erase_masked[
+        regular_gate_close + 1:regular_original_call
+    ].strip():
+        fail("native regular eraser original invocation is not unconditional")
+    if len(re.findall(r"\bif\s*\(", native_regular_erase_masked)) != 3:
+        fail(
+            "native regular eraser may only use the acquire, signature, and "
+            "restore guards"
+        )
+    if len(re.findall(r"\btrail_int\s*\(", native_regular_erase_masked)) != 8:
+        fail("native regular eraser must perform four reads and four writes")
+    if len(
+        re.findall(
+            r"kTrailRedrawWidth\s*\)\s*=", native_regular_erase_masked
+        )
+    ) != 2:
+        fail("native regular eraser width may only be patched and restored once")
+    if len(
+        re.findall(
+            r"kTrailRedrawHeight\s*\)\s*=", native_regular_erase_masked
+        )
+    ) != 2:
+        fail("native regular eraser height may only be patched and restored once")
+    if len(
+        re.findall(r"\boriginal_regular_erase\s*\(", native_regular_erase_masked)
+    ) != 1:
+        fail("native regular eraser must invoke the original exactly once")
+    if re.search(
+        r"\b(?:for|while|switch|goto|throw|try|catch)\b|\?",
+        native_regular_erase_masked,
+    ):
+        fail("native regular eraser contains unexpected conditional control flow")
+    require_only_cpp_calls(
+        native_regular_erase_masked,
+        {
+            "replacement_regular_erase",
+            "if",
+            "load",
+            "trail_int",
+            "original_regular_erase",
+        },
+        "native regular eraser replacement",
+    )
+
+    if (
+        native_cpp.count(
+            '"_Z10eraseTrailR14TrailContainerRNSt6__ndk16vectorIS_NS1_"'
+        ) != 1
+        or native_cpp.count(
+            '"9allocatorIS_EEEERNS2_IiNS3_IiEEEES6_i"'
+        ) != 1
+    ):
+        fail("native regular eraser must target exactly the reviewed vector symbol")
+    if len(re.findall(r"\bdlsym\s*\(", native_hook_install_masked)) != 2:
+        fail("native eraser installer must resolve exactly two reviewed symbols")
+    if len(re.findall(r"\bhook_function\s*\(", native_hook_install_masked)) != 2:
+        fail("native eraser installer must install exactly two reviewed hooks")
+    require_cpp_pattern(
+        native_hook_install_masked,
+        r"dlsym\s*\(\s*handle\s*,\s*kGridLineTargetSymbol\s*\)",
+        "native grid eraser symbol resolution",
+    )
+    require_cpp_pattern(
+        native_hook_install_masked,
+        r"dlsym\s*\(\s*handle\s*,\s*kRegularTargetSymbol\s*\)",
+        "native regular eraser symbol resolution",
+    )
+    require_cpp_pattern(
+        native_hook_install_masked,
+        r"if\s*\(\s*original_grid_line_erase\s*!=\s*nullptr\s*&&\s*"
+        r"original_regular_erase\s*!=\s*nullptr\s*\)\s*\{\s*"
+        r"hook_state\s*\.\s*store\s*\(\s*2\s*,\s*"
+        r"std::memory_order_release\s*\)\s*;\s*\}",
+        "native two-hook readiness publication",
+    )
+    if len(
+        re.findall(
+            r"hook_state\s*\.\s*store\s*\(\s*2\s*,",
+            native_hook_install_masked,
+        )
+    ) != 1:
+        fail("native hook readiness may be published exactly once")
+
     gate_body_start = native_gate_masked.find("{")
     gate_body_end = native_gate_masked.rfind("}")
     normalized_gate_body = re.sub(
@@ -823,7 +999,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 118L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 119L",
             "private const val NATIVE_SPREAD_HANDSHAKE_PROTOCOL = 2",
             "private const val NATIVE_SPREAD_EDITABLE_MARKER_PROTOCOL = 2",
             '"protected-editable-transactional-v1"',
@@ -3059,27 +3235,37 @@ def check(repo_root: Path) -> None:
     dispatch_trace = dispatch_touch_hook.find(
         "traceTouchEvent(activity, event);", dispatch_finger_stream
     )
+    dispatch_config = dispatch_touch_hook.find(
+        "SpreadConfig config = SPREAD_CONFIGS.get(activity);", dispatch_trace
+    )
+    dispatch_editable_spread = dispatch_touch_hook.find(
+        "isCachedEditableSpreadLandscape(activity, config)", dispatch_config
+    )
+    dispatch_contact_latch = dispatch_touch_hook.find(
+        "latchPenContactFromActivityTouch(", dispatch_editable_spread
+    )
     dispatch_block = dispatch_touch_hook.find(
-        "blockPageActivationUiInput(activity, event)", dispatch_trace
+        "blockPageActivationUiInput(activity, event)", dispatch_contact_latch
     )
     dispatch_consume = dispatch_touch_hook.find(
         "param.setResult(true);", dispatch_block
     )
     dispatch_return = dispatch_touch_hook.find("return;", dispatch_consume)
-    dispatch_config = dispatch_touch_hook.find(
-        "SpreadConfig config = SPREAD_CONFIGS.get(activity);", dispatch_return
-    )
     dispatch_after = dispatch_touch_hook.find(
-        "protected void afterHookedMethod", dispatch_config
+        "protected void afterHookedMethod", dispatch_return
     )
     dispatch_finger_finish = dispatch_touch_hook.find(
         "finishFingerTouchStream(", dispatch_after
     )
+    dispatch_contact_terminal = dispatch_touch_hook.find(
+        "schedulePenContactFallbackFromActivityTouch(",
+        dispatch_finger_finish,
+    )
     if not (
-        0 <= dispatch_finger_stream < dispatch_trace
-        < dispatch_block < dispatch_consume
-        < dispatch_return < dispatch_config < dispatch_after
-        < dispatch_finger_finish
+        0 <= dispatch_finger_stream < dispatch_trace < dispatch_config
+        < dispatch_editable_spread < dispatch_contact_latch
+        < dispatch_block < dispatch_consume < dispatch_return < dispatch_after
+        < dispatch_finger_finish < dispatch_contact_terminal
     ):
         fail(
             "touch input is not consumed before native chrome and page "
@@ -3091,7 +3277,9 @@ def check(repo_root: Path) -> None:
             "isCachedSpreadLandscape(activity, config)",
             "cachedSpreadLandscape",
             "trackFingerTouchStream(activity, event)",
+            "latchPenContactFromActivityTouch(",
             "finishFingerTouchStream(",
+            "schedulePenContactFallbackFromActivityTouch(",
             "trackFingerTapNavigation(",
             "handlePageActivationTouch(",
         ),
@@ -4495,15 +4683,25 @@ def check(repo_root: Path) -> None:
     ui_block_start = module.find(
         "private static boolean blockPageActivationUiInput("
     )
+    activity_contact_latch_start = module.find(
+        "private static void latchPenContactFromActivityTouch(", ui_block_start
+    )
+    activity_contact_terminal_start = module.find(
+        "private static void schedulePenContactFallbackFromActivityTouch(",
+        activity_contact_latch_start,
+    )
     activation_touch_start = module.find(
-        "private static boolean handlePageActivationTouch(", ui_block_start
+        "private static boolean handlePageActivationTouch(",
+        activity_contact_terminal_start,
     )
     native_chrome_start = module.find(
         "private static boolean isNativeChromeTouch(", activation_touch_start
     )
-    if ui_block_start < 0 or activation_touch_start < 0 or native_chrome_start < 0:
+    if (ui_block_start < 0 or activity_contact_latch_start < 0
+            or activity_contact_terminal_start < 0
+            or activation_touch_start < 0 or native_chrome_start < 0):
         fail("could not isolate page-activation UI-input blocking")
-    ui_block_method = module[ui_block_start:activation_touch_start]
+    ui_block_method = module[ui_block_start:activity_contact_latch_start]
     require_markers(
         ui_block_method,
         (
@@ -4528,6 +4726,128 @@ def check(repo_root: Path) -> None:
     )
     if "log(" in ui_block_method:
         fail("blocked UI-input hook performs synchronous per-motion logging")
+    activity_contact_latch = module[
+        activity_contact_latch_start:activity_contact_terminal_start
+    ]
+    require_markers(
+        activity_contact_latch,
+        (
+            "event.getActionMasked() != MotionEvent.ACTION_DOWN",
+            "MotionEvent.TOOL_TYPE_STYLUS",
+            "MotionEvent.TOOL_TYPE_ERASER",
+            "PenInputSnapshot snapshot = penInputSnapshot(activity)",
+            "PenContactIdentityCapture identity = snapshot == null",
+            "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+            "PEN_CONTACT_OWNERSHIPS.get(activity)",
+            "PEN_INPUT_EDITABLE_GUARDS.get(activity)",
+            "PAGE_ACTIVATION_TRANSACTIONS.get(activity)",
+            "PEN_INPUT_SNAPSHOTS.get(activity) != snapshot",
+            "SPREAD_CONFIGS.get(activity) != snapshot.config",
+            "publishAmbiguousPenContactLocked(activity)",
+            "snapshot.isNativeChromeTouch(touchY)",
+            "int mappedPage = pageAt(",
+            "mappedPage == snapshot.currentPage",
+            "publishPenContactOwnershipLocked(",
+            "PEN_PHYSICAL_CONTACT_DOWNS.put(",
+            "retireDocumentReceiveQuarantineAfterFreshContactLocked(",
+            '"pen_contact_activity_touch_latched"',
+        ),
+        "identity-validated Android stylus contact fallback",
+    )
+    fallback_lock = activity_contact_latch.find(
+        "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)"
+    )
+    fallback_existing = activity_contact_latch.find(
+        "PEN_CONTACT_OWNERSHIPS.get(activity)", fallback_lock
+    )
+    fallback_authority = activity_contact_latch.find(
+        "PEN_INPUT_EDITABLE_GUARDS.get(activity)", fallback_existing
+    )
+    fallback_snapshot = activity_contact_latch.find(
+        "PEN_INPUT_SNAPSHOTS.get(activity) != snapshot", fallback_authority
+    )
+    fallback_mapping = activity_contact_latch.find(
+        "int mappedPage = pageAt(", fallback_snapshot
+    )
+    fallback_publish = activity_contact_latch.find(
+        "published = publishPenContactOwnershipLocked(", fallback_mapping
+    )
+    fallback_physical = activity_contact_latch.find(
+        "PEN_PHYSICAL_CONTACT_DOWNS.put(", fallback_publish
+    )
+    fallback_quarantine = activity_contact_latch.find(
+        "retireDocumentReceiveQuarantineAfterFreshContactLocked(",
+        fallback_physical,
+    )
+    if not (
+        0 <= fallback_lock < fallback_existing < fallback_authority
+        < fallback_snapshot < fallback_mapping < fallback_publish
+        < fallback_physical < fallback_quarantine
+    ):
+        fail(
+            "Android stylus fallback does not validate and publish one exact "
+            "contact owner before retiring receive quarantine"
+        )
+    fallback_blocking_hits = [
+        marker for marker in blocking_markers
+        if marker in activity_contact_latch
+    ]
+    if fallback_blocking_hits or "log(" in activity_contact_latch:
+        fail(
+            "Android stylus fallback performs blocking or synchronous work: "
+            f"{fallback_blocking_hits}"
+        )
+    activity_contact_terminal = module[
+        activity_contact_terminal_start:activation_touch_start
+    ]
+    require_markers(
+        activity_contact_terminal,
+        (
+            "action != MotionEvent.ACTION_UP",
+            "&& action != MotionEvent.ACTION_CANCEL",
+            "MotionEvent.TOOL_TYPE_STYLUS",
+            "MotionEvent.TOOL_TYPE_ERASER",
+            "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+            "PEN_CONTACT_OWNERSHIPS.get(activity)",
+            "owner.phase != PEN_CONTACT_PHASE_ACTIVE",
+            "capturePageActivationPenLiftGeneration(activity)",
+            "schedulePenContactReceiveFallback(",
+            '"pen_contact_activity_touch_terminal_fallback"',
+        ),
+        "Android stylus terminal fallback",
+    )
+    terminal_lock = activity_contact_terminal.find(
+        "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)"
+    )
+    terminal_owner = activity_contact_terminal.find(
+        "PEN_CONTACT_OWNERSHIPS.get(activity)", terminal_lock
+    )
+    terminal_phase = activity_contact_terminal.find(
+        "owner.phase != PEN_CONTACT_PHASE_ACTIVE", terminal_owner
+    )
+    terminal_lift = activity_contact_terminal.find(
+        "capturePageActivationPenLiftGeneration(activity)", terminal_phase
+    )
+    terminal_schedule = activity_contact_terminal.find(
+        "schedulePenContactReceiveFallback(", terminal_lift
+    )
+    if not (
+        0 <= terminal_lock < terminal_owner < terminal_phase
+        < terminal_lift < terminal_schedule
+    ):
+        fail(
+            "Android stylus terminal fallback does not validate the active "
+            "owner before scheduling the receive fallback"
+        )
+    terminal_blocking_hits = [
+        marker for marker in blocking_markers
+        if marker in activity_contact_terminal
+    ]
+    if terminal_blocking_hits or "log(" in activity_contact_terminal:
+        fail(
+            "Android stylus terminal fallback performs blocking or "
+            f"synchronous work: {terminal_blocking_hits}"
+        )
     activation_touch_method = module[
         activation_touch_start:native_chrome_start
     ]
@@ -4549,6 +4869,9 @@ def check(repo_root: Path) -> None:
             "PAGE_ACTIVATION_BLOCKED_TOUCHES.put(",
             "notePageActivationUiBlock(",
             '"page_activation_stylus_stream_latched current="',
+            '"stylus_touch_contact"',
+            "beginPageActivationTransaction(",
+            '"page_activation_stylus_touch_result current="',
             "return true;",
         ),
         "inactive-page stylus-stream admission latch",
@@ -4574,14 +4897,20 @@ def check(repo_root: Path) -> None:
     stylus_note = activation_touch_method.find(
         "notePageActivationUiBlock(", stylus_latch
     )
+    stylus_activation = activation_touch_method.find(
+        "beginPageActivationTransaction(", stylus_note
+    )
+    stylus_result = activation_touch_method.find(
+        '"page_activation_stylus_touch_result current="', stylus_activation
+    )
     finger_activation = activation_touch_method.find(
         "Integer trackedTarget = ACTIVATION_TOUCH_TARGETS.get(activity)",
-        stylus_note,
+        stylus_result,
     )
     if not (
         0 <= stylus_branch < stylus_down_only < stylus_snapshot
         < stylus_persisted_guard < stylus_current_guard < stylus_latch
-        < stylus_note < finger_activation
+        < stylus_note < stylus_activation < stylus_result < finger_activation
     ):
         fail(
             "inactive-page stylus DOWN is not validated and latched before "
@@ -4734,14 +5063,31 @@ def check(repo_root: Path) -> None:
         fail("could not isolate native finger-stream cancellation")
     cancel_helper = module[cancel_helper_start:native_chrome_helper_start]
     child_cancel = cancel_helper.find("superDispatchTouchEvent(")
+    child_result = cancel_helper.rfind(
+        "boolean childHandled =", 0, child_cancel
+    )
     activity_fallback = cancel_helper.find(
         "activity.onTouchEvent(cancelEvent)", child_cancel
     )
-    return_handled = cancel_helper.find("return handled;", activity_fallback)
-    if not 0 <= child_cancel < activity_fallback < return_handled:
+    activity_result = cancel_helper.rfind(
+        "activityHandled =", child_cancel, activity_fallback
+    )
+    unhandled_diagnostic = cancel_helper.find(
+        '"activation_touch_cancel_delivered_unhandled"', activity_fallback
+    )
+    return_delivered = cancel_helper.find("return true;", unhandled_diagnostic)
+    if not (
+        0 <= child_result < child_cancel < activity_result
+        < activity_fallback < unhandled_diagnostic < return_delivered
+    ):
         fail(
-            "synthetic finger CANCEL bypasses the Activity fallback or reports "
-            "success without its dispatch result"
+            "synthetic finger CANCEL does not traverse both possible owners "
+            "or confuses Android's consumption result with delivery"
+        )
+    if "return handled;" in cancel_helper:
+        fail(
+            "synthetic finger CANCEL still mistakes an unconsumed terminal "
+            "event for a delivery failure"
         )
     if "activateDocumentPage(" in activation_touch_method:
         fail("inactive-page finger taps can bypass persisted config validation")
@@ -5565,6 +5911,7 @@ def check(repo_root: Path) -> None:
             "receiveTrialsOwnershipFailure(",
             "receiveScope.ownershipFailure = ownershipFailure",
             "popPresenterCallbackScope(",
+            "currentReceiveTrialsScope()",
             "popReceiveTrialsScope()",
             "presenterCallbackScopeStillActive(",
             "PenContactOwnership contactOwnership =",
@@ -5574,10 +5921,58 @@ def check(repo_root: Path) -> None:
             "contactOwnership.phase =",
             "PEN_CONTACT_PHASE_EXPIRED;",
             "PEN_RECEIVE_EXPIRED_GENERATIONS.put(",
+            "receive_trials_scope_pop_mismatch",
             "finishTraceMutationAdmission(",
         ),
         "transactional receiveTrials guard",
     )
+    receive_scope_lookup = transaction_receive_hook.find(
+        "ReceiveTrialsScope receiveScope =\n"
+        "                        currentReceiveTrialsScope();"
+    )
+    receive_active_refresh = transaction_receive_hook.find(
+        "persistActiveMutationBeforeCanonicalRefresh(",
+        receive_scope_lookup,
+    )
+    receive_terminal_scope_pop = transaction_receive_hook.find(
+        "ReceiveTrialsScope poppedReceiveScope =",
+        receive_active_refresh,
+    )
+    receive_scope_mismatch = transaction_receive_hook.find(
+        'log("receive_trials_scope_pop_mismatch")',
+        receive_terminal_scope_pop,
+    )
+    receive_trace_finish = transaction_receive_hook.find(
+        "finishTraceMutationAdmission(",
+        receive_scope_mismatch,
+    )
+    if not (
+        0 <= receive_scope_lookup < receive_active_refresh
+        < receive_terminal_scope_pop < receive_scope_mismatch
+        < receive_trace_finish
+    ):
+        fail(
+            "terminal receive ownership is not retained through the exact "
+            "active-page canonical save and retired before trace admission"
+        )
+    receive_scope_helper_start = module.find(
+        "private static ReceiveTrialsScope currentReceiveTrialsScope()"
+    )
+    receive_scope_pop_helper_start = module.find(
+        "private static ReceiveTrialsScope popReceiveTrialsScope()",
+        receive_scope_helper_start,
+    )
+    if receive_scope_helper_start < 0 or receive_scope_pop_helper_start < 0:
+        fail("could not isolate terminal receive-scope lookup")
+    receive_scope_helper = module[
+        receive_scope_helper_start:receive_scope_pop_helper_start
+    ]
+    if (
+        "RECEIVE_TRIALS_OWNERSHIP_SCOPES.get()" not in receive_scope_helper
+        or "scopes.peek()" not in receive_scope_helper
+        or "scopes.pop()" in receive_scope_helper
+    ):
+        fail("terminal receive-scope lookup can consume or lose ownership")
     require_markers(
         transaction_save_hook,
         (
@@ -7065,13 +7460,14 @@ def check(repo_root: Path) -> None:
             "boolean canonicalOnly",
             "readOnly || canonicalOnly",
             'committed_ink_canonical_only reason=eraser',
-            "persistActiveEraserBeforeCanonicalRefresh(",
-            'active_eraser_saved_before_canonical_refresh',
-            'active_eraser_canonical_reloaded',
-            '"active_eraser_canonical_reload"',
+            "persistActiveMutationBeforeCanonicalRefresh(",
+            'active_mutation_saved_before_canonical_refresh',
+            'active_mutation_canonical_reloaded',
+            '"active_mutation_canonical_reload"',
             "saveTrailsForCanonicalReload(",
             '"undo_redo:" + mutationName',
             '"active_eraser"',
+            '"active_pen"',
             'explicit_canonical_trail_save reason=',
             "if (replaceActiveSlot && activeDestination != null)",
             '" mode=" + (replaceActiveSlot ? "replace" : "add")',
@@ -7079,25 +7475,43 @@ def check(repo_root: Path) -> None:
         "settled ink composition",
     )
 
-    active_eraser_start = module.find(
-        "private static void persistActiveEraserBeforeCanonicalRefresh("
+    active_mutation_start = module.find(
+        "private static void persistActiveMutationBeforeCanonicalRefresh("
     )
     canonical_save_start = module.find(
         "private static void saveTrailsForCanonicalReload(",
-        active_eraser_start,
+        active_mutation_start,
     )
-    if active_eraser_start < 0 or canonical_save_start < 0:
-        fail("could not isolate active-page eraser canonical refresh")
-    active_eraser_refresh = module[active_eraser_start:canonical_save_start]
-    eraser_save = active_eraser_refresh.find("saveTrailsForCanonicalReload(")
-    eraser_reload = active_eraser_refresh.find('"loadHandWrite"', eraser_save)
-    eraser_trace = active_eraser_refresh.find(
-        '"active_eraser_canonical_reload"', eraser_reload
+    if active_mutation_start < 0 or canonical_save_start < 0:
+        fail("could not isolate active-page canonical mutation refresh")
+    active_mutation_refresh = module[
+        active_mutation_start:canonical_save_start
+    ]
+    mutation_kind = active_mutation_refresh.find(
+        'String mutationKind = eraserMutation'
     )
-    if not 0 <= eraser_save < eraser_reload < eraser_trace:
+    mutation_save = active_mutation_refresh.find(
+        "saveTrailsForCanonicalReload(", mutation_kind
+    )
+    mutation_force = active_mutation_refresh.find(
+        "FORCE_CANONICAL_ACTIVE_INK.set(Boolean.TRUE)", mutation_save
+    )
+    mutation_reload = active_mutation_refresh.find(
+        '"loadHandWrite"', mutation_force
+    )
+    mutation_restore = active_mutation_refresh.find(
+        "if (previousForceCanonical == null)", mutation_reload
+    )
+    mutation_trace = active_mutation_refresh.find(
+        '"active_mutation_canonical_reload"', mutation_restore
+    )
+    if not (
+        0 <= mutation_kind < mutation_save < mutation_force
+        < mutation_reload < mutation_restore < mutation_trace
+    ):
         fail(
-            "active-page eraser must save canonical trails before reloading "
-            "and tracing the settled bitmap"
+            "active-page mutation must save canonical trails and force a "
+            "canonical-only reload before tracing the settled bitmap"
         )
 
     combined_start = module.find(
@@ -8386,14 +8800,15 @@ def check(repo_root: Path) -> None:
             "function Clear-MatchingLocalExpectedTraceSession",
             ".native-spread-expected-session.txt",
             "[string]$CurrentAction",
+            "[switch]$NoPing",
             "pidof '$documentPackage'",
             '"$remoteRoot/.active-recovery"',
             "__SNTRACE_RECOVERY_PRESENT__",
             "__TRACE_POINTER_REPLACEMENT_RETAINED__",
             "__TRACE_ABANDONED_ARCHIVED__",
-            "candidate_identity=`$(stat -c '%d:%i:%s:%Y:%Z'",
-            "claimed_identity=`$(stat -c '%d:%i:%s:%Y:%Z'",
-            "archived_identity=`$(stat -c '%d:%i:%s:%Y:%Z'",
+            "candidate_identity=`$(stat -c '%d:%i:%s:%Y'",
+            "claimed_identity=`$(stat -c '%d:%i:%s:%Y'",
+            "archived_identity=`$(stat -c '%d:%i:%s:%Y'",
             "$script:recoveredAbandonedTraceSession = $session",
             "active.txt was retained",
             "Reconcile-AbandonedTracePointer -CurrentAction $Action",
@@ -8421,7 +8836,7 @@ def check(repo_root: Path) -> None:
             '"$remoteFile.partial"',
             "Trace bundle contains $parseErrors malformed JSON event",
             "Trace bundle contains no JSON events",
-            "'.partial-' + $session + '-'",
+            "'.partial-' + [Guid]::NewGuid().ToString('N')",
             "Timed out waiting for trace",
         ),
         "Native Spread trace collection script",
@@ -8448,6 +8863,9 @@ def check(repo_root: Path) -> None:
             "abandoned-pointer-recovery-failure-stop",
             "abandoned-pointer-replaced-during-claim-stop",
             "abandoned-pointer-recovery-clears-matching-expected-stop",
+            "abandoned-pointer-android-rename-ctime-change-stop",
+            "rename-changing ctime",
+            "-NoPing",
             "abandoned-pointer-recovery-retains-mismatched-expected-stop",
             "retained-recovery-guard-$action",
             "retained-recovery-guard-Status",
@@ -8573,7 +8991,7 @@ if ($LASTEXITCODE -ne 0) {
     native_source_review_gate = r'''
 $nativeSource = Join-Path $projectRoot 'native\spread_probe_native.cpp'
 $expectedNativeSourceSha256 =
-    '2AA4F5AA8DBACEB7446D66ED04063D42F38D865A7013A3A477C67DD785FEFE3B'
+    '715183119972CC32599842C07CBC999334D0EF74E9CC587E9FCFE2ADEAC47CD5'
 $nativeSourceSha256 = Get-NormalizedTextSha256 -LiteralPath $nativeSource
 if ($nativeSourceSha256 -ne $expectedNativeSourceSha256) {
     throw (
@@ -8909,6 +9327,17 @@ try {
         )
 
     helper_reconcile_code = trace_script[helper_reconcile:helper_wait]
+    stable_identity_stat = "stat -c '%d:%i:%s:%Y'"
+    if helper_reconcile_code.count(stable_identity_stat) != 5:
+        fail(
+            "abandoned-pointer recovery must validate the same stable "
+            "device/inode/size/mtime identity at all five claim stages"
+        )
+    if "stat -c '%d:%i:%s:%Y:%Z'" in helper_reconcile_code:
+        fail(
+            "abandoned-pointer recovery includes ctime even though Android "
+            "changes it during the helper's own atomic rename"
+        )
     active_pointer_path = helper_reconcile_code.find(
         '$activePointer = "$remoteRoot/active.txt"'
     )
@@ -8929,28 +9358,28 @@ try {
         "if ! mkdir '$recoveryLock'; then", recovery_invoke
     )
     candidate_identity = helper_reconcile_code.find(
-        "candidate_identity=`$(stat -c '%d:%i:%s:%Y:%Z'", recovery_lock_create
+        "candidate_identity=`$(stat -c '%d:%i:%s:%Y'", recovery_lock_create
     )
     candidate_value = helper_reconcile_code.find(
         "candidate_value=`$(cat '$activePointer')", candidate_identity
     )
     candidate_confirmed = helper_reconcile_code.find(
-        "candidate_confirmed=`$(stat -c '%d:%i:%s:%Y:%Z'", candidate_value
+        "candidate_confirmed=`$(stat -c '%d:%i:%s:%Y'", candidate_value
     )
     claim_move = helper_reconcile_code.find(
         "if ! mv '$activePointer' '$claimedPointer'; then", candidate_confirmed
     )
     claimed_identity = helper_reconcile_code.find(
-        "claimed_identity=`$(stat -c '%d:%i:%s:%Y:%Z'", claim_move
+        "claimed_identity=`$(stat -c '%d:%i:%s:%Y'", claim_move
     )
     claimed_confirmed = helper_reconcile_code.find(
-        "claimed_confirmed=`$(stat -c '%d:%i:%s:%Y:%Z'", claimed_identity
+        "claimed_confirmed=`$(stat -c '%d:%i:%s:%Y'", claimed_identity
     )
     archive_move = helper_reconcile_code.find(
         "if ! mv '$recoveryLock' '$archivedRecovery'; then", claimed_confirmed
     )
     archived_identity = helper_reconcile_code.find(
-        "archived_identity=`$(stat -c '%d:%i:%s:%Y:%Z'", archive_move
+        "archived_identity=`$(stat -c '%d:%i:%s:%Y'", archive_move
     )
     archived_status = helper_reconcile_code.find(
         "echo __TRACE_ABANDONED_ARCHIVED__", archived_identity
@@ -9115,10 +9544,10 @@ try {
     if '"$remoteRoot/$Session/screenshots"' in trace_script:
         fail("desktop screenshots can mutate an already-published trace bundle")
 
-    if 'android:versionCode="118"' not in manifest:
-        fail("companion manifest must use versionCode 118")
-    if 'android:versionName="0.0.118"' not in manifest:
-        fail("companion manifest must use versionName 0.0.118")
+    if 'android:versionCode="119"' not in manifest:
+        fail("companion manifest must use versionCode 119")
+    if 'android:versionName="0.0.119"' not in manifest:
+        fail("companion manifest must use versionName 0.0.119")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

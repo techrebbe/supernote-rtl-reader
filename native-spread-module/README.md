@@ -273,6 +273,15 @@ partial archive stages, while ambiguous evidence fails closed without mutation.
 Read-only and Off transitions are also pending-journaled before recovery
 retirement, so a process death cannot silently lose the protected baseline.
 
+v0.0.119 corrects the firmware's regular vector-eraser coordinate mismatch in
+Native Spread. The regular eraser operation arrives with half-page
+`932 x 1243` redraw dimensions while the active canonical trails use
+`1872 x 2496`. The native wrapper substitutes the canonical dimensions only
+when the operation also has the exact regular-eraser pen type and color, calls
+Supernote's original eraser once, and restores the original fields immediately.
+The established grid eraser path is unchanged. Native eraser readiness is
+published only when both firmware symbols have been hooked successfully.
+
 This is firmware-specific experimental software for a rooted device. Back up
 documents and `.mark` files before testing a new firmware or module revision.
 
@@ -303,7 +312,7 @@ previously installed build.
 
 Install the APK, enable **Supernote Native Spread Probe** in LSPosed, scope it
 only to `com.supernote.document`, and restart the document reader. Supernote
-RTL Reader v0.4.13 or newer and Native Spread v0.0.118 or newer are required for
+RTL Reader v0.4.13 or newer and Native Spread v0.0.119 or newer are required for
 the transactional protected-editable candidate. Its
 recovery manifest binds the backup to the PDF's full SHA-256 because
 Supernote changes the PDF modification time when the document activity
@@ -363,3 +372,12 @@ eraser regression removed exactly one of two separated inactive-page strokes,
 retained the control stroke, left companion page 4 unchanged, and preserved the
 result after a spread turn away and back. The full record is in the root
 `REGRESSION.md`.
+
+The v0.0.119 regular-eraser regression passed on the disposable calibration PDF
+in an active-left spread. The erased gap survived an active-side round trip and
+a cold document-reader restart. The canonical `.mark` after the erasure and
+after cold reopen had the identical SHA-256
+`9a61d949f6437a0f55986ba85b5797ba2e01743e46402607faefe351fcd211dd`;
+the captured trace reported no potential failures. The first contact after a
+document-process restart remains subject to the existing fail-closed
+document-context quarantine and may be deliberately discarded.

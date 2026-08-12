@@ -13,6 +13,248 @@ def fail(message: str) -> None:
     raise SystemExit(f"check_native_spread_invariants.py: {message}")
 
 
+def normalized_text_sha256(path: Path) -> str:
+    """Hash canonical LF text so frozen review gates are checkout-independent."""
+
+    text = path.read_text(encoding="utf-8")
+    canonical = text.replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def tokenize_powershell(text: str) -> list[tuple[str, str, int, int]]:
+    """Tokenize enough PowerShell to make review gates comment-aware.
+
+    Comments, whitespace, and explicit line continuations are discarded. Quoted
+    strings remain single tokens, so text inside a comment or string cannot act
+    as an executable-code decoy.
+    """
+
+    tokens: list[tuple[str, str, int, int]] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char.isspace():
+            index += 1
+            continue
+        if char == "`" and index + 1 < len(text):
+            continuation = index + 1
+            if text[continuation] == "\r":
+                index = continuation + 1
+                if index < len(text) and text[index] == "\n":
+                    index += 1
+                continue
+            if text[continuation] == "\n":
+                index = continuation + 1
+                continue
+        if char == "#":
+            cr = text.find("\r", index + 1)
+            lf = text.find("\n", index + 1)
+            line_ends = [position for position in (cr, lf) if position >= 0]
+            index = len(text) if not line_ends else min(line_ends) + 1
+            continue
+        if text.startswith("<#", index):
+            comment_end = text.find("#>", index + 2)
+            if comment_end < 0:
+                fail("native build contains an unterminated PowerShell block comment")
+            index = comment_end + 2
+            continue
+        if (
+            char == "@"
+            and index + 2 < len(text)
+            and text[index + 1] in ("'", '"')
+            and text[index + 2] in ("\r", "\n")
+        ):
+            quote = text[index + 1]
+            start = index
+            line_start = index + 2
+            if text[line_start] == "\r":
+                line_start += 1
+                if line_start < len(text) and text[line_start] == "\n":
+                    line_start += 1
+            else:
+                line_start += 1
+            index = line_start
+            while index <= len(text):
+                cr = text.find("\r", index)
+                lf = text.find("\n", index)
+                line_ends = [position for position in (cr, lf) if position >= 0]
+                line_end = len(text) if not line_ends else min(line_ends)
+                if text[index:line_end] == quote + "@":
+                    index = line_end
+                    break
+                if not line_ends:
+                    fail("native build contains an unterminated PowerShell here-string")
+                index = line_end + 1
+                if (
+                    text[line_end] == "\r"
+                    and index < len(text)
+                    and text[index] == "\n"
+                ):
+                    index += 1
+            tokens.append(("string", text[start:index], start, index))
+            continue
+        if char in ("'", '"'):
+            quote = char
+            start = index
+            index += 1
+            while index < len(text):
+                if quote == "'" and text.startswith("''", index):
+                    index += 2
+                    continue
+                if quote == '"' and text[index] == "`":
+                    index += min(2, len(text) - index)
+                    continue
+                if text[index] == quote:
+                    index += 1
+                    break
+                index += 1
+            else:
+                fail("native build contains an unterminated PowerShell string")
+            tokens.append(("string", text[start:index], start, index))
+            continue
+        if char == "$":
+            start = index
+            index += 1
+            if index < len(text) and text[index] == "{":
+                variable_end = text.find("}", index + 1)
+                if variable_end < 0:
+                    fail("native build contains an unterminated PowerShell variable")
+                index = variable_end + 1
+            else:
+                while index < len(text) and (
+                    text[index].isalnum() or text[index] in "_:?"
+                ):
+                    index += 1
+            tokens.append(("variable", text[start:index].casefold(), start, index))
+            continue
+        if char.isalpha() or char == "_" or (
+            char == "-"
+            and index + 1 < len(text)
+            and (text[index + 1].isalpha() or text[index + 1] == "_")
+        ):
+            start = index
+            index += 1
+            while index < len(text) and (
+                text[index].isalnum() or text[index] in "_-?"
+            ):
+                index += 1
+            tokens.append(("word", text[start:index].casefold(), start, index))
+            continue
+        if char.isdigit():
+            start = index
+            index += 1
+            while index < len(text) and text[index].isalnum():
+                index += 1
+            tokens.append(("number", text[start:index].casefold(), start, index))
+            continue
+        start = index
+        if text.startswith("::", index):
+            index += 2
+        else:
+            index += 1
+        tokens.append(("symbol", text[start:index], start, index))
+    return tokens
+
+
+def powershell_token_keys(
+    tokens: list[tuple[str, str, int, int]],
+) -> list[tuple[str, str]]:
+    return [(kind, value) for kind, value, _start, _end in tokens]
+
+
+def powershell_sequence_positions(
+    tokens: list[tuple[str, str, int, int]],
+    snippet: str,
+) -> list[int]:
+    expected = powershell_token_keys(tokenize_powershell(snippet))
+    actual = powershell_token_keys(tokens)
+    if not expected:
+        fail("internal error: empty PowerShell invariant snippet")
+    return [
+        index
+        for index in range(len(actual) - len(expected) + 1)
+        if actual[index : index + len(expected)] == expected
+    ]
+
+
+def require_unique_powershell_sequence(
+    tokens: list[tuple[str, str, int, int]],
+    snippet: str,
+    label: str,
+) -> int:
+    positions = powershell_sequence_positions(tokens, snippet)
+    if len(positions) != 1:
+        fail(f"expected exactly one executable {label}, found {len(positions)}")
+    return positions[0]
+
+
+def powershell_brace_depths(
+    tokens: list[tuple[str, str, int, int]],
+) -> list[int]:
+    depths: list[int] = []
+    depth = 0
+    for kind, value, _start, _end in tokens:
+        depths.append(depth)
+        if kind == "symbol" and value == "{":
+            depth += 1
+        elif kind == "symbol" and value == "}":
+            depth -= 1
+            if depth < 0:
+                fail("native build contains an unmatched PowerShell closing brace")
+    if depth != 0:
+        fail("native build contains an unmatched PowerShell opening brace")
+    return depths
+
+
+def matching_powershell_brace_token(
+    tokens: list[tuple[str, str, int, int]],
+    opening: int,
+    label: str,
+) -> int:
+    if opening >= len(tokens) or tokens[opening][:2] != ("symbol", "{"):
+        fail(f"could not locate {label} opening brace")
+    depth = 0
+    for index in range(opening, len(tokens)):
+        kind, value, _start, _end = tokens[index]
+        if kind == "symbol" and value == "{":
+            depth += 1
+        elif kind == "symbol" and value == "}":
+            depth -= 1
+            if depth == 0:
+                return index
+    fail(f"could not locate {label} closing brace")
+    raise AssertionError("unreachable")
+
+
+def extract_powershell_function_tokens(
+    tokens: list[tuple[str, str, int, int]],
+    name: str,
+) -> list[tuple[str, str, int, int]]:
+    keys = powershell_token_keys(tokens)
+    signature = [("word", "function"), ("word", name.casefold())]
+    starts = [
+        index
+        for index in range(len(keys) - 1)
+        if keys[index : index + 2] == signature
+    ]
+    if len(starts) != 1:
+        fail(f"expected exactly one executable PowerShell function {name}")
+    start = starts[0]
+    if start + 2 >= len(tokens) or tokens[start + 2][:2] != ("symbol", "{"):
+        fail(f"PowerShell function {name} has no structural body")
+    depth = 0
+    for index in range(start + 2, len(tokens)):
+        kind, value, _token_start, _token_end = tokens[index]
+        if kind == "symbol" and value == "{":
+            depth += 1
+        elif kind == "symbol" and value == "}":
+            depth -= 1
+            if depth == 0:
+                return tokens[start : index + 1]
+    fail(f"PowerShell function {name} has an unterminated body")
+    raise AssertionError("unreachable")
+
+
 def require_markers(text: str, markers: tuple[str, ...], label: str) -> None:
     missing = [marker for marker in markers if marker not in text]
     if missing:
@@ -253,17 +495,17 @@ def check(repo_root: Path) -> None:
     frozen_source_digests = (
         (
             plugin_path,
-            "d59f765380505753662cea7cd336edc0f715d392e21ece4b6d4344ce1dcd48c4",
+            "1a1f5a452dcbdb467c2a1b36260aa422fb56e595eb2dea308f427b98688e7b0b",
             "ReaderPreferencesModule.kt.template",
         ),
         (
             module_path,
-            "2d407b56fc6908364d4e29740e8f541bd46586d9d15df8ed445d71173ed4629d",
+            "dc2709f0bcf632d839acc6676087f6177a7a14610160e3e04a8a52d96b427d2e",
             "SpreadProbe.java",
         ),
         (
             native_build_path,
-            "6aa62accd4684c893f5ee66461e07e73aa25e7bd3a6f98ca837e0a6ab22ebb7e",
+            "c36c96bcd65111882929fceb878747e0f48a5ab779c2a20cb2ffa1ad69c313a0",
             "native build script",
         ),
         (
@@ -278,17 +520,17 @@ def check(repo_root: Path) -> None:
         ),
         (
             app_path,
-            "d806730383e9f763a1a376bbf1afb109d4680d4ae0b76e63248c69473664ec19",
+            "b9304da544d1dfc238cc75f16ee398796b6c47024c77b54020d37167e35e414a",
             "Native Spread UI authority source",
         ),
         (
             workflow_path,
-            "97acbd87f1c6ea7b6638ddc24b6b945436b6b41567ec7d3d674db097d6bb1491",
+            "04c3455b1350b0d0812599531f6ca946fcd63062d8d47a745c55f6b192ced88a",
             "Native Spread companion-build workflow",
         ),
     )
     for frozen_path, expected_digest, label in frozen_source_digests:
-        actual_digest = hashlib.sha256(frozen_path.read_bytes()).hexdigest()
+        actual_digest = normalized_text_sha256(frozen_path)
         if actual_digest != expected_digest:
             fail(
                 f"{label} changed without an explicit frozen-source digest "
@@ -380,9 +622,7 @@ def check(repo_root: Path) -> None:
     expected_native_cpp_sha256 = (
         "2aa4f5aa8dbaceb7446d66ed04063d42f38d865a7013a3a477c67dd785fefe3b"
     )
-    actual_native_cpp_sha256 = hashlib.sha256(
-        native_cpp_path.read_bytes()
-    ).hexdigest()
+    actual_native_cpp_sha256 = normalized_text_sha256(native_cpp_path)
     if actual_native_cpp_sha256 != expected_native_cpp_sha256:
         fail(
             "native eraser source changed without an explicit frozen-source "
@@ -8226,8 +8466,11 @@ def check(repo_root: Path) -> None:
         (
             "scripts\\test_trace_helper_fail_closed.ps1",
             "Trace-helper tests failed with exit code",
+            "function Get-NormalizedTextSha256",
+            '$normalized = $text.Replace("`r`n", "`n").Replace("`r", "`n")',
+            "$actualTraceSourceSha256 = Get-NormalizedTextSha256 `",
         ),
-        "Native Spread build trace-helper regression gate",
+        "checkout-independent Native Spread build trace-helper regression gate",
     )
     require_markers(
         native_build,
@@ -8236,7 +8479,8 @@ def check(repo_root: Path) -> None:
             "$verifiedTraceSources = @(",
             "Trace safety source digest mismatch for",
             "$expectedNativeSourceSha256 =",
-            "$nativeSourceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nativeSource).Hash",
+            "$nativeSourceSha256 = Get-NormalizedTextSha256 -LiteralPath $nativeSource",
+            "(Get-NormalizedTextSha256 -LiteralPath $nativeSource) -ne",
             "-o $nativeOutput",
             "$nativeSource",
             "$compiledNativeSha256 = (",
@@ -8251,28 +8495,248 @@ def check(repo_root: Path) -> None:
         ),
         "Native Spread canonical-source and APK payload build gate",
     )
-    native_source_assignment = native_build.find(
-        "$nativeSource = Join-Path $projectRoot 'native\\spread_probe_native.cpp'"
+    native_build_tokens = tokenize_powershell(native_build)
+    native_build_depths = powershell_brace_depths(native_build_tokens)
+
+    normalized_digest_function = r'''
+function Get-NormalizedTextSha256 {
+    param(
+        [Parameter(Mandatory = $true)][string]$LiteralPath
     )
-    native_compile_output = native_build.find("-o $nativeOutput", native_source_assignment)
-    native_compile_input = native_build.find("$nativeSource", native_compile_output)
-    compiled_digest = native_build.find(
-        "$compiledNativeSha256 = (", native_compile_input
+    $text = [System.IO.File]::ReadAllText(
+        $LiteralPath,
+        [System.Text.Encoding]::UTF8
     )
-    prepackage_digest = native_build.find(
-        "Native eraser source or compiled library changed before packaging.",
-        compiled_digest,
+    $normalized = $text.Replace("`r`n", "`n").Replace("`r", "`n")
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($normalized)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return [System.BitConverter]::ToString(
+            $sha256.ComputeHash($bytes)
+        ).Replace('-', '')
+    } finally {
+        $sha256.Dispose()
+    }
+}
+'''
+    actual_digest_function = extract_powershell_function_tokens(
+        native_build_tokens,
+        "Get-NormalizedTextSha256",
     )
-    native_jar = native_build.find("& jar u0f $unsignedApk", prepackage_digest)
-    apk_digest = native_build.find(
-        "$apkNativeSha256 -ne $compiledNativeSha256", native_jar
+    if powershell_token_keys(actual_digest_function) != powershell_token_keys(
+        tokenize_powershell(normalized_digest_function)
+    ):
+        fail(
+            "normalized text digest helper does not have the exact canonical "
+            "LF and SHA-256 control flow"
+        )
+    digest_function = require_unique_powershell_sequence(
+        native_build_tokens,
+        normalized_digest_function,
+        "normalized text digest helper",
     )
+
+    trace_review_gate = r'''
+foreach ($verifiedTraceSource in $verifiedTraceSources) {
+    $actualTraceSourceSha256 = Get-NormalizedTextSha256 `
+        -LiteralPath $verifiedTraceSource[0]
+    if ($actualTraceSourceSha256 -ne $verifiedTraceSource[1]) {
+        throw (
+            "Trace safety source digest mismatch for $($verifiedTraceSource[0]): " +
+            "expected $($verifiedTraceSource[1]), got $actualTraceSourceSha256"
+        )
+    }
+}
+'''
+    trace_review = require_unique_powershell_sequence(
+        native_build_tokens,
+        trace_review_gate,
+        "trace-source digest review loop",
+    )
+
+    trace_test_gate = r'''
+& $windowsPowerShell `
+    -NoProfile `
+    -ExecutionPolicy Bypass `
+    -File $traceHelperTest `
+    -RepositoryRoot $repositoryRoot
+if ($LASTEXITCODE -ne 0) {
+    throw "Trace-helper tests failed with exit code $LASTEXITCODE"
+}
+'''
+    trace_test = require_unique_powershell_sequence(
+        native_build_tokens,
+        trace_test_gate,
+        "trace-helper regression-test gate",
+    )
+
+    native_source_review_gate = r'''
+$nativeSource = Join-Path $projectRoot 'native\spread_probe_native.cpp'
+$expectedNativeSourceSha256 =
+    '2AA4F5AA8DBACEB7446D66ED04063D42F38D865A7013A3A477C67DD785FEFE3B'
+$nativeSourceSha256 = Get-NormalizedTextSha256 -LiteralPath $nativeSource
+if ($nativeSourceSha256 -ne $expectedNativeSourceSha256) {
+    throw (
+        'Frozen native eraser source digest mismatch: expected ' +
+        "$expectedNativeSourceSha256, got $nativeSourceSha256"
+    )
+}
+'''
+    native_source_review = require_unique_powershell_sequence(
+        native_build_tokens,
+        native_source_review_gate,
+        "pre-compile native-source review gate",
+    )
+
+    native_compile_gate = r'''
+$nativeOutput = Join-Path $arm64LibDir 'libspreadprobe.so'
+& $clang `
+    -shared `
+    -fPIC `
+    -std=c++17 `
+    -O2 `
+    -fvisibility=hidden `
+    '-Wl,--build-id=sha1' `
+    -llog `
+    -ldl `
+    -o $nativeOutput `
+    $nativeSource
+if ($LASTEXITCODE -ne 0) {
+    throw "NDK compilation failed with exit code $LASTEXITCODE"
+}
+$compiledNativeSha256 = (
+    Get-FileHash -Algorithm SHA256 -LiteralPath $nativeOutput
+).Hash
+'''
+    native_compile = require_unique_powershell_sequence(
+        native_build_tokens,
+        native_compile_gate,
+        "native compiler-input and raw-output digest gate",
+    )
+
+    prepackage_review_gate = r'''
+if (
+    (Get-NormalizedTextSha256 -LiteralPath $nativeSource) -ne
+        $expectedNativeSourceSha256 -or
+    (Get-FileHash -Algorithm SHA256 -LiteralPath $nativeOutput).Hash -ne
+        $compiledNativeSha256
+) {
+    throw 'Native eraser source or compiled library changed before packaging.'
+}
+& jar u0f $unsignedApk `
+    -C $nativeLibRoot lib
+if ($LASTEXITCODE -ne 0) {
+    throw "jar native-library update failed with exit code $LASTEXITCODE"
+}
+'''
+    prepackage_review = require_unique_powershell_sequence(
+        native_build_tokens,
+        prepackage_review_gate,
+        "prepackage source and raw-binary review gate",
+    )
+
+    apk_native_review_gate = r'''
+$nativeEntry = $entriesByName['lib/arm64-v8a/libspreadprobe.so']
+if ($nativeEntry.CompressedLength -ne $nativeEntry.Length) {
+    throw 'APK native library is compressed and cannot be mmap-loaded.'
+}
+$nativeEntryStream = $nativeEntry.Open()
+try {
+    $apkNativeSha256 = [BitConverter]::ToString(
+        [Security.Cryptography.SHA256]::Create().ComputeHash(
+            $nativeEntryStream
+        )
+    ).Replace('-', '')
+} finally {
+    $nativeEntryStream.Dispose()
+}
+if ($apkNativeSha256 -ne $compiledNativeSha256) {
+    throw 'APK native library does not match the verified compiler output.'
+}
+'''
+    apk_native_review = require_unique_powershell_sequence(
+        native_build_tokens,
+        apk_native_review_gate,
+        "raw APK native-entry digest and compiler-output comparison",
+    )
+
+    apk_archive_header = r'''
+$apkArchive = [IO.Compression.ZipFile]::OpenRead($outputApk)
+try {
+'''
+    apk_archive = require_unique_powershell_sequence(
+        native_build_tokens,
+        apk_archive_header,
+        "APK archive review block",
+    )
+    apk_archive_opening = apk_archive + len(
+        tokenize_powershell(apk_archive_header)
+    ) - 1
+    apk_archive_closing = matching_powershell_brace_token(
+        native_build_tokens,
+        apk_archive_opening,
+        "APK archive review block",
+    )
+    apk_archive_finally = require_unique_powershell_sequence(
+        native_build_tokens,
+        r'''
+} finally {
+    $apkArchive.Dispose()
+}
+''',
+        "APK archive disposal guard",
+    )
+
+    final_apk_hash = require_unique_powershell_sequence(
+        native_build_tokens,
+        "Get-FileHash -Algorithm SHA256 -LiteralPath $outputApk",
+        "raw final-APK digest command",
+    )
+
+    top_level_gates = (
+        digest_function,
+        trace_review,
+        trace_test,
+        native_source_review,
+        native_compile,
+        prepackage_review,
+        apk_archive,
+        final_apk_hash,
+    )
+    if any(native_build_depths[position] != 0 for position in top_level_gates):
+        fail("native build review gates must execute at top level")
+    if (
+        native_build_depths[apk_native_review] != 1
+        or not apk_archive_opening < apk_native_review < apk_archive_closing
+        or apk_archive_closing != apk_archive_finally
+    ):
+        fail("APK native-entry digest gate must execute directly in archive review")
     if not (
-        0 <= native_source_assignment < native_compile_output
-        < native_compile_input < compiled_digest < prepackage_digest
-        < native_jar < apk_digest
+        digest_function < trace_review < trace_test < native_source_review
+        < native_compile < prepackage_review < apk_archive
+        < apk_native_review < apk_archive_closing < final_apk_hash
     ):
         fail("frozen native source is not bound through compile and APK packaging")
+
+    executable_words = [
+        value
+        for kind, value, _start, _end in native_build_tokens
+        if kind == "word"
+    ]
+    if executable_words.count("get-normalizedtextsha256") != 4:
+        fail("normalized text hashing must be limited to reviewed text sources")
+    if executable_words.count("get-filehash") != 3:
+        fail("native compiler output and APK outputs must use exactly three raw hashes")
+    if executable_words.count("computehash") != 2:
+        fail("raw SHA-256 must hash exactly the helper bytes and APK native stream")
+    for assignment, label in (
+        ("$nativeSource =", "native source"),
+        ("$nativeOutput =", "native compiler output"),
+        ("$compiledNativeSha256 =", "compiled-native digest"),
+        ("$apkNativeSha256 =", "APK-native digest"),
+    ):
+        if len(powershell_sequence_positions(native_build_tokens, assignment)) != 1:
+            fail(f"native build must assign {label} exactly once")
 
     pointer_reader_start = trace_script.find("function Read-RemotePointer")
     publication_reader_start = trace_script.find(

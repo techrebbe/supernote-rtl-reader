@@ -16,6 +16,27 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+function Get-NormalizedTextSha256 {
+    param(
+        [Parameter(Mandatory = $true)][string]$LiteralPath
+    )
+
+    $text = [System.IO.File]::ReadAllText(
+        $LiteralPath,
+        [System.Text.Encoding]::UTF8
+    )
+    $normalized = $text.Replace("`r`n", "`n").Replace("`r", "`n")
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($normalized)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return [System.BitConverter]::ToString(
+            $sha256.ComputeHash($bytes)
+        ).Replace('-', '')
+    } finally {
+        $sha256.Dispose()
+    }
+}
+
 $projectRoot = [System.IO.Path]::GetFullPath($PSScriptRoot)
 $repositoryRoot = [System.IO.Path]::GetFullPath(
     (Join-Path $projectRoot '..')
@@ -42,9 +63,8 @@ $verifiedTraceSources = @(
     )
 )
 foreach ($verifiedTraceSource in $verifiedTraceSources) {
-    $actualTraceSourceSha256 = (
-        Get-FileHash -Algorithm SHA256 -LiteralPath $verifiedTraceSource[0]
-    ).Hash
+    $actualTraceSourceSha256 = Get-NormalizedTextSha256 `
+        -LiteralPath $verifiedTraceSource[0]
     if ($actualTraceSourceSha256 -ne $verifiedTraceSource[1]) {
         throw (
             "Trace safety source digest mismatch for $($verifiedTraceSource[0]): " +
@@ -123,7 +143,7 @@ foreach ($required in @(
 $nativeSource = Join-Path $projectRoot 'native\spread_probe_native.cpp'
 $expectedNativeSourceSha256 =
     '2AA4F5AA8DBACEB7446D66ED04063D42F38D865A7013A3A477C67DD785FEFE3B'
-$nativeSourceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nativeSource).Hash
+$nativeSourceSha256 = Get-NormalizedTextSha256 -LiteralPath $nativeSource
 if ($nativeSourceSha256 -ne $expectedNativeSourceSha256) {
     throw (
         'Frozen native eraser source digest mismatch: expected ' +
@@ -217,7 +237,7 @@ if ($LASTEXITCODE -ne 0) {
 # LSPosed's module class loader maps native libraries directly from the APK.
 # Keep the arm64 library uncompressed so Android's linker can mmap it.
 if (
-    (Get-FileHash -Algorithm SHA256 -LiteralPath $nativeSource).Hash -ne
+    (Get-NormalizedTextSha256 -LiteralPath $nativeSource) -ne
         $expectedNativeSourceSha256 -or
     (Get-FileHash -Algorithm SHA256 -LiteralPath $nativeOutput).Hash -ne
         $compiledNativeSha256

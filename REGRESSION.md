@@ -350,11 +350,14 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   Fit foreground and prefetch renders skip it.
 - [x] Static invariant: a configured marker is authoritative for cover parity
   as well as divider, header, and page-sizing state during initialization.
-- [x] Static invariant: failed trace startup stops observers, cancels pending
-  work, and removes the stale `active.txt` session pointer.
+- [x] Static invariant: failed trace startup stops observers and cancels pending
+  work. A pre-publication attempt is cleaned up; after `active.txt` is durable,
+  that exact pointer remains guarded by `incomplete.txt` and
+  `publication-failed.txt`.
 - [x] Static invariant: `last.txt` is published only during successful trace
-  finalization, before `active.txt` is removed; failed startup preserves the
-  previous completed-session pointer.
+  finalization by atomically renaming `active.txt`; failed startup preserves the
+  previous completed-session pointer and no separate success event can disagree
+  with that single commit.
 - [x] Static invariant: every desktop trace-helper action recognizes an
   `active.txt` whose recorded PID is no longer the live document process.
   `Status` retains that pointer across invocations; `Stop` removes it only after
@@ -377,9 +380,9 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 - [x] Static invariant: hook-thread event capture queues immutable records to a
   per-session serialized writer; only that writer opens `events.jsonl`, and
   finalization drains it before publishing a session pointer.
-- [x] Static invariant: completed/incomplete pointer publication always attempts
-  `active.txt` cleanup in `finally`; a failure preserves the exact session via
-  `publication-failed.txt`, which the helper checks before `last.txt`.
+- [x] Static invariant: completion removes `active.txt` only through the atomic
+  rename to `last.txt`; incomplete/publication failure retains exact active,
+  incomplete, and publication-failed guards, all checked before `last.txt`.
 - [x] Static invariant: completed publication rejects an undeletable stale
   `incomplete.txt` and preserves an explicit publication-failure session.
 - [x] Nomad helper simulation: `Stop` reported a disposable `incomplete.txt`
@@ -388,6 +391,14 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   marker and directory were then removed.
 - [x] The trace collection script waits for asynchronous finalization and
   verifies the completed session pointer before pulling the bundle.
+- [x] Local failure-injection regression: malformed active/incomplete/failure
+  pointers for every helper action, padded active bytes, multiline `last.txt`,
+  unreadable/nonregular nodes, missing/ambiguous owner metadata, `pidof`
+  failure, and ADB transport failure all retain state and cannot broadcast,
+  mutate, pull, or fall back to an older completed trace.
+- [x] Static invariant: checkpoint screenshots stage outside the remote session
+  directory; Checkpoint revalidates active identity on both sides, and Stop
+  revalidates completion before and after every remote pull.
 - [x] Ordered trail fingerprints cover all trails while detailed trace items
   remain capped at 256.
 - [x] Native Spread v0.0.116 active/inactive composition trace: two new active
@@ -412,6 +423,158 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   need a focused smoke test with the new trim transform.
 - [ ] Return to Fit page and confirm all existing annotations return to their
   original whole-page positions.
+
+## v0.4.14 transactional single-active-page candidate
+
+Automated and build evidence:
+
+- [x] Work starts from stable `main` at `4e4d3ed`; the v0.0.117 inactive-page
+  merge experiment is preserved on `agent/v116-inactive-erase-regression` at
+  `818db1f` and is not in this branch's ancestry.
+- [x] Native PDF renderer invariants pass.
+- [x] Native Spread safety invariants pass and require exact transaction/input
+  guard publication -> thread-scoped source save -> writer disable -> target
+  native load ordering. Concurrent pen contact, UI/history actions, and all
+  other lifecycle saves remain blocked from publication through commit.
+- [x] Static invariants require the inactive-page pen coordinate to be rejected
+  in an Xposed `beforeHookedMethod`, before Supernote's native callback can add
+  it to the source page's DrawPath.
+- [x] Static invariants reject any live pen-activation route to the experimental
+  trail capture, normalization, manual `.mark` merge, or synthetic history path.
+- [x] Static invariants require reader-page and presenter-mark-page identity to
+  match the exact target before geometry commits.
+- [x] Static invariants require trigger-contact save and receive callbacks to be
+  blocked until pen-up, and require timeout/completion work to match the exact
+  transaction token.
+- [x] Static invariants serialize contact-start latching, activation startup,
+  and final guard removal under the same ownership lock, including contacts
+  that begin in a gutter/cropped margin or race a queued transfer/commit.
+- [x] Static invariants require the native pen-position callback and its queued
+  activation/interception helpers to use a UI-published immutable
+  document/page-geometry snapshot. Config parsing, file identity capture,
+  `stat`, and other filesystem work are rejected from the low-latency path.
+- [x] Static invariants keep a stroke that begins on the active page owned by
+  that page and discard any points that cross into the inactive half.
+- [x] Static invariants require source-page rollback to use bounded,
+  exact-transaction retries. A reload exception or convergence timeout cannot
+  leave UI/history/save guards published forever: after the final attempt, the
+  native writer must be disabled and pen geometry invalidated before the
+  transaction guard is released.
+- [x] Static invariants require an editable RTL spread turn rejected by a
+  temporary pen/geometry/transaction guard to be retained and replayed against
+  its exact document and source page rather than reported as handled and lost.
+- [x] Static invariants require the pen-lift completion path to republish ready
+  target-page geometry before releasing a held activation transaction.
+- [x] Static invariants reject synchronous logging, JSON serialization, and UI
+  context capture in the native pen-position hook/interceptor. Contact-boundary
+  trace data and coalesced block-state logs are enqueued to serialized workers.
+- [x] Static invariants require a partial transaction-start failure to retain
+  ownership through source rollback and suppress the legacy target-page
+  activation fallback.
+- [x] Static invariants require an explicit side-selection tap rejected during
+  transient geometry publication to be retained and replayed against its exact
+  document/source/target context.
+- [x] Static invariants require active-page ink coordinates crossing into the
+  other page, divider, or unmapped/cropped margins to remain blocked while the
+  terminal pen-up callback is preserved.
+- [x] Static invariants require a native-chrome-origin stylus contact to remain
+  blocked from DrawPath through pen-up, even if it drags into the page.
+- [x] Static invariants reject synchronous per-motion logging from the blocked
+  UI-input hook and require coalesced boundary diagnostics on the background
+  logger.
+- [x] Static invariants require deferred spread turns to bind and revalidate the
+  cover-parity value used to calculate their target.
+- [x] Static invariants require every deferred activation to be cancelled when
+  the latest validated document configuration explicitly disables editing or
+  Native Spread.
+- [x] A verified v0.4.12 `protected-editable-pilot` session is authorized only
+  for one-time marker migration or backup retirement. Load-time migration
+  retains the existing live `.mark` and recovery snapshot, publishes the
+  transactional marker atomically with rollback, and verifies the new marker
+  against the same backup before reporting editable mode.
+- [x] Static invariants require protocol-2 editable activation to publish a
+  non-authorizing `pending` marker before the final live-`.mark` check. Only the
+  atomic `committed` marker publication authorizes writing, and committed
+  markers cannot retain pending-only rollback fields.
+- [x] Static invariants require a failed new activation to archive and verify a
+  token-bound copy of its manifest and snapshot before restoring the previous
+  marker or freeing the canonical backup slot. Partial archive stages are
+  resumable; ambiguous or mismatched evidence remains non-mutating and
+  fail-closed.
+- [x] Static invariants require read-only and Off transitions to journal their
+  intent and exact previous-marker identity before retiring recovery data, then
+  revalidate that pending transaction before publishing the final state.
+- [x] Static invariants serialize configuration, retirement, restore, and
+  process-death reconciliation under one lock and require an exclusive restore
+  claim before `.mark` replacement.
+- [x] Native Spread v0.0.119 compiles, is v2/v3 signed, and reports matching
+  manifest, handshake, and plug-in minimum version 119. The tested APK is
+  164,524 bytes with SHA-256
+  `d001ddea28d93873413372f9a284e3b801d2ee043df645fd0a42b551e595e44f`.
+- [x] Static invariants require both firmware-specific eraser hooks before the
+  native readiness gate is published. The regular vector eraser wrapper is
+  restricted to pen type 16, color 255, and exact `932 x 1243` half-page
+  geometry; it temporarily supplies canonical `1872 x 2496` dimensions, calls
+  the original exactly once, restores both fields, and preserves its result.
+- [x] Deep-review hardening is compiled as Native Spread v0.0.120 and requires
+  RTL Reader v0.4.14. Hook readiness uses atomic attempted/installed state and
+  non-null original functions; ambiguous hook results cannot be installed a
+  second time. The v2/v3-signed local APK is 168,622 bytes with SHA-256
+  `4e03659bbd5d01861fd41982c1913689728f81da4e03e21f3261d7a6b0e3982e`.
+- [x] Canonical reloads after pen, eraser, Undo, and Redo require the exact root
+  `saveTrails()` hook to have been admitted, counted, and completed without a
+  throwable. The final writer proof and `loadHandWrite()` are linearized in
+  lifecycle-safe OWNER-then-PAGE lock order.
+- [x] Fresh-process startup and sequential document switching are distinguished:
+  only an earlier exact reset/presentation proof activates the late-receive
+  quarantine. Delayed orientation refreshes retain and revalidate exact
+  document, generation, presenter, and view-model identity.
+- [x] Restore-worker ownership and the post-restore handoff skip use separate
+  atomic states; the skip is published before worker ownership is released.
+- [x] A clean Windows plugin build embeds and verifies `app.npk`. CI and local
+  publication require one package, exact `/icon.png` and `/app.npk` metadata,
+  the exact ReactPackage, reviewed native classes, and the runtime marker.
+  Failure-injection tests reject missing/corrupt native payloads and softened
+  packager paths. A digest-advanced mutation audit rejected all eight targeted
+  authority, lock, hook, workflow, and package-verifier regressions.
+
+Nomad hardware gate (in progress):
+
+- [ ] Finger-tap each inactive half. Existing annotations on both pages remain
+  unchanged; native focus and the ACTIVE banner move to the requested page.
+- [ ] Hover over the inactive page, wait for activation, then write. The first
+  real stroke uses normal native behavior and persists after away/back.
+- [ ] Draw several normal and quick connected strokes on the active page. Pen
+  samples remain smooth, no stroke is dropped, and the settled native ink
+  matches the gesture after away/back.
+- [ ] Touch the inactive page with the pen before activation can complete. The
+  trigger gesture creates no partial or wrong-page ink; after lifting, the
+  target is active and the next stroke persists normally.
+- [ ] Repeat the direct-contact test in both directions and confirm no source
+  page annotation count or visible ink changes.
+- [ ] Begin a stroke on the active page and drag across the divider. It remains
+  an active-page stroke, does not switch focus, and leaves no ink on the other
+  page.
+- [ ] On each active side, validate pen, stroke eraser, lasso move, top-toolbar
+  Undo/Redo, highlighting, and an embedded link through native controls.
+  Regular stroke erasure on active left page 2 passed with v0.0.119: the
+  accepted eraser contact published `active_eraser`, reloaded the canonical
+  page, remained visibly erased after Active Left -> Active Right -> Active
+  Left, and survived a cold document-reader restart. The post-erasure and
+  cold-reopen `.mark` SHA-256 both equal
+  `9a61d949f6437a0f55986ba85b5797ba2e01743e46402607faefe351fcd211dd`.
+  The trace recorded zero potential failures. The first eraser contact after
+  process restart was intentionally discarded by the pre-existing
+  document-context receive quarantine; a subsequent fresh contact retired the
+  quarantine and persisted normally. The opposite side and remaining tools are
+  still open.
+- [ ] Advance and reverse spreads with taps and swipes. Every turn saves the
+  source, lands on the expected RTL spread, and leaves writing enabled only for
+  the focused page.
+- [ ] Rotate landscape -> portrait -> landscape and turn away/back. Canonical
+  annotations on both pages remain complete and correctly aligned.
+- [ ] Force an activation timeout or identity mismatch in a disposable test.
+  Writing visibly fails closed and no `.mark` merge fallback runs.
 
 ## v0.4.10 protected native editing pilot
 

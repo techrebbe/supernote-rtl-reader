@@ -4,9 +4,12 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 
 ## Stable baseline
 
-v0.4.6 is the current merged hardware-validated stable baseline on Supernote
-Nomad. v0.4.7 is a hardware-validated safety-hardening candidate for the native
-reader pilot, paired with Native Spread v0.0.62.
+v0.4.12 with Native Spread v0.0.116 is the current merged stable baseline.
+v0.4.14 with Native Spread v0.0.120 is the deeply reviewed transactional
+single-active-page candidate. It incorporates the partially hardware-validated
+v0.4.13/v0.0.119 eraser work plus pre-device race, lifecycle, recovery, and
+packaging hardening. Native Spread v0.0.117 is preserved only on its
+experimental branch and is not part of this release line.
 
 The validated reader behavior covers:
 
@@ -297,9 +300,10 @@ Supernote's exact 4/3 in-memory landscape transform; the canonical and current
 trail fingerprints match again in portrait.
 Trace shutdown retries an unstable final `.mark` snapshot up to five times. A
 session is published to `last.txt` only after one attempt captures a stable,
-verified state. Persistent instability writes `incomplete.txt`, leaves the
-partial directory intact, and makes the desktop helper report the failure
-instead of pulling an older completed trace.
+verified state. Persistent instability retains the exact `active.txt` guard,
+writes `incomplete.txt` plus `publication-failed.txt`, leaves the partial
+directory intact, and makes the desktop helper report the failure instead of
+pulling an older completed trace.
 The source identity is checked again after hashing the copied snapshot, so a
 concurrent rewrite during snapshot verification also forces a retry.
 Missing-file and unchanged-hash fast paths perform their own final source
@@ -309,11 +313,108 @@ in-memory acceptance. Rejected candidates can therefore never publish a
 `mark_snapshot` entry that names a deleted snapshot file.
 All event records are now captured as immutable JSON on the calling thread and
 written by a per-session serialized background writer. Finalization drains that
-writer before publishing a completion pointer. If pointer publication fails,
-`active.txt` is cleaned up in `finally` and `publication-failed.txt` preserves
-the exact failed session so the helper cannot fall back to an older trace.
+writer before atomically renaming `active.txt` to `last.txt`. That single rename
+is both the terminal completion record and the completed-session pointer, so no
+separate success event can survive a failed pointer publication. If publication
+fails after `active.txt` is durable, that active guard remains and
+`incomplete.txt` plus `publication-failed.txt` preserve the exact failed
+session, so the helper cannot fall back to an older trace. A failure before the
+active pointer is published cleans up only the unpublished attempt.
 Failure to remove a stale `incomplete.txt` is treated as the same publication
 failure, preventing it from overriding a newly completed session.
+The desktop helper accepts pointer files only when their bytes are exactly one
+safe session identifier followed by one line feed. Missing, nonregular,
+unreadable, padded, multiline, or transport-ambiguous state is retained and
+blocks Start/Checkpoint/Stop. It likewise treats unreadable session metadata or
+an indeterminate document-process lookup as unknown rather than abandoned.
+Checkpoint screenshots are staged outside the remotely published trace
+directory and merged only into the pulled local bundle, so a racing checkpoint
+cannot modify a trace after `active.txt` becomes `last.txt`.
+
+## v0.4.14 transactional single-active-page editing and hardening
+
+Native Spread v0.0.118 replaces the live inactive-page annotation route with a
+serialized ownership transfer through Supernote's own page lifecycle. The
+landscape reader still presents two pages, but only one page at a time owns the
+native `DocumentViewModel`, `HandWritePresenter`, DrawPath geometry, Undo/Redo
+history, and `.mark` writer.
+
+When the inactive half is tapped or hovered, the module saves the current page
+through native `saveTrails()`, disables writing, calls native `loadPage()` for
+the target, verifies both reader and handwriting page identities, recomposes the
+spread, and installs target-only writing geometry before committing. Page turns
+use the same transaction. Transactions carry unique IDs, allow one bounded
+reload retry, and fail closed on stale completion, identity mismatch, timeout,
+or geometry failure.
+
+Pen coordinates that initiate or overlap a transfer are intercepted before
+Supernote's native position callback. Hover can therefore preactivate a page,
+while a too-fast contact activates the target but deliberately discards that
+gesture through pen-up. The next stroke uses the ordinary native writer on the
+now-active page. The runtime path does not invoke v0.0.117's experimental
+inactive-page trail capture, coordinate normalization, `.mark` merge, or
+synthetic history transaction.
+
+Protected-editable authorization now uses marker protocol 2. Enabling editing
+first publishes a `pending` marker containing the exact previous-marker bytes
+and the complete recovery identity. Native Spread accepts only the subsequent
+atomically published `committed` marker; a pending, legacy, malformed, or
+partially migrated marker remains read-only. The committed rename is the sole
+authorization point, with no fallible state decision after it.
+
+If activation fails after pending publication, the original recovery baseline
+is copied into a token-bound, self-contained evidence archive before the old
+marker is restored. Explicit retry reconciles every partial archive stage and
+remains non-mutating when identity is ambiguous. Downgrading to read-only or
+Off uses the same durable pending-intent journal before retiring the backup, so
+process death cannot silently discard either editable authority or its restore
+baseline. Restore claims and configuration transitions are serialized and
+validated against the PDF, manifest, snapshot, marker, and activation token.
+
+Native Spread v0.0.119 fixes the native regular stroke eraser in a spread. The
+firmware supplies its vector eraser with half-page `932 x 1243` redraw geometry
+even though the active canonical page trails use `1872 x 2496` coordinates.
+The module now corrects those dimensions only for the exact regular-eraser
+signature (pen type 16, color 255, and the exact half-page dimensions), calls
+Supernote's original eraser once, and restores the operation fields immediately.
+The existing grid-eraser hook is unchanged, and protected editing is enabled
+only after both native eraser hooks are installed.
+
+The focused Nomad test passed end to end. A regular erasure on active page 2
+was saved through Supernote's canonical writer, remained pixel-for-pixel after
+switching active pages, and survived a cold document-reader restart. The final
+on-device `.mark` SHA-256 was
+`9a61d949f6437a0f55986ba85b5797ba2e01743e46402607faefe351fcd211dd`,
+matching the trace snapshot taken immediately after the erasure. The existing
+document-context quarantine safely discarded the first contact following the
+process restart; the next fresh eraser contact was accepted and persisted.
+
+The full design and safety boundary are recorded in
+`TRANSACTIONAL_ACTIVE_PAGE.md`. Regular active-page erasure remains validated
+on v0.0.119. The v0.4.14/v0.0.120 candidate additionally passed a deep static,
+compiled, and failure-injection review before device testing:
+
+- native eraser readiness is published only after both hook installers return
+  success and non-null original functions; ambiguous installer results are not
+  retried, preventing accidental double-hooking;
+- all cross-thread weak maps use synchronized access, and delayed orientation
+  refreshes are bound to the exact document generation, path, presenter, and
+  view model that scheduled them;
+- fresh-process document startup no longer quarantines the first valid stroke,
+  while a proved sequential document switch retains the late-receive guard;
+- pen, eraser, Undo, and Redo canonical reloads require an admitted,
+  throwable-free native `saveTrails()` completion and revalidate writer
+  authority in lifecycle-safe OWNER-then-PAGE lock order;
+- annotation restore worker ownership and the one-shot native handoff skip are
+  separate atomic states, closing the completion/restart window;
+- clean Windows and CI builds fail if native registration, compilation,
+  `app.npk`, exact package metadata, native classes, or the runtime marker is
+  missing. The finished archive is verified before it can reach `out/` or a CI
+  artifact.
+
+Both invariant suites, trace-helper regressions, native packaging
+failure-injection tests, the v0.0.120 Java/C++ APK build, and a clean native
+plugin build pass locally. Hardware validation of this candidate remains open.
 
 The active settled-ink compositor now clips its transformed bitmap to the
 same visible page-slot bounds used by Native Fill PDF and canonical-ink
@@ -368,6 +469,15 @@ compares the live `.mark` presence, length, and SHA-256 with the new recovery
 baseline. If the running native reader flushed annotations during backup
 creation, the stale snapshot is retired and recreated; activation fails closed
 after three unstable attempts rather than authorizing recovery from older ink.
+
+When v0.4.13 opens a document already protected by the merged v0.4.12
+`protected-editable-pilot` marker, it verifies that marker against the existing
+recovery manifest and migrates only the marker metadata to the transactional
+protocol. The live `.mark` and recovery snapshot are not restored, replaced, or
+recreated, so annotations added during the v0.4.12 protected session remain
+intact. A failed migration leaves recovery available and opens fail-closed;
+selecting editable mode can retry the same non-destructive migration. Off and
+read-only transitions can also retire a verified legacy session cleanly.
 
 After successful verification, v0.0.75 explicitly refreshes an already visible
 landscape spread so native handwriting geometry is re-enabled without waiting
@@ -645,13 +755,19 @@ chmod +x build.sh
 ./build.sh
 ```
 
+Python 3 must be discoverable as `python3`, `python`, or `py -3`. On Windows,
+`PYTHON_BIN` may instead point to the exact Python executable. The build now
+fails unless the generated package contains and passes strict verification of
+the native `app.npk` payload.
+
 The resulting package is written to:
 
 ```text
 out/*.snplg
 ```
 
-GitHub Actions uploads the current stabilization build as the `supernote-rtl-reader-v0.4.3` artifact.
+GitHub Actions uploads the current stabilization build as the
+`supernote-rtl-reader-v0.4.14-transactional-hardening` artifact.
 
 ## Install and diagnostics
 

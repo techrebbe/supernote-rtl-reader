@@ -57,9 +57,13 @@ using RegularErase = int (*)(
 
 std::atomic<bool> calibration_enabled{false};
 std::atomic<int> hook_state{0};
+std::atomic<bool> grid_hook_attempted{false};
+std::atomic<bool> regular_hook_attempted{false};
+std::atomic<bool> grid_hook_installed{false};
+std::atomic<bool> regular_hook_installed{false};
 HookFunType hook_function = nullptr;
-GridLineErase original_grid_line_erase = nullptr;
-RegularErase original_regular_erase = nullptr;
+std::atomic<GridLineErase> original_grid_line_erase{nullptr};
+std::atomic<RegularErase> original_regular_erase{nullptr};
 
 int32_t& trail_int(void* trail, std::ptrdiff_t offset) {
     return *reinterpret_cast<int32_t*>(
@@ -91,6 +95,12 @@ void replacement_grid_line_erase(
     bool second_flag,
     bool third_flag
 ) {
+    GridLineErase original = original_grid_line_erase.load(
+        std::memory_order_acquire
+    );
+    if (original == nullptr) {
+        return;
+    }
     bool patched = false;
     int32_t original_width = 0;
     int32_t original_height = 0;
@@ -117,7 +127,7 @@ void replacement_grid_line_erase(
         }
     }
 
-    original_grid_line_erase(
+    original(
         current_page_trails,
         operation_trail,
         erased_trail_numbers,
@@ -141,6 +151,12 @@ int replacement_regular_erase(
     void* affected_trail_numbers,
     int mode
 ) {
+    RegularErase original = original_regular_erase.load(
+        std::memory_order_acquire
+    );
+    if (original == nullptr) {
+        return 0;
+    }
     bool patched = false;
     int32_t original_width = 0;
     int32_t original_height = 0;
@@ -172,7 +188,7 @@ int replacement_regular_erase(
         }
     }
 
-    const int result = original_regular_erase(
+    const int result = original(
         operation_trail,
         current_page_trails,
         erased_trail_numbers,
@@ -194,9 +210,14 @@ void on_library_loaded(const char* name, void* handle) {
         return;
     }
 
-    if (original_grid_line_erase == nullptr) {
+    if (!grid_hook_installed.load(std::memory_order_acquire)
+        && !grid_hook_attempted.exchange(
+            true,
+            std::memory_order_acq_rel
+        )) {
         void* target = dlsym(handle, kGridLineTargetSymbol);
         if (target == nullptr) {
+            grid_hook_attempted.store(false, std::memory_order_release);
             __android_log_print(
                 ANDROID_LOG_ERROR,
                 kLogTag,
@@ -205,27 +226,53 @@ void on_library_loaded(const char* name, void* handle) {
                 dlerror()
             );
         } else {
+            void* backup = nullptr;
             const int result = hook_function(
                 target,
                 reinterpret_cast<void*>(replacement_grid_line_erase),
-                reinterpret_cast<void**>(&original_grid_line_erase)
+                &backup
             );
+            GridLineErase original = reinterpret_cast<GridLineErase>(backup);
+            const bool installed = result == 0
+                && original != nullptr;
+            if (installed) {
+                original_grid_line_erase.store(
+                    original,
+                    std::memory_order_release
+                );
+            }
+            grid_hook_installed.store(
+                installed,
+                std::memory_order_release
+            );
+            // Retry only a contract-clean installer failure. A zero result
+            // with no backup (or a nonzero result that still supplied one)
+            // is ambiguous: the target may already be patched, so a second
+            // installation could chain or corrupt the hook.
+            if (!installed && result != 0 && backup == nullptr) {
+                grid_hook_attempted.store(false, std::memory_order_release);
+            }
             __android_log_print(
-                result == 0 ? ANDROID_LOG_WARN : ANDROID_LOG_ERROR,
+                installed ? ANDROID_LOG_WARN : ANDROID_LOG_ERROR,
                 kLogTag,
                 "grid_eraser_hook_installed result=%d path=%s "
                 "target=%p backup=%p",
                 result,
                 name,
                 target,
-                reinterpret_cast<void*>(original_grid_line_erase)
+                backup
             );
         }
     }
 
-    if (original_regular_erase == nullptr) {
+    if (!regular_hook_installed.load(std::memory_order_acquire)
+        && !regular_hook_attempted.exchange(
+            true,
+            std::memory_order_acq_rel
+        )) {
         void* target = dlsym(handle, kRegularTargetSymbol);
         if (target == nullptr) {
+            regular_hook_attempted.store(false, std::memory_order_release);
             __android_log_print(
                 ANDROID_LOG_ERROR,
                 kLogTag,
@@ -234,26 +281,43 @@ void on_library_loaded(const char* name, void* handle) {
                 dlerror()
             );
         } else {
+            void* backup = nullptr;
             const int result = hook_function(
                 target,
                 reinterpret_cast<void*>(replacement_regular_erase),
-                reinterpret_cast<void**>(&original_regular_erase)
+                &backup
             );
+            RegularErase original = reinterpret_cast<RegularErase>(backup);
+            const bool installed = result == 0
+                && original != nullptr;
+            if (installed) {
+                original_regular_erase.store(
+                    original,
+                    std::memory_order_release
+                );
+            }
+            regular_hook_installed.store(
+                installed,
+                std::memory_order_release
+            );
+            if (!installed && result != 0 && backup == nullptr) {
+                regular_hook_attempted.store(false, std::memory_order_release);
+            }
             __android_log_print(
-                result == 0 ? ANDROID_LOG_WARN : ANDROID_LOG_ERROR,
+                installed ? ANDROID_LOG_WARN : ANDROID_LOG_ERROR,
                 kLogTag,
                 "regular_eraser_hook_installed result=%d path=%s "
                 "target=%p backup=%p",
                 result,
                 name,
                 target,
-                reinterpret_cast<void*>(original_regular_erase)
+                backup
             );
         }
     }
 
-    if (original_grid_line_erase != nullptr
-        && original_regular_erase != nullptr) {
+    if (grid_hook_installed.load(std::memory_order_acquire)
+        && regular_hook_installed.load(std::memory_order_acquire)) {
         hook_state.store(2, std::memory_order_release);
     }
     __android_log_print(
@@ -263,8 +327,12 @@ void on_library_loaded(const char* name, void* handle) {
         "eraser_hooks_ready ready=%d path=%s grid=%p regular=%p",
         hook_state.load(std::memory_order_acquire) == 2 ? 1 : 0,
         name,
-        reinterpret_cast<void*>(original_grid_line_erase),
-        reinterpret_cast<void*>(original_regular_erase)
+        reinterpret_cast<void*>(original_grid_line_erase.load(
+            std::memory_order_acquire
+        )),
+        reinterpret_cast<void*>(original_regular_erase.load(
+            std::memory_order_acquire
+        ))
     );
 }
 

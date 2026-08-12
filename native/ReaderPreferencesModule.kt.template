@@ -46,7 +46,7 @@ class ReaderPreferencesModule(
         private const val NATIVE_SPREAD_PACKAGE =
             "com.techrebbe.supernote.spreadprobe"
         private const val PLUGIN_HOST_PACKAGE = "com.ratta.supernote.pluginhost"
-        private const val NATIVE_SPREAD_MIN_VERSION_CODE = 119L
+        private const val NATIVE_SPREAD_MIN_VERSION_CODE = 120L
         private const val NATIVE_SPREAD_MARKER_SUFFIX = ".snspread"
         private const val NATIVE_SPREAD_BACKUP_SUFFIX = ".snspread-backup.properties"
         private const val NATIVE_SPREAD_BACKUP_MARK_SUFFIX = ".snspread-backup.mark"
@@ -100,6 +100,7 @@ class ReaderPreferencesModule(
     private var lastSavedFilePath: String? = null
 
     private val annotationRecoveryPending = AtomicBoolean(false)
+    private val annotationRecoveryHandoffPending = AtomicBoolean(false)
     private val nativeSpreadConfigurationLock = Any()
 
     override fun getName(): String = "ReaderPreferencesModule"
@@ -609,6 +610,7 @@ class ReaderPreferencesModule(
                     )
                 }
                 recoveryClaimed = true
+                annotationRecoveryHandoffPending.set(false)
                 val result = readNativeAnnotationBackup(pdfFile)
                 val backup = result.backup
                     ?: throw IllegalStateException(
@@ -626,16 +628,29 @@ class ReaderPreferencesModule(
                 scheduleAnnotationRestore(pdfFile, backup) { error ->
                     Handler(Looper.getMainLooper()).post {
                         if (error == null) {
+                            // Publish the one-shot handoff suppression before
+                            // releasing worker ownership.  The opposite order
+                            // leaves a cross-thread window in which a handoff
+                            // can restart DocumentActivity between restore
+                            // completion and suppression publication.
+                            annotationRecoveryHandoffPending.set(true)
+                            annotationRecoveryPending.set(false)
                             promise.resolve(nativeAnnotationBackupMap(backup, "restored"))
-                            // App.js normally consumes this flag immediately while
-                            // closing. Avoid leaving a stale skip behind if the
-                            // document restart has already dismissed PluginHost.
+                            // App.js normally consumes this one-shot handoff skip
+                            // immediately while closing. Avoid leaving it behind
+                            // if DocumentActivity already dismissed PluginHost.
                             Handler(Looper.getMainLooper()).postDelayed(
-                                { annotationRecoveryPending.compareAndSet(true, false) },
+                                {
+                                    annotationRecoveryHandoffPending.compareAndSet(
+                                        true,
+                                        false,
+                                    )
+                                },
                                 5000L,
                             )
                         } else {
                             annotationRecoveryPending.set(false)
+                            annotationRecoveryHandoffPending.set(false)
                             val message =
                                 "Annotation restore failed: ${error.message ?: "unknown error"}"
                             Toast.makeText(
@@ -662,6 +677,7 @@ class ReaderPreferencesModule(
         } catch (error: Throwable) {
             if (recoveryClaimed && !restoreWorkerStarted) {
                 annotationRecoveryPending.set(false)
+                annotationRecoveryHandoffPending.set(false)
             }
             Log.e(LOG_TAG, "RTL_READER_NATIVE_BACKUP_RESTORE_FAILED: ${error.message}", error)
             promise.reject("NATIVE_SPREAD_BACKUP_RESTORE_FAILED", error.message, error)
@@ -3402,7 +3418,9 @@ class ReaderPreferencesModule(
      */
     @ReactMethod
     fun handoffLastSavedPage(promise: Promise) {
-        if (annotationRecoveryPending.compareAndSet(true, false)) {
+        if (annotationRecoveryPending.get() ||
+            annotationRecoveryHandoffPending.compareAndSet(true, false)
+        ) {
             Log.i(LOG_TAG, "RTL_READER_HANDOFF_SKIPPED reason=annotation_recovery")
             promise.resolve(Arguments.createMap().apply {
                 putBoolean("annotationRecovery", true)

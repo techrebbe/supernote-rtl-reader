@@ -37,6 +37,7 @@ jobs:
         run: |
           python3 scripts/check_native_invariants.py .
           python3 scripts/check_native_spread_invariants.py .
+          python3 scripts/test_plugin_packaging_fail_closed.py
 
   native-spread-build:
     name: Native Spread compile and verification only
@@ -112,6 +113,8 @@ jobs:
           )
 
   build:
+    needs:
+      - native-spread-build
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -145,13 +148,15 @@ jobs:
 
       - name: Verify package
         run: |
-          test -n "$(find out -maxdepth 1 -name '*.snplg' -print -quit)"
-          ls -lh out/*.snplg
+          mapfile -t packages < <(find out -maxdepth 1 -type f -name '*.snplg' -print)
+          test "${#packages[@]}" -eq 1
+          python3 scripts/verify_plugin_package.py "${packages[0]}" .
+          ls -lh "${packages[0]}"
 
       - name: Upload plugin package
         uses: actions/upload-artifact@v4
         with:
-          name: supernote-rtl-reader-v0.4.13-transactional-active-page
+          name: supernote-rtl-reader-v0.4.14-transactional-hardening
           path: out/*.snplg
           if-no-files-found: error
           retention-days: 3

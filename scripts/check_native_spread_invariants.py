@@ -308,6 +308,40 @@ def mask_yaml_comments(text: str) -> str:
     )
 
 
+def mask_shell_comments(text: str) -> str:
+    """Mask executable shell comments without treating ${#array[@]} as one."""
+
+    chars = list(text)
+    index = 0
+    quote: str | None = None
+    while index < len(chars):
+        char = chars[index]
+        if quote is not None:
+            if quote == '"' and char == "\\":
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+            index += 1
+            continue
+        comment_boundary = (
+            index == 0
+            or chars[index - 1].isspace()
+            or chars[index - 1] in ";|&()"
+        )
+        if char == "#" and comment_boundary:
+            while index < len(chars) and chars[index] not in "\r\n":
+                chars[index] = " "
+                index += 1
+            continue
+        index += 1
+    return "".join(chars)
+
+
 def extract_cpp_function(text: str, signature: str, label: str) -> tuple[str, str]:
     """Return the unique C++ definition and a comment/literal-masked copy."""
 
@@ -465,6 +499,12 @@ def check(repo_root: Path) -> None:
     )
     app_path = repo_root / "overlay" / "App.js"
     workflow_path = repo_root / ".github" / "workflows" / "build.yml"
+    plugin_build_path = repo_root / "build.sh"
+    packager_patch_path = repo_root / "scripts" / "patch_plugin_packager.py"
+    package_verifier_path = repo_root / "scripts" / "verify_plugin_package.py"
+    package_test_path = (
+        repo_root / "scripts" / "test_plugin_packaging_fail_closed.py"
+    )
     pdf_view_path = repo_root / "native" / "PdfPageView.kt.template"
     pdf_view_manager_path = repo_root / "native" / "PdfPageViewManager.kt.template"
     direct_patch_path = repo_root / "scripts" / "patch_direct_view.py"
@@ -478,6 +518,10 @@ def check(repo_root: Path) -> None:
     trace_helper_test = trace_helper_test_path.read_text(encoding="utf-8")
     app = app_path.read_text(encoding="utf-8")
     workflow = workflow_path.read_text(encoding="utf-8")
+    plugin_build_script = plugin_build_path.read_text(encoding="utf-8")
+    packager_patch = packager_patch_path.read_text(encoding="utf-8")
+    package_verifier = package_verifier_path.read_text(encoding="utf-8")
+    package_test = package_test_path.read_text(encoding="utf-8")
     pdf_view = pdf_view_path.read_text(encoding="utf-8")
     pdf_view_manager = pdf_view_manager_path.read_text(encoding="utf-8")
     direct_patch = direct_patch_path.read_text(encoding="utf-8")
@@ -495,17 +539,17 @@ def check(repo_root: Path) -> None:
     frozen_source_digests = (
         (
             plugin_path,
-            "a7e1e7dfe29197478a3fcafd2fa6ab7806477b80b573d79b748c28f96ce0ac80",
+            "c293aaf4373158dabd9172a0b3ff82e01c9a68dcb1bd3192a5113f3e3e33eb1e",
             "ReaderPreferencesModule.kt.template",
         ),
         (
             module_path,
-            "1d7702b989a29ea0e41ae44ee670303ca8fb281f0870d161018b8bed0131c6b0",
+            "81c619556396e921bf19032a92a4d6dd0a2db0dc39edf85758267509ffc329c4",
             "SpreadProbe.java",
         ),
         (
             native_build_path,
-            "94c913965f7f9146b3d8fb368fd434881a4af566b27a0f185882db36972b2f9e",
+            "d1e16bc0e3b8d608d068d7926566641f9d5d5557016fc88541e9f69d964d1f9b",
             "native build script",
         ),
         (
@@ -525,8 +569,28 @@ def check(repo_root: Path) -> None:
         ),
         (
             workflow_path,
-            "04c3455b1350b0d0812599531f6ca946fcd63062d8d47a745c55f6b192ced88a",
+            "776d9068660553038fd2ae6f21fb8d2d9906369c59597fdb8765c038b9bb3ba7",
             "Native Spread companion-build workflow",
+        ),
+        (
+            plugin_build_path,
+            "06171e49d9a175256b1aa8b69f8ef37cbc0d538f07c04270c69406a0782dfd4f",
+            "native plugin build entrypoint",
+        ),
+        (
+            packager_patch_path,
+            "386893f12a9db1ccb4fb77e57a63c65ab1b778bdd90803ae59c3e12ba8cd2a24",
+            "generated plugin-packager hardening",
+        ),
+        (
+            package_verifier_path,
+            "2761190e1096a0c8f5ac0b0a0aecdf88f522a250023117aa387f8d5978e98b03",
+            "finished native plugin package verifier",
+        ),
+        (
+            package_test_path,
+            "acfea38a966b7d5553571bf93478bf1a0c5382ebf554f3e03e994fbbbb08c028",
+            "native plugin packaging failure-injection tests",
         ),
     )
     for frozen_path, expected_digest, label in frozen_source_digests:
@@ -546,6 +610,7 @@ def check(repo_root: Path) -> None:
             "native-spread-build:",
             "python3 scripts/check_native_invariants.py .",
             "python3 scripts/check_native_spread_invariants.py .",
+            "python3 scripts/test_plugin_packaging_fail_closed.py",
             "name: Native Spread compile and verification only",
             "- invariant-suites",
             "- trace-helper-tests",
@@ -557,6 +622,7 @@ def check(repo_root: Path) -> None:
             "-File .\\native-spread-module\\build.ps1 `",
             "if ($LASTEXITCODE -ne 0)",
             "no APK is published by this workflow",
+            'python3 scripts/verify_plugin_package.py "${packages[0]}" .',
         ),
         "Native Spread companion-build provenance",
     )
@@ -578,6 +644,7 @@ def check(repo_root: Path) -> None:
     trace_job = workflow_code[trace_job_start:invariant_job_start]
     invariant_job = workflow_code[invariant_job_start:companion_job_start]
     companion_job = workflow_code[companion_job_start:plugin_job_start]
+    plugin_job = workflow_code[plugin_job_start:]
     disabled_job_pattern = re.compile(
         r"(?m)^\s*if:\s*\$\{\{\s*false\s*\}\}\s*$"
     )
@@ -595,6 +662,9 @@ def check(repo_root: Path) -> None:
         or invariant_job.count("python3 scripts/check_native_invariants.py .") != 1
         or invariant_job.count(
             "python3 scripts/check_native_spread_invariants.py ."
+        ) != 1
+        or invariant_job.count(
+            "python3 scripts/test_plugin_packaging_fail_closed.py"
         ) != 1
     ):
         fail("Native Spread invariant-suite workflow gate can be bypassed")
@@ -618,9 +688,116 @@ def check(repo_root: Path) -> None:
         companion_job,
     ):
         fail("Native Spread verification workflow may not publish its APK")
+    if (
+        "continue-on-error:" in plugin_job
+        or disabled_job_pattern.search(plugin_job)
+        or job_override_pattern.search(plugin_job)
+    ):
+        fail("plugin build or publication can bypass its Native Spread gate")
+    if re.search(r"(?m)^\s*ref:\s*", plugin_job):
+        fail("plugin build checkout must use the triggering revision")
+    plugin_needs_native = plugin_job.find("- native-spread-build")
+    plugin_runs_on = plugin_job.find("runs-on: ubuntu-latest")
+    plugin_build = plugin_job.find("./build.sh", plugin_runs_on)
+    plugin_verify = plugin_job.find(
+        'python3 scripts/verify_plugin_package.py "${packages[0]}" .',
+        plugin_build,
+    )
+    plugin_upload = plugin_job.find("uses: actions/upload-artifact@v4", plugin_verify)
+    plugin_artifact = plugin_job.find("path: out/*.snplg", plugin_upload)
+    if not (
+        0 <= plugin_needs_native < plugin_runs_on < plugin_build
+        < plugin_verify < plugin_upload < plugin_artifact
+    ):
+        fail(
+            "plugin artifact is not built, verified, and uploaded strictly "
+            "after the Native Spread compile/safety gate"
+        )
+    if plugin_job.count("- native-spread-build") != 1:
+        fail("plugin build must depend on Native Spread verification exactly once")
+    if plugin_job.count("python3 scripts/verify_plugin_package.py") != 1:
+        fail("workflow must strictly verify the finished plugin package exactly once")
+
+    plugin_build_code = mask_shell_comments(plugin_build_script)
+    require_markers(
+        plugin_build_code,
+        (
+            '"${PYTHON_CMD[@]}" "$ROOT/scripts/check_native_spread_invariants.py" "$ROOT"',
+            '"${PYTHON_CMD[@]}" "$ROOT/scripts/patch_plugin_packager.py" "$PROJECT/buildPlugin.sh"',
+            'export MSYS2_ARG_CONV_EXCL=',
+            './buildPlugin.sh',
+            'mapfile -t PACKAGES < <(find "$PROJECT/build/outputs"',
+            'if [[ "${#PACKAGES[@]}" -ne 1 ]]',
+            '"${PYTHON_CMD[@]}" "$ROOT/scripts/verify_plugin_package.py" "${PACKAGES[0]}" "$ROOT"',
+            'cp "${PACKAGES[0]}" "$ROOT/out/"',
+        ),
+        "fail-closed native plugin build",
+    )
+    patch_position = plugin_build_code.find("patch_plugin_packager.py")
+    build_position = plugin_build_code.find("./buildPlugin.sh", patch_position)
+    verify_position = plugin_build_code.find("verify_plugin_package.py", build_position)
+    copy_position = plugin_build_code.find('cp "${PACKAGES[0]}"', verify_position)
+    if not 0 <= patch_position < build_position < verify_position < copy_position:
+        fail(
+            "plugin packager hardening, native build, finished-package "
+            "verification, and publication are not strictly ordered"
+        )
+    for marker, label in (
+        ("patch_plugin_packager.py", "packager hardening"),
+        ("./buildPlugin.sh", "generated plugin build"),
+        ("verify_plugin_package.py", "finished-package verification"),
+        ('cp "${PACKAGES[0]}"', "verified-package publication"),
+    ):
+        if plugin_build_code.count(marker) != 1:
+            fail(f"plugin build must execute {label} exactly once")
+
+    require_markers(
+        packager_patch,
+        (
+            'EXPECTED_PACKAGE = "com.supernotertlreader.PdfRendererPackage"',
+            'local project_react_pkgs="$expected_react_package"',
+            'if [[ "$all_pkgs" != "$expected_react_package" ]]',
+            'if ! build_android_apk "$project_root" "$gen_cfg"',
+            'if ! copy_apk_and_update_config "$project_root" "$gen_dir" "$gen_cfg"',
+            'write_color_output "Required RTL Reader native build was not selected" "Red"',
+            "return 1",
+        ),
+        "generated native packager fail-closed patch",
+    )
+    require_markers(
+        package_verifier,
+        (
+            'EXPECTED_REACT_PACKAGES = ["com.supernotertlreader.PdfRendererPackage"]',
+            '"nativeCodePackage"] = "/app.npk"',
+            'expected_config["iconPath"] = "/icon.png"',
+            'verify_native_apk(require_single_entry(package, "app.npk"))',
+            '"lib/arm64-v8a/libnative-lib.so"',
+            'EXPECTED_NATIVE_CLASSES',
+            'expected_runtime_marker(repo_root)',
+        ),
+        "finished native plugin package verification",
+    )
+    require_markers(
+        package_test,
+        (
+            "UPSTREAM_SOFT_NATIVE_BUILD",
+            "STRICT_NATIVE_BUILD",
+            "patch_text(upstream)",
+            "patch_text(upstream.replace(UPSTREAM_PACKAGE_SCAN",
+            "missing app.npk",
+            "converted nativeCodePackage path",
+            "unexpected archive payload",
+            "wrong runtime marker",
+            "missing reviewed native classes",
+            "invalid embedded APK",
+            "duplicate PluginConfig.json",
+            "Native plugin packaging fail-closed tests: PASS",
+        ),
+        "native plugin packaging failure-injection coverage",
+    )
 
     expected_native_cpp_sha256 = (
-        "715183119972cc32599842c07cbc999334d0ef74e9cc587e9fcfe2adeac47cd5"
+        "9584855fdefac7e7795d8ad34dde6b0d17ecfd8c93518d309f170af2bb882221"
     )
     actual_native_cpp_sha256 = normalized_text_sha256(native_cpp_path)
     if actual_native_cpp_sha256 != expected_native_cpp_sha256:
@@ -674,6 +851,33 @@ def check(repo_root: Path) -> None:
         )
     ) != 1:
         fail("native eraser calibration gate must be one atomic bool")
+    native_cpp_masked = mask_cpp_comments_and_literals(native_cpp)
+    for pointer_type, pointer_name in (
+        ("GridLineErase", "original_grid_line_erase"),
+        ("RegularErase", "original_regular_erase"),
+    ):
+        if len(
+            re.findall(
+                rf"\bstd::atomic\s*<\s*{pointer_type}\s*>\s+"
+                rf"{pointer_name}\s*\{{\s*nullptr\s*\}}\s*;",
+                native_cpp_masked,
+            )
+        ) != 1:
+            fail(f"{pointer_name} must be one atomic function pointer")
+    for state_name in (
+        "grid_hook_attempted",
+        "regular_hook_attempted",
+        "grid_hook_installed",
+        "regular_hook_installed",
+    ):
+        if len(
+            re.findall(
+                rf"\bstd::atomic\s*<\s*bool\s*>\s+{state_name}\s*"
+                rf"\{{\s*false\s*\}}\s*;",
+                native_cpp_masked,
+            )
+        ) != 1:
+            fail(f"native hook state {state_name} must be one atomic bool")
     trail_body_start = native_trail_masked.find("{")
     trail_body_end = native_trail_masked.rfind("}")
     normalized_trail_body = re.sub(
@@ -687,6 +891,17 @@ def check(repo_root: Path) -> None:
             "native trail field accessor must remain a side-effect-free "
             "offset reference"
         )
+    original_load = require_cpp_pattern(
+        native_erase_masked,
+        r"GridLineErase\s+original\s*=\s*original_grid_line_erase\s*\.\s*"
+        r"load\s*\(\s*std::memory_order_acquire\s*\)\s*;",
+        "native eraser atomic original load",
+    )
+    null_original_guard = require_cpp_pattern(
+        native_erase_masked,
+        r"if\s*\(\s*original\s*==\s*nullptr\s*\)\s*\{\s*return\s*;\s*\}",
+        "native eraser null-original fail-closed guard",
+    )
     gate_condition = require_cpp_pattern(
         native_erase_masked,
         r"if\s*\(\s*calibration_enabled\s*\.\s*load\s*\(\s*"
@@ -719,7 +934,7 @@ def check(repo_root: Path) -> None:
     )
     original_call = require_cpp_pattern(
         native_erase_masked,
-        r"original_grid_line_erase\s*\(\s*current_page_trails\s*,\s*"
+        r"\boriginal\s*\(\s*current_page_trails\s*,\s*"
         r"operation_trail\s*,\s*erased_trail_numbers\s*,\s*scale\s*,\s*"
         r"first_flag\s*,\s*mode\s*,\s*second_flag\s*,\s*third_flag\s*\)"
         r"\s*;",
@@ -745,7 +960,8 @@ def check(repo_root: Path) -> None:
         "native eraser exact-signature branch",
     )
     if not (
-        gate_condition < exact_signature < patch_width < patch_height
+        original_load < null_original_guard < gate_condition
+        < exact_signature < patch_width < patch_height
         < patched_true < signature_close <= gate_close < original_call
         < restore_block
     ):
@@ -756,7 +972,7 @@ def check(repo_root: Path) -> None:
     if native_erase_masked[gate_close + 1:original_call].strip():
         fail("native eraser original invocation is not unconditional")
     original_call_match = re.search(
-        r"original_grid_line_erase\s*\(\s*current_page_trails\s*,\s*"
+        r"\boriginal\s*\(\s*current_page_trails\s*,\s*"
         r"operation_trail\s*,\s*erased_trail_numbers\s*,\s*scale\s*,\s*"
         r"first_flag\s*,\s*mode\s*,\s*second_flag\s*,\s*third_flag\s*\)"
         r"\s*;",
@@ -781,21 +997,26 @@ def check(repo_root: Path) -> None:
         fail("native eraser performs work after restoring trail dimensions")
     if len(
         re.findall(
-            r"original_grid_line_erase\s*\(", native_erase_masked
+            r"\boriginal\s*\(", native_erase_masked
         )
     ) != 1:
         fail("native eraser must invoke the original function exactly once")
-    if len(re.findall(r"\bif\s*\(", native_erase_masked)) != 3:
-        fail("native eraser may only use the acquire, signature, and restore guards")
+    if len(re.findall(r"\bif\s*\(", native_erase_masked)) != 4:
+        fail(
+            "native eraser may only use the null-original, acquire, signature, "
+            "and restore guards"
+        )
     if len(re.findall(r"\bpatched\s*=\s*false\s*;", native_erase_masked)) != 1:
         fail("native eraser patched state must initialize false exactly once")
     if len(re.findall(r"\bpatched\s*=\s*true\s*;", native_erase_masked)) != 1:
         fail("native eraser patched state must publish true exactly once")
     if re.search(
-        r"\b(?:for|while|switch|goto|return|throw|try|catch)\b|\?",
+        r"\b(?:for|while|switch|goto|throw|try|catch)\b|\?",
         native_erase_masked,
     ):
         fail("native eraser contains unexpected conditional control flow")
+    if len(re.findall(r"\breturn\s*;", native_erase_masked)) != 1:
+        fail("native eraser must fail closed exactly once for a missing original")
     if len(re.findall(r"\btrail_int\s*\(", native_erase_masked)) != 7:
         fail("native eraser must perform exactly three reads and four writes")
     if len(re.findall(r"kTrailRedrawWidth\s*\)\s*=", native_erase_masked)) != 2:
@@ -809,11 +1030,23 @@ def check(repo_root: Path) -> None:
             "if",
             "load",
             "trail_int",
-            "original_grid_line_erase",
+            "original",
         },
         "native eraser replacement",
     )
 
+    regular_original_load = require_cpp_pattern(
+        native_regular_erase_masked,
+        r"RegularErase\s+original\s*=\s*original_regular_erase\s*\.\s*"
+        r"load\s*\(\s*std::memory_order_acquire\s*\)\s*;",
+        "native regular eraser atomic original load",
+    )
+    regular_null_original_guard = require_cpp_pattern(
+        native_regular_erase_masked,
+        r"if\s*\(\s*original\s*==\s*nullptr\s*\)\s*\{\s*"
+        r"return\s+0\s*;\s*\}",
+        "native regular eraser null-original fail-closed guard",
+    )
     regular_gate = require_cpp_pattern(
         native_regular_erase_masked,
         r"if\s*\(\s*calibration_enabled\s*\.\s*load\s*\(\s*"
@@ -847,7 +1080,7 @@ def check(repo_root: Path) -> None:
     )
     regular_original_call = require_cpp_pattern(
         native_regular_erase_masked,
-        r"const\s+int\s+result\s*=\s*original_regular_erase\s*\(\s*"
+        r"const\s+int\s+result\s*=\s*original\s*\(\s*"
         r"operation_trail\s*,\s*current_page_trails\s*,\s*"
         r"erased_trail_numbers\s*,\s*affected_trail_numbers\s*,\s*mode\s*"
         r"\)\s*;",
@@ -882,7 +1115,8 @@ def check(repo_root: Path) -> None:
         "native regular eraser exact-signature branch",
     )
     if not (
-        regular_gate < regular_signature < regular_patch_width
+        regular_original_load < regular_null_original_guard < regular_gate
+        < regular_signature < regular_patch_width
         < regular_patch_height < regular_patched_true
         < regular_signature_close <= regular_gate_close
         < regular_original_call < regular_restore < regular_return
@@ -895,10 +1129,10 @@ def check(repo_root: Path) -> None:
         regular_gate_close + 1:regular_original_call
     ].strip():
         fail("native regular eraser original invocation is not unconditional")
-    if len(re.findall(r"\bif\s*\(", native_regular_erase_masked)) != 3:
+    if len(re.findall(r"\bif\s*\(", native_regular_erase_masked)) != 4:
         fail(
-            "native regular eraser may only use the acquire, signature, and "
-            "restore guards"
+            "native regular eraser may only use the null-original, acquire, "
+            "signature, and restore guards"
         )
     if len(re.findall(r"\btrail_int\s*\(", native_regular_erase_masked)) != 8:
         fail("native regular eraser must perform four reads and four writes")
@@ -915,7 +1149,7 @@ def check(repo_root: Path) -> None:
     ) != 2:
         fail("native regular eraser height may only be patched and restored once")
     if len(
-        re.findall(r"\boriginal_regular_erase\s*\(", native_regular_erase_masked)
+        re.findall(r"\boriginal\s*\(", native_regular_erase_masked)
     ) != 1:
         fail("native regular eraser must invoke the original exactly once")
     if re.search(
@@ -923,6 +1157,11 @@ def check(repo_root: Path) -> None:
         native_regular_erase_masked,
     ):
         fail("native regular eraser contains unexpected conditional control flow")
+    if len(re.findall(r"\breturn\s+0\s*;", native_regular_erase_masked)) != 1:
+        fail(
+            "native regular eraser must fail closed exactly once for a missing "
+            "original"
+        )
     require_only_cpp_calls(
         native_regular_erase_masked,
         {
@@ -930,7 +1169,7 @@ def check(repo_root: Path) -> None:
             "if",
             "load",
             "trail_int",
-            "original_regular_erase",
+            "original",
         },
         "native regular eraser replacement",
     )
@@ -958,14 +1197,107 @@ def check(repo_root: Path) -> None:
         r"dlsym\s*\(\s*handle\s*,\s*kRegularTargetSymbol\s*\)",
         "native regular eraser symbol resolution",
     )
-    require_cpp_pattern(
+    for hook_prefix in ("grid", "regular"):
+        require_cpp_pattern(
+            native_hook_install_masked,
+            rf"!{hook_prefix}_hook_installed\s*\.\s*load\s*\(\s*"
+            rf"std::memory_order_acquire\s*\)\s*&&\s*"
+            rf"!{hook_prefix}_hook_attempted\s*\.\s*exchange\s*\(\s*"
+            rf"true\s*,\s*std::memory_order_acq_rel\s*\)",
+            f"native {hook_prefix} hook single-installer guard",
+        )
+        if len(
+            re.findall(
+                rf"{hook_prefix}_hook_installed\s*\.\s*store\s*\(\s*"
+                rf"installed\s*,\s*std::memory_order_release\s*\)",
+                native_hook_install_masked,
+            )
+        ) != 1:
+            fail(
+                f"native {hook_prefix} hook result must publish installed state "
+                "exactly once"
+            )
+        if len(
+            re.findall(
+                rf"{hook_prefix}_hook_attempted\s*\.\s*store\s*\(\s*"
+                rf"false\s*,\s*std::memory_order_release\s*\)",
+                native_hook_install_masked,
+            )
+        ) != 2:
+            fail(
+                f"native {hook_prefix} hook must have exactly the symbol and "
+                "unambiguous installer retry publications"
+            )
+        require_cpp_pattern(
+            native_hook_install_masked,
+            r"if\s*\(\s*!\s*installed\s*&&\s*result\s*!=\s*0\s*&&\s*"
+            r"backup\s*==\s*nullptr\s*\)\s*\{\s*"
+            rf"{hook_prefix}_hook_attempted\s*\.\s*store\s*\(\s*false\s*,\s*"
+            r"std::memory_order_release\s*\)\s*;\s*\}",
+            f"native {hook_prefix} hook unambiguous-failure retry guard",
+        )
+    if len(
+        re.findall(
+            r"void\s*\*\s*backup\s*=\s*nullptr\s*;",
+            native_hook_install_masked,
+        )
+    ) != 2:
+        fail("native eraser hooks must use two local null backup pointers")
+    if len(
+        re.findall(
+            r"hook_function\s*\([^;]*?&\s*backup\s*\)",
+            native_hook_install_masked,
+            re.DOTALL,
+        )
+    ) != 2:
+        fail("native eraser hook backups must be written only to local pointers")
+    if len(
+        re.findall(
+            r"const\s+bool\s+installed\s*=\s*result\s*==\s*0\s*&&\s*"
+            r"original\s*!=\s*nullptr\s*;",
+            native_hook_install_masked,
+        )
+    ) != 2:
+        fail("native eraser hook success must require result zero and a backup")
+    for pointer_name in (
+        "original_grid_line_erase",
+        "original_regular_erase",
+    ):
+        if len(
+            re.findall(
+                rf"if\s*\(\s*installed\s*\)\s*\{{\s*{pointer_name}\s*\.\s*"
+                rf"store\s*\(\s*original\s*,\s*std::memory_order_release\s*\)"
+                rf"\s*;\s*\}}",
+                native_hook_install_masked,
+                re.DOTALL,
+            )
+        ) != 1:
+            fail(
+                f"{pointer_name} must publish only inside the proven installer "
+                "success branch"
+            )
+    readiness_guard = require_cpp_pattern(
         native_hook_install_masked,
-        r"if\s*\(\s*original_grid_line_erase\s*!=\s*nullptr\s*&&\s*"
-        r"original_regular_erase\s*!=\s*nullptr\s*\)\s*\{\s*"
+        r"if\s*\(\s*grid_hook_installed\s*\.\s*load\s*\(\s*"
+        r"std::memory_order_acquire\s*\)\s*&&\s*"
+        r"regular_hook_installed\s*\.\s*load\s*\(\s*"
+        r"std::memory_order_acquire\s*\)\s*\)\s*\{\s*"
         r"hook_state\s*\.\s*store\s*\(\s*2\s*,\s*"
         r"std::memory_order_release\s*\)\s*;\s*\}",
         "native two-hook readiness publication",
     )
+    readiness_store = native_hook_install_masked.find(
+        "hook_state.store(2", readiness_guard
+    )
+    if readiness_store < 0:
+        fail("could not isolate native eraser readiness publication")
+    readiness_prefix = native_hook_install_masked[
+        readiness_guard:readiness_store
+    ]
+    if "original_grid_line_erase" in readiness_prefix or (
+        "original_regular_erase" in readiness_prefix
+    ):
+        fail("native hook readiness may not be inferred from backup pointers")
     if len(
         re.findall(
             r"hook_state\s*\.\s*store\s*\(\s*2\s*,",
@@ -999,7 +1331,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 119L",
+            "NATIVE_SPREAD_MIN_VERSION_CODE = 120L",
             "private const val NATIVE_SPREAD_HANDSHAKE_PROTOCOL = 2",
             "private const val NATIVE_SPREAD_EDITABLE_MARKER_PROTOCOL = 2",
             '"protected-editable-transactional-v1"',
@@ -1461,6 +1793,76 @@ def check(repo_root: Path) -> None:
         ) != 1
     ):
         fail("explicit recovery does not use the exact assess/delegate/assess flow")
+
+    plugin_code = mask_comments_preserve_literals(plugin)
+    if plugin_code.count(
+        "private val annotationRecoveryPending = AtomicBoolean(false)"
+    ) != 1 or plugin_code.count(
+        "private val annotationRecoveryHandoffPending = AtomicBoolean(false)"
+    ) != 1:
+        fail("annotation recovery worker ownership and handoff skip must be separate")
+    restore_start = plugin_code.find(
+        "fun restoreNativeAnnotationBackup(filePath: String, promise: Promise)"
+    )
+    restore_end = plugin_code.find(
+        "private fun writeNativeSpreadReadOnlyMarker(", restore_start
+    )
+    if restore_start < 0 or restore_end < 0:
+        fail("could not isolate annotation recovery worker ownership")
+    restore_backup = plugin_code[restore_start:restore_end]
+    recovery_claim = restore_backup.find(
+        "annotationRecoveryPending.compareAndSet(false, true)"
+    )
+    stale_handoff_clear = restore_backup.find(
+        "annotationRecoveryHandoffPending.set(false)", recovery_claim
+    )
+    restore_schedule = restore_backup.find(
+        "scheduleAnnotationRestore(pdfFile, backup)", stale_handoff_clear
+    )
+    handoff_publish = restore_backup.find(
+        "annotationRecoveryHandoffPending.set(true)", restore_schedule
+    )
+    worker_release = restore_backup.find(
+        "annotationRecoveryPending.set(false)", handoff_publish
+    )
+    recovery_resolve = restore_backup.find(
+        'promise.resolve(nativeAnnotationBackupMap(backup, "restored"))',
+        worker_release,
+    )
+    stale_handoff_expiry = restore_backup.find(
+        "annotationRecoveryHandoffPending.compareAndSet(", recovery_resolve
+    )
+    if not (
+        0 <= recovery_claim < stale_handoff_clear < restore_schedule
+        < handoff_publish < worker_release < recovery_resolve
+        < stale_handoff_expiry
+    ):
+        fail(
+            "annotation recovery must retain worker ownership until completion, "
+            "publish a separate one-shot handoff skip before releasing that "
+            "ownership, and only then resolve"
+        )
+    if restore_backup.count("annotationRecoveryPending.set(false)") != 3:
+        fail(
+            "annotation recovery pending ownership must be released only by the "
+            "success, worker-failure, and pre-worker-failure paths"
+        )
+    handoff_start = plugin_code.find("fun handoffLastSavedPage(promise: Promise)")
+    handoff_end = plugin_code.find(
+        "private fun findMatchingConfig(", handoff_start
+    )
+    if handoff_start < 0 or handoff_end < 0:
+        fail("could not isolate native-reader handoff recovery guard")
+    handoff = re.sub(r"\s+", "", plugin_code[handoff_start:handoff_end])
+    if (
+        "if(annotationRecoveryPending.get()||"
+        "annotationRecoveryHandoffPending.compareAndSet(true,false))"
+        not in handoff
+        or "annotationRecoveryPending.compareAndSet(true,false)" in handoff
+    ):
+        fail(
+            "native handoff can consume in-progress annotation recovery ownership"
+        )
 
     authority_assessment_model_start = plugin.find(
         "private data class NativeSpreadAuthorityAssessment("
@@ -2907,6 +3309,121 @@ def check(repo_root: Path) -> None:
         ),
         "transactional inactive-page activation and receive quarantine",
     )
+    require_markers(
+        module,
+        (
+            "DOCUMENT_CONTEXTS_PRESENTED",
+            "final boolean receiveQuarantineRequired;",
+            "fence.receiveQuarantineRequired",
+            "DOCUMENT_CONTEXTS_PRESENTED.put(activity, Boolean.TRUE)",
+            "DOCUMENT_CONTEXTS_PRESENTED.remove(activity)",
+        ),
+        "fresh-process versus sequential-document receive quarantine",
+    )
+    weak_map_declarations = tuple(
+        re.finditer(r"new\s+WeakHashMap\s*<\s*>\s*\(\s*\)", module)
+    )
+    if len(weak_map_declarations) != 22:
+        fail(
+            "per-activity weak-map inventory changed without an explicit "
+            f"concurrency review: found {len(weak_map_declarations)}"
+        )
+    for declaration in weak_map_declarations:
+        prefix = module[max(0, declaration.start() - 60):declaration.start()]
+        if not re.search(r"Collections\s*\.\s*synchronizedMap\s*\(\s*$", prefix):
+            fail("a shared per-activity WeakHashMap is not synchronized")
+
+    invalidate_identity_start = module.find(
+        "private static DocumentIdentityAdmission invalidateDocumentIdentityAdmission("
+    )
+    finish_identity_start = module.find(
+        "private static void finishDocumentIdentityAdmission(",
+        invalidate_identity_start,
+    )
+    note_identity_start = module.find(
+        "private static boolean noteDocumentIdentityPresentation(",
+        finish_identity_start,
+    )
+    prove_identity_start = module.find(
+        "private static boolean proveDocumentIdentityPresentation(",
+        note_identity_start,
+    )
+    receive_identity_start = module.find(
+        "private static void publishDocumentReceiveIdentity(",
+        prove_identity_start,
+    )
+    if min(
+        invalidate_identity_start,
+        finish_identity_start,
+        note_identity_start,
+        prove_identity_start,
+        receive_identity_start,
+    ) < 0:
+        fail("could not isolate document receive-quarantine lifecycle")
+    invalidate_identity = compact_code(
+        module[invalidate_identity_start:finish_identity_start]
+    )
+    note_identity = compact_code(
+        module[note_identity_start:prove_identity_start]
+    )
+    prove_identity = compact_code(
+        module[prove_identity_start:receive_identity_start]
+    )
+    prior_context = invalidate_identity.find(
+        "booleanpriorDocumentContext=Boolean.TRUE.equals("
+        "DOCUMENT_CONTEXTS_PRESENTED.get(activity));"
+    )
+    fence_publish = invalidate_identity.find(
+        "newDocumentIdentityFence(activity,documentContextGeneration,"
+        "priorDocumentContext)",
+        prior_context,
+    )
+    quarantine_guard = invalidate_identity.find(
+        "if(fence.receiveQuarantineRequired)", fence_publish
+    )
+    quarantine_publish = invalidate_identity.find(
+        "DOCUMENT_RECEIVE_TOMBSTONES.put(", quarantine_guard
+    )
+    fresh_branch = invalidate_identity.find("else{", quarantine_publish)
+    fresh_remove = invalidate_identity.find(
+        "DOCUMENT_RECEIVE_TOMBSTONES.remove(activity);", fresh_branch
+    )
+    if not (
+        0 <= prior_context < fence_publish < quarantine_guard
+        < quarantine_publish < fresh_branch < fresh_remove
+    ):
+        fail(
+            "document receive quarantine is not conditional on an exactly "
+            "proved prior document context"
+        )
+    if "DOCUMENT_CONTEXT_GENERATIONS.get(activity)" in invalidate_identity[
+        max(0, prior_context - 100):fence_publish
+    ]:
+        fail("mere startup generation state can falsely enable receive quarantine")
+    fence_absent = note_identity.find("if(fence==null)")
+    fence_absent_return = note_identity.find("returntrue;", fence_absent)
+    if not 0 <= fence_absent < fence_absent_return:
+        fail("could not isolate provisional no-fence presentation")
+    if "DOCUMENT_CONTEXTS_PRESENTED.put" in note_identity[
+        fence_absent:fence_absent_return
+    ]:
+        fail("provisional startup presentation can be mistaken for a prior document")
+    exact_fence_remove = prove_identity.find(
+        "if(!DOCUMENT_IDENTITY_ADMISSIONS.remove(activity,fence))"
+    )
+    exact_presentation_publish = prove_identity.find(
+        "DOCUMENT_CONTEXTS_PRESENTED.put(activity,Boolean.TRUE);",
+        exact_fence_remove,
+    )
+    editable_guard = prove_identity.find(
+        "PEN_INPUT_EDITABLE_GUARDS.put(activity,Boolean.TRUE);",
+        exact_presentation_publish,
+    )
+    if not 0 <= exact_fence_remove < exact_presentation_publish < editable_guard:
+        fail(
+            "prior-document state is not published only after exact reset-fence "
+            "identity proof"
+        )
     forbidden_legacy_activation_markers = (
         "PEN_ACTIVATION_TARGETS",
         "PEN_ACTIVATION_MARK_PRIMING",
@@ -7455,7 +7972,6 @@ def check(repo_root: Path) -> None:
             'new String[] {"undo", "redo"}',
             'ink_composition_force_canonical reason=',
             'undo_redo_saved_before_canonical_reload',
-            '"loadHandWrite",\n                                    markPage',
             "boolean replaceActiveSlot",
             "boolean canonicalOnly",
             "readOnly || canonicalOnly",
@@ -7463,8 +7979,13 @@ def check(repo_root: Path) -> None:
             "persistActiveMutationBeforeCanonicalRefresh(",
             'active_mutation_saved_before_canonical_refresh',
             'active_mutation_canonical_reloaded',
+            'active_mutation_canonical_reload_skipped',
             '"active_mutation_canonical_reload"',
             "saveTrailsForCanonicalReload(",
+            "ExplicitCanonicalSaveScope",
+            "EXPLICIT_CANONICAL_SAVE_SCOPES",
+            'reason=save_not_committed',
+            'reason=authority_changed_after_save',
             '"undo_redo:" + mutationName',
             '"active_eraser"',
             '"active_pen"',
@@ -7479,7 +8000,7 @@ def check(repo_root: Path) -> None:
         "private static void persistActiveMutationBeforeCanonicalRefresh("
     )
     canonical_save_start = module.find(
-        "private static void saveTrailsForCanonicalReload(",
+        "private static boolean saveTrailsForCanonicalReload(",
         active_mutation_start,
     )
     if active_mutation_start < 0 or canonical_save_start < 0:
@@ -7493,26 +8014,154 @@ def check(repo_root: Path) -> None:
     mutation_save = active_mutation_refresh.find(
         "saveTrailsForCanonicalReload(", mutation_kind
     )
-    mutation_force = active_mutation_refresh.find(
-        "FORCE_CANONICAL_ACTIVE_INK.set(Boolean.TRUE)", mutation_save
+    mutation_save_guard = active_mutation_refresh.find(
+        "if (!saved)", mutation_save
     )
-    mutation_reload = active_mutation_refresh.find(
-        '"loadHandWrite"', mutation_force
+    mutation_save_return = active_mutation_refresh.find(
+        "return;", mutation_save_guard
+    )
+    mutation_force = active_mutation_refresh.find(
+        "FORCE_CANONICAL_ACTIVE_INK.set(Boolean.TRUE)", mutation_save_return
+    )
+    mutation_reload_guard = active_mutation_refresh.find(
+        "if (!loadCanonicalHandwritingIfAuthorityCurrent(", mutation_force
+    )
+    mutation_authority_reason = active_mutation_refresh.find(
+        'reason=authority_changed_after_save', mutation_reload_guard
     )
     mutation_restore = active_mutation_refresh.find(
-        "if (previousForceCanonical == null)", mutation_reload
+        "if (previousForceCanonical == null)", mutation_authority_reason
     )
     mutation_trace = active_mutation_refresh.find(
         '"active_mutation_canonical_reload"', mutation_restore
     )
     if not (
-        0 <= mutation_kind < mutation_save < mutation_force
-        < mutation_reload < mutation_restore < mutation_trace
+        0 <= mutation_kind < mutation_save < mutation_save_guard
+        < mutation_save_return < mutation_force < mutation_reload_guard
+        < mutation_authority_reason < mutation_restore < mutation_trace
     ):
         fail(
-            "active-page mutation must save canonical trails and force a "
-            "canonical-only reload before tracing the settled bitmap"
+            "active-page mutation must prove its exact save and current writer "
+            "authority before forcing a canonical-only reload"
         )
+
+    canonical_reload_start = module.find(
+        "private static boolean loadCanonicalHandwritingIfAuthorityCurrent(",
+        canonical_save_start,
+    )
+    if canonical_reload_start < 0:
+        fail("could not isolate explicit canonical save acknowledgement")
+    canonical_save = mask_comments_preserve_literals(
+        module[canonical_save_start:canonical_reload_start]
+    )
+    canonical_save_compact = re.sub(r"\s+", "", canonical_save)
+    for marker in (
+        "ExplicitCanonicalSaveScopescope=newExplicitCanonicalSaveScope(presenter);",
+        "EXPLICIT_CANONICAL_SAVE_SCOPES.set(scope);",
+        'XposedHelpers.callMethod(presenter,"saveTrails",false,false);',
+        "returnscope.completed;",
+        "EXPLICIT_CANONICAL_SAVE_SCOPES.remove();",
+        "EXPLICIT_CANONICAL_SAVE_SCOPES.set(previousScope);",
+    ):
+        if marker not in canonical_save_compact:
+            fail(
+                "explicit canonical save does not preserve and return its exact "
+                f"hook acknowledgement: missing {marker}"
+            )
+
+    canonical_reload_end = module.find(
+        "private static void trackFingerTapNavigation(", canonical_reload_start
+    )
+    if canonical_reload_end < 0:
+        fail("could not isolate ownership-linearized canonical reload")
+    canonical_reload = compact_code(
+        module[canonical_reload_start:canonical_reload_end]
+    )
+    lifecycle_lock = canonical_reload.find(
+        "OWNER_LIFETIME_LOCK.readLock().lock();"
+    )
+    reload_lock = canonical_reload.find(
+        "synchronized(PAGE_ACTIVATION_OWNERSHIP_LOCK)", lifecycle_lock
+    )
+    reload_authority = canonical_reload.find(
+        "if(!documentMutationAuthorityCurrent(activity,presenter))",
+        reload_lock,
+    )
+    reload_reject = canonical_reload.find("returnfalse;", reload_authority)
+    reload_call = canonical_reload.find(
+        'XposedHelpers.callMethod(presenter,"loadHandWrite",markPage);',
+        reload_reject,
+    )
+    reload_success = canonical_reload.find("returntrue;", reload_call)
+    lifecycle_finally = canonical_reload.find("}finally{", reload_success)
+    lifecycle_unlock = canonical_reload.find(
+        "OWNER_LIFETIME_LOCK.readLock().unlock();", lifecycle_finally
+    )
+    if not (
+        0 <= lifecycle_lock < reload_lock < reload_authority < reload_reject
+        < reload_call < reload_success < lifecycle_finally < lifecycle_unlock
+    ):
+        fail(
+            "canonical handwriting reload is not lifecycle-safe and linearized "
+            "with its final writer-authority proof in OWNER-then-PAGE lock order"
+        )
+
+    save_hook_start = module.find(
+        '"saveTrails",\n            boolean.class', 0, active_mutation_start
+    )
+    receive_hook_start = module.find(
+        '"receiveTrials",', save_hook_start, active_mutation_start
+    )
+    if save_hook_start < 0 or receive_hook_start < 0:
+        fail("could not isolate saveTrails acknowledgement hook")
+    save_hook = re.sub(
+        r"\s+",
+        "",
+        mask_comments_preserve_literals(module[save_hook_start:receive_hook_start]),
+    )
+    save_admission = save_hook.find("booleansaveAdmitted=admitPageSave(")
+    root_admission = save_hook.find(
+        "explicitScope.rootAdmitted=saveAdmitted;", save_admission
+    )
+    finish_admission = save_hook.find("finishPageSaveAdmission();", root_admission)
+    completion = save_hook.find(
+        "explicitScope.completed=explicitScope.rootAdmitted&&admission!=null&&"
+        "admission.counted&&param.getThrowable()==null;",
+        finish_admission,
+    )
+    if not 0 <= save_admission < root_admission < finish_admission < completion:
+        fail(
+            "explicit canonical save completion is not derived from the exact "
+            "admitted root save and its throwable-free after-hook"
+        )
+
+    history_hook_start = module.find(
+        'for (String methodName : new String[] {"undo", "redo"})'
+    )
+    load_handwrite_hook_start = module.find(
+        '"loadHandWrite",', history_hook_start
+    )
+    if history_hook_start < 0 or load_handwrite_hook_start < 0:
+        fail("could not isolate undo/redo acknowledged canonical reload")
+    history_hook = re.sub(
+        r"\s+",
+        "",
+        mask_comments_preserve_literals(
+            module[history_hook_start:load_handwrite_hook_start]
+        ),
+    )
+    history_save = history_hook.find(
+        "booleansaved=saveTrailsForCanonicalReload("
+    )
+    history_save_guard = history_hook.find(
+        "if(!saved)", history_save
+    )
+    history_reload = history_hook.find(
+        "if(!loadCanonicalHandwritingIfAuthorityCurrent(",
+        history_save_guard,
+    )
+    if not 0 <= history_save < history_save_guard < history_reload:
+        fail("undo/redo can reload canonical ink without a committed current save")
 
     combined_start = module.find(
         "private static Bitmap renderCombinedCommittedInk("
@@ -7536,10 +8185,90 @@ def check(repo_root: Path) -> None:
         (
             "configuration_refresh_waiting_for_layout",
             "configuration_refresh_native_reload",
+            "configuration_refresh_not_scheduled reason=identity_unavailable",
+            "configuration_refresh_stale orientation=",
+            "configuration_refresh_stale reason=field_identity",
             'XposedHelpers.callMethod(viewModel, "reloadPage")',
         ),
         "portrait rotation refresh",
     )
+    refresh_start = module.find(
+        "private static void scheduleConfigurationRefresh("
+    )
+    portrait_restore_start = module.find(
+        "private static void restorePortraitPresentation(", refresh_start
+    )
+    if refresh_start < 0 or portrait_restore_start < 0:
+        fail("could not isolate delayed configuration refresh identity")
+    refresh = compact_code(module[refresh_start:portrait_restore_start])
+    capture_generation = refresh.find(
+        "LongdocumentContextGeneration=activity==null?null:"
+        "DOCUMENT_CONTEXT_GENERATIONS.get(activity);"
+    )
+    capture_path = refresh.find(
+        "StringdocumentPath=activity==null?null:currentDocumentPath(activity);",
+        capture_generation,
+    )
+    capture_view_model = refresh.find(
+        "ObjectviewModel=activity==null?null:DOCUMENT_VIEW_MODELS.get(activity);",
+        capture_path,
+    )
+    capture_presenter = refresh.find(
+        "Objectpresenter=activity==null?null:HANDWRITE_PRESENTERS.get(activity);",
+        capture_view_model,
+    )
+    overload = refresh.find(
+        "finallongexpectedDocumentContextGeneration,"
+        "finalStringexpectedDocumentPath,finalObjectexpectedViewModel,"
+        "finalObjectexpectedPresenter",
+        capture_presenter,
+    )
+    generation_guard = refresh.find(
+        "Long.valueOf(expectedDocumentContextGeneration),"
+        "DOCUMENT_CONTEXT_GENERATIONS.get(activity)",
+        overload,
+    )
+    path_guard = refresh.find(
+        "expectedDocumentPath,currentDocumentPath(activity)", generation_guard
+    )
+    view_model_guard = refresh.find(
+        "DOCUMENT_VIEW_MODELS.get(activity)!=expectedViewModel", path_guard
+    )
+    presenter_guard = refresh.find(
+        "HANDWRITE_PRESENTERS.get(activity)!=expectedPresenter", view_model_guard
+    )
+    reflected_view_model = refresh.find(
+        'XposedHelpers.getObjectField(activity,"documentViewModel")',
+        presenter_guard,
+    )
+    reflected_presenter = refresh.find(
+        'XposedHelpers.getObjectField(activity,"handWritePresenter")',
+        reflected_view_model,
+    )
+    reflected_guard = refresh.find(
+        "if(viewModel!=expectedViewModel||presenter!=expectedPresenter)",
+        reflected_presenter,
+    )
+    if not (
+        0 <= capture_generation < capture_path < capture_view_model
+        < capture_presenter < overload < generation_guard < path_guard
+        < view_model_guard < presenter_guard < reflected_view_model
+        < reflected_presenter < reflected_guard
+    ):
+        fail(
+            "delayed configuration refresh does not carry and revalidate the "
+            "exact document generation, path, view model, and presenter"
+        )
+    retry_calls = tuple(
+        re.finditer(
+            r"scheduleConfigurationRefresh\(activity,orientation,attempt\+1,"
+            r"expectedDocumentContextGeneration,expectedDocumentPath,"
+            r"expectedViewModel,expectedPresenter\)",
+            refresh,
+        )
+    )
+    if len(retry_calls) != 2:
+        fail("configuration refresh retries can shed their document identity")
 
     require_markers(
         module,
@@ -8991,7 +9720,7 @@ if ($LASTEXITCODE -ne 0) {
     native_source_review_gate = r'''
 $nativeSource = Join-Path $projectRoot 'native\spread_probe_native.cpp'
 $expectedNativeSourceSha256 =
-    '715183119972CC32599842C07CBC999334D0EF74E9CC587E9FCFE2ADEAC47CD5'
+    '9584855FDEFAC7E7795D8AD34DDE6B0D17ECFD8C93518D309F170AF2BB882221'
 $nativeSourceSha256 = Get-NormalizedTextSha256 -LiteralPath $nativeSource
 if ($nativeSourceSha256 -ne $expectedNativeSourceSha256) {
     throw (
@@ -9544,10 +10273,10 @@ try {
     if '"$remoteRoot/$Session/screenshots"' in trace_script:
         fail("desktop screenshots can mutate an already-published trace bundle")
 
-    if 'android:versionCode="119"' not in manifest:
-        fail("companion manifest must use versionCode 119")
-    if 'android:versionName="0.0.119"' not in manifest:
-        fail("companion manifest must use versionName 0.0.119")
+    if 'android:versionCode="120"' not in manifest:
+        fail("companion manifest must use versionCode 120")
+    if 'android:versionName="0.0.120"' not in manifest:
+        fail("companion manifest must use versionName 0.0.120")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest

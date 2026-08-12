@@ -142,7 +142,7 @@ foreach ($required in @(
 
 $nativeSource = Join-Path $projectRoot 'native\spread_probe_native.cpp'
 $expectedNativeSourceSha256 =
-    '715183119972CC32599842C07CBC999334D0EF74E9CC587E9FCFE2ADEAC47CD5'
+    '9584855FDEFAC7E7795D8AD34DDE6B0D17ECFD8C93518D309F170AF2BB882221'
 $nativeSourceSha256 = Get-NormalizedTextSha256 -LiteralPath $nativeSource
 if ($nativeSourceSha256 -ne $expectedNativeSourceSha256) {
     throw (

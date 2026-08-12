@@ -121,7 +121,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int TRACE_FINAL_SNAPSHOT_ATTEMPTS = 5;
     private static final long TRACE_FINAL_SNAPSHOT_RETRY_MS = 120L;
     private static final int HANDSHAKE_PROTOCOL = 2;
-    private static final long MODULE_VERSION_CODE = 119L;
+    private static final long MODULE_VERSION_CODE = 120L;
     private static final long TRANSACTIONAL_MIN_MODULE_VERSION_CODE = 118L;
     private static final int EDITABLE_MARKER_PROTOCOL = 2;
     private static final String EDITABLE_MARKER_MODE =
@@ -217,31 +217,38 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         new ReentrantReadWriteLock(true);
     private static final ReentrantLock DOCUMENT_CONTEXT_MUTATION_LOCK =
         new ReentrantLock(true);
-    private static final Map<Activity, Bitmap> COMPOSITES = new WeakHashMap<>();
-    private static final Map<Activity, RectF> LEFT_DESTINATIONS = new WeakHashMap<>();
-    private static final Map<Activity, RectF> RIGHT_DESTINATIONS = new WeakHashMap<>();
-    private static final Map<Activity, RectF> LEFT_VISIBLE_BOUNDS = new WeakHashMap<>();
-    private static final Map<Activity, RectF> RIGHT_VISIBLE_BOUNDS = new WeakHashMap<>();
+    private static final Map<Activity, Bitmap> COMPOSITES =
+        Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<Activity, RectF> LEFT_DESTINATIONS =
+        Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<Activity, RectF> RIGHT_DESTINATIONS =
+        Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<Activity, RectF> LEFT_VISIBLE_BOUNDS =
+        Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<Activity, RectF> RIGHT_VISIBLE_BOUNDS =
+        Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<Object, RectF> AUTO_TRIMMING_RECTS =
-        new WeakHashMap<>();
+        Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<Activity, Bitmap> COMMITTED_INK_COMPOSITES =
-        new WeakHashMap<>();
+        Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<Activity, Bitmap> FULL_INK_BITMAPS =
-        new WeakHashMap<>();
+        Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<Activity, Boolean> REPLACE_ACTIVE_INK_MODES =
-        new WeakHashMap<>();
+        Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<Activity, Boolean> CANONICAL_ONLY_INK_MODES =
-        new WeakHashMap<>();
+        Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<Activity, Bitmap> DIGEST_COMPOSITES =
-        new WeakHashMap<>();
+        Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<Activity, Integer> ACTIVATION_TOUCH_TARGETS =
         new ConcurrentHashMap<>();
     private static final Map<Activity, Point> ACTIVATION_TOUCH_STARTS =
-        new WeakHashMap<>();
+        Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<Activity, ActivationTouchIdentity>
-        ACTIVATION_TOUCH_IDENTITIES = new WeakHashMap<>();
+        ACTIVATION_TOUCH_IDENTITIES =
+            Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<Activity, Boolean>
-        PAGE_ACTIVATION_BLOCKED_TOUCHES = new WeakHashMap<>();
+        PAGE_ACTIVATION_BLOCKED_TOUCHES =
+            Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<Activity, UiInputBlockLogState>
         PAGE_ACTIVATION_UI_BLOCK_LOG_STATES = new ConcurrentHashMap<>();
     private static final Map<Activity, PageActivationTransaction>
@@ -297,11 +304,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final Map<Activity, PenContactOwnership>
         PEN_CONTACT_OWNERSHIPS = new ConcurrentHashMap<>();
     private static final Map<Activity, Point> FINGER_TOUCH_STARTS =
-        new WeakHashMap<>();
+        Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<Activity, Boolean> ACTIVE_FINGER_TOUCH_STREAMS =
         new ConcurrentHashMap<>();
     private static final Map<Activity, Long> NON_EDGE_TAP_SUPPRESS_UNTIL =
-        new WeakHashMap<>();
+        Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<Activity, Integer> TRACE_LAST_PRESSURES =
         new ConcurrentHashMap<>();
     private static final Map<Activity, Long> TRACE_TRANSACTION_IDS =
@@ -321,6 +328,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final Map<Activity, Long> CONFIG_AUTHORITY_GENERATIONS =
         new ConcurrentHashMap<>();
     private static final Map<Activity, Long> DOCUMENT_CONTEXT_GENERATIONS =
+        new ConcurrentHashMap<>();
+    private static final Map<Activity, Boolean> DOCUMENT_CONTEXTS_PRESENTED =
         new ConcurrentHashMap<>();
     private static final Map<Activity, Long> DOCUMENT_RECEIVE_TOMBSTONES =
         new ConcurrentHashMap<>();
@@ -348,6 +357,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         new ThreadLocal<>();
     private static final ThreadLocal<Boolean> EXPLICIT_CANONICAL_TRAIL_SAVE =
         new ThreadLocal<>();
+    private static final ThreadLocal<ExplicitCanonicalSaveScope>
+        EXPLICIT_CANONICAL_SAVE_SCOPES = new ThreadLocal<>();
     private static final ThreadLocal<ArrayDeque<PageActivationSourceSaveToken>>
         PAGE_ACTIVATION_SOURCE_SAVE_SCOPES = new ThreadLocal<>();
     private static final ThreadLocal<ArrayDeque<PageSaveAdmission>>
@@ -406,6 +417,17 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         PageActivationSourceSaveToken sourceToken;
     }
 
+    private static final class ExplicitCanonicalSaveScope {
+        final Object presenter;
+        int hookDepth;
+        boolean rootAdmitted;
+        boolean completed;
+
+        ExplicitCanonicalSaveScope(Object presenter) {
+            this.presenter = presenter;
+        }
+    }
+
     private static final class PageActivationSourceSaveToken {
         final Activity activity;
         final PageActivationTransaction transaction;
@@ -447,14 +469,20 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final class DocumentIdentityFence {
         final Activity activity;
         final long id;
+        final boolean receiveQuarantineRequired;
         int depth;
         boolean failed;
         boolean resetCompleted;
         boolean presentationObserved;
 
-        DocumentIdentityFence(Activity activity, long id) {
+        DocumentIdentityFence(
+            Activity activity,
+            long id,
+            boolean receiveQuarantineRequired
+        ) {
             this.activity = activity;
             this.id = id;
+            this.receiveQuarantineRequired = receiveQuarantineRequired;
         }
     }
 
@@ -4082,15 +4110,27 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                                     param.thisObject,
                                     "currentPage"
                                 );
-                                saveTrailsForCanonicalReload(
-                                    param.thisObject,
-                                    "undo_redo:" + mutationName
-                                );
-                                XposedHelpers.callMethod(
-                                    param.thisObject,
-                                    "loadHandWrite",
-                                    markPage
-                                );
+                                boolean saved =
+                                    saveTrailsForCanonicalReload(
+                                        param.thisObject,
+                                        "undo_redo:" + mutationName
+                                    );
+                                if (!saved) {
+                                    log("undo_redo_canonical_reload_skipped"
+                                        + " action=" + mutationName
+                                        + " reason=save_not_committed");
+                                    return;
+                                }
+                                if (!loadCanonicalHandwritingIfAuthorityCurrent(
+                                        activity,
+                                        param.thisObject,
+                                        markPage
+                                    )) {
+                                    log("undo_redo_canonical_reload_skipped"
+                                        + " action=" + mutationName
+                                        + " reason=authority_changed_after_save");
+                                    return;
+                                }
                                 log("undo_redo_saved_before_canonical_reload"
                                     + " action=" + mutationName
                                     + " mark_page=" + markPage);
@@ -4575,10 +4615,19 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     if (activationSourceSave) {
                         log("page_activation_source_save_allowed");
                     }
-                    if (!admitPageSave(
-                            activity,
-                            activationSourceSave ? sourceToken : null
-                        )) {
+                    ExplicitCanonicalSaveScope explicitScope =
+                        EXPLICIT_CANONICAL_SAVE_SCOPES.get();
+                    boolean explicitRoot = explicitScope != null
+                        && explicitScope.presenter == param.thisObject
+                        && explicitScope.hookDepth++ == 0;
+                    boolean saveAdmitted = admitPageSave(
+                        activity,
+                        activationSourceSave ? sourceToken : null
+                    );
+                    if (explicitRoot) {
+                        explicitScope.rootAdmitted = saveAdmitted;
+                    }
+                    if (!saveAdmitted) {
                         param.setResult(null);
                         PageActivationTransaction transaction = activity
                             == null ? null
@@ -4596,6 +4645,21 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     try {
                         PageSaveAdmission admission =
                             finishPageSaveAdmission();
+                        ExplicitCanonicalSaveScope explicitScope =
+                            EXPLICIT_CANONICAL_SAVE_SCOPES.get();
+                        if (explicitScope != null
+                            && explicitScope.presenter == param.thisObject
+                            && explicitScope.hookDepth > 0) {
+                            boolean explicitRoot = explicitScope.hookDepth == 1;
+                            explicitScope.hookDepth--;
+                            if (explicitRoot) {
+                                explicitScope.completed =
+                                    explicitScope.rootAdmitted
+                                    && admission != null
+                                    && admission.counted
+                                    && param.getThrowable() == null;
+                            }
+                        }
                         Activity activity = admission == null
                             ? null : admission.activity;
                         if (admission != null
@@ -11319,9 +11383,13 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             DocumentIdentityFence fence =
                 DOCUMENT_IDENTITY_ADMISSIONS.get(activity);
             if (fence == null) {
+                boolean priorDocumentContext = Boolean.TRUE.equals(
+                    DOCUMENT_CONTEXTS_PRESENTED.get(activity)
+                );
                 fence = new DocumentIdentityFence(
                     activity,
-                    documentContextGeneration
+                    documentContextGeneration,
+                    priorDocumentContext
                 );
                 DOCUMENT_IDENTITY_ADMISSIONS.put(activity, fence);
             } else if (fence.depth == 0) {
@@ -11337,12 +11405,21 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 activity,
                 Long.valueOf(documentContextGeneration)
             );
-            DOCUMENT_RECEIVE_TOMBSTONES.put(
-                activity,
-                Long.valueOf(documentContextGeneration)
-            );
-            DOCUMENT_RECEIVE_DISCARDED_GENERATIONS.remove(activity);
-            DOCUMENT_RECEIVE_IDENTITIES.remove(activity);
+            if (fence.receiveQuarantineRequired) {
+                DOCUMENT_RECEIVE_TOMBSTONES.put(
+                    activity,
+                    Long.valueOf(documentContextGeneration)
+                );
+                DOCUMENT_RECEIVE_DISCARDED_GENERATIONS.remove(activity);
+                DOCUMENT_RECEIVE_IDENTITIES.remove(activity);
+            } else {
+                // A fresh process/activity has no prior document receive that
+                // can arrive late. Do not silently sacrifice its first real
+                // stroke. Sequential document resets retain the quarantine.
+                DOCUMENT_RECEIVE_TOMBSTONES.remove(activity);
+                DOCUMENT_RECEIVE_DISCARDED_GENERATIONS.remove(activity);
+                DOCUMENT_RECEIVE_IDENTITIES.remove(activity);
+            }
             SpreadConfig prior = SPREAD_CONFIGS.remove(activity);
             if (prior != null) {
                 NAVIGATION_FAIL_CLOSED_DOCUMENTS.put(
@@ -11497,6 +11574,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             fence = activity == null ? null
                 : DOCUMENT_IDENTITY_ADMISSIONS.get(activity);
             if (fence == null) {
+                // Only a reset whose exact post-reset presentation was proved
+                // may make a later reset quarantine receiveTrials.  A normal
+                // startup setImage can precede openDocument/setUri on this
+                // firmware; treating that provisional frame as a prior
+                // document would discard the first real stroke after launch.
                 return true;
             }
             fence.presentationObserved = true;
@@ -11581,6 +11663,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 if (!DOCUMENT_IDENTITY_ADMISSIONS.remove(activity, fence)) {
                     return false;
                 }
+                DOCUMENT_CONTEXTS_PRESENTED.put(activity, Boolean.TRUE);
                 PEN_INPUT_EDITABLE_GUARDS.put(activity, Boolean.TRUE);
                 PEN_INPUT_SNAPSHOTS.remove(activity);
             }
@@ -12524,6 +12607,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         TRACE_TOOLS.remove(activity);
         DOCUMENT_IDENTITY_ADMISSIONS.remove(activity);
         DOCUMENT_CONTEXT_GENERATIONS.remove(activity);
+        DOCUMENT_CONTEXTS_PRESENTED.remove(activity);
         DOCUMENT_RECEIVE_TOMBSTONES.remove(activity);
         DOCUMENT_RECEIVE_DISCARDED_GENERATIONS.remove(activity);
         DOCUMENT_RECEIVE_IDENTITIES.remove(activity);
@@ -15034,6 +15118,40 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         final int orientation,
         final int attempt
     ) {
+        Long documentContextGeneration = activity == null ? null
+            : DOCUMENT_CONTEXT_GENERATIONS.get(activity);
+        String documentPath = activity == null ? null
+            : currentDocumentPath(activity);
+        Object viewModel = activity == null ? null
+            : DOCUMENT_VIEW_MODELS.get(activity);
+        Object presenter = activity == null ? null
+            : HANDWRITE_PRESENTERS.get(activity);
+        if (documentContextGeneration == null || documentPath == null
+            || viewModel == null || presenter == null) {
+            log("configuration_refresh_not_scheduled reason=identity_unavailable"
+                + " orientation=" + orientation + " attempt=" + attempt);
+            return;
+        }
+        scheduleConfigurationRefresh(
+            activity,
+            orientation,
+            attempt,
+            documentContextGeneration.longValue(),
+            documentPath,
+            viewModel,
+            presenter
+        );
+    }
+
+    private static void scheduleConfigurationRefresh(
+        final Activity activity,
+        final int orientation,
+        final int attempt,
+        final long expectedDocumentContextGeneration,
+        final String expectedDocumentPath,
+        final Object expectedViewModel,
+        final Object expectedPresenter
+    ) {
         new Handler(activity.getMainLooper()).postDelayed(new Runnable() {
             @Override
             public void run() {
@@ -15042,7 +15160,22 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     || (Build.VERSION.SDK_INT
                             >= Build.VERSION_CODES.JELLY_BEAN_MR1
                         && activity.isDestroyed())
-                    || !isCalibrationFile(activity)) {
+                    || !isCalibrationFile(activity)
+                    || !Objects.equals(
+                        Long.valueOf(expectedDocumentContextGeneration),
+                        DOCUMENT_CONTEXT_GENERATIONS.get(activity)
+                    )
+                    || !Objects.equals(
+                        expectedDocumentPath,
+                        currentDocumentPath(activity)
+                    )
+                    || DOCUMENT_VIEW_MODELS.get(activity)
+                        != expectedViewModel
+                    || HANDWRITE_PRESENTERS.get(activity)
+                        != expectedPresenter) {
+                    log("configuration_refresh_stale orientation="
+                        + orientation + " attempt=" + attempt
+                        + " expected_path=" + expectedDocumentPath);
                     return;
                 }
                 try {
@@ -15050,6 +15183,18 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         activity,
                         "documentViewModel"
                     );
+                    Object presenter = XposedHelpers.getObjectField(
+                        activity,
+                        "handWritePresenter"
+                    );
+                    if (viewModel != expectedViewModel
+                        || presenter != expectedPresenter) {
+                        log("configuration_refresh_stale reason=field_identity"
+                            + " orientation=" + orientation + " attempt="
+                            + attempt + " expected_path="
+                            + expectedDocumentPath);
+                        return;
+                    }
                     Bitmap originBitmap = (Bitmap) XposedHelpers.callMethod(
                         viewModel,
                         "getOriginBitmap"
@@ -15059,7 +15204,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                             scheduleConfigurationRefresh(
                                 activity,
                                 orientation,
-                                attempt + 1
+                                attempt + 1,
+                                expectedDocumentContextGeneration,
+                                expectedDocumentPath,
+                                expectedViewModel,
+                                expectedPresenter
                             );
                         } else {
                             log("configuration_refresh_abandoned orientation="
@@ -15085,7 +15234,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                             scheduleConfigurationRefresh(
                                 activity,
                                 orientation,
-                                attempt + 1
+                                attempt + 1,
+                                expectedDocumentContextGeneration,
+                                expectedDocumentPath,
+                                expectedViewModel,
+                                expectedPresenter
                             );
                         } else {
                             log("configuration_refresh_layout_abandoned orientation="
@@ -19618,21 +19771,31 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
              * reload the same mark page so settled ink is visible immediately
              * rather than only after a page activation or reader restart.
              */
-            saveTrailsForCanonicalReload(
+            boolean saved = saveTrailsForCanonicalReload(
                 presenter,
                 mutationKind
             );
+            if (!saved) {
+                log("active_mutation_canonical_reload_skipped kind="
+                    + mutationKind + " reason=save_not_committed");
+                return;
+            }
             log("active_mutation_saved_before_canonical_refresh kind="
                 + mutationKind + " page=" + currentDocumentPage(activity));
             Boolean previousForceCanonical =
                 FORCE_CANONICAL_ACTIVE_INK.get();
             FORCE_CANONICAL_ACTIVE_INK.set(Boolean.TRUE);
             try {
-                XposedHelpers.callMethod(
-                    presenter,
-                    "loadHandWrite",
-                    markPage
-                );
+                if (!loadCanonicalHandwritingIfAuthorityCurrent(
+                        activity,
+                        presenter,
+                        markPage
+                    )) {
+                    log("active_mutation_canonical_reload_skipped kind="
+                        + mutationKind
+                        + " reason=authority_changed_after_save");
+                    return;
+                }
             } finally {
                 if (previousForceCanonical == null) {
                     FORCE_CANONICAL_ACTIVE_INK.remove();
@@ -19657,11 +19820,17 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
     }
 
-    private static void saveTrailsForCanonicalReload(
+    private static boolean saveTrailsForCanonicalReload(
         Object presenter,
         String reason
     ) {
+        Boolean previousExplicit = EXPLICIT_CANONICAL_TRAIL_SAVE.get();
+        ExplicitCanonicalSaveScope previousScope =
+            EXPLICIT_CANONICAL_SAVE_SCOPES.get();
+        ExplicitCanonicalSaveScope scope =
+            new ExplicitCanonicalSaveScope(presenter);
         EXPLICIT_CANONICAL_TRAIL_SAVE.set(Boolean.TRUE);
+        EXPLICIT_CANONICAL_SAVE_SCOPES.set(scope);
         try {
             XposedHelpers.callMethod(
                 presenter,
@@ -19669,9 +19838,55 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 false,
                 false
             );
-            log("explicit_canonical_trail_save reason=" + reason);
+            log("explicit_canonical_trail_save reason=" + reason
+                + " admitted=" + scope.rootAdmitted
+                + " completed=" + scope.completed);
+            return scope.completed;
         } finally {
-            EXPLICIT_CANONICAL_TRAIL_SAVE.remove();
+            if (previousExplicit == null) {
+                EXPLICIT_CANONICAL_TRAIL_SAVE.remove();
+            } else {
+                EXPLICIT_CANONICAL_TRAIL_SAVE.set(previousExplicit);
+            }
+            if (previousScope == null) {
+                EXPLICIT_CANONICAL_SAVE_SCOPES.remove();
+            } else {
+                EXPLICIT_CANONICAL_SAVE_SCOPES.set(previousScope);
+            }
+        }
+    }
+
+    /**
+     * Linearizes the final writer-authority proof with loadHandWrite().  The
+     * persisted-config observer and every page/document ownership transition
+     * withdraw authority under this same lock, so none can interleave after
+     * the proof and replace settled ink with a stale canonical page image.
+     */
+    private static boolean loadCanonicalHandwritingIfAuthorityCurrent(
+        Activity activity,
+        Object presenter,
+        int markPage
+    ) {
+        // Lifecycle teardown always acquires OWNER_LIFETIME_LOCK before the
+        // page-ownership monitor. loadHandWrite() re-enters module callbacks
+        // that take the lifecycle read lock, so acquire it first here as well;
+        // otherwise a concurrent onDestroy() can deadlock PAGE -> OWNER_READ
+        // against OWNER_WRITE -> PAGE.
+        OWNER_LIFETIME_LOCK.readLock().lock();
+        try {
+            synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+                if (!documentMutationAuthorityCurrent(activity, presenter)) {
+                    return false;
+                }
+                XposedHelpers.callMethod(
+                    presenter,
+                    "loadHandWrite",
+                    markPage
+                );
+                return true;
+            }
+        } finally {
+            OWNER_LIFETIME_LOCK.readLock().unlock();
         }
     }
 

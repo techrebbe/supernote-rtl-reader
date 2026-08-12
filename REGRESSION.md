@@ -424,7 +424,7 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 - [ ] Return to Fit page and confirm all existing annotations return to their
   original whole-page positions.
 
-## v0.4.13 transactional single-active-page candidate
+## v0.4.14 transactional single-active-page candidate
 
 Automated and build evidence:
 
@@ -516,6 +516,27 @@ Automated and build evidence:
   restricted to pen type 16, color 255, and exact `932 x 1243` half-page
   geometry; it temporarily supplies canonical `1872 x 2496` dimensions, calls
   the original exactly once, restores both fields, and preserves its result.
+- [x] Deep-review hardening is compiled as Native Spread v0.0.120 and requires
+  RTL Reader v0.4.14. Hook readiness uses atomic attempted/installed state and
+  non-null original functions; ambiguous hook results cannot be installed a
+  second time. The v2/v3-signed local APK is 168,622 bytes with SHA-256
+  `4e03659bbd5d01861fd41982c1913689728f81da4e03e21f3261d7a6b0e3982e`.
+- [x] Canonical reloads after pen, eraser, Undo, and Redo require the exact root
+  `saveTrails()` hook to have been admitted, counted, and completed without a
+  throwable. The final writer proof and `loadHandWrite()` are linearized in
+  lifecycle-safe OWNER-then-PAGE lock order.
+- [x] Fresh-process startup and sequential document switching are distinguished:
+  only an earlier exact reset/presentation proof activates the late-receive
+  quarantine. Delayed orientation refreshes retain and revalidate exact
+  document, generation, presenter, and view-model identity.
+- [x] Restore-worker ownership and the post-restore handoff skip use separate
+  atomic states; the skip is published before worker ownership is released.
+- [x] A clean Windows plugin build embeds and verifies `app.npk`. CI and local
+  publication require one package, exact `/icon.png` and `/app.npk` metadata,
+  the exact ReactPackage, reviewed native classes, and the runtime marker.
+  Failure-injection tests reject missing/corrupt native payloads and softened
+  packager paths. A digest-advanced mutation audit rejected all eight targeted
+  authority, lock, hook, workflow, and package-verifier regressions.
 
 Nomad hardware gate (in progress):
 

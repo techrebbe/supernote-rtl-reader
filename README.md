@@ -5,8 +5,10 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 ## Stable baseline
 
 v0.4.12 with Native Spread v0.0.116 is the current merged stable baseline.
-v0.4.13 with Native Spread v0.0.119 is a partially hardware-validated
-transactional single-active-page candidate. Native Spread v0.0.117 is preserved only on its
+v0.4.14 with Native Spread v0.0.120 is the deeply reviewed transactional
+single-active-page candidate. It incorporates the partially hardware-validated
+v0.4.13/v0.0.119 eraser work plus pre-device race, lifecycle, recovery, and
+packaging hardening. Native Spread v0.0.117 is preserved only on its
 experimental branch and is not part of this release line.
 
 The validated reader behavior covers:
@@ -329,7 +331,7 @@ Checkpoint screenshots are staged outside the remotely published trace
 directory and merged only into the pulled local bundle, so a racing checkpoint
 cannot modify a trace after `active.txt` becomes `last.txt`.
 
-## v0.4.13 transactional single-active-page editing
+## v0.4.14 transactional single-active-page editing and hardening
 
 Native Spread v0.0.118 replaces the live inactive-page annotation route with a
 serialized ownership transfer through Supernote's own page lifecycle. The
@@ -388,9 +390,31 @@ document-context quarantine safely discarded the first contact following the
 process restart; the next fresh eraser contact was accepted and persisted.
 
 The full design and safety boundary are recorded in
-`TRANSACTIONAL_ACTIVE_PAGE.md`. Automated invariants and the v0.0.119 APK build
-pass locally. Regular active-page erasure is hardware validated; the remaining
-transactional tool and lifecycle gates are still in progress.
+`TRANSACTIONAL_ACTIVE_PAGE.md`. Regular active-page erasure remains validated
+on v0.0.119. The v0.4.14/v0.0.120 candidate additionally passed a deep static,
+compiled, and failure-injection review before device testing:
+
+- native eraser readiness is published only after both hook installers return
+  success and non-null original functions; ambiguous installer results are not
+  retried, preventing accidental double-hooking;
+- all cross-thread weak maps use synchronized access, and delayed orientation
+  refreshes are bound to the exact document generation, path, presenter, and
+  view model that scheduled them;
+- fresh-process document startup no longer quarantines the first valid stroke,
+  while a proved sequential document switch retains the late-receive guard;
+- pen, eraser, Undo, and Redo canonical reloads require an admitted,
+  throwable-free native `saveTrails()` completion and revalidate writer
+  authority in lifecycle-safe OWNER-then-PAGE lock order;
+- annotation restore worker ownership and the one-shot native handoff skip are
+  separate atomic states, closing the completion/restart window;
+- clean Windows and CI builds fail if native registration, compilation,
+  `app.npk`, exact package metadata, native classes, or the runtime marker is
+  missing. The finished archive is verified before it can reach `out/` or a CI
+  artifact.
+
+Both invariant suites, trace-helper regressions, native packaging
+failure-injection tests, the v0.0.120 Java/C++ APK build, and a clean native
+plugin build pass locally. Hardware validation of this candidate remains open.
 
 The active settled-ink compositor now clips its transformed bitmap to the
 same visible page-slot bounds used by Native Fill PDF and canonical-ink
@@ -731,6 +755,11 @@ chmod +x build.sh
 ./build.sh
 ```
 
+Python 3 must be discoverable as `python3`, `python`, or `py -3`. On Windows,
+`PYTHON_BIN` may instead point to the exact Python executable. The build now
+fails unless the generated package contains and passes strict verification of
+the native `app.npk` payload.
+
 The resulting package is written to:
 
 ```text
@@ -738,7 +767,7 @@ out/*.snplg
 ```
 
 GitHub Actions uploads the current stabilization build as the
-`supernote-rtl-reader-v0.4.13-transactional-active-page` artifact.
+`supernote-rtl-reader-v0.4.14-transactional-hardening` artifact.
 
 ## Install and diagnostics
 

@@ -282,6 +282,15 @@ Supernote's original eraser once, and restores the original fields immediately.
 The established grid eraser path is unchanged. Native eraser readiness is
 published only when both firmware symbols have been hooked successfully.
 
+v0.0.120 is the deep-review hardening candidate. Hook installation now uses
+atomic attempted/installed state and publishes callable originals only after a
+zero result with a non-null backup. An ambiguous installer result remains
+fail-closed and is never installed again. Document startup distinguishes a
+fresh process from a proved sequential document switch, delayed refresh work
+is bound to exact document/component identity, and canonical reloads require an
+acknowledged native save plus current authority in lifecycle-safe lock order.
+All previously weak cross-thread activity maps are synchronized.
+
 This is firmware-specific experimental software for a rooted device. Back up
 documents and `.mark` files before testing a new firmware or module revision.
 
@@ -312,8 +321,8 @@ previously installed build.
 
 Install the APK, enable **Supernote Native Spread Probe** in LSPosed, scope it
 only to `com.supernote.document`, and restart the document reader. Supernote
-RTL Reader v0.4.13 or newer and Native Spread v0.0.119 or newer are required for
-the transactional protected-editable candidate. Its
+RTL Reader v0.4.14 or newer and Native Spread v0.0.120 or newer are required for
+the current transactional hardening candidate. Its
 recovery manifest binds the backup to the PDF's full SHA-256 because
 Supernote changes the PDF modification time when the document activity
 reopens.

@@ -12,6 +12,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  virtual-spread-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: virtual_spread/requirements.txt
+
+      - name: Install pinned virtual-spread dependencies
+        run: python -m pip install -r virtual_spread/requirements.txt
+
+      - name: Test virtual-spread generator
+        run: python scripts/test_virtual_spread.py
+
+      - name: Check native invariants
+        run: |
+          python scripts/check_native_invariants.py .
+          python scripts/check_native_spread_invariants.py .
+
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 20

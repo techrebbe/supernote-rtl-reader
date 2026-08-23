@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
@@ -18,6 +20,7 @@ sys.path.insert(0, str(ROOT / "virtual_spread"))
 
 from generate_virtual_spread import (  # noqa: E402
     VirtualSpreadError,
+    _publish_pair,
     build_pairs,
     build_virtual_spread,
 )
@@ -270,6 +273,52 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertGreaterEqual(output_rect[1], bottom - 0.001)
             self.assertLessEqual(output_rect[2], right + 0.001)
             self.assertLessEqual(output_rect[3], top + 0.001)
+
+    def test_pair_publication_rolls_back_after_second_replace_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            real_replace = os.replace
+
+            def fail_output_publication(source: object, target: object) -> None:
+                if (
+                    Path(source) == temporary_output
+                    and Path(target) == output
+                ):
+                    raise OSError("simulated output publication failure")
+                real_replace(source, target)
+
+            with mock.patch(
+                "generate_virtual_spread.os.replace",
+                side_effect=fail_output_publication,
+            ):
+                with self.assertRaisesRegex(
+                    OSError,
+                    "simulated output publication failure",
+                ):
+                    _publish_pair(
+                        temporary_output,
+                        output,
+                        temporary_manifest,
+                        manifest,
+                    )
+
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(temporary_output.exists())
+            self.assertFalse(temporary_manifest.exists())
+            self.assertEqual(
+                list(root.glob("*.bak")),
+                [],
+            )
 
 
 if __name__ == "__main__":

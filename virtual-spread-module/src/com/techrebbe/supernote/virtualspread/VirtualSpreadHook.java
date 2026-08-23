@@ -7,11 +7,15 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.system.Os;
+import android.system.StructStat;
 import android.util.Log;
 
+import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.lang.ref.WeakReference;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.WeakHashMap;
@@ -50,7 +54,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final String SCHEMA =
         "techrebbe.supernote.virtual-spread/v1";
     private static final String TAG = "SN_VIRTUAL_SPREAD";
-    private static final String VERSION = "0.0.8";
+    private static final String VERSION = "0.0.9";
 
     private static volatile WeakReference<Activity> activeActivity =
         new WeakReference<>(null);
@@ -83,32 +87,74 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
     }
 
+    private static final class FileIdentity {
+        final long device;
+        final long inode;
+        final long size;
+        final long modifiedSeconds;
+        final long changedSeconds;
+        final long changedNanos;
+
+        FileIdentity(
+            long device,
+            long inode,
+            long size,
+            long modifiedSeconds,
+            long changedSeconds,
+            long changedNanos
+        ) {
+            this.device = device;
+            this.inode = inode;
+            this.size = size;
+            this.modifiedSeconds = modifiedSeconds;
+            this.changedSeconds = changedSeconds;
+            this.changedNanos = changedNanos;
+        }
+
+        static FileIdentity capture(File file) throws Exception {
+            StructStat stat = Os.stat(file.getPath());
+            long changedNanos = stat.st_ctim == null
+                ? 0L : stat.st_ctim.tv_nsec;
+            return new FileIdentity(
+                stat.st_dev,
+                stat.st_ino,
+                stat.st_size,
+                stat.st_mtime,
+                stat.st_ctime,
+                changedNanos
+            );
+        }
+
+        boolean matches(FileIdentity other) {
+            return other != null
+                && device == other.device
+                && inode == other.inode
+                && size == other.size
+                && modifiedSeconds == other.modifiedSeconds
+                && changedSeconds == other.changedSeconds
+                && changedNanos == other.changedNanos;
+        }
+    }
+
     private static final class CachedManifest {
-        final long pdfLength;
-        final long pdfModified;
-        final long sidecarLength;
-        final long sidecarModified;
+        final FileIdentity pdfIdentity;
+        final String sidecarDigest;
         final Manifest manifest;
 
         CachedManifest(
-            long pdfLength,
-            long pdfModified,
-            long sidecarLength,
-            long sidecarModified,
+            FileIdentity pdfIdentity,
+            String sidecarDigest,
             Manifest manifest
         ) {
-            this.pdfLength = pdfLength;
-            this.pdfModified = pdfModified;
-            this.sidecarLength = sidecarLength;
-            this.sidecarModified = sidecarModified;
+            this.pdfIdentity = pdfIdentity;
+            this.sidecarDigest = sidecarDigest;
             this.manifest = manifest;
         }
 
-        boolean matches(File pdf, File sidecar) {
-            return pdfLength == pdf.length()
-                && pdfModified == pdf.lastModified()
-                && sidecarLength == sidecar.length()
-                && sidecarModified == sidecar.lastModified();
+        boolean matches(File pdf, String currentSidecarDigest)
+            throws Exception {
+            return sidecarDigest.equals(currentSidecarDigest)
+                && pdfIdentity.matches(FileIdentity.capture(pdf));
         }
     }
 
@@ -1002,21 +1048,32 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             }
             File pdf = new File(uri.getPath());
             File sidecar = new File(pdf.getPath() + ".json");
+            if (!pdf.isFile() || !sidecar.isFile()) {
+                return null;
+            }
             String key = pdf.getCanonicalPath();
+            byte[] sidecarData = readBytes(sidecar);
+            String sidecarDigest = sha256(sidecarData);
             CachedManifest cached = MANIFESTS.get(key);
-            if (cached != null && cached.matches(pdf, sidecar)) {
+            if (cached != null && cached.matches(pdf, sidecarDigest)) {
                 return validatePageCount(viewModel, cached.manifest);
             }
-            Manifest parsed = parseManifest(pdf, sidecar, key);
+            FileIdentity before = FileIdentity.capture(pdf);
+            Manifest parsed = parseManifest(
+                pdf,
+                new String(sidecarData, "UTF-8"),
+                key
+            );
+            FileIdentity after = FileIdentity.capture(pdf);
+            if (!before.matches(after)) {
+                MANIFESTS.remove(key);
+                log("manifest_rejected reason=pdf_changed_during_read path="
+                    + key);
+                return null;
+            }
             MANIFESTS.put(
                 key,
-                new CachedManifest(
-                    pdf.length(),
-                    pdf.lastModified(),
-                    sidecar.length(),
-                    sidecar.lastModified(),
-                    parsed
-                )
+                new CachedManifest(after, sidecarDigest, parsed)
             );
             return validatePageCount(viewModel, parsed);
         } catch (Throwable throwable) {
@@ -1043,13 +1100,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
 
     private static Manifest parseManifest(
         File pdf,
-        File sidecar,
+        String sidecarJson,
         String key
     ) throws Exception {
-        if (!pdf.isFile() || !sidecar.isFile()) {
-            return null;
-        }
-        JSONObject root = new JSONObject(readUtf8(sidecar));
+        JSONObject root = new JSONObject(sidecarJson);
         if (!SCHEMA.equals(root.optString("schema"))
             || !"rtl".equalsIgnoreCase(root.optString("direction"))) {
             return null;
@@ -1060,11 +1114,17 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             return null;
         }
         long expectedSize = output.optLong("size", -1L);
+        String expectedHash = output.optString("sha256", "");
         int pageCount = output.optInt("pageCount", -1);
         if (expectedSize != pdf.length()
             || pageCount <= 0
             || spreadsJson.length() != pageCount) {
             log("manifest_rejected reason=output_identity path=" + key);
+            return null;
+        }
+        if (!isSha256(expectedHash)
+            || !expectedHash.equalsIgnoreCase(sha256File(pdf))) {
+            log("manifest_rejected reason=output_hash path=" + key);
             return null;
         }
         JSONArray spreadSize = output.optJSONArray("spreadSize");
@@ -1168,7 +1228,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         );
     }
 
-    private static String readUtf8(File file) throws Exception {
+    private static byte[] readBytes(File file) throws Exception {
         if (file.length() > 8L * 1024L * 1024L) {
             throw new IllegalArgumentException("manifest is too large");
         }
@@ -1189,7 +1249,59 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         } finally {
             input.close();
         }
-        return new String(data, "UTF-8");
+        return data;
+    }
+
+    private static String sha256(byte[] data) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        digest.update(data);
+        return toHex(digest.digest());
+    }
+
+    private static String sha256File(File file) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        BufferedInputStream input = new BufferedInputStream(
+            new FileInputStream(file),
+            64 * 1024
+        );
+        try {
+            byte[] buffer = new byte[64 * 1024];
+            while (true) {
+                int count = input.read(buffer);
+                if (count < 0) {
+                    break;
+                }
+                if (count > 0) {
+                    digest.update(buffer, 0, count);
+                }
+            }
+        } finally {
+            input.close();
+        }
+        return toHex(digest.digest());
+    }
+
+    private static String toHex(byte[] value) {
+        final char[] digits = "0123456789abcdef".toCharArray();
+        char[] output = new char[value.length * 2];
+        for (int index = 0; index < value.length; index++) {
+            int current = value[index] & 0xff;
+            output[index * 2] = digits[current >>> 4];
+            output[index * 2 + 1] = digits[current & 0x0f];
+        }
+        return new String(output);
+    }
+
+    private static boolean isSha256(String value) {
+        if (value == null || value.length() != 64) {
+            return false;
+        }
+        for (int index = 0; index < value.length(); index++) {
+            if (Character.digit(value.charAt(index), 16) < 0) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static boolean isPortrait(Activity activity) {

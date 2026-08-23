@@ -344,21 +344,77 @@ def _copy_link_annotation(
     }
 
 
-def _atomic_write_json(path: Path, value: dict[str, Any]) -> None:
+def _write_json(path: Path, value: dict[str, Any]) -> None:
+    with path.open("w", encoding="utf-8", newline="\n") as stream:
+        json.dump(value, stream, ensure_ascii=False, indent=2, sort_keys=True)
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def _temporary_neighbor(path: Path, suffix: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    handle, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    descriptor, name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=suffix, dir=path.parent
     )
-    temporary = Path(temporary_name)
+    os.close(descriptor)
+    return Path(name)
+
+
+def _publish_pair(
+    temporary_output: Path,
+    output_path: Path,
+    temporary_manifest: Path,
+    manifest_path: Path,
+) -> None:
+    """Publish a matching manifest/PDF pair or restore the previous pair."""
+    backups: list[tuple[Path, Path]] = []
+    published: list[Path] = []
+    committed = False
     try:
-        with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as stream:
-            json.dump(value, stream, ensure_ascii=False, indent=2, sort_keys=True)
-            stream.write("\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        for final_path in (output_path, manifest_path):
+            if not final_path.exists():
+                continue
+            backup = _temporary_neighbor(final_path, ".bak")
+            try:
+                os.replace(final_path, backup)
+            except BaseException:
+                backup.unlink(missing_ok=True)
+                raise
+            backups.append((final_path, backup))
+
+        # Publish the sidecar first. Until the PDF appears, the module fails
+        # closed; once the PDF is published, its persisted hash matches.
+        os.replace(temporary_manifest, manifest_path)
+        published.append(manifest_path)
+        os.replace(temporary_output, output_path)
+        published.append(output_path)
+        committed = True
+    except BaseException as publication_error:
+        rollback_errors: list[str] = []
+        backed_up_paths = {final_path for final_path, _ in backups}
+        for final_path, backup in reversed(backups):
+            try:
+                os.replace(backup, final_path)
+            except BaseException as rollback_error:
+                rollback_errors.append(f"{final_path}: {rollback_error}")
+        for published_path in reversed(published):
+            if published_path in backed_up_paths:
+                continue
+            try:
+                published_path.unlink(missing_ok=True)
+            except BaseException as rollback_error:
+                rollback_errors.append(f"{published_path}: {rollback_error}")
+        if rollback_errors:
+            raise VirtualSpreadError(
+                "Virtual-spread publication failed and rollback was incomplete: "
+                + "; ".join(rollback_errors)
+            ) from publication_error
+        raise
     finally:
-        temporary.unlink(missing_ok=True)
+        if committed:
+            for _, backup in backups:
+                backup.unlink(missing_ok=True)
 
 
 def build_virtual_spread(
@@ -476,6 +532,7 @@ def build_virtual_spread(
                 )
             )
 
+    source_hash = sha256_file(source_path)
     metadata = {
         key: str(value)
         for key, value in (reader.metadata or {}).items()
@@ -485,17 +542,15 @@ def build_virtual_spread(
         {
             "/SNVirtualSpreadSchema": SCHEMA,
             "/SNVirtualSpreadSource": source_path.name,
-            "/SNVirtualSpreadSourceSHA256": sha256_file(source_path),
+            "/SNVirtualSpreadSourceSHA256": source_hash,
         }
     )
     writer.add_metadata(metadata)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{output_path.name}.", suffix=".tmp", dir=output_path.parent
-    )
-    os.close(descriptor)
-    temporary_output = Path(temporary_name)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_output = _temporary_neighbor(output_path, ".tmp")
+    temporary_manifest: Path | None = None
     try:
         with temporary_output.open("wb") as stream:
             writer.write(stream)
@@ -509,36 +564,46 @@ def build_virtual_spread(
                 float(page.mediabox.height) - spread_height
             ) > 0.01:
                 raise VirtualSpreadError("Written PDF has inconsistent page geometry")
-        os.replace(temporary_output, output_path)
+
+        manifest: dict[str, Any] = {
+            "schema": SCHEMA,
+            "source": {
+                "name": source_path.name,
+                "path": str(source_path),
+                "size": source_path.stat().st_size,
+                "sha256": source_hash,
+                "pageCount": len(reader.pages),
+            },
+            "output": {
+                "name": output_path.name,
+                "path": str(output_path),
+                "size": temporary_output.stat().st_size,
+                "sha256": sha256_file(temporary_output),
+                "pageCount": len(pairs),
+                "spreadSize": [spread_width, spread_height],
+                "gutter": gutter,
+            },
+            "direction": direction,
+            "coverSeparate": cover_separate,
+            "spreads": spread_records,
+            "sourcePages": [
+                source_mapping[index] for index in range(len(reader.pages))
+            ],
+            "links": links,
+        }
+        temporary_manifest = _temporary_neighbor(manifest_path, ".tmp")
+        _write_json(temporary_manifest, manifest)
+        _publish_pair(
+            temporary_output,
+            output_path,
+            temporary_manifest,
+            manifest_path,
+        )
+        return manifest
     finally:
         temporary_output.unlink(missing_ok=True)
-
-    manifest: dict[str, Any] = {
-        "schema": SCHEMA,
-        "source": {
-            "name": source_path.name,
-            "path": str(source_path),
-            "size": source_path.stat().st_size,
-            "sha256": sha256_file(source_path),
-            "pageCount": len(reader.pages),
-        },
-        "output": {
-            "name": output_path.name,
-            "path": str(output_path),
-            "size": output_path.stat().st_size,
-            "sha256": sha256_file(output_path),
-            "pageCount": len(pairs),
-            "spreadSize": [spread_width, spread_height],
-            "gutter": gutter,
-        },
-        "direction": direction,
-        "coverSeparate": cover_separate,
-        "spreads": spread_records,
-        "sourcePages": [source_mapping[index] for index in range(len(reader.pages))],
-        "links": links,
-    }
-    _atomic_write_json(manifest_path, manifest)
-    return manifest
+        if temporary_manifest is not None:
+            temporary_manifest.unlink(missing_ok=True)
 
 
 def _parser() -> argparse.ArgumentParser:

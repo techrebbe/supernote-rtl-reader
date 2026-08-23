@@ -88,7 +88,32 @@ for forbidden in (
             "failed cross-page saves must preserve the current reader state"
         )
 
+manifest_start = hook.find("private static Manifest manifestFor")
+manifest_end = hook.find("private static boolean isPortrait", manifest_start)
+if manifest_start < 0 or manifest_end < 0:
+    raise SystemExit("missing manifest validation implementation")
+manifest_validation = hook[manifest_start:manifest_end]
+for required in (
+    "String sidecarDigest = sha256(sidecarData)",
+    "cached.matches(pdf, sidecarDigest)",
+    "FileIdentity.capture(pdf)",
+    'output.optString("sha256", "")',
+    "expectedHash.equalsIgnoreCase(sha256File(pdf))",
+    'manifest_rejected reason=output_hash',
+    'manifest_rejected reason=pdf_changed_during_read',
+):
+    if required not in manifest_validation:
+        raise SystemExit(
+            f"manifest validation is missing content authority: {required}"
+        )
+
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
+if 'android:versionCode="9"' not in manifest:
+    raise SystemExit("unexpected virtual-spread package version code")
+if 'android:versionName="0.0.9"' not in manifest:
+    raise SystemExit("unexpected virtual-spread package version name")
+if 'private static final String VERSION = "0.0.9"' not in hook:
+    raise SystemExit("runtime and package versions must remain aligned")
 scope = (root / "meta/META-INF/xposed/scope.list").read_text(
     encoding="utf-8"
 ).splitlines()

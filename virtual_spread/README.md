@@ -20,6 +20,16 @@ Supported internal and URI links are copied with transformed hit rectangles;
 internal destinations are remapped to their virtual spread page. A JSON
 manifest records every source-page affine transform and target half.
 
+## Reproducible Python environment
+
+Python 3.12 is used in CI (Python 3.10 or newer is required). Install the
+generator's exact tested dependencies in an isolated environment:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r .\virtual_spread\requirements.txt
+```
+
 ## Generate
 
 ```powershell
@@ -33,7 +43,10 @@ python .\virtual_spread\generate_virtual_spread.py `
 
 The command refuses encrypted PDFs, unsupported annotation subtypes, unresolved
 links, and existing outputs unless `--force` is supplied. The PDF and manifest
-are each staged and validated before atomic publication.
+are each staged and validated before publication as one recoverable pair. If
+publishing either member fails, the previous PDF and manifest are restored.
+The manifest records the staged PDF's exact size and SHA-256, which the runtime
+module verifies before trusting its mappings.
 
 ## Nomad hardware result: GO
 

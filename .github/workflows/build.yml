@@ -14,7 +14,7 @@ concurrency:
 jobs:
   virtual-spread-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -33,6 +33,26 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android build dependencies
+        shell: bash
+        run: |
+          sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+          mkdir -p "$HOME/.android"
+          if [[ ! -f "$HOME/.android/debug.keystore" ]]; then
+            keytool -genkeypair \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -dname 'CN=Android Debug,O=Android,C=US' \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000
+          fi
+
       - name: Install pinned virtual-spread dependencies
         run: python -m pip install -r virtual_spread/requirements.txt
 
@@ -47,6 +67,18 @@ jobs:
       - name: Test virtual-spread companion module
         shell: pwsh
         run: ./virtual-spread-module/test.ps1
+
+      - name: Build and verify virtual-spread companion APK
+        shell: pwsh
+        run: ./virtual-spread-module/build.ps1
+
+      - name: Upload virtual-spread companion APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: supernote-virtual-spread-navigation
+          path: virtual-spread-module/build/artifact/*.apk
+          if-no-files-found: error
+          retention-days: 3
 
   build:
     runs-on: ubuntu-latest

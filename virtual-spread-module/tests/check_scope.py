@@ -209,6 +209,7 @@ for required in (
     'manifest_rejected reason=source_layout',
     "x0 > x1",
     "y0 > y1",
+    "file.length() > MAX_MANIFEST_BYTES",
     'manifest_rejected reason=link_mapping',
     'manifest_rejected reason=link_record',
 ):
@@ -233,6 +234,10 @@ if 'android:versionName="0.0.15"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
 if 'private static final String VERSION = "0.0.15"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
+if "MAX_MANIFEST_BYTES = 8L * 1024L * 1024L" not in hook:
+    raise SystemExit(
+        "runtime and generator manifest-size limits must remain aligned"
+    )
 scope = (root / "meta/META-INF/xposed/scope.list").read_text(
     encoding="utf-8"
 ).splitlines()
@@ -248,12 +253,19 @@ if "run: ./virtual-spread-module/test.ps1" not in workflow:
     raise SystemExit(
         "CI must run the complete virtual-spread companion test script"
     )
+if "run: ./virtual-spread-module/build.ps1" not in workflow:
+    raise SystemExit(
+        "CI must build and verify the virtual-spread companion APK"
+    )
 
 generator = (root.parent / "virtual_spread/generate_virtual_spread.py").read_text(
     encoding="utf-8"
 )
 for required in (
     "MOVEFILE_WRITE_THROUGH",
+    "MAX_MANIFEST_BYTES = 8 * 1024 * 1024",
+    "temporary_manifest.stat().st_size > MAX_MANIFEST_BYTES",
+    "with _publication_lock(resolved_output, resolved_manifest):",
     "_durable_replace(final_path, backup)",
     "_durable_replace(temporary_manifest, manifest_path)",
     "_durable_replace(temporary_output, output_path)",

@@ -576,11 +576,17 @@ to a second authority marker inside the hashed PDF, preventing stale sidecars
 from swapping layouts with equal page counts. It also makes Windows publication
 durable with write-through marker, backup, publication, rollback, and retirement
 renames; POSIX continues to synchronize affected directories. Older generated
-pairs fail closed and must be regenerated. The 17 generator regressions include
+pairs fail closed and must be regenerated. The 19 generator regressions include
 metadata-preserving source changes, exact cross-language layout vectors,
 write-through flag invariants, plus both partial and fully committed
-crash-recovery states. CI also runs the complete
-Java companion-module suite, including ten layout/link authority assertions.
+crash-recovery states. CI also runs the complete Java companion-module suite,
+including ten layout/link authority assertions.
+A ninth review pass added an OS-owned per-pair publication lock so a concurrent
+generator cannot recover another process's live transaction, enforces the
+runtime's 8 MiB sidecar limit before publication, and makes CI compile, D8,
+package, sign, and verify the actual companion APK on Ubuntu. Deterministic
+regressions hold a live lock/marker while a second generator is rejected and
+inject an oversized staged manifest before any final file can change.
 These automated checks do not replace or restate the v0.0.8 hardware result;
 v0.0.15 still requires a focused generated-pair smoke test before release.
 

@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT / "virtual_spread"))
 from generate_virtual_spread import (  # noqa: E402
     LAYOUT_AUTHORITY_MARKER,
     LINK_AUTHORITY_MARKER,
+    MAX_MANIFEST_BYTES,
     MOVEFILE_REPLACE_EXISTING,
     MOVEFILE_WRITE_THROUGH,
     SourceIdentity,
@@ -31,6 +32,8 @@ from generate_virtual_spread import (  # noqa: E402
     _layout_authority_sha256,
     _link_authority_sha256,
     _publish_pair,
+    _publication_lock,
+    _publication_lock_path,
     _prepare_publication_transaction,
     _recover_pair_publication,
     _sha256_open_file,
@@ -414,7 +417,10 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertFalse(manifest_path.exists())
             self.assertEqual(
                 sorted(path.name for path in root.iterdir()),
-                ["source.pdf"],
+                sorted([
+                    "source.pdf",
+                    _publication_lock_path(output, manifest_path).name,
+                ]),
             )
 
     def test_source_change_during_snapshot_is_rejected(self) -> None:
@@ -447,7 +453,10 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertFalse(manifest_path.exists())
             self.assertEqual(
                 sorted(path.name for path in root.iterdir()),
-                ["source.pdf"],
+                sorted([
+                    "source.pdf",
+                    _publication_lock_path(output, manifest_path).name,
+                ]),
             )
 
     def test_content_change_during_snapshot_is_rejected_with_stable_metadata(
@@ -489,7 +498,10 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertFalse(manifest_path.exists())
             self.assertEqual(
                 sorted(path.name for path in root.iterdir()),
-                ["source.pdf"],
+                sorted([
+                    "source.pdf",
+                    _publication_lock_path(output, manifest_path).name,
+                ]),
             )
 
     def test_content_change_before_publication_is_rejected_with_stable_metadata(
@@ -529,7 +541,10 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertFalse(manifest_path.exists())
             self.assertEqual(
                 sorted(path.name for path in root.iterdir()),
-                ["source.pdf"],
+                sorted([
+                    "source.pdf",
+                    _publication_lock_path(output, manifest_path).name,
+                ]),
             )
 
     def test_output_and_manifest_paths_must_be_distinct(self) -> None:
@@ -674,6 +689,82 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertGreaterEqual(output_rect[1], bottom - 0.001)
             self.assertLessEqual(output_rect[2], right + 0.001)
             self.assertLessEqual(output_rect[3], top + 0.001)
+
+    def test_live_publication_lock_blocks_recovery_by_second_generator(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            create_odd_page_fixture(source)
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            marker = Path(transaction["markerPath"])
+            marker_before = marker.read_bytes()
+
+            with _publication_lock(output, manifest):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Publication is already active",
+                ):
+                    build_virtual_spread(
+                        source,
+                        output,
+                        manifest,
+                        force=True,
+                    )
+                self.assertEqual(marker.read_bytes(), marker_before)
+                self.assertEqual(output.read_bytes(), b"old-pdf")
+                self.assertEqual(manifest.read_bytes(), b"old-manifest")
+
+            self.assertEqual(
+                _recover_pair_publication(output, manifest),
+                "rolled_back",
+            )
+            self.assertFalse(marker.exists())
+
+    def test_oversized_manifest_is_rejected_before_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+
+            def write_oversized(path: Path, value: object) -> None:
+                del value
+                path.write_bytes(b"x" * (MAX_MANIFEST_BYTES + 1))
+
+            with mock.patch(
+                "generate_virtual_spread._write_json",
+                side_effect=write_oversized,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "exceeds the runtime limit",
+                ):
+                    build_virtual_spread(
+                        source, output, manifest, force=True
+                    )
+
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertFalse(any(root.glob("*.bak")))
+            self.assertFalse(any(root.glob("*.publish.json")))
 
     def test_pair_publication_rolls_back_after_second_replace_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

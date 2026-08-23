@@ -22,8 +22,11 @@ Regenerate the PDF/sidecar pair before using it with this module.
 
 The manifest cache is content-authoritative: the small sidecar is hashed on
 every lookup, and the PDF cache identity includes its device, inode, size,
-modification time, and change time. On a cache miss, the module fails closed
-while a single background worker performs the full PDF SHA-256 check. It
+modification time, and change time. Generator and runtime share an 8 MiB
+sidecar ceiling; the generator rejects an oversized manifest before publishing
+it, while the runtime independently fails closed if that invariant is violated.
+On a cache miss, the module fails closed while a single background worker
+performs the full PDF SHA-256 check. It
 publishes the result only if both the PDF identity and sidecar digest are still
 unchanged, then refreshes the still-open native reader from its main thread.
 Page-bar and page-turn callbacks never perform the full-file hash.
@@ -65,6 +68,10 @@ For a matching document it:
 
 It does not compose bitmaps, remap pen coordinates, modify annotation files,
 or hook any annotation subsystem.
+
+GitHub CI runs this module's complete host-side suite and then invokes the same
+cross-platform build used locally, compiling the Android hook and producing,
+signing, and verifying the companion APK.
 
 ## Build and test
 

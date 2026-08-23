@@ -11,9 +11,10 @@ import math
 import os
 import struct
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, BinaryIO, Iterable
+from typing import Any, BinaryIO, Iterable, Iterator
 
 from pypdf import PdfReader, PdfWriter, Transformation
 from pypdf.generic import (
@@ -34,6 +35,7 @@ PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v1"
 MOVEFILE_REPLACE_EXISTING = 0x00000001
 MOVEFILE_WRITE_THROUGH = 0x00000008
 WINDOWS_ALREADY_EXISTS = {80, 183}
+MAX_MANIFEST_BYTES = 8 * 1024 * 1024
 
 
 class VirtualSpreadError(RuntimeError):
@@ -681,6 +683,65 @@ def _publication_artifacts(
     return marker, output_backup, manifest_backup
 
 
+def _publication_lock_path(output_path: Path, manifest_path: Path) -> Path:
+    marker, _, _ = _publication_artifacts(output_path, manifest_path)
+    return marker.with_name(marker.name + ".lock")
+
+
+@contextmanager
+def _publication_lock(
+    output_path: Path,
+    manifest_path: Path,
+) -> Iterator[None]:
+    """Serialize generation and recovery for one deterministic output pair."""
+    lock_path = _publication_lock_path(output_path, manifest_path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    stream = lock_path.open("a+b")
+    acquired = False
+    try:
+        stream.seek(0, os.SEEK_END)
+        if stream.tell() == 0:
+            stream.write(b"\0")
+            stream.flush()
+            os.fsync(stream.fileno())
+        stream.seek(0)
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(
+                    stream.fileno(),
+                    fcntl.LOCK_EX | fcntl.LOCK_NB,
+                )
+        except OSError as error:
+            raise VirtualSpreadError(
+                f"Publication is already active: {output_path}"
+            ) from error
+        acquired = True
+        yield
+    finally:
+        if acquired:
+            stream.seek(0)
+            try:
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                # Closing the descriptor below releases an OS-owned lock even
+                # if an explicit unlock reports a late platform error.
+                pass
+        stream.close()
+
+
 def _windows_move_flags(replace_existing: bool) -> int:
     flags = MOVEFILE_WRITE_THROUGH
     if replace_existing:
@@ -1191,6 +1252,11 @@ def _build_virtual_spread_from_snapshot(
         }
         temporary_manifest = _temporary_neighbor(manifest_path, ".tmp")
         _write_json(temporary_manifest, manifest)
+        if temporary_manifest.stat().st_size > MAX_MANIFEST_BYTES:
+            raise VirtualSpreadError(
+                "Generated manifest exceeds the runtime limit of "
+                f"{MAX_MANIFEST_BYTES} bytes"
+            )
         _require_source_snapshot(
             source_path,
             source_identity,
@@ -1209,7 +1275,7 @@ def _build_virtual_spread_from_snapshot(
             temporary_manifest.unlink(missing_ok=True)
 
 
-def build_virtual_spread(
+def _build_virtual_spread_locked(
     source_path: Path,
     output_path: Path,
     manifest_path: Path,
@@ -1262,6 +1328,39 @@ def build_virtual_spread(
         )
     finally:
         source_snapshot.unlink(missing_ok=True)
+
+
+def build_virtual_spread(
+    source_path: Path,
+    output_path: Path,
+    manifest_path: Path,
+    *,
+    direction: str = "rtl",
+    cover_separate: bool = True,
+    spread_width: float = 864.0,
+    spread_height: float = 648.0,
+    gutter: float = 0.0,
+    force: bool = False,
+) -> dict[str, Any]:
+    resolved_source = source_path.resolve()
+    resolved_output = output_path.resolve()
+    resolved_manifest = manifest_path.resolve()
+    if len({resolved_source, resolved_output, resolved_manifest}) != 3:
+        raise VirtualSpreadError(
+            "Source PDF, output PDF, and manifest paths must be distinct"
+        )
+    with _publication_lock(resolved_output, resolved_manifest):
+        return _build_virtual_spread_locked(
+            resolved_source,
+            resolved_output,
+            resolved_manifest,
+            direction=direction,
+            cover_separate=cover_separate,
+            spread_width=spread_width,
+            spread_height=spread_height,
+            gutter=gutter,
+            force=force,
+        )
 
 
 def _parser() -> argparse.ArgumentParser:

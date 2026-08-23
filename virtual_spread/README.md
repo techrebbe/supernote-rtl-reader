@@ -47,7 +47,11 @@ links, and existing outputs unless `--force` is supplied. It copies and hashes
 the source through one file snapshot, re-reads the opened source to prove that
 the copied bytes are stable, generates only from that verified snapshot, and
 rehashes the current source before publication. The PDF and manifest are each
-staged and validated before publication as one recoverable pair. A transaction
+protected by a deterministic OS-owned lock for the entire recovery, generation,
+and publication operation. A concurrent generator targeting the same pair fails
+without touching the live transaction; a crashed process releases the lock so
+the next invocation can recover it.
+The PDF and manifest are staged before publication as one recoverable pair. A transaction
 marker is durably published before either previous file is moved. POSIX builds
 sync every affected parent directory; Windows builds use
 `MoveFileExW(MOVEFILE_WRITE_THROUGH)` for the marker, backup, publication,
@@ -65,6 +69,10 @@ an otherwise internally consistent sidecar from swapping cover pairing or
 geometry. Native module v0.0.15 therefore fails closed on manifests generated
 before this layout authority existed; regenerate an older virtual-spread pair
 before opening it with v0.0.15.
+
+The generator also enforces the companion runtime's exact 8 MiB sidecar limit
+before publication. Oversized manifests fail with an explicit error while any
+previous PDF/sidecar pair remains intact.
 
 ## Nomad hardware result: GO
 

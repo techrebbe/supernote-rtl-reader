@@ -9,7 +9,9 @@ param(
         }
     ),
     [string]$DebugKeystore = $(
-        Join-Path $env:USERPROFILE '.android\debug.keystore'
+        Join-Path `
+            ([Environment]::GetFolderPath('UserProfile')) `
+            '.android/debug.keystore'
     )
 )
 
@@ -20,8 +22,9 @@ $buildRoot = [System.IO.Path]::GetFullPath(
     (Join-Path $projectRoot 'build')
 )
 $stubRoot = [System.IO.Path]::GetFullPath(
-    (Join-Path $projectRoot '..\native-spread-module\stubs')
+    (Join-Path (Split-Path -Parent $projectRoot) 'native-spread-module/stubs')
 )
+$windowsHost = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
 
 if (-not $buildRoot.StartsWith(
         $projectRoot,
@@ -54,12 +57,12 @@ if (-not $versionCode -or -not $versionName) {
     throw 'AndroidManifest.xml is missing versionCode or versionName'
 }
 
-$androidJar = Join-Path $AndroidSdk 'platforms\android-35\android.jar'
-$buildTools = Join-Path $AndroidSdk 'build-tools\35.0.0'
-$aapt2 = Join-Path $buildTools 'aapt2.exe'
-$d8 = Join-Path $buildTools 'd8.bat'
-$zipalign = Join-Path $buildTools 'zipalign.exe'
-$apksigner = Join-Path $buildTools 'apksigner.bat'
+$androidJar = Join-Path $AndroidSdk 'platforms/android-35/android.jar'
+$buildTools = Join-Path $AndroidSdk 'build-tools/35.0.0'
+$aapt2 = Join-Path $buildTools $(if ($windowsHost) {'aapt2.exe'} else {'aapt2'})
+$d8 = Join-Path $buildTools $(if ($windowsHost) {'d8.bat'} else {'d8'})
+$zipalign = Join-Path $buildTools $(if ($windowsHost) {'zipalign.exe'} else {'zipalign'})
+$apksigner = Join-Path $buildTools $(if ($windowsHost) {'apksigner.bat'} else {'apksigner'})
 foreach ($required in @(
     $androidJar,
     $aapt2,
@@ -98,12 +101,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $moduleJar = Join-Path $buildRoot 'virtual-spread-navigation.jar'
-Push-Location $classesDir
-try {
-    & jar cf $moduleJar com\techrebbe\supernote\virtualspread
-} finally {
-    Pop-Location
-}
+& jar cf $moduleJar -C $classesDir 'com/techrebbe/supernote/virtualspread'
 
 & $d8 `
     --lib $androidJar `

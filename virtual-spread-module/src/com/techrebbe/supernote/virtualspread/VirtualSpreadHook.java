@@ -57,6 +57,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         "techrebbe.supernote.virtual-spread/v1";
     private static final String TAG = "SN_VIRTUAL_SPREAD";
     private static final String VERSION = "0.0.15";
+    private static final long MAX_MANIFEST_BYTES = 8L * 1024L * 1024L;
 
     private static volatile WeakReference<Activity> activeActivity =
         new WeakReference<>(null);
@@ -1604,7 +1605,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
 
 
     private static byte[] readBytes(File file) throws Exception {
-        if (file.length() > 8L * 1024L * 1024L) {
+        if (file.length() > MAX_MANIFEST_BYTES) {
             throw new IllegalArgumentException("manifest is too large");
         }
         byte[] data = new byte[(int) file.length()];

@@ -12,7 +12,7 @@ import struct
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, BinaryIO, Iterable
 
 from pypdf import PdfReader, PdfWriter, Transformation
 from pypdf.generic import (
@@ -28,6 +28,7 @@ from pypdf.generic import (
 
 SCHEMA = "techrebbe.supernote.virtual-spread/v1"
 LINK_AUTHORITY_MARKER = b"%SNVirtualSpreadLinksSHA256:"
+PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v1"
 
 
 class VirtualSpreadError(RuntimeError):
@@ -50,6 +51,16 @@ class SourceIdentity:
     size: int
     modified_ns: int
     changed_ns: int
+
+
+def _sha256_open_file(stream: BinaryIO) -> str:
+    """Hash one complete view of an already-open file."""
+    digest = hashlib.sha256()
+    stream.seek(0)
+    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+        digest.update(chunk)
+    stream.seek(0)
+    return digest.hexdigest()
 
 
 def sha256_file(path: Path) -> str:
@@ -100,6 +111,7 @@ def _snapshot_source(
                 digest.update(chunk)
             target.flush()
             os.fsync(target.fileno())
+            verified_source_hash = _sha256_open_file(source)
             opened_after = _identity(os.fstat(source.fileno()))
         path_after = _identity(source_path.stat())
     except OSError as error:
@@ -111,21 +123,41 @@ def _snapshot_source(
         or path_before != path_after
     ):
         raise VirtualSpreadError("Source PDF changed while snapshotting")
-    return path_before, digest.hexdigest()
+    snapshot_hash = digest.hexdigest()
+    if verified_source_hash != snapshot_hash:
+        raise VirtualSpreadError("Source PDF content changed while snapshotting")
+    return path_before, snapshot_hash
 
 
-def _require_source_identity(
+def _require_source_snapshot(
     source_path: Path,
     expected: SourceIdentity,
+    expected_hash: str,
 ) -> None:
     try:
-        current = _identity(source_path.stat())
+        path_before = _identity(source_path.stat())
+        with source_path.open("rb") as source:
+            opened_before = _identity(os.fstat(source.fileno()))
+            if not _same_open_file(path_before, opened_before):
+                raise VirtualSpreadError(
+                    "Source PDF changed before publication"
+                )
+            current_hash = _sha256_open_file(source)
+            opened_after = _identity(os.fstat(source.fileno()))
+        path_after = _identity(source_path.stat())
     except OSError as error:
         raise VirtualSpreadError(
             "Source PDF disappeared before publication"
         ) from error
-    if current != expected:
+    if (
+        path_before != expected
+        or path_after != expected
+        or opened_before != opened_after
+        or not _same_open_file(path_after, opened_after)
+    ):
         raise VirtualSpreadError("Source PDF changed before publication")
+    if current_hash != expected_hash:
+        raise VirtualSpreadError("Source PDF content changed before publication")
 
 
 def _float_bits(value: Any) -> str:
@@ -512,54 +544,301 @@ def _publish_pair(
     temporary_manifest: Path,
     manifest_path: Path,
 ) -> None:
-    """Publish a matching manifest/PDF pair or restore the previous pair."""
-    backups: list[tuple[Path, Path]] = []
-    published: list[Path] = []
-    committed = False
+    """Publish a matching pair with durable recovery across process death."""
+    transaction = _prepare_publication_transaction(
+        temporary_output,
+        output_path,
+        temporary_manifest,
+        manifest_path,
+    )
     try:
-        for final_path in (output_path, manifest_path):
-            if not final_path.exists():
-                continue
-            backup = _temporary_neighbor(final_path, ".bak")
-            try:
+        entries = (
+            (
+                output_path,
+                Path(transaction["outputBackupPath"]),
+                transaction["hadOutput"],
+            ),
+            (
+                manifest_path,
+                Path(transaction["manifestBackupPath"]),
+                transaction["hadManifest"],
+            ),
+        )
+        for final_path, backup, had_final in entries:
+            if had_final:
                 os.replace(final_path, backup)
-            except BaseException:
-                backup.unlink(missing_ok=True)
-                raise
-            backups.append((final_path, backup))
+            elif final_path.exists():
+                raise VirtualSpreadError(
+                    f"Publication target appeared concurrently: {final_path}"
+                )
 
+        _fsync_parent_directories(output_path, manifest_path)
         # Publish the sidecar first. Until the PDF appears, the module fails
         # closed; once the PDF is published, its persisted hash matches.
         os.replace(temporary_manifest, manifest_path)
-        published.append(manifest_path)
         os.replace(temporary_output, output_path)
-        published.append(output_path)
-        committed = True
+        _fsync_parent_directories(output_path, manifest_path)
+        _finish_publication_transaction(transaction)
     except BaseException as publication_error:
-        rollback_errors: list[str] = []
-        backed_up_paths = {final_path for final_path, _ in backups}
-        for final_path, backup in reversed(backups):
-            try:
-                os.replace(backup, final_path)
-            except BaseException as rollback_error:
-                rollback_errors.append(f"{final_path}: {rollback_error}")
-        for published_path in reversed(published):
-            if published_path in backed_up_paths:
-                continue
-            try:
-                published_path.unlink(missing_ok=True)
-            except BaseException as rollback_error:
-                rollback_errors.append(f"{published_path}: {rollback_error}")
-        if rollback_errors:
+        try:
+            recovery = _recover_pair_publication(output_path, manifest_path)
+        except BaseException as recovery_error:
             raise VirtualSpreadError(
                 "Virtual-spread publication failed and rollback was incomplete: "
-                + "; ".join(rollback_errors)
+                + str(recovery_error)
             ) from publication_error
+        if recovery == "committed":
+            return
         raise
-    finally:
-        if committed:
-            for _, backup in backups:
-                backup.unlink(missing_ok=True)
+
+
+def _publication_artifacts(
+    output_path: Path,
+    manifest_path: Path,
+) -> tuple[Path, Path, Path]:
+    output_path = output_path.resolve()
+    manifest_path = manifest_path.resolve()
+    key_material = (
+        os.path.normcase(str(output_path))
+        + "\0"
+        + os.path.normcase(str(manifest_path))
+    ).encode("utf-8")
+    key = hashlib.sha256(key_material).hexdigest()[:24]
+    marker = output_path.parent / f".virtual-spread-{key}.publish.json"
+    output_backup = output_path.parent / (
+        f".virtual-spread-{key}.output.bak"
+    )
+    manifest_backup = manifest_path.parent / (
+        f".virtual-spread-{key}.manifest.bak"
+    )
+    return marker, output_backup, manifest_backup
+
+
+def _fsync_parent_directories(*paths: Path) -> None:
+    directories = sorted(
+        {path.resolve().parent for path in paths},
+        key=lambda path: str(path),
+    )
+    for directory in directories:
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        try:
+            descriptor = os.open(directory, flags)
+        except OSError:
+            if os.name == "nt":
+                continue
+            raise
+        try:
+            os.fsync(descriptor)
+        except OSError:
+            if os.name != "nt":
+                raise
+        finally:
+            os.close(descriptor)
+
+
+def _valid_sha256(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _file_matches_sha256(path: Path, expected_hash: str) -> bool:
+    try:
+        return path.is_file() and sha256_file(path) == expected_hash
+    except OSError:
+        return False
+
+
+def _write_publication_marker(
+    marker_path: Path,
+    transaction: dict[str, Any],
+) -> None:
+    marker_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        descriptor = os.open(
+            marker_path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+    except FileExistsError as error:
+        raise VirtualSpreadError(
+            f"Publication is already in progress: {marker_path}"
+        ) from error
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+            json.dump(
+                transaction,
+                stream,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+    except BaseException:
+        marker_path.unlink(missing_ok=True)
+        raise
+    _fsync_parent_directories(marker_path)
+
+
+def _validated_publication_transaction(
+    marker_path: Path,
+    output_path: Path,
+    manifest_path: Path,
+    output_backup: Path,
+    manifest_backup: Path,
+) -> dict[str, Any]:
+    with marker_path.open("r", encoding="utf-8") as stream:
+        transaction = json.load(stream)
+    expected = {
+        "schema": PUBLICATION_SCHEMA,
+        "outputPath": str(output_path.resolve()),
+        "manifestPath": str(manifest_path.resolve()),
+        "outputBackupPath": str(output_backup.resolve()),
+        "manifestBackupPath": str(manifest_backup.resolve()),
+    }
+    if not isinstance(transaction, dict) or any(
+        transaction.get(key) != value for key, value in expected.items()
+    ):
+        raise VirtualSpreadError("Invalid virtual-spread publication marker")
+    for key in ("hadOutput", "hadManifest"):
+        if type(transaction.get(key)) is not bool:
+            raise VirtualSpreadError("Invalid virtual-spread publication marker")
+    for key in ("newOutputSha256", "newManifestSha256"):
+        if not _valid_sha256(transaction.get(key)):
+            raise VirtualSpreadError("Invalid virtual-spread publication marker")
+    return transaction
+
+
+def _finish_publication_transaction(transaction: dict[str, Any]) -> None:
+    marker_path = Path(transaction["markerPath"])
+    output_backup = Path(transaction["outputBackupPath"])
+    manifest_backup = Path(transaction["manifestBackupPath"])
+    output_backup.unlink(missing_ok=True)
+    manifest_backup.unlink(missing_ok=True)
+    _fsync_parent_directories(output_backup, manifest_backup)
+    marker_path.unlink()
+    _fsync_parent_directories(marker_path)
+
+
+def _recover_pair_publication(
+    output_path: Path,
+    manifest_path: Path,
+) -> str | None:
+    output_path = output_path.resolve()
+    manifest_path = manifest_path.resolve()
+    marker_path, output_backup, manifest_backup = _publication_artifacts(
+        output_path,
+        manifest_path,
+    )
+    if not marker_path.exists():
+        if output_backup.exists() or manifest_backup.exists():
+            raise VirtualSpreadError(
+                "Orphaned virtual-spread publication backup requires recovery"
+            )
+        return None
+    try:
+        transaction = _validated_publication_transaction(
+            marker_path,
+            output_path,
+            manifest_path,
+            output_backup,
+            manifest_backup,
+        )
+    except (OSError, ValueError, TypeError, UnicodeError) as error:
+        if not output_backup.exists() and not manifest_backup.exists():
+            marker_path.unlink(missing_ok=True)
+            _fsync_parent_directories(marker_path)
+            return "discarded"
+        raise VirtualSpreadError(
+            "Cannot recover invalid virtual-spread publication marker"
+        ) from error
+    transaction["markerPath"] = str(marker_path)
+    output_is_new = _file_matches_sha256(
+        output_path,
+        transaction["newOutputSha256"],
+    )
+    manifest_is_new = _file_matches_sha256(
+        manifest_path,
+        transaction["newManifestSha256"],
+    )
+    if output_is_new and manifest_is_new:
+        _finish_publication_transaction(transaction)
+        return "committed"
+
+    errors: list[str] = []
+    entries = (
+        (
+            output_path,
+            output_backup,
+            transaction["hadOutput"],
+            transaction["newOutputSha256"],
+        ),
+        (
+            manifest_path,
+            manifest_backup,
+            transaction["hadManifest"],
+            transaction["newManifestSha256"],
+        ),
+    )
+    for final_path, backup, had_final, new_hash in entries:
+        try:
+            if backup.exists():
+                os.replace(backup, final_path)
+            elif had_final:
+                if not final_path.exists():
+                    raise VirtualSpreadError(
+                        f"Missing original and backup: {final_path}"
+                    )
+            elif final_path.exists():
+                if not _file_matches_sha256(final_path, new_hash):
+                    raise VirtualSpreadError(
+                        f"Unexpected publication target: {final_path}"
+                    )
+                final_path.unlink()
+        except BaseException as error:
+            errors.append(f"{final_path}: {error}")
+    if errors:
+        raise VirtualSpreadError(
+            "Virtual-spread recovery was incomplete: " + "; ".join(errors)
+        )
+    _fsync_parent_directories(output_path, manifest_path)
+    _finish_publication_transaction(transaction)
+    return "rolled_back"
+
+
+def _prepare_publication_transaction(
+    temporary_output: Path,
+    output_path: Path,
+    temporary_manifest: Path,
+    manifest_path: Path,
+) -> dict[str, Any]:
+    output_path = output_path.resolve()
+    manifest_path = manifest_path.resolve()
+    _recover_pair_publication(output_path, manifest_path)
+    marker_path, output_backup, manifest_backup = _publication_artifacts(
+        output_path,
+        manifest_path,
+    )
+    transaction: dict[str, Any] = {
+        "schema": PUBLICATION_SCHEMA,
+        "markerPath": str(marker_path),
+        "outputPath": str(output_path),
+        "manifestPath": str(manifest_path),
+        "outputBackupPath": str(output_backup),
+        "manifestBackupPath": str(manifest_backup),
+        "hadOutput": output_path.exists(),
+        "hadManifest": manifest_path.exists(),
+        "newOutputSha256": sha256_file(temporary_output),
+        "newManifestSha256": sha256_file(temporary_manifest),
+    }
+    marker_record = dict(transaction)
+    marker_record.pop("markerPath")
+    _write_publication_marker(marker_path, marker_record)
+    return transaction
 
 
 def _build_virtual_spread_from_snapshot(
@@ -753,7 +1032,11 @@ def _build_virtual_spread_from_snapshot(
         }
         temporary_manifest = _temporary_neighbor(manifest_path, ".tmp")
         _write_json(temporary_manifest, manifest)
-        _require_source_identity(source_path, source_identity)
+        _require_source_snapshot(
+            source_path,
+            source_identity,
+            source_hash,
+        )
         _publish_pair(
             temporary_output,
             output_path,
@@ -782,12 +1065,13 @@ def build_virtual_spread(
     source_path = source_path.resolve()
     output_path = output_path.resolve()
     manifest_path = manifest_path.resolve()
-    if not source_path.is_file():
-        raise VirtualSpreadError(f"Source PDF does not exist: {source_path}")
     if len({source_path, output_path, manifest_path}) != 3:
         raise VirtualSpreadError(
             "Source PDF, output PDF, and manifest paths must be distinct"
         )
+    _recover_pair_publication(output_path, manifest_path)
+    if not source_path.is_file():
+        raise VirtualSpreadError(f"Source PDF does not exist: {source_path}")
     if not force and (output_path.exists() or manifest_path.exists()):
         raise VirtualSpreadError("Output already exists; pass --force to replace it")
     if not all(math.isfinite(value) for value in (

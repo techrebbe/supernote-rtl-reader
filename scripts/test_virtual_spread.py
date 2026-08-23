@@ -26,6 +26,9 @@ from generate_virtual_spread import (  # noqa: E402
     _identity,
     _link_authority_sha256,
     _publish_pair,
+    _prepare_publication_transaction,
+    _recover_pair_publication,
+    _sha256_open_file,
     _write_json,
     build_pairs,
     build_virtual_spread,
@@ -387,6 +390,88 @@ class VirtualSpreadTests(unittest.TestCase):
                 ["source.pdf"],
             )
 
+    def test_content_change_during_snapshot_is_rejected_with_stable_metadata(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            stable = _identity(source.stat())
+            real_hash = _sha256_open_file
+            changed = False
+
+            def mutate_then_hash(stream: object) -> str:
+                nonlocal changed
+                if not changed:
+                    contents = bytearray(source.read_bytes())
+                    contents[len(contents) // 2] ^= 1
+                    source.write_bytes(contents)
+                    changed = True
+                return real_hash(stream)  # type: ignore[arg-type]
+
+            with mock.patch(
+                "generate_virtual_spread._identity",
+                return_value=stable,
+            ), mock.patch(
+                "generate_virtual_spread._sha256_open_file",
+                side_effect=mutate_then_hash,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "content changed while snapshotting",
+                ):
+                    build_virtual_spread(source, output, manifest_path)
+
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+            self.assertEqual(
+                sorted(path.name for path in root.iterdir()),
+                ["source.pdf"],
+            )
+
+    def test_content_change_before_publication_is_rejected_with_stable_metadata(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            stable = _identity(source.stat())
+            changed_contents = bytearray(source.read_bytes())
+            changed_contents[len(changed_contents) // 2] ^= 1
+
+            def write_then_mutate(
+                path: Path,
+                value: dict[str, object],
+            ) -> None:
+                _write_json(path, value)
+                source.write_bytes(changed_contents)
+
+            with mock.patch(
+                "generate_virtual_spread._identity",
+                return_value=stable,
+            ), mock.patch(
+                "generate_virtual_spread._write_json",
+                side_effect=write_then_mutate,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "content changed before publication",
+                ):
+                    build_virtual_spread(source, output, manifest_path)
+
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+            self.assertEqual(
+                sorted(path.name for path in root.iterdir()),
+                ["source.pdf"],
+            )
+
     def test_output_and_manifest_paths_must_be_distinct(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -573,8 +658,86 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertFalse(temporary_manifest.exists())
             self.assertEqual(
                 list(root.glob("*.bak")),
+
                 [],
             )
+    def test_next_run_recovers_interrupted_partial_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            create_odd_page_fixture(source)
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            output_backup = Path(transaction["outputBackupPath"])
+            manifest_backup = Path(transaction["manifestBackupPath"])
+            marker = Path(transaction["markerPath"])
+            os.replace(output, output_backup)
+            os.replace(manifest, manifest_backup)
+            os.replace(temporary_manifest, manifest)
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Output already exists",
+            ):
+                build_virtual_spread(source, output, manifest)
+
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(temporary_output.exists())
+            self.assertFalse(temporary_manifest.exists())
+            self.assertFalse(marker.exists())
+            self.assertFalse(output_backup.exists())
+            self.assertFalse(manifest_backup.exists())
+
+    def test_recovery_finishes_cleanup_after_complete_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            output_backup = Path(transaction["outputBackupPath"])
+            manifest_backup = Path(transaction["manifestBackupPath"])
+            marker = Path(transaction["markerPath"])
+            os.replace(output, output_backup)
+            os.replace(manifest, manifest_backup)
+            os.replace(temporary_manifest, manifest)
+            os.replace(temporary_output, output)
+
+            self.assertEqual(
+                _recover_pair_publication(output, manifest),
+                "committed",
+            )
+            self.assertEqual(output.read_bytes(), b"new-pdf")
+            self.assertEqual(manifest.read_bytes(), b"new-manifest")
+            self.assertFalse(marker.exists())
+            self.assertFalse(output_backup.exists())
+            self.assertFalse(manifest_backup.exists())
+
 
 
 if __name__ == "__main__":

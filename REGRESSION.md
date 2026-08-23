@@ -568,8 +568,13 @@ v0.0.9-v0.0.14 changes harden manifest authority, revision invalidation,
 publication transactions, internal-link mapping validation, and asynchronous
 full-file verification. v0.0.13 also rejects reversed link rectangles and
 dereferences indirect PDF destinations. v0.0.14 generates from a stable source
-snapshot and binds the complete ordered link collection to the hashed PDF;
-these automated checks do not replace or restate the v0.0.8 hardware result.
+snapshot, verifies source bytes independently of filesystem timestamps, binds
+the complete ordered link collection to the hashed PDF, and recovers an
+interrupted two-file publication through a durable transaction marker. The 16
+generator regressions include metadata-preserving source changes plus both
+partial and fully committed crash-recovery states. CI also runs the complete
+Java companion-module suite. These automated checks do not replace or restate
+the v0.0.8 hardware result.
 
 ## Failure capture
 

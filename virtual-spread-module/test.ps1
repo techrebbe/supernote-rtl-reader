@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = [System.IO.Path]::GetFullPath($PSScriptRoot)
-$testRoot = Join-Path $projectRoot 'build\tests'
+$testRoot = Join-Path $projectRoot 'build/tests'
 if (-not $testRoot.StartsWith(
         $projectRoot,
         [System.StringComparison]::OrdinalIgnoreCase
@@ -19,13 +19,13 @@ New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
     -encoding UTF-8 `
     -d $testRoot `
     (Join-Path $projectRoot `
-        'src\com\techrebbe\supernote\virtualspread\VirtualSpreadNavigation.java') `
+        'src/com/techrebbe/supernote/virtualspread/VirtualSpreadNavigation.java') `
     (Join-Path $projectRoot `
-        'src\com\techrebbe\supernote\virtualspread\VirtualSpreadLinkAuthority.java') `
-    (Join-Path $projectRoot 'tests\VirtualSpreadLinkAuthorityTest.java') `
-    (Join-Path $projectRoot 'tests\VirtualSpreadNavigationTest.java') `
+        'src/com/techrebbe/supernote/virtualspread/VirtualSpreadLinkAuthority.java') `
+    (Join-Path $projectRoot 'tests/VirtualSpreadLinkAuthorityTest.java') `
+    (Join-Path $projectRoot 'tests/VirtualSpreadNavigationTest.java') `
     (Join-Path $projectRoot `
-        'tests\VirtualSpreadNavigationExhaustiveTest.java')
+        'tests/VirtualSpreadNavigationExhaustiveTest.java')
 if ($LASTEXITCODE -ne 0) {
     throw "navigation test compilation failed with exit code $LASTEXITCODE"
 }
@@ -45,7 +45,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "exhaustive navigation tests failed with exit code $LASTEXITCODE"
 }
 
-& python (Join-Path $projectRoot 'tests\check_scope.py')
+& python (Join-Path $projectRoot 'tests/check_scope.py')
 if ($LASTEXITCODE -ne 0) {
     throw "hook scope checks failed with exit code $LASTEXITCODE"
 }

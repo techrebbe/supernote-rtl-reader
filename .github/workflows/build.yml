@@ -27,6 +27,12 @@ jobs:
           cache: pip
           cache-dependency-path: virtual_spread/requirements.txt
 
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
       - name: Install pinned virtual-spread dependencies
         run: python -m pip install -r virtual_spread/requirements.txt
 
@@ -37,6 +43,10 @@ jobs:
         run: |
           python scripts/check_native_invariants.py .
           python scripts/check_native_spread_invariants.py .
+
+      - name: Test virtual-spread companion module
+        shell: pwsh
+        run: ./virtual-spread-module/test.ps1
 
   build:
     runs-on: ubuntu-latest

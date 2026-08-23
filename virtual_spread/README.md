@@ -44,10 +44,15 @@ python .\virtual_spread\generate_virtual_spread.py `
 
 The command refuses encrypted PDFs, unsupported annotation subtypes, unresolved
 links, and existing outputs unless `--force` is supplied. It copies and hashes
-the source through one stable file snapshot, generates only from that snapshot,
-and rechecks the original path identity before publication. The PDF and manifest
-are each staged and validated before publication as one recoverable pair. If
-publishing either member fails, the previous PDF and manifest are restored.
+the source through one file snapshot, re-reads the opened source to prove that
+the copied bytes are stable, generates only from that verified snapshot, and
+rehashes the current source before publication. The PDF and manifest are each
+staged and validated before publication as one recoverable pair. A durable
+transaction marker is synced before either previous file is moved. If the
+process is interrupted, the next run either recognizes the fully published pair
+by both staged hashes and finishes cleanup, or restores the previous PDF and
+manifest from the recorded backups. Ordinary publication errors use that same
+recovery path immediately.
 The manifest records the staged PDF's exact size and SHA-256, which the runtime
 module verifies before trusting its mappings. A canonical digest of every link
 record is also embedded in the generated PDF and verified against the sidecar,

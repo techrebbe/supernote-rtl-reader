@@ -234,4 +234,12 @@ if scope != ["com.supernote.document"]:
 if "android.permission" in manifest:
     raise SystemExit("navigation-only module must not request Android permissions")
 
+workflow = (root.parent / ".github/workflows/build.yml").read_text(
+    encoding="utf-8"
+)
+if "run: ./virtual-spread-module/test.ps1" not in workflow:
+    raise SystemExit(
+        "CI must run the complete virtual-spread companion test script"
+    )
+
 print("VirtualSpread hook scope PASS")

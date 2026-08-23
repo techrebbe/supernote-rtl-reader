@@ -543,6 +543,31 @@ stroke after Supernote commits and redraws it. The saved `.mark` retains the
 canonical Supernote thickness and remains portable through InkBridge; matching
 the transient preview to the half-page scale is tracked as post-v0.4.10 polish.
 
+## Native Virtual Spread v0.0.8 architecture validation — PASS
+
+Hardware validation was completed on 2026-08-21 on a Supernote Nomad, using
+the native `com.supernote.document` reader. The legacy dual-page Native Spread
+compositor was disabled and absent from the document process.
+
+- [x] Native landscape displayed `blank | cover`, `3 | 2`, `5 | 4`, and
+  `7 | 6` as real fixed PDF spread pages.
+- [x] Native beginning/end boundaries, RTL turns, and portrait half focus were
+  correct, including internal links to both halves plus Back/Original Back.
+- [x] Mixed rotations and extreme source page dimensions navigated without the
+  former page-turn failure.
+- [x] Portrait-to-landscape and landscape-to-portrait refresh completed without
+  a page turn while retaining the focused source half.
+- [x] Pen input on both halves, erasing, lasso movement, undo/redo, text
+  highlighting, and portrait writing all persisted through document round trips.
+- [x] An ordinary PDF without a valid sidecar retained unmodified native LTR
+  behavior and emitted no virtual-spread events.
+
+The complete fixture list, visible observations, logs, and before/after `.mark`
+hash evidence are recorded in `virtual_spread/HARDWARE_VALIDATION.md`. Later
+v0.0.9-v0.0.10 changes harden manifest authority, revision invalidation, and
+publication transactions; their automated checks do not replace or restate the
+v0.0.8 hardware result.
+
 ## Failure capture
 
 Before reproducing a failure:

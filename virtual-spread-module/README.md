@@ -10,7 +10,9 @@ It activates only when all of these are true:
 - the open file has a sibling `<pdf>.json` manifest;
 - the manifest schema is `techrebbe.supernote.virtual-spread/v1`;
 - the manifest direction is `rtl`;
-- the PDF byte length, page count, and full SHA-256 match the manifest; and
+- the PDF byte length, page count, and full SHA-256 match the manifest;
+- the persisted `coverSeparate`, spread occupancy, and source-page mappings
+  describe the same complete RTL layout; and
 - the known Supernote document firmware fingerprint and APK size match.
 
 The manifest cache is content-authoritative: the small sidecar is hashed on

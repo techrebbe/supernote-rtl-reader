@@ -54,7 +54,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final String SCHEMA =
         "techrebbe.supernote.virtual-spread/v1";
     private static final String TAG = "SN_VIRTUAL_SPREAD";
-    private static final String VERSION = "0.0.9";
+    private static final String VERSION = "0.0.10";
 
     private static volatile WeakReference<Activity> activeActivity =
         new WeakReference<>(null);
@@ -67,6 +67,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
 
     private static final class Manifest {
         final String key;
+        final String revision;
         final int pageCount;
         final VirtualSpreadNavigation.Spread[] spreads;
         final float pageHeight;
@@ -74,12 +75,14 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
 
         Manifest(
             String key,
+            String revision,
             int pageCount,
             VirtualSpreadNavigation.Spread[] spreads,
             float pageHeight,
             VirtualSpreadNavigation.LinkTarget[] links
         ) {
             this.key = key;
+            this.revision = revision;
             this.pageCount = pageCount;
             this.spreads = spreads;
             this.pageHeight = pageHeight;
@@ -160,6 +163,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
 
     private static final class ReaderState {
         String manifestKey;
+        String manifestRevision;
         int lastPage = -1;
         int pendingPage = -1;
         VirtualSpreadNavigation.Half half =
@@ -1010,8 +1014,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 state = new ReaderState();
                 STATES.put(viewModel, state);
             }
-            if (!manifest.key.equals(state.manifestKey)) {
+            if (!manifest.key.equals(state.manifestKey)
+                || !manifest.revision.equals(state.manifestRevision)) {
                 state.manifestKey = manifest.key;
+                state.manifestRevision = manifest.revision;
                 state.lastPage = -1;
                 state.pendingPage = -1;
                 state.pendingHalf = null;
@@ -1062,7 +1068,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             Manifest parsed = parseManifest(
                 pdf,
                 new String(sidecarData, "UTF-8"),
-                key
+                key,
+                sidecarDigest
             );
             FileIdentity after = FileIdentity.capture(pdf);
             if (!before.matches(after)) {
@@ -1098,21 +1105,94 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         return manifest;
     }
 
+    private static int expectedSourcePage(
+        int virtualPage,
+        boolean left,
+        boolean coverSeparate,
+        int sourcePageCount
+    ) {
+        if (coverSeparate && virtualPage == 0) {
+            return left ? -1 : 0;
+        }
+        int firstVirtualPage = coverSeparate ? 1 : 0;
+        int firstSourcePage = coverSeparate ? 1 : 0;
+        int sourcePage = firstSourcePage
+            + (virtualPage - firstVirtualPage) * 2
+            + (left ? 1 : 0);
+        return sourcePage >= 0 && sourcePage < sourcePageCount
+            ? sourcePage : -1;
+    }
+
+    private static boolean spreadEntryMatches(
+        JSONObject spread,
+        String side,
+        int expectedSourcePage,
+        int virtualPage
+    ) {
+        if (!spread.has(side)) {
+            return false;
+        }
+        if (expectedSourcePage < 0) {
+            return spread.isNull(side);
+        }
+        JSONObject mapping = spread.optJSONObject(side);
+        return mapping != null
+            && expectedSourcePage
+                == mapping.optInt("sourcePageIndex", -1)
+            && virtualPage == mapping.optInt("virtualPageIndex", -1)
+            && side.equals(mapping.optString("side"));
+    }
+
+    private static boolean sourceEntryMatches(
+        JSONObject mapping,
+        int sourcePage,
+        boolean coverSeparate
+    ) {
+        if (mapping == null
+            || sourcePage != mapping.optInt("sourcePageIndex", -1)) {
+            return false;
+        }
+        if (coverSeparate && sourcePage == 0) {
+            return mapping.optInt("virtualPageIndex", -1) == 0
+                && "right".equals(mapping.optString("side"));
+        }
+        int firstSourcePage = coverSeparate ? 1 : 0;
+        int firstVirtualPage = coverSeparate ? 1 : 0;
+        int offset = sourcePage - firstSourcePage;
+        if (offset < 0) {
+            return false;
+        }
+        return mapping.optInt("virtualPageIndex", -1)
+                == firstVirtualPage + offset / 2
+            && (offset % 2 == 0 ? "right" : "left").equals(
+                mapping.optString("side")
+            );
+    }
+
     private static Manifest parseManifest(
         File pdf,
         String sidecarJson,
-        String key
+        String key,
+        String sidecarDigest
     ) throws Exception {
         JSONObject root = new JSONObject(sidecarJson);
         if (!SCHEMA.equals(root.optString("schema"))
             || !"rtl".equalsIgnoreCase(root.optString("direction"))) {
             return null;
         }
+        Object coverValue = root.opt("coverSeparate");
+        JSONObject source = root.optJSONObject("source");
         JSONObject output = root.optJSONObject("output");
         JSONArray spreadsJson = root.optJSONArray("spreads");
-        if (output == null || spreadsJson == null) {
+        JSONArray sourcePagesJson = root.optJSONArray("sourcePages");
+        if (!(coverValue instanceof Boolean)
+            || source == null || output == null
+            || spreadsJson == null || sourcePagesJson == null) {
+            log("manifest_rejected reason=manifest_shape path=" + key);
             return null;
         }
+        boolean coverSeparate = ((Boolean) coverValue).booleanValue();
+        int sourcePageCount = source.optInt("pageCount", -1);
         long expectedSize = output.optLong("size", -1L);
         String expectedHash = output.optString("sha256", "");
         int pageCount = output.optInt("pageCount", -1);
@@ -1125,6 +1205,15 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         if (!isSha256(expectedHash)
             || !expectedHash.equalsIgnoreCase(sha256File(pdf))) {
             log("manifest_rejected reason=output_hash path=" + key);
+            return null;
+        }
+        int firstSourcePage = coverSeparate ? 1 : 0;
+        int expectedPageCount = (coverSeparate ? 1 : 0)
+            + (sourcePageCount - firstSourcePage + 1) / 2;
+        if (sourcePageCount <= 0
+            || sourcePagesJson.length() != sourcePageCount
+            || pageCount != expectedPageCount) {
+            log("manifest_rejected reason=cover_layout path=" + key);
             return null;
         }
         JSONArray spreadSize = output.optJSONArray("spreadSize");
@@ -1149,16 +1238,34 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 log("manifest_rejected reason=spread_index index=" + index);
                 return null;
             }
-            boolean hasLeft = spread.has("left") && !spread.isNull("left");
-            boolean hasRight = spread.has("right") && !spread.isNull("right");
-            if (!hasLeft && !hasRight) {
-                log("manifest_rejected reason=empty_spread index=" + index);
+            int expectedLeft = expectedSourcePage(
+                index, true, coverSeparate, sourcePageCount
+            );
+            int expectedRight = expectedSourcePage(
+                index, false, coverSeparate, sourcePageCount
+            );
+            if (!spreadEntryMatches(
+                    spread, "left", expectedLeft, index
+                ) || !spreadEntryMatches(
+                    spread, "right", expectedRight, index
+                )) {
+                log("manifest_rejected reason=cover_layout index=" + index);
                 return null;
             }
             spreads[index] = new VirtualSpreadNavigation.Spread(
-                hasLeft,
-                hasRight
+                expectedLeft >= 0,
+                expectedRight >= 0
             );
+        }
+        for (int index = 0; index < sourcePageCount; index++) {
+            if (!sourceEntryMatches(
+                    sourcePagesJson.optJSONObject(index),
+                    index,
+                    coverSeparate
+                )) {
+                log("manifest_rejected reason=source_layout index=" + index);
+                return null;
+            }
         }
         ArrayList<VirtualSpreadNavigation.LinkTarget> links =
             new ArrayList<>();
@@ -1221,6 +1328,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         log("manifest_accepted path=" + key + " pages=" + pageCount);
         return new Manifest(
             key,
+            sidecarDigest,
             pageCount,
             spreads,
             (float) pageHeight,

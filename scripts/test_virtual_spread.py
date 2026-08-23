@@ -137,8 +137,33 @@ class VirtualSpreadTests(unittest.TestCase):
                 cover_separate=True,
             )
 
+            self.assertIs(manifest["coverSeparate"], True)
             self.assertEqual(manifest["output"]["pageCount"], 4)
             self.assertEqual(len(manifest["sourcePages"]), 7)
+            self.assertEqual(
+                [
+                    (
+                        None if spread["left"] is None else
+                            spread["left"]["sourcePageIndex"],
+                        None if spread["right"] is None else
+                            spread["right"]["sourcePageIndex"],
+                    )
+                    for spread in manifest["spreads"]
+                ],
+                [(None, 0), (2, 1), (4, 3), (6, 5)],
+            )
+            self.assertEqual(
+                [
+                    (mapping["virtualPageIndex"], mapping["side"])
+                    for mapping in manifest["sourcePages"]
+                ],
+                [
+                    (0, "right"),
+                    (1, "right"), (1, "left"),
+                    (2, "right"), (2, "left"),
+                    (3, "right"), (3, "left"),
+                ],
+            )
             self.assertEqual(len(manifest["links"]), 4)
             self.assertEqual(
                 [link["sourceSide"] for link in manifest["links"]],

@@ -88,6 +88,20 @@ for forbidden in (
             "failed cross-page saves must preserve the current reader state"
         )
 
+state_start = hook.find("private static ReaderState stateFor")
+state_end = hook.find("private static VirtualSpreadNavigation.Half firstHalf", state_start)
+if state_start < 0 or state_end < 0:
+    raise SystemExit("missing reader-state revision implementation")
+reader_state = hook[state_start:state_end]
+for required in (
+    "manifest.revision.equals(state.manifestRevision)",
+    "state.manifestRevision = manifest.revision",
+):
+    if required not in reader_state:
+        raise SystemExit(
+            f"reader state is not bound to the manifest revision: {required}"
+        )
+
 manifest_start = hook.find("private static Manifest manifestFor")
 manifest_end = hook.find("private static boolean isPortrait", manifest_start)
 if manifest_start < 0 or manifest_end < 0:
@@ -101,6 +115,12 @@ for required in (
     "expectedHash.equalsIgnoreCase(sha256File(pdf))",
     'manifest_rejected reason=output_hash',
     'manifest_rejected reason=pdf_changed_during_read',
+    'root.opt("coverSeparate")',
+    "sourcePagesJson.length() != sourcePageCount",
+    "spreadEntryMatches(",
+    "sourceEntryMatches(",
+    'manifest_rejected reason=cover_layout',
+    'manifest_rejected reason=source_layout',
 ):
     if required not in manifest_validation:
         raise SystemExit(
@@ -108,11 +128,11 @@ for required in (
         )
 
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
-if 'android:versionCode="9"' not in manifest:
+if 'android:versionCode="10"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version code")
-if 'android:versionName="0.0.9"' not in manifest:
+if 'android:versionName="0.0.10"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
-if 'private static final String VERSION = "0.0.9"' not in hook:
+if 'private static final String VERSION = "0.0.10"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
 scope = (root / "meta/META-INF/xposed/scope.list").read_text(
     encoding="utf-8"

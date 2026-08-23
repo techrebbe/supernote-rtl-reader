@@ -4,9 +4,9 @@
 from __future__ import annotations
 
 import argparse
-import copy
 import hashlib
 import json
+import math
 import os
 import tempfile
 from dataclasses import dataclass
@@ -89,19 +89,51 @@ def _page_ref_key(value: Any) -> tuple[int, int] | None:
     return None
 
 
-def _normalized_page(source_page: Any) -> Any:
-    page = copy.deepcopy(source_page)
+def _normalization_transform(page: Any) -> Transformation:
+    rotation = int(page.get("/Rotate", 0) or 0) % 360
+    if rotation not in {0, 90, 180, 270}:
+        raise VirtualSpreadError(
+            f"Unsupported source page rotation: {rotation}"
+        )
+    if rotation == 0:
+        return Transformation()
+    box = page.mediabox
+    transform = (
+        Transformation()
+        .translate(
+            -float(box.left + box.width / 2),
+            -float(box.bottom + box.height / 2),
+        )
+        .rotate(-rotation)
+    )
+    lower = transform.apply_on(box.lower_left)
+    upper = transform.apply_on(box.upper_right)
+    return transform.translate(
+        -min(lower[0], upper[0]),
+        -min(lower[1], upper[1]),
+    )
+
+
+def _normalized_page(source_page: Any) -> tuple[Any, Transformation]:
+    # Assign the clone to a writer before replacing its content stream. pypdf
+    # 7 removes support for mutating detached PageObject clones.
+    page = PdfWriter().add_page(source_page)
     # merge_transformed_page also merges /Annots. Links are copied separately
     # after every source-to-spread mapping is known, so the content clone must
     # not carry stale source destinations into the output page.
     page.pop("/Annots", None)
     rotation = int(page.get("/Rotate", 0) or 0) % 360
+    normalization = _normalization_transform(page)
     if rotation:
         page.transfer_rotation_to_content()
-    return page
+    return page, normalization
 
 
-def _layout_for_page(page: Any, slot: Slot) -> dict[str, Any]:
+def _layout_for_page(
+    page: Any,
+    slot: Slot,
+    source_transform: Transformation,
+) -> dict[str, Any]:
     box = page.cropbox
     source_left = float(box.left)
     source_bottom = float(box.bottom)
@@ -124,6 +156,10 @@ def _layout_for_page(page: Any, slot: Slot) -> dict[str, Any]:
         + (slot.height - placed_height) / 2.0
         - source_bottom * scale
     )
+    content_transform = Transformation(
+        ctm=(scale, 0.0, 0.0, scale, translate_x, translate_y)
+    )
+    source_to_spread = source_transform.transform(content_transform)
     destination = [
         slot.left + (slot.width - placed_width) / 2.0,
         slot.bottom + (slot.height - placed_height) / 2.0,
@@ -132,7 +168,7 @@ def _layout_for_page(page: Any, slot: Slot) -> dict[str, Any]:
     ]
     return {
         "side": slot.side,
-        "sourceBox": [
+        "normalizedSourceBox": [
             source_left,
             source_bottom,
             source_left + source_width,
@@ -146,7 +182,8 @@ def _layout_for_page(page: Any, slot: Slot) -> dict[str, Any]:
         ],
         "destination": destination,
         "scale": scale,
-        "transform": [scale, 0.0, 0.0, scale, translate_x, translate_y],
+        "transform": list(source_to_spread.ctm),
+        "contentTransform": list(content_transform.ctm),
     }
 
 
@@ -341,11 +378,15 @@ def build_virtual_spread(
     manifest_path = manifest_path.resolve()
     if not source_path.is_file():
         raise VirtualSpreadError(f"Source PDF does not exist: {source_path}")
-    if source_path in {output_path, manifest_path}:
-        raise VirtualSpreadError("Output paths must differ from the source PDF")
+    if len({source_path, output_path, manifest_path}) != 3:
+        raise VirtualSpreadError(
+            "Source PDF, output PDF, and manifest paths must be distinct"
+        )
     if not force and (output_path.exists() or manifest_path.exists()):
         raise VirtualSpreadError("Output already exists; pass --force to replace it")
-    if spread_width <= 0 or spread_height <= 0 or gutter < 0:
+    if not all(math.isfinite(value) for value in (
+        spread_width, spread_height, gutter
+    )) or spread_width <= 0 or spread_height <= 0 or gutter < 0:
         raise VirtualSpreadError("Spread dimensions and gutter must be valid")
     slot_width = (spread_width - gutter) / 2.0
     if slot_width <= 0:
@@ -378,14 +419,22 @@ def build_virtual_spread(
         ):
             if source_page_index is None:
                 continue
-            page = normalized_pages[source_page_index]
-            layout = _layout_for_page(page, slot)
+            page, source_transform = normalized_pages[source_page_index]
+            layout = _layout_for_page(page, slot, source_transform)
+            original_box = reader.pages[source_page_index].cropbox
+            layout["sourceBox"] = [
+                float(original_box.left),
+                float(original_box.bottom),
+                float(original_box.right),
+                float(original_box.top),
+            ]
             output_page.merge_transformed_page(
                 page,
-                Transformation(ctm=tuple(layout["transform"])),
+                Transformation(ctm=tuple(layout["contentTransform"])),
                 over=True,
                 expand=False,
             )
+            layout.pop("contentTransform")
             mapping = {
                 **layout,
                 "sourcePageIndex": source_page_index,

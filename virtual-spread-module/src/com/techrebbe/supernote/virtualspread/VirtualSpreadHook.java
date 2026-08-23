@@ -626,9 +626,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             return;
         }
 
-        state.half = plan.targetHalf;
-        state.lastPage = plan.targetPage;
         if (plan.kind == VirtualSpreadNavigation.Kind.SAME_SPREAD) {
+            state.half = plan.targetHalf;
+            state.lastPage = plan.targetPage;
             int adjusted = plan.targetHalf == VirtualSpreadNavigation.Half.LEFT
                 ? -1 : 1;
             param.args[0] = Integer.valueOf(adjusted);
@@ -761,7 +761,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 @Override
                 public void run() {
                     Activity activity = activeActivity.get();
-                    if (!isPortrait(activity)) {
+                    if (activity != owner || !isPortrait(activity)) {
                         return;
                     }
                     Manifest manifest = manifestFor(viewModel);

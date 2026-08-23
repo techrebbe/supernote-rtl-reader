@@ -61,6 +61,33 @@ for required in (
             f"configuration refresh is missing fail-closed guard: {required}"
         )
 
+focus_start = hook.find("private static void schedulePortraitFocus")
+focus_end = hook.find("private static void scheduleConfigurationRefresh", focus_start)
+if focus_start < 0 or focus_end < 0:
+    raise SystemExit("missing portrait focus scheduler")
+portrait_focus = hook[focus_start:focus_end]
+if "activity != owner" not in portrait_focus:
+    raise SystemExit("portrait focus retries must not mutate a replaced activity")
+
+turn_start = hook.find("private static void handleTurn")
+turn_end = hook.find("private static void handlePageLoaded", turn_start)
+if turn_start < 0 or turn_end < 0:
+    raise SystemExit("missing page-turn implementation")
+page_turn = hook[turn_start:turn_end]
+save_index = page_turn.find("if (!saveNativeTrails(activity))")
+pending_index = page_turn.find("state.pendingPage = plan.targetPage")
+if save_index < 0 or pending_index < 0 or save_index >= pending_index:
+    raise SystemExit("cross-page state must follow a successful native trail save")
+cross_page = page_turn[save_index:pending_index]
+for forbidden in (
+    "state.half = plan.targetHalf",
+    "state.lastPage = plan.targetPage",
+):
+    if forbidden in cross_page:
+        raise SystemExit(
+            "failed cross-page saves must preserve the current reader state"
+        )
+
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
 scope = (root / "meta/META-INF/xposed/scope.list").read_text(
     encoding="utf-8"

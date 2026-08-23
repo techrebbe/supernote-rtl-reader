@@ -9,14 +9,18 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "virtual_spread"))
 
-from generate_virtual_spread import build_pairs, build_virtual_spread  # noqa: E402
+from generate_virtual_spread import (  # noqa: E402
+    VirtualSpreadError,
+    build_pairs,
+    build_virtual_spread,
+)
 
 
 PAGE_SIZES = [
@@ -54,6 +58,43 @@ def create_odd_page_fixture(path: Path) -> None:
             pdf.linkRect("", "source-3", (15, 15, min(width - 15, 180), 48))
         pdf.showPage()
     pdf.save()
+
+
+def create_rotated_link_fixture(path: Path) -> None:
+    unrotated = path.with_name("unrotated.pdf")
+    pdf = canvas.Canvas(str(unrotated), pagesize=(200, 100))
+    pdf.bookmarkPage("first")
+    pdf.drawString(10, 70, "ROTATED LINK SOURCE")
+    pdf.linkRect("", "second", (10, 20, 60, 40))
+    pdf.showPage()
+    pdf.setPageSize((200, 100))
+    pdf.bookmarkPage("second")
+    pdf.drawString(10, 70, "LINK TARGET")
+    pdf.showPage()
+    pdf.save()
+
+    source = PdfReader(str(unrotated), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    writer.pages[0].rotate(90)
+    with path.open("wb") as stream:
+        writer.write(stream)
+    unrotated.unlink()
+
+
+def transform_rect(rect: object, transform: list[float]) -> list[float]:
+    x0, y0, x1, y1 = [float(value) for value in rect]
+    a, b, c, d, e, f = transform
+    points = [
+        (a * x + c * y + e, b * x + d * y + f)
+        for x, y in ((x0, y0), (x0, y1), (x1, y0), (x1, y1))
+    ]
+    return [
+        min(point[0] for point in points),
+        min(point[1] for point in points),
+        max(point[0] for point in points),
+        max(point[1] for point in points),
+    ]
 
 
 def destination_page_index(reader: PdfReader, annotation: object) -> int:
@@ -150,6 +191,85 @@ class VirtualSpreadTests(unittest.TestCase):
                 self.assertGreaterEqual(bottom, slot_bottom - 0.001)
                 self.assertLessEqual(right, slot_right + 0.001)
                 self.assertLessEqual(top, slot_top + 0.001)
+
+    def test_output_and_manifest_paths_must_be_distinct(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            collision = root / "collision.pdf"
+            create_odd_page_fixture(source)
+
+            with self.assertRaisesRegex(VirtualSpreadError, "must be distinct"):
+                build_virtual_spread(
+                    source,
+                    collision,
+                    collision,
+                    force=True,
+                )
+            self.assertFalse(collision.exists())
+
+    def test_non_finite_spread_geometry_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            create_odd_page_fixture(source)
+            cases = (
+                {"spread_width": float("nan")},
+                {"spread_height": float("inf")},
+                {"gutter": float("nan")},
+            )
+            for index, values in enumerate(cases):
+                with self.subTest(values=values):
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "dimensions and gutter",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            root / f"spread-{index}.pdf",
+                            root / f"spread-{index}.pdf.json",
+                            **values,
+                        )
+
+    def test_rotated_page_link_uses_source_to_spread_transform(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "rotated-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_rotated_link_fixture(source)
+            source_reader = PdfReader(str(source), strict=True)
+            source_rect = source_reader.pages[0]["/Annots"][0].get_object()[
+                "/Rect"
+            ]
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                direction="rtl",
+                cover_separate=False,
+            )
+            mapping = manifest["sourcePages"][0]
+            transform = mapping["transform"]
+            self.assertNotAlmostEqual(transform[1], 0.0)
+            self.assertNotAlmostEqual(transform[2], 0.0)
+
+            output_reader = PdfReader(str(output), strict=True)
+            output_rect = [
+                float(value)
+                for value in output_reader.pages[0]["/Annots"][0]
+                .get_object()["/Rect"]
+            ]
+            expected_rect = transform_rect(source_rect, transform)
+            for actual, expected in zip(output_rect, expected_rect):
+                self.assertAlmostEqual(actual, expected, places=4)
+
+            left, bottom, right, top = mapping["destination"]
+            self.assertGreaterEqual(output_rect[0], left - 0.001)
+            self.assertGreaterEqual(output_rect[1], bottom - 0.001)
+            self.assertLessEqual(output_rect[2], right + 0.001)
+            self.assertLessEqual(output_rect[3], top + 0.001)
 
 
 if __name__ == "__main__":

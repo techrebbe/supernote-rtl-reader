@@ -23,9 +23,11 @@ publishes the result only if both the PDF identity and sidecar digest are still
 unchanged, then refreshes the still-open native reader from its main thread.
 Page-bar and page-turn callbacks never perform the full-file hash.
 
-Internal-link source and target pages, virtual pages, and sides must also agree
-with the authoritative `sourcePages` mapping; a contradictory link rejects the
-whole manifest rather than navigating to an inferred half.
+The `links` collection is required. Every entry must be a complete internal or
+URI record whose source page, virtual page, and side agree with the
+authoritative `sourcePages` mapping; internal targets must agree as well.
+Missing collections, unknown record kinds, malformed URI records, and
+contradictory mappings reject the whole manifest rather than losing half focus.
 
 For a matching document it:
 

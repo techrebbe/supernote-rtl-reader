@@ -182,26 +182,41 @@ for required in (
     'manifest_rejected reason=snapshot_changed_during_read',
     'root.opt("coverSeparate")',
     "sourcePagesJson.length() != sourcePageCount",
+    'JSONArray linksJson = root.optJSONArray("links")',
+    "linksJson == null",
     "spreadEntryMatches(",
     "sourceEntryMatches(",
     "linkEndpointMatches(",
     'link.optInt("sourcePage", -1)',
     '"targetSourcePage"',
+    '!("internal".equals(kind) || "uri".equals(kind))',
+    'if ("uri".equals(kind))',
+    'link.opt("uri") instanceof String',
     'manifest_rejected reason=cover_layout',
     'manifest_rejected reason=source_layout',
     'manifest_rejected reason=link_mapping',
+    'manifest_rejected reason=link_record',
 ):
     if required not in manifest_validation:
         raise SystemExit(
             f"manifest validation is missing content authority: {required}"
         )
 
+for forbidden in (
+    "if (linksJson != null)",
+    'link == null || !"internal".equals(link.optString("kind"))',
+):
+    if forbidden in manifest_validation:
+        raise SystemExit(
+            f"manifest parser still skips malformed link metadata: {forbidden}"
+        )
+
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
-if 'android:versionCode="11"' not in manifest:
+if 'android:versionCode="12"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version code")
-if 'android:versionName="0.0.11"' not in manifest:
+if 'android:versionName="0.0.12"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
-if 'private static final String VERSION = "0.0.11"' not in hook:
+if 'private static final String VERSION = "0.0.12"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
 scope = (root / "meta/META-INF/xposed/scope.list").read_text(
     encoding="utf-8"

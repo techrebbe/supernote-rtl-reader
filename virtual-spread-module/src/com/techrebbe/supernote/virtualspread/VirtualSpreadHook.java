@@ -56,7 +56,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final String SCHEMA =
         "techrebbe.supernote.virtual-spread/v1";
     private static final String TAG = "SN_VIRTUAL_SPREAD";
-    private static final String VERSION = "0.0.11";
+    private static final String VERSION = "0.0.12";
 
     private static volatile WeakReference<Activity> activeActivity =
         new WeakReference<>(null);
@@ -1350,9 +1350,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         JSONObject output = root.optJSONObject("output");
         JSONArray spreadsJson = root.optJSONArray("spreads");
         JSONArray sourcePagesJson = root.optJSONArray("sourcePages");
+        JSONArray linksJson = root.optJSONArray("links");
         if (!(coverValue instanceof Boolean)
             || source == null || output == null
-            || spreadsJson == null || sourcePagesJson == null) {
+            || spreadsJson == null || sourcePagesJson == null
+            || linksJson == null) {
             log("manifest_rejected reason=manifest_shape path=" + key);
             return null;
         }
@@ -1434,68 +1436,88 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
         ArrayList<VirtualSpreadNavigation.LinkTarget> links =
             new ArrayList<>();
-        JSONArray linksJson = root.optJSONArray("links");
-        if (linksJson != null) {
-            for (int index = 0; index < linksJson.length(); index++) {
-                JSONObject link = linksJson.optJSONObject(index);
-                if (link == null || !"internal".equals(link.optString("kind"))) {
-                    continue;
-                }
-                int sourceSourcePage = link.optInt("sourcePage", -1);
-                int sourceOutputPage = link.optInt("outputPage", -1);
-                int targetSourcePage = link.optInt(
-                    "targetSourcePage",
-                    -1
-                );
-                int targetOutputPage = link.optInt("targetOutputPage", -1);
-                String sourceSide = link.optString("sourceSide");
-                String targetSide = link.optString("targetSide");
-                JSONArray rect = link.optJSONArray("rect");
-                if (sourceOutputPage < 0 || sourceOutputPage >= pageCount
-                    || targetOutputPage < 0 || targetOutputPage >= pageCount
-                    || rect == null || rect.length() != 4
-                    || !linkEndpointMatches(
-                        sourcePagesJson,
-                        sourceSourcePage,
-                        sourceOutputPage,
-                        sourceSide
-                    ) || !linkEndpointMatches(
-                        sourcePagesJson,
-                        targetSourcePage,
-                        targetOutputPage,
-                        targetSide
-                    )) {
-                    log("manifest_rejected reason=link_mapping index=" + index);
-                    return null;
-                }
-                double x0 = rect.optDouble(0, Double.NaN);
-                double y0 = rect.optDouble(1, Double.NaN);
-                double x1 = rect.optDouble(2, Double.NaN);
-                double y1 = rect.optDouble(3, Double.NaN);
-                if (Double.isNaN(x0) || Double.isInfinite(x0)
-                    || Double.isNaN(y0) || Double.isInfinite(y0)
-                    || Double.isNaN(x1) || Double.isInfinite(x1)
-                    || Double.isNaN(y1) || Double.isInfinite(y1)) {
-                    log("manifest_rejected reason=link_rect index=" + index);
-                    return null;
-                }
-                VirtualSpreadNavigation.Half sourceHalf = "left".equals(
-                    sourceSide
-                ) ? VirtualSpreadNavigation.Half.LEFT
-                    : VirtualSpreadNavigation.Half.RIGHT;
-                links.add(new VirtualSpreadNavigation.LinkTarget(
-                    sourceOutputPage,
-                    targetOutputPage,
-                    sourceHalf,
-                    "left".equals(targetSide)
-                        ? VirtualSpreadNavigation.Half.LEFT
-                        : VirtualSpreadNavigation.Half.RIGHT,
-                    (float) x0,
-                    (float) y0,
-                    (float) x1,
-                    (float) y1
-                ));
+        for (int index = 0; index < linksJson.length(); index++) {
+            JSONObject link = linksJson.optJSONObject(index);
+            if (link == null) {
+                log("manifest_rejected reason=link_record index=" + index);
+                return null;
             }
+            String kind = link.optString("kind");
+            if (!("internal".equals(kind) || "uri".equals(kind))) {
+                log("manifest_rejected reason=link_record index=" + index);
+                return null;
+            }
+            int sourceSourcePage = link.optInt("sourcePage", -1);
+            int sourceOutputPage = link.optInt("outputPage", -1);
+            String sourceSide = link.optString("sourceSide");
+            JSONArray rect = link.optJSONArray("rect");
+            if (sourceOutputPage < 0 || sourceOutputPage >= pageCount
+                || rect == null || rect.length() != 4) {
+                log("manifest_rejected reason=link_record index=" + index);
+                return null;
+            }
+            if (!linkEndpointMatches(
+                    sourcePagesJson,
+                    sourceSourcePage,
+                    sourceOutputPage,
+                    sourceSide
+                )) {
+                log("manifest_rejected reason=link_mapping index=" + index);
+                return null;
+            }
+            double x0 = rect.optDouble(0, Double.NaN);
+            double y0 = rect.optDouble(1, Double.NaN);
+            double x1 = rect.optDouble(2, Double.NaN);
+            double y1 = rect.optDouble(3, Double.NaN);
+            if (Double.isNaN(x0) || Double.isInfinite(x0)
+                || Double.isNaN(y0) || Double.isInfinite(y0)
+                || Double.isNaN(x1) || Double.isInfinite(x1)
+                || Double.isNaN(y1) || Double.isInfinite(y1)) {
+                log("manifest_rejected reason=link_rect index=" + index);
+                return null;
+            }
+            if ("uri".equals(kind)) {
+                if (!(link.opt("uri") instanceof String)) {
+                    log("manifest_rejected reason=link_record index=" + index);
+                    return null;
+                }
+                continue;
+            }
+            int targetSourcePage = link.optInt(
+                "targetSourcePage",
+                -1
+            );
+            int targetOutputPage = link.optInt("targetOutputPage", -1);
+            String targetSide = link.optString("targetSide");
+            if (targetOutputPage < 0 || targetOutputPage >= pageCount) {
+                log("manifest_rejected reason=link_record index=" + index);
+                return null;
+            }
+            if (!linkEndpointMatches(
+                    sourcePagesJson,
+                    targetSourcePage,
+                    targetOutputPage,
+                    targetSide
+                )) {
+                log("manifest_rejected reason=link_mapping index=" + index);
+                return null;
+            }
+            VirtualSpreadNavigation.Half sourceHalf = "left".equals(
+                sourceSide
+            ) ? VirtualSpreadNavigation.Half.LEFT
+                : VirtualSpreadNavigation.Half.RIGHT;
+            links.add(new VirtualSpreadNavigation.LinkTarget(
+                sourceOutputPage,
+                targetOutputPage,
+                sourceHalf,
+                "left".equals(targetSide)
+                    ? VirtualSpreadNavigation.Half.LEFT
+                    : VirtualSpreadNavigation.Half.RIGHT,
+                (float) x0,
+                (float) y0,
+                (float) x1,
+                (float) y1
+            ));
         }
         return new Manifest(
             key,

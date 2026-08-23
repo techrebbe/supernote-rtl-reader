@@ -587,6 +587,13 @@ runtime's 8 MiB sidecar limit before publication, and makes CI compile, D8,
 package, sign, and verify the actual companion APK on Ubuntu. Deterministic
 regressions hold a live lock/marker while a second generator is rejected and
 inject an oversized staged manifest before any final file can change.
+A tenth review pass made publication ownership exclusively output-PDF keyed and
+restricted generation to the runtime's only discoverable sibling sidecar,
+`<output>.json`. One regression proves syntactic aliases of the same output use
+the same transaction artifacts and OS lock; another proves an alternate
+manifest path is rejected before a lock is created or the existing PDF, runtime
+sidecar, or alternate file can change. The generator suite now contains 21
+tests.
 These automated checks do not replace or restate the v0.0.8 hardware result;
 v0.0.15 still requires a focused generated-pair smoke test before release.
 

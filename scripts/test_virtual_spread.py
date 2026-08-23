@@ -32,6 +32,7 @@ from generate_virtual_spread import (  # noqa: E402
     _layout_authority_sha256,
     _link_authority_sha256,
     _publish_pair,
+    _publication_artifacts,
     _publication_lock,
     _publication_lock_path,
     _prepare_publication_transaction,
@@ -419,7 +420,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 sorted(path.name for path in root.iterdir()),
                 sorted([
                     "source.pdf",
-                    _publication_lock_path(output, manifest_path).name,
+                    _publication_lock_path(output).name,
                 ]),
             )
 
@@ -455,7 +456,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 sorted(path.name for path in root.iterdir()),
                 sorted([
                     "source.pdf",
-                    _publication_lock_path(output, manifest_path).name,
+                    _publication_lock_path(output).name,
                 ]),
             )
 
@@ -500,7 +501,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 sorted(path.name for path in root.iterdir()),
                 sorted([
                     "source.pdf",
-                    _publication_lock_path(output, manifest_path).name,
+                    _publication_lock_path(output).name,
                 ]),
             )
 
@@ -543,7 +544,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 sorted(path.name for path in root.iterdir()),
                 sorted([
                     "source.pdf",
-                    _publication_lock_path(output, manifest_path).name,
+                    _publication_lock_path(output).name,
                 ]),
             )
 
@@ -690,6 +691,61 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertLessEqual(output_rect[2], right + 0.001)
             self.assertLessEqual(output_rect[3], top + 0.001)
 
+    def test_publication_ownership_is_keyed_only_by_output_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "nested" / ".." / "spread.pdf"
+            canonical = root / "spread.pdf"
+
+            self.assertEqual(
+                _publication_artifacts(output),
+                _publication_artifacts(canonical),
+            )
+            marker, output_backup, manifest_backup = (
+                _publication_artifacts(canonical)
+            )
+            self.assertEqual(marker.parent, root)
+            self.assertEqual(output_backup.parent, root)
+            self.assertEqual(manifest_backup.parent, root)
+            self.assertEqual(
+                _publication_lock_path(output),
+                _publication_lock_path(canonical),
+            )
+
+    def test_custom_manifest_path_is_rejected_before_lock_or_mutation(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            runtime_manifest = root / "spread.pdf.json"
+            custom_manifest = root / "custom.json"
+            create_odd_page_fixture(source)
+            output.write_bytes(b"old-pdf")
+            runtime_manifest.write_bytes(b"old-runtime-manifest")
+            custom_manifest.write_bytes(b"old-custom-manifest")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Manifest path must be the runtime sibling",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    custom_manifest,
+                    force=True,
+                )
+
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(
+                runtime_manifest.read_bytes(), b"old-runtime-manifest"
+            )
+            self.assertEqual(
+                custom_manifest.read_bytes(), b"old-custom-manifest"
+            )
+            self.assertFalse(_publication_lock_path(output).exists())
+
     def test_live_publication_lock_blocks_recovery_by_second_generator(
         self,
     ) -> None:
@@ -714,7 +770,7 @@ class VirtualSpreadTests(unittest.TestCase):
             marker = Path(transaction["markerPath"])
             marker_before = marker.read_bytes()
 
-            with _publication_lock(output, manifest):
+            with _publication_lock(output):
                 with self.assertRaisesRegex(
                     VirtualSpreadError,
                     "Publication is already active",

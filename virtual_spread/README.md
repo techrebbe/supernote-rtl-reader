@@ -37,7 +37,6 @@ py -3.12 -m venv .venv
 python .\virtual_spread\generate_virtual_spread.py `
   source.pdf `
   output\pdf\source.virtual-spread.pdf `
-  --manifest output\pdf\source.virtual-spread.pdf.json `
   --direction rtl `
   --cover-separate
 ```
@@ -47,10 +46,14 @@ links, and existing outputs unless `--force` is supplied. It copies and hashes
 the source through one file snapshot, re-reads the opened source to prove that
 the copied bytes are stable, generates only from that verified snapshot, and
 rehashes the current source before publication. The PDF and manifest are each
-protected by a deterministic OS-owned lock for the entire recovery, generation,
-and publication operation. A concurrent generator targeting the same pair fails
-without touching the live transaction; a crashed process releases the lock so
-the next invocation can recover it.
+protected by a deterministic OS-owned lock keyed only by the output PDF for the
+entire recovery, generation, and publication operation. A concurrent generator
+targeting the same output fails without touching the live transaction; a crashed
+process releases the lock so the next invocation can recover it. The Android
+runtime discovers only the sibling `<output>.json` sidecar. The generator uses
+that path by default and rejects any other `--manifest` path before acquiring a
+lock or changing an output, preventing alternate sidecars from bypassing either
+runtime discovery or publication ownership.
 The PDF and manifest are staged before publication as one recoverable pair. A transaction
 marker is durably published before either previous file is moved. POSIX builds
 sync every affected parent directory; Windows builds use

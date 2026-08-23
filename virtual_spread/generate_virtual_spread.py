@@ -661,12 +661,35 @@ def _publish_pair(
         raise
 
 
-def _publication_artifacts(
+def _runtime_manifest_path(output_path: Path) -> Path:
+    """Return the only sidecar path probed by the Android runtime."""
+    output_path = output_path.resolve()
+    return Path(str(output_path) + ".json")
+
+
+def _require_runtime_manifest_path(
     output_path: Path,
     manifest_path: Path,
+) -> Path:
+    expected = _runtime_manifest_path(output_path)
+    actual = manifest_path.resolve()
+    if os.path.normcase(str(actual)) != os.path.normcase(str(expected)):
+        raise VirtualSpreadError(
+            "Manifest path must be the runtime sibling "
+            f"{expected}; got {actual}"
+        )
+    return expected
+
+
+def _publication_artifacts(
+    output_path: Path,
 ) -> tuple[Path, Path, Path]:
     output_path = output_path.resolve()
-    manifest_path = manifest_path.resolve()
+    manifest_path = _runtime_manifest_path(output_path)
+    # The manifest is now derived rather than caller-controlled. Retaining the
+    # earlier canonical pair bytes keeps interrupted canonical transactions
+    # discoverable across this hardening update while ownership remains solely
+    # a function of the output PDF.
     key_material = (
         os.path.normcase(str(output_path))
         + "\0"
@@ -677,24 +700,23 @@ def _publication_artifacts(
     output_backup = output_path.parent / (
         f".virtual-spread-{key}.output.bak"
     )
-    manifest_backup = manifest_path.parent / (
+    manifest_backup = output_path.parent / (
         f".virtual-spread-{key}.manifest.bak"
     )
     return marker, output_backup, manifest_backup
 
 
-def _publication_lock_path(output_path: Path, manifest_path: Path) -> Path:
-    marker, _, _ = _publication_artifacts(output_path, manifest_path)
+def _publication_lock_path(output_path: Path) -> Path:
+    marker, _, _ = _publication_artifacts(output_path)
     return marker.with_name(marker.name + ".lock")
 
 
 @contextmanager
 def _publication_lock(
     output_path: Path,
-    manifest_path: Path,
 ) -> Iterator[None]:
-    """Serialize generation and recovery for one deterministic output pair."""
-    lock_path = _publication_lock_path(output_path, manifest_path)
+    """Serialize every publisher and recovery owner for one output PDF."""
+    lock_path = _publication_lock_path(output_path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     stream = lock_path.open("a+b")
     acquired = False
@@ -937,9 +959,9 @@ def _recover_pair_publication(
 ) -> str | None:
     output_path = output_path.resolve()
     manifest_path = manifest_path.resolve()
+    _require_runtime_manifest_path(output_path, manifest_path)
     marker_path, output_backup, manifest_backup = _publication_artifacts(
         output_path,
-        manifest_path,
     )
     if not marker_path.exists():
         if output_backup.exists() or manifest_backup.exists():
@@ -1023,10 +1045,10 @@ def _prepare_publication_transaction(
 ) -> dict[str, Any]:
     output_path = output_path.resolve()
     manifest_path = manifest_path.resolve()
+    _require_runtime_manifest_path(output_path, manifest_path)
     _recover_pair_publication(output_path, manifest_path)
     marker_path, output_backup, manifest_backup = _publication_artifacts(
         output_path,
-        manifest_path,
     )
     transaction: dict[str, Any] = {
         "schema": PUBLICATION_SCHEMA,
@@ -1349,7 +1371,8 @@ def build_virtual_spread(
         raise VirtualSpreadError(
             "Source PDF, output PDF, and manifest paths must be distinct"
         )
-    with _publication_lock(resolved_output, resolved_manifest):
+    _require_runtime_manifest_path(resolved_output, resolved_manifest)
+    with _publication_lock(resolved_output):
         return _build_virtual_spread_locked(
             resolved_source,
             resolved_output,
@@ -1367,7 +1390,11 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--manifest", type=Path)
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        help="optional explicit <output>.json path; other paths are rejected",
+    )
     parser.add_argument("--direction", choices=("rtl", "ltr"), default="rtl")
     parser.add_argument(
         "--cover-separate",

@@ -8,6 +8,7 @@ import hashlib
 import json
 import math
 import os
+import struct
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +27,7 @@ from pypdf.generic import (
 
 
 SCHEMA = "techrebbe.supernote.virtual-spread/v1"
+LINK_AUTHORITY_MARKER = b"%SNVirtualSpreadLinksSHA256:"
 
 
 class VirtualSpreadError(RuntimeError):
@@ -41,12 +43,153 @@ class Slot:
     height: float
 
 
+@dataclass(frozen=True)
+class SourceIdentity:
+    device: int
+    inode: int
+    size: int
+    modified_ns: int
+    changed_ns: int
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _identity(stat_result: os.stat_result) -> SourceIdentity:
+    return SourceIdentity(
+        device=int(stat_result.st_dev),
+        inode=int(stat_result.st_ino),
+        size=int(stat_result.st_size),
+        modified_ns=int(stat_result.st_mtime_ns),
+        changed_ns=int(stat_result.st_ctime_ns),
+    )
+
+
+def _same_open_file(
+    path_identity: SourceIdentity,
+    open_identity: SourceIdentity,
+) -> bool:
+    return (
+        path_identity.device == open_identity.device
+        and path_identity.inode == open_identity.inode
+        and path_identity.size == open_identity.size
+        and path_identity.modified_ns == open_identity.modified_ns
+    )
+
+
+def _snapshot_source(
+    source_path: Path,
+    snapshot_path: Path,
+) -> tuple[SourceIdentity, str]:
+    digest = hashlib.sha256()
+    try:
+        path_before = _identity(source_path.stat())
+        with source_path.open("rb") as source, snapshot_path.open("wb") as target:
+            opened_before = _identity(os.fstat(source.fileno()))
+            if not _same_open_file(path_before, opened_before):
+                raise VirtualSpreadError(
+                    "Source PDF changed before snapshot creation"
+                )
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                target.write(chunk)
+                digest.update(chunk)
+            target.flush()
+            os.fsync(target.fileno())
+            opened_after = _identity(os.fstat(source.fileno()))
+        path_after = _identity(source_path.stat())
+    except OSError as error:
+        raise VirtualSpreadError(
+            f"Cannot create a stable source snapshot: {source_path}"
+        ) from error
+    if (
+        opened_before != opened_after
+        or path_before != path_after
+    ):
+        raise VirtualSpreadError("Source PDF changed while snapshotting")
+    return path_before, digest.hexdigest()
+
+
+def _require_source_identity(
+    source_path: Path,
+    expected: SourceIdentity,
+) -> None:
+    try:
+        current = _identity(source_path.stat())
+    except OSError as error:
+        raise VirtualSpreadError(
+            "Source PDF disappeared before publication"
+        ) from error
+    if current != expected:
+        raise VirtualSpreadError("Source PDF changed before publication")
+
+
+def _float_bits(value: Any) -> str:
+    return struct.pack(">d", float(value)).hex()
+
+
+def _canonical_link(link: dict[str, Any]) -> str:
+    kind = str(link["kind"])
+    fields = [
+        "v1",
+        kind,
+        str(int(link["sourcePage"])),
+        str(link["sourceSide"]),
+        str(int(link["outputPage"])),
+        *(_float_bits(value) for value in link["rect"]),
+    ]
+    if kind == "internal":
+        fields.extend(
+            [
+                str(int(link["targetSourcePage"])),
+                str(int(link["targetOutputPage"])),
+                str(link["targetSide"]),
+            ]
+        )
+    elif kind == "uri":
+        fields.append(
+            hashlib.sha256(str(link["uri"]).encode("utf-8")).hexdigest()
+        )
+    else:
+        raise VirtualSpreadError(f"Unsupported link kind: {kind}")
+    return "|".join(fields)
+
+
+def _link_authority_sha256(links: list[dict[str, Any]]) -> str:
+    digest = hashlib.sha256()
+    for link in links:
+        digest.update(_canonical_link(link).encode("utf-8"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def _bind_pdf_link_authority(path: Path, authority_sha256: str) -> None:
+    if len(authority_sha256) != 64 or any(
+        character not in "0123456789abcdef" for character in authority_sha256
+    ):
+        raise VirtualSpreadError("Invalid link authority digest")
+    marker = LINK_AUTHORITY_MARKER + authority_sha256.encode("ascii") + b"\n"
+    with path.open("r+b") as stream:
+        stream.seek(0, os.SEEK_END)
+        length = stream.tell()
+        tail_start = max(0, length - 4096)
+        stream.seek(tail_start)
+        tail = stream.read()
+        startxref = tail.rfind(b"startxref")
+        if startxref < 0:
+            raise VirtualSpreadError("Written PDF has no final startxref")
+        if LINK_AUTHORITY_MARKER in tail[startxref:]:
+            raise VirtualSpreadError("Written PDF has an invalid authority marker")
+        stream.seek(tail_start + startxref)
+        stream.write(marker)
+        stream.write(tail[startxref:])
+        stream.truncate()
+        stream.flush()
+        os.fsync(stream.fileno())
 
 
 def build_pairs(
@@ -419,8 +562,11 @@ def _publish_pair(
                 backup.unlink(missing_ok=True)
 
 
-def build_virtual_spread(
+def _build_virtual_spread_from_snapshot(
     source_path: Path,
+    source_snapshot: Path,
+    source_identity: SourceIdentity,
+    source_hash: str,
     output_path: Path,
     manifest_path: Path,
     *,
@@ -450,7 +596,7 @@ def build_virtual_spread(
     if slot_width <= 0:
         raise VirtualSpreadError("Gutter consumes the complete spread width")
 
-    reader = PdfReader(str(source_path), strict=True)
+    reader = PdfReader(str(source_snapshot), strict=True)
     if reader.is_encrypted:
         raise VirtualSpreadError("Encrypted PDFs are not supported by this prototype")
     pairs = build_pairs(len(reader.pages), direction, cover_separate)
@@ -543,7 +689,7 @@ def build_virtual_spread(
                 )
             )
 
-    source_hash = sha256_file(source_path)
+    link_authority_hash = _link_authority_sha256(links)
     metadata = {
         key: str(value)
         for key, value in (reader.metadata or {}).items()
@@ -554,6 +700,7 @@ def build_virtual_spread(
             "/SNVirtualSpreadSchema": SCHEMA,
             "/SNVirtualSpreadSource": source_path.name,
             "/SNVirtualSpreadSourceSHA256": source_hash,
+            "/SNVirtualSpreadLinksSHA256": link_authority_hash,
         }
     )
     writer.add_metadata(metadata)
@@ -567,6 +714,7 @@ def build_virtual_spread(
             writer.write(stream)
             stream.flush()
             os.fsync(stream.fileno())
+        _bind_pdf_link_authority(temporary_output, link_authority_hash)
         verification = PdfReader(str(temporary_output), strict=True)
         if len(verification.pages) != len(pairs):
             raise VirtualSpreadError("Written PDF failed page-count verification")
@@ -581,7 +729,7 @@ def build_virtual_spread(
             "source": {
                 "name": source_path.name,
                 "path": str(source_path),
-                "size": source_path.stat().st_size,
+                "size": source_identity.size,
                 "sha256": source_hash,
                 "pageCount": len(reader.pages),
             },
@@ -593,6 +741,7 @@ def build_virtual_spread(
                 "pageCount": len(pairs),
                 "spreadSize": [spread_width, spread_height],
                 "gutter": gutter,
+                "linkAuthoritySha256": link_authority_hash,
             },
             "direction": direction,
             "coverSeparate": cover_separate,
@@ -604,6 +753,7 @@ def build_virtual_spread(
         }
         temporary_manifest = _temporary_neighbor(manifest_path, ".tmp")
         _write_json(temporary_manifest, manifest)
+        _require_source_identity(source_path, source_identity)
         _publish_pair(
             temporary_output,
             output_path,
@@ -615,6 +765,60 @@ def build_virtual_spread(
         temporary_output.unlink(missing_ok=True)
         if temporary_manifest is not None:
             temporary_manifest.unlink(missing_ok=True)
+
+
+def build_virtual_spread(
+    source_path: Path,
+    output_path: Path,
+    manifest_path: Path,
+    *,
+    direction: str = "rtl",
+    cover_separate: bool = True,
+    spread_width: float = 864.0,
+    spread_height: float = 648.0,
+    gutter: float = 0.0,
+    force: bool = False,
+) -> dict[str, Any]:
+    source_path = source_path.resolve()
+    output_path = output_path.resolve()
+    manifest_path = manifest_path.resolve()
+    if not source_path.is_file():
+        raise VirtualSpreadError(f"Source PDF does not exist: {source_path}")
+    if len({source_path, output_path, manifest_path}) != 3:
+        raise VirtualSpreadError(
+            "Source PDF, output PDF, and manifest paths must be distinct"
+        )
+    if not force and (output_path.exists() or manifest_path.exists()):
+        raise VirtualSpreadError("Output already exists; pass --force to replace it")
+    if not all(math.isfinite(value) for value in (
+        spread_width, spread_height, gutter
+    )) or spread_width <= 0 or spread_height <= 0 or gutter < 0:
+        raise VirtualSpreadError("Spread dimensions and gutter must be valid")
+    if (spread_width - gutter) / 2.0 <= 0:
+        raise VirtualSpreadError("Gutter consumes the complete spread width")
+
+    source_snapshot = _temporary_neighbor(output_path, ".source.tmp")
+    try:
+        source_identity, source_hash = _snapshot_source(
+            source_path,
+            source_snapshot,
+        )
+        return _build_virtual_spread_from_snapshot(
+            source_path,
+            source_snapshot,
+            source_identity,
+            source_hash,
+            output_path,
+            manifest_path,
+            direction=direction,
+            cover_separate=cover_separate,
+            spread_width=spread_width,
+            spread_height=spread_height,
+            gutter=gutter,
+            force=force,
+        )
+    finally:
+        source_snapshot.unlink(missing_ok=True)
 
 
 def _parser() -> argparse.ArgumentParser:

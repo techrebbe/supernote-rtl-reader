@@ -20,11 +20,19 @@ New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
     -d $testRoot `
     (Join-Path $projectRoot `
         'src\com\techrebbe\supernote\virtualspread\VirtualSpreadNavigation.java') `
+    (Join-Path $projectRoot `
+        'src\com\techrebbe\supernote\virtualspread\VirtualSpreadLinkAuthority.java') `
+    (Join-Path $projectRoot 'tests\VirtualSpreadLinkAuthorityTest.java') `
     (Join-Path $projectRoot 'tests\VirtualSpreadNavigationTest.java') `
     (Join-Path $projectRoot `
         'tests\VirtualSpreadNavigationExhaustiveTest.java')
 if ($LASTEXITCODE -ne 0) {
     throw "navigation test compilation failed with exit code $LASTEXITCODE"
+}
+
+& java -cp $testRoot VirtualSpreadLinkAuthorityTest
+if ($LASTEXITCODE -ne 0) {
+    throw "link-authority tests failed with exit code $LASTEXITCODE"
 }
 
 & java -cp $testRoot VirtualSpreadNavigationTest

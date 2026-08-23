@@ -20,8 +20,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "virtual_spread"))
 
 from generate_virtual_spread import (  # noqa: E402
+    LINK_AUTHORITY_MARKER,
+    SourceIdentity,
     VirtualSpreadError,
+    _identity,
+    _link_authority_sha256,
     _publish_pair,
+    _write_json,
     build_pairs,
     build_virtual_spread,
 )
@@ -273,6 +278,114 @@ class VirtualSpreadTests(unittest.TestCase):
                 self.assertGreaterEqual(bottom, slot_bottom - 0.001)
                 self.assertLessEqual(right, slot_right + 0.001)
                 self.assertLessEqual(top, slot_top + 0.001)
+
+    def test_link_authority_is_embedded_and_tamper_evident(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                direction="rtl",
+                cover_separate=True,
+            )
+
+            authority = _link_authority_sha256(manifest["links"])
+            self.assertEqual(
+                manifest["output"]["linkAuthoritySha256"],
+                authority,
+            )
+            metadata = PdfReader(str(output), strict=True).metadata
+            self.assertEqual(
+                metadata["/SNVirtualSpreadLinksSHA256"],
+                authority,
+            )
+            with output.open("rb") as stream:
+                stream.seek(max(0, output.stat().st_size - 4096))
+                tail = stream.read()
+            marker = LINK_AUTHORITY_MARKER + authority.encode("ascii") + b"\n"
+            self.assertEqual(tail.count(marker), 1)
+            self.assertEqual(
+                tail.index(marker) + len(marker),
+                tail.rindex(b"startxref"),
+            )
+
+            tampered_links = json.loads(json.dumps(manifest["links"]))
+            tampered_links[0]["targetSourcePage"] = 6
+            tampered_links[0]["targetSide"] = "left"
+            self.assertEqual(tampered_links[0]["targetOutputPage"], 3)
+            self.assertNotEqual(
+                _link_authority_sha256(tampered_links),
+                authority,
+            )
+            self.assertNotEqual(_link_authority_sha256([]), authority)
+
+    def test_source_change_before_publication_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+
+            def write_then_mutate(path: Path, value: dict[str, object]) -> None:
+                _write_json(path, value)
+                source.write_bytes(source.read_bytes() + b"\n% changed\n")
+
+            with mock.patch(
+                "generate_virtual_spread._write_json",
+                side_effect=write_then_mutate,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "changed before publication",
+                ):
+                    build_virtual_spread(source, output, manifest_path)
+
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+            self.assertEqual(
+                sorted(path.name for path in root.iterdir()),
+                ["source.pdf"],
+            )
+
+    def test_source_change_during_snapshot_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            stable = _identity(source.stat())
+            changed = SourceIdentity(
+                device=stable.device,
+                inode=stable.inode,
+                size=stable.size,
+                modified_ns=stable.modified_ns,
+                changed_ns=stable.changed_ns + 1,
+            )
+
+            with mock.patch(
+                "generate_virtual_spread._identity",
+                side_effect=(stable, stable, changed, changed),
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "changed while snapshotting",
+                ):
+                    build_virtual_spread(source, output, manifest_path)
+
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+            self.assertEqual(
+                sorted(path.name for path in root.iterdir()),
+                ["source.pdf"],
+            )
 
     def test_output_and_manifest_paths_must_be_distinct(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

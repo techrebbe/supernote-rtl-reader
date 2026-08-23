@@ -192,6 +192,12 @@ for required in (
     '!("internal".equals(kind) || "uri".equals(kind))',
     'if ("uri".equals(kind))',
     'link.opt("uri") instanceof String',
+    '"linkAuthoritySha256"',
+    "VirtualSpreadLinkAuthority.readPdfDigest(pdf)",
+    "VirtualSpreadLinkAuthority.uri(",
+    "VirtualSpreadLinkAuthority.internal(",
+    "VirtualSpreadLinkAuthority.digest(",
+    'manifest_rejected reason=link_authority_records',
     'manifest_rejected reason=cover_layout',
     'manifest_rejected reason=source_layout',
     "x0 > x1",
@@ -214,11 +220,11 @@ for forbidden in (
         )
 
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
-if 'android:versionCode="13"' not in manifest:
+if 'android:versionCode="14"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version code")
-if 'android:versionName="0.0.13"' not in manifest:
+if 'android:versionName="0.0.14"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
-if 'private static final String VERSION = "0.0.13"' not in hook:
+if 'private static final String VERSION = "0.0.14"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
 scope = (root / "meta/META-INF/xposed/scope.list").read_text(
     encoding="utf-8"

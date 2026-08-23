@@ -564,11 +564,12 @@ compositor was disabled and absent from the document process.
 
 The complete fixture list, visible observations, logs, and before/after `.mark`
 hash evidence are recorded in `virtual_spread/HARDWARE_VALIDATION.md`. Later
-v0.0.9-v0.0.13 changes harden manifest authority, revision invalidation,
+v0.0.9-v0.0.14 changes harden manifest authority, revision invalidation,
 publication transactions, internal-link mapping validation, and asynchronous
 full-file verification. v0.0.13 also rejects reversed link rectangles and
-dereferences indirect PDF destinations; these automated checks do not replace
-or restate the v0.0.8 hardware result.
+dereferences indirect PDF destinations. v0.0.14 generates from a stable source
+snapshot and binds the complete ordered link collection to the hashed PDF;
+these automated checks do not replace or restate the v0.0.8 hardware result.
 
 ## Failure capture
 

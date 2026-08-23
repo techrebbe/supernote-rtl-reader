@@ -56,7 +56,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final String SCHEMA =
         "techrebbe.supernote.virtual-spread/v1";
     private static final String TAG = "SN_VIRTUAL_SPREAD";
-    private static final String VERSION = "0.0.13";
+    private static final String VERSION = "0.0.14";
 
     private static volatile WeakReference<Activity> activeActivity =
         new WeakReference<>(null);
@@ -1374,6 +1374,17 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             log("manifest_rejected reason=output_hash path=" + key);
             return null;
         }
+        String expectedLinkAuthority = output.optString(
+            "linkAuthoritySha256",
+            ""
+        );
+        String embeddedLinkAuthority =
+            VirtualSpreadLinkAuthority.readPdfDigest(pdf);
+        if (!isSha256(expectedLinkAuthority)
+            || !expectedLinkAuthority.equalsIgnoreCase(embeddedLinkAuthority)) {
+            log("manifest_rejected reason=link_authority path=" + key);
+            return null;
+        }
         int firstSourcePage = coverSeparate ? 1 : 0;
         int expectedPageCount = (coverSeparate ? 1 : 0)
             + (sourcePageCount - firstSourcePage + 1) / 2;
@@ -1436,6 +1447,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
         ArrayList<VirtualSpreadNavigation.LinkTarget> links =
             new ArrayList<>();
+        ArrayList<String> linkAuthorityRecords = new ArrayList<>();
         for (int index = 0; index < linksJson.length(); index++) {
             JSONObject link = linksJson.optJSONObject(index);
             if (link == null) {
@@ -1482,6 +1494,16 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     log("manifest_rejected reason=link_record index=" + index);
                     return null;
                 }
+                linkAuthorityRecords.add(VirtualSpreadLinkAuthority.uri(
+                    sourceSourcePage,
+                    sourceSide,
+                    sourceOutputPage,
+                    x0,
+                    y0,
+                    x1,
+                    y1,
+                    (String) link.opt("uri")
+                ));
                 continue;
             }
             int targetSourcePage = link.optInt(
@@ -1503,6 +1525,18 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 log("manifest_rejected reason=link_mapping index=" + index);
                 return null;
             }
+            linkAuthorityRecords.add(VirtualSpreadLinkAuthority.internal(
+                sourceSourcePage,
+                sourceSide,
+                sourceOutputPage,
+                x0,
+                y0,
+                x1,
+                y1,
+                targetSourcePage,
+                targetOutputPage,
+                targetSide
+            ));
             VirtualSpreadNavigation.Half sourceHalf = "left".equals(
                 sourceSide
             ) ? VirtualSpreadNavigation.Half.LEFT
@@ -1520,6 +1554,15 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 (float) y1
             ));
         }
+        String actualLinkAuthority = VirtualSpreadLinkAuthority.digest(
+            linkAuthorityRecords.toArray(
+                new String[linkAuthorityRecords.size()]
+            )
+        );
+        if (!expectedLinkAuthority.equalsIgnoreCase(actualLinkAuthority)) {
+            log("manifest_rejected reason=link_authority_records path=" + key);
+            return null;
+        }
         return new Manifest(
             key,
             sidecarDigest,
@@ -1529,6 +1572,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             links.toArray(new VirtualSpreadNavigation.LinkTarget[links.size()])
         );
     }
+
 
     private static byte[] readBytes(File file) throws Exception {
         if (file.length() > 8L * 1024L * 1024L) {

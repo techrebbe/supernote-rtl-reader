@@ -29,7 +29,11 @@ authoritative `sourcePages` mapping; internal targets must agree as well. Link
 rectangles must use finite, canonical left/bottom/right/top ordering. Missing
 collections, unknown record kinds, malformed URI records, reversed rectangles,
 and contradictory mappings reject the whole manifest rather than losing half
-focus.
+focus. The generator hashes a canonical form of the complete ordered link
+collection and embeds that authority digest immediately before the PDF's final
+`startxref`. The runtime recomputes the digest from the sidecar and requires it
+to match both the sidecar identity and the marker inside the already-verified
+PDF, so omitted, reordered, or retargeted records fail closed.
 
 For a matching document it:
 

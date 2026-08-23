@@ -1,0 +1,538 @@
+#!/usr/bin/env python3
+"""Create a native-reader PDF whose pages are deterministic two-page spreads."""
+
+from __future__ import annotations
+
+import argparse
+import copy
+import hashlib
+import json
+import os
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Iterable
+
+from pypdf import PdfReader, PdfWriter, Transformation
+from pypdf.generic import (
+    ArrayObject,
+    DictionaryObject,
+    FloatObject,
+    IndirectObject,
+    NameObject,
+    NumberObject,
+    TextStringObject,
+)
+
+
+SCHEMA = "techrebbe.supernote.virtual-spread/v1"
+
+
+class VirtualSpreadError(RuntimeError):
+    """Raised when a source document cannot be transformed without data loss."""
+
+
+@dataclass(frozen=True)
+class Slot:
+    side: str
+    left: float
+    bottom: float
+    width: float
+    height: float
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def build_pairs(
+    page_count: int,
+    direction: str,
+    cover_separate: bool,
+) -> list[tuple[int | None, int | None]]:
+    """Return display-order (left, right) source page indices."""
+    if page_count < 1:
+        raise VirtualSpreadError("The source PDF has no pages")
+    if direction not in {"rtl", "ltr"}:
+        raise VirtualSpreadError(f"Unsupported direction: {direction}")
+
+    pairs: list[tuple[int | None, int | None]] = []
+    next_page = 0
+    if cover_separate:
+        if direction == "rtl":
+            pairs.append((None, 0))
+        else:
+            pairs.append((0, None))
+        next_page = 1
+
+    while next_page < page_count:
+        first = next_page
+        second = next_page + 1 if next_page + 1 < page_count else None
+        if direction == "rtl":
+            pairs.append((second, first))
+        else:
+            pairs.append((first, second))
+        next_page += 2
+    return pairs
+
+
+def _page_ref_key(value: Any) -> tuple[int, int] | None:
+    if isinstance(value, IndirectObject):
+        return (value.idnum, value.generation)
+    reference = getattr(value, "indirect_reference", None)
+    if isinstance(reference, IndirectObject):
+        return (reference.idnum, reference.generation)
+    return None
+
+
+def _normalized_page(source_page: Any) -> Any:
+    page = copy.deepcopy(source_page)
+    # merge_transformed_page also merges /Annots. Links are copied separately
+    # after every source-to-spread mapping is known, so the content clone must
+    # not carry stale source destinations into the output page.
+    page.pop("/Annots", None)
+    rotation = int(page.get("/Rotate", 0) or 0) % 360
+    if rotation:
+        page.transfer_rotation_to_content()
+    return page
+
+
+def _layout_for_page(page: Any, slot: Slot) -> dict[str, Any]:
+    box = page.cropbox
+    source_left = float(box.left)
+    source_bottom = float(box.bottom)
+    source_width = float(box.width)
+    source_height = float(box.height)
+    if source_width <= 0 or source_height <= 0:
+        raise VirtualSpreadError(
+            f"Invalid source page box: {source_width} x {source_height}"
+        )
+    scale = min(slot.width / source_width, slot.height / source_height)
+    placed_width = source_width * scale
+    placed_height = source_height * scale
+    translate_x = (
+        slot.left
+        + (slot.width - placed_width) / 2.0
+        - source_left * scale
+    )
+    translate_y = (
+        slot.bottom
+        + (slot.height - placed_height) / 2.0
+        - source_bottom * scale
+    )
+    destination = [
+        slot.left + (slot.width - placed_width) / 2.0,
+        slot.bottom + (slot.height - placed_height) / 2.0,
+        slot.left + (slot.width + placed_width) / 2.0,
+        slot.bottom + (slot.height + placed_height) / 2.0,
+    ]
+    return {
+        "side": slot.side,
+        "sourceBox": [
+            source_left,
+            source_bottom,
+            source_left + source_width,
+            source_bottom + source_height,
+        ],
+        "slot": [
+            slot.left,
+            slot.bottom,
+            slot.left + slot.width,
+            slot.bottom + slot.height,
+        ],
+        "destination": destination,
+        "scale": scale,
+        "transform": [scale, 0.0, 0.0, scale, translate_x, translate_y],
+    }
+
+
+def _transform_rect(rect: Iterable[Any], transform: list[float]) -> ArrayObject:
+    values = [float(value) for value in rect]
+    if len(values) != 4:
+        raise VirtualSpreadError(f"Invalid annotation rectangle: {values}")
+    x1, y1, x2, y2 = values
+    a, b, c, d, e, f = transform
+    points = [
+        (a * x + c * y + e, b * x + d * y + f)
+        for x, y in ((x1, y1), (x1, y2), (x2, y1), (x2, y2))
+    ]
+    return ArrayObject(
+        [
+            FloatObject(min(point[0] for point in points)),
+            FloatObject(min(point[1] for point in points)),
+            FloatObject(max(point[0] for point in points)),
+            FloatObject(max(point[1] for point in points)),
+        ]
+    )
+
+
+def _destination_source_page(
+    reader: PdfReader,
+    destination: Any,
+    page_ref_to_index: dict[tuple[int, int], int],
+) -> int | None:
+    if isinstance(destination, (str, TextStringObject, NameObject)):
+        names = [str(destination), str(destination).lstrip("/")]
+        named = reader.named_destinations
+        for name in names:
+            if name in named:
+                return reader.get_destination_page_number(named[name])
+        return None
+    if isinstance(destination, (list, ArrayObject)) and destination:
+        return page_ref_to_index.get(_page_ref_key(destination[0]))
+    return None
+
+
+def _attach_annotation(
+    writer: PdfWriter,
+    output_page_index: int,
+    annotation: DictionaryObject,
+) -> None:
+    """Attach an already-normalized annotation without rewriting its destination."""
+    output_page = writer.pages[output_page_index]
+    page_reference = output_page.indirect_reference
+    if page_reference is None:
+        raise VirtualSpreadError("Output page has no indirect reference")
+
+    annotation[NameObject("/P")] = page_reference
+    annotation_reference = writer._add_object(annotation)
+    annotations = output_page.get("/Annots")
+    if annotations is None:
+        annotation_array = ArrayObject()
+        output_page[NameObject("/Annots")] = annotation_array
+    else:
+        annotation_array = annotations.get_object()
+        if not isinstance(annotation_array, ArrayObject):
+            raise VirtualSpreadError("Output page /Annots is not an array")
+    annotation_array.append(annotation_reference)
+
+
+def _copy_link_annotation(
+    *,
+    reader: PdfReader,
+    writer: PdfWriter,
+    annotation: Any,
+    output_page_index: int,
+    source_page_index: int,
+    source_mapping: dict[int, dict[str, Any]],
+    page_ref_to_index: dict[tuple[int, int], int],
+) -> dict[str, Any]:
+    original = annotation.get_object()
+    mapping = source_mapping[source_page_index]
+    copied = DictionaryObject(
+        {
+            NameObject("/Type"): NameObject("/Annot"),
+            NameObject("/Subtype"): NameObject("/Link"),
+            NameObject("/Rect"): _transform_rect(
+                original["/Rect"], mapping["transform"]
+            ),
+            NameObject("/Border"): ArrayObject(
+                [NumberObject(0), NumberObject(0), NumberObject(0)]
+            ),
+            NameObject("/SNSourcePage"): NumberObject(source_page_index),
+        }
+    )
+    if "/Contents" in original:
+        copied[NameObject("/Contents")] = TextStringObject(
+            str(original["/Contents"])
+        )
+
+    destination = original.get("/Dest")
+    action = original.get("/A")
+    action_object = action.get_object() if action is not None else None
+    if destination is None and action_object is not None:
+        if action_object.get("/S") == "/GoTo":
+            destination = action_object.get("/D")
+        elif action_object.get("/S") == "/URI":
+            uri = action_object.get("/URI")
+            if uri is None:
+                raise VirtualSpreadError("URI link has no /URI value")
+            copied[NameObject("/A")] = DictionaryObject(
+                {
+                    NameObject("/S"): NameObject("/URI"),
+                    NameObject("/URI"): TextStringObject(str(uri)),
+                }
+            )
+            _attach_annotation(writer, output_page_index, copied)
+            return {
+                "sourcePage": source_page_index,
+                "sourceSide": source_mapping[source_page_index]["side"],
+                "outputPage": output_page_index,
+                "kind": "uri",
+                "uri": str(uri),
+                "rect": [float(value) for value in copied["/Rect"]],
+            }
+        else:
+            raise VirtualSpreadError(
+                f"Unsupported link action: {action_object.get('/S')}"
+            )
+
+    if destination is None:
+        raise VirtualSpreadError("Link annotation has neither /Dest nor /A")
+    target_source_page = _destination_source_page(
+        reader, destination, page_ref_to_index
+    )
+    if target_source_page is None or target_source_page not in source_mapping:
+        raise VirtualSpreadError(
+            f"Cannot resolve internal link on source page {source_page_index + 1}"
+        )
+    target = source_mapping[target_source_page]
+    target_output_page = int(target["virtualPageIndex"])
+    target_reference = writer.pages[target_output_page].indirect_reference
+    if target_reference is None:
+        raise VirtualSpreadError("Output page has no indirect reference")
+    copied[NameObject("/Dest")] = ArrayObject(
+        [target_reference, NameObject("/Fit")]
+    )
+    copied[NameObject("/SNTargetSourcePage")] = NumberObject(
+        target_source_page
+    )
+    copied[NameObject("/SNTargetSide")] = NameObject(
+        "/Left" if target["side"] == "left" else "/Right"
+    )
+    _attach_annotation(writer, output_page_index, copied)
+    return {
+        "sourcePage": source_page_index,
+        "sourceSide": source_mapping[source_page_index]["side"],
+        "outputPage": output_page_index,
+        "kind": "internal",
+        "targetSourcePage": target_source_page,
+        "targetOutputPage": target_output_page,
+        "targetSide": target["side"],
+        "rect": [float(value) for value in copied["/Rect"]],
+    }
+
+
+def _atomic_write_json(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as stream:
+            json.dump(value, stream, ensure_ascii=False, indent=2, sort_keys=True)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def build_virtual_spread(
+    source_path: Path,
+    output_path: Path,
+    manifest_path: Path,
+    *,
+    direction: str = "rtl",
+    cover_separate: bool = True,
+    spread_width: float = 864.0,
+    spread_height: float = 648.0,
+    gutter: float = 0.0,
+    force: bool = False,
+) -> dict[str, Any]:
+    source_path = source_path.resolve()
+    output_path = output_path.resolve()
+    manifest_path = manifest_path.resolve()
+    if not source_path.is_file():
+        raise VirtualSpreadError(f"Source PDF does not exist: {source_path}")
+    if source_path in {output_path, manifest_path}:
+        raise VirtualSpreadError("Output paths must differ from the source PDF")
+    if not force and (output_path.exists() or manifest_path.exists()):
+        raise VirtualSpreadError("Output already exists; pass --force to replace it")
+    if spread_width <= 0 or spread_height <= 0 or gutter < 0:
+        raise VirtualSpreadError("Spread dimensions and gutter must be valid")
+    slot_width = (spread_width - gutter) / 2.0
+    if slot_width <= 0:
+        raise VirtualSpreadError("Gutter consumes the complete spread width")
+
+    reader = PdfReader(str(source_path), strict=True)
+    if reader.is_encrypted:
+        raise VirtualSpreadError("Encrypted PDFs are not supported by this prototype")
+    pairs = build_pairs(len(reader.pages), direction, cover_separate)
+    normalized_pages = [_normalized_page(page) for page in reader.pages]
+    left_slot = Slot("left", 0.0, 0.0, slot_width, spread_height)
+    right_slot = Slot(
+        "right", slot_width + gutter, 0.0, slot_width, spread_height
+    )
+
+    writer = PdfWriter()
+    source_mapping: dict[int, dict[str, Any]] = {}
+    spread_records: list[dict[str, Any]] = []
+    for virtual_page_index, (left_source, right_source) in enumerate(pairs):
+        output_page = writer.add_blank_page(spread_width, spread_height)
+        record: dict[str, Any] = {
+            "virtualPageIndex": virtual_page_index,
+            "virtualPageNumber": virtual_page_index + 1,
+            "left": None,
+            "right": None,
+        }
+        for source_page_index, slot in (
+            (left_source, left_slot),
+            (right_source, right_slot),
+        ):
+            if source_page_index is None:
+                continue
+            page = normalized_pages[source_page_index]
+            layout = _layout_for_page(page, slot)
+            output_page.merge_transformed_page(
+                page,
+                Transformation(ctm=tuple(layout["transform"])),
+                over=True,
+                expand=False,
+            )
+            mapping = {
+                **layout,
+                "sourcePageIndex": source_page_index,
+                "sourcePageNumber": source_page_index + 1,
+                "virtualPageIndex": virtual_page_index,
+                "virtualPageNumber": virtual_page_index + 1,
+            }
+            source_mapping[source_page_index] = mapping
+            record[slot.side] = mapping
+        spread_records.append(record)
+
+    page_ref_to_index = {
+        key: index
+        for index, page in enumerate(reader.pages)
+        if (key := _page_ref_key(page)) is not None
+    }
+    links: list[dict[str, Any]] = []
+    for source_page_index, source_page in enumerate(reader.pages):
+        output_page_index = int(
+            source_mapping[source_page_index]["virtualPageIndex"]
+        )
+        for annotation in source_page.get("/Annots", []):
+            annotation_object = annotation.get_object()
+            if annotation_object.get("/Subtype") != "/Link":
+                raise VirtualSpreadError(
+                    "Only /Link annotations are supported by this prototype; "
+                    f"source page {source_page_index + 1} contains "
+                    f"{annotation_object.get('/Subtype')}"
+                )
+            links.append(
+                _copy_link_annotation(
+                    reader=reader,
+                    writer=writer,
+                    annotation=annotation,
+                    output_page_index=output_page_index,
+                    source_page_index=source_page_index,
+                    source_mapping=source_mapping,
+                    page_ref_to_index=page_ref_to_index,
+                )
+            )
+
+    metadata = {
+        key: str(value)
+        for key, value in (reader.metadata or {}).items()
+        if value is not None
+    }
+    metadata.update(
+        {
+            "/SNVirtualSpreadSchema": SCHEMA,
+            "/SNVirtualSpreadSource": source_path.name,
+            "/SNVirtualSpreadSourceSHA256": sha256_file(source_path),
+        }
+    )
+    writer.add_metadata(metadata)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{output_path.name}.", suffix=".tmp", dir=output_path.parent
+    )
+    os.close(descriptor)
+    temporary_output = Path(temporary_name)
+    try:
+        with temporary_output.open("wb") as stream:
+            writer.write(stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        verification = PdfReader(str(temporary_output), strict=True)
+        if len(verification.pages) != len(pairs):
+            raise VirtualSpreadError("Written PDF failed page-count verification")
+        for page in verification.pages:
+            if abs(float(page.mediabox.width) - spread_width) > 0.01 or abs(
+                float(page.mediabox.height) - spread_height
+            ) > 0.01:
+                raise VirtualSpreadError("Written PDF has inconsistent page geometry")
+        os.replace(temporary_output, output_path)
+    finally:
+        temporary_output.unlink(missing_ok=True)
+
+    manifest: dict[str, Any] = {
+        "schema": SCHEMA,
+        "source": {
+            "name": source_path.name,
+            "path": str(source_path),
+            "size": source_path.stat().st_size,
+            "sha256": sha256_file(source_path),
+            "pageCount": len(reader.pages),
+        },
+        "output": {
+            "name": output_path.name,
+            "path": str(output_path),
+            "size": output_path.stat().st_size,
+            "sha256": sha256_file(output_path),
+            "pageCount": len(pairs),
+            "spreadSize": [spread_width, spread_height],
+            "gutter": gutter,
+        },
+        "direction": direction,
+        "coverSeparate": cover_separate,
+        "spreads": spread_records,
+        "sourcePages": [source_mapping[index] for index in range(len(reader.pages))],
+        "links": links,
+    }
+    _atomic_write_json(manifest_path, manifest)
+    return manifest
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("source", type=Path)
+    parser.add_argument("output", type=Path)
+    parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--direction", choices=("rtl", "ltr"), default="rtl")
+    parser.add_argument(
+        "--cover-separate",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument("--spread-width", type=float, default=864.0)
+    parser.add_argument("--spread-height", type=float, default=648.0)
+    parser.add_argument("--gutter", type=float, default=0.0)
+    parser.add_argument("--force", action="store_true")
+    return parser
+
+
+def main() -> int:
+    args = _parser().parse_args()
+    manifest_path = args.manifest or args.output.with_suffix(
+        args.output.suffix + ".json"
+    )
+    manifest = build_virtual_spread(
+        args.source,
+        args.output,
+        manifest_path,
+        direction=args.direction,
+        cover_separate=args.cover_separate,
+        spread_width=args.spread_width,
+        spread_height=args.spread_height,
+        gutter=args.gutter,
+        force=args.force,
+    )
+    print(f"Virtual spread PDF: {manifest['output']['path']}")
+    print(f"Mapping manifest:   {manifest_path.resolve()}")
+    print(f"Source pages:       {manifest['source']['pageCount']}")
+    print(f"Virtual spreads:    {manifest['output']['pageCount']}")
+    print(f"Output SHA-256:      {manifest['output']['sha256']}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

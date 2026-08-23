@@ -17,8 +17,15 @@ It activates only when all of these are true:
 
 The manifest cache is content-authoritative: the small sidecar is hashed on
 every lookup, and the PDF cache identity includes its device, inode, size,
-modification time, and change time. A cache miss performs a full PDF SHA-256
-check and rejects a PDF that changes while validation is in progress.
+modification time, and change time. On a cache miss, the module fails closed
+while a single background worker performs the full PDF SHA-256 check. It
+publishes the result only if both the PDF identity and sidecar digest are still
+unchanged, then refreshes the still-open native reader from its main thread.
+Page-bar and page-turn callbacks never perform the full-file hash.
+
+Internal-link source and target pages, virtual pages, and sides must also agree
+with the authoritative `sourcePages` mapping; a contradictory link rejects the
+whole manifest rather than navigating to an inferred half.
 
 For a matching document it:
 

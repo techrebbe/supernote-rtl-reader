@@ -102,6 +102,71 @@ for required in (
             f"reader state is not bound to the manifest revision: {required}"
         )
 
+lookup_start = hook.find("private static Manifest manifestFor")
+lookup_end = hook.find(
+    "private static boolean scheduleManifestVerification",
+    lookup_start,
+)
+if lookup_start < 0 or lookup_end < 0:
+    raise SystemExit("missing fail-closed manifest lookup implementation")
+manifest_lookup = hook[lookup_start:lookup_end]
+for required in (
+    "String sidecarDigest = sha256(sidecarData)",
+    "cached.matches(pdf, sidecarDigest)",
+    "FileIdentity.capture(pdf)",
+    "scheduleManifestVerification(",
+    "manifest_verification_pending",
+    "Fail closed until the background verifier publishes",
+):
+    if required not in manifest_lookup:
+        raise SystemExit(f"manifest lookup is missing fail-closed guard: {required}")
+for forbidden in ("parseManifest(", "sha256File("):
+    if forbidden in manifest_lookup:
+        raise SystemExit(
+            f"manifest lookup performs expensive verification on a UI callback: {forbidden}"
+        )
+
+if hook.count("parseManifest(") != 2 or hook.count("sha256File(") != 2:
+    raise SystemExit(
+        "full PDF verification must have exactly one call site, inside the "
+        "background manifest verifier"
+    )
+
+verification_start = lookup_end
+verification_end = hook.find(
+    "private static Manifest validatePageCount",
+    verification_start,
+)
+if verification_end < 0:
+    raise SystemExit("missing asynchronous manifest verification implementation")
+manifest_verification = hook[verification_start:verification_end]
+for required in (
+    "MANIFEST_VERIFIER.execute",
+    "VERIFYING.put(key, verificationId)",
+    "verificationId.equals(VERIFYING.get(key))",
+    "before.matches(after)",
+    "sidecarDigest.equals(currentSidecarDigest)",
+    "MANIFESTS.put(key, published)",
+    "scheduleManifestActivation(key, parsed.revision)",
+    "new Handler(owner.getMainLooper()).post",
+    "handlePageLoaded(viewModel)",
+    '"manifest_verified"',
+):
+    if required not in manifest_verification:
+        raise SystemExit(
+            f"background manifest verification is missing guard: {required}"
+        )
+
+pdf_stable = manifest_verification.find("before.matches(after)")
+sidecar_stable = manifest_verification.find(
+    "sidecarDigest.equals(currentSidecarDigest)"
+)
+publication = manifest_verification.find("MANIFESTS.put(key, published)")
+if min(pdf_stable, sidecar_stable, publication) < 0 or publication <= max(
+    pdf_stable, sidecar_stable
+):
+    raise SystemExit("manifest publication must follow both snapshot checks")
+
 manifest_start = hook.find("private static Manifest manifestFor")
 manifest_end = hook.find("private static boolean isPortrait", manifest_start)
 if manifest_start < 0 or manifest_end < 0:
@@ -114,13 +179,17 @@ for required in (
     'output.optString("sha256", "")',
     "expectedHash.equalsIgnoreCase(sha256File(pdf))",
     'manifest_rejected reason=output_hash',
-    'manifest_rejected reason=pdf_changed_during_read',
+    'manifest_rejected reason=snapshot_changed_during_read',
     'root.opt("coverSeparate")',
     "sourcePagesJson.length() != sourcePageCount",
     "spreadEntryMatches(",
     "sourceEntryMatches(",
+    "linkEndpointMatches(",
+    'link.optInt("sourcePage", -1)',
+    '"targetSourcePage"',
     'manifest_rejected reason=cover_layout',
     'manifest_rejected reason=source_layout',
+    'manifest_rejected reason=link_mapping',
 ):
     if required not in manifest_validation:
         raise SystemExit(
@@ -128,11 +197,11 @@ for required in (
         )
 
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
-if 'android:versionCode="10"' not in manifest:
+if 'android:versionCode="11"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version code")
-if 'android:versionName="0.0.10"' not in manifest:
+if 'android:versionName="0.0.11"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
-if 'private static final String VERSION = "0.0.10"' not in hook:
+if 'private static final String VERSION = "0.0.11"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
 scope = (root / "meta/META-INF/xposed/scope.list").read_text(
     encoding="utf-8"

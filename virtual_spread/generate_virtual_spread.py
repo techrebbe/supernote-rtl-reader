@@ -512,7 +512,16 @@ def build_virtual_spread(
         output_page_index = int(
             source_mapping[source_page_index]["virtualPageIndex"]
         )
-        for annotation in source_page.get("/Annots", []):
+        annotations = source_page.get("/Annots")
+        if annotations is None:
+            continue
+        annotation_array = annotations.get_object()
+        if not isinstance(annotation_array, ArrayObject):
+            raise VirtualSpreadError(
+                "Source page /Annots is not an array; "
+                f"source page {source_page_index + 1}"
+            )
+        for annotation in annotation_array:
             annotation_object = annotation.get_object()
             if annotation_object.get("/Subtype") != "/Link":
                 raise VirtualSpreadError(

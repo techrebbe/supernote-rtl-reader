@@ -20,6 +20,8 @@ import java.util.ArrayList;
 import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -54,7 +56,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final String SCHEMA =
         "techrebbe.supernote.virtual-spread/v1";
     private static final String TAG = "SN_VIRTUAL_SPREAD";
-    private static final String VERSION = "0.0.10";
+    private static final String VERSION = "0.0.11";
 
     private static volatile WeakReference<Activity> activeActivity =
         new WeakReference<>(null);
@@ -62,6 +64,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         new WeakHashMap<>();
     private static final Map<String, CachedManifest> MANIFESTS =
         new ConcurrentHashMap<>();
+    private static final Map<String, String> VERIFYING =
+        new ConcurrentHashMap<>();
+    private static final ExecutorService MANIFEST_VERIFIER =
+        Executors.newSingleThreadExecutor();
     private static final ThreadLocal<int[]> PAGE_BAR_VALUES =
         new ThreadLocal<>();
 
@@ -136,6 +142,14 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 && modifiedSeconds == other.modifiedSeconds
                 && changedSeconds == other.changedSeconds
                 && changedNanos == other.changedNanos;
+        }
+
+        String token() {
+            return device + ":" + inode
+                + ":" + size
+                + ":" + modifiedSeconds
+                + ":" + changedSeconds
+                + ":" + changedNanos;
         }
     }
 
@@ -1064,7 +1078,77 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             if (cached != null && cached.matches(pdf, sidecarDigest)) {
                 return validatePageCount(viewModel, cached.manifest);
             }
+            if (cached != null) {
+                MANIFESTS.remove(key, cached);
+            }
             FileIdentity before = FileIdentity.capture(pdf);
+            if (scheduleManifestVerification(
+                    pdf,
+                    sidecar,
+                    sidecarData,
+                    sidecarDigest,
+                    key,
+                    before
+                )) {
+                log("manifest_verification_pending path=" + key);
+            }
+            // Fail closed until the background verifier publishes a stable
+            // PDF + sidecar snapshot into MANIFESTS.
+            return null;
+        } catch (Throwable throwable) {
+            logFailure("manifest_read_failed", throwable);
+            return null;
+        }
+    }
+
+    private static boolean scheduleManifestVerification(
+        final File pdf,
+        final File sidecar,
+        final byte[] sidecarData,
+        final String sidecarDigest,
+        final String key,
+        final FileIdentity before
+    ) {
+        final String verificationId = sidecarDigest + ":" + before.token();
+        String previous = VERIFYING.put(key, verificationId);
+        if (verificationId.equals(previous)) {
+            return false;
+        }
+        try {
+            MANIFEST_VERIFIER.execute(new Runnable() {
+                @Override
+                public void run() {
+                    verifyManifestSnapshot(
+                        pdf,
+                        sidecar,
+                        sidecarData,
+                        sidecarDigest,
+                        key,
+                        before,
+                        verificationId
+                    );
+                }
+            });
+            return true;
+        } catch (RuntimeException exception) {
+            VERIFYING.remove(key, verificationId);
+            throw exception;
+        }
+    }
+
+    private static void verifyManifestSnapshot(
+        File pdf,
+        File sidecar,
+        byte[] sidecarData,
+        String sidecarDigest,
+        String key,
+        FileIdentity before,
+        String verificationId
+    ) {
+        try {
+            if (!verificationId.equals(VERIFYING.get(key))) {
+                return;
+            }
             Manifest parsed = parseManifest(
                 pdf,
                 new String(sidecarData, "UTF-8"),
@@ -1072,21 +1156,81 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 sidecarDigest
             );
             FileIdentity after = FileIdentity.capture(pdf);
-            if (!before.matches(after)) {
-                MANIFESTS.remove(key);
-                log("manifest_rejected reason=pdf_changed_during_read path="
+            String currentSidecarDigest = sha256(readBytes(sidecar));
+            if (!before.matches(after)
+                || !sidecarDigest.equals(currentSidecarDigest)) {
+                if (verificationId.equals(VERIFYING.get(key))) {
+                    MANIFESTS.remove(key);
+                }
+                log("manifest_rejected reason=snapshot_changed_during_read path="
                     + key);
-                return null;
+                return;
             }
-            MANIFESTS.put(
-                key,
-                new CachedManifest(after, sidecarDigest, parsed)
+            if (!verificationId.equals(VERIFYING.get(key))) {
+                return;
+            }
+            CachedManifest published = new CachedManifest(
+                after,
+                sidecarDigest,
+                parsed
             );
-            return validatePageCount(viewModel, parsed);
+            MANIFESTS.put(key, published);
+            if (!verificationId.equals(VERIFYING.get(key))) {
+                MANIFESTS.remove(key, published);
+                return;
+            }
+            if (parsed != null) {
+                log("manifest_accepted path=" + key
+                    + " pages=" + parsed.pageCount);
+                scheduleManifestActivation(key, parsed.revision);
+            }
         } catch (Throwable throwable) {
-            logFailure("manifest_read_failed", throwable);
-            return null;
+            if (verificationId.equals(VERIFYING.get(key))) {
+                MANIFESTS.remove(key);
+                logFailure("manifest_verification_failed", throwable);
+            }
+        } finally {
+            VERIFYING.remove(key, verificationId);
         }
+    }
+
+    private static void scheduleManifestActivation(
+        final String key,
+        final String revision
+    ) {
+        final Activity owner = activeActivity.get();
+        if (owner == null) {
+            return;
+        }
+        new Handler(owner.getMainLooper()).post(new Runnable() {
+            @Override
+            public void run() {
+                Activity activity = activeActivity.get();
+                if (activity != owner
+                    || owner.isFinishing()
+                    || owner.isDestroyed()) {
+                    return;
+                }
+                Object viewModel = objectField(
+                    owner,
+                    "documentViewModel"
+                );
+                Manifest current = manifestFor(viewModel);
+                if (current == null
+                    || !key.equals(current.key)
+                    || !revision.equals(current.revision)) {
+                    return;
+                }
+                handlePageLoaded(viewModel);
+                scheduleConfigurationRefresh(
+                    owner,
+                    viewModel,
+                    "manifest_verified"
+                );
+                log("manifest_activated path=" + key
+                    + " revision=" + revision);
+            }
+        });
     }
 
     private static Manifest validatePageCount(
@@ -1167,6 +1311,27 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             && (offset % 2 == 0 ? "right" : "left").equals(
                 mapping.optString("side")
             );
+    }
+
+    private static boolean linkEndpointMatches(
+        JSONArray sourcePages,
+        int sourcePageIndex,
+        int virtualPageIndex,
+        String side
+    ) {
+        if (sourcePageIndex < 0
+            || sourcePageIndex >= sourcePages.length()
+            || virtualPageIndex < 0
+            || !("left".equals(side) || "right".equals(side))) {
+            return false;
+        }
+        JSONObject mapping = sourcePages.optJSONObject(sourcePageIndex);
+        return mapping != null
+            && sourcePageIndex
+                == mapping.optInt("sourcePageIndex", -1)
+            && virtualPageIndex
+                == mapping.optInt("virtualPageIndex", -1)
+            && side.equals(mapping.optString("side"));
     }
 
     private static Manifest parseManifest(
@@ -1276,16 +1441,31 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 if (link == null || !"internal".equals(link.optString("kind"))) {
                     continue;
                 }
-                int sourcePage = link.optInt("outputPage", -1);
-                int targetPage = link.optInt("targetOutputPage", -1);
+                int sourceSourcePage = link.optInt("sourcePage", -1);
+                int sourceOutputPage = link.optInt("outputPage", -1);
+                int targetSourcePage = link.optInt(
+                    "targetSourcePage",
+                    -1
+                );
+                int targetOutputPage = link.optInt("targetOutputPage", -1);
                 String sourceSide = link.optString("sourceSide");
-                String side = link.optString("targetSide");
+                String targetSide = link.optString("targetSide");
                 JSONArray rect = link.optJSONArray("rect");
-                if (sourcePage < 0 || sourcePage >= pageCount
-                    || targetPage < 0 || targetPage >= pageCount
+                if (sourceOutputPage < 0 || sourceOutputPage >= pageCount
+                    || targetOutputPage < 0 || targetOutputPage >= pageCount
                     || rect == null || rect.length() != 4
-                    || !("left".equals(side) || "right".equals(side))) {
-                    log("manifest_rejected reason=link_record index=" + index);
+                    || !linkEndpointMatches(
+                        sourcePagesJson,
+                        sourceSourcePage,
+                        sourceOutputPage,
+                        sourceSide
+                    ) || !linkEndpointMatches(
+                        sourcePagesJson,
+                        targetSourcePage,
+                        targetOutputPage,
+                        targetSide
+                    )) {
+                    log("manifest_rejected reason=link_mapping index=" + index);
                     return null;
                 }
                 double x0 = rect.optDouble(0, Double.NaN);
@@ -1299,23 +1479,15 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     log("manifest_rejected reason=link_rect index=" + index);
                     return null;
                 }
-                VirtualSpreadNavigation.Half sourceHalf;
-                if ("left".equals(sourceSide)) {
-                    sourceHalf = VirtualSpreadNavigation.Half.LEFT;
-                } else if ("right".equals(sourceSide)) {
-                    sourceHalf = VirtualSpreadNavigation.Half.RIGHT;
-                } else if (x1 <= pageWidth / 2.0) {
-                    sourceHalf = VirtualSpreadNavigation.Half.LEFT;
-                } else if (x0 >= pageWidth / 2.0) {
-                    sourceHalf = VirtualSpreadNavigation.Half.RIGHT;
-                } else {
-                    sourceHalf = null;
-                }
+                VirtualSpreadNavigation.Half sourceHalf = "left".equals(
+                    sourceSide
+                ) ? VirtualSpreadNavigation.Half.LEFT
+                    : VirtualSpreadNavigation.Half.RIGHT;
                 links.add(new VirtualSpreadNavigation.LinkTarget(
-                    sourcePage,
-                    targetPage,
+                    sourceOutputPage,
+                    targetOutputPage,
                     sourceHalf,
-                    "left".equals(side)
+                    "left".equals(targetSide)
                         ? VirtualSpreadNavigation.Half.LEFT
                         : VirtualSpreadNavigation.Half.RIGHT,
                     (float) x0,
@@ -1325,7 +1497,6 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 ));
             }
         }
-        log("manifest_accepted path=" + key + " pages=" + pageCount);
         return new Manifest(
             key,
             sidecarDigest,

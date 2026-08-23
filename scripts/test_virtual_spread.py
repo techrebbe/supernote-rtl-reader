@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 from pypdf import PdfReader, PdfWriter
+from pypdf.generic import IndirectObject, NameObject
 from reportlab.pdfgen import canvas
 
 
@@ -83,6 +84,28 @@ def create_rotated_link_fixture(path: Path) -> None:
     with path.open("wb") as stream:
         writer.write(stream)
     unrotated.unlink()
+
+
+def make_annotation_array_indirect(path: Path, page_index: int) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    annotations = writer.pages[page_index].get("/Annots")
+    if annotations is None:
+        raise AssertionError("fixture page has no annotations")
+    annotation_array = annotations.get_object()
+    writer.pages[page_index][NameObject("/Annots")] = writer._add_object(
+        annotation_array
+    )
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    persisted = PdfReader(str(path), strict=True)
+    persisted_annotations = persisted.pages[page_index].raw_get(
+        "/Annots"
+    )
+    if not isinstance(persisted_annotations, IndirectObject):
+        raise AssertionError("fixture annotation array is not indirect")
 
 
 def transform_rect(rect: object, transform: list[float]) -> list[float]:
@@ -235,6 +258,35 @@ class VirtualSpreadTests(unittest.TestCase):
                     force=True,
                 )
             self.assertFalse(collision.exists())
+
+    def test_indirect_annotation_array_is_dereferenced(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            make_annotation_array_indirect(source, 1)
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                direction="rtl",
+                cover_separate=True,
+            )
+
+            self.assertEqual(len(manifest["links"]), 4)
+            persisted_source = PdfReader(str(source), strict=True)
+            self.assertIsInstance(
+                persisted_source.pages[1].raw_get("/Annots"),
+                IndirectObject,
+            )
+            output_reader = PdfReader(str(output), strict=True)
+            self.assertEqual(
+                len(output_reader.pages[1]["/Annots"].get_object()),
+                2,
+            )
 
     def test_non_finite_spread_geometry_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

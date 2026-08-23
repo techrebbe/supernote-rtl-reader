@@ -56,7 +56,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final String SCHEMA =
         "techrebbe.supernote.virtual-spread/v1";
     private static final String TAG = "SN_VIRTUAL_SPREAD";
-    private static final String VERSION = "0.0.12";
+    private static final String VERSION = "0.0.13";
 
     private static volatile WeakReference<Activity> activeActivity =
         new WeakReference<>(null);
@@ -1472,7 +1472,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             if (Double.isNaN(x0) || Double.isInfinite(x0)
                 || Double.isNaN(y0) || Double.isInfinite(y0)
                 || Double.isNaN(x1) || Double.isInfinite(x1)
-                || Double.isNaN(y1) || Double.isInfinite(y1)) {
+                || Double.isNaN(y1) || Double.isInfinite(y1)
+                || x0 > x1 || y0 > y1) {
                 log("manifest_rejected reason=link_rect index=" + index);
                 return null;
             }

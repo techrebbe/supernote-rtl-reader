@@ -212,6 +212,8 @@ def _destination_source_page(
     destination: Any,
     page_ref_to_index: dict[tuple[int, int], int],
 ) -> int | None:
+    if isinstance(destination, IndirectObject):
+        destination = destination.get_object()
     if isinstance(destination, (str, TextStringObject, NameObject)):
         names = [str(destination), str(destination).lstrip("/")]
         named = reader.named_destinations

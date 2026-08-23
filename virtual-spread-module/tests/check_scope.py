@@ -194,6 +194,8 @@ for required in (
     'link.opt("uri") instanceof String',
     'manifest_rejected reason=cover_layout',
     'manifest_rejected reason=source_layout',
+    "x0 > x1",
+    "y0 > y1",
     'manifest_rejected reason=link_mapping',
     'manifest_rejected reason=link_record',
 ):
@@ -212,11 +214,11 @@ for forbidden in (
         )
 
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
-if 'android:versionCode="12"' not in manifest:
+if 'android:versionCode="13"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version code")
-if 'android:versionName="0.0.12"' not in manifest:
+if 'android:versionName="0.0.13"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
-if 'private static final String VERSION = "0.0.12"' not in hook:
+if 'private static final String VERSION = "0.0.13"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
 scope = (root / "meta/META-INF/xposed/scope.list").read_text(
     encoding="utf-8"

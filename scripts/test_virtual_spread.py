@@ -108,6 +108,37 @@ def make_annotation_array_indirect(path: Path, page_index: int) -> None:
         raise AssertionError("fixture annotation array is not indirect")
 
 
+def make_link_destination_indirect(
+    path: Path,
+    page_index: int,
+    annotation_index: int,
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    annotations = writer.pages[page_index].get("/Annots")
+    if annotations is None:
+        raise AssertionError("fixture page has no annotations")
+    annotation_array = annotations.get_object()
+    annotation = annotation_array[annotation_index].get_object()
+    destination = annotation.get("/Dest")
+    if destination is None:
+        raise AssertionError("fixture link has no direct destination")
+    annotation[NameObject("/Dest")] = writer._add_object(
+        destination.get_object()
+    )
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    persisted = PdfReader(str(path), strict=True)
+    persisted_annotations = persisted.pages[page_index]["/Annots"].get_object()
+    persisted_destination = persisted_annotations[
+        annotation_index
+    ].get_object().raw_get("/Dest")
+    if not isinstance(persisted_destination, IndirectObject):
+        raise AssertionError("fixture link destination is not indirect")
+
+
 def transform_rect(rect: object, transform: list[float]) -> list[float]:
     x0, y0, x1, y1 = [float(value) for value in rect]
     a, b, c, d, e, f = transform
@@ -286,6 +317,41 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertEqual(
                 len(output_reader.pages[1]["/Annots"].get_object()),
                 2,
+            )
+
+    def test_indirect_link_destination_is_dereferenced(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            make_link_destination_indirect(source, 1, 0)
+
+            persisted_source = PdfReader(str(source), strict=True)
+            persisted_annotation = (
+                persisted_source.pages[1]["/Annots"].get_object()[0]
+                .get_object()
+            )
+            self.assertIsInstance(
+                persisted_annotation.raw_get("/Dest"),
+                IndirectObject,
+            )
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                direction="rtl",
+                cover_separate=True,
+            )
+
+            self.assertEqual(len(manifest["links"]), 4)
+            output_reader = PdfReader(str(output), strict=True)
+            first_link = output_reader.pages[1]["/Annots"].get_object()[0]
+            self.assertEqual(
+                destination_page_index(output_reader, first_link),
+                3,
             )
 
     def test_non_finite_spread_geometry_is_rejected(self) -> None:

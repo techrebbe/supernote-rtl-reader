@@ -16,9 +16,10 @@ Every virtual page uses the same 4:3 page box, matching the Nomad's landscape
 screen. Source pages are fitted independently into fixed left and right slots,
 so unusual source page sizes cannot change the reader's navigation surface.
 Content streams remain vector/text PDF content rather than page screenshots.
-Supported internal and URI links are copied with transformed hit rectangles;
-internal destinations are remapped to their virtual spread page. A JSON
-manifest records every source-page affine transform and target half.
+Supported internal and URI links, including indirect destination arrays, are
+copied with transformed hit rectangles; internal destinations are remapped to
+their virtual spread page. A JSON manifest records every source-page affine
+transform and target half.
 
 ## Reproducible Python environment
 

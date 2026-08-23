@@ -25,9 +25,11 @@ Page-bar and page-turn callbacks never perform the full-file hash.
 
 The `links` collection is required. Every entry must be a complete internal or
 URI record whose source page, virtual page, and side agree with the
-authoritative `sourcePages` mapping; internal targets must agree as well.
-Missing collections, unknown record kinds, malformed URI records, and
-contradictory mappings reject the whole manifest rather than losing half focus.
+authoritative `sourcePages` mapping; internal targets must agree as well. Link
+rectangles must use finite, canonical left/bottom/right/top ordering. Missing
+collections, unknown record kinds, malformed URI records, reversed rectangles,
+and contradictory mappings reject the whole manifest rather than losing half
+focus.
 
 For a matching document it:
 

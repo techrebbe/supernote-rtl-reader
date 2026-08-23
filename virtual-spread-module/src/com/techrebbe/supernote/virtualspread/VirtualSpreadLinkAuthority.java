@@ -10,7 +10,32 @@ public final class VirtualSpreadLinkAuthority {
     private VirtualSpreadLinkAuthority() {}
     private static final String PDF_MARKER =
         "%SNVirtualSpreadLinksSHA256:";
+    private static final String LAYOUT_PDF_MARKER =
+        "%SNVirtualSpreadLayoutSHA256:";
 
+    public static String layout(
+        String direction,
+        boolean coverSeparate,
+        int sourcePageCount,
+        int outputPageCount,
+        double spreadWidth,
+        double spreadHeight,
+        double gutter
+    ) {
+        return "v1|layout|" + direction
+            + "|" + (coverSeparate ? "1" : "0")
+            + "|" + sourcePageCount
+            + "|" + outputPageCount
+            + "|" + doubleBits(spreadWidth)
+            + "|" + doubleBits(spreadHeight)
+            + "|" + doubleBits(gutter);
+    }
+
+    public static String layoutDigest(
+        String layoutRecord
+    ) throws Exception {
+        return digest(new String[] {layoutRecord});
+    }
 
     public static String internal(
         int sourcePage,
@@ -94,6 +119,41 @@ public final class VirtualSpreadLinkAuthority {
             if (digestEnd >= tail.length()
                 || tail.charAt(digestEnd) != '\n'
                 || digestEnd + 1 != startxref) {
+                return null;
+            }
+            String digest = tail.substring(digestStart, digestEnd);
+            return isSha256(digest) ? digest.toLowerCase() : null;
+        } finally {
+            input.close();
+        }
+    }
+
+    public static String readPdfLayoutDigest(File pdf) throws Exception {
+        RandomAccessFile input = new RandomAccessFile(pdf, "r");
+        try {
+            long length = input.length();
+            int count = (int) Math.min(length, 4096L);
+            if (count <= LAYOUT_PDF_MARKER.length() + 65) {
+                return null;
+            }
+            byte[] data = new byte[count];
+            input.seek(length - count);
+            input.readFully(data);
+            String tail = new String(data, StandardCharsets.ISO_8859_1);
+            int startxref = tail.lastIndexOf("startxref");
+            if (startxref < 0) {
+                return null;
+            }
+            int marker = tail.lastIndexOf(LAYOUT_PDF_MARKER, startxref);
+            if (marker < 0) {
+                return null;
+            }
+            int digestStart = marker + LAYOUT_PDF_MARKER.length();
+            int digestEnd = digestStart + 64;
+            int nextMarker = digestEnd + 1;
+            if (digestEnd >= tail.length()
+                || tail.charAt(digestEnd) != '\n'
+                || !tail.startsWith(PDF_MARKER, nextMarker)) {
                 return null;
             }
             String digest = tail.substring(digestStart, digestEnd);

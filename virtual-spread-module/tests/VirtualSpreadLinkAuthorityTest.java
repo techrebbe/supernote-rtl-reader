@@ -44,6 +44,21 @@ public final class VirtualSpreadLinkAuthorityTest {
                 + "|68e5babec42067702f302e53b929c9f3e0041bd7164c7d90818ac5f281dd523b",
             uri
         );
+        String layout = VirtualSpreadLinkAuthority.layout(
+            "rtl", true, 7, 4, 864.0, 648.0, 0.0
+        );
+        assertEquals(
+            "layout canonical form",
+            "v1|layout|rtl|1|7|4|408b000000000000|"
+                + "4084400000000000|0000000000000000",
+            layout
+        );
+        String layoutDigest = VirtualSpreadLinkAuthority.layoutDigest(layout);
+        assertEquals(
+            "layout authority digest",
+            "53d5b0b6c97118392220518325c8ee23f1a81d04bf430e01c893d88c490a4307",
+            layoutDigest
+        );
         assertEquals(
             "combined authority digest",
             "2a54578ef38e06780c09c695bd2c78b9f3017744cbefda2199d88f041a3c3a9b",
@@ -57,6 +72,8 @@ public final class VirtualSpreadLinkAuthorityTest {
         Path fixture = Files.createTempFile("virtual-spread-authority", ".pdf");
         try {
             String bound = "%PDF-1.7\n"
+                + "%SNVirtualSpreadLayoutSHA256:"
+                + layoutDigest + "\n"
                 + "%SNVirtualSpreadLinksSHA256:"
                 + "2a54578ef38e06780c09c695bd2c78b9f3017744cbefda2199d88f041a3c3a9b"
                 + "\nstartxref\n42\n%%EOF\n";
@@ -65,6 +82,24 @@ public final class VirtualSpreadLinkAuthorityTest {
                 "PDF-bound authority digest",
                 "2a54578ef38e06780c09c695bd2c78b9f3017744cbefda2199d88f041a3c3a9b",
                 VirtualSpreadLinkAuthority.readPdfDigest(fixture.toFile())
+            );
+            assertEquals(
+                "PDF-bound layout authority digest",
+                layoutDigest,
+                VirtualSpreadLinkAuthority.readPdfLayoutDigest(fixture.toFile())
+            );
+            String displacedLayout = bound.replace(
+                "\n%SNVirtualSpreadLinksSHA256:",
+                "\n\n%SNVirtualSpreadLinksSHA256:"
+            );
+            Files.write(
+                fixture,
+                displacedLayout.getBytes(StandardCharsets.ISO_8859_1)
+            );
+            assertEquals(
+                "displaced layout authority marker is rejected",
+                null,
+                VirtualSpreadLinkAuthority.readPdfLayoutDigest(fixture.toFile())
             );
             String displaced = bound.replace("\nstartxref", "\n\nstartxref");
             Files.write(

@@ -564,17 +564,25 @@ compositor was disabled and absent from the document process.
 
 The complete fixture list, visible observations, logs, and before/after `.mark`
 hash evidence are recorded in `virtual_spread/HARDWARE_VALIDATION.md`. Later
-v0.0.9-v0.0.14 changes harden manifest authority, revision invalidation,
+v0.0.9-v0.0.15 changes harden manifest authority, revision invalidation,
 publication transactions, internal-link mapping validation, and asynchronous
 full-file verification. v0.0.13 also rejects reversed link rectangles and
 dereferences indirect PDF destinations. v0.0.14 generates from a stable source
 snapshot, verifies source bytes independently of filesystem timestamps, binds
 the complete ordered link collection to the hashed PDF, and recovers an
-interrupted two-file publication through a durable transaction marker. The 16
-generator regressions include metadata-preserving source changes plus both
-partial and fully committed crash-recovery states. CI also runs the complete
-Java companion-module suite. These automated checks do not replace or restate
-the v0.0.8 hardware result.
+interrupted two-file publication through a transaction marker. v0.0.15 binds
+direction, cover parity, source/output page counts, spread geometry, and gutter
+to a second authority marker inside the hashed PDF, preventing stale sidecars
+from swapping layouts with equal page counts. It also makes Windows publication
+durable with write-through marker, backup, publication, rollback, and retirement
+renames; POSIX continues to synchronize affected directories. Older generated
+pairs fail closed and must be regenerated. The 17 generator regressions include
+metadata-preserving source changes, exact cross-language layout vectors,
+write-through flag invariants, plus both partial and fully committed
+crash-recovery states. CI also runs the complete
+Java companion-module suite, including ten layout/link authority assertions.
+These automated checks do not replace or restate the v0.0.8 hardware result;
+v0.0.15 still requires a focused generated-pair smoke test before release.
 
 ## Failure capture
 

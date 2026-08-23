@@ -194,10 +194,17 @@ for required in (
     'link.opt("uri") instanceof String',
     '"linkAuthoritySha256"',
     "VirtualSpreadLinkAuthority.readPdfDigest(pdf)",
+    '"layoutAuthoritySha256"',
+    "VirtualSpreadLinkAuthority.readPdfLayoutDigest(pdf)",
+    "VirtualSpreadLinkAuthority.layout(",
+    "VirtualSpreadLinkAuthority.layoutDigest(",
+    'output.optDouble("gutter", Double.NaN)',
     "VirtualSpreadLinkAuthority.uri(",
     "VirtualSpreadLinkAuthority.internal(",
     "VirtualSpreadLinkAuthority.digest(",
     'manifest_rejected reason=link_authority_records',
+    'manifest_rejected reason=layout_authority',
+    'manifest_rejected reason=layout_authority_records',
     'manifest_rejected reason=cover_layout',
     'manifest_rejected reason=source_layout',
     "x0 > x1",
@@ -220,11 +227,11 @@ for forbidden in (
         )
 
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
-if 'android:versionCode="14"' not in manifest:
+if 'android:versionCode="15"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version code")
-if 'android:versionName="0.0.14"' not in manifest:
+if 'android:versionName="0.0.15"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
-if 'private static final String VERSION = "0.0.14"' not in hook:
+if 'private static final String VERSION = "0.0.15"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
 scope = (root / "meta/META-INF/xposed/scope.list").read_text(
     encoding="utf-8"
@@ -241,5 +248,25 @@ if "run: ./virtual-spread-module/test.ps1" not in workflow:
     raise SystemExit(
         "CI must run the complete virtual-spread companion test script"
     )
+
+generator = (root.parent / "virtual_spread/generate_virtual_spread.py").read_text(
+    encoding="utf-8"
+)
+for required in (
+    "MOVEFILE_WRITE_THROUGH",
+    "_durable_replace(final_path, backup)",
+    "_durable_replace(temporary_manifest, manifest_path)",
+    "_durable_replace(temporary_output, output_path)",
+    "replace_existing=False",
+    "_durably_remove(output_backup)",
+    "_durably_remove(manifest_backup)",
+    "_durably_remove(marker_path)",
+    '"layoutAuthoritySha256": layout_authority_hash',
+    '"/SNVirtualSpreadLayoutSHA256": layout_authority_hash',
+):
+    if required not in generator:
+        raise SystemExit(
+            f"generator is missing durable/layout authority invariant: {required}"
+        )
 
 print("VirtualSpread hook scope PASS")

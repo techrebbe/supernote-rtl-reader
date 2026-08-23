@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
 import math
@@ -28,7 +29,11 @@ from pypdf.generic import (
 
 SCHEMA = "techrebbe.supernote.virtual-spread/v1"
 LINK_AUTHORITY_MARKER = b"%SNVirtualSpreadLinksSHA256:"
+LAYOUT_AUTHORITY_MARKER = b"%SNVirtualSpreadLayoutSHA256:"
 PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v1"
+MOVEFILE_REPLACE_EXISTING = 0x00000001
+MOVEFILE_WRITE_THROUGH = 0x00000008
+WINDOWS_ALREADY_EXISTS = {80, 183}
 
 
 class VirtualSpreadError(RuntimeError):
@@ -199,12 +204,72 @@ def _link_authority_sha256(links: list[dict[str, Any]]) -> str:
     return digest.hexdigest()
 
 
-def _bind_pdf_link_authority(path: Path, authority_sha256: str) -> None:
-    if len(authority_sha256) != 64 or any(
-        character not in "0123456789abcdef" for character in authority_sha256
+def _canonical_layout(
+    direction: str,
+    cover_separate: bool,
+    source_page_count: int,
+    output_page_count: int,
+    spread_width: float,
+    spread_height: float,
+    gutter: float,
+) -> str:
+    return "|".join(
+        [
+            "v1",
+            "layout",
+            direction,
+            "1" if cover_separate else "0",
+            str(source_page_count),
+            str(output_page_count),
+            _float_bits(spread_width),
+            _float_bits(spread_height),
+            _float_bits(gutter),
+        ]
+    )
+
+
+def _layout_authority_sha256(
+    direction: str,
+    cover_separate: bool,
+    source_page_count: int,
+    output_page_count: int,
+    spread_width: float,
+    spread_height: float,
+    gutter: float,
+) -> str:
+    record = _canonical_layout(
+        direction,
+        cover_separate,
+        source_page_count,
+        output_page_count,
+        spread_width,
+        spread_height,
+        gutter,
+    )
+    return hashlib.sha256((record + "\n").encode("utf-8")).hexdigest()
+
+
+def _bind_pdf_authorities(
+    path: Path,
+    layout_authority_sha256: str,
+    link_authority_sha256: str,
+) -> None:
+    for label, value in (
+        ("layout", layout_authority_sha256),
+        ("link", link_authority_sha256),
     ):
-        raise VirtualSpreadError("Invalid link authority digest")
-    marker = LINK_AUTHORITY_MARKER + authority_sha256.encode("ascii") + b"\n"
+        if len(value) != 64 or any(
+            character not in "0123456789abcdef" for character in value
+        ):
+            raise VirtualSpreadError(f"Invalid {label} authority digest")
+    marker = (
+        LAYOUT_AUTHORITY_MARKER
+        + layout_authority_sha256.encode("ascii")
+        + b"\n"
+        + LINK_AUTHORITY_MARKER
+        + link_authority_sha256.encode("ascii")
+        + b"\n"
+    )
     with path.open("r+b") as stream:
         stream.seek(0, os.SEEK_END)
         length = stream.tell()
@@ -214,7 +279,11 @@ def _bind_pdf_link_authority(path: Path, authority_sha256: str) -> None:
         startxref = tail.rfind(b"startxref")
         if startxref < 0:
             raise VirtualSpreadError("Written PDF has no final startxref")
-        if LINK_AUTHORITY_MARKER in tail[startxref:]:
+        authority_tail = tail[startxref:]
+        if (
+            LAYOUT_AUTHORITY_MARKER in authority_tail
+            or LINK_AUTHORITY_MARKER in authority_tail
+        ):
             raise VirtualSpreadError("Written PDF has an invalid authority marker")
         stream.seek(tail_start + startxref)
         stream.write(marker)
@@ -566,18 +635,16 @@ def _publish_pair(
         )
         for final_path, backup, had_final in entries:
             if had_final:
-                os.replace(final_path, backup)
+                _durable_replace(final_path, backup)
             elif final_path.exists():
                 raise VirtualSpreadError(
                     f"Publication target appeared concurrently: {final_path}"
                 )
 
-        _fsync_parent_directories(output_path, manifest_path)
         # Publish the sidecar first. Until the PDF appears, the module fails
         # closed; once the PDF is published, its persisted hash matches.
-        os.replace(temporary_manifest, manifest_path)
-        os.replace(temporary_output, output_path)
-        _fsync_parent_directories(output_path, manifest_path)
+        _durable_replace(temporary_manifest, manifest_path)
+        _durable_replace(temporary_output, output_path)
         _finish_publication_transaction(transaction)
     except BaseException as publication_error:
         try:
@@ -614,7 +681,63 @@ def _publication_artifacts(
     return marker, output_backup, manifest_backup
 
 
+def _windows_move_flags(replace_existing: bool) -> int:
+    flags = MOVEFILE_WRITE_THROUGH
+    if replace_existing:
+        flags |= MOVEFILE_REPLACE_EXISTING
+    return flags
+
+
+def _windows_move_file_ex(source: Path, target: Path, flags: int) -> None:
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    move_file_ex = kernel32.MoveFileExW
+    move_file_ex.argtypes = [
+        ctypes.c_wchar_p,
+        ctypes.c_wchar_p,
+        ctypes.c_uint32,
+    ]
+    move_file_ex.restype = ctypes.c_int
+    if move_file_ex(str(source), str(target), flags):
+        return
+    error_code = ctypes.get_last_error()
+    if not (flags & MOVEFILE_REPLACE_EXISTING) and error_code in WINDOWS_ALREADY_EXISTS:
+        raise FileExistsError(
+            error_code,
+            f"Publication target already exists: {target}",
+            str(target),
+        )
+    raise ctypes.WinError(error_code)
+
+
+def _durable_replace(
+    source: Path,
+    target: Path,
+    *,
+    replace_existing: bool = True,
+) -> None:
+    source = Path(source)
+    target = Path(target)
+    if os.name == "nt":
+        _windows_move_file_ex(
+            source,
+            target,
+            _windows_move_flags(replace_existing),
+        )
+        return
+    if not replace_existing and target.exists():
+        raise FileExistsError(
+            f"Publication target already exists: {target}"
+        )
+    os.replace(source, target)
+    _fsync_parent_directories(source, target)
+
+
 def _fsync_parent_directories(*paths: Path) -> None:
+    if os.name == "nt":
+        # Every publication namespace change on Windows goes through
+        # MoveFileExW(MOVEFILE_WRITE_THROUGH). Directory handles cannot be
+        # opened portably by Python's os.open implementation.
+        return
     directories = sorted(
         {path.resolve().parent for path in paths},
         key=lambda path: str(path),
@@ -624,16 +747,23 @@ def _fsync_parent_directories(*paths: Path) -> None:
         try:
             descriptor = os.open(directory, flags)
         except OSError:
-            if os.name == "nt":
-                continue
             raise
         try:
             os.fsync(descriptor)
         except OSError:
-            if os.name != "nt":
-                raise
+            raise
         finally:
             os.close(descriptor)
+
+
+def _durably_remove(path: Path) -> None:
+    retired = path.with_name(path.name + ".retired")
+    try:
+        _durable_replace(path, retired)
+    except FileNotFoundError:
+        return
+    retired.unlink(missing_ok=True)
+    _fsync_parent_directories(retired)
 
 
 def _valid_sha256(value: Any) -> bool:
@@ -656,6 +786,24 @@ def _write_publication_marker(
     transaction: dict[str, Any],
 ) -> None:
     marker_path.parent.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        staged_marker = _temporary_neighbor(marker_path, ".publish-marker.tmp")
+        try:
+            _write_json(staged_marker, transaction)
+            try:
+                _durable_replace(
+                    staged_marker,
+                    marker_path,
+                    replace_existing=False,
+                )
+            except FileExistsError as error:
+                raise VirtualSpreadError(
+                    f"Publication is already in progress: {marker_path}"
+                ) from error
+        finally:
+            staged_marker.unlink(missing_ok=True)
+        return
+
     try:
         descriptor = os.open(
             marker_path,
@@ -717,11 +865,9 @@ def _finish_publication_transaction(transaction: dict[str, Any]) -> None:
     marker_path = Path(transaction["markerPath"])
     output_backup = Path(transaction["outputBackupPath"])
     manifest_backup = Path(transaction["manifestBackupPath"])
-    output_backup.unlink(missing_ok=True)
-    manifest_backup.unlink(missing_ok=True)
-    _fsync_parent_directories(output_backup, manifest_backup)
-    marker_path.unlink()
-    _fsync_parent_directories(marker_path)
+    _durably_remove(output_backup)
+    _durably_remove(manifest_backup)
+    _durably_remove(marker_path)
 
 
 def _recover_pair_publication(
@@ -750,8 +896,7 @@ def _recover_pair_publication(
         )
     except (OSError, ValueError, TypeError, UnicodeError) as error:
         if not output_backup.exists() and not manifest_backup.exists():
-            marker_path.unlink(missing_ok=True)
-            _fsync_parent_directories(marker_path)
+            _durably_remove(marker_path)
             return "discarded"
         raise VirtualSpreadError(
             "Cannot recover invalid virtual-spread publication marker"
@@ -787,7 +932,7 @@ def _recover_pair_publication(
     for final_path, backup, had_final, new_hash in entries:
         try:
             if backup.exists():
-                os.replace(backup, final_path)
+                _durable_replace(backup, final_path)
             elif had_final:
                 if not final_path.exists():
                     raise VirtualSpreadError(
@@ -798,14 +943,13 @@ def _recover_pair_publication(
                     raise VirtualSpreadError(
                         f"Unexpected publication target: {final_path}"
                     )
-                final_path.unlink()
+                _durably_remove(final_path)
         except BaseException as error:
             errors.append(f"{final_path}: {error}")
     if errors:
         raise VirtualSpreadError(
             "Virtual-spread recovery was incomplete: " + "; ".join(errors)
         )
-    _fsync_parent_directories(output_path, manifest_path)
     _finish_publication_transaction(transaction)
     return "rolled_back"
 
@@ -969,6 +1113,15 @@ def _build_virtual_spread_from_snapshot(
             )
 
     link_authority_hash = _link_authority_sha256(links)
+    layout_authority_hash = _layout_authority_sha256(
+        direction,
+        cover_separate,
+        len(reader.pages),
+        len(pairs),
+        spread_width,
+        spread_height,
+        gutter,
+    )
     metadata = {
         key: str(value)
         for key, value in (reader.metadata or {}).items()
@@ -979,6 +1132,7 @@ def _build_virtual_spread_from_snapshot(
             "/SNVirtualSpreadSchema": SCHEMA,
             "/SNVirtualSpreadSource": source_path.name,
             "/SNVirtualSpreadSourceSHA256": source_hash,
+            "/SNVirtualSpreadLayoutSHA256": layout_authority_hash,
             "/SNVirtualSpreadLinksSHA256": link_authority_hash,
         }
     )
@@ -993,7 +1147,11 @@ def _build_virtual_spread_from_snapshot(
             writer.write(stream)
             stream.flush()
             os.fsync(stream.fileno())
-        _bind_pdf_link_authority(temporary_output, link_authority_hash)
+        _bind_pdf_authorities(
+            temporary_output,
+            layout_authority_hash,
+            link_authority_hash,
+        )
         verification = PdfReader(str(temporary_output), strict=True)
         if len(verification.pages) != len(pairs):
             raise VirtualSpreadError("Written PDF failed page-count verification")
@@ -1020,6 +1178,7 @@ def _build_virtual_spread_from_snapshot(
                 "pageCount": len(pairs),
                 "spreadSize": [spread_width, spread_height],
                 "gutter": gutter,
+                "layoutAuthoritySha256": layout_authority_hash,
                 "linkAuthoritySha256": link_authority_hash,
             },
             "direction": direction,

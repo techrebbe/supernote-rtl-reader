@@ -12,8 +12,13 @@ It activates only when all of these are true:
 - the manifest direction is `rtl`;
 - the PDF byte length, page count, and full SHA-256 match the manifest;
 - the persisted `coverSeparate`, spread occupancy, and source-page mappings
-  describe the same complete RTL layout; and
+  describe the same complete RTL layout;
+- the canonical direction, cover parity, page counts, spread geometry, and
+  gutter digest matches the authority marker embedded in the hashed PDF; and
 - the known Supernote document firmware fingerprint and APK size match.
+
+Manifests generated before v0.0.15 lack that layout authority and fail closed.
+Regenerate the PDF/sidecar pair before using it with this module.
 
 The manifest cache is content-authoritative: the small sidecar is hashed on
 every lookup, and the PDF cache identity includes its device, inode, size,
@@ -34,6 +39,12 @@ collection and embeds that authority digest immediately before the PDF's final
 `startxref`. The runtime recomputes the digest from the sidecar and requires it
 to match both the sidecar identity and the marker inside the already-verified
 PDF, so omitted, reordered, or retargeted records fail closed.
+
+Immediately before the link marker, the generator embeds a separate layout
+authority. The runtime recomputes it from the validated sidecar and requires an
+exact match. This prevents a stale or substituted sidecar from changing cover
+parity or spread geometry even when the source and output page counts happen to
+remain the same.
 
 For a matching document it:
 

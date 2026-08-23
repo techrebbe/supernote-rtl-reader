@@ -47,16 +47,24 @@ links, and existing outputs unless `--force` is supplied. It copies and hashes
 the source through one file snapshot, re-reads the opened source to prove that
 the copied bytes are stable, generates only from that verified snapshot, and
 rehashes the current source before publication. The PDF and manifest are each
-staged and validated before publication as one recoverable pair. A durable
-transaction marker is synced before either previous file is moved. If the
-process is interrupted, the next run either recognizes the fully published pair
-by both staged hashes and finishes cleanup, or restores the previous PDF and
-manifest from the recorded backups. Ordinary publication errors use that same
-recovery path immediately.
+staged and validated before publication as one recoverable pair. A transaction
+marker is durably published before either previous file is moved. POSIX builds
+sync every affected parent directory; Windows builds use
+`MoveFileExW(MOVEFILE_WRITE_THROUGH)` for the marker, backup, publication,
+rollback, and retirement renames. If the process or machine is interrupted, the
+next run either recognizes the fully published pair by both staged hashes and
+finishes cleanup, or restores the previous PDF and manifest from the recorded
+backups. Ordinary publication errors use that same recovery path immediately.
 The manifest records the staged PDF's exact size and SHA-256, which the runtime
 module verifies before trusting its mappings. A canonical digest of every link
 record is also embedded in the generated PDF and verified against the sidecar,
 preventing a separately edited sidecar from omitting or retargeting links.
+A second canonical authority binds RTL direction, cover parity, source/output
+page counts, spread dimensions, and gutter to that same hashed PDF. This keeps
+an otherwise internally consistent sidecar from swapping cover pairing or
+geometry. Native module v0.0.15 therefore fails closed on manifests generated
+before this layout authority existed; regenerate an older virtual-spread pair
+before opening it with v0.0.15.
 
 ## Nomad hardware result: GO
 

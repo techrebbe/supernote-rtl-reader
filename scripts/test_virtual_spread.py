@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 import tempfile
 import unittest
@@ -20,15 +19,22 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "virtual_spread"))
 
 from generate_virtual_spread import (  # noqa: E402
+    LAYOUT_AUTHORITY_MARKER,
     LINK_AUTHORITY_MARKER,
+    MOVEFILE_REPLACE_EXISTING,
+    MOVEFILE_WRITE_THROUGH,
     SourceIdentity,
     VirtualSpreadError,
+    _canonical_layout,
+    _durable_replace,
     _identity,
+    _layout_authority_sha256,
     _link_authority_sha256,
     _publish_pair,
     _prepare_publication_transaction,
     _recover_pair_publication,
     _sha256_open_file,
+    _windows_move_flags,
     _write_json,
     build_pairs,
     build_virtual_spread,
@@ -282,7 +288,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 self.assertLessEqual(right, slot_right + 0.001)
                 self.assertLessEqual(top, slot_top + 0.001)
 
-    def test_link_authority_is_embedded_and_tamper_evident(self) -> None:
+    def test_pdf_authorities_are_embedded_and_tamper_evident(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "source.pdf"
@@ -308,13 +314,57 @@ class VirtualSpreadTests(unittest.TestCase):
                 metadata["/SNVirtualSpreadLinksSHA256"],
                 authority,
             )
+            layout_record = _canonical_layout(
+                "rtl", True, 7, 4, 864.0, 648.0, 0.0
+            )
+            self.assertEqual(
+                layout_record,
+                "v1|layout|rtl|1|7|4|408b000000000000|"
+                "4084400000000000|0000000000000000",
+            )
+            layout_authority = _layout_authority_sha256(
+                "rtl", True, 7, 4, 864.0, 648.0, 0.0
+            )
+            self.assertEqual(
+                layout_authority,
+                "53d5b0b6c97118392220518325c8ee23f1a81d04bf430e01c893d88c490a4307",
+            )
+            self.assertEqual(
+                manifest["output"]["layoutAuthoritySha256"],
+                layout_authority,
+            )
+            self.assertEqual(
+                metadata["/SNVirtualSpreadLayoutSHA256"],
+                layout_authority,
+            )
+            # Seven source pages produce four spreads with either cover mode.
+            # The layout digest must still distinguish their different parity.
+            self.assertEqual(manifest["output"]["pageCount"], 4)
+            self.assertNotEqual(
+                _layout_authority_sha256(
+                    "rtl", False, 7, 4, 864.0, 648.0, 0.0
+                ),
+                layout_authority,
+            )
             with output.open("rb") as stream:
                 stream.seek(max(0, output.stat().st_size - 4096))
                 tail = stream.read()
-            marker = LINK_AUTHORITY_MARKER + authority.encode("ascii") + b"\n"
-            self.assertEqual(tail.count(marker), 1)
+            layout_marker = (
+                LAYOUT_AUTHORITY_MARKER
+                + layout_authority.encode("ascii")
+                + b"\n"
+            )
+            link_marker = (
+                LINK_AUTHORITY_MARKER + authority.encode("ascii") + b"\n"
+            )
+            self.assertEqual(tail.count(layout_marker), 1)
+            self.assertEqual(tail.count(link_marker), 1)
             self.assertEqual(
-                tail.index(marker) + len(marker),
+                tail.index(layout_marker) + len(layout_marker),
+                tail.index(link_marker),
+            )
+            self.assertEqual(
+                tail.index(link_marker) + len(link_marker),
                 tail.rindex(b"startxref"),
             )
 
@@ -327,6 +377,16 @@ class VirtualSpreadTests(unittest.TestCase):
                 authority,
             )
             self.assertNotEqual(_link_authority_sha256([]), authority)
+
+    def test_windows_namespace_changes_always_request_write_through(self) -> None:
+        self.assertEqual(
+            _windows_move_flags(False),
+            MOVEFILE_WRITE_THROUGH,
+        )
+        self.assertEqual(
+            _windows_move_flags(True),
+            MOVEFILE_WRITE_THROUGH | MOVEFILE_REPLACE_EXISTING,
+        )
 
     def test_source_change_before_publication_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -627,18 +687,25 @@ class VirtualSpreadTests(unittest.TestCase):
             temporary_output.write_bytes(b"new-pdf")
             temporary_manifest.write_bytes(b"new-manifest")
 
-            real_replace = os.replace
+            real_replace = _durable_replace
 
-            def fail_output_publication(source: object, target: object) -> None:
+            def fail_output_publication(
+                source: object,
+                target: object,
+                *,
+                replace_existing: bool = True,
+            ) -> None:
                 if (
                     Path(source) == temporary_output
                     and Path(target) == output
                 ):
                     raise OSError("simulated output publication failure")
-                real_replace(source, target)
+                real_replace(
+                    Path(source), Path(target), replace_existing=replace_existing
+                )
 
             with mock.patch(
-                "generate_virtual_spread.os.replace",
+                "generate_virtual_spread._durable_replace",
                 side_effect=fail_output_publication,
             ):
                 with self.assertRaisesRegex(
@@ -684,9 +751,9 @@ class VirtualSpreadTests(unittest.TestCase):
             output_backup = Path(transaction["outputBackupPath"])
             manifest_backup = Path(transaction["manifestBackupPath"])
             marker = Path(transaction["markerPath"])
-            os.replace(output, output_backup)
-            os.replace(manifest, manifest_backup)
-            os.replace(temporary_manifest, manifest)
+            _durable_replace(output, output_backup)
+            _durable_replace(manifest, manifest_backup)
+            _durable_replace(temporary_manifest, manifest)
 
             with self.assertRaisesRegex(
                 VirtualSpreadError,
@@ -723,10 +790,10 @@ class VirtualSpreadTests(unittest.TestCase):
             output_backup = Path(transaction["outputBackupPath"])
             manifest_backup = Path(transaction["manifestBackupPath"])
             marker = Path(transaction["markerPath"])
-            os.replace(output, output_backup)
-            os.replace(manifest, manifest_backup)
-            os.replace(temporary_manifest, manifest)
-            os.replace(temporary_output, output)
+            _durable_replace(output, output_backup)
+            _durable_replace(manifest, manifest_backup)
+            _durable_replace(temporary_manifest, manifest)
+            _durable_replace(temporary_output, output)
 
             self.assertEqual(
                 _recover_pair_publication(output, manifest),

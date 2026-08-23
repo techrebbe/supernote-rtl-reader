@@ -56,7 +56,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final String SCHEMA =
         "techrebbe.supernote.virtual-spread/v1";
     private static final String TAG = "SN_VIRTUAL_SPREAD";
-    private static final String VERSION = "0.0.14";
+    private static final String VERSION = "0.0.15";
 
     private static volatile WeakReference<Activity> activeActivity =
         new WeakReference<>(null);
@@ -1385,6 +1385,17 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             log("manifest_rejected reason=link_authority path=" + key);
             return null;
         }
+        String expectedLayoutAuthority = output.optString(
+            "layoutAuthoritySha256",
+            ""
+        );
+        String embeddedLayoutAuthority =
+            VirtualSpreadLinkAuthority.readPdfLayoutDigest(pdf);
+        if (!isSha256(expectedLayoutAuthority)
+            || !expectedLayoutAuthority.equalsIgnoreCase(embeddedLayoutAuthority)) {
+            log("manifest_rejected reason=layout_authority path=" + key);
+            return null;
+        }
         int firstSourcePage = coverSeparate ? 1 : 0;
         int expectedPageCount = (coverSeparate ? 1 : 0)
             + (sourcePageCount - firstSourcePage + 1) / 2;
@@ -1401,10 +1412,28 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
         double pageWidth = spreadSize.optDouble(0, Double.NaN);
         double pageHeight = spreadSize.optDouble(1, Double.NaN);
+        double gutter = output.optDouble("gutter", Double.NaN);
         if (Double.isNaN(pageWidth) || Double.isInfinite(pageWidth)
             || Double.isNaN(pageHeight) || Double.isInfinite(pageHeight)
-            || pageWidth <= 0.0 || pageHeight <= 0.0) {
+            || Double.isNaN(gutter) || Double.isInfinite(gutter)
+            || pageWidth <= 0.0 || pageHeight <= 0.0
+            || gutter < 0.0 || (pageWidth - gutter) / 2.0 <= 0.0) {
             log("manifest_rejected reason=output_geometry path=" + key);
+            return null;
+        }
+        String actualLayoutAuthority = VirtualSpreadLinkAuthority.layoutDigest(
+            VirtualSpreadLinkAuthority.layout(
+                "rtl",
+                coverSeparate,
+                sourcePageCount,
+                pageCount,
+                pageWidth,
+                pageHeight,
+                gutter
+            )
+        );
+        if (!expectedLayoutAuthority.equalsIgnoreCase(actualLayoutAuthority)) {
+            log("manifest_rejected reason=layout_authority_records path=" + key);
             return null;
         }
         VirtualSpreadNavigation.Spread[] spreads =

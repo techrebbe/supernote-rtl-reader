@@ -293,7 +293,11 @@ def _require_runtime_float_geometry(
             )
     narrowed_width = _runtime_float32(spread_width)
     narrowed_gutter = _runtime_float32(gutter)
-    narrowed_slot = (narrowed_width - narrowed_gutter) / 2.0
+    # Android evaluates both operations as float, rounding after each one.
+    narrowed_difference = _runtime_float32(
+        narrowed_width - narrowed_gutter
+    )
+    narrowed_slot = _runtime_float32(narrowed_difference / 2.0)
     if not math.isfinite(narrowed_slot) or narrowed_slot <= 0.0:
         raise VirtualSpreadError(
             "Spread geometry is not representable by Android runtime floats"

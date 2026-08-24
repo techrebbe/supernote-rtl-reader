@@ -180,6 +180,15 @@ public final class VirtualSpreadNavigationTest {
             )
         );
         assertBoolean(
+            "runtime slot arithmetic rounds after every float operation",
+            false,
+            VirtualSpreadNavigation.runtimeGeometryIsRepresentable(
+                2.49 * Math.scalb(1.0, -149),
+                1.0,
+                0.51 * Math.scalb(1.0, -149)
+            )
+        );
+        assertBoolean(
             "normal runtime link rectangle is representable",
             true,
             VirtualSpreadNavigation.runtimeRectIsRepresentable(

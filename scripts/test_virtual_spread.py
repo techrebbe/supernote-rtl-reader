@@ -2129,6 +2129,7 @@ class VirtualSpreadTests(unittest.TestCase):
             root = Path(directory)
             source = root / "source.pdf"
             create_odd_page_fixture(source)
+            smallest_float32 = math.ldexp(1.0, -149)
             cases = (
                 {"spread_width": 1e40},
                 {"spread_height": 1e40},
@@ -2143,6 +2144,11 @@ class VirtualSpreadTests(unittest.TestCase):
                 {
                     "spread_width": 1.0,
                     "gutter": 1.0 - 1e-16,
+                },
+                {
+                    "spread_width": 2.49 * smallest_float32,
+                    "spread_height": 1.0,
+                    "gutter": 0.51 * smallest_float32,
                 },
             )
             for index, values in enumerate(cases):

@@ -763,6 +763,16 @@ fail closed before staging or publication. Real `/Dur`, `/Trans`, `/AA`, and
 `/UserUnit` fixtures verify all reported and generic paths while preserving the
 source and previous publication pair, raising the generator suite to 68 tests
 on Windows and Linux.
+A thirty-first review pass requires `/Rotate` to be an actual PDF integer and
+an exact multiple of 90 before normalization, rejecting string, fractional, and
+non-quarter-turn values without publication changes. Document information now
+bypasses pypdf's string-coercing `add_metadata()` helper: validated text,
+byte-string, name, Boolean, integer, real, and null primitives are copied with
+their PDF types intact; standardized text and `/Trapped` entries are constrained;
+arrays, dictionaries, streams, and other unsupported values fail closed. Typed
+`/Trapped`, custom number/Boolean, malformed rotation, unsupported metadata,
+numeric-title, and string-typed-`/Trapped` fixtures raise the generator suite to
+72 tests on Windows and Linux.
 These automated checks do not replace or restate the v0.0.8 hardware result;
 v0.0.15 still requires a focused generated-pair smoke test before release.
 

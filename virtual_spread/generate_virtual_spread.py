@@ -22,6 +22,7 @@ from pypdf import PdfReader, PdfWriter, Transformation
 from pypdf.generic import (
     ArrayObject,
     BooleanObject,
+    ByteStringObject,
     DictionaryObject,
     FloatObject,
     IndirectObject,
@@ -94,6 +95,17 @@ SUPPORTED_SOURCE_PAGE_KEYS = frozenset({
     "/Trans",
     "/Type",
 })
+DOCUMENT_INFORMATION_TEXT_KEYS = frozenset({
+    "/Author",
+    "/CreationDate",
+    "/Creator",
+    "/Keywords",
+    "/ModDate",
+    "/Producer",
+    "/Subject",
+    "/Title",
+})
+SUPPORTED_TRAPPED_NAMES = frozenset({"/False", "/True", "/Unknown"})
 
 PublicationOwnershipGuard = Callable[[], None]
 
@@ -693,6 +705,16 @@ def _require_supported_document_catalog(
 def _require_supported_source_pages(reader: PdfReader) -> None:
     for page_index, page in enumerate(reader.pages):
         page_number = page_index + 1
+        if "/Rotate" in page:
+            rotation = _dereference_pdf_object(page.raw_get("/Rotate"))
+            if (
+                not isinstance(rotation, NumberObject)
+                or int(rotation) % 90 != 0
+            ):
+                raise VirtualSpreadError(
+                    "Source page /Rotate must be a PDF integer multiple of 90; "
+                    f"source page {page_number}"
+                )
         if "/Dur" in page:
             raise VirtualSpreadError(
                 "Page durations are not supported by this prototype; "
@@ -720,6 +742,78 @@ def _require_supported_source_pages(reader: PdfReader) -> None:
                 "Unsupported source page entries on page "
                 f"{page_number}: " + ", ".join(unsupported)
             )
+
+
+def _copy_document_information_value(value: Any, label: str) -> Any:
+    value = _dereference_pdf_object(value)
+    if isinstance(value, TextStringObject):
+        return TextStringObject(str(value))
+    if isinstance(value, ByteStringObject):
+        return ByteStringObject(bytes(value))
+    if isinstance(value, NameObject):
+        return NameObject(str(value))
+    if isinstance(value, BooleanObject):
+        return BooleanObject(value.value)
+    if isinstance(value, FloatObject):
+        return FloatObject(str(value))
+    if isinstance(value, NumberObject):
+        return NumberObject(int(value))
+    if isinstance(value, NullObject):
+        return NullObject()
+    raise VirtualSpreadError(
+        f"Unsupported document information value for {label}"
+    )
+
+
+def _write_document_information(
+    reader: PdfReader,
+    writer: PdfWriter,
+    generated_entries: dict[str, str],
+) -> None:
+    information = DictionaryObject()
+    if writer._info is not None:
+        for key in writer._info.keys():
+            information[NameObject(str(key))] = _copy_document_information_value(
+                writer._info.raw_get(key),
+                str(key),
+            )
+    if "/Info" in reader.trailer:
+        source_information = _dereference_pdf_object(
+            reader.trailer.raw_get("/Info")
+        )
+        if not isinstance(source_information, DictionaryObject):
+            raise VirtualSpreadError(
+                "Source document information is not a dictionary"
+            )
+        for key in source_information.keys():
+            if not isinstance(key, NameObject):
+                raise VirtualSpreadError(
+                    "Source document information contains a non-name key"
+                )
+            key_text = str(key)
+            value = _dereference_pdf_object(
+                source_information.raw_get(key)
+            )
+            if key_text in DOCUMENT_INFORMATION_TEXT_KEYS and not isinstance(
+                value,
+                (TextStringObject, ByteStringObject),
+            ):
+                raise VirtualSpreadError(
+                    f"Invalid text document information value for {key_text}"
+                )
+            if key_text == "/Trapped" and (
+                not isinstance(value, NameObject)
+                or str(value) not in SUPPORTED_TRAPPED_NAMES
+            ):
+                raise VirtualSpreadError(
+                    "Invalid document information /Trapped value"
+                )
+            information[NameObject(key_text)] = (
+                _copy_document_information_value(value, key_text)
+            )
+    for key, value in generated_entries.items():
+        information[NameObject(key)] = TextStringObject(value)
+    writer._info = information
 
 
 def _required_pdf_name(
@@ -3180,21 +3274,17 @@ def _build_virtual_spread_from_snapshot(
         spread_height,
         gutter,
     )
-    metadata = {
-        key: str(value)
-        for key, value in (reader.metadata or {}).items()
-        if value is not None
-    }
-    metadata.update(
+    _write_document_information(
+        reader,
+        writer,
         {
             "/SNVirtualSpreadSchema": SCHEMA,
             "/SNVirtualSpreadSource": source_path.name,
             "/SNVirtualSpreadSourceSHA256": source_hash,
             "/SNVirtualSpreadLayoutSHA256": layout_authority_hash,
             "/SNVirtualSpreadLinksSHA256": link_authority_hash,
-        }
+        },
     )
-    writer.add_metadata(metadata)
 
     temporary_output = _temporary_neighbor(
         output_path, ".tmp", ownership_guard

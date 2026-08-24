@@ -248,6 +248,69 @@ def add_page_behavior(path: Path, behavior: str) -> str:
     return key
 
 
+def add_invalid_page_rotation(path: Path, value: object) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    writer.pages[0][NameObject("/Rotate")] = value
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def add_typed_document_information(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    if writer._info is None:
+        writer._info = DictionaryObject()
+    writer._info[NameObject("/Trapped")] = NameObject("/True")
+    writer._info[NameObject("/CustomNumber")] = NumberObject(7)
+    writer._info[NameObject("/CustomFlag")] = BooleanObject(True)
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    information = PdfReader(str(path), strict=True).trailer["/Info"]
+    if not isinstance(information.raw_get("/Trapped"), NameObject):
+        raise AssertionError("fixture /Trapped value is not a PDF name")
+    if not isinstance(information.raw_get("/CustomNumber"), NumberObject):
+        raise AssertionError("fixture custom number is not a PDF integer")
+    if not isinstance(information.raw_get("/CustomFlag"), BooleanObject):
+        raise AssertionError("fixture custom flag is not a PDF Boolean")
+
+
+def add_unsupported_document_information(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    if writer._info is None:
+        writer._info = DictionaryObject()
+    writer._info[NameObject("/CustomArray")] = ArrayObject([
+        NumberObject(1),
+        NumberObject(2),
+    ])
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    information = PdfReader(str(path), strict=True).trailer["/Info"]
+    if not isinstance(information.raw_get("/CustomArray"), ArrayObject):
+        raise AssertionError("fixture custom metadata array was not persisted")
+
+
+def add_invalid_standard_document_information(
+    path: Path,
+    key: str,
+    value: object,
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    if writer._info is None:
+        writer._info = DictionaryObject()
+    writer._info[NameObject(key)] = value
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
 def make_annotation_array_indirect(path: Path, page_index: int) -> None:
     source = PdfReader(str(path), strict=True)
     writer = PdfWriter()
@@ -781,6 +844,135 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertEqual(
                 manifest_path.read_bytes(), b"existing-manifest"
             )
+
+    def test_page_rotation_requires_exact_pdf_quarter_turn_integer(self) -> None:
+        cases = (
+            ("string", TextStringObject("90")),
+            ("fractional", FloatObject(90.5)),
+            ("not-quarter-turn", NumberObject(45)),
+        )
+        for label, value in cases:
+            with self.subTest(value=label):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    source = root / f"rotation-{label}.pdf"
+                    output = root / "spread.pdf"
+                    manifest_path = root / "spread.pdf.json"
+                    create_odd_page_fixture(source)
+                    add_invalid_page_rotation(source, value)
+                    source_bytes = source.read_bytes()
+                    output.write_bytes(b"existing-output")
+                    manifest_path.write_bytes(b"existing-manifest")
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "Source page /Rotate must be a PDF integer multiple of 90",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            force=True,
+                        )
+
+                    self.assertEqual(source.read_bytes(), source_bytes)
+                    self.assertEqual(output.read_bytes(), b"existing-output")
+                    self.assertEqual(
+                        manifest_path.read_bytes(), b"existing-manifest"
+                    )
+
+    def test_typed_document_information_is_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "typed-information-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_typed_document_information(source)
+
+            build_virtual_spread(source, output, manifest_path)
+
+            information = PdfReader(str(output), strict=True).trailer["/Info"]
+            trapped = information.raw_get("/Trapped")
+            number = information.raw_get("/CustomNumber")
+            flag = information.raw_get("/CustomFlag")
+            self.assertIsInstance(trapped, NameObject)
+            self.assertEqual(trapped, "/True")
+            self.assertIsInstance(number, NumberObject)
+            self.assertEqual(number, 7)
+            self.assertIsInstance(flag, BooleanObject)
+            self.assertTrue(flag.value)
+
+    def test_unsupported_document_information_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "unsupported-information-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_unsupported_document_information(source)
+            source_bytes = source.read_bytes()
+            output.write_bytes(b"existing-output")
+            manifest_path.write_bytes(b"existing-manifest")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Unsupported document information value for /CustomArray",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    force=True,
+                )
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(output.read_bytes(), b"existing-output")
+            self.assertEqual(
+                manifest_path.read_bytes(), b"existing-manifest"
+            )
+
+    def test_invalid_standard_document_information_fails_closed(self) -> None:
+        cases = (
+            (
+                "numeric-title",
+                "/Title",
+                NumberObject(7),
+                "Invalid text document information value for /Title",
+            ),
+            (
+                "string-trapped",
+                "/Trapped",
+                TextStringObject("/True"),
+                "Invalid document information /Trapped value",
+            ),
+        )
+        for label, key, value, message in cases:
+            with self.subTest(value=label):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    source = root / f"{label}-source.pdf"
+                    output = root / "spread.pdf"
+                    manifest_path = root / "spread.pdf.json"
+                    create_odd_page_fixture(source)
+                    add_invalid_standard_document_information(source, key, value)
+                    source_bytes = source.read_bytes()
+                    output.write_bytes(b"existing-output")
+                    manifest_path.write_bytes(b"existing-manifest")
+
+                    with self.assertRaisesRegex(VirtualSpreadError, message):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            force=True,
+                        )
+
+                    self.assertEqual(source.read_bytes(), source_bytes)
+                    self.assertEqual(output.read_bytes(), b"existing-output")
+                    self.assertEqual(
+                        manifest_path.read_bytes(), b"existing-manifest"
+                    )
 
     def test_pdf_authorities_are_embedded_and_tamper_evident(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

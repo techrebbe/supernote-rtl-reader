@@ -68,11 +68,15 @@ silently discarded. Source page dictionaries use the same complete contract:
 content, resources, geometry, rotation, and supported link annotations are
 consumed explicitly; ReportLab's empty transition placeholder is inert; page
 durations, meaningful transitions, additional actions, user-unit scaling, and
-every other unsupported or unknown page entry fail closed. Existing outputs
-also require `--force`. The command rejects a source path that collides with its
-output's deterministic marker, backup, retirement, or lock artifacts before
-recovery or lock acquisition. It copies and hashes the source through one file
-snapshot, re-reads the opened
+every other unsupported or unknown page entry fail closed. Persisted rotation
+must be a true PDF integer divisible by 90. The document information dictionary
+is copied with primitive PDF types intact; standardized text and `/Trapped`
+entries are validated, while arrays, dictionaries, streams, or other unsupported
+values fail closed rather than being stringified. Existing outputs also require
+`--force`. The command rejects a source path that collides with its output's
+deterministic marker, backup, retirement, or lock artifacts before recovery or
+lock acquisition. It copies and hashes the source through one file snapshot,
+re-reads the opened
 source to prove that
 the copied bytes are stable, generates only from that verified snapshot, and
 rehashes the current source before publication. The PDF and manifest are each

@@ -806,6 +806,37 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertFalse(manifest.exists())
             self.assertTrue(_publication_lock_path(output).is_file())
 
+    def test_publication_lock_symlink_never_touches_target(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            victim = root / "victim.bin"
+            create_odd_page_fixture(source)
+            victim.write_bytes(b"victim")
+            lock_path = _publication_lock_path(output)
+            try:
+                lock_path.symlink_to(victim)
+            except OSError as error:
+                self.skipTest(f"symlink creation unavailable: {error}")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Publication lock must be a regular file",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest,
+                    force=True,
+                )
+
+            self.assertEqual(victim.read_bytes(), b"victim")
+            self.assertTrue(lock_path.is_symlink())
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest.exists())
+
     def test_force_rejects_directory_publication_targets(self) -> None:
         for directory_target in ("output", "manifest"):
             with self.subTest(directory_target=directory_target):
@@ -938,6 +969,117 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertTrue(manifest.is_file())
             self.assertFalse(marker.exists())
             self.assertFalse(any(root.glob("*.bak")))
+
+    def test_staged_directory_is_rejected_before_backup_moves(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+            real_prepare = _prepare_publication_transaction
+
+            def prepare_then_replace_stage(
+                staged_output: Path,
+                final_output: Path,
+                staged_manifest: Path,
+                final_manifest: Path,
+            ) -> dict[str, object]:
+                transaction = real_prepare(
+                    staged_output,
+                    final_output,
+                    staged_manifest,
+                    final_manifest,
+                )
+                staged_manifest.unlink()
+                staged_manifest.mkdir()
+                (staged_manifest / "keep.txt").write_bytes(b"keep")
+                return transaction
+
+            with mock.patch(
+                "generate_virtual_spread._prepare_publication_transaction",
+                side_effect=prepare_then_replace_stage,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Staged manifest must be a regular file",
+                ):
+                    _publish_pair(
+                        temporary_output,
+                        output,
+                        temporary_manifest,
+                        manifest,
+                    )
+
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(temporary_manifest.is_dir())
+            self.assertEqual(
+                (temporary_manifest / "keep.txt").read_bytes(),
+                b"keep",
+            )
+            self.assertFalse(any(root.glob("*.bak")))
+            self.assertFalse(any(root.glob("*.publish.json")))
+
+    def test_published_hash_mismatch_restores_existing_pair(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+            real_replace = _durable_replace
+            replaced_stage = False
+
+            def replace_with_tamper(
+                source: object,
+                target: object,
+                *,
+                replace_existing: bool = True,
+            ) -> None:
+                nonlocal replaced_stage
+                if (
+                    not replaced_stage
+                    and Path(source) == temporary_manifest
+                    and Path(target) == manifest
+                ):
+                    temporary_manifest.write_bytes(b"tampered-manifest")
+                    replaced_stage = True
+                real_replace(
+                    Path(source),
+                    Path(target),
+                    replace_existing=replace_existing,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._durable_replace",
+                side_effect=replace_with_tamper,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Published manifest SHA-256 mismatch",
+                ):
+                    _publish_pair(
+                        temporary_output,
+                        output,
+                        temporary_manifest,
+                        manifest,
+                    )
+
+            self.assertTrue(replaced_stage)
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(temporary_output.is_file())
+            self.assertFalse(any(root.glob("*.bak")))
+            self.assertFalse(any(root.glob("*.publish.json")))
 
     def test_live_publication_lock_blocks_recovery_by_second_generator(
         self,

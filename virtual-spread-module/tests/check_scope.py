@@ -111,16 +111,16 @@ if lookup_start < 0 or lookup_end < 0:
     raise SystemExit("missing fail-closed manifest lookup implementation")
 manifest_lookup = hook[lookup_start:lookup_end]
 for required in (
-    "String sidecarDigest = sha256(sidecarData)",
-    "cached.matches(pdf, sidecarDigest)",
-    "FileIdentity.capture(pdf)",
+    "FileIdentity pdfIdentity = FileIdentity.capture(pdf)",
+    "FileIdentity sidecarIdentity = FileIdentity.capture(sidecar)",
+    "cached.matches(pdfIdentity, sidecarIdentity)",
     "scheduleManifestVerification(",
     "manifest_verification_pending",
     "Fail closed until the background verifier publishes",
 ):
     if required not in manifest_lookup:
         raise SystemExit(f"manifest lookup is missing fail-closed guard: {required}")
-for forbidden in ("parseManifest(", "sha256File("):
+for forbidden in ("parseManifest(", "readBytes(", "sha256(", "sha256File("):
     if forbidden in manifest_lookup:
         raise SystemExit(
             f"manifest lookup performs expensive verification on a UI callback: {forbidden}"
@@ -144,7 +144,10 @@ for required in (
     "MANIFEST_VERIFIER.execute",
     "VERIFYING.put(key, verificationId)",
     "verificationId.equals(VERIFYING.get(key))",
-    "before.matches(after)",
+    "byte[] sidecarData = readBytes(sidecar)",
+    "String sidecarDigest = sha256(sidecarData)",
+    "pdfBefore.matches(pdfAfter)",
+    "sidecarBefore.matches(sidecarAfter)",
     "sidecarDigest.equals(currentSidecarDigest)",
     "MANIFESTS.put(key, published)",
     "scheduleManifestActivation(key, parsed.revision)",
@@ -157,15 +160,20 @@ for required in (
             f"background manifest verification is missing guard: {required}"
         )
 
-pdf_stable = manifest_verification.find("before.matches(after)")
-sidecar_stable = manifest_verification.find(
+pdf_stable = manifest_verification.find("pdfBefore.matches(pdfAfter)")
+sidecar_identity_stable = manifest_verification.find(
+    "sidecarBefore.matches(sidecarAfter)"
+)
+sidecar_digest_stable = manifest_verification.find(
     "sidecarDigest.equals(currentSidecarDigest)"
 )
 publication = manifest_verification.find("MANIFESTS.put(key, published)")
-if min(pdf_stable, sidecar_stable, publication) < 0 or publication <= max(
-    pdf_stable, sidecar_stable
+if min(
+    pdf_stable, sidecar_identity_stable, sidecar_digest_stable, publication
+) < 0 or publication <= max(
+    pdf_stable, sidecar_identity_stable, sidecar_digest_stable
 ):
-    raise SystemExit("manifest publication must follow both snapshot checks")
+    raise SystemExit("manifest publication must follow every snapshot check")
 
 manifest_start = hook.find("private static Manifest manifestFor")
 manifest_end = hook.find("private static boolean isPortrait", manifest_start)
@@ -173,9 +181,9 @@ if manifest_start < 0 or manifest_end < 0:
     raise SystemExit("missing manifest validation implementation")
 manifest_validation = hook[manifest_start:manifest_end]
 for required in (
+    "FileIdentity sidecarIdentity = FileIdentity.capture(sidecar)",
+    "cached.matches(pdfIdentity, sidecarIdentity)",
     "String sidecarDigest = sha256(sidecarData)",
-    "cached.matches(pdf, sidecarDigest)",
-    "FileIdentity.capture(pdf)",
     'output.optString("sha256", "")',
     "expectedHash.equalsIgnoreCase(sha256File(pdf))",
     'manifest_rejected reason=output_hash',
@@ -270,7 +278,14 @@ for required in (
     "with _publication_lock(lexical_output):",
     "def _publication_lock_path(output_path: Path)",
     "manifest_path = _runtime_manifest_path(output_path)",
+    "getattr(os, \"O_NOFOLLOW\", 0)",
+    "_require_open_lock_identity(lock_path, descriptor)",
+    "_require_open_lock_identity(lock_path, stream.fileno())",
     "_require_regular_publication_targets(output_path, manifest_path)",
+    '"Staged output"',
+    '"Staged manifest"',
+    '"Published output"',
+    '"Published manifest"',
     '"Existing publication target"',
     '"Publication marker"',
     '"Publication backup"',
@@ -289,6 +304,18 @@ for required in (
         raise SystemExit(
             f"generator is missing durable/layout authority invariant: {required}"
         )
+
+preflight_hash = generator.find('"Staged manifest"')
+backup_move = generator.find("for final_path, backup, had_final in entries:")
+published_manifest_hash = generator.find('"Published manifest"')
+finish_transaction = generator.find("_finish_publication_transaction(transaction)")
+if not (
+    0 <= preflight_hash < backup_move
+    and backup_move < published_manifest_hash < finish_transaction
+):
+    raise SystemExit(
+        "staged and published hashes must be checked around backup publication"
+    )
 
 build_start = generator.find("def build_virtual_spread(")
 build_end = generator.find("def _parser()", build_start)

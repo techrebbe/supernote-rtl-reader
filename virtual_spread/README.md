@@ -61,6 +61,11 @@ sidecar must share one unambiguous path. Existing PDF, manifest, marker, and
 backup entries must be regular files; directories and other special entries are
 rejected rather than renamed, even with `--force`. Backup destinations are
 created without replacement and are revalidated immediately before each move.
+The persistent OS lock is opened without following links where the platform
+supports it; its path and descriptor must identify the same regular file before
+initialization and again after lock acquisition. Staged artifacts are type- and
+hash-checked before backup moves and immediately before publication, and both
+canonical hashes are verified before recovery evidence is retired.
 The PDF and manifest are staged before publication as one recoverable pair. A transaction
 marker is durably published before either previous file is moved. POSIX builds
 sync every affected parent directory; Windows builds use
@@ -78,7 +83,10 @@ page counts, spread dimensions, and gutter to that same hashed PDF. This keeps
 an otherwise internally consistent sidecar from swapping cover pairing or
 geometry. Native module v0.0.15 therefore fails closed on manifests generated
 before this layout authority existed; regenerate an older virtual-spread pair
-before opening it with v0.0.15.
+before opening it with v0.0.15. Native reader callbacks perform only strong PDF
+and sidecar identity checks. Sidecar reading/hashing, parsing, full-PDF hashing,
+and stable-snapshot verification run on the single background verifier; the
+module fails closed until that verified snapshot is published.
 
 The generator also enforces the companion runtime's exact 8 MiB sidecar limit
 before publication. Oversized manifests fail with an explicit error while any

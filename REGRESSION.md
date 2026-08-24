@@ -608,7 +608,12 @@ simulate an alias appearing between the initial check and locked build, and
 preserve both output- and manifest-directory fixtures byte-for-byte. The suite
 also prevents a concurrently introduced backup directory from becoming a rename
 destination and rechecks file existence after interrupted-publication recovery.
-The suite now contains 26 generator tests.
+A thirteenth review pass protects the deterministic lock itself with no-follow,
+regular-file, and open-descriptor identity checks, and validates staged plus
+canonical publication hashes before retiring rollback state. It also moves all
+sidecar reads and hashes off native reader callbacks: UI paths compare strong PDF
+and sidecar identities while the background verifier proves stable content.
+Three fault and alias regressions raise the suite to 29 generator tests.
 These automated checks do not replace or restate the v0.0.8 hardware result;
 v0.0.15 still requires a focused generated-pair smoke test before release.
 

@@ -156,23 +156,25 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
 
     private static final class CachedManifest {
         final FileIdentity pdfIdentity;
+        final FileIdentity sidecarIdentity;
         final String sidecarDigest;
         final Manifest manifest;
 
         CachedManifest(
             FileIdentity pdfIdentity,
+            FileIdentity sidecarIdentity,
             String sidecarDigest,
             Manifest manifest
         ) {
             this.pdfIdentity = pdfIdentity;
+            this.sidecarIdentity = sidecarIdentity;
             this.sidecarDigest = sidecarDigest;
             this.manifest = manifest;
         }
 
-        boolean matches(File pdf, String currentSidecarDigest)
-            throws Exception {
-            return sidecarDigest.equals(currentSidecarDigest)
-                && pdfIdentity.matches(FileIdentity.capture(pdf));
+        boolean matches(FileIdentity pdf, FileIdentity sidecar) {
+            return pdfIdentity.matches(pdf)
+                && sidecarIdentity.matches(sidecar);
         }
     }
 
@@ -1073,23 +1075,22 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 return null;
             }
             String key = pdf.getCanonicalPath();
-            byte[] sidecarData = readBytes(sidecar);
-            String sidecarDigest = sha256(sidecarData);
+            FileIdentity pdfIdentity = FileIdentity.capture(pdf);
+            FileIdentity sidecarIdentity = FileIdentity.capture(sidecar);
             CachedManifest cached = MANIFESTS.get(key);
-            if (cached != null && cached.matches(pdf, sidecarDigest)) {
+            if (cached != null
+                && cached.matches(pdfIdentity, sidecarIdentity)) {
                 return validatePageCount(viewModel, cached.manifest);
             }
             if (cached != null) {
                 MANIFESTS.remove(key, cached);
             }
-            FileIdentity before = FileIdentity.capture(pdf);
             if (scheduleManifestVerification(
                     pdf,
                     sidecar,
-                    sidecarData,
-                    sidecarDigest,
                     key,
-                    before
+                    pdfIdentity,
+                    sidecarIdentity
                 )) {
                 log("manifest_verification_pending path=" + key);
             }
@@ -1105,12 +1106,12 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static boolean scheduleManifestVerification(
         final File pdf,
         final File sidecar,
-        final byte[] sidecarData,
-        final String sidecarDigest,
         final String key,
-        final FileIdentity before
+        final FileIdentity pdfBefore,
+        final FileIdentity sidecarBefore
     ) {
-        final String verificationId = sidecarDigest + ":" + before.token();
+        final String verificationId = pdfBefore.token()
+            + ":" + sidecarBefore.token();
         String previous = VERIFYING.put(key, verificationId);
         if (verificationId.equals(previous)) {
             return false;
@@ -1122,10 +1123,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     verifyManifestSnapshot(
                         pdf,
                         sidecar,
-                        sidecarData,
-                        sidecarDigest,
                         key,
-                        before,
+                        pdfBefore,
+                        sidecarBefore,
                         verificationId
                     );
                 }
@@ -1140,25 +1140,28 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static void verifyManifestSnapshot(
         File pdf,
         File sidecar,
-        byte[] sidecarData,
-        String sidecarDigest,
         String key,
-        FileIdentity before,
+        FileIdentity pdfBefore,
+        FileIdentity sidecarBefore,
         String verificationId
     ) {
         try {
             if (!verificationId.equals(VERIFYING.get(key))) {
                 return;
             }
+            byte[] sidecarData = readBytes(sidecar);
+            String sidecarDigest = sha256(sidecarData);
             Manifest parsed = parseManifest(
                 pdf,
                 new String(sidecarData, "UTF-8"),
                 key,
                 sidecarDigest
             );
-            FileIdentity after = FileIdentity.capture(pdf);
             String currentSidecarDigest = sha256(readBytes(sidecar));
-            if (!before.matches(after)
+            FileIdentity pdfAfter = FileIdentity.capture(pdf);
+            FileIdentity sidecarAfter = FileIdentity.capture(sidecar);
+            if (!pdfBefore.matches(pdfAfter)
+                || !sidecarBefore.matches(sidecarAfter)
                 || !sidecarDigest.equals(currentSidecarDigest)) {
                 if (verificationId.equals(VERIFYING.get(key))) {
                     MANIFESTS.remove(key);
@@ -1171,7 +1174,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 return;
             }
             CachedManifest published = new CachedManifest(
-                after,
+                pdfAfter,
+                sidecarAfter,
                 sidecarDigest,
                 parsed
             );

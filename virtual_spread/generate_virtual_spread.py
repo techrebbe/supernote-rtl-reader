@@ -624,6 +624,18 @@ def _publish_pair(
         manifest_path,
     )
     try:
+        expected_output_hash = transaction["newOutputSha256"]
+        expected_manifest_hash = transaction["newManifestSha256"]
+        _require_publication_file_hash(
+            temporary_output,
+            expected_output_hash,
+            "Staged output",
+        )
+        _require_publication_file_hash(
+            temporary_manifest,
+            expected_manifest_hash,
+            "Staged manifest",
+        )
         entries = (
             (
                 output_path,
@@ -666,8 +678,33 @@ def _publish_pair(
 
         # Publish the sidecar first. Until the PDF appears, the module fails
         # closed; once the PDF is published, its persisted hash matches.
+        _require_publication_file_hash(
+            temporary_manifest,
+            expected_manifest_hash,
+            "Staged manifest",
+        )
         _durable_replace(temporary_manifest, manifest_path)
+        _require_publication_file_hash(
+            manifest_path,
+            expected_manifest_hash,
+            "Published manifest",
+        )
+        _require_publication_file_hash(
+            temporary_output,
+            expected_output_hash,
+            "Staged output",
+        )
         _durable_replace(temporary_output, output_path)
+        _require_publication_file_hash(
+            manifest_path,
+            expected_manifest_hash,
+            "Published manifest",
+        )
+        _require_publication_file_hash(
+            output_path,
+            expected_output_hash,
+            "Published output",
+        )
         _finish_publication_transaction(transaction)
     except BaseException as publication_error:
         try:
@@ -757,6 +794,24 @@ def _require_regular_publication_targets(
     )
 
 
+def _require_publication_file_hash(
+    path: Path,
+    expected_hash: str,
+    label: str,
+) -> None:
+    if not _require_regular_publication_target(path, label):
+        raise VirtualSpreadError(f"{label} disappeared: {path}")
+    try:
+        actual_hash = sha256_file(path)
+    except OSError as error:
+        raise VirtualSpreadError(f"Cannot hash {label}: {path}") from error
+    if actual_hash != expected_hash:
+        raise VirtualSpreadError(
+            f"{label} SHA-256 mismatch: expected {expected_hash}, "
+            f"got {actual_hash}"
+        )
+
+
 def _publication_artifacts(
     output_path: Path,
 ) -> tuple[Path, Path, Path]:
@@ -787,6 +842,46 @@ def _publication_lock_path(output_path: Path) -> Path:
     return marker.with_name(marker.name + ".lock")
 
 
+def _require_open_lock_identity(lock_path: Path, descriptor: int) -> None:
+    try:
+        path_entry = lock_path.lstat()
+        opened_entry = os.fstat(descriptor)
+    except OSError as error:
+        raise VirtualSpreadError(
+            f"Cannot verify publication lock: {lock_path}"
+        ) from error
+    if (
+        not stat.S_ISREG(path_entry.st_mode)
+        or not stat.S_ISREG(opened_entry.st_mode)
+        or path_entry.st_dev != opened_entry.st_dev
+        or path_entry.st_ino != opened_entry.st_ino
+    ):
+        raise VirtualSpreadError(
+            "Publication lock must remain one regular, unaliased file: "
+            f"{lock_path}"
+        )
+
+
+def _open_publication_lock(lock_path: Path) -> BinaryIO:
+    _require_regular_publication_target(lock_path, "Publication lock")
+    flags = os.O_RDWR | os.O_CREAT
+    flags |= getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_NOINHERIT", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(lock_path, flags, 0o600)
+    except OSError as error:
+        raise VirtualSpreadError(
+            f"Cannot open publication lock safely: {lock_path}"
+        ) from error
+    try:
+        _require_open_lock_identity(lock_path, descriptor)
+        return os.fdopen(descriptor, "r+b", buffering=0)
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
 @contextmanager
 def _publication_lock(
     output_path: Path,
@@ -794,7 +889,7 @@ def _publication_lock(
     """Serialize every publisher and recovery owner for one output PDF."""
     lock_path = _publication_lock_path(output_path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    stream = lock_path.open("a+b")
+    stream = _open_publication_lock(lock_path)
     acquired = False
     try:
         stream.seek(0, os.SEEK_END)
@@ -819,6 +914,7 @@ def _publication_lock(
             raise VirtualSpreadError(
                 f"Publication is already active: {output_path}"
             ) from error
+        _require_open_lock_identity(lock_path, stream.fileno())
         acquired = True
         yield
     finally:

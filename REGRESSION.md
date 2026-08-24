@@ -739,6 +739,12 @@ identity-only callback fast path from descriptor-bound sidecar and PDF hashing
 on a background cache miss. Two deterministic regression groups cover all
 nine reserved source names and outline rejection, raising the generator suite
 to 62 tests on Windows and Linux.
+A twenty-eighth review pass extends the document-catalog preflight to reject a
+source `/OpenAction` before staging or publication, preventing the generated
+PDF from silently losing its persisted opening destination, zoom, or action.
+A serialized destination-array fixture verifies that the source and an existing
+published PDF/manifest pair remain byte-for-byte unchanged, raising the
+generator suite to 63 tests on Windows and Linux.
 These automated checks do not replace or restate the v0.0.8 hardware result;
 v0.0.15 still requires a focused generated-pair smoke test before release.
 

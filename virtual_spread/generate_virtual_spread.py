@@ -565,7 +565,7 @@ def _dereference_pdf_object(value: Any) -> Any:
     return value.get_object() if isinstance(value, IndirectObject) else value
 
 
-def _require_no_document_outlines(reader: PdfReader) -> None:
+def _require_supported_document_catalog(reader: PdfReader) -> None:
     try:
         catalog = _dereference_pdf_object(
             reader.trailer.raw_get("/Root")
@@ -580,6 +580,11 @@ def _require_no_document_outlines(reader: PdfReader) -> None:
         raise VirtualSpreadError(
             "Document outlines are not supported by this prototype; "
             "generation would discard native table-of-contents navigation"
+        )
+    if "/OpenAction" in catalog:
+        raise VirtualSpreadError(
+            "Document open actions are not supported by this prototype; "
+            "generation would discard the persisted opening destination or action"
         )
 
 
@@ -2941,7 +2946,7 @@ def _build_virtual_spread_from_snapshot(
     reader = PdfReader(source_snapshot, strict=True)
     if reader.is_encrypted:
         raise VirtualSpreadError("Encrypted PDFs are not supported by this prototype")
-    _require_no_document_outlines(reader)
+    _require_supported_document_catalog(reader)
     pairs = build_pairs(len(reader.pages), direction, cover_separate)
     normalized_pages = [_normalized_page(page) for page in reader.pages]
     left_slot = Slot("left", 0.0, 0.0, slot_width, spread_height)

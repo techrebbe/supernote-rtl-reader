@@ -135,6 +135,25 @@ def add_outline_entry(path: Path) -> None:
         raise AssertionError("fixture document outline is empty")
 
 
+def add_document_open_action(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    writer._root_object[NameObject("/OpenAction")] = ArrayObject(
+        [writer.pages[1].indirect_reference, NameObject("/Fit")]
+    )
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    persisted = PdfReader(str(path), strict=True)
+    catalog = persisted.trailer["/Root"]
+    if "/OpenAction" not in catalog:
+        raise AssertionError("fixture document open action was not persisted")
+    open_action = catalog["/OpenAction"]
+    if not isinstance(open_action, ArrayObject) or len(open_action) != 2:
+        raise AssertionError("fixture document open action is malformed")
+
+
 def make_annotation_array_indirect(path: Path, page_index: int) -> None:
     source = PdfReader(str(path), strict=True)
     writer = PdfWriter()
@@ -488,6 +507,35 @@ class VirtualSpreadTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 VirtualSpreadError,
                 "Document outlines are not supported",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    force=True,
+                )
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(output.read_bytes(), b"existing-output")
+            self.assertEqual(
+                manifest_path.read_bytes(), b"existing-manifest"
+            )
+
+    def test_document_open_action_fails_closed_before_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "open-action-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_document_open_action(source)
+            source_bytes = source.read_bytes()
+            output.write_bytes(b"existing-output")
+            manifest_path.write_bytes(b"existing-manifest")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Document open actions are not supported",
             ):
                 build_virtual_spread(
                     source,

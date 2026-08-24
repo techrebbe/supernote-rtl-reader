@@ -672,12 +672,12 @@ exists, recovery still fails closed and preserves all evidence. Two regressions
 cover both branches, raising the generator suite to 40 tests on Windows and
 Linux.
 A twentieth review pass validates and recovers the usable v1 marker fields when
-no backup exists. Canonical artifacts are classified against the persisted
-prior-existence flags and staged digests: a complete brand-new pair commits, a
-partial brand-new publication rolls back, and an unchanged pre-mutation state
-discards only its obsolete marker. Any state requiring an unauthenticated prior
-backup remains fail-closed. Unknown or malformed markers are discarded only when
-both canonical artifacts and both backups are absent. Three regressions cover a
+no backup exists. Only an unambiguous pre-mutation state discards its obsolete
+marker: previously existing artifacts must remain present without matching the
+staged digest, and previously absent artifacts must remain absent. Partial or
+complete new publication and every ambiguous state remain fail-closed with all
+evidence preserved. Unknown or malformed markers are discarded only when both
+canonical artifacts and both backups are absent. Three regressions cover a
 sidecar-only partial publication, a complete new pair, and an unknown marker with
 a canonical artifact, raising the generator suite to 43 tests on Windows and
 Linux.

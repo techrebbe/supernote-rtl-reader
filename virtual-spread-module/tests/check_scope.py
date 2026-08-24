@@ -376,8 +376,8 @@ for required in (
     "test_same_content_staged_output_replacement_is_rejected",
     "test_obsolete_marker_without_backups_is_discarded",
     "test_obsolete_marker_with_backup_fails_closed",
-    "test_obsolete_new_pair_partial_sidecar_is_rolled_back",
-    "test_obsolete_new_pair_complete_publication_commits",
+    "test_obsolete_new_pair_partial_sidecar_fails_closed",
+    "test_obsolete_new_pair_complete_publication_fails_closed",
     "test_invalid_marker_with_canonical_artifact_fails_closed",
 ):
     if required not in generator_tests:

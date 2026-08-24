@@ -1674,7 +1674,7 @@ class VirtualSpreadTests(unittest.TestCase):
             )
             self.assertFalse(manifest_backup.exists())
 
-    def test_obsolete_new_pair_partial_sidecar_is_rolled_back(self) -> None:
+    def test_obsolete_new_pair_partial_sidecar_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             output = root / "spread.pdf"
@@ -1705,17 +1705,19 @@ class VirtualSpreadTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            self.assertEqual(
-                _recover_pair_publication(output, manifest),
-                "rolled_back",
-            )
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot recover obsolete virtual-spread publication marker",
+            ):
+                _recover_pair_publication(output, manifest)
+
             self.assertFalse(output.exists())
-            self.assertFalse(manifest.exists())
-            self.assertFalse(marker.exists())
+            self.assertEqual(manifest.read_bytes(), b"published-sidecar")
+            self.assertTrue(marker.is_file())
             self.assertFalse(output_backup.exists())
             self.assertFalse(manifest_backup.exists())
 
-    def test_obsolete_new_pair_complete_publication_commits(self) -> None:
+    def test_obsolete_new_pair_complete_publication_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             output = root / "spread.pdf"
@@ -1749,13 +1751,15 @@ class VirtualSpreadTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            self.assertEqual(
-                _recover_pair_publication(output, manifest),
-                "committed",
-            )
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot recover obsolete virtual-spread publication marker",
+            ):
+                _recover_pair_publication(output, manifest)
+
             self.assertEqual(output.read_bytes(), b"published-output")
             self.assertEqual(manifest.read_bytes(), b"published-sidecar")
-            self.assertFalse(marker.exists())
+            self.assertTrue(marker.is_file())
             self.assertFalse(output_backup.exists())
             self.assertFalse(manifest_backup.exists())
 

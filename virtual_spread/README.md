@@ -127,12 +127,12 @@ describe different bytes.
 
 Recovery recognizes the prior v1 transaction schema only while no backup exists.
 It validates the canonical paths, prior-existence flags, and staged hashes before
-classifying each canonical artifact as old, absent, or newly published. A complete
-new pair is committed, a brand-new partial publication is removed, and a
-pre-mutation marker is discarded. Any partial state that would require an
-unauthenticated old backup still fails closed. Unknown or malformed markers are
-discarded only when neither canonical artifact nor backup exists; otherwise the
-marker and all recovery evidence remain in place for inspection.
+discarding a marker only when every previously existing artifact remains present
+and does not match the staged digest, while every previously absent artifact is
+still absent. A complete or partial new publication, any backup, and every other
+ambiguous legacy state remain fail-closed with all evidence preserved. Unknown or
+malformed markers are discarded only when neither canonical artifact nor backup
+exists.
 
 ## Nomad hardware result: GO
 

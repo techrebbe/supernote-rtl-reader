@@ -1821,13 +1821,13 @@ def _validated_publication_transaction(
     return transaction
 
 
-def _recover_legacy_publication_without_backups(
+def _legacy_publication_is_pre_mutation(
     transaction: dict[str, Any],
     output_path: Path,
     manifest_path: Path,
     ownership_guard: PublicationOwnershipGuard | None,
-) -> str:
-    """Recover an authenticated v1 transaction that never created backups."""
+) -> bool:
+    """Recognize only the unambiguous pre-mutation state of a v1 marker."""
     entries = (
         (
             output_path,
@@ -1835,7 +1835,6 @@ def _recover_legacy_publication_without_backups(
             transaction["newOutputSha256"],
             "Output PDF",
             _publication_output_matches_sha256,
-            _publication_output_evidence,
         ),
         (
             manifest_path,
@@ -1843,55 +1842,20 @@ def _recover_legacy_publication_without_backups(
             transaction["newManifestSha256"],
             "Manifest",
             _publication_manifest_matches_sha256,
-            _publication_manifest_evidence,
         ),
     )
-    states: list[str] = []
-    for final_path, had_final, new_hash, label, matches, _ in entries:
+    for final_path, had_final, new_hash, label, matches in entries:
         exists = _require_regular_publication_target(
             final_path,
             label,
             ownership_guard,
         )
-        if exists and matches(final_path, new_hash, ownership_guard):
-            states.append("new")
-        elif had_final and exists:
-            states.append("old")
-        elif not had_final and not exists:
-            states.append("absent")
-        else:
-            raise VirtualSpreadError(
-                "Cannot recover obsolete virtual-spread publication marker"
-            )
-
-    if all(state == "new" for state in states):
-        _finish_publication_transaction(transaction, ownership_guard)
-        return "committed"
-    if all(state != "new" for state in states):
-        _finish_publication_transaction(transaction, ownership_guard)
-        return "discarded"
-
-    for state, entry in zip(states, entries):
-        _, had_final, _, _, _, _ = entry
-        if state == "new" and had_final:
-            raise VirtualSpreadError(
-                "Cannot recover obsolete virtual-spread publication marker"
-            )
-
-    for state, entry in zip(states, entries):
-        final_path, _, new_hash, label, _, evidence = entry
-        if state != "new":
-            continue
-        evidence(
-            final_path,
-            f"Obsolete transaction {label}",
-            ownership_guard,
-            expected_hash=new_hash,
-        )
-        _durably_remove(final_path, ownership_guard)
-
-    _finish_publication_transaction(transaction, ownership_guard)
-    return "rolled_back"
+        if had_final:
+            if not exists or matches(final_path, new_hash, ownership_guard):
+                return False
+        elif exists:
+            return False
+    return True
 
 
 def _finish_publication_transaction(
@@ -2017,12 +1981,17 @@ def _recover_pair_publication(
             raise VirtualSpreadError(
                 "Cannot recover obsolete virtual-spread publication marker"
             )
-        return _recover_legacy_publication_without_backups(
+        if not _legacy_publication_is_pre_mutation(
             transaction,
             output_path,
             manifest_path,
             ownership_guard,
-        )
+        ):
+            raise VirtualSpreadError(
+                "Cannot recover obsolete virtual-spread publication marker"
+            )
+        _finish_publication_transaction(transaction, ownership_guard)
+        return "discarded"
     output_is_new = _publication_output_matches_sha256(
         output_path,
         transaction["newOutputSha256"],

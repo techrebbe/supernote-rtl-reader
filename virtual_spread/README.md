@@ -19,10 +19,16 @@ Content streams remain vector/text PDF content rather than page screenshots.
 Supported internal and URI links, including indirect destination arrays, are
 copied with transformed hit rectangles. Multiline `/QuadPoints` activation
 regions are transformed point-for-point rather than widened to their bounding
-rectangle. Standard annotation `/F` flags are preserved exactly, while malformed
-or unknown flag values fail closed. Link `/Rect` arrays require four finite PDF
-number objects in increasing coordinate order; numeric strings and non-finite
-values are never repaired. Internal `/Fit`, `/FitB`, `/XYZ`,
+rectangle. Standard annotation `/F` flags, visible `/Border` and `/BS` styling,
+border color, and `/H` activation highlight mode are validated and preserved;
+border dimensions and dash patterns follow the source-to-spread scale and page
+rotation. URI actions retain a Boolean `/IsMap`. Chained actions, custom
+appearances, optional-content visibility, additional actions, and every other
+unimplemented link semantic fail closed rather than being silently discarded.
+Link `/Rect` arrays require four finite PDF number objects in increasing
+coordinate order; numeric strings and non-finite values are never repaired.
+URI operands likewise require real PDF text/Boolean objects. Internal `/Fit`,
+`/FitB`, `/XYZ`,
 `/FitH`, `/FitBH`, `/FitV`, `/FitBV`, and `/FitR` destinations retain their
 mode while coordinate parameters are transformed into the target spread;
 unknown modes, invalid PDF operand types, rotation-dependent partial coordinates,

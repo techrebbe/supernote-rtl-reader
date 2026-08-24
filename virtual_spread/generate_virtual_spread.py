@@ -21,6 +21,7 @@ from typing import Any, BinaryIO, Callable, Iterator
 from pypdf import PdfReader, PdfWriter, Transformation
 from pypdf.generic import (
     ArrayObject,
+    BooleanObject,
     DictionaryObject,
     FloatObject,
     IndirectObject,
@@ -41,6 +42,25 @@ MOVEFILE_WRITE_THROUGH = 0x00000008
 WINDOWS_ALREADY_EXISTS = {80, 183}
 MAX_MANIFEST_BYTES = 8 * 1024 * 1024
 SUPPORTED_ANNOTATION_FLAGS_MASK = 0x03FF
+SUPPORTED_LINK_ANNOTATION_KEYS = frozenset({
+    "/A",
+    "/BS",
+    "/Border",
+    "/C",
+    "/Contents",
+    "/Dest",
+    "/F",
+    "/H",
+    "/M",
+    "/NM",
+    "/P",
+    "/QuadPoints",
+    "/Rect",
+    "/Subtype",
+    "/Type",
+})
+SUPPORTED_LINK_HIGHLIGHT_MODES = frozenset({"/N", "/I", "/O", "/P"})
+SUPPORTED_BORDER_STYLES = frozenset({"/S", "/D", "/B", "/I", "/U"})
 
 PublicationOwnershipGuard = Callable[[], None]
 
@@ -541,6 +561,284 @@ def _link_annotation_flags(annotation: DictionaryObject) -> NumberObject | None:
     return NumberObject(flags)
 
 
+def _dereference_pdf_object(value: Any) -> Any:
+    return value.get_object() if isinstance(value, IndirectObject) else value
+
+
+def _required_pdf_name(
+    dictionary: DictionaryObject,
+    key: str,
+    label: str,
+    allowed: frozenset[str],
+) -> NameObject:
+    if key not in dictionary:
+        raise VirtualSpreadError(f"Missing {label}")
+    value = _dereference_pdf_object(dictionary.raw_get(key))
+    if not isinstance(value, NameObject) or str(value) not in allowed:
+        raise VirtualSpreadError(f"Invalid {label}")
+    return NameObject(str(value))
+
+
+def _optional_text_string(
+    dictionary: DictionaryObject,
+    key: str,
+    label: str,
+) -> TextStringObject | None:
+    if key not in dictionary:
+        return None
+    value = _dereference_pdf_object(dictionary.raw_get(key))
+    if not isinstance(value, TextStringObject):
+        raise VirtualSpreadError(f"Invalid {label}")
+    return TextStringObject(str(value))
+
+
+def _validate_link_annotation(annotation: Any) -> DictionaryObject:
+    if not isinstance(annotation, DictionaryObject):
+        raise VirtualSpreadError("Link annotation is not a dictionary")
+    unknown = sorted(
+        str(key)
+        for key in annotation.keys()
+        if str(key) not in SUPPORTED_LINK_ANNOTATION_KEYS
+    )
+    if unknown:
+        raise VirtualSpreadError(
+            "Unsupported link annotation entries: " + ", ".join(unknown)
+        )
+    if "/Type" in annotation:
+        _required_pdf_name(
+            annotation,
+            "/Type",
+            "link annotation /Type",
+            frozenset({"/Annot"}),
+        )
+    _required_pdf_name(
+        annotation,
+        "/Subtype",
+        "link annotation /Subtype",
+        frozenset({"/Link"}),
+    )
+    return annotation
+
+
+def _border_transform(
+    transform: list[float],
+    label: str,
+) -> tuple[float, float, float, float, float]:
+    if len(transform) != 6 or any(
+        not math.isfinite(value) for value in transform
+    ):
+        raise VirtualSpreadError(f"Invalid {label} transform")
+    a, b, c, d, _, _ = transform
+    tolerance = 1e-12
+    axis_aligned = (
+        (abs(b) <= tolerance and abs(c) <= tolerance)
+        or (abs(a) <= tolerance and abs(d) <= tolerance)
+    )
+    scale_x = math.hypot(a, b)
+    scale_y = math.hypot(c, d)
+    if (
+        not axis_aligned
+        or scale_x <= 0.0
+        or scale_y <= 0.0
+        or not math.isclose(
+            scale_x, scale_y, rel_tol=0.0, abs_tol=tolerance
+        )
+    ):
+        raise VirtualSpreadError(f"Cannot preserve {label} transform")
+    return a, b, c, d, scale_x
+
+
+def _pdf_number_array(
+    value: Any,
+    label: str,
+    *,
+    lengths: frozenset[int] | None = None,
+    nonnegative: bool = False,
+) -> list[float]:
+    value = _dereference_pdf_object(value)
+    if not isinstance(value, ArrayObject):
+        raise VirtualSpreadError(f"Invalid {label} array")
+    if lengths is not None and len(value) not in lengths:
+        raise VirtualSpreadError(f"Invalid {label} array")
+    numbers = [
+        _finite_pdf_number(item, f"{label} value") for item in value
+    ]
+    if nonnegative and any(number < 0.0 for number in numbers):
+        raise VirtualSpreadError(f"Invalid {label} value")
+    return numbers
+
+
+def _transform_link_border(
+    annotation: DictionaryObject,
+    transform: list[float],
+) -> ArrayObject | None:
+    if "/Border" not in annotation:
+        return None
+    border = _dereference_pdf_object(annotation.raw_get("/Border"))
+    if not isinstance(border, ArrayObject) or len(border) not in {3, 4}:
+        raise VirtualSpreadError("Invalid link annotation /Border array")
+    radii_and_width = [
+        _finite_pdf_number(value, "link annotation /Border value")
+        for value in border[:3]
+    ]
+    if any(value < 0.0 for value in radii_and_width):
+        raise VirtualSpreadError("Invalid link annotation /Border value")
+    a, b, c, d, scale = _border_transform(
+        transform, "link annotation /Border"
+    )
+    horizontal_radius, vertical_radius, width = radii_and_width
+    copied = ArrayObject([
+        FloatObject(
+            abs(a) * horizontal_radius + abs(c) * vertical_radius
+        ),
+        FloatObject(
+            abs(b) * horizontal_radius + abs(d) * vertical_radius
+        ),
+        FloatObject(width * scale),
+    ])
+    if len(border) == 4:
+        dash = _pdf_number_array(
+            border[3],
+            "link annotation /Border dash",
+            nonnegative=True,
+        )
+        if dash and all(value == 0.0 for value in dash):
+            raise VirtualSpreadError(
+                "Invalid link annotation /Border dash value"
+            )
+        copied.append(
+            ArrayObject(FloatObject(value * scale) for value in dash)
+        )
+    return copied
+
+
+def _transform_link_border_style(
+    annotation: DictionaryObject,
+    transform: list[float],
+) -> DictionaryObject | None:
+    if "/BS" not in annotation:
+        return None
+    style = _dereference_pdf_object(annotation.raw_get("/BS"))
+    if not isinstance(style, DictionaryObject):
+        raise VirtualSpreadError("Invalid link annotation /BS dictionary")
+    unknown = sorted(
+        str(key) for key in style.keys()
+        if str(key) not in {"/Type", "/W", "/S", "/D"}
+    )
+    if unknown:
+        raise VirtualSpreadError(
+            "Unsupported link annotation /BS entries: "
+            + ", ".join(unknown)
+        )
+    if "/Type" in style:
+        _required_pdf_name(
+            style,
+            "/Type",
+            "link annotation /BS /Type",
+            frozenset({"/Border"}),
+        )
+    style_name = (
+        _required_pdf_name(
+            style,
+            "/S",
+            "link annotation /BS /S",
+            SUPPORTED_BORDER_STYLES,
+        )
+        if "/S" in style else NameObject("/S")
+    )
+    _, _, _, _, scale = _border_transform(
+        transform, "link annotation /BS"
+    )
+    width = (
+        _finite_pdf_number(style.raw_get("/W"), "link annotation /BS /W")
+        if "/W" in style else 1.0
+    )
+    if width < 0.0:
+        raise VirtualSpreadError("Invalid link annotation /BS /W")
+    copied = DictionaryObject({
+        NameObject("/Type"): NameObject("/Border"),
+        NameObject("/W"): FloatObject(width * scale),
+        NameObject("/S"): style_name,
+    })
+    if "/D" in style or style_name == "/D":
+        dash = (
+            _pdf_number_array(
+                style.raw_get("/D"),
+                "link annotation /BS /D",
+                nonnegative=True,
+            )
+            if "/D" in style else [3.0]
+        )
+        if dash and all(value == 0.0 for value in dash):
+            raise VirtualSpreadError("Invalid link annotation /BS /D")
+        copied[NameObject("/D")] = ArrayObject(
+            FloatObject(value * scale) for value in dash
+        )
+    return copied
+
+
+def _copy_link_color(annotation: DictionaryObject) -> ArrayObject | None:
+    if "/C" not in annotation:
+        return None
+    color = _pdf_number_array(
+        annotation.raw_get("/C"),
+        "link annotation /C",
+        lengths=frozenset({0, 1, 3, 4}),
+    )
+    if any(value < 0.0 or value > 1.0 for value in color):
+        raise VirtualSpreadError("Invalid link annotation /C value")
+    return ArrayObject(FloatObject(value) for value in color)
+
+
+def _copy_link_highlight_mode(
+    annotation: DictionaryObject,
+) -> NameObject | None:
+    if "/H" not in annotation:
+        return None
+    return _required_pdf_name(
+        annotation,
+        "/H",
+        "link annotation /H",
+        SUPPORTED_LINK_HIGHLIGHT_MODES,
+    )
+
+
+def _validated_link_action(
+    action: Any,
+) -> tuple[DictionaryObject, NameObject]:
+    action = _dereference_pdf_object(action)
+    if not isinstance(action, DictionaryObject):
+        raise VirtualSpreadError("Link /A is not an action dictionary")
+    if "/Next" in action:
+        raise VirtualSpreadError("Chained link /Next actions are unsupported")
+    if "/Type" in action:
+        _required_pdf_name(
+            action,
+            "/Type",
+            "link action /Type",
+            frozenset({"/Action"}),
+        )
+    action_type = _required_pdf_name(
+        action,
+        "/S",
+        "link action /S",
+        frozenset({"/GoTo", "/URI"}),
+    )
+    allowed = (
+        {"/Type", "/S", "/D"}
+        if action_type == "/GoTo"
+        else {"/Type", "/S", "/URI", "/IsMap"}
+    )
+    unknown = sorted(
+        str(key) for key in action.keys() if str(key) not in allowed
+    )
+    if unknown:
+        raise VirtualSpreadError(
+            "Unsupported link action entries: " + ", ".join(unknown)
+        )
+    return action, action_type
+
+
 def _resolved_destination_array(
     reader: PdfReader,
     destination: Any,
@@ -822,7 +1120,7 @@ def _copy_link_annotation(
     source_mapping: dict[int, dict[str, Any]],
     page_ref_to_index: dict[tuple[int, int], int],
 ) -> dict[str, Any]:
-    original = annotation.get_object()
+    original = _validate_link_annotation(annotation.get_object())
     mapping = source_mapping[source_page_index]
     annotation_flags = _link_annotation_flags(original)
     copied = DictionaryObject(
@@ -830,41 +1128,73 @@ def _copy_link_annotation(
             NameObject("/Type"): NameObject("/Annot"),
             NameObject("/Subtype"): NameObject("/Link"),
             NameObject("/Rect"): _transform_rect(
-                original["/Rect"], mapping["transform"]
-            ),
-            NameObject("/Border"): ArrayObject(
-                [NumberObject(0), NumberObject(0), NumberObject(0)]
+                original.raw_get("/Rect"), mapping["transform"]
             ),
             NameObject("/SNSourcePage"): NumberObject(source_page_index),
         }
     )
     if annotation_flags is not None:
         copied[NameObject("/F")] = annotation_flags
-    if "/Contents" in original:
-        copied[NameObject("/Contents")] = TextStringObject(
-            str(original["/Contents"])
+    border = _transform_link_border(original, mapping["transform"])
+    if border is not None:
+        copied[NameObject("/Border")] = border
+    border_style = _transform_link_border_style(
+        original, mapping["transform"]
+    )
+    if border_style is not None:
+        copied[NameObject("/BS")] = border_style
+    color = _copy_link_color(original)
+    if color is not None:
+        copied[NameObject("/C")] = color
+    highlight_mode = _copy_link_highlight_mode(original)
+    if highlight_mode is not None:
+        copied[NameObject("/H")] = highlight_mode
+    for key in ("/Contents", "/NM", "/M"):
+        value = _optional_text_string(
+            original, key, f"link annotation {key}"
         )
+        if value is not None:
+            copied[NameObject(key)] = value
     if "/QuadPoints" in original:
         copied[NameObject("/QuadPoints")] = _transform_quad_points(
-            original["/QuadPoints"], mapping["transform"]
+            original.raw_get("/QuadPoints"), mapping["transform"]
         )
 
-    destination = original.get("/Dest")
-    action = original.get("/A")
-    action_object = action.get_object() if action is not None else None
-    if destination is None and action_object is not None:
-        if action_object.get("/S") == "/GoTo":
-            destination = action_object.get("/D")
-        elif action_object.get("/S") == "/URI":
-            uri = action_object.get("/URI")
-            if uri is None:
+    destination = (
+        original.raw_get("/Dest") if "/Dest" in original else None
+    )
+    action = original.raw_get("/A") if "/A" in original else None
+    if destination is not None and action is not None:
+        raise VirtualSpreadError("Link annotation has both /Dest and /A")
+    if destination is None and action is not None:
+        action_object, action_type = _validated_link_action(action)
+        if action_type == "/GoTo":
+            if "/D" not in action_object:
+                raise VirtualSpreadError("GoTo link action has no /D value")
+            destination = action_object.raw_get("/D")
+        else:
+            if "/URI" not in action_object:
                 raise VirtualSpreadError("URI link has no /URI value")
-            copied[NameObject("/A")] = DictionaryObject(
-                {
-                    NameObject("/S"): NameObject("/URI"),
-                    NameObject("/URI"): TextStringObject(str(uri)),
-                }
+            uri_object = _dereference_pdf_object(
+                action_object.raw_get("/URI")
             )
+            if not isinstance(uri_object, TextStringObject):
+                raise VirtualSpreadError("Invalid URI link /URI string")
+            uri = str(uri_object)
+            copied_action = DictionaryObject({
+                NameObject("/S"): NameObject("/URI"),
+                NameObject("/URI"): TextStringObject(uri),
+            })
+            if "/IsMap" in action_object:
+                is_map = _dereference_pdf_object(
+                    action_object.raw_get("/IsMap")
+                )
+                if not isinstance(is_map, BooleanObject):
+                    raise VirtualSpreadError("Invalid URI link /IsMap boolean")
+                copied_action[NameObject("/IsMap")] = BooleanObject(
+                    is_map.value
+                )
+            copied[NameObject("/A")] = copied_action
             _attach_annotation(writer, output_page_index, copied)
             return {
                 "sourcePage": source_page_index,
@@ -874,10 +1204,6 @@ def _copy_link_annotation(
                 "uri": str(uri),
                 "rect": [float(value) for value in copied["/Rect"]],
             }
-        else:
-            raise VirtualSpreadError(
-                f"Unsupported link action: {action_object.get('/S')}"
-            )
 
     if destination is None:
         raise VirtualSpreadError("Link annotation has neither /Dest nor /A")
@@ -2634,12 +2960,6 @@ def _build_virtual_spread_from_snapshot(
             )
         for annotation in annotation_array:
             annotation_object = annotation.get_object()
-            if annotation_object.get("/Subtype") != "/Link":
-                raise VirtualSpreadError(
-                    "Only /Link annotations are supported by this prototype; "
-                    f"source page {source_page_index + 1} contains "
-                    f"{annotation_object.get('/Subtype')}"
-                )
             links.append(
                 _copy_link_annotation(
                     reader=reader,

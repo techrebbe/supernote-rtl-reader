@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 import tempfile
@@ -14,6 +15,7 @@ from unittest import mock
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import (
     ArrayObject,
+    BooleanObject,
     DictionaryObject,
     FloatObject,
     IndirectObject,
@@ -261,6 +263,40 @@ def set_link_annotation_value(
     annotation[NameObject(key)] = value
     with path.open("wb") as stream:
         writer.write(stream)
+
+
+def set_link_action(
+    path: Path,
+    source_page_index: int,
+    annotation_index: int,
+    action: DictionaryObject,
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    annotations = writer.pages[source_page_index].get("/Annots")
+    if annotations is None:
+        raise AssertionError("fixture page has no annotations")
+    annotation = annotations.get_object()[annotation_index].get_object()
+    annotation.pop("/Dest", None)
+    annotation[NameObject("/A")] = action
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def output_annotation_for_source(
+    output: Path,
+    manifest: dict[str, object],
+    source_page_index: int,
+) -> DictionaryObject:
+    reader = PdfReader(str(output), strict=True)
+    mapping = manifest["sourcePages"][source_page_index]
+    annotations = reader.pages[mapping["virtualPageIndex"]]["/Annots"]
+    return next(
+        item.get_object()
+        for item in annotations.get_object()
+        if int(item.get_object()["/SNSourcePage"]) == source_page_index
+    )
 
 
 def transform_point(
@@ -1233,6 +1269,235 @@ class VirtualSpreadTests(unittest.TestCase):
 
             self.assertFalse(output.exists())
             self.assertFalse(manifest_path.exists())
+
+    def test_visible_link_border_and_highlight_are_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "border-source.pdf"
+            output = root / "border-spread.pdf"
+            manifest_path = root / "border-spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_annotation_value(
+                source, 1, 0, "/Border", ArrayObject([
+                    FloatObject(2.0),
+                    FloatObject(3.0),
+                    FloatObject(4.0),
+                    ArrayObject([FloatObject(5.0), FloatObject(2.0)]),
+                ])
+            )
+            set_link_annotation_value(
+                source, 1, 0, "/BS", DictionaryObject({
+                    NameObject("/Type"): NameObject("/Border"),
+                    NameObject("/W"): FloatObject(2.0),
+                    NameObject("/S"): NameObject("/D"),
+                    NameObject("/D"): ArrayObject([
+                        FloatObject(3.0), FloatObject(1.0)
+                    ]),
+                })
+            )
+            set_link_annotation_value(
+                source, 1, 0, "/C", ArrayObject([
+                    FloatObject(0.1),
+                    FloatObject(0.2),
+                    FloatObject(0.3),
+                ])
+            )
+            set_link_annotation_value(
+                source, 1, 0, "/H", NameObject("/O")
+            )
+
+            manifest = build_virtual_spread(
+                source, output, manifest_path, direction="rtl"
+            )
+            copied = output_annotation_for_source(output, manifest, 1)
+            transform = manifest["sourcePages"][1]["transform"]
+            a, b, c, d = transform[:4]
+            scale = math.hypot(a, b)
+            expected_border = [
+                abs(a) * 2.0 + abs(c) * 3.0,
+                abs(b) * 2.0 + abs(d) * 3.0,
+                4.0 * scale,
+            ]
+            for actual, expected in zip(
+                copied["/Border"][:3], expected_border
+            ):
+                self.assertAlmostEqual(float(actual), expected, places=4)
+            for actual, expected in zip(
+                copied["/Border"][3], (5.0 * scale, 2.0 * scale)
+            ):
+                self.assertAlmostEqual(float(actual), expected, places=4)
+            self.assertEqual(copied["/H"], "/O")
+            self.assertEqual(
+                [round(float(value), 4) for value in copied["/C"]],
+                [0.1, 0.2, 0.3],
+            )
+            border_style = copied["/BS"]
+            self.assertEqual(border_style["/S"], "/D")
+            self.assertAlmostEqual(
+                float(border_style["/W"]), 2.0 * scale, places=4
+            )
+            for actual, expected in zip(
+                border_style["/D"], (3.0 * scale, 1.0 * scale)
+            ):
+                self.assertAlmostEqual(float(actual), expected, places=4)
+
+    def test_malformed_link_border_or_highlight_fails_closed(self) -> None:
+        cases = (
+            (
+                "/Border",
+                ArrayObject([
+                    TextStringObject("0"),
+                    NumberObject(0),
+                    NumberObject(1),
+                ]),
+                "/Border value",
+            ),
+            ("/H", TextStringObject("/N"), "annotation /H"),
+            ("/H", NameObject("/X"), "annotation /H"),
+            (
+                "/BS",
+                DictionaryObject({NameObject("/Foo"): NumberObject(1)}),
+                "Unsupported link annotation /BS entries",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, (key, value, message) in enumerate(cases):
+                with self.subTest(key=key, value=value):
+                    source = root / f"bad-border-source-{index}.pdf"
+                    output = root / f"bad-border-spread-{index}.pdf"
+                    manifest_path = root / f"bad-border-spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    set_link_annotation_value(source, 1, 0, key, value)
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError, message
+                    ):
+                        build_virtual_spread(
+                            source, output, manifest_path, direction="rtl"
+                        )
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
+    def test_uri_action_is_map_is_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "uri-source.pdf"
+            output = root / "uri-spread.pdf"
+            manifest_path = root / "uri-spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_action(
+                source,
+                1,
+                0,
+                DictionaryObject({
+                    NameObject("/Type"): NameObject("/Action"),
+                    NameObject("/S"): NameObject("/URI"),
+                    NameObject("/URI"): TextStringObject(
+                        "https://example.test/map"
+                    ),
+                    NameObject("/IsMap"): BooleanObject(True),
+                }),
+            )
+
+            manifest = build_virtual_spread(
+                source, output, manifest_path, direction="rtl"
+            )
+            copied = output_annotation_for_source(output, manifest, 1)
+            action = copied["/A"]
+            self.assertEqual(action["/S"], "/URI")
+            self.assertEqual(
+                action["/URI"], "https://example.test/map"
+            )
+            self.assertIsInstance(action.raw_get("/IsMap"), BooleanObject)
+            self.assertIs(action["/IsMap"].value, True)
+            uri_link = next(
+                link for link in manifest["links"]
+                if link["kind"] == "uri"
+            )
+            self.assertEqual(
+                uri_link["uri"], "https://example.test/map"
+            )
+
+    def test_uri_action_operands_and_chains_fail_closed(self) -> None:
+        base = {
+            NameObject("/S"): NameObject("/URI"),
+            NameObject("/URI"): TextStringObject("https://example.test"),
+        }
+        actions = (
+            (
+                DictionaryObject({
+                    NameObject("/S"): NameObject("/URI"),
+                    NameObject("/URI"): NumberObject(7),
+                }),
+                "Invalid URI link /URI string",
+            ),
+            (
+                DictionaryObject({
+                    **base,
+                    NameObject("/IsMap"): NumberObject(1),
+                }),
+                "Invalid URI link /IsMap boolean",
+            ),
+            (
+                DictionaryObject({
+                    **base,
+                    NameObject("/Next"): DictionaryObject({
+                        NameObject("/S"): NameObject("/URI"),
+                        NameObject("/URI"): TextStringObject(
+                            "https://example.test/next"
+                        ),
+                    }),
+                }),
+                "Chained link /Next actions are unsupported",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, (action, message) in enumerate(actions):
+                with self.subTest(index=index):
+                    source = root / f"bad-uri-source-{index}.pdf"
+                    output = root / f"bad-uri-spread-{index}.pdf"
+                    manifest_path = root / f"bad-uri-spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    set_link_action(source, 1, 0, action)
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError, message
+                    ):
+                        build_virtual_spread(
+                            source, output, manifest_path, direction="rtl"
+                        )
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
+    def test_unsupported_link_semantics_fail_closed(self) -> None:
+        cases = (
+            ("/AP", DictionaryObject()),
+            ("/AS", NameObject("/On")),
+            ("/OC", NameObject("/Layer")),
+            ("/AA", DictionaryObject()),
+            ("/PA", DictionaryObject()),
+            ("/StructParent", NumberObject(0)),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, (key, value) in enumerate(cases):
+                with self.subTest(key=key):
+                    source = root / f"unsupported-link-source-{index}.pdf"
+                    output = root / f"unsupported-link-spread-{index}.pdf"
+                    manifest_path = (
+                        root / f"unsupported-link-spread-{index}.pdf.json"
+                    )
+                    create_odd_page_fixture(source)
+                    set_link_annotation_value(source, 1, 0, key, value)
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "Unsupported link annotation entries",
+                    ):
+                        build_virtual_spread(
+                            source, output, manifest_path, direction="rtl"
+                        )
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
 
     def test_unsupported_internal_destination_mode_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

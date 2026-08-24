@@ -718,6 +718,16 @@ increasing coordinate order, preventing numeric-string coercion, non-finite
 geometry, and repaired reversed hit regions. Three new regression groups plus
 the revised direction test raise the generator suite to 55 tests on Windows and
 Linux.
+A twenty-sixth review pass closes the complete supported-link annotation
+surface rather than continuing a field-by-field whitelist. Visible `/Border`
+and `/BS` styling, color, and `/H` activation highlight modes are validated,
+scaled through the source-to-spread transform, and retained. URI actions now
+require a PDF text-string operand and preserve a Boolean `/IsMap`. Chained
+`/Next` actions and unimplemented appearance, optional-content, additional-
+action, previous-action, structural-parent, or unknown entries fail closed
+instead of being partially reconstructed. Positive border/highlight and URI
+fixtures plus malformed and unsupported semantic matrices add five regression
+groups, raising the generator suite to 60 tests on Windows and Linux.
 These automated checks do not replace or restate the v0.0.8 hardware result;
 v0.0.15 still requires a focused generated-pair smoke test before release.
 

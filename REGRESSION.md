@@ -654,6 +654,16 @@ either an oversized regular file or a byte-identical file on a different inode.
 Both prove that the previous PDF/sidecar pair remains untouched. The generator
 suite now contains 36 tests and passes completely on both Windows and Linux,
 with only the five POSIX-only cases skipped on Windows.
+An eighteenth review pass symmetrically binds the staged PDF's identity, size,
+and SHA-256 to the manifest and transaction. Descriptor-bound evidence is
+captured before strict PDF verification, revalidated afterward, and carried
+unchanged through marker creation, the sidecar move, the PDF move, and final
+canonical verification. Two deterministic races replace the already-checked
+staged PDF immediately before transaction preparation with either different
+bytes or byte-identical content on another inode. Both fail before the existing
+PDF/sidecar pair changes. The generator suite now contains 38 tests and passes
+completely on both Windows and Linux, with only the five POSIX-only cases skipped
+on Windows.
 These automated checks do not replace or restate the v0.0.8 hardware result;
 v0.0.15 still requires a focused generated-pair smoke test before release.
 

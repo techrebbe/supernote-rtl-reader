@@ -118,6 +118,13 @@ will not accept an oversized sidecar as a committed pair. Oversized or exchanged
 manifests therefore fail with an explicit error while any previous PDF/sidecar
 pair remains intact.
 
+The staged PDF receives the same descriptor-bound treatment. Its identity, size,
+and SHA-256 are captured before strict PDF verification, revalidated afterward,
+and then carried unchanged into the manifest and publication transaction. The
+same evidence is checked before the sidecar move, before the PDF move, and after
+canonical publication, so exchanging the staged PDF cannot make its sidecar
+describe different bytes.
+
 ## Nomad hardware result: GO
 
 The generated documents were validated on a Supernote Nomad on 2026-08-21

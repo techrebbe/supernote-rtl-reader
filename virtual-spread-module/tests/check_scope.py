@@ -291,12 +291,24 @@ for required in (
     'PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v2"',
     "MOVEFILE_WRITE_THROUGH",
     "MAX_MANIFEST_BYTES = 8 * 1024 * 1024",
+    "def _publication_file_evidence(",
+    "maximum_bytes is not None and opened_before.size > maximum_bytes",
+    "def _publication_output_evidence(",
     "def _publication_manifest_evidence(",
-    "opened_before.size > MAX_MANIFEST_BYTES",
+    "maximum_bytes=MAX_MANIFEST_BYTES",
+    "expected_identity=expected_output_identity",
+    "expected_hash=expected_output_hash",
     "expected_identity=expected_manifest_identity",
     "expected_hash=expected_manifest_hash",
+    "def _require_publication_output_hash(",
+    "def _publication_output_matches_sha256(",
     "def _require_publication_manifest_hash(",
     "def _publication_manifest_matches_sha256(",
+    'transaction["_newOutputIdentity"] = new_output_identity',
+    '"size": temporary_output_identity.size',
+    '"sha256": temporary_output_hash',
+    "expected_output_identity=temporary_output_identity",
+    "expected_output_hash=temporary_output_hash",
     "lexical_output = _require_unaliased_output_path(output_path)",
     "lexical_manifest = _require_runtime_manifest_path(",
     "with _publication_lock(lexical_output) as ownership_guard:",
@@ -315,7 +327,6 @@ for required in (
     "dst_dir_fd=self.directory_descriptor",
     "dir_fd=self.directory_descriptor",
     "def _publication_open_file(",
-    "def _publication_file_size(",
     "def _publication_unlink(",
     "def _temporary_neighbor(",
     "namespace.open_file(candidate, flags, 0o600)",
@@ -356,22 +367,39 @@ for required in (
             f"generator is missing durable/layout authority invariant: {required}"
         )
 
+generator_tests = (root.parent / "scripts/test_virtual_spread.py").read_text(
+    encoding="utf-8"
+)
+for required in (
+    "test_staged_output_swap_is_rejected_at_publication_boundary",
+    "test_same_content_staged_output_replacement_is_rejected",
+):
+    if required not in generator_tests:
+        raise SystemExit(
+            "generator is missing staged-output publication regression: "
+            f"{required}"
+        )
+
 preflight_hash = generator.find('"Staged manifest"')
+preflight_output_hash = generator.find('"Staged output"')
 backup_move = generator.find(
     "for (\n"
     "            final_path,\n"
     "            backup,"
 )
 published_manifest_hash = generator.find('"Published manifest"')
+published_output_hash = generator.find('"Published output"')
 finish_transaction = generator.find(
     "_finish_publication_transaction(transaction, ownership_guard)"
 )
 if not (
-    0 <= preflight_hash < backup_move
+    0 <= preflight_output_hash < backup_move
+    and 0 <= preflight_hash < backup_move
     and backup_move < published_manifest_hash < finish_transaction
+    and backup_move < published_output_hash < finish_transaction
 ):
     raise SystemExit(
-        "staged and published hashes must be checked around backup publication"
+        "staged and published pair hashes must bracket backup publication"
     )
 
 build_start = generator.find("def build_virtual_spread(")

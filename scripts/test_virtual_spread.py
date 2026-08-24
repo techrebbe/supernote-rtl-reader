@@ -1377,6 +1377,8 @@ class VirtualSpreadTests(unittest.TestCase):
                 temporary_manifest: Path,
                 manifest_path: Path,
                 ownership_guard: object = None,
+                expected_output_identity: object = None,
+                expected_output_hash: str | None = None,
                 expected_manifest_identity: object = None,
                 expected_manifest_hash: str | None = None,
             ) -> dict[str, object]:
@@ -1390,8 +1392,10 @@ class VirtualSpreadTests(unittest.TestCase):
                     temporary_manifest,
                     manifest_path,
                     ownership_guard,
-                    expected_manifest_identity,
-                    expected_manifest_hash,
+                    expected_output_identity=expected_output_identity,
+                    expected_output_hash=expected_output_hash,
+                    expected_manifest_identity=expected_manifest_identity,
+                    expected_manifest_hash=expected_manifest_hash,
                 )
 
             with mock.patch(
@@ -1428,6 +1432,8 @@ class VirtualSpreadTests(unittest.TestCase):
                 temporary_manifest: Path,
                 manifest_path: Path,
                 ownership_guard: object = None,
+                expected_output_identity: object = None,
+                expected_output_hash: str | None = None,
                 expected_manifest_identity: object = None,
                 expected_manifest_hash: str | None = None,
             ) -> dict[str, object]:
@@ -1444,8 +1450,126 @@ class VirtualSpreadTests(unittest.TestCase):
                     temporary_manifest,
                     manifest_path,
                     ownership_guard,
-                    expected_manifest_identity,
-                    expected_manifest_hash,
+                    expected_output_identity=expected_output_identity,
+                    expected_output_hash=expected_output_hash,
+                    expected_manifest_identity=expected_manifest_identity,
+                    expected_manifest_hash=expected_manifest_hash,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._prepare_publication_transaction",
+                side_effect=swap_then_prepare,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "identity changed before publication",
+                ):
+                    build_virtual_spread(source, output, manifest, force=True)
+
+            self.assertTrue(swapped)
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertFalse(any(root.glob("*.bak")))
+            self.assertFalse(any(root.glob("*.publish.json")))
+
+    def test_staged_output_swap_is_rejected_at_publication_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            real_prepare = _prepare_publication_transaction
+            swapped = False
+
+            def swap_then_prepare(
+                temporary_output: Path,
+                output_path: Path,
+                temporary_manifest: Path,
+                manifest_path: Path,
+                ownership_guard: object = None,
+                expected_output_identity: object = None,
+                expected_output_hash: str | None = None,
+                expected_manifest_identity: object = None,
+                expected_manifest_hash: str | None = None,
+            ) -> dict[str, object]:
+                nonlocal swapped
+                replacement = temporary_output.with_name(
+                    temporary_output.name + ".replacement"
+                )
+                replacement.write_bytes(b"replacement-pdf")
+                os.replace(replacement, temporary_output)
+                swapped = True
+                return real_prepare(
+                    temporary_output,
+                    output_path,
+                    temporary_manifest,
+                    manifest_path,
+                    ownership_guard,
+                    expected_output_identity=expected_output_identity,
+                    expected_output_hash=expected_output_hash,
+                    expected_manifest_identity=expected_manifest_identity,
+                    expected_manifest_hash=expected_manifest_hash,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._prepare_publication_transaction",
+                side_effect=swap_then_prepare,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Staged output SHA-256 mismatch",
+                ):
+                    build_virtual_spread(source, output, manifest, force=True)
+
+            self.assertTrue(swapped)
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertFalse(any(root.glob("*.bak")))
+            self.assertFalse(any(root.glob("*.publish.json")))
+
+    def test_same_content_staged_output_replacement_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            real_prepare = _prepare_publication_transaction
+            swapped = False
+
+            def swap_then_prepare(
+                temporary_output: Path,
+                output_path: Path,
+                temporary_manifest: Path,
+                manifest_path: Path,
+                ownership_guard: object = None,
+                expected_output_identity: object = None,
+                expected_output_hash: str | None = None,
+                expected_manifest_identity: object = None,
+                expected_manifest_hash: str | None = None,
+            ) -> dict[str, object]:
+                nonlocal swapped
+                replacement = temporary_output.with_name(
+                    temporary_output.name + ".replacement"
+                )
+                replacement.write_bytes(temporary_output.read_bytes())
+                os.replace(replacement, temporary_output)
+                swapped = True
+                return real_prepare(
+                    temporary_output,
+                    output_path,
+                    temporary_manifest,
+                    manifest_path,
+                    ownership_guard,
+                    expected_output_identity=expected_output_identity,
+                    expected_output_hash=expected_output_hash,
+                    expected_manifest_identity=expected_manifest_identity,
+                    expected_manifest_hash=expected_manifest_hash,
                 )
 
             with mock.patch(

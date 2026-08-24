@@ -125,11 +125,14 @@ same evidence is checked before the sidecar move, before the PDF move, and after
 canonical publication, so exchanging the staged PDF cannot make its sidecar
 describe different bytes.
 
-Recovery discards an obsolete or otherwise invalid transaction marker only when
-neither recovery backup exists, which is the pre-mutation interruption case. If
-either backup exists, validation continues to fail closed and preserves the
-marker and recovery evidence for inspection rather than guessing how to restore
-an older transaction schema.
+Recovery recognizes the prior v1 transaction schema only while no backup exists.
+It validates the canonical paths, prior-existence flags, and staged hashes before
+classifying each canonical artifact as old, absent, or newly published. A complete
+new pair is committed, a brand-new partial publication is removed, and a
+pre-mutation marker is discarded. Any partial state that would require an
+unauthenticated old backup still fails closed. Unknown or malformed markers are
+discarded only when neither canonical artifact nor backup exists; otherwise the
+marker and all recovery evidence remain in place for inspection.
 
 ## Nomad hardware result: GO
 

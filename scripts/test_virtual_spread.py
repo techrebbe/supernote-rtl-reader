@@ -1661,7 +1661,7 @@ class VirtualSpreadTests(unittest.TestCase):
 
             with self.assertRaisesRegex(
                 VirtualSpreadError,
-                "Cannot recover invalid virtual-spread publication marker",
+                "Cannot recover obsolete virtual-spread publication marker",
             ):
                 _recover_pair_publication(output, manifest)
 
@@ -1672,6 +1672,128 @@ class VirtualSpreadTests(unittest.TestCase):
                 output_backup.read_bytes(),
                 b"recovery-evidence",
             )
+            self.assertFalse(manifest_backup.exists())
+
+    def test_obsolete_new_pair_partial_sidecar_is_rolled_back(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            manifest.write_bytes(b"published-sidecar")
+            with manifest.open("rb") as stream:
+                manifest_hash = _sha256_open_file(stream)
+            marker.write_text(
+                json.dumps(
+                    {
+                        "schema": (
+                            "techrebbe.supernote."
+                            "virtual-spread-publication/v1"
+                        ),
+                        "outputPath": str(output),
+                        "manifestPath": str(manifest),
+                        "outputBackupPath": str(output_backup),
+                        "manifestBackupPath": str(manifest_backup),
+                        "hadOutput": False,
+                        "hadManifest": False,
+                        "newOutputSha256": "0" * 64,
+                        "newManifestSha256": manifest_hash,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                _recover_pair_publication(output, manifest),
+                "rolled_back",
+            )
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest.exists())
+            self.assertFalse(marker.exists())
+            self.assertFalse(output_backup.exists())
+            self.assertFalse(manifest_backup.exists())
+
+    def test_obsolete_new_pair_complete_publication_commits(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            output.write_bytes(b"published-output")
+            manifest.write_bytes(b"published-sidecar")
+            with output.open("rb") as stream:
+                output_hash = _sha256_open_file(stream)
+            with manifest.open("rb") as stream:
+                manifest_hash = _sha256_open_file(stream)
+            marker.write_text(
+                json.dumps(
+                    {
+                        "schema": (
+                            "techrebbe.supernote."
+                            "virtual-spread-publication/v1"
+                        ),
+                        "outputPath": str(output),
+                        "manifestPath": str(manifest),
+                        "outputBackupPath": str(output_backup),
+                        "manifestBackupPath": str(manifest_backup),
+                        "hadOutput": False,
+                        "hadManifest": False,
+                        "newOutputSha256": output_hash,
+                        "newManifestSha256": manifest_hash,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                _recover_pair_publication(output, manifest),
+                "committed",
+            )
+            self.assertEqual(output.read_bytes(), b"published-output")
+            self.assertEqual(manifest.read_bytes(), b"published-sidecar")
+            self.assertFalse(marker.exists())
+            self.assertFalse(output_backup.exists())
+            self.assertFalse(manifest_backup.exists())
+
+    def test_invalid_marker_with_canonical_artifact_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            manifest.write_bytes(b"unclassified-canonical-artifact")
+            marker.write_text(
+                json.dumps(
+                    {
+                        "schema": "unsupported-publication-schema",
+                        "outputPath": str(output),
+                        "manifestPath": str(manifest),
+                        "outputBackupPath": str(output_backup),
+                        "manifestBackupPath": str(manifest_backup),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot recover invalid virtual-spread publication marker",
+            ):
+                _recover_pair_publication(output, manifest)
+
+            self.assertFalse(output.exists())
+            self.assertEqual(
+                manifest.read_bytes(),
+                b"unclassified-canonical-artifact",
+            )
+            self.assertTrue(marker.is_file())
+            self.assertFalse(output_backup.exists())
             self.assertFalse(manifest_backup.exists())
 
     def test_pair_publication_rolls_back_after_second_replace_fails(self) -> None:

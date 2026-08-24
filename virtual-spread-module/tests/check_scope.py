@@ -301,6 +301,11 @@ for required in (
     "getattr(os, \"O_NOFOLLOW\", 0)",
     "_require_open_lock_identity(lock_path, descriptor)",
     "_require_open_lock_identity(lock_path, stream.fileno())",
+    "def _acquire_publication_directory_lock(",
+    "_require_open_directory_identity(lock_path.parent, descriptor)",
+    "directory_descriptor = _acquire_publication_directory_lock(",
+    "_require_open_directory_identity(\n"
+    "                        lock_path.parent,",
     "_validate_publication_ownership(ownership_guard)",
     "_require_regular_publication_targets(output_path, manifest_path)",
     '"Staged output"',
@@ -389,6 +394,7 @@ generator_tests = (root.parent / "scripts/test_virtual_spread.py").read_text(
 )
 for required in (
     "test_publication_lock_replacement_is_detected_while_held",
+    "test_replaced_lock_path_does_not_admit_second_publisher",
     "test_recovery_rejects_tampered_backup_without_restoring_it",
 ):
     if required not in generator_tests:

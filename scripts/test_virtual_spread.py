@@ -860,6 +860,31 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertEqual(lock_path.read_bytes(), b"replacement-lock")
             self.assertFalse(output.exists())
 
+    @unittest.skipIf(
+        os.name == "nt",
+        "Windows does not allow an open lock pathname to be unlinked",
+    )
+    def test_replaced_lock_path_does_not_admit_second_publisher(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            lock_path = _publication_lock_path(output)
+
+            with _publication_lock(output):
+                lock_path.unlink()
+                lock_path.write_bytes(b"replacement-lock")
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Publication is already active",
+                ):
+                    with _publication_lock(output):
+                        self.fail(
+                            "replacement lock admitted a second publisher"
+                        )
+
+            self.assertEqual(lock_path.read_bytes(), b"replacement-lock")
+            self.assertFalse(output.exists())
+
     def test_force_rejects_directory_publication_targets(self) -> None:
         for directory_target in ("output", "manifest"):
             with self.subTest(directory_target=directory_target):

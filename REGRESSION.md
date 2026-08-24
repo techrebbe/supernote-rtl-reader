@@ -624,7 +624,15 @@ tampered evidence in place. The generator also carries a live lock-identity guar
 through recovery and publication and rechecks it before each shared namespace
 mutation. A POSIX lock-replacement regression and a tampered-backup regression
 raise the generator suite to 31 tests; the complete Java companion suite and
-signed APK build also pass locally.
+signed APK build also pass locally. A fifteenth review pass closes the remaining
+check-then-mutate race for cooperating publishers: POSIX generators acquire one
+stable output-directory lock before the per-output lock and retain both until the
+complete transaction ends. Replacing the per-output lock pathname therefore
+cannot admit a second generator between an ownership check and its mutation;
+Windows retains its nonreplaceable open-file lock. A deterministic Linux
+regression recreates the per-output lock during an active transaction and proves
+that a second publisher is still rejected, raising the generator suite to 32
+tests.
 These automated checks do not replace or restate the v0.0.8 hardware result;
 v0.0.15 still requires a focused generated-pair smoke test before release.
 

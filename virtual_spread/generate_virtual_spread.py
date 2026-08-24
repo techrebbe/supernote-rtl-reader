@@ -895,6 +895,82 @@ def _require_open_lock_identity(lock_path: Path, descriptor: int) -> None:
         )
 
 
+def _require_open_directory_identity(
+    directory_path: Path,
+    descriptor: int,
+) -> None:
+    try:
+        path_entry = directory_path.lstat()
+        opened_entry = os.fstat(descriptor)
+    except OSError as error:
+        raise VirtualSpreadError(
+            "Cannot verify publication lock directory: "
+            f"{directory_path}"
+        ) from error
+    if (
+        not stat.S_ISDIR(path_entry.st_mode)
+        or not stat.S_ISDIR(opened_entry.st_mode)
+        or path_entry.st_dev != opened_entry.st_dev
+        or path_entry.st_ino != opened_entry.st_ino
+    ):
+        raise VirtualSpreadError(
+            "Publication lock directory must remain one unaliased directory: "
+            f"{directory_path}"
+        )
+
+
+def _acquire_publication_directory_lock(
+    lock_path: Path,
+    output_path: Path,
+) -> int | None:
+    """Hold one stable POSIX namespace owner while a pair is published."""
+    if os.name == "nt":
+        return None
+
+    import fcntl
+
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_DIRECTORY", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    try:
+        descriptor = os.open(lock_path.parent, flags)
+    except OSError as error:
+        raise VirtualSpreadError(
+            "Cannot open publication lock directory safely: "
+            f"{lock_path.parent}"
+        ) from error
+    try:
+        _require_open_directory_identity(lock_path.parent, descriptor)
+        try:
+            fcntl.flock(
+                descriptor,
+                fcntl.LOCK_EX | fcntl.LOCK_NB,
+            )
+        except OSError as error:
+            raise VirtualSpreadError(
+                f"Publication is already active: {output_path}"
+            ) from error
+        _require_open_directory_identity(lock_path.parent, descriptor)
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _release_publication_directory_lock(descriptor: int | None) -> None:
+    if descriptor is None:
+        return
+    import fcntl
+
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        except OSError:
+            pass
+    finally:
+        os.close(descriptor)
+
+
 def _open_publication_lock(lock_path: Path) -> BinaryIO:
     _require_regular_publication_target(lock_path, "Publication lock")
     flags = os.O_RDWR | os.O_CREAT
@@ -922,55 +998,67 @@ def _publication_lock(
     """Serialize every publisher and recovery owner for one output PDF."""
     lock_path = _publication_lock_path(output_path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    stream = _open_publication_lock(lock_path)
-    acquired = False
+    directory_descriptor = _acquire_publication_directory_lock(
+        lock_path,
+        output_path,
+    )
     try:
-        stream.seek(0, os.SEEK_END)
-        if stream.tell() == 0:
-            stream.write(b"\0")
-            stream.flush()
-            os.fsync(stream.fileno())
-        stream.seek(0)
+        stream = _open_publication_lock(lock_path)
+        acquired = False
         try:
-            if os.name == "nt":
-                import msvcrt
-
-                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-
-                fcntl.flock(
-                    stream.fileno(),
-                    fcntl.LOCK_EX | fcntl.LOCK_NB,
-                )
-        except OSError as error:
-            raise VirtualSpreadError(
-                f"Publication is already active: {output_path}"
-            ) from error
-        _require_open_lock_identity(lock_path, stream.fileno())
-        acquired = True
-
-        def ownership_guard() -> None:
-            _require_open_lock_identity(lock_path, stream.fileno())
-
-        yield ownership_guard
-    finally:
-        if acquired:
+            stream.seek(0, os.SEEK_END)
+            if stream.tell() == 0:
+                stream.write(b"\0")
+                stream.flush()
+                os.fsync(stream.fileno())
             stream.seek(0)
             try:
                 if os.name == "nt":
                     import msvcrt
 
-                    msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
                 else:
                     import fcntl
 
-                    fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
-            except OSError:
-                # Closing the descriptor below releases an OS-owned lock even
-                # if an explicit unlock reports a late platform error.
-                pass
-        stream.close()
+                    fcntl.flock(
+                        stream.fileno(),
+                        fcntl.LOCK_EX | fcntl.LOCK_NB,
+                    )
+            except OSError as error:
+                raise VirtualSpreadError(
+                    f"Publication is already active: {output_path}"
+                ) from error
+            _require_open_lock_identity(lock_path, stream.fileno())
+            acquired = True
+
+            def ownership_guard() -> None:
+                if directory_descriptor is not None:
+                    _require_open_directory_identity(
+                        lock_path.parent,
+                        directory_descriptor,
+                    )
+                _require_open_lock_identity(lock_path, stream.fileno())
+
+            yield ownership_guard
+        finally:
+            if acquired:
+                stream.seek(0)
+                try:
+                    if os.name == "nt":
+                        import msvcrt
+
+                        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+                    else:
+                        import fcntl
+
+                        fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+                except OSError:
+                    # Closing the descriptor below releases an OS-owned lock even
+                    # if an explicit unlock reports a late platform error.
+                    pass
+            stream.close()
+    finally:
+        _release_publication_directory_lock(directory_descriptor)
 
 
 def _validate_publication_ownership(

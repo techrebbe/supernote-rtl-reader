@@ -63,9 +63,15 @@ rejected rather than renamed, even with `--force`. Backup destinations are
 created without replacement and are revalidated immediately before each move.
 The persistent OS lock is opened without following links where the platform
 supports it; its path and descriptor must identify the same regular file before
-initialization and again after lock acquisition. That identity is rechecked
-before every shared transaction mutation, so replacing the lock pathname causes
-the current publisher to fail closed. Staged artifacts are type- and hash-checked
+initialization and again after lock acquisition. On POSIX, every publisher first
+locks the already-open output-directory inode and holds it until the per-output
+lock and complete transaction are released. All cooperating publishers acquire
+those locks in that order, so unlinking and recreating the per-output lock cannot
+admit a second recovery or publication owner. This intentionally serializes
+virtual-spread publications that share one directory on POSIX; Windows already
+prevents replacement of the open per-output lock. Both identities are rechecked
+before every shared transaction mutation, so namespace replacement also makes
+the current publisher fail closed. Staged artifacts are type- and hash-checked
 before backup moves and immediately before publication, and both canonical hashes
 are verified before recovery evidence is retired.
 The PDF and manifest are staged before publication as one recoverable pair. A transaction

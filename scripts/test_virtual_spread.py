@@ -14,9 +14,11 @@ from unittest import mock
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import (
     ArrayObject,
+    DictionaryObject,
     FloatObject,
     IndirectObject,
     NameObject,
+    NumberObject,
     NullObject,
     TextStringObject,
 )
@@ -39,10 +41,12 @@ from generate_virtual_spread import (  # noqa: E402
     _identity,
     _layout_authority_sha256,
     _link_authority_sha256,
+    _link_annotation_flags,
     _publish_pair,
     _require_unaliased_output_path,
     _publication_artifacts,
     _publication_lock,
+    _transform_rect,
     _publication_lock_path,
     _prepare_publication_transaction,
     _recover_pair_publication,
@@ -240,6 +244,25 @@ def set_link_quad_points(
         writer.write(stream)
 
 
+def set_link_annotation_value(
+    path: Path,
+    source_page_index: int,
+    annotation_index: int,
+    key: str,
+    value: object,
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    annotations = writer.pages[source_page_index].get("/Annots")
+    if annotations is None:
+        raise AssertionError("fixture page has no annotations")
+    annotation = annotations.get_object()[annotation_index].get_object()
+    annotation[NameObject(key)] = value
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
 def transform_point(
     x: float, y: float, transform: list[float]
 ) -> tuple[float, float]:
@@ -278,11 +301,27 @@ class VirtualSpreadTests(unittest.TestCase):
             [(None, 0), (2, 1), (4, 3), (6, 5)],
         )
 
-    def test_ltr_pairing_without_cover(self) -> None:
-        self.assertEqual(
-            build_pairs(5, "ltr", False),
-            [(0, 1), (2, 3), (4, None)],
-        )
+    def test_ltr_generation_is_rejected_before_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Unsupported virtual-spread direction: ltr",
+            ):
+                build_virtual_spread(
+                    source, output, manifest_path, direction="ltr"
+                )
+
+            with self.assertRaisesRegex(VirtualSpreadError, "direction: ltr"):
+                build_pairs(5, "ltr", False)
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+            self.assertFalse(_publication_lock_path(output).exists())
 
     def test_odd_pages_text_and_links_survive(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1048,6 +1087,152 @@ class VirtualSpreadTests(unittest.TestCase):
 
                     self.assertFalse(output.exists())
                     self.assertFalse(manifest_path.exists())
+
+    def test_link_annotation_flags_are_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "flags-source.pdf"
+            output = root / "flags-spread.pdf"
+            manifest_path = root / "flags-spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_annotation_value(
+                source,
+                source_page_index=1,
+                annotation_index=0,
+                key="/F",
+                value=NumberObject(34),
+            )
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                direction="rtl",
+                cover_separate=True,
+            )
+            reader = PdfReader(str(output), strict=True)
+            mapping = manifest["sourcePages"][1]
+            annotations = reader.pages[
+                mapping["virtualPageIndex"]
+            ]["/Annots"].get_object()
+            copied = next(
+                item.get_object()
+                for item in annotations
+                if int(item.get_object()["/SNSourcePage"]) == 1
+            )
+            self.assertIsInstance(copied.raw_get("/F"), NumberObject)
+            self.assertEqual(int(copied["/F"]), 34)
+
+    def test_malformed_link_annotation_flags_fail_closed(self) -> None:
+        malformed_type = DictionaryObject(
+            {NameObject("/F"): FloatObject(2.0)}
+        )
+        with self.assertRaisesRegex(
+            VirtualSpreadError,
+            "Invalid link annotation /F flags",
+        ):
+            _link_annotation_flags(malformed_type)
+
+        cases = (
+            TextStringObject("2"),
+            NumberObject(-1),
+            NumberObject(0x0400),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, flags in enumerate(cases):
+                with self.subTest(flags=flags):
+                    source = root / f"bad-flags-source-{index}.pdf"
+                    output = root / f"bad-flags-spread-{index}.pdf"
+                    manifest_path = root / f"bad-flags-spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    set_link_annotation_value(
+                        source,
+                        source_page_index=1,
+                        annotation_index=0,
+                        key="/F",
+                        value=flags,
+                    )
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "link annotation /F flags",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            direction="rtl",
+                            cover_separate=True,
+                        )
+
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
+    def test_link_rect_requires_finite_pdf_numbers(self) -> None:
+        invalid_rectangles = (
+            ArrayObject(
+                [
+                    TextStringObject("15"),
+                    FloatObject(15.0),
+                    FloatObject(180.0),
+                    FloatObject(48.0),
+                ]
+            ),
+            ArrayObject(
+                [
+                    FloatObject(float("nan")),
+                    FloatObject(15.0),
+                    FloatObject(180.0),
+                    FloatObject(48.0),
+                ]
+            ),
+            ArrayObject(
+                [
+                    FloatObject(180.0),
+                    FloatObject(15.0),
+                    FloatObject(15.0),
+                    FloatObject(48.0),
+                ]
+            ),
+        )
+        identity = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+        for rectangle in invalid_rectangles:
+            with self.subTest(rectangle=rectangle):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "link annotation /Rect",
+                ):
+                    _transform_rect(rectangle, identity)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "bad-rect-source.pdf"
+            output = root / "bad-rect-spread.pdf"
+            manifest_path = root / "bad-rect-spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_annotation_value(
+                source,
+                source_page_index=1,
+                annotation_index=0,
+                key="/Rect",
+                value=invalid_rectangles[0],
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "link annotation /Rect coordinate",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    direction="rtl",
+                    cover_separate=True,
+                )
+
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
 
     def test_unsupported_internal_destination_mode_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

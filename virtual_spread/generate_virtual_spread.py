@@ -16,7 +16,7 @@ import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, BinaryIO, Callable, Iterable, Iterator
+from typing import Any, BinaryIO, Callable, Iterator
 
 from pypdf import PdfReader, PdfWriter, Transformation
 from pypdf.generic import (
@@ -40,6 +40,7 @@ MOVEFILE_REPLACE_EXISTING = 0x00000001
 MOVEFILE_WRITE_THROUGH = 0x00000008
 WINDOWS_ALREADY_EXISTS = {80, 183}
 MAX_MANIFEST_BYTES = 8 * 1024 * 1024
+SUPPORTED_ANNOTATION_FLAGS_MASK = 0x03FF
 
 PublicationOwnershipGuard = Callable[[], None]
 
@@ -314,33 +315,34 @@ def _bind_pdf_authorities(
         os.fsync(stream.fileno())
 
 
+def _require_supported_direction(direction: str) -> str:
+    if direction != "rtl":
+        raise VirtualSpreadError(
+            f"Unsupported virtual-spread direction: {direction}"
+        )
+    return direction
+
+
 def build_pairs(
     page_count: int,
     direction: str,
     cover_separate: bool,
 ) -> list[tuple[int | None, int | None]]:
     """Return display-order (left, right) source page indices."""
+    _require_supported_direction(direction)
     if page_count < 1:
         raise VirtualSpreadError("The source PDF has no pages")
-    if direction not in {"rtl", "ltr"}:
-        raise VirtualSpreadError(f"Unsupported direction: {direction}")
 
     pairs: list[tuple[int | None, int | None]] = []
     next_page = 0
     if cover_separate:
-        if direction == "rtl":
-            pairs.append((None, 0))
-        else:
-            pairs.append((0, None))
+        pairs.append((None, 0))
         next_page = 1
 
     while next_page < page_count:
         first = next_page
         second = next_page + 1 if next_page + 1 < page_count else None
-        if direction == "rtl":
-            pairs.append((second, first))
-        else:
-            pairs.append((first, second))
+        pairs.append((second, first))
         next_page += 2
     return pairs
 
@@ -452,16 +454,50 @@ def _layout_for_page(
     }
 
 
-def _transform_rect(rect: Iterable[Any], transform: list[float]) -> ArrayObject:
-    values = [float(value) for value in rect]
-    if len(values) != 4:
-        raise VirtualSpreadError(f"Invalid annotation rectangle: {values}")
+def _finite_pdf_number(
+    value: Any,
+    label: str,
+    *,
+    allow_null: bool = False,
+) -> float | None:
+    if isinstance(value, NullObject):
+        if allow_null:
+            return None
+        raise VirtualSpreadError(f"Invalid {label}")
+    if not isinstance(value, (FloatObject, NumberObject)):
+        raise VirtualSpreadError(f"Invalid {label}")
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise VirtualSpreadError(f"Invalid {label}") from error
+    if not math.isfinite(number):
+        raise VirtualSpreadError(f"Invalid {label}")
+    return number
+
+
+def _transform_finite_rectangle(
+    values: list[float],
+    transform: list[float],
+    label: str,
+) -> ArrayObject:
+    if len(values) != 4 or any(not math.isfinite(value) for value in values):
+        raise VirtualSpreadError(f"Invalid {label}")
+    if len(transform) != 6 or any(
+        not math.isfinite(value) for value in transform
+    ):
+        raise VirtualSpreadError(f"Invalid {label} transform")
     x1, y1, x2, y2 = values
     a, b, c, d, e, f = transform
     points = [
         (a * x + c * y + e, b * x + d * y + f)
         for x, y in ((x1, y1), (x1, y2), (x2, y1), (x2, y2))
     ]
+    if any(
+        not math.isfinite(coordinate)
+        for point in points
+        for coordinate in point
+    ):
+        raise VirtualSpreadError(f"Invalid transformed {label}")
     return ArrayObject(
         [
             FloatObject(min(point[0] for point in points)),
@@ -470,6 +506,39 @@ def _transform_rect(rect: Iterable[Any], transform: list[float]) -> ArrayObject:
             FloatObject(max(point[1] for point in points)),
         ]
     )
+
+
+def _transform_rect(rect: Any, transform: list[float]) -> ArrayObject:
+    if isinstance(rect, IndirectObject):
+        rect = rect.get_object()
+    if not isinstance(rect, ArrayObject) or len(rect) != 4:
+        raise VirtualSpreadError("Invalid link annotation /Rect array")
+    values = [
+        _finite_pdf_number(value, "link annotation /Rect coordinate")
+        for value in rect
+    ]
+    x1, y1, x2, y2 = values
+    if x1 >= x2 or y1 >= y2:
+        raise VirtualSpreadError("Invalid link annotation /Rect ordering")
+    return _transform_finite_rectangle(
+        values,
+        transform,
+        "link annotation /Rect",
+    )
+
+
+def _link_annotation_flags(annotation: DictionaryObject) -> NumberObject | None:
+    if "/F" not in annotation:
+        return None
+    flags_object = annotation.raw_get("/F")
+    if isinstance(flags_object, IndirectObject):
+        flags_object = flags_object.get_object()
+    if not isinstance(flags_object, NumberObject):
+        raise VirtualSpreadError("Invalid link annotation /F flags")
+    flags = int(flags_object)
+    if flags < 0 or flags & ~SUPPORTED_ANNOTATION_FLAGS_MASK:
+        raise VirtualSpreadError("Unsupported link annotation /F flags")
+    return NumberObject(flags)
 
 
 def _resolved_destination_array(
@@ -500,19 +569,11 @@ def _destination_source_page(
 
 
 def _destination_number(value: Any, label: str) -> float | None:
-    if isinstance(value, NullObject):
-        return None
-    if not isinstance(value, (FloatObject, NumberObject)):
-        raise VirtualSpreadError(f"Invalid internal destination {label}")
-    try:
-        number = float(value)
-    except (TypeError, ValueError, OverflowError) as error:
-        raise VirtualSpreadError(
-            f"Invalid internal destination {label}"
-        ) from error
-    if not math.isfinite(number):
-        raise VirtualSpreadError(f"Invalid internal destination {label}")
-    return number
+    return _finite_pdf_number(
+        value,
+        f"internal destination {label}",
+        allow_null=True,
+    )
 
 
 def _transform_quad_points(
@@ -534,11 +595,9 @@ def _transform_quad_points(
 
     coordinates: list[float] = []
     for value in quad_points:
-        coordinate = _destination_number(value, "/QuadPoints coordinate")
-        if coordinate is None:
-            raise VirtualSpreadError(
-                "Invalid link annotation /QuadPoints coordinate"
-            )
+        coordinate = _finite_pdf_number(
+            value, "link annotation /QuadPoints coordinate"
+        )
         coordinates.append(coordinate)
 
     a, b, c, d, e, f = transform
@@ -715,7 +774,11 @@ def _transformed_internal_destination(
         left, bottom, right, top = rectangle
         if left > right or bottom > top:
             raise VirtualSpreadError("Invalid /FitR destination rectangle")
-        transformed = _transform_rect(rectangle, transform)
+        transformed = _transform_finite_rectangle(
+            rectangle,
+            transform,
+            "internal destination /FitR rectangle",
+        )
         return ArrayObject(
             [target_reference, NameObject(mode), *transformed]
         )
@@ -761,6 +824,7 @@ def _copy_link_annotation(
 ) -> dict[str, Any]:
     original = annotation.get_object()
     mapping = source_mapping[source_page_index]
+    annotation_flags = _link_annotation_flags(original)
     copied = DictionaryObject(
         {
             NameObject("/Type"): NameObject("/Annot"),
@@ -774,6 +838,8 @@ def _copy_link_annotation(
             NameObject("/SNSourcePage"): NumberObject(source_page_index),
         }
     )
+    if annotation_flags is not None:
+        copied[NameObject("/F")] = annotation_flags
     if "/Contents" in original:
         copied[NameObject("/Contents")] = TextStringObject(
             str(original["/Contents"])
@@ -2821,6 +2887,7 @@ def build_virtual_spread(
     gutter: float = 0.0,
     force: bool = False,
 ) -> dict[str, Any]:
+    direction = _require_supported_direction(direction)
     resolved_source = source_path.resolve()
     lexical_output = _require_unaliased_output_path(output_path)
     lexical_manifest = _lexical_absolute(manifest_path)
@@ -2857,7 +2924,7 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         help="optional explicit <output>.json path; other paths are rejected",
     )
-    parser.add_argument("--direction", choices=("rtl", "ltr"), default="rtl")
+    parser.add_argument("--direction", choices=("rtl",), default="rtl")
     parser.add_argument(
         "--cover-separate",
         action=argparse.BooleanOptionalAction,

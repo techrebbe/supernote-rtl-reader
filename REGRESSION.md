@@ -708,6 +708,16 @@ quadrilateral order. Empty, non-array, incomplete, null, nonnumeric, nonfinite,
 or overflowed quadrilateral geometry fails closed rather than widening the link
 to its bounding `/Rect`. Positive and malformed regressions raise the generator
 suite to 52 tests on Windows and Linux.
+A twenty-fifth review pass makes generator/runtime direction support explicit:
+LTR is rejected before publication because the companion runtime intentionally
+accepts only RTL manifests. Rebuilt links now retain every standardized integer
+annotation `/F` bit, while malformed, negative, or unknown flag values fail
+closed instead of turning a hidden or NoView link into an ordinary active link.
+Link `/Rect` arrays likewise require exactly four finite PDF number objects in
+increasing coordinate order, preventing numeric-string coercion, non-finite
+geometry, and repaired reversed hit regions. Three new regression groups plus
+the revised direction test raise the generator suite to 55 tests on Windows and
+Linux.
 These automated checks do not replace or restate the v0.0.8 hardware result;
 v0.0.15 still requires a focused generated-pair smoke test before release.
 

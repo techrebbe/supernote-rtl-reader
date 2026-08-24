@@ -19,14 +19,18 @@ Content streams remain vector/text PDF content rather than page screenshots.
 Supported internal and URI links, including indirect destination arrays, are
 copied with transformed hit rectangles. Multiline `/QuadPoints` activation
 regions are transformed point-for-point rather than widened to their bounding
-rectangle. Internal `/Fit`, `/FitB`, `/XYZ`,
+rectangle. Standard annotation `/F` flags are preserved exactly, while malformed
+or unknown flag values fail closed. Link `/Rect` arrays require four finite PDF
+number objects in increasing coordinate order; numeric strings and non-finite
+values are never repaired. Internal `/Fit`, `/FitB`, `/XYZ`,
 `/FitH`, `/FitBH`, `/FitV`, `/FitBV`, and `/FitR` destinations retain their
 mode while coordinate parameters are transformed into the target spread;
 unknown modes, invalid PDF operand types, rotation-dependent partial coordinates,
 and null coordinates whose source and target axis transforms differ fail closed
 instead of silently degrading to `/Fit`. A JSON manifest records every
-source-page affine
-transform and target half.
+source-page affine transform and target half. The companion runtime supports RTL
+virtual spreads only, so the generator rejects LTR at its public boundary before
+acquiring a publication lock or touching an output.
 
 ## Reproducible Python environment
 

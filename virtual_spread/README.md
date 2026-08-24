@@ -59,8 +59,12 @@ python .\virtual_spread\generate_virtual_spread.py `
 ```
 
 The command refuses encrypted PDFs, unsupported annotation subtypes, unresolved
-links, and existing outputs unless `--force` is supplied. It copies and hashes
-the source through one file snapshot, re-reads the opened source to prove that
+links, document outlines whose native table-of-contents destinations have not
+yet been remapped, and existing outputs unless `--force` is supplied. It also
+rejects a source path that collides with its output's deterministic marker,
+backup, retirement, or lock artifacts before recovery or lock acquisition. It
+copies and hashes the source through one file snapshot, re-reads the opened
+source to prove that
 the copied bytes are stable, generates only from that verified snapshot, and
 rehashes the current source before publication. The PDF and manifest are each
 protected by a deterministic OS-owned lock keyed only by the output PDF for the

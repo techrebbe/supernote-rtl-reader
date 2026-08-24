@@ -119,6 +119,22 @@ def create_rotated_link_fixture(path: Path) -> None:
     unrotated.unlink()
 
 
+def add_outline_entry(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    writer.add_outline_item("Chapter 2", 1)
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    persisted = PdfReader(str(path), strict=True)
+    catalog = persisted.trailer["/Root"]
+    if "/Outlines" not in catalog:
+        raise AssertionError("fixture document outline was not persisted")
+    if not persisted.outline:
+        raise AssertionError("fixture document outline is empty")
+
+
 def make_annotation_array_indirect(path: Path, page_index: int) -> None:
     source = PdfReader(str(path), strict=True)
     writer = PdfWriter()
@@ -457,6 +473,35 @@ class VirtualSpreadTests(unittest.TestCase):
                 self.assertLessEqual(right, slot_right + 0.001)
                 self.assertLessEqual(top, slot_top + 0.001)
 
+    def test_document_outlines_fail_closed_before_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "outlined-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_outline_entry(source)
+            source_bytes = source.read_bytes()
+            output.write_bytes(b"existing-output")
+            manifest_path.write_bytes(b"existing-manifest")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Document outlines are not supported",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    force=True,
+                )
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(output.read_bytes(), b"existing-output")
+            self.assertEqual(
+                manifest_path.read_bytes(), b"existing-manifest"
+            )
+
     def test_pdf_authorities_are_embedded_and_tamper_evident(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -733,6 +778,59 @@ class VirtualSpreadTests(unittest.TestCase):
                     force=True,
                 )
             self.assertFalse(collision.exists())
+
+    def test_source_reserved_artifact_collisions_fail_before_locking(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index in range(9):
+                with self.subTest(index=index):
+                    case_root = root / str(index)
+                    case_root.mkdir()
+                    output = case_root / "spread.pdf"
+                    manifest_path = case_root / "spread.pdf.json"
+                    marker, output_backup, manifest_backup = (
+                        _publication_artifacts(output)
+                    )
+                    removable = (
+                        marker,
+                        output_backup,
+                        manifest_backup,
+                    )
+                    reserved = (
+                        *removable,
+                        *(
+                            path.with_name(path.name + ".retired")
+                            for path in (
+                                *removable,
+                                output,
+                                manifest_path,
+                            )
+                        ),
+                        _publication_lock_path(output),
+                    )
+                    source = reserved[index]
+                    create_odd_page_fixture(source)
+                    source_bytes = source.read_bytes()
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "reserved virtual-spread publication artifact",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            force=True,
+                        )
+
+                    self.assertEqual(source.read_bytes(), source_bytes)
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+                    for artifact in reserved:
+                        if artifact != source:
+                            self.assertFalse(artifact.exists())
 
     def test_indirect_annotation_array_is_dereferenced(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -565,6 +565,24 @@ def _dereference_pdf_object(value: Any) -> Any:
     return value.get_object() if isinstance(value, IndirectObject) else value
 
 
+def _require_no_document_outlines(reader: PdfReader) -> None:
+    try:
+        catalog = _dereference_pdf_object(
+            reader.trailer.raw_get("/Root")
+        )
+    except KeyError as error:
+        raise VirtualSpreadError(
+            "Source PDF has no document catalog"
+        ) from error
+    if not isinstance(catalog, DictionaryObject):
+        raise VirtualSpreadError("Source PDF catalog is not a dictionary")
+    if "/Outlines" in catalog:
+        raise VirtualSpreadError(
+            "Document outlines are not supported by this prototype; "
+            "generation would discard native table-of-contents navigation"
+        )
+
+
 def _required_pdf_name(
     dictionary: DictionaryObject,
     key: str,
@@ -1632,6 +1650,41 @@ def _publication_artifacts(
 def _publication_lock_path(output_path: Path) -> Path:
     marker, _, _ = _publication_artifacts(output_path)
     return marker.with_name(marker.name + ".lock")
+
+
+def _publication_reserved_paths(output_path: Path) -> tuple[Path, ...]:
+    marker, output_backup, manifest_backup = _publication_artifacts(
+        output_path
+    )
+    removable = (marker, output_backup, manifest_backup)
+    canonical = (
+        _lexical_absolute(output_path),
+        _runtime_manifest_path(output_path),
+    )
+    retired = tuple(
+        path.with_name(path.name + ".retired")
+        for path in (*removable, *canonical)
+    )
+    return (
+        *removable,
+        *retired,
+        _publication_lock_path(output_path),
+    )
+
+
+def _require_source_outside_publication_namespace(
+    source_path: Path,
+    output_path: Path,
+) -> None:
+    source = _lexical_absolute(source_path.resolve())
+    source_key = os.path.normcase(str(source))
+    for artifact in _publication_reserved_paths(output_path):
+        artifact = _lexical_absolute(artifact)
+        if os.path.normcase(str(artifact)) == source_key:
+            raise VirtualSpreadError(
+                "Source PDF path collides with a reserved virtual-spread "
+                f"publication artifact: {source}"
+            )
 
 
 def _require_open_lock_identity(
@@ -2888,6 +2941,7 @@ def _build_virtual_spread_from_snapshot(
     reader = PdfReader(source_snapshot, strict=True)
     if reader.is_encrypted:
         raise VirtualSpreadError("Encrypted PDFs are not supported by this prototype")
+    _require_no_document_outlines(reader)
     pairs = build_pairs(len(reader.pages), direction, cover_separate)
     normalized_pages = [_normalized_page(page) for page in reader.pages]
     left_slot = Slot("left", 0.0, 0.0, slot_width, spread_height)
@@ -3152,6 +3206,9 @@ def _build_virtual_spread_locked(
         raise VirtualSpreadError(
             "Source PDF, output PDF, and manifest paths must be distinct"
         )
+    _require_source_outside_publication_namespace(
+        source_path, output_path
+    )
     _recover_pair_publication(output_path, manifest_path, ownership_guard)
     output_exists, manifest_exists = _require_regular_publication_targets(
         output_path,
@@ -3218,6 +3275,9 @@ def build_virtual_spread(
     lexical_manifest = _require_runtime_manifest_path(
         lexical_output,
         lexical_manifest,
+    )
+    _require_source_outside_publication_namespace(
+        resolved_source, lexical_output
     )
     _require_regular_publication_targets(lexical_output, lexical_manifest)
     with _publication_lock(lexical_output) as ownership_guard:

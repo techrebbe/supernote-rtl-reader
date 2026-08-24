@@ -728,6 +728,17 @@ action, previous-action, structural-parent, or unknown entries fail closed
 instead of being partially reconstructed. Positive border/highlight and URI
 fixtures plus malformed and unsupported semantic matrices add five regression
 groups, raising the generator suite to 60 tests on Windows and Linux.
+A twenty-seventh review pass rejects every deterministic marker, backup,
+retirement, and lock filename as a source path before recovery or lock
+acquisition, so transaction cleanup cannot delete or overwrite an unusually
+named input PDF. The generator also detects a source catalog `/Outlines` tree
+and fails before publication rather than silently removing native table-of-
+contents navigation; destination remapping remains an explicit future
+capability. The runtime documentation now accurately distinguishes its
+identity-only callback fast path from descriptor-bound sidecar and PDF hashing
+on a background cache miss. Two deterministic regression groups cover all
+nine reserved source names and outline rejection, raising the generator suite
+to 62 tests on Windows and Linux.
 These automated checks do not replace or restate the v0.0.8 hardware result;
 v0.0.15 still requires a focused generated-pair smoke test before release.
 

@@ -32,6 +32,7 @@ from generate_virtual_spread import (  # noqa: E402
     _layout_authority_sha256,
     _link_authority_sha256,
     _publish_pair,
+    _require_unaliased_output_path,
     _publication_artifacts,
     _publication_lock,
     _publication_lock_path,
@@ -745,6 +746,33 @@ class VirtualSpreadTests(unittest.TestCase):
                 custom_manifest.read_bytes(), b"old-custom-manifest"
             )
             self.assertFalse(_publication_lock_path(output).exists())
+
+    def test_output_filesystem_alias_is_rejected_before_publication(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            lexical = root / "alias.pdf"
+            resolved = root / "target.pdf"
+
+            class AliasedPath:
+                def __fspath__(self) -> str:
+                    return str(lexical)
+
+                def resolve(self) -> Path:
+                    return resolved
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "must not contain symlinks or filesystem aliases",
+            ):
+                _require_unaliased_output_path(
+                    AliasedPath(),  # type: ignore[arg-type]
+                )
+
+            self.assertFalse(lexical.exists())
+            self.assertFalse(resolved.exists())
+            self.assertFalse(_publication_lock_path(lexical).exists())
 
     def test_live_publication_lock_blocks_recovery_by_second_generator(
         self,

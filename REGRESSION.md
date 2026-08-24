@@ -594,6 +594,11 @@ the same transaction artifacts and OS lock; another proves an alternate
 manifest path is rejected before a lock is created or the existing PDF, runtime
 sidecar, or alternate file can change. The generator suite now contains 21
 tests.
+An eleventh review pass rejects an output path containing a symlink, junction,
+or other filesystem alias before publication ownership is acquired. This keeps
+the generator's sidecar location identical to the lexical PDF path later probed
+by the Android runtime. A deterministic alias-path regression and a static
+guard-before-lock invariant raise the generator suite to 22 tests.
 These automated checks do not replace or restate the v0.0.8 hardware result;
 v0.0.15 still requires a focused generated-pair smoke test before release.
 

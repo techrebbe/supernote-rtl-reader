@@ -265,6 +265,7 @@ for required in (
     "MOVEFILE_WRITE_THROUGH",
     "MAX_MANIFEST_BYTES = 8 * 1024 * 1024",
     "temporary_manifest.stat().st_size > MAX_MANIFEST_BYTES",
+    "resolved_output = _require_unaliased_output_path(output_path)",
     "_require_runtime_manifest_path(resolved_output, resolved_manifest)",
     "with _publication_lock(resolved_output):",
     "def _publication_lock_path(output_path: Path)",
@@ -283,5 +284,14 @@ for required in (
         raise SystemExit(
             f"generator is missing durable/layout authority invariant: {required}"
         )
+
+alias_guard = generator.find(
+    "resolved_output = _require_unaliased_output_path(output_path)"
+)
+publication_lock = generator.find("with _publication_lock(resolved_output):")
+if alias_guard < 0 or publication_lock < 0 or alias_guard >= publication_lock:
+    raise SystemExit(
+        "output alias rejection must run before publication ownership is acquired"
+    )
 
 print("VirtualSpread hook scope PASS")

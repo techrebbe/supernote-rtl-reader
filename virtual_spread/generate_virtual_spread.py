@@ -661,6 +661,18 @@ def _publish_pair(
         raise
 
 
+def _require_unaliased_output_path(output_path: Path) -> Path:
+    """Reject output aliases whose runtime sidecar path would be ambiguous."""
+    lexical = Path(os.path.abspath(os.fspath(output_path)))
+    resolved = output_path.resolve()
+    if os.path.normcase(str(lexical)) != os.path.normcase(str(resolved)):
+        raise VirtualSpreadError(
+            "Output PDF path must not contain symlinks or filesystem aliases: "
+            f"{lexical} resolves to {resolved}"
+        )
+    return resolved
+
+
 def _runtime_manifest_path(output_path: Path) -> Path:
     """Return the only sidecar path probed by the Android runtime."""
     output_path = output_path.resolve()
@@ -1365,7 +1377,7 @@ def build_virtual_spread(
     force: bool = False,
 ) -> dict[str, Any]:
     resolved_source = source_path.resolve()
-    resolved_output = output_path.resolve()
+    resolved_output = _require_unaliased_output_path(output_path)
     resolved_manifest = manifest_path.resolve()
     if len({resolved_source, resolved_output, resolved_manifest}) != 3:
         raise VirtualSpreadError(

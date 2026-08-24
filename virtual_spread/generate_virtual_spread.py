@@ -668,26 +668,38 @@ def _publish_pair(
     temporary_manifest: Path,
     manifest_path: Path,
     ownership_guard: PublicationOwnershipGuard | None = None,
+    expected_manifest_identity: SourceIdentity | None = None,
+    expected_manifest_hash: str | None = None,
 ) -> None:
     """Publish a matching pair with durable recovery across process death."""
+    expected_manifest_arguments: dict[str, Any] = {}
+    if expected_manifest_identity is not None:
+        expected_manifest_arguments["expected_manifest_identity"] = (
+            expected_manifest_identity
+        )
+    if expected_manifest_hash is not None:
+        expected_manifest_arguments["expected_manifest_hash"] = expected_manifest_hash
     transaction = _prepare_publication_transaction(
         temporary_output,
         output_path,
         temporary_manifest,
         manifest_path,
         ownership_guard,
+        **expected_manifest_arguments,
     )
     try:
         expected_output_hash = transaction["newOutputSha256"]
         expected_manifest_hash = transaction["newManifestSha256"]
+        published_manifest_identity = transaction["_newManifestIdentity"]
         _require_publication_file_hash(
             temporary_output,
             expected_output_hash,
             "Staged output",
             ownership_guard,
         )
-        _require_publication_file_hash(
+        _require_publication_manifest_hash(
             temporary_manifest,
+            published_manifest_identity,
             expected_manifest_hash,
             "Staged manifest",
             ownership_guard,
@@ -764,8 +776,9 @@ def _publish_pair(
 
         # Publish the sidecar first. Until the PDF appears, the module fails
         # closed; once the PDF is published, its persisted hash matches.
-        _require_publication_file_hash(
+        _require_publication_manifest_hash(
             temporary_manifest,
+            published_manifest_identity,
             expected_manifest_hash,
             "Staged manifest",
             ownership_guard,
@@ -776,8 +789,9 @@ def _publish_pair(
             manifest_path,
             ownership_guard=ownership_guard,
         )
-        _require_publication_file_hash(
+        _require_publication_manifest_hash(
             manifest_path,
+            published_manifest_identity,
             expected_manifest_hash,
             "Published manifest",
             ownership_guard,
@@ -794,8 +808,9 @@ def _publish_pair(
             output_path,
             ownership_guard=ownership_guard,
         )
-        _require_publication_file_hash(
+        _require_publication_manifest_hash(
             manifest_path,
+            published_manifest_identity,
             expected_manifest_hash,
             "Published manifest",
             ownership_guard,
@@ -1209,6 +1224,100 @@ def _publication_sha256(
     descriptor = _publication_open_file(path, flags, ownership_guard)
     with os.fdopen(descriptor, "rb", buffering=0) as stream:
         return _sha256_open_file(stream)
+
+
+def _publication_manifest_evidence(
+    path: Path,
+    label: str,
+    ownership_guard: PublicationOwnershipGuard | None,
+    *,
+    expected_identity: SourceIdentity | None = None,
+    expected_hash: str | None = None,
+) -> tuple[SourceIdentity, str]:
+    """Bind the runtime size ceiling and digest to one staged-file identity."""
+    if not _require_regular_publication_target(
+        path, label, ownership_guard
+    ):
+        raise VirtualSpreadError(f"{label} disappeared: {path}")
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_NOINHERIT", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = _publication_open_file(path, flags, ownership_guard)
+        with os.fdopen(descriptor, "rb", buffering=0) as stream:
+            opened_before_stat = os.fstat(stream.fileno())
+            if not stat.S_ISREG(opened_before_stat.st_mode):
+                raise VirtualSpreadError(f"{label} must be a regular file: {path}")
+            opened_before = _identity(opened_before_stat)
+            if opened_before.size > MAX_MANIFEST_BYTES:
+                raise VirtualSpreadError(
+                    f"{label} exceeds the runtime limit of "
+                    f"{MAX_MANIFEST_BYTES} bytes"
+                )
+            actual_hash = _sha256_open_file(stream)
+            opened_after = _identity(os.fstat(stream.fileno()))
+            namespace = _publication_namespace(ownership_guard)
+            path_entry = (
+                namespace.lstat(path)
+                if namespace is not None
+                else _lexical_absolute(path).lstat()
+            )
+            if not stat.S_ISREG(path_entry.st_mode):
+                raise VirtualSpreadError(f"{label} must be a regular file: {path}")
+            path_identity = _identity(path_entry)
+    except VirtualSpreadError:
+        raise
+    except OSError as error:
+        raise VirtualSpreadError(f"Cannot verify {label}: {path}") from error
+
+    if opened_before != opened_after or not _same_open_file(
+        path_identity, opened_after
+    ):
+        raise VirtualSpreadError(f"{label} changed while it was being verified: {path}")
+    if expected_hash is not None and actual_hash != expected_hash:
+        raise VirtualSpreadError(
+            f"{label} SHA-256 mismatch: expected {expected_hash}, "
+            f"got {actual_hash}"
+        )
+    if expected_identity is not None and not _same_open_file(
+        expected_identity, opened_before
+    ):
+        raise VirtualSpreadError(f"{label} identity changed before publication: {path}")
+    return opened_before, actual_hash
+
+
+def _require_publication_manifest_hash(
+    path: Path,
+    expected_identity: SourceIdentity,
+    expected_hash: str,
+    label: str,
+    ownership_guard: PublicationOwnershipGuard | None,
+) -> None:
+    _publication_manifest_evidence(
+        path,
+        label,
+        ownership_guard,
+        expected_identity=expected_identity,
+        expected_hash=expected_hash,
+    )
+
+
+def _publication_manifest_matches_sha256(
+    path: Path,
+    expected_hash: str,
+    ownership_guard: PublicationOwnershipGuard | None,
+) -> bool:
+    try:
+        _publication_manifest_evidence(
+            path,
+            "Published manifest",
+            ownership_guard,
+            expected_hash=expected_hash,
+        )
+        return True
+    except (OSError, VirtualSpreadError):
+        return False
 
 
 def _publication_file_size(
@@ -1721,7 +1830,7 @@ def _recover_pair_publication(
         transaction["newOutputSha256"],
         ownership_guard,
     )
-    manifest_is_new = _file_matches_sha256(
+    manifest_is_new = _publication_manifest_matches_sha256(
         manifest_path,
         transaction["newManifestSha256"],
         ownership_guard,
@@ -1821,6 +1930,8 @@ def _prepare_publication_transaction(
     temporary_manifest: Path,
     manifest_path: Path,
     ownership_guard: PublicationOwnershipGuard | None = None,
+    expected_manifest_identity: SourceIdentity | None = None,
+    expected_manifest_hash: str | None = None,
 ) -> dict[str, Any]:
     output_path = _require_unaliased_output_path(output_path)
     manifest_path = _require_runtime_manifest_path(
@@ -1846,6 +1957,13 @@ def _prepare_publication_transaction(
         if had_manifest
         else None
     )
+    new_manifest_identity, new_manifest_hash = _publication_manifest_evidence(
+        temporary_manifest,
+        "Staged manifest",
+        ownership_guard,
+        expected_identity=expected_manifest_identity,
+        expected_hash=expected_manifest_hash,
+    )
     _validate_publication_ownership(ownership_guard)
     transaction: dict[str, Any] = {
         "schema": PUBLICATION_SCHEMA,
@@ -1859,11 +1977,12 @@ def _prepare_publication_transaction(
         "oldOutputSha256": old_output_hash,
         "oldManifestSha256": old_manifest_hash,
         "newOutputSha256": _publication_sha256(temporary_output, ownership_guard),
-        "newManifestSha256": _publication_sha256(temporary_manifest, ownership_guard),
+        "newManifestSha256": new_manifest_hash,
     }
     marker_record = dict(transaction)
     marker_record.pop("markerPath")
     _write_publication_marker(marker_path, marker_record, ownership_guard)
+    transaction["_newManifestIdentity"] = new_manifest_identity
     return transaction
 
 
@@ -2112,14 +2231,13 @@ def _build_virtual_spread_from_snapshot(
             ownership_guard,
         )
         _write_json(temporary_manifest, manifest, ownership_guard)
-        temporary_manifest_size = _publication_file_size(
-            temporary_manifest, ownership_guard
-        )
-        if temporary_manifest_size > MAX_MANIFEST_BYTES:
-            raise VirtualSpreadError(
-                "Generated manifest exceeds the runtime limit of "
-                f"{MAX_MANIFEST_BYTES} bytes"
+        temporary_manifest_identity, temporary_manifest_hash = (
+            _publication_manifest_evidence(
+                temporary_manifest,
+                "Generated manifest",
+                ownership_guard,
             )
+        )
         _require_source_snapshot(
             source_path,
             source_identity,
@@ -2131,6 +2249,8 @@ def _build_virtual_spread_from_snapshot(
             temporary_manifest,
             manifest_path,
             ownership_guard,
+            temporary_manifest_identity,
+            temporary_manifest_hash,
         )
         return manifest
     finally:

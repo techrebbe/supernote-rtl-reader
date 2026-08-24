@@ -111,8 +111,12 @@ open handles, and finally proves the handles still match the visible pathnames.
 The module fails closed until that descriptor-bound snapshot is published.
 
 The generator also enforces the companion runtime's exact 8 MiB sidecar limit
-before publication. Oversized manifests fail with an explicit error while any
-previous PDF/sidecar pair remains intact.
+before publication. The limit, staged-file identity, and SHA-256 are captured
+from one open descriptor and revalidated before transaction-marker creation,
+immediately before the sidecar move, and after canonical publication. Recovery
+will not accept an oversized sidecar as a committed pair. Oversized or exchanged
+manifests therefore fail with an explicit error while any previous PDF/sidecar
+pair remains intact.
 
 ## Nomad hardware result: GO
 

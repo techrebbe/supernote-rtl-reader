@@ -291,7 +291,12 @@ for required in (
     'PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v2"',
     "MOVEFILE_WRITE_THROUGH",
     "MAX_MANIFEST_BYTES = 8 * 1024 * 1024",
-    "temporary_manifest_size > MAX_MANIFEST_BYTES",
+    "def _publication_manifest_evidence(",
+    "opened_before.size > MAX_MANIFEST_BYTES",
+    "expected_identity=expected_manifest_identity",
+    "expected_hash=expected_manifest_hash",
+    "def _require_publication_manifest_hash(",
+    "def _publication_manifest_matches_sha256(",
     "lexical_output = _require_unaliased_output_path(output_path)",
     "lexical_manifest = _require_runtime_manifest_path(",
     "with _publication_lock(lexical_output) as ownership_guard:",
@@ -411,8 +416,10 @@ generator_tests = (root.parent / "scripts/test_virtual_spread.py").read_text(
 for required in (
     "test_publication_lock_replacement_is_detected_while_held",
     "test_replaced_lock_path_does_not_admit_second_publisher",
+    "test_same_content_staged_manifest_replacement_is_rejected",
     "test_parent_exchange_cannot_redirect_locked_publication",
     "test_parent_exchange_cannot_redirect_staged_write",
+    "test_staged_manifest_swap_to_oversized_is_rejected_at_publication_boundary",
     "test_recovery_rejects_tampered_backup_without_restoring_it",
 ):
     if required not in generator_tests:

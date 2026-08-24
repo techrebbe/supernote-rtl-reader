@@ -643,7 +643,17 @@ parent directory precisely between validation and a final replace or staged JSON
 open. In both cases the replacement tree remains byte-for-byte unchanged while
 the original locked directory receives the descriptor-relative operation. The
 generator suite now contains 34 tests and passes completely on Linux; Windows
-passes the same suite with its five platform-specific POSIX cases skipped.
+passes the same suite with its five platform-specific POSIX cases skipped. A
+seventeenth review pass binds the 8 MiB runtime manifest ceiling, staged-file
+identity, and SHA-256 to one open descriptor. The same identity, size ceiling,
+and digest are revalidated before marker establishment, immediately before the
+sidecar move, and after canonical publication; interrupted-publication recovery
+also refuses to commit an oversized sidecar. Two deterministic races replace the
+already-checked staged manifest immediately before transaction preparation with
+either an oversized regular file or a byte-identical file on a different inode.
+Both prove that the previous PDF/sidecar pair remains untouched. The generator
+suite now contains 36 tests and passes completely on both Windows and Linux,
+with only the five POSIX-only cases skipped on Windows.
 These automated checks do not replace or restate the v0.0.8 hardware result;
 v0.0.15 still requires a focused generated-pair smoke test before release.
 

@@ -222,6 +222,24 @@ def set_raw_link_destination(
         writer.write(stream)
 
 
+def set_link_quad_points(
+    path: Path,
+    source_page_index: int,
+    annotation_index: int,
+    points: tuple[object, ...],
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    annotations = writer.pages[source_page_index].get("/Annots")
+    if annotations is None:
+        raise AssertionError("fixture page has no annotations")
+    annotation = annotations.get_object()[annotation_index].get_object()
+    annotation[NameObject("/QuadPoints")] = ArrayObject(points)
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
 def transform_point(
     x: float, y: float, transform: list[float]
 ) -> tuple[float, float]:
@@ -921,6 +939,104 @@ class VirtualSpreadTests(unittest.TestCase):
                     with self.assertRaisesRegex(
                         VirtualSpreadError,
                         message,
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            direction="rtl",
+                            cover_separate=True,
+                        )
+
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
+    def test_link_quad_points_are_preserved_and_transformed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "quadpoints-source.pdf"
+            output = root / "quadpoints-spread.pdf"
+            manifest_path = root / "quadpoints-spread.pdf.json"
+            create_odd_page_fixture(source)
+            coordinates = (
+                15.0,
+                48.0,
+                80.0,
+                48.0,
+                15.0,
+                30.0,
+                80.0,
+                30.0,
+                100.0,
+                48.0,
+                165.0,
+                48.0,
+                100.0,
+                30.0,
+                165.0,
+                30.0,
+            )
+            set_link_quad_points(
+                source,
+                source_page_index=1,
+                annotation_index=0,
+                points=tuple(FloatObject(value) for value in coordinates),
+            )
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                direction="rtl",
+                cover_separate=True,
+            )
+            reader = PdfReader(str(output), strict=True)
+            source_mapping = manifest["sourcePages"][1]
+            annotation = reader.pages[
+                source_mapping["virtualPageIndex"]
+            ]["/Annots"].get_object()[0].get_object()
+            actual = annotation["/QuadPoints"]
+            expected: list[float] = []
+            for index in range(0, len(coordinates), 2):
+                expected.extend(
+                    transform_point(
+                        coordinates[index],
+                        coordinates[index + 1],
+                        source_mapping["transform"],
+                    )
+                )
+
+            self.assertEqual(len(actual), len(expected))
+            for actual_coordinate, expected_coordinate in zip(
+                actual, expected
+            ):
+                self.assertAlmostEqual(
+                    float(actual_coordinate), expected_coordinate, places=4
+                )
+
+    def test_malformed_link_quad_points_fail_closed(self) -> None:
+        cases = (
+            tuple(FloatObject(value) for value in range(6)),
+            (
+                TextStringObject("15"),
+                *(FloatObject(value) for value in range(1, 8)),
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, points in enumerate(cases):
+                with self.subTest(index=index):
+                    source = root / f"bad-quadpoints-source-{index}.pdf"
+                    output = root / f"bad-quadpoints-spread-{index}.pdf"
+                    manifest_path = (
+                        root / f"bad-quadpoints-spread-{index}.pdf.json"
+                    )
+                    create_odd_page_fixture(source)
+                    set_link_quad_points(source, 1, 0, points)
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "/QuadPoints",
                     ):
                         build_virtual_spread(
                             source,

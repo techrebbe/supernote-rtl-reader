@@ -515,6 +515,45 @@ def _destination_number(value: Any, label: str) -> float | None:
     return number
 
 
+def _transform_quad_points(
+    quad_points: Any,
+    transform: list[float],
+) -> ArrayObject:
+    if isinstance(quad_points, IndirectObject):
+        quad_points = quad_points.get_object()
+    if (
+        not isinstance(quad_points, ArrayObject)
+        or not quad_points
+        or len(quad_points) % 8 != 0
+    ):
+        raise VirtualSpreadError("Invalid link annotation /QuadPoints array")
+    if len(transform) != 6 or any(
+        not math.isfinite(value) for value in transform
+    ):
+        raise VirtualSpreadError("Invalid link annotation transform")
+
+    coordinates: list[float] = []
+    for value in quad_points:
+        coordinate = _destination_number(value, "/QuadPoints coordinate")
+        if coordinate is None:
+            raise VirtualSpreadError(
+                "Invalid link annotation /QuadPoints coordinate"
+            )
+        coordinates.append(coordinate)
+
+    a, b, c, d, e, f = transform
+    transformed = ArrayObject()
+    for index in range(0, len(coordinates), 2):
+        x = a * coordinates[index] + c * coordinates[index + 1] + e
+        y = b * coordinates[index] + d * coordinates[index + 1] + f
+        if not math.isfinite(x) or not math.isfinite(y):
+            raise VirtualSpreadError(
+                "Invalid transformed link annotation /QuadPoints"
+            )
+        transformed.extend((FloatObject(x), FloatObject(y)))
+    return transformed
+
+
 def _destination_object(value: float | None) -> FloatObject | NullObject:
     return NullObject() if value is None else FloatObject(value)
 
@@ -738,6 +777,10 @@ def _copy_link_annotation(
     if "/Contents" in original:
         copied[NameObject("/Contents")] = TextStringObject(
             str(original["/Contents"])
+        )
+    if "/QuadPoints" in original:
+        copied[NameObject("/QuadPoints")] = _transform_quad_points(
+            original["/QuadPoints"], mapping["transform"]
         )
 
     destination = original.get("/Dest")

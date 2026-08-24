@@ -17,7 +17,9 @@ screen. Source pages are fitted independently into fixed left and right slots,
 so unusual source page sizes cannot change the reader's navigation surface.
 Content streams remain vector/text PDF content rather than page screenshots.
 Supported internal and URI links, including indirect destination arrays, are
-copied with transformed hit rectangles. Internal `/Fit`, `/FitB`, `/XYZ`,
+copied with transformed hit rectangles. Multiline `/QuadPoints` activation
+regions are transformed point-for-point rather than widened to their bounding
+rectangle. Internal `/Fit`, `/FitB`, `/XYZ`,
 `/FitH`, `/FitBH`, `/FitV`, `/FitBV`, and `/FitR` destinations retain their
 mode while coordinate parameters are transformed into the target spread;
 unknown modes, invalid PDF operand types, rotation-dependent partial coordinates,

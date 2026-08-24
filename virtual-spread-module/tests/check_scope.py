@@ -311,6 +311,8 @@ for required in (
     'transaction["_newOutputIdentity"] = new_output_identity',
     '"size": temporary_output_identity.size',
     '"sha256": temporary_output_hash',
+    "def _transform_quad_points(",
+    'if "/QuadPoints" in original:',
     "def _transformed_internal_destination(",
     "def _destination_axis_is_preserved(",
     "isinstance(mode_object, NameObject)",
@@ -394,6 +396,8 @@ for required in (
     "test_null_destination_coordinates_survive_matching_transform",
     "test_null_destination_coordinates_reject_different_transforms",
     "test_destination_operands_require_pdf_name_and_numbers",
+    "test_link_quad_points_are_preserved_and_transformed",
+    "test_malformed_link_quad_points_fail_closed",
     "test_unsupported_internal_destination_mode_fails_closed",
     "test_invalid_marker_with_canonical_artifact_fails_closed",
 ):

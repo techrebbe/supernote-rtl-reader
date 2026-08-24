@@ -702,6 +702,12 @@ rather than retaining a coordinate from the wrong half or page geometry. Three
 regression groups cover matching transforms, differing transforms across all six
 partial destination forms, string-typed modes, and numeric strings, raising the
 generator suite to 50 tests on Windows and Linux.
+A twenty-fourth review pass preserves multiline link activation geometry by
+transforming every coordinate in a valid `/QuadPoints` array while retaining
+quadrilateral order. Empty, non-array, incomplete, null, nonnumeric, nonfinite,
+or overflowed quadrilateral geometry fails closed rather than widening the link
+to its bounding `/Rect`. Positive and malformed regressions raise the generator
+suite to 52 tests on Windows and Linux.
 These automated checks do not replace or restate the v0.0.8 hardware result;
 v0.0.15 still requires a focused generated-pair smoke test before release.
 

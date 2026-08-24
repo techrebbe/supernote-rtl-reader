@@ -256,6 +256,79 @@ def _float_bits(value: Any) -> str:
     return struct.pack(">d", float(value)).hex()
 
 
+def _runtime_float32(value: float) -> float:
+    """Narrow a JSON/PDF double exactly as Android's float cast will."""
+    try:
+        return struct.unpack(">f", struct.pack(">f", float(value)))[0]
+    except (OverflowError, struct.error) as error:
+        raise VirtualSpreadError(
+            "Spread geometry is not representable by Android runtime floats"
+        ) from error
+
+
+def _require_runtime_float_geometry(
+    spread_width: float,
+    spread_height: float,
+    gutter: float,
+) -> float:
+    if not all(math.isfinite(value) for value in (
+        spread_width, spread_height, gutter
+    )) or spread_width <= 0 or spread_height <= 0 or gutter < 0:
+        raise VirtualSpreadError("Spread dimensions and gutter must be valid")
+    slot_width = (spread_width - gutter) / 2.0
+    if slot_width <= 0:
+        raise VirtualSpreadError("Gutter consumes the complete spread width")
+    for value, allow_zero in (
+        (spread_width, False),
+        (spread_height, False),
+        (gutter, True),
+        (slot_width, False),
+    ):
+        narrowed = _runtime_float32(value)
+        if not math.isfinite(narrowed) or (
+            narrowed <= 0.0 and not (allow_zero and value == 0.0)
+        ):
+            raise VirtualSpreadError(
+                "Spread geometry is not representable by Android runtime floats"
+            )
+    narrowed_width = _runtime_float32(spread_width)
+    narrowed_gutter = _runtime_float32(gutter)
+    narrowed_slot = (narrowed_width - narrowed_gutter) / 2.0
+    if not math.isfinite(narrowed_slot) or narrowed_slot <= 0.0:
+        raise VirtualSpreadError(
+            "Spread geometry is not representable by Android runtime floats"
+        )
+    return slot_width
+
+
+def _require_runtime_float_rect(rect: list[float]) -> None:
+    if len(rect) != 4 or any(not math.isfinite(value) for value in rect):
+        raise VirtualSpreadError(
+            "Link rectangle is not representable by Android runtime floats"
+        )
+    try:
+        narrowed = [_runtime_float32(value) for value in rect]
+    except VirtualSpreadError as error:
+        raise VirtualSpreadError(
+            "Link rectangle is not representable by Android runtime floats"
+        ) from error
+    if any(not math.isfinite(value) for value in narrowed):
+        raise VirtualSpreadError(
+            "Link rectangle is not representable by Android runtime floats"
+        )
+    x0, y0, x1, y1 = rect
+    narrowed_x0, narrowed_y0, narrowed_x1, narrowed_y1 = narrowed
+    if (
+        x0 > x1
+        or y0 > y1
+        or (x0 < x1 and narrowed_x0 >= narrowed_x1)
+        or (y0 < y1 and narrowed_y0 >= narrowed_y1)
+    ):
+        raise VirtualSpreadError(
+            "Link rectangle is not representable by Android runtime floats"
+        )
+
+
 def _canonical_link(link: dict[str, Any]) -> str:
     kind = str(link["kind"])
     fields = [
@@ -1384,6 +1457,8 @@ def _copy_link_annotation(
             NameObject("/SNSourcePage"): NumberObject(source_page_index),
         }
     )
+    runtime_rect = [float(value) for value in copied["/Rect"]]
+    _require_runtime_float_rect(runtime_rect)
     if annotation_flags is not None:
         copied[NameObject("/F")] = annotation_flags
     border = _transform_link_border(original, mapping["transform"])
@@ -1453,7 +1528,7 @@ def _copy_link_annotation(
                 "outputPage": output_page_index,
                 "kind": "uri",
                 "uri": str(uri),
-                "rect": [float(value) for value in copied["/Rect"]],
+                "rect": runtime_rect,
             }
 
     if destination is None:
@@ -1492,7 +1567,7 @@ def _copy_link_annotation(
         "targetSourcePage": target_source_page,
         "targetOutputPage": target_output_page,
         "targetSide": target["side"],
-        "rect": [float(value) for value in copied["/Rect"]],
+        "rect": runtime_rect,
     }
 
 
@@ -3163,13 +3238,9 @@ def _build_virtual_spread_from_snapshot(
         )
     if not force and (output_exists or manifest_exists):
         raise VirtualSpreadError("Output already exists; pass --force to replace it")
-    if not all(math.isfinite(value) for value in (
+    slot_width = _require_runtime_float_geometry(
         spread_width, spread_height, gutter
-    )) or spread_width <= 0 or spread_height <= 0 or gutter < 0:
-        raise VirtualSpreadError("Spread dimensions and gutter must be valid")
-    slot_width = (spread_width - gutter) / 2.0
-    if slot_width <= 0:
-        raise VirtualSpreadError("Gutter consumes the complete spread width")
+    )
 
     reader = PdfReader(source_snapshot, strict=True)
     if reader.is_encrypted:
@@ -3453,12 +3524,7 @@ def _build_virtual_spread_locked(
         raise VirtualSpreadError(f"Source PDF does not exist: {source_path}")
     if not force and (output_exists or manifest_exists):
         raise VirtualSpreadError("Output already exists; pass --force to replace it")
-    if not all(math.isfinite(value) for value in (
-        spread_width, spread_height, gutter
-    )) or spread_width <= 0 or spread_height <= 0 or gutter < 0:
-        raise VirtualSpreadError("Spread dimensions and gutter must be valid")
-    if (spread_width - gutter) / 2.0 <= 0:
-        raise VirtualSpreadError("Gutter consumes the complete spread width")
+    _require_runtime_float_geometry(spread_width, spread_height, gutter)
 
     with tempfile.TemporaryFile(
         mode="w+b",

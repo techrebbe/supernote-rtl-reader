@@ -1454,11 +1454,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         double pageWidth = spreadSize.optDouble(0, Double.NaN);
         double pageHeight = spreadSize.optDouble(1, Double.NaN);
         double gutter = output.optDouble("gutter", Double.NaN);
-        if (Double.isNaN(pageWidth) || Double.isInfinite(pageWidth)
-            || Double.isNaN(pageHeight) || Double.isInfinite(pageHeight)
-            || Double.isNaN(gutter) || Double.isInfinite(gutter)
-            || pageWidth <= 0.0 || pageHeight <= 0.0
-            || gutter < 0.0 || (pageWidth - gutter) / 2.0 <= 0.0) {
+        if (!VirtualSpreadNavigation.runtimeGeometryIsRepresentable(
+                pageWidth, pageHeight, gutter)) {
             log("manifest_rejected reason=output_geometry path=" + key);
             return null;
         }
@@ -1551,11 +1548,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             double y0 = rect.optDouble(1, Double.NaN);
             double x1 = rect.optDouble(2, Double.NaN);
             double y1 = rect.optDouble(3, Double.NaN);
-            if (Double.isNaN(x0) || Double.isInfinite(x0)
-                || Double.isNaN(y0) || Double.isInfinite(y0)
-                || Double.isNaN(x1) || Double.isInfinite(x1)
-                || Double.isNaN(y1) || Double.isInfinite(y1)
-                || x0 > x1 || y0 > y1) {
+            if (!VirtualSpreadNavigation.runtimeRectIsRepresentable(
+                    x0, y0, x1, y1)) {
                 log("manifest_rejected reason=link_rect index=" + index);
                 return null;
             }

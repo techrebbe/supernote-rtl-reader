@@ -137,6 +137,69 @@ public final class VirtualSpreadNavigationTest {
             false,
             true
         );
+        assertBoolean(
+            "normal runtime geometry is representable",
+            true,
+            VirtualSpreadNavigation.runtimeGeometryIsRepresentable(
+                864.0, 648.0, 0.0
+            )
+        );
+        assertBoolean(
+            "overflowing runtime geometry fails closed",
+            false,
+            VirtualSpreadNavigation.runtimeGeometryIsRepresentable(
+                864.0, 1e40, 0.0
+            )
+        );
+        assertBoolean(
+            "underflowing runtime geometry fails closed",
+            false,
+            VirtualSpreadNavigation.runtimeGeometryIsRepresentable(
+                864.0, 1e-50, 0.0
+            )
+        );
+        assertBoolean(
+            "positive gutter cannot collapse to zero",
+            false,
+            VirtualSpreadNavigation.runtimeGeometryIsRepresentable(
+                864.0, 648.0, 1e-50
+            )
+        );
+        assertBoolean(
+            "slot width cannot collapse to zero",
+            false,
+            VirtualSpreadNavigation.runtimeGeometryIsRepresentable(
+                2e-40, 1.0, 1.999999999e-40
+            )
+        );
+        assertBoolean(
+            "runtime width and gutter cannot collapse together",
+            false,
+            VirtualSpreadNavigation.runtimeGeometryIsRepresentable(
+                1.0, 1.0, 1.0 - 1e-16
+            )
+        );
+        assertBoolean(
+            "normal runtime link rectangle is representable",
+            true,
+            VirtualSpreadNavigation.runtimeRectIsRepresentable(
+                10.0, 20.0, 100.0, 50.0
+            )
+        );
+        assertBoolean(
+            "overflowing runtime link rectangle fails closed",
+            false,
+            VirtualSpreadNavigation.runtimeRectIsRepresentable(
+                10.0, 20.0, 1e40, 50.0
+            )
+        );
+        assertBoolean(
+            "collapsing runtime link rectangle fails closed",
+            false,
+            VirtualSpreadNavigation.runtimeRectIsRepresentable(
+                1e-50, 20.0, 2e-50, 50.0
+            )
+        );
 
         LinkTarget[] linkTargets = new LinkTarget[] {
             new LinkTarget(
@@ -386,6 +449,19 @@ public final class VirtualSpreadNavigationTest {
                     + " next=" + nextEnabled
                     + " but got previous=" + actual.previousEnabled
                     + " next=" + actual.nextEnabled
+            );
+        }
+        assertions++;
+    }
+
+    private static void assertBoolean(
+        String name,
+        boolean expected,
+        boolean actual
+    ) {
+        if (expected != actual) {
+            throw new AssertionError(
+                name + ": expected " + expected + " but got " + actual
             );
         }
         assertions++;

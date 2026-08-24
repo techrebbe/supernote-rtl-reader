@@ -201,6 +201,72 @@ public final class VirtualSpreadNavigation {
         return -nativeOffset;
     }
 
+    /** True only when the persisted double geometry survives Android floats. */
+    public static boolean runtimeGeometryIsRepresentable(
+        double pageWidth,
+        double pageHeight,
+        double gutter
+    ) {
+        if (!finite(pageWidth) || !finite(pageHeight) || !finite(gutter)
+            || pageWidth <= 0.0 || pageHeight <= 0.0 || gutter < 0.0) {
+            return false;
+        }
+        double slotWidth = (pageWidth - gutter) / 2.0;
+        float runtimeSlotWidth = (
+            (float) pageWidth - (float) gutter
+        ) / 2.0f;
+        return runtimePositiveFloat(pageWidth)
+            && runtimePositiveFloat(pageHeight)
+            && runtimeNonnegativeFloat(gutter)
+            && runtimePositiveFloat(slotWidth)
+            && finite(runtimeSlotWidth)
+            && runtimeSlotWidth > 0.0f;
+    }
+
+    /** True only when a persisted link rectangle retains its float ordering. */
+    public static boolean runtimeRectIsRepresentable(
+        double x0,
+        double y0,
+        double x1,
+        double y1
+    ) {
+        if (!finite(x0) || !finite(y0) || !finite(x1) || !finite(y1)
+            || x0 > x1 || y0 > y1) {
+            return false;
+        }
+        float narrowedX0 = (float) x0;
+        float narrowedY0 = (float) y0;
+        float narrowedX1 = (float) x1;
+        float narrowedY1 = (float) y1;
+        return finite(narrowedX0)
+            && finite(narrowedY0)
+            && finite(narrowedX1)
+            && finite(narrowedY1)
+            && (x0 == x1 || narrowedX0 < narrowedX1)
+            && (y0 == y1 || narrowedY0 < narrowedY1);
+    }
+
+    private static boolean runtimePositiveFloat(double value) {
+        if (!finite(value) || value <= 0.0) {
+            return false;
+        }
+        float narrowed = (float) value;
+        return finite(narrowed) && narrowed > 0.0f;
+    }
+
+    private static boolean runtimeNonnegativeFloat(double value) {
+        if (!finite(value) || value < 0.0) {
+            return false;
+        }
+        float narrowed = (float) value;
+        return finite(narrowed)
+            && (value == 0.0 ? narrowed == 0.0f : narrowed > 0.0f);
+    }
+
+    private static boolean finite(double value) {
+        return !Double.isNaN(value) && !Double.isInfinite(value);
+    }
+
     public static PageBarState pageBarState(
         Spread[] spreads,
         int currentPage,

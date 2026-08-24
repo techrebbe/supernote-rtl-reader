@@ -44,6 +44,7 @@ from generate_virtual_spread import (  # noqa: E402
     _layout_authority_sha256,
     _link_authority_sha256,
     _link_annotation_flags,
+    _require_runtime_float_rect,
     _publish_pair,
     _require_unaliased_output_path,
     _publication_artifacts,
@@ -2122,6 +2123,87 @@ class VirtualSpreadTests(unittest.TestCase):
                             root / f"spread-{index}.pdf.json",
                             **values,
                         )
+
+    def test_runtime_float_spread_geometry_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            create_odd_page_fixture(source)
+            cases = (
+                {"spread_width": 1e40},
+                {"spread_height": 1e40},
+                {"spread_width": 1e-50},
+                {"spread_height": 1e-50},
+                {"gutter": 1e-50},
+                {
+                    "spread_width": 2e-40,
+                    "spread_height": 1.0,
+                    "gutter": 1.999999999e-40,
+                },
+                {
+                    "spread_width": 1.0,
+                    "gutter": 1.0 - 1e-16,
+                },
+            )
+            for index, values in enumerate(cases):
+                with self.subTest(values=values):
+                    output = root / f"spread-{index}.pdf"
+                    manifest = root / f"spread-{index}.pdf.json"
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "not representable by Android runtime floats",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest,
+                            **values,
+                        )
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest.exists())
+
+    def test_runtime_float_link_rect_is_rejected(self) -> None:
+        _require_runtime_float_rect([0.0, 0.0, 100.0, 50.0])
+        cases = (
+            [0.0, 0.0, 1e40, 50.0],
+            [1e-50, 0.0, 2e-50, 50.0],
+            [0.0, 1e-50, 100.0, 2e-50],
+        )
+        for rect in cases:
+            with self.subTest(rect=rect):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Link rectangle is not representable by Android "
+                    "runtime floats",
+                ):
+                    _require_runtime_float_rect(rect)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "oversized-link-source.pdf"
+            output = root / "oversized-link-spread.pdf"
+            manifest = root / "oversized-link-spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_annotation_value(
+                source,
+                source_page_index=1,
+                annotation_index=0,
+                key="/Rect",
+                value=ArrayObject([
+                    FloatObject(15.0),
+                    FloatObject(15.0),
+                    FloatObject(1e40),
+                    FloatObject(48.0),
+                ]),
+            )
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Link rectangle is not representable by Android "
+                "runtime floats",
+            ):
+                build_virtual_spread(source, output, manifest)
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest.exists())
 
     def test_rotated_page_link_uses_source_to_spread_transform(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -212,6 +212,42 @@ def add_viewer_preferences(path: Path) -> None:
         raise AssertionError("fixture viewer preference was not persisted")
 
 
+def add_page_behavior(path: Path, behavior: str) -> str:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    if behavior == "duration":
+        key = "/Dur"
+        value = NumberObject(5)
+    elif behavior == "transition":
+        key = "/Trans"
+        value = DictionaryObject({
+            NameObject("/S"): NameObject("/Dissolve"),
+            NameObject("/D"): NumberObject(1),
+        })
+    elif behavior == "additional-action":
+        key = "/AA"
+        value = DictionaryObject({
+            NameObject("/O"): DictionaryObject({
+                NameObject("/S"): NameObject("/URI"),
+                NameObject("/URI"): TextStringObject("https://example.com/open"),
+            }),
+        })
+    elif behavior == "user-unit":
+        key = "/UserUnit"
+        value = NumberObject(2)
+    else:
+        raise AssertionError(f"unknown page behavior fixture: {behavior}")
+    writer.pages[0][NameObject(key)] = value
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    persisted = PdfReader(str(path), strict=True)
+    if key not in persisted.pages[0]:
+        raise AssertionError(f"fixture page entry was not persisted: {key}")
+    return key
+
+
 def make_annotation_array_indirect(path: Path, page_index: int) -> None:
     source = PdfReader(str(path), strict=True)
     writer = PdfWriter()
@@ -667,6 +703,71 @@ class VirtualSpreadTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 VirtualSpreadError,
                 "Unsupported document catalog entries: /ViewerPreferences",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    force=True,
+                )
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(output.read_bytes(), b"existing-output")
+            self.assertEqual(
+                manifest_path.read_bytes(), b"existing-manifest"
+            )
+
+    def test_page_behaviors_fail_closed_before_publication(self) -> None:
+        cases = (
+            ("duration", "Page durations are not supported"),
+            ("transition", "Page transitions are not supported"),
+            ("additional-action", "Page additional actions are not supported"),
+        )
+        for behavior, message in cases:
+            with self.subTest(behavior=behavior):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    source = root / f"{behavior}-source.pdf"
+                    output = root / "spread.pdf"
+                    manifest_path = root / "spread.pdf.json"
+                    create_odd_page_fixture(source)
+                    add_page_behavior(source, behavior)
+                    source_bytes = source.read_bytes()
+                    output.write_bytes(b"existing-output")
+                    manifest_path.write_bytes(b"existing-manifest")
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        message,
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            force=True,
+                        )
+
+                    self.assertEqual(source.read_bytes(), source_bytes)
+                    self.assertEqual(output.read_bytes(), b"existing-output")
+                    self.assertEqual(
+                        manifest_path.read_bytes(), b"existing-manifest"
+                    )
+
+    def test_unknown_source_page_entry_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "user-unit-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_page_behavior(source, "user-unit")
+            source_bytes = source.read_bytes()
+            output.write_bytes(b"existing-output")
+            manifest_path.write_bytes(b"existing-manifest")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Unsupported source page entries on page 1: /UserUnit",
             ):
                 build_virtual_spread(
                     source,

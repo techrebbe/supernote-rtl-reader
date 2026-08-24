@@ -64,10 +64,15 @@ regenerates the structural `/Type` and `/Pages` entries and preserves validated
 `/PageMode` and `/PageLayout` names. Outlines, opening actions, optional-content
 layer configuration, viewer preferences, and every other unsupported or unknown
 catalog entry fail closed before staging or publication rather than being
-silently discarded. Existing outputs also require `--force`. The command rejects
-a source path that collides with its output's deterministic marker, backup,
-retirement, or lock artifacts before recovery or lock acquisition. It copies
-and hashes the source through one file snapshot, re-reads the opened
+silently discarded. Source page dictionaries use the same complete contract:
+content, resources, geometry, rotation, and supported link annotations are
+consumed explicitly; ReportLab's empty transition placeholder is inert; page
+durations, meaningful transitions, additional actions, user-unit scaling, and
+every other unsupported or unknown page entry fail closed. Existing outputs
+also require `--force`. The command rejects a source path that collides with its
+output's deterministic marker, backup, retirement, or lock artifacts before
+recovery or lock acquisition. It copies and hashes the source through one file
+snapshot, re-reads the opened
 source to prove that
 the copied bytes are stable, generates only from that verified snapshot, and
 rehashes the current source before publication. The PDF and manifest are each

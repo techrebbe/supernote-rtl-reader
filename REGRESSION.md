@@ -754,6 +754,15 @@ fixture covers the reported visibility-loss case; positive view-setting
 preservation and generic viewer-preference rejection prevent another catalog
 field from being silently dropped. The generator suite now contains 66 tests
 on Windows and Linux.
+A thirtieth review pass applies the complete supported-surface design to each
+source page dictionary. Content, resources, geometry, rotation, and supported
+links remain explicit inputs; ReportLab's empty transition placeholder is
+accepted as inert; persisted durations, meaningful transitions, additional
+actions, user-unit scaling, and every other unsupported or unknown page entry
+fail closed before staging or publication. Real `/Dur`, `/Trans`, `/AA`, and
+`/UserUnit` fixtures verify all reported and generic paths while preserving the
+source and previous publication pair, raising the generator suite to 68 tests
+on Windows and Linux.
 These automated checks do not replace or restate the v0.0.8 hardware result;
 v0.0.15 still requires a focused generated-pair smoke test before release.
 

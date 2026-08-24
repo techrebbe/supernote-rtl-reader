@@ -83,6 +83,17 @@ SUPPORTED_PAGE_LAYOUTS = frozenset({
     "/TwoPageLeft",
     "/TwoPageRight",
 })
+SUPPORTED_SOURCE_PAGE_KEYS = frozenset({
+    "/Annots",
+    "/Contents",
+    "/CropBox",
+    "/MediaBox",
+    "/Parent",
+    "/Resources",
+    "/Rotate",
+    "/Trans",
+    "/Type",
+})
 
 PublicationOwnershipGuard = Callable[[], None]
 
@@ -677,6 +688,38 @@ def _require_supported_document_catalog(
         page_mode=page_mode,
         page_layout=page_layout,
     )
+
+
+def _require_supported_source_pages(reader: PdfReader) -> None:
+    for page_index, page in enumerate(reader.pages):
+        page_number = page_index + 1
+        if "/Dur" in page:
+            raise VirtualSpreadError(
+                "Page durations are not supported by this prototype; "
+                f"source page {page_number}"
+            )
+        if "/AA" in page:
+            raise VirtualSpreadError(
+                "Page additional actions are not supported by this prototype; "
+                f"source page {page_number}"
+            )
+        if "/Trans" in page:
+            transition = _dereference_pdf_object(page.raw_get("/Trans"))
+            if not isinstance(transition, DictionaryObject) or transition:
+                raise VirtualSpreadError(
+                    "Page transitions are not supported by this prototype; "
+                    f"source page {page_number}"
+                )
+        unsupported = sorted(
+            str(key)
+            for key in page.keys()
+            if str(key) not in SUPPORTED_SOURCE_PAGE_KEYS
+        )
+        if unsupported:
+            raise VirtualSpreadError(
+                "Unsupported source page entries on page "
+                f"{page_number}: " + ", ".join(unsupported)
+            )
 
 
 def _required_pdf_name(
@@ -3038,6 +3081,7 @@ def _build_virtual_spread_from_snapshot(
     if reader.is_encrypted:
         raise VirtualSpreadError("Encrypted PDFs are not supported by this prototype")
     document_catalog = _require_supported_document_catalog(reader)
+    _require_supported_source_pages(reader)
     pairs = build_pairs(len(reader.pages), direction, cover_separate)
     normalized_pages = [_normalized_page(page) for page in reader.pages]
     left_slot = Slot("left", 0.0, 0.0, slot_width, spread_height)

@@ -223,27 +223,37 @@ public final class VirtualSpreadNavigation {
             && runtimeSlotWidth > 0.0f;
     }
 
-    /** True only when a persisted link rectangle retains its float ordering. */
+    /** True only when a link survives Android's top-down float conversion. */
     public static boolean runtimeRectIsRepresentable(
+        double pageHeight,
         double x0,
         double y0,
         double x1,
         double y1
     ) {
-        if (!finite(x0) || !finite(y0) || !finite(x1) || !finite(y1)
+        if (!finite(pageHeight) || pageHeight <= 0.0
+            || !finite(x0) || !finite(y0) || !finite(x1) || !finite(y1)
             || x0 > x1 || y0 > y1) {
             return false;
         }
+        float narrowedPageHeight = (float) pageHeight;
         float narrowedX0 = (float) x0;
         float narrowedY0 = (float) y0;
         float narrowedX1 = (float) x1;
         float narrowedY1 = (float) y1;
-        return finite(narrowedX0)
+        float topDownY0 = narrowedPageHeight - narrowedY1;
+        float topDownY1 = narrowedPageHeight - narrowedY0;
+        return finite(narrowedPageHeight)
+            && narrowedPageHeight > 0.0f
+            && finite(narrowedX0)
             && finite(narrowedY0)
             && finite(narrowedX1)
             && finite(narrowedY1)
+            && finite(topDownY0)
+            && finite(topDownY1)
             && (x0 == x1 || narrowedX0 < narrowedX1)
-            && (y0 == y1 || narrowedY0 < narrowedY1);
+            && (y0 == y1 || narrowedY0 < narrowedY1)
+            && (y0 == y1 || topDownY0 < topDownY1);
     }
 
     private static boolean runtimePositiveFloat(double value) {
@@ -327,27 +337,36 @@ public final class VirtualSpreadNavigation {
         float pageHeight,
         float tolerance
     ) {
-        if (targets == null || tolerance < 0.0f
+        if (targets == null || !finite(tolerance) || tolerance < 0.0f
             || !finite(pageHeight) || pageHeight <= 0.0f
             || !finite(x0) || !finite(y0)
             || !finite(x1) || !finite(y1)
             || x0 > x1 || y0 > y1) {
             return null;
         }
-        // The generator records PDF rectangles in bottom-left coordinates.
-        // MuPDF's Link.getBounds() reports the same rectangle top-down.
-        float manifestY0 = pageHeight - y1;
-        float manifestY1 = pageHeight - y0;
         LinkTarget matched = null;
         for (LinkTarget target : targets) {
             if (target == null
                 || target.sourcePage != sourcePage
                 || target.targetPage != targetPage
                 || target.targetHalf == null
+                || !finite(target.x0) || !finite(target.y0)
+                || !finite(target.x1) || !finite(target.y1)
+                || target.x0 > target.x1 || target.y0 > target.y1) {
+                continue;
+            }
+            // The manifest is bottom-up, while MuPDF reports top-down bounds.
+            // Convert the manifest once and compare in MuPDF's coordinates;
+            // converting the large native bounds back loses low Y bits.
+            float expectedNativeY0 = pageHeight - target.y1;
+            float expectedNativeY1 = pageHeight - target.y0;
+            if (!finite(expectedNativeY0) || !finite(expectedNativeY1)
+                || (target.y0 < target.y1
+                    && expectedNativeY0 >= expectedNativeY1)
                 || Math.abs(target.x0 - x0) > tolerance
-                || Math.abs(target.y0 - manifestY0) > tolerance
+                || Math.abs(expectedNativeY0 - y0) > tolerance
                 || Math.abs(target.x1 - x1) > tolerance
-                || Math.abs(target.y1 - manifestY1) > tolerance) {
+                || Math.abs(expectedNativeY1 - y1) > tolerance) {
                 continue;
             }
             if (matched != null

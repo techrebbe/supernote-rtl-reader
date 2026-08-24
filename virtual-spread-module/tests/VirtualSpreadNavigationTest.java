@@ -192,21 +192,35 @@ public final class VirtualSpreadNavigationTest {
             "normal runtime link rectangle is representable",
             true,
             VirtualSpreadNavigation.runtimeRectIsRepresentable(
-                10.0, 20.0, 100.0, 50.0
+                648.0, 10.0, 20.0, 100.0, 50.0
             )
         );
         assertBoolean(
             "overflowing runtime link rectangle fails closed",
             false,
             VirtualSpreadNavigation.runtimeRectIsRepresentable(
-                10.0, 20.0, 1e40, 50.0
+                648.0, 10.0, 20.0, 1e40, 50.0
             )
         );
         assertBoolean(
             "collapsing runtime link rectangle fails closed",
             false,
             VirtualSpreadNavigation.runtimeRectIsRepresentable(
-                1e-50, 20.0, 2e-50, 50.0
+                648.0, 1e-50, 20.0, 2e-50, 50.0
+            )
+        );
+        assertBoolean(
+            "tall-page link retains top-down float ordering",
+            true,
+            VirtualSpreadNavigation.runtimeRectIsRepresentable(
+                Math.scalb(1.0, 27), 0.0, 10.0, 100.0, 20.0
+            )
+        );
+        assertBoolean(
+            "tall-page link collapsing top-down fails closed",
+            false,
+            VirtualSpreadNavigation.runtimeRectIsRepresentable(
+                Math.scalb(1.0, 27), 0.0, 10.0, 100.0, 11.0
             )
         );
 
@@ -302,6 +316,69 @@ public final class VirtualSpreadNavigationTest {
                 588.6f,
                 648.0f,
                 0.01f
+            )
+        );
+        float tallPageHeight = Math.scalb(1.0f, 27);
+        LinkTarget[] tallPageTargets = new LinkTarget[] {
+            new LinkTarget(
+                1,
+                3,
+                Half.RIGHT,
+                Half.LEFT,
+                10.0f,
+                10.0f,
+                100.0f,
+                20.0f
+            )
+        };
+        assertHalf(
+            "tall-page link matches directly in top-down coordinates",
+            Half.LEFT,
+            VirtualSpreadNavigation.matchLinkTarget(
+                tallPageTargets,
+                1,
+                3,
+                10.0f,
+                tallPageHeight - 20.0f,
+                100.0f,
+                tallPageHeight - 10.0f,
+                tallPageHeight,
+                2.0f
+            )
+        );
+        assertHalf(
+            "non-finite tolerance fails closed",
+            null,
+            VirtualSpreadNavigation.matchLinkTarget(
+                linkTargets,
+                1,
+                3,
+                486.0f,
+                546.0f,
+                810.0f,
+                588.0f,
+                648.0f,
+                Float.NaN
+            )
+        );
+        assertHalf(
+            "non-finite manifest target fails closed",
+            null,
+            VirtualSpreadNavigation.matchLinkTarget(
+                new LinkTarget[] {
+                    new LinkTarget(
+                        1, 3, Half.RIGHT, Half.LEFT,
+                        10.0f, Float.NaN, 100.0f, 20.0f
+                    )
+                },
+                1,
+                3,
+                10.0f,
+                628.0f,
+                100.0f,
+                638.0f,
+                648.0f,
+                2.0f
             )
         );
         assertHalf(

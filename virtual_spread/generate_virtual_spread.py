@@ -305,13 +305,25 @@ def _require_runtime_float_geometry(
     return slot_width
 
 
-def _require_runtime_float_rect(rect: list[float]) -> None:
-    if len(rect) != 4 or any(not math.isfinite(value) for value in rect):
+def _require_runtime_float_rect(
+    rect: list[float], page_height: float
+) -> None:
+    if (
+        len(rect) != 4
+        or not math.isfinite(page_height)
+        or page_height <= 0.0
+        or any(not math.isfinite(value) for value in rect)
+    ):
         raise VirtualSpreadError(
             "Link rectangle is not representable by Android runtime floats"
         )
+    x0, y0, x1, y1 = rect
     try:
         narrowed = [_runtime_float32(value) for value in rect]
+        narrowed_height = _runtime_float32(page_height)
+        narrowed_x0, narrowed_y0, narrowed_x1, narrowed_y1 = narrowed
+        runtime_top_y0 = _runtime_float32(narrowed_height - narrowed_y1)
+        runtime_top_y1 = _runtime_float32(narrowed_height - narrowed_y0)
     except VirtualSpreadError as error:
         raise VirtualSpreadError(
             "Link rectangle is not representable by Android runtime floats"
@@ -320,13 +332,16 @@ def _require_runtime_float_rect(rect: list[float]) -> None:
         raise VirtualSpreadError(
             "Link rectangle is not representable by Android runtime floats"
         )
-    x0, y0, x1, y1 = rect
-    narrowed_x0, narrowed_y0, narrowed_x1, narrowed_y1 = narrowed
     if (
-        x0 > x1
+        not math.isfinite(narrowed_height)
+        or narrowed_height <= 0.0
+        or not math.isfinite(runtime_top_y0)
+        or not math.isfinite(runtime_top_y1)
+        or x0 > x1
         or y0 > y1
         or (x0 < x1 and narrowed_x0 >= narrowed_x1)
         or (y0 < y1 and narrowed_y0 >= narrowed_y1)
+        or (y0 < y1 and runtime_top_y0 >= runtime_top_y1)
     ):
         raise VirtualSpreadError(
             "Link rectangle is not representable by Android runtime floats"
@@ -1447,6 +1462,7 @@ def _copy_link_annotation(
     source_page_index: int,
     source_mapping: dict[int, dict[str, Any]],
     page_ref_to_index: dict[tuple[int, int], int],
+    page_height: float,
 ) -> dict[str, Any]:
     original = _validate_link_annotation(annotation.get_object())
     mapping = source_mapping[source_page_index]
@@ -1462,7 +1478,7 @@ def _copy_link_annotation(
         }
     )
     runtime_rect = [float(value) for value in copied["/Rect"]]
-    _require_runtime_float_rect(runtime_rect)
+    _require_runtime_float_rect(runtime_rect, page_height)
     if annotation_flags is not None:
         copied[NameObject("/F")] = annotation_flags
     border = _transform_link_border(original, mapping["transform"])
@@ -3336,6 +3352,7 @@ def _build_virtual_spread_from_snapshot(
                     source_page_index=source_page_index,
                     source_mapping=source_mapping,
                     page_ref_to_index=page_ref_to_index,
+                    page_height=spread_height,
                 )
             )
 

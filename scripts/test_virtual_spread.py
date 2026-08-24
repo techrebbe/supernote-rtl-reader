@@ -2169,20 +2169,24 @@ class VirtualSpreadTests(unittest.TestCase):
                     self.assertFalse(manifest.exists())
 
     def test_runtime_float_link_rect_is_rejected(self) -> None:
-        _require_runtime_float_rect([0.0, 0.0, 100.0, 50.0])
-        cases = (
-            [0.0, 0.0, 1e40, 50.0],
-            [1e-50, 0.0, 2e-50, 50.0],
-            [0.0, 1e-50, 100.0, 2e-50],
+        _require_runtime_float_rect([0.0, 0.0, 100.0, 50.0], 648.0)
+        _require_runtime_float_rect(
+            [0.0, 10.0, 100.0, 20.0], float(2 ** 27)
         )
-        for rect in cases:
-            with self.subTest(rect=rect):
+        cases = (
+            ([0.0, 0.0, 1e40, 50.0], 648.0),
+            ([1e-50, 0.0, 2e-50, 50.0], 648.0),
+            ([0.0, 1e-50, 100.0, 2e-50], 648.0),
+            ([0.0, 10.0, 100.0, 11.0], float(2 ** 27)),
+        )
+        for rect, page_height in cases:
+            with self.subTest(rect=rect, page_height=page_height):
                 with self.assertRaisesRegex(
                     VirtualSpreadError,
                     "Link rectangle is not representable by Android "
                     "runtime floats",
                 ):
-                    _require_runtime_float_rect(rect)
+                    _require_runtime_float_rect(rect, page_height)
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

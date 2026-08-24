@@ -235,6 +235,7 @@ for required in (
     'manifest_rejected reason=source_layout',
     "VirtualSpreadNavigation.runtimeGeometryIsRepresentable(",
     "VirtualSpreadNavigation.runtimeRectIsRepresentable(",
+    "pageHeight, x0, y0, x1, y1",
     "length < 0L || length > MAX_MANIFEST_BYTES",
     'manifest_rejected reason=link_mapping',
     'manifest_rejected reason=link_record',
@@ -328,6 +329,7 @@ for required in (
     "def _require_supported_document_catalog(",
     "def _require_runtime_float_geometry(",
     "def _require_runtime_float_rect(",
+    "_require_runtime_float_rect(runtime_rect, page_height)",
     "SUPPORTED_DOCUMENT_CATALOG_KEYS",
     "SUPPORTED_PAGE_MODES",
     "SUPPORTED_PAGE_LAYOUTS",
@@ -451,6 +453,7 @@ for required in (
     "test_source_reserved_artifact_collisions_fail_before_locking",
     "test_unsupported_internal_destination_mode_fails_closed",
     "test_invalid_marker_with_canonical_artifact_fails_closed",
+    "test_runtime_float_link_rect_is_rejected",
 ):
     if required not in generator_tests:
         raise SystemExit(

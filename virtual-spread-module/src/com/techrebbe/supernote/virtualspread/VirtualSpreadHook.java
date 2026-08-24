@@ -1549,7 +1549,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             double x1 = rect.optDouble(2, Double.NaN);
             double y1 = rect.optDouble(3, Double.NaN);
             if (!VirtualSpreadNavigation.runtimeRectIsRepresentable(
-                    x0, y0, x1, y1)) {
+                    pageHeight, x0, y0, x1, y1)) {
                 log("manifest_rejected reason=link_rect index=" + index);
                 return null;
             }

@@ -70,10 +70,17 @@ those locks in that order, so unlinking and recreating the per-output lock canno
 admit a second recovery or publication owner. This intentionally serializes
 virtual-spread publications that share one directory on POSIX; Windows already
 prevents replacement of the open per-output lock. Both identities are rechecked
-before every shared transaction mutation, so namespace replacement also makes
-the current publisher fail closed. Staged artifacts are type- and hash-checked
-before backup moves and immediately before publication, and both canonical hashes
-are verified before recovery evidence is retired.
+before every shared transaction operation. On POSIX, staged-file creation,
+writing, reopening, hashing, size/type inspection, marker and backup handling,
+publication, rollback, and cleanup are all relative to the retained output-
+directory descriptor rather than its replaceable pathname. The source snapshot
+is kept in one already-open temporary stream outside that namespace. If the
+parent pathname is exchanged before an operation, validation fails closed; if
+it is exchanged between validation and the syscall, the descriptor-relative
+operation remains confined to the originally locked directory and cannot touch
+the replacement tree. Staged artifacts are type- and hash-checked before backup
+moves and immediately before publication, and both canonical hashes are verified
+before recovery evidence is retired.
 The PDF and manifest are staged before publication as one recoverable pair. A transaction
 marker is durably published before either previous file is moved. POSIX builds
 sync every affected parent directory; Windows builds use

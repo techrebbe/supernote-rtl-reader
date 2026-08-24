@@ -402,8 +402,12 @@ class VirtualSpreadTests(unittest.TestCase):
             manifest_path = root / "spread.pdf.json"
             create_odd_page_fixture(source)
 
-            def write_then_mutate(path: Path, value: dict[str, object]) -> None:
-                _write_json(path, value)
+            def write_then_mutate(
+                path: Path,
+                value: dict[str, object],
+                ownership_guard: object = None,
+            ) -> None:
+                _write_json(path, value, ownership_guard)
                 source.write_bytes(source.read_bytes() + b"\n% changed\n")
 
             with mock.patch(
@@ -523,8 +527,9 @@ class VirtualSpreadTests(unittest.TestCase):
             def write_then_mutate(
                 path: Path,
                 value: dict[str, object],
+                ownership_guard: object = None,
             ) -> None:
-                _write_json(path, value)
+                _write_json(path, value, ownership_guard)
                 source.write_bytes(changed_contents)
 
             with mock.patch(
@@ -885,6 +890,139 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertEqual(lock_path.read_bytes(), b"replacement-lock")
             self.assertFalse(output.exists())
 
+    @unittest.skipIf(
+        os.name == "nt",
+        "Windows does not allow an open publication tree to be exchanged",
+    )
+    def test_parent_exchange_cannot_redirect_locked_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            active = root / "active"
+            detached = root / "detached"
+            active.mkdir()
+            output = active / "spread.pdf"
+            staged = active / ".spread.pdf.new"
+            output.write_bytes(b"old-output")
+            staged.write_bytes(b"old-staged")
+            real_replace = os.replace
+            exchanged = False
+
+            with _publication_lock(output) as ownership_guard:
+                def exchange_then_replace(
+                    source: object,
+                    target: object,
+                    *args: object,
+                    **kwargs: object,
+                ) -> None:
+                    nonlocal exchanged
+                    if not exchanged:
+                        active.rename(detached)
+                        active.mkdir()
+                        (active / "spread.pdf").write_bytes(
+                            b"replacement-output"
+                        )
+                        (active / ".spread.pdf.new").write_bytes(
+                            b"replacement-staged"
+                        )
+                        with _publication_lock(output):
+                            pass
+                        exchanged = True
+                    real_replace(source, target, *args, **kwargs)
+
+                with mock.patch(
+                    "generate_virtual_spread.os.replace",
+                    side_effect=exchange_then_replace,
+                ):
+                    _durable_replace(
+                        staged,
+                        output,
+                        ownership_guard=ownership_guard,
+                    )
+
+            self.assertTrue(exchanged)
+            self.assertEqual(
+                (active / "spread.pdf").read_bytes(),
+                b"replacement-output",
+            )
+            self.assertEqual(
+                (active / ".spread.pdf.new").read_bytes(),
+                b"replacement-staged",
+            )
+            self.assertEqual(
+                (detached / "spread.pdf").read_bytes(),
+                b"old-staged",
+            )
+            self.assertFalse((detached / ".spread.pdf.new").exists())
+
+    @unittest.skipIf(
+        os.name == "nt",
+        "Windows does not allow an open publication tree to be exchanged",
+    )
+    def test_parent_exchange_cannot_redirect_staged_write(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            active = root / "active"
+            detached = root / "detached"
+            active.mkdir()
+            output = active / "spread.pdf"
+            staged = active / ".spread.pdf.manifest.tmp"
+            staged.write_bytes(b"old-staged")
+            real_open = os.open
+            exchanged = False
+
+            with _publication_lock(output) as ownership_guard:
+                directory_descriptor = getattr(
+                    ownership_guard, "directory_descriptor"
+                )
+
+                def exchange_then_open(
+                    path: object,
+                    flags: int,
+                    mode: int = 0o777,
+                    *,
+                    dir_fd: int | None = None,
+                ) -> int:
+                    nonlocal exchanged
+                    if (
+                        not exchanged
+                        and dir_fd == directory_descriptor
+                        and os.fspath(path) == staged.name
+                    ):
+                        active.rename(detached)
+                        active.mkdir()
+                        (active / staged.name).write_bytes(
+                            b"replacement-staged"
+                        )
+                        exchanged = True
+                    if dir_fd is None:
+                        return real_open(path, flags, mode)
+                    return real_open(
+                        path,
+                        flags,
+                        mode,
+                        dir_fd=dir_fd,
+                    )
+
+                with mock.patch(
+                    "generate_virtual_spread.os.open",
+                    side_effect=exchange_then_open,
+                ):
+                    _write_json(
+                        staged,
+                        {"owner": "detached"},
+                        ownership_guard,
+                    )
+
+            self.assertTrue(exchanged)
+            self.assertEqual(
+                (active / staged.name).read_bytes(),
+                b"replacement-staged",
+            )
+            self.assertEqual(
+                json.loads((detached / staged.name).read_text("utf-8")),
+                {"owner": "detached"},
+            )
+
     def test_force_rejects_directory_publication_targets(self) -> None:
         for directory_target in ("output", "manifest"):
             with self.subTest(directory_target=directory_target):
@@ -1096,6 +1234,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 target: object,
                 *,
                 replace_existing: bool = True,
+                ownership_guard: object = None,
             ) -> None:
                 nonlocal replaced_stage
                 if (
@@ -1109,6 +1248,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     Path(source),
                     Path(target),
                     replace_existing=replace_existing,
+                    ownership_guard=ownership_guard,
                 )
 
             with mock.patch(
@@ -1188,9 +1328,17 @@ class VirtualSpreadTests(unittest.TestCase):
             output.write_bytes(b"old-pdf")
             manifest.write_bytes(b"old-manifest")
 
-            def write_oversized(path: Path, value: object) -> None:
+            def write_oversized(
+                path: Path,
+                value: object,
+                ownership_guard: object = None,
+            ) -> None:
                 del value
-                path.write_bytes(b"x" * (MAX_MANIFEST_BYTES + 1))
+                _write_json(
+                    path,
+                    {"padding": "x" * MAX_MANIFEST_BYTES},
+                    ownership_guard,
+                )
 
             with mock.patch(
                 "generate_virtual_spread._write_json",
@@ -1228,6 +1376,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 target: object,
                 *,
                 replace_existing: bool = True,
+                ownership_guard: object = None,
             ) -> None:
                 if (
                     Path(source) == temporary_output
@@ -1235,7 +1384,10 @@ class VirtualSpreadTests(unittest.TestCase):
                 ):
                     raise OSError("simulated output publication failure")
                 real_replace(
-                    Path(source), Path(target), replace_existing=replace_existing
+                    Path(source),
+                    Path(target),
+                    replace_existing=replace_existing,
+                    ownership_guard=ownership_guard,
                 )
 
             with mock.patch(

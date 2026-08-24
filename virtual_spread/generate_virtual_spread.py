@@ -9,6 +9,7 @@ import hashlib
 import json
 import math
 import os
+import secrets
 import stat
 import struct
 import tempfile
@@ -105,22 +106,24 @@ def _same_open_file(
 
 def _snapshot_source(
     source_path: Path,
-    snapshot_path: Path,
+    snapshot_stream: BinaryIO,
 ) -> tuple[SourceIdentity, str]:
     digest = hashlib.sha256()
     try:
         path_before = _identity(source_path.stat())
-        with source_path.open("rb") as source, snapshot_path.open("wb") as target:
+        snapshot_stream.seek(0)
+        snapshot_stream.truncate()
+        with source_path.open("rb") as source:
             opened_before = _identity(os.fstat(source.fileno()))
             if not _same_open_file(path_before, opened_before):
                 raise VirtualSpreadError(
                     "Source PDF changed before snapshot creation"
                 )
             for chunk in iter(lambda: source.read(1024 * 1024), b""):
-                target.write(chunk)
+                snapshot_stream.write(chunk)
                 digest.update(chunk)
-            target.flush()
-            os.fsync(target.fileno())
+            snapshot_stream.flush()
+            os.fsync(snapshot_stream.fileno())
             verified_source_hash = _sha256_open_file(source)
             opened_after = _identity(os.fstat(source.fileno()))
         path_after = _identity(source_path.stat())
@@ -136,6 +139,7 @@ def _snapshot_source(
     snapshot_hash = digest.hexdigest()
     if verified_source_hash != snapshot_hash:
         raise VirtualSpreadError("Source PDF content changed while snapshotting")
+    snapshot_stream.seek(0)
     return path_before, snapshot_hash
 
 
@@ -258,6 +262,7 @@ def _bind_pdf_authorities(
     path: Path,
     layout_authority_sha256: str,
     link_authority_sha256: str,
+    ownership_guard: PublicationOwnershipGuard | None = None,
 ) -> None:
     for label, value in (
         ("layout", layout_authority_sha256),
@@ -275,7 +280,12 @@ def _bind_pdf_authorities(
         + link_authority_sha256.encode("ascii")
         + b"\n"
     )
-    with path.open("r+b") as stream:
+    flags = os.O_RDWR
+    flags |= getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_NOINHERIT", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = _publication_open_file(path, flags, ownership_guard)
+    with os.fdopen(descriptor, "r+b", buffering=0) as stream:
         stream.seek(0, os.SEEK_END)
         length = stream.tell()
         tail_start = max(0, length - 4096)
@@ -595,15 +605,55 @@ def _copy_link_annotation(
     }
 
 
-def _write_json(path: Path, value: dict[str, Any]) -> None:
-    with path.open("w", encoding="utf-8", newline="\n") as stream:
+def _write_json(
+    path: Path,
+    value: dict[str, Any],
+    ownership_guard: PublicationOwnershipGuard | None = None,
+) -> None:
+    flags = os.O_WRONLY | os.O_TRUNC
+    flags |= getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_NOINHERIT", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = _publication_open_file(path, flags, ownership_guard)
+    with os.fdopen(
+        descriptor,
+        "w",
+        encoding="utf-8",
+        newline="\n",
+    ) as stream:
         json.dump(value, stream, ensure_ascii=False, indent=2, sort_keys=True)
         stream.write("\n")
         stream.flush()
         os.fsync(stream.fileno())
 
 
-def _temporary_neighbor(path: Path, suffix: str) -> Path:
+def _temporary_neighbor(
+    path: Path,
+    suffix: str,
+    ownership_guard: PublicationOwnershipGuard | None = None,
+) -> Path:
+    path = _lexical_absolute(path)
+    namespace = _publication_namespace(ownership_guard)
+    if namespace is not None and namespace.directory_descriptor is not None:
+        flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
+        flags |= getattr(os, "O_BINARY", 0)
+        flags |= getattr(os, "O_NOINHERIT", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        for _ in range(128):
+            candidate = path.with_name(
+                f".{path.name}.{secrets.token_hex(16)}{suffix}"
+            )
+            try:
+                descriptor = namespace.open_file(candidate, flags, 0o600)
+            except FileExistsError:
+                continue
+            os.close(descriptor)
+            namespace.fsync()
+            return candidate
+        raise VirtualSpreadError(
+            f"Cannot allocate a staged publication file: {path}"
+        )
+    _validate_publication_ownership(ownership_guard)
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, name = tempfile.mkstemp(
         prefix=f".{path.name}.", suffix=suffix, dir=path.parent
@@ -634,11 +684,13 @@ def _publish_pair(
             temporary_output,
             expected_output_hash,
             "Staged output",
+            ownership_guard,
         )
         _require_publication_file_hash(
             temporary_manifest,
             expected_manifest_hash,
             "Staged manifest",
+            ownership_guard,
         )
         entries = (
             (
@@ -669,6 +721,7 @@ def _publish_pair(
             backup_exists = _require_regular_publication_target(
                 backup,
                 backup_label,
+                ownership_guard,
             )
             if backup_exists:
                 raise VirtualSpreadError(
@@ -677,6 +730,7 @@ def _publish_pair(
             exists_now = _require_regular_publication_target(
                 final_path,
                 final_label,
+                ownership_guard,
             )
             if had_final:
                 if not exists_now:
@@ -688,17 +742,20 @@ def _publish_pair(
                     final_path,
                     old_hash,
                     final_label,
+                    ownership_guard,
                 )
                 _validate_publication_ownership(ownership_guard)
                 _durable_replace(
                     final_path,
                     backup,
                     replace_existing=False,
+                    ownership_guard=ownership_guard,
                 )
                 _require_publication_file_hash(
                     backup,
                     old_hash,
                     backup_label,
+                    ownership_guard,
                 )
             elif exists_now:
                 raise VirtualSpreadError(
@@ -711,30 +768,43 @@ def _publish_pair(
             temporary_manifest,
             expected_manifest_hash,
             "Staged manifest",
+            ownership_guard,
         )
         _validate_publication_ownership(ownership_guard)
-        _durable_replace(temporary_manifest, manifest_path)
+        _durable_replace(
+            temporary_manifest,
+            manifest_path,
+            ownership_guard=ownership_guard,
+        )
         _require_publication_file_hash(
             manifest_path,
             expected_manifest_hash,
             "Published manifest",
+            ownership_guard,
         )
         _require_publication_file_hash(
             temporary_output,
             expected_output_hash,
             "Staged output",
+            ownership_guard,
         )
         _validate_publication_ownership(ownership_guard)
-        _durable_replace(temporary_output, output_path)
+        _durable_replace(
+            temporary_output,
+            output_path,
+            ownership_guard=ownership_guard,
+        )
         _require_publication_file_hash(
             manifest_path,
             expected_manifest_hash,
             "Published manifest",
+            ownership_guard,
         )
         _require_publication_file_hash(
             output_path,
             expected_output_hash,
             "Published output",
+            ownership_guard,
         )
         _finish_publication_transaction(transaction, ownership_guard)
     except BaseException as publication_error:
@@ -798,11 +868,15 @@ def _require_runtime_manifest_path(
 def _require_regular_publication_target(
     path: Path,
     label: str,
+    ownership_guard: PublicationOwnershipGuard | None = None,
 ) -> bool:
     """Return entry existence, rejecting anything other than a regular file."""
     path = _lexical_absolute(path)
     try:
-        entry = path.lstat()
+        namespace = _publication_namespace(ownership_guard)
+        entry = (
+            namespace.lstat(path) if namespace is not None else path.lstat()
+        )
     except FileNotFoundError:
         return False
     except OSError as error:
@@ -817,12 +891,16 @@ def _require_regular_publication_target(
 def _require_regular_publication_targets(
     output_path: Path,
     manifest_path: Path,
+    ownership_guard: PublicationOwnershipGuard | None = None,
 ) -> tuple[bool, bool]:
     return (
-        _require_regular_publication_target(output_path, "Output PDF"),
+        _require_regular_publication_target(
+            output_path, "Output PDF", ownership_guard
+        ),
         _require_regular_publication_target(
             manifest_path,
             "Manifest",
+            ownership_guard,
         ),
     )
 
@@ -831,11 +909,14 @@ def _require_publication_file_hash(
     path: Path,
     expected_hash: str,
     label: str,
+    ownership_guard: PublicationOwnershipGuard | None = None,
 ) -> None:
-    if not _require_regular_publication_target(path, label):
+    if not _require_regular_publication_target(
+        path, label, ownership_guard
+    ):
         raise VirtualSpreadError(f"{label} disappeared: {path}")
     try:
-        actual_hash = sha256_file(path)
+        actual_hash = _publication_sha256(path, ownership_guard)
     except OSError as error:
         raise VirtualSpreadError(f"Cannot hash {label}: {path}") from error
     if actual_hash != expected_hash:
@@ -875,9 +956,21 @@ def _publication_lock_path(output_path: Path) -> Path:
     return marker.with_name(marker.name + ".lock")
 
 
-def _require_open_lock_identity(lock_path: Path, descriptor: int) -> None:
+def _require_open_lock_identity(
+    lock_path: Path,
+    descriptor: int,
+    directory_descriptor: int | None = None,
+) -> None:
     try:
-        path_entry = lock_path.lstat()
+        path_entry = (
+            lock_path.lstat()
+            if directory_descriptor is None
+            else os.stat(
+                lock_path.name,
+                dir_fd=directory_descriptor,
+                follow_symlinks=False,
+            )
+        )
         opened_entry = os.fstat(descriptor)
     except OSError as error:
         raise VirtualSpreadError(
@@ -971,20 +1064,224 @@ def _release_publication_directory_lock(descriptor: int | None) -> None:
         os.close(descriptor)
 
 
-def _open_publication_lock(lock_path: Path) -> BinaryIO:
-    _require_regular_publication_target(lock_path, "Publication lock")
+@dataclass
+class _PublicationNamespace:
+    """Bind all POSIX publication I/O to one locked directory handle."""
+
+    directory_path: Path
+    directory_descriptor: int | None
+    lock_path: Path
+    lock_descriptor: int
+
+    def __call__(self) -> None:
+        if self.directory_descriptor is not None:
+            _require_open_directory_identity(
+                self.directory_path,
+                self.directory_descriptor,
+            )
+        _require_open_lock_identity(
+            self.lock_path,
+            self.lock_descriptor,
+            self.directory_descriptor,
+        )
+
+    def _member_name(self, path: Path) -> str:
+        lexical = _lexical_absolute(path)
+        if os.path.normcase(str(lexical.parent)) != os.path.normcase(
+            str(self.directory_path)
+        ):
+            raise VirtualSpreadError(
+                "Publication artifact escaped the locked directory: "
+                f"{lexical}"
+            )
+        return lexical.name
+
+    def lstat(self, path: Path) -> os.stat_result:
+        self()
+        if self.directory_descriptor is None:
+            return _lexical_absolute(path).lstat()
+        return os.stat(
+            self._member_name(path),
+            dir_fd=self.directory_descriptor,
+            follow_symlinks=False,
+        )
+
+    def open_file(self, path: Path, flags: int, mode: int = 0o666) -> int:
+        self()
+        if self.directory_descriptor is None:
+            return os.open(_lexical_absolute(path), flags, mode)
+        return os.open(
+            self._member_name(path),
+            flags,
+            mode,
+            dir_fd=self.directory_descriptor,
+        )
+
+    def fsync(self) -> None:
+        if self.directory_descriptor is not None:
+            os.fsync(self.directory_descriptor)
+
+    def replace(
+        self,
+        source: Path,
+        target: Path,
+        *,
+        replace_existing: bool,
+    ) -> None:
+        self()
+        if self.directory_descriptor is None:
+            _windows_move_file_ex(
+                source,
+                target,
+                _windows_move_flags(replace_existing),
+            )
+            return
+        source_name = self._member_name(source)
+        target_name = self._member_name(target)
+        if replace_existing:
+            os.replace(
+                source_name,
+                target_name,
+                src_dir_fd=self.directory_descriptor,
+                dst_dir_fd=self.directory_descriptor,
+            )
+            self.fsync()
+            return
+        os.link(
+            source_name,
+            target_name,
+            src_dir_fd=self.directory_descriptor,
+            dst_dir_fd=self.directory_descriptor,
+            follow_symlinks=False,
+        )
+        self.fsync()
+        os.unlink(source_name, dir_fd=self.directory_descriptor)
+        self.fsync()
+
+    def unlink(self, path: Path, *, missing_ok: bool) -> None:
+        self()
+        try:
+            if self.directory_descriptor is None:
+                _lexical_absolute(path).unlink()
+            else:
+                os.unlink(
+                    self._member_name(path),
+                    dir_fd=self.directory_descriptor,
+                )
+        except FileNotFoundError:
+            if not missing_ok:
+                raise
+            return
+        self.fsync()
+
+
+def _publication_namespace(
+    ownership_guard: PublicationOwnershipGuard | None,
+) -> _PublicationNamespace | None:
+    return (
+        ownership_guard
+        if isinstance(ownership_guard, _PublicationNamespace)
+        else None
+    )
+
+
+def _publication_open_file(
+    path: Path,
+    flags: int,
+    ownership_guard: PublicationOwnershipGuard | None,
+    mode: int = 0o666,
+) -> int:
+    namespace = _publication_namespace(ownership_guard)
+    if namespace is not None:
+        return namespace.open_file(path, flags, mode)
+    _validate_publication_ownership(ownership_guard)
+    return os.open(_lexical_absolute(path), flags, mode)
+
+
+def _publication_sha256(
+    path: Path,
+    ownership_guard: PublicationOwnershipGuard | None,
+) -> str:
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_NOINHERIT", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = _publication_open_file(path, flags, ownership_guard)
+    with os.fdopen(descriptor, "rb", buffering=0) as stream:
+        return _sha256_open_file(stream)
+
+
+def _publication_file_size(
+    path: Path,
+    ownership_guard: PublicationOwnershipGuard | None,
+) -> int:
+    namespace = _publication_namespace(ownership_guard)
+    if namespace is not None:
+        return int(namespace.lstat(path).st_size)
+    _validate_publication_ownership(ownership_guard)
+    return int(_lexical_absolute(path).stat().st_size)
+
+
+def _publication_unlink(
+    path: Path,
+    ownership_guard: PublicationOwnershipGuard | None,
+    *,
+    missing_ok: bool,
+) -> None:
+    namespace = _publication_namespace(ownership_guard)
+    if namespace is not None:
+        namespace.unlink(path, missing_ok=missing_ok)
+        return
+    _validate_publication_ownership(ownership_guard)
+    _lexical_absolute(path).unlink(missing_ok=missing_ok)
+
+
+def _open_publication_lock(
+    lock_path: Path,
+    directory_descriptor: int | None,
+) -> BinaryIO:
+    if directory_descriptor is None:
+        _require_regular_publication_target(lock_path, "Publication lock")
+    else:
+        try:
+            lock_entry = os.stat(
+                lock_path.name,
+                dir_fd=directory_descriptor,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            lock_entry = None
+        except OSError as error:
+            raise VirtualSpreadError(
+                f"Cannot inspect Publication lock: {lock_path}"
+            ) from error
+        if lock_entry is not None and not stat.S_ISREG(lock_entry.st_mode):
+            raise VirtualSpreadError(
+                "Publication lock must be a regular file when it exists: "
+                f"{lock_path}"
+            )
     flags = os.O_RDWR | os.O_CREAT
     flags |= getattr(os, "O_BINARY", 0)
     flags |= getattr(os, "O_NOINHERIT", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
     try:
-        descriptor = os.open(lock_path, flags, 0o600)
+        if directory_descriptor is None:
+            descriptor = os.open(lock_path, flags, 0o600)
+        else:
+            descriptor = os.open(
+                lock_path.name,
+                flags,
+                0o600,
+                dir_fd=directory_descriptor,
+            )
     except OSError as error:
         raise VirtualSpreadError(
             f"Cannot open publication lock safely: {lock_path}"
         ) from error
     try:
-        _require_open_lock_identity(lock_path, descriptor)
+        _require_open_lock_identity(
+            lock_path, descriptor, directory_descriptor
+        )
         return os.fdopen(descriptor, "r+b", buffering=0)
     except BaseException:
         os.close(descriptor)
@@ -1003,7 +1300,9 @@ def _publication_lock(
         output_path,
     )
     try:
-        stream = _open_publication_lock(lock_path)
+        stream = _open_publication_lock(
+            lock_path, directory_descriptor
+        )
         acquired = False
         try:
             stream.seek(0, os.SEEK_END)
@@ -1028,18 +1327,16 @@ def _publication_lock(
                 raise VirtualSpreadError(
                     f"Publication is already active: {output_path}"
                 ) from error
-            _require_open_lock_identity(lock_path, stream.fileno())
+            ownership = _PublicationNamespace(
+                directory_path=lock_path.parent,
+                directory_descriptor=directory_descriptor,
+                lock_path=lock_path,
+                lock_descriptor=stream.fileno(),
+            )
+            ownership()
             acquired = True
 
-            def ownership_guard() -> None:
-                if directory_descriptor is not None:
-                    _require_open_directory_identity(
-                        lock_path.parent,
-                        directory_descriptor,
-                    )
-                _require_open_lock_identity(lock_path, stream.fileno())
-
-            yield ownership_guard
+            yield ownership
         finally:
             if acquired:
                 stream.seek(0)
@@ -1101,9 +1398,17 @@ def _durable_replace(
     target: Path,
     *,
     replace_existing: bool = True,
+    ownership_guard: PublicationOwnershipGuard | None = None,
 ) -> None:
     source = Path(source)
     target = Path(target)
+    namespace = _publication_namespace(ownership_guard)
+    if namespace is not None:
+        namespace.replace(
+            source, target, replace_existing=replace_existing
+        )
+        return
+    _validate_publication_ownership(ownership_guard)
     if os.name == "nt":
         _windows_move_file_ex(
             source,
@@ -1149,13 +1454,20 @@ def _durably_remove(
 ) -> None:
     retired = path.with_name(path.name + ".retired")
     try:
-        _validate_publication_ownership(ownership_guard)
-        _durable_replace(path, retired)
+        _durable_replace(
+            path,
+            retired,
+            ownership_guard=ownership_guard,
+        )
     except FileNotFoundError:
         return
-    _validate_publication_ownership(ownership_guard)
-    retired.unlink(missing_ok=True)
-    _fsync_parent_directories(retired)
+    namespace = _publication_namespace(ownership_guard)
+    if namespace is not None:
+        namespace.unlink(retired, missing_ok=True)
+    else:
+        _validate_publication_ownership(ownership_guard)
+        retired.unlink(missing_ok=True)
+        _fsync_parent_directories(retired)
 
 
 def _valid_sha256(value: Any) -> bool:
@@ -1166,9 +1478,18 @@ def _valid_sha256(value: Any) -> bool:
     )
 
 
-def _file_matches_sha256(path: Path, expected_hash: str) -> bool:
+def _file_matches_sha256(
+    path: Path,
+    expected_hash: str,
+    ownership_guard: PublicationOwnershipGuard | None = None,
+) -> bool:
     try:
-        return path.is_file() and sha256_file(path) == expected_hash
+        return (
+            _require_regular_publication_target(
+                path, "Publication target", ownership_guard
+            )
+            and _publication_sha256(path, ownership_guard) == expected_hash
+        )
     except OSError:
         return False
 
@@ -1179,31 +1500,46 @@ def _write_publication_marker(
     ownership_guard: PublicationOwnershipGuard | None = None,
 ) -> None:
     _validate_publication_ownership(ownership_guard)
-    marker_path.parent.mkdir(parents=True, exist_ok=True)
+    namespace = _publication_namespace(ownership_guard)
+    if namespace is None:
+        marker_path.parent.mkdir(parents=True, exist_ok=True)
     if os.name == "nt":
-        staged_marker = _temporary_neighbor(marker_path, ".publish-marker.tmp")
+        staged_marker = _temporary_neighbor(
+            marker_path,
+            ".publish-marker.tmp",
+            ownership_guard,
+        )
         try:
-            _write_json(staged_marker, transaction)
+            _write_json(staged_marker, transaction, ownership_guard)
             try:
                 _validate_publication_ownership(ownership_guard)
                 _durable_replace(
                     staged_marker,
                     marker_path,
                     replace_existing=False,
+                    ownership_guard=ownership_guard,
                 )
             except FileExistsError as error:
                 raise VirtualSpreadError(
                     f"Publication is already in progress: {marker_path}"
                 ) from error
         finally:
-            staged_marker.unlink(missing_ok=True)
+            _publication_unlink(
+                staged_marker,
+                ownership_guard,
+                missing_ok=True,
+            )
         return
 
+    marker_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    marker_flags |= getattr(os, "O_NOINHERIT", 0)
+    marker_flags |= getattr(os, "O_NOFOLLOW", 0)
     try:
         _validate_publication_ownership(ownership_guard)
-        descriptor = os.open(
+        descriptor = _publication_open_file(
             marker_path,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            marker_flags,
+            ownership_guard,
             0o600,
         )
     except FileExistsError as error:
@@ -1224,13 +1560,19 @@ def _write_publication_marker(
             os.fsync(stream.fileno())
     except BaseException:
         try:
-            _validate_publication_ownership(ownership_guard)
-            marker_path.unlink(missing_ok=True)
+            _publication_unlink(
+                marker_path,
+                ownership_guard,
+                missing_ok=True,
+            )
         except VirtualSpreadError:
             pass
         raise
     _validate_publication_ownership(ownership_guard)
-    _fsync_parent_directories(marker_path)
+    if namespace is not None:
+        namespace.fsync()
+    else:
+        _fsync_parent_directories(marker_path)
 
 
 def _validated_publication_transaction(
@@ -1239,8 +1581,16 @@ def _validated_publication_transaction(
     manifest_path: Path,
     output_backup: Path,
     manifest_backup: Path,
+    ownership_guard: PublicationOwnershipGuard | None = None,
 ) -> dict[str, Any]:
-    with marker_path.open("r", encoding="utf-8") as stream:
+    marker_flags = os.O_RDONLY
+    marker_flags |= getattr(os, "O_BINARY", 0)
+    marker_flags |= getattr(os, "O_NOINHERIT", 0)
+    marker_flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = _publication_open_file(
+        marker_path, marker_flags, ownership_guard
+    )
+    with os.fdopen(descriptor, "r", encoding="utf-8") as stream:
         transaction = json.load(stream)
     expected = {
         "schema": PUBLICATION_SCHEMA,
@@ -1289,7 +1639,9 @@ def _finish_publication_transaction(
         (marker_path, "Publication marker"),
     )
     for path, label in artifacts:
-        _require_regular_publication_target(path, label)
+        _require_regular_publication_target(
+            path, label, ownership_guard
+        )
     for path, _ in artifacts:
         _durably_remove(path, ownership_guard)
 
@@ -1304,21 +1656,26 @@ def _recover_pair_publication(
         output_path,
         manifest_path,
     )
-    _require_regular_publication_targets(output_path, manifest_path)
+    _require_regular_publication_targets(
+        output_path, manifest_path, ownership_guard
+    )
     marker_path, output_backup, manifest_backup = _publication_artifacts(
         output_path,
     )
     marker_exists = _require_regular_publication_target(
         marker_path,
         "Publication marker",
+        ownership_guard,
     )
     output_backup_exists = _require_regular_publication_target(
         output_backup,
         "Output backup",
+        ownership_guard,
     )
     manifest_backup_exists = _require_regular_publication_target(
         manifest_backup,
         "Manifest backup",
+        ownership_guard,
     )
     if not marker_exists:
         if output_backup_exists or manifest_backup_exists:
@@ -1333,20 +1690,24 @@ def _recover_pair_publication(
             manifest_path,
             output_backup,
             manifest_backup,
+            ownership_guard,
         )
     except (OSError, ValueError, TypeError, UnicodeError) as error:
         current_output_backup_exists = _require_regular_publication_target(
             output_backup,
             "Output backup",
+            ownership_guard,
         )
         current_manifest_backup_exists = _require_regular_publication_target(
             manifest_backup,
             "Manifest backup",
+            ownership_guard,
         )
         if not current_output_backup_exists and not current_manifest_backup_exists:
             marker_still_exists = _require_regular_publication_target(
                 marker_path,
                 "Publication marker",
+                ownership_guard,
             )
             if marker_still_exists:
                 _durably_remove(marker_path, ownership_guard)
@@ -1358,10 +1719,12 @@ def _recover_pair_publication(
     output_is_new = _file_matches_sha256(
         output_path,
         transaction["newOutputSha256"],
+        ownership_guard,
     )
     manifest_is_new = _file_matches_sha256(
         manifest_path,
         transaction["newManifestSha256"],
+        ownership_guard,
     )
     if output_is_new and manifest_is_new:
         _finish_publication_transaction(transaction, ownership_guard)
@@ -1391,10 +1754,12 @@ def _recover_pair_publication(
             backup_exists = _require_regular_publication_target(
                 backup,
                 backup_label,
+                ownership_guard,
             )
             final_exists = _require_regular_publication_target(
                 final_path,
                 "Publication target",
+                ownership_guard,
             )
             if backup_exists:
                 if not had_final:
@@ -1406,13 +1771,19 @@ def _recover_pair_publication(
                     backup,
                     old_hash,
                     backup_label,
+                    ownership_guard,
                 )
                 _validate_publication_ownership(ownership_guard)
-                _durable_replace(backup, final_path)
+                _durable_replace(
+                    backup,
+                    final_path,
+                    ownership_guard=ownership_guard,
+                )
                 _require_publication_file_hash(
                     final_path,
                     old_hash,
                     "Restored publication target",
+                    ownership_guard,
                 )
             elif had_final:
                 if not final_exists:
@@ -1424,9 +1795,12 @@ def _recover_pair_publication(
                     final_path,
                     old_hash,
                     "Original publication target",
+                    ownership_guard,
                 )
             elif final_exists:
-                if not _file_matches_sha256(final_path, new_hash):
+                if not _file_matches_sha256(
+                    final_path, new_hash, ownership_guard
+                ):
                     raise VirtualSpreadError(
                         f"Unexpected publication target: {final_path}"
                     )
@@ -1457,12 +1831,21 @@ def _prepare_publication_transaction(
     had_output, had_manifest = _require_regular_publication_targets(
         output_path,
         manifest_path,
+        ownership_guard,
     )
     marker_path, output_backup, manifest_backup = _publication_artifacts(
         output_path,
     )
-    old_output_hash = sha256_file(output_path) if had_output else None
-    old_manifest_hash = sha256_file(manifest_path) if had_manifest else None
+    old_output_hash = (
+        _publication_sha256(output_path, ownership_guard)
+        if had_output
+        else None
+    )
+    old_manifest_hash = (
+        _publication_sha256(manifest_path, ownership_guard)
+        if had_manifest
+        else None
+    )
     _validate_publication_ownership(ownership_guard)
     transaction: dict[str, Any] = {
         "schema": PUBLICATION_SCHEMA,
@@ -1475,8 +1858,8 @@ def _prepare_publication_transaction(
         "hadManifest": had_manifest,
         "oldOutputSha256": old_output_hash,
         "oldManifestSha256": old_manifest_hash,
-        "newOutputSha256": sha256_file(temporary_output),
-        "newManifestSha256": sha256_file(temporary_manifest),
+        "newOutputSha256": _publication_sha256(temporary_output, ownership_guard),
+        "newManifestSha256": _publication_sha256(temporary_manifest, ownership_guard),
     }
     marker_record = dict(transaction)
     marker_record.pop("markerPath")
@@ -1486,7 +1869,7 @@ def _prepare_publication_transaction(
 
 def _build_virtual_spread_from_snapshot(
     source_path: Path,
-    source_snapshot: Path,
+    source_snapshot: BinaryIO,
     source_identity: SourceIdentity,
     source_hash: str,
     output_path: Path,
@@ -1509,6 +1892,7 @@ def _build_virtual_spread_from_snapshot(
     output_exists, manifest_exists = _require_regular_publication_targets(
         output_path,
         manifest_path,
+        ownership_guard,
     )
     if not source_path.is_file():
         raise VirtualSpreadError(f"Source PDF does not exist: {source_path}")
@@ -1526,7 +1910,7 @@ def _build_virtual_spread_from_snapshot(
     if slot_width <= 0:
         raise VirtualSpreadError("Gutter consumes the complete spread width")
 
-    reader = PdfReader(str(source_snapshot), strict=True)
+    reader = PdfReader(source_snapshot, strict=True)
     if reader.is_encrypted:
         raise VirtualSpreadError("Encrypted PDFs are not supported by this prototype")
     pairs = build_pairs(len(reader.pages), direction, cover_separate)
@@ -1645,12 +2029,19 @@ def _build_virtual_spread_from_snapshot(
     )
     writer.add_metadata(metadata)
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_output = _temporary_neighbor(output_path, ".tmp")
+    temporary_output = _temporary_neighbor(
+        output_path, ".tmp", ownership_guard
+    )
     temporary_manifest: Path | None = None
     try:
-        with temporary_output.open("wb") as stream:
+        output_flags = os.O_WRONLY | os.O_TRUNC
+        output_flags |= getattr(os, "O_BINARY", 0)
+        output_flags |= getattr(os, "O_NOINHERIT", 0)
+        output_flags |= getattr(os, "O_NOFOLLOW", 0)
+        output_descriptor = _publication_open_file(
+            temporary_output, output_flags, ownership_guard
+        )
+        with os.fdopen(output_descriptor, "wb", buffering=0) as stream:
             writer.write(stream)
             stream.flush()
             os.fsync(stream.fileno())
@@ -1658,15 +2049,30 @@ def _build_virtual_spread_from_snapshot(
             temporary_output,
             layout_authority_hash,
             link_authority_hash,
+            ownership_guard,
         )
-        verification = PdfReader(str(temporary_output), strict=True)
-        if len(verification.pages) != len(pairs):
-            raise VirtualSpreadError("Written PDF failed page-count verification")
-        for page in verification.pages:
-            if abs(float(page.mediabox.width) - spread_width) > 0.01 or abs(
-                float(page.mediabox.height) - spread_height
-            ) > 0.01:
-                raise VirtualSpreadError("Written PDF has inconsistent page geometry")
+        verification_flags = os.O_RDONLY
+        verification_flags |= getattr(os, "O_BINARY", 0)
+        verification_flags |= getattr(os, "O_NOINHERIT", 0)
+        verification_flags |= getattr(os, "O_NOFOLLOW", 0)
+        verification_descriptor = _publication_open_file(
+            temporary_output, verification_flags, ownership_guard
+        )
+        with os.fdopen(
+            verification_descriptor, "rb", buffering=0
+        ) as verification_stream:
+            verification = PdfReader(verification_stream, strict=True)
+            if len(verification.pages) != len(pairs):
+                raise VirtualSpreadError(
+                    "Written PDF failed page-count verification"
+                )
+            for page in verification.pages:
+                if abs(float(page.mediabox.width) - spread_width) > 0.01 or abs(
+                    float(page.mediabox.height) - spread_height
+                ) > 0.01:
+                    raise VirtualSpreadError(
+                        "Written PDF has inconsistent page geometry"
+                    )
 
         manifest: dict[str, Any] = {
             "schema": SCHEMA,
@@ -1680,8 +2086,12 @@ def _build_virtual_spread_from_snapshot(
             "output": {
                 "name": output_path.name,
                 "path": str(output_path),
-                "size": temporary_output.stat().st_size,
-                "sha256": sha256_file(temporary_output),
+                "size": _publication_file_size(
+                    temporary_output, ownership_guard
+                ),
+                "sha256": _publication_sha256(
+                    temporary_output, ownership_guard
+                ),
                 "pageCount": len(pairs),
                 "spreadSize": [spread_width, spread_height],
                 "gutter": gutter,
@@ -1696,9 +2106,16 @@ def _build_virtual_spread_from_snapshot(
             ],
             "links": links,
         }
-        temporary_manifest = _temporary_neighbor(manifest_path, ".tmp")
-        _write_json(temporary_manifest, manifest)
-        if temporary_manifest.stat().st_size > MAX_MANIFEST_BYTES:
+        temporary_manifest = _temporary_neighbor(
+            manifest_path,
+            ".tmp",
+            ownership_guard,
+        )
+        _write_json(temporary_manifest, manifest, ownership_guard)
+        temporary_manifest_size = _publication_file_size(
+            temporary_manifest, ownership_guard
+        )
+        if temporary_manifest_size > MAX_MANIFEST_BYTES:
             raise VirtualSpreadError(
                 "Generated manifest exceeds the runtime limit of "
                 f"{MAX_MANIFEST_BYTES} bytes"
@@ -1717,9 +2134,17 @@ def _build_virtual_spread_from_snapshot(
         )
         return manifest
     finally:
-        temporary_output.unlink(missing_ok=True)
+        _publication_unlink(
+            temporary_output,
+            ownership_guard,
+            missing_ok=True,
+        )
         if temporary_manifest is not None:
-            temporary_manifest.unlink(missing_ok=True)
+            _publication_unlink(
+                temporary_manifest,
+                ownership_guard,
+                missing_ok=True,
+            )
 
 
 def _build_virtual_spread_locked(
@@ -1749,6 +2174,7 @@ def _build_virtual_spread_locked(
     output_exists, manifest_exists = _require_regular_publication_targets(
         output_path,
         manifest_path,
+        ownership_guard,
     )
     if not source_path.is_file():
         raise VirtualSpreadError(f"Source PDF does not exist: {source_path}")
@@ -1761,8 +2187,11 @@ def _build_virtual_spread_locked(
     if (spread_width - gutter) / 2.0 <= 0:
         raise VirtualSpreadError("Gutter consumes the complete spread width")
 
-    source_snapshot = _temporary_neighbor(output_path, ".source.tmp")
-    try:
+    with tempfile.TemporaryFile(
+        mode="w+b",
+        prefix="virtual-spread-source-",
+        suffix=".pdf",
+    ) as source_snapshot:
         source_identity, source_hash = _snapshot_source(
             source_path,
             source_snapshot,
@@ -1782,8 +2211,6 @@ def _build_virtual_spread_locked(
             gutter=gutter,
             force=force,
         )
-    finally:
-        source_snapshot.unlink(missing_ok=True)
 
 
 def build_virtual_spread(

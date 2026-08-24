@@ -291,23 +291,35 @@ for required in (
     'PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v2"',
     "MOVEFILE_WRITE_THROUGH",
     "MAX_MANIFEST_BYTES = 8 * 1024 * 1024",
-    "temporary_manifest.stat().st_size > MAX_MANIFEST_BYTES",
+    "temporary_manifest_size > MAX_MANIFEST_BYTES",
     "lexical_output = _require_unaliased_output_path(output_path)",
     "lexical_manifest = _require_runtime_manifest_path(",
     "with _publication_lock(lexical_output) as ownership_guard:",
-    "yield ownership_guard",
+    "yield ownership",
     "def _publication_lock_path(output_path: Path)",
     "manifest_path = _runtime_manifest_path(output_path)",
     "getattr(os, \"O_NOFOLLOW\", 0)",
-    "_require_open_lock_identity(lock_path, descriptor)",
-    "_require_open_lock_identity(lock_path, stream.fileno())",
+    "lock_path, descriptor, directory_descriptor",
     "def _acquire_publication_directory_lock(",
     "_require_open_directory_identity(lock_path.parent, descriptor)",
     "directory_descriptor = _acquire_publication_directory_lock(",
-    "_require_open_directory_identity(\n"
-    "                        lock_path.parent,",
+    "self.directory_descriptor",
     "_validate_publication_ownership(ownership_guard)",
-    "_require_regular_publication_targets(output_path, manifest_path)",
+    "class _PublicationNamespace:",
+    "src_dir_fd=self.directory_descriptor",
+    "dst_dir_fd=self.directory_descriptor",
+    "dir_fd=self.directory_descriptor",
+    "def _publication_open_file(",
+    "def _publication_file_size(",
+    "def _publication_unlink(",
+    "def _temporary_neighbor(",
+    "namespace.open_file(candidate, flags, 0o600)",
+    "_write_json(temporary_manifest, manifest, ownership_guard)",
+    "PdfReader(verification_stream, strict=True)",
+    "with tempfile.TemporaryFile(",
+    "_publication_sha256(path, ownership_guard)",
+    "_require_regular_publication_targets(\n"
+    "        output_path, manifest_path, ownership_guard",
     '"Staged output"',
     '"Staged manifest"',
     '"Published output"',
@@ -320,8 +332,12 @@ for required in (
     "for final_path, backup, had_final, new_hash, old_hash, backup_label "
     "in entries:",
     "replace_existing=False",
-    "_durable_replace(temporary_manifest, manifest_path)",
-    "_durable_replace(temporary_output, output_path)",
+    "temporary_manifest,\n"
+    "            manifest_path,\n"
+    "            ownership_guard=ownership_guard",
+    "temporary_output,\n"
+    "            output_path,\n"
+    "            ownership_guard=ownership_guard",
     "replace_existing=False",
     "artifacts = (",
     "for path, _ in artifacts:",
@@ -395,6 +411,8 @@ generator_tests = (root.parent / "scripts/test_virtual_spread.py").read_text(
 for required in (
     "test_publication_lock_replacement_is_detected_while_held",
     "test_replaced_lock_path_does_not_admit_second_publisher",
+    "test_parent_exchange_cannot_redirect_locked_publication",
+    "test_parent_exchange_cannot_redirect_staged_write",
     "test_recovery_rejects_tampered_backup_without_restoring_it",
 ):
     if required not in generator_tests:

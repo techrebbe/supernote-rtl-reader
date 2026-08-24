@@ -633,6 +633,17 @@ Windows retains its nonreplaceable open-file lock. A deterministic Linux
 regression recreates the per-output lock during an active transaction and proves
 that a second publisher is still rejected, raising the generator suite to 32
 tests.
+A sixteenth review pass binds the complete POSIX publication namespace to the
+already-open output-directory descriptor. Staged PDF and manifest creation,
+writes, verification reads, hashes, size/type checks, transaction marker and
+backup operations, publication, rollback, and cleanup no longer resolve the
+replaceable parent pathname. The source snapshot uses one already-open temporary
+stream outside that namespace. Two deterministic Linux regressions exchange the
+parent directory precisely between validation and a final replace or staged JSON
+open. In both cases the replacement tree remains byte-for-byte unchanged while
+the original locked directory receives the descriptor-relative operation. The
+generator suite now contains 34 tests and passes completely on Linux; Windows
+passes the same suite with its five platform-specific POSIX cases skipped.
 These automated checks do not replace or restate the v0.0.8 hardware result;
 v0.0.15 still requires a focused generated-pair smoke test before release.
 

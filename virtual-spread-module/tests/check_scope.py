@@ -290,6 +290,9 @@ generator = (root.parent / "virtual_spread/generate_virtual_spread.py").read_tex
 for required in (
     'PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v2"',
     'LEGACY_PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v1"',
+    "class AmbiguousPublicationMarkerError(",
+    "object_pairs_hook=_publication_marker_object",
+    "set(transaction) != expected_fields",
     "MOVEFILE_WRITE_THROUGH",
     "MAX_MANIFEST_BYTES = 8 * 1024 * 1024",
     "def _publication_file_evidence(",
@@ -376,6 +379,8 @@ for required in (
     "test_same_content_staged_output_replacement_is_rejected",
     "test_obsolete_marker_without_backups_is_discarded",
     "test_obsolete_marker_with_backup_fails_closed",
+    "test_legacy_marker_with_duplicate_keys_fails_closed",
+    "test_legacy_marker_with_unknown_fields_fails_closed",
     "test_obsolete_new_pair_partial_sidecar_fails_closed",
     "test_obsolete_new_pair_complete_publication_fails_closed",
     "test_invalid_marker_with_canonical_artifact_fails_closed",

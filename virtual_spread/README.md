@@ -132,7 +132,10 @@ and does not match the staged digest, while every previously absent artifact is
 still absent. A complete or partial new publication, any backup, and every other
 ambiguous legacy state remain fail-closed with all evidence preserved. Unknown or
 malformed markers are discarded only when neither canonical artifact nor backup
-exists.
+exists. Only a marker with the exact field set for its declared schema can reach
+legacy recovery classification; duplicate JSON keys or additional fields are
+structurally ambiguous and always fail closed with the marker and canonical
+evidence preserved.
 
 ## Nomad hardware result: GO
 

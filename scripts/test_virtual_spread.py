@@ -1628,6 +1628,93 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertFalse(output_backup.exists())
             self.assertFalse(manifest_backup.exists())
 
+    def test_legacy_marker_with_duplicate_keys_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            record = {
+                "schema": (
+                    "techrebbe.supernote."
+                    "virtual-spread-publication/v1"
+                ),
+                "outputPath": str(output),
+                "manifestPath": str(manifest),
+                "outputBackupPath": str(output_backup),
+                "manifestBackupPath": str(manifest_backup),
+                "hadOutput": True,
+                "hadManifest": True,
+                "newOutputSha256": "0" * 64,
+                "newManifestSha256": "1" * 64,
+            }
+            marker_text = json.dumps(record).replace(
+                '"hadOutput": true',
+                '"hadOutput": false, "hadOutput": true',
+                1,
+            )
+            self.assertEqual(marker_text.count('"hadOutput"'), 2)
+            marker.write_text(marker_text, encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot recover ambiguous virtual-spread publication marker",
+            ):
+                _recover_pair_publication(output, manifest)
+
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(marker.is_file())
+            self.assertFalse(output_backup.exists())
+            self.assertFalse(manifest_backup.exists())
+
+    def test_legacy_marker_with_unknown_fields_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            marker.write_text(
+                json.dumps(
+                    {
+                        "schema": (
+                            "techrebbe.supernote."
+                            "virtual-spread-publication/v1"
+                        ),
+                        "outputPath": str(output),
+                        "manifestPath": str(manifest),
+                        "outputBackupPath": str(output_backup),
+                        "manifestBackupPath": str(manifest_backup),
+                        "hadOutput": True,
+                        "hadManifest": True,
+                        "newOutputSha256": "0" * 64,
+                        "newManifestSha256": "1" * 64,
+                        "unexpectedRecoveryHint": "discard-marker",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot recover ambiguous virtual-spread publication marker",
+            ):
+                _recover_pair_publication(output, manifest)
+
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(marker.is_file())
+            self.assertFalse(output_backup.exists())
+            self.assertFalse(manifest_backup.exists())
+
     def test_obsolete_marker_with_backup_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -681,6 +681,12 @@ canonical artifacts and both backups are absent. Three regressions cover a
 sidecar-only partial publication, a complete new pair, and an unknown marker with
 a canonical artifact, raising the generator suite to 43 tests on Windows and
 Linux.
+A twenty-first review pass rejects duplicate JSON keys while parsing publication
+markers and requires the exact field set for each recognized transaction schema.
+Structurally ambiguous markers bypass the evidence-free invalid-marker discard
+path and remain fail-closed even when no backup exists. Two regressions preserve
+the marker and canonical pair for a duplicate legacy field and an unknown legacy
+field, raising the generator suite to 45 tests on Windows and Linux.
 These automated checks do not replace or restate the v0.0.8 hardware result;
 v0.0.15 still requires a focused generated-pair smoke test before release.
 

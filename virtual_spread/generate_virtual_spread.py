@@ -47,6 +47,10 @@ class VirtualSpreadError(RuntimeError):
     """Raised when a source document cannot be transformed without data loss."""
 
 
+class AmbiguousPublicationMarkerError(VirtualSpreadError):
+    """Raised when marker structure is unsafe to interpret or retire."""
+
+
 @dataclass(frozen=True)
 class Slot:
     side: str
@@ -1766,6 +1770,19 @@ def _write_publication_marker(
         _fsync_parent_directories(marker_path)
 
 
+def _publication_marker_object(
+    pairs: list[tuple[str, Any]],
+) -> dict[str, Any]:
+    marker: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in marker:
+            raise AmbiguousPublicationMarkerError(
+                "Duplicate virtual-spread publication marker field"
+            )
+        marker[key] = value
+    return marker
+
+
 def _validated_publication_transaction(
     marker_path: Path,
     output_path: Path,
@@ -1782,7 +1799,10 @@ def _validated_publication_transaction(
         marker_path, marker_flags, ownership_guard
     )
     with os.fdopen(descriptor, "r", encoding="utf-8") as stream:
-        transaction = json.load(stream)
+        transaction = json.load(
+            stream,
+            object_pairs_hook=_publication_marker_object,
+        )
     expected = {
         "outputPath": str(_lexical_absolute(output_path)),
         "manifestPath": str(_lexical_absolute(manifest_path)),
@@ -1792,7 +1812,27 @@ def _validated_publication_transaction(
     if not isinstance(transaction, dict):
         raise VirtualSpreadError("Invalid virtual-spread publication marker")
     schema = transaction.get("schema")
-    if schema not in (PUBLICATION_SCHEMA, LEGACY_PUBLICATION_SCHEMA) or any(
+    if schema not in (PUBLICATION_SCHEMA, LEGACY_PUBLICATION_SCHEMA):
+        raise VirtualSpreadError("Invalid virtual-spread publication marker")
+    common_fields = {
+        "schema",
+        *expected.keys(),
+        "hadOutput",
+        "hadManifest",
+        "newOutputSha256",
+        "newManifestSha256",
+    }
+    expected_fields = common_fields
+    if schema == PUBLICATION_SCHEMA:
+        expected_fields = common_fields | {
+            "oldOutputSha256",
+            "oldManifestSha256",
+        }
+    if set(transaction) != expected_fields:
+        raise AmbiguousPublicationMarkerError(
+            "Unexpected virtual-spread publication marker fields"
+        )
+    if any(
         transaction.get(key) != value for key, value in expected.items()
     ):
         raise VirtualSpreadError("Invalid virtual-spread publication marker")
@@ -1924,6 +1964,10 @@ def _recover_pair_publication(
             manifest_backup,
             ownership_guard,
         )
+    except AmbiguousPublicationMarkerError as error:
+        raise VirtualSpreadError(
+            "Cannot recover ambiguous virtual-spread publication marker"
+        ) from error
     except (
         OSError,
         ValueError,

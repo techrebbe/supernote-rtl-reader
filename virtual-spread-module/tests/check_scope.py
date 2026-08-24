@@ -265,18 +265,23 @@ for required in (
     "MOVEFILE_WRITE_THROUGH",
     "MAX_MANIFEST_BYTES = 8 * 1024 * 1024",
     "temporary_manifest.stat().st_size > MAX_MANIFEST_BYTES",
-    "resolved_output = _require_unaliased_output_path(output_path)",
-    "_require_runtime_manifest_path(resolved_output, resolved_manifest)",
-    "with _publication_lock(resolved_output):",
+    "lexical_output = _require_unaliased_output_path(output_path)",
+    "lexical_manifest = _require_runtime_manifest_path(",
+    "with _publication_lock(lexical_output):",
     "def _publication_lock_path(output_path: Path)",
     "manifest_path = _runtime_manifest_path(output_path)",
-    "_durable_replace(final_path, backup)",
+    "_require_regular_publication_targets(output_path, manifest_path)",
+    '"Existing publication target"',
+    '"Publication marker"',
+    '"Publication backup"',
+    "final_path,\n                    backup,",
+    "replace_existing=False",
     "_durable_replace(temporary_manifest, manifest_path)",
     "_durable_replace(temporary_output, output_path)",
     "replace_existing=False",
-    "_durably_remove(output_backup)",
-    "_durably_remove(manifest_backup)",
-    "_durably_remove(marker_path)",
+    "artifacts = (",
+    "for path, _ in artifacts:",
+    "_durably_remove(path)",
     '"layoutAuthoritySha256": layout_authority_hash',
     '"/SNVirtualSpreadLayoutSHA256": layout_authority_hash',
 ):
@@ -285,13 +290,38 @@ for required in (
             f"generator is missing durable/layout authority invariant: {required}"
         )
 
-alias_guard = generator.find(
-    "resolved_output = _require_unaliased_output_path(output_path)"
+build_start = generator.find("def build_virtual_spread(")
+build_end = generator.find("def _parser()", build_start)
+if build_start < 0 or build_end < 0:
+    raise SystemExit("missing public virtual-spread build entry point")
+public_build = generator[build_start:build_end]
+alias_guard = public_build.find(
+    "lexical_output = _require_unaliased_output_path(output_path)"
 )
-publication_lock = generator.find("with _publication_lock(resolved_output):")
+publication_lock = public_build.find("with _publication_lock(lexical_output):")
 if alias_guard < 0 or publication_lock < 0 or alias_guard >= publication_lock:
     raise SystemExit(
         "output alias rejection must run before publication ownership is acquired"
+    )
+
+locked_start = generator.find("def _build_virtual_spread_locked(")
+locked_end = generator.find("def build_virtual_spread(", locked_start)
+if locked_start < 0 or locked_end < 0:
+    raise SystemExit("missing locked virtual-spread build implementation")
+locked_build = generator[locked_start:locked_end]
+locked_alias_guard = locked_build.find(
+    "output_path = _require_unaliased_output_path(output_path)"
+)
+locked_recovery = locked_build.find(
+    "_recover_pair_publication(output_path, manifest_path)"
+)
+if (
+    locked_alias_guard < 0
+    or locked_recovery < 0
+    or locked_alias_guard >= locked_recovery
+):
+    raise SystemExit(
+        "output aliases must be rechecked under lock before recovery or mutation"
     )
 
 print("VirtualSpread hook scope PASS")

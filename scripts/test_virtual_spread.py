@@ -774,6 +774,171 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertFalse(resolved.exists())
             self.assertFalse(_publication_lock_path(lexical).exists())
 
+    def test_output_alias_is_rechecked_after_publication_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            lexical_output = output.absolute()
+
+            with mock.patch(
+                "generate_virtual_spread._require_unaliased_output_path",
+                side_effect=(
+                    lexical_output,
+                    VirtualSpreadError("simulated output alias race"),
+                ),
+            ) as alias_guard:
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "simulated output alias race",
+                ):
+                    build_virtual_spread(
+                        source,
+                        output,
+                        manifest,
+                        force=True,
+                    )
+
+            self.assertEqual(alias_guard.call_count, 2)
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest.exists())
+            self.assertTrue(_publication_lock_path(output).is_file())
+
+    def test_force_rejects_directory_publication_targets(self) -> None:
+        for directory_target in ("output", "manifest"):
+            with self.subTest(directory_target=directory_target):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    source = root / "source.pdf"
+                    output = root / "spread.pdf"
+                    manifest = root / "spread.pdf.json"
+                    create_odd_page_fixture(source)
+
+                    if directory_target == "output":
+                        blocked = output
+                        preserved_file = manifest
+                        preserved_bytes = b"old-manifest"
+                    else:
+                        blocked = manifest
+                        preserved_file = output
+                        preserved_bytes = b"old-pdf"
+                    blocked.mkdir()
+                    sentinel = blocked / "keep.txt"
+                    sentinel.write_bytes(b"keep")
+                    preserved_file.write_bytes(preserved_bytes)
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "must be a regular file",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest,
+                            force=True,
+                        )
+
+                    self.assertTrue(blocked.is_dir())
+                    self.assertEqual(sentinel.read_bytes(), b"keep")
+                    self.assertEqual(
+                        preserved_file.read_bytes(),
+                        preserved_bytes,
+                    )
+                    self.assertFalse(
+                        _publication_lock_path(output).exists()
+                    )
+                    self.assertFalse(any(root.glob("*.publish.json")))
+                    self.assertFalse(any(root.glob("*.bak")))
+                    self.assertFalse(any(root.glob("*.retired")))
+
+    def test_concurrent_backup_directory_is_never_replaced(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+            real_prepare = _prepare_publication_transaction
+            created_backup: Path | None = None
+
+            def prepare_then_race(
+                staged_output: Path,
+                final_output: Path,
+                staged_manifest: Path,
+                final_manifest: Path,
+            ) -> dict[str, object]:
+                nonlocal created_backup
+                transaction = real_prepare(
+                    staged_output,
+                    final_output,
+                    staged_manifest,
+                    final_manifest,
+                )
+                created_backup = Path(transaction["outputBackupPath"])
+                created_backup.mkdir()
+                (created_backup / "keep.txt").write_bytes(b"keep")
+                return transaction
+
+            with mock.patch(
+                "generate_virtual_spread._prepare_publication_transaction",
+                side_effect=prepare_then_race,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "rollback was incomplete: Output backup must be a regular file",
+                ):
+                    _publish_pair(
+                        temporary_output,
+                        output,
+                        temporary_manifest,
+                        manifest,
+                    )
+
+            self.assertIsNotNone(created_backup)
+            assert created_backup is not None
+            self.assertTrue(created_backup.is_dir())
+            self.assertEqual(
+                (created_backup / "keep.txt").read_bytes(),
+                b"keep",
+            )
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+
+    def test_first_publication_rechecks_state_after_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            create_odd_page_fixture(source)
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            marker = Path(transaction["markerPath"])
+            _durable_replace(temporary_manifest, manifest)
+
+            generated = build_virtual_spread(source, output, manifest)
+
+            self.assertEqual(generated["output"]["path"], str(output))
+            self.assertTrue(output.is_file())
+            self.assertTrue(manifest.is_file())
+            self.assertFalse(marker.exists())
+            self.assertFalse(any(root.glob("*.bak")))
+
     def test_live_publication_lock_blocks_recovery_by_second_generator(
         self,
     ) -> None:

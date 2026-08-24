@@ -54,8 +54,13 @@ runtime discovers only the sibling `<output>.json` sidecar. The generator uses
 that path by default and rejects any other `--manifest` path before acquiring a
 lock or changing an output, preventing alternate sidecars from bypassing either
 runtime discovery or publication ownership. For the same reason, an output path
-that contains a symlink, junction, or other filesystem alias is rejected before
-publication; the runtime-visible PDF and sidecar must share one unambiguous path.
+that contains a symlink, junction, or other filesystem alias is rejected both
+before and after acquiring publication ownership; the lexical path is retained
+through every recovery and publication boundary. The runtime-visible PDF and
+sidecar must share one unambiguous path. Existing PDF, manifest, marker, and
+backup entries must be regular files; directories and other special entries are
+rejected rather than renamed, even with `--force`. Backup destinations are
+created without replacement and are revalidated immediately before each move.
 The PDF and manifest are staged before publication as one recoverable pair. A transaction
 marker is durably published before either previous file is moved. POSIX builds
 sync every affected parent directory; Windows builds use

@@ -9,6 +9,7 @@ import hashlib
 import json
 import math
 import os
+import stat
 import struct
 import tempfile
 from contextlib import contextmanager
@@ -636,9 +637,29 @@ def _publish_pair(
             ),
         )
         for final_path, backup, had_final in entries:
+            backup_exists = _require_regular_publication_target(
+                backup,
+                "Publication backup",
+            )
+            if backup_exists:
+                raise VirtualSpreadError(
+                    f"Publication backup appeared concurrently: {backup}"
+                )
+            exists_now = _require_regular_publication_target(
+                final_path,
+                "Existing publication target",
+            )
             if had_final:
-                _durable_replace(final_path, backup)
-            elif final_path.exists():
+                if not exists_now:
+                    raise VirtualSpreadError(
+                        f"Publication target disappeared: {final_path}"
+                    )
+                _durable_replace(
+                    final_path,
+                    backup,
+                    replace_existing=False,
+                )
+            elif exists_now:
                 raise VirtualSpreadError(
                     f"Publication target appeared concurrently: {final_path}"
                 )
@@ -661,21 +682,26 @@ def _publish_pair(
         raise
 
 
+def _lexical_absolute(path: Path) -> Path:
+    """Normalize dot segments without following filesystem aliases."""
+    return Path(os.path.abspath(os.fspath(path)))
+
+
 def _require_unaliased_output_path(output_path: Path) -> Path:
     """Reject output aliases whose runtime sidecar path would be ambiguous."""
-    lexical = Path(os.path.abspath(os.fspath(output_path)))
+    lexical = _lexical_absolute(output_path)
     resolved = output_path.resolve()
     if os.path.normcase(str(lexical)) != os.path.normcase(str(resolved)):
         raise VirtualSpreadError(
             "Output PDF path must not contain symlinks or filesystem aliases: "
             f"{lexical} resolves to {resolved}"
         )
-    return resolved
+    return lexical
 
 
 def _runtime_manifest_path(output_path: Path) -> Path:
     """Return the only sidecar path probed by the Android runtime."""
-    output_path = output_path.resolve()
+    output_path = _lexical_absolute(output_path)
     return Path(str(output_path) + ".json")
 
 
@@ -684,19 +710,57 @@ def _require_runtime_manifest_path(
     manifest_path: Path,
 ) -> Path:
     expected = _runtime_manifest_path(output_path)
-    actual = manifest_path.resolve()
+    actual = _lexical_absolute(manifest_path)
     if os.path.normcase(str(actual)) != os.path.normcase(str(expected)):
         raise VirtualSpreadError(
             "Manifest path must be the runtime sibling "
             f"{expected}; got {actual}"
         )
-    return expected
+    resolved = actual.resolve()
+    if os.path.normcase(str(actual)) != os.path.normcase(str(resolved)):
+        raise VirtualSpreadError(
+            "Manifest path must not contain symlinks or filesystem aliases: "
+            f"{actual} resolves to {resolved}"
+        )
+    return actual
+
+
+def _require_regular_publication_target(
+    path: Path,
+    label: str,
+) -> bool:
+    """Return entry existence, rejecting anything other than a regular file."""
+    path = _lexical_absolute(path)
+    try:
+        entry = path.lstat()
+    except FileNotFoundError:
+        return False
+    except OSError as error:
+        raise VirtualSpreadError(f"Cannot inspect {label}: {path}") from error
+    if not stat.S_ISREG(entry.st_mode):
+        raise VirtualSpreadError(
+            f"{label} must be a regular file when it exists: {path}"
+        )
+    return True
+
+
+def _require_regular_publication_targets(
+    output_path: Path,
+    manifest_path: Path,
+) -> tuple[bool, bool]:
+    return (
+        _require_regular_publication_target(output_path, "Output PDF"),
+        _require_regular_publication_target(
+            manifest_path,
+            "Manifest",
+        ),
+    )
 
 
 def _publication_artifacts(
     output_path: Path,
 ) -> tuple[Path, Path, Path]:
-    output_path = output_path.resolve()
+    output_path = _lexical_absolute(output_path)
     manifest_path = _runtime_manifest_path(output_path)
     # The manifest is now derived rather than caller-controlled. Retaining the
     # earlier canonical pair bytes keeps interrupted canonical transactions
@@ -938,10 +1002,10 @@ def _validated_publication_transaction(
         transaction = json.load(stream)
     expected = {
         "schema": PUBLICATION_SCHEMA,
-        "outputPath": str(output_path.resolve()),
-        "manifestPath": str(manifest_path.resolve()),
-        "outputBackupPath": str(output_backup.resolve()),
-        "manifestBackupPath": str(manifest_backup.resolve()),
+        "outputPath": str(_lexical_absolute(output_path)),
+        "manifestPath": str(_lexical_absolute(manifest_path)),
+        "outputBackupPath": str(_lexical_absolute(output_backup)),
+        "manifestBackupPath": str(_lexical_absolute(manifest_backup)),
     }
     if not isinstance(transaction, dict) or any(
         transaction.get(key) != value for key, value in expected.items()
@@ -960,23 +1024,44 @@ def _finish_publication_transaction(transaction: dict[str, Any]) -> None:
     marker_path = Path(transaction["markerPath"])
     output_backup = Path(transaction["outputBackupPath"])
     manifest_backup = Path(transaction["manifestBackupPath"])
-    _durably_remove(output_backup)
-    _durably_remove(manifest_backup)
-    _durably_remove(marker_path)
+    artifacts = (
+        (output_backup, "Output backup"),
+        (manifest_backup, "Manifest backup"),
+        (marker_path, "Publication marker"),
+    )
+    for path, label in artifacts:
+        _require_regular_publication_target(path, label)
+    for path, _ in artifacts:
+        _durably_remove(path)
 
 
 def _recover_pair_publication(
     output_path: Path,
     manifest_path: Path,
 ) -> str | None:
-    output_path = output_path.resolve()
-    manifest_path = manifest_path.resolve()
-    _require_runtime_manifest_path(output_path, manifest_path)
+    output_path = _require_unaliased_output_path(output_path)
+    manifest_path = _require_runtime_manifest_path(
+        output_path,
+        manifest_path,
+    )
+    _require_regular_publication_targets(output_path, manifest_path)
     marker_path, output_backup, manifest_backup = _publication_artifacts(
         output_path,
     )
-    if not marker_path.exists():
-        if output_backup.exists() or manifest_backup.exists():
+    marker_exists = _require_regular_publication_target(
+        marker_path,
+        "Publication marker",
+    )
+    output_backup_exists = _require_regular_publication_target(
+        output_backup,
+        "Output backup",
+    )
+    manifest_backup_exists = _require_regular_publication_target(
+        manifest_backup,
+        "Manifest backup",
+    )
+    if not marker_exists:
+        if output_backup_exists or manifest_backup_exists:
             raise VirtualSpreadError(
                 "Orphaned virtual-spread publication backup requires recovery"
             )
@@ -990,8 +1075,21 @@ def _recover_pair_publication(
             manifest_backup,
         )
     except (OSError, ValueError, TypeError, UnicodeError) as error:
-        if not output_backup.exists() and not manifest_backup.exists():
-            _durably_remove(marker_path)
+        current_output_backup_exists = _require_regular_publication_target(
+            output_backup,
+            "Output backup",
+        )
+        current_manifest_backup_exists = _require_regular_publication_target(
+            manifest_backup,
+            "Manifest backup",
+        )
+        if not current_output_backup_exists and not current_manifest_backup_exists:
+            marker_still_exists = _require_regular_publication_target(
+                marker_path,
+                "Publication marker",
+            )
+            if marker_still_exists:
+                _durably_remove(marker_path)
             return "discarded"
         raise VirtualSpreadError(
             "Cannot recover invalid virtual-spread publication marker"
@@ -1026,14 +1124,22 @@ def _recover_pair_publication(
     )
     for final_path, backup, had_final, new_hash in entries:
         try:
-            if backup.exists():
+            backup_exists = _require_regular_publication_target(
+                backup,
+                "Publication backup",
+            )
+            final_exists = _require_regular_publication_target(
+                final_path,
+                "Publication target",
+            )
+            if backup_exists:
                 _durable_replace(backup, final_path)
             elif had_final:
-                if not final_path.exists():
+                if not final_exists:
                     raise VirtualSpreadError(
                         f"Missing original and backup: {final_path}"
                     )
-            elif final_path.exists():
+            elif final_exists:
                 if not _file_matches_sha256(final_path, new_hash):
                     raise VirtualSpreadError(
                         f"Unexpected publication target: {final_path}"
@@ -1055,10 +1161,16 @@ def _prepare_publication_transaction(
     temporary_manifest: Path,
     manifest_path: Path,
 ) -> dict[str, Any]:
-    output_path = output_path.resolve()
-    manifest_path = manifest_path.resolve()
-    _require_runtime_manifest_path(output_path, manifest_path)
+    output_path = _require_unaliased_output_path(output_path)
+    manifest_path = _require_runtime_manifest_path(
+        output_path,
+        manifest_path,
+    )
     _recover_pair_publication(output_path, manifest_path)
+    had_output, had_manifest = _require_regular_publication_targets(
+        output_path,
+        manifest_path,
+    )
     marker_path, output_backup, manifest_backup = _publication_artifacts(
         output_path,
     )
@@ -1069,8 +1181,8 @@ def _prepare_publication_transaction(
         "manifestPath": str(manifest_path),
         "outputBackupPath": str(output_backup),
         "manifestBackupPath": str(manifest_backup),
-        "hadOutput": output_path.exists(),
-        "hadManifest": manifest_path.exists(),
+        "hadOutput": had_output,
+        "hadManifest": had_manifest,
         "newOutputSha256": sha256_file(temporary_output),
         "newManifestSha256": sha256_file(temporary_manifest),
     }
@@ -1096,15 +1208,22 @@ def _build_virtual_spread_from_snapshot(
     force: bool = False,
 ) -> dict[str, Any]:
     source_path = source_path.resolve()
-    output_path = output_path.resolve()
-    manifest_path = manifest_path.resolve()
+    output_path = _require_unaliased_output_path(output_path)
+    manifest_path = _require_runtime_manifest_path(
+        output_path,
+        manifest_path,
+    )
+    output_exists, manifest_exists = _require_regular_publication_targets(
+        output_path,
+        manifest_path,
+    )
     if not source_path.is_file():
         raise VirtualSpreadError(f"Source PDF does not exist: {source_path}")
     if len({source_path, output_path, manifest_path}) != 3:
         raise VirtualSpreadError(
             "Source PDF, output PDF, and manifest paths must be distinct"
         )
-    if not force and (output_path.exists() or manifest_path.exists()):
+    if not force and (output_exists or manifest_exists):
         raise VirtualSpreadError("Output already exists; pass --force to replace it")
     if not all(math.isfinite(value) for value in (
         spread_width, spread_height, gutter
@@ -1322,16 +1441,23 @@ def _build_virtual_spread_locked(
     force: bool = False,
 ) -> dict[str, Any]:
     source_path = source_path.resolve()
-    output_path = output_path.resolve()
-    manifest_path = manifest_path.resolve()
+    output_path = _require_unaliased_output_path(output_path)
+    manifest_path = _require_runtime_manifest_path(
+        output_path,
+        manifest_path,
+    )
     if len({source_path, output_path, manifest_path}) != 3:
         raise VirtualSpreadError(
             "Source PDF, output PDF, and manifest paths must be distinct"
         )
     _recover_pair_publication(output_path, manifest_path)
+    output_exists, manifest_exists = _require_regular_publication_targets(
+        output_path,
+        manifest_path,
+    )
     if not source_path.is_file():
         raise VirtualSpreadError(f"Source PDF does not exist: {source_path}")
-    if not force and (output_path.exists() or manifest_path.exists()):
+    if not force and (output_exists or manifest_exists):
         raise VirtualSpreadError("Output already exists; pass --force to replace it")
     if not all(math.isfinite(value) for value in (
         spread_width, spread_height, gutter
@@ -1377,18 +1503,22 @@ def build_virtual_spread(
     force: bool = False,
 ) -> dict[str, Any]:
     resolved_source = source_path.resolve()
-    resolved_output = _require_unaliased_output_path(output_path)
-    resolved_manifest = manifest_path.resolve()
-    if len({resolved_source, resolved_output, resolved_manifest}) != 3:
+    lexical_output = _require_unaliased_output_path(output_path)
+    lexical_manifest = _lexical_absolute(manifest_path)
+    if len({resolved_source, lexical_output, lexical_manifest}) != 3:
         raise VirtualSpreadError(
             "Source PDF, output PDF, and manifest paths must be distinct"
         )
-    _require_runtime_manifest_path(resolved_output, resolved_manifest)
-    with _publication_lock(resolved_output):
+    lexical_manifest = _require_runtime_manifest_path(
+        lexical_output,
+        lexical_manifest,
+    )
+    _require_regular_publication_targets(lexical_output, lexical_manifest)
+    with _publication_lock(lexical_output):
         return _build_virtual_spread_locked(
             resolved_source,
-            resolved_output,
-            resolved_manifest,
+            lexical_output,
+            lexical_manifest,
             direction=direction,
             cover_separate=cover_separate,
             spread_width=spread_width,
@@ -1437,7 +1567,7 @@ def main() -> int:
         force=args.force,
     )
     print(f"Virtual spread PDF: {manifest['output']['path']}")
-    print(f"Mapping manifest:   {manifest_path.resolve()}")
+    print(f"Mapping manifest:   {_lexical_absolute(manifest_path)}")
     print(f"Source pages:       {manifest['source']['pageCount']}")
     print(f"Virtual spreads:    {manifest['output']['pageCount']}")
     print(f"Output SHA-256:      {manifest['output']['sha256']}")

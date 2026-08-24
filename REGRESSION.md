@@ -599,6 +599,16 @@ or other filesystem alias before publication ownership is acquired. This keeps
 the generator's sidecar location identical to the lexical PDF path later probed
 by the Android runtime. A deterministic alias-path regression and a static
 guard-before-lock invariant raise the generator suite to 22 tests.
+A twelfth review pass keeps the lexical output and sibling manifest paths through
+the locked generation/recovery pipeline and repeats alias validation after the
+output-keyed OS lock is acquired. It also requires every existing publication
+target, transaction marker, and backup to be a regular file before rename or
+removal, so `--force` cannot displace a directory or special entry. Regressions
+simulate an alias appearing between the initial check and locked build, and
+preserve both output- and manifest-directory fixtures byte-for-byte. The suite
+also prevents a concurrently introduced backup directory from becoming a rename
+destination and rechecks file existence after interrupted-publication recovery.
+The suite now contains 26 generator tests.
 These automated checks do not replace or restate the v0.0.8 hardware result;
 v0.0.15 still requires a focused generated-pair smoke test before release.
 

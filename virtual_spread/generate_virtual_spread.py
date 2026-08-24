@@ -502,6 +502,8 @@ def _destination_source_page(
 def _destination_number(value: Any, label: str) -> float | None:
     if isinstance(value, NullObject):
         return None
+    if not isinstance(value, (FloatObject, NumberObject)):
+        raise VirtualSpreadError(f"Invalid internal destination {label}")
     try:
         number = float(value)
     except (TypeError, ValueError, OverflowError) as error:
@@ -517,17 +519,53 @@ def _destination_object(value: float | None) -> FloatObject | NullObject:
     return NullObject() if value is None else FloatObject(value)
 
 
-def _transformed_internal_destination(
-    destination: ArrayObject,
-    target_reference: IndirectObject,
-    target_mapping: dict[str, Any],
-) -> ArrayObject:
-    mode = str(destination[1])
-    transform = [float(value) for value in target_mapping["transform"]]
+def _destination_transform(
+    mapping: dict[str, Any], label: str
+) -> list[float]:
+    try:
+        transform = [float(value) for value in mapping["transform"]]
+    except (KeyError, TypeError, ValueError, OverflowError) as error:
+        raise VirtualSpreadError(
+            f"Invalid {label} internal destination transform"
+        ) from error
     if len(transform) != 6 or any(
         not math.isfinite(value) for value in transform
     ):
-        raise VirtualSpreadError("Invalid internal destination transform")
+        raise VirtualSpreadError(
+            f"Invalid {label} internal destination transform"
+        )
+    return transform
+
+
+def _destination_axis_is_preserved(
+    source_transform: list[float],
+    target_transform: list[float],
+    axis: str,
+) -> bool:
+    indices = (0, 2, 4) if axis == "x" else (1, 3, 5)
+    return all(
+        math.isclose(
+            source_transform[index],
+            target_transform[index],
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+        for index in indices
+    )
+
+
+def _transformed_internal_destination(
+    destination: ArrayObject,
+    target_reference: IndirectObject,
+    source_mapping: dict[str, Any],
+    target_mapping: dict[str, Any],
+) -> ArrayObject:
+    mode_object = destination[1]
+    if not isinstance(mode_object, NameObject):
+        raise VirtualSpreadError("Invalid internal destination mode object")
+    mode = str(mode_object)
+    source_transform = _destination_transform(source_mapping, "source")
+    transform = _destination_transform(target_mapping, "target")
     a, b, c, d, e, f = transform
     tolerance = 1e-12
 
@@ -546,15 +584,27 @@ def _transformed_internal_destination(
         left = _destination_number(destination[2], "/XYZ left")
         top = _destination_number(destination[3], "/XYZ top")
         zoom = _destination_number(destination[4], "/XYZ zoom")
+        if left is None and not _destination_axis_is_preserved(
+            source_transform, transform, "x"
+        ):
+            raise VirtualSpreadError(
+                "Cannot preserve null /XYZ left across page transforms"
+            )
+        if top is None and not _destination_axis_is_preserved(
+            source_transform, transform, "y"
+        ):
+            raise VirtualSpreadError(
+                "Cannot preserve null /XYZ top across page transforms"
+            )
         if left is not None and top is not None:
             transformed_left = a * left + c * top + e
             transformed_top = b * left + d * top + f
         else:
-            if left is not None and abs(b) > tolerance:
+            if left is not None and abs(c) > tolerance:
                 raise VirtualSpreadError(
                     "Cannot preserve partial /XYZ through page rotation"
                 )
-            if top is not None and abs(c) > tolerance:
+            if top is not None and abs(b) > tolerance:
                 raise VirtualSpreadError(
                     "Cannot preserve partial /XYZ through page rotation"
                 )
@@ -576,6 +626,12 @@ def _transformed_internal_destination(
                 f"Cannot preserve internal destination mode {mode}"
             )
         top = _destination_number(destination[2], f"{mode} top")
+        if top is None and not _destination_axis_is_preserved(
+            source_transform, transform, "y"
+        ):
+            raise VirtualSpreadError(
+                f"Cannot preserve null {mode} top across page transforms"
+            )
         transformed_top = None if top is None else d * top + f
         return ArrayObject(
             [
@@ -591,6 +647,12 @@ def _transformed_internal_destination(
                 f"Cannot preserve internal destination mode {mode}"
             )
         left = _destination_number(destination[2], f"{mode} left")
+        if left is None and not _destination_axis_is_preserved(
+            source_transform, transform, "x"
+        ):
+            raise VirtualSpreadError(
+                f"Cannot preserve null {mode} left across page transforms"
+            )
         transformed_left = None if left is None else a * left + e
         return ArrayObject(
             [
@@ -726,6 +788,7 @@ def _copy_link_annotation(
     copied[NameObject("/Dest")] = _transformed_internal_destination(
         resolved_destination,
         target_reference,
+        mapping,
         target,
     )
     copied[NameObject("/SNTargetSourcePage")] = NumberObject(

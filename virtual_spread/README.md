@@ -20,8 +20,10 @@ Supported internal and URI links, including indirect destination arrays, are
 copied with transformed hit rectangles. Internal `/Fit`, `/FitB`, `/XYZ`,
 `/FitH`, `/FitBH`, `/FitV`, `/FitBV`, and `/FitR` destinations retain their
 mode while coordinate parameters are transformed into the target spread;
-unknown modes and rotation-dependent partial coordinates fail closed instead of
-silently degrading to `/Fit`. A JSON manifest records every source-page affine
+unknown modes, invalid PDF operand types, rotation-dependent partial coordinates,
+and null coordinates whose source and target axis transforms differ fail closed
+instead of silently degrading to `/Fit`. A JSON manifest records every
+source-page affine
 transform and target half.
 
 ## Reproducible Python environment

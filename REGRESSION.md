@@ -694,6 +694,14 @@ coordinates that cannot survive rotation now fail closed instead of silently
 degrading to `/Fit`. Two regressions cover all eight supported destination modes
 and one unsupported mode, raising the generator suite to 47 tests on Windows and
 Linux.
+A twenty-third review pass accepts destination modes only as PDF name objects
+and coordinates only as PDF numeric/null objects. Null `/XYZ`, horizontal-fit,
+and vertical-fit coordinates survive only when the source and target transforms
+preserve the relevant generated-spread axis; otherwise generation fails closed
+rather than retaining a coordinate from the wrong half or page geometry. Three
+regression groups cover matching transforms, differing transforms across all six
+partial destination forms, string-typed modes, and numeric strings, raising the
+generator suite to 50 tests on Windows and Linux.
 These automated checks do not replace or restate the v0.0.8 hardware result;
 v0.0.15 still requires a focused generated-pair smoke test before release.
 

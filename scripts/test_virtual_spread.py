@@ -18,6 +18,7 @@ from pypdf.generic import (
     IndirectObject,
     NameObject,
     NullObject,
+    TextStringObject,
 )
 from reportlab.pdfgen import canvas
 
@@ -190,6 +191,32 @@ def set_link_destination_mode(
     annotation.pop("/A", None)
     annotation[NameObject("/Dest")] = ArrayObject(
         [target_reference, NameObject(mode), *destination_arguments]
+    )
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def set_raw_link_destination(
+    path: Path,
+    source_page_index: int,
+    annotation_index: int,
+    target_page_index: int,
+    mode: object,
+    arguments: tuple[object, ...],
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    annotations = writer.pages[source_page_index].get("/Annots")
+    if annotations is None:
+        raise AssertionError("fixture page has no annotations")
+    annotation = annotations.get_object()[annotation_index].get_object()
+    target_reference = writer.pages[target_page_index].indirect_reference
+    if target_reference is None:
+        raise AssertionError("fixture target page has no indirect reference")
+    annotation.pop("/A", None)
+    annotation[NameObject("/Dest")] = ArrayObject(
+        [target_reference, mode, *arguments]
     )
     with path.open("wb") as stream:
         writer.write(stream)
@@ -768,6 +795,143 @@ class VirtualSpreadTests(unittest.TestCase):
                             self.assertAlmostEqual(
                                 float(actual), expected, places=4
                             )
+
+    def test_null_destination_coordinates_survive_matching_transform(
+        self,
+    ) -> None:
+        cases = (
+            ("/XYZ", (None, 160.0, 1.25), 2),
+            ("/XYZ", (30.0, None, 1.25), 3),
+            ("/FitH", (None,), 2),
+            ("/FitBH", (None,), 2),
+            ("/FitV", (None,), 2),
+            ("/FitBV", (None,), 2),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, (mode, arguments, null_index) in enumerate(cases):
+                with self.subTest(mode=mode, arguments=arguments):
+                    source = root / f"matching-source-{index}.pdf"
+                    output = root / f"matching-spread-{index}.pdf"
+                    manifest_path = root / f"matching-spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    set_link_destination_mode(
+                        source,
+                        source_page_index=1,
+                        annotation_index=0,
+                        target_page_index=1,
+                        mode=mode,
+                        arguments=arguments,
+                    )
+
+                    manifest = build_virtual_spread(
+                        source,
+                        output,
+                        manifest_path,
+                        direction="rtl",
+                        cover_separate=True,
+                    )
+                    reader = PdfReader(str(output), strict=True)
+                    source_mapping = manifest["sourcePages"][1]
+                    annotation = reader.pages[
+                        source_mapping["virtualPageIndex"]
+                    ]["/Annots"].get_object()[0].get_object()
+                    destination = annotation["/Dest"]
+
+                    self.assertEqual(str(destination[1]), mode)
+                    self.assertIsInstance(destination[null_index], NullObject)
+
+    def test_null_destination_coordinates_reject_different_transforms(
+        self,
+    ) -> None:
+        cases = (
+            ("/XYZ", (None, 160.0, 1.25)),
+            ("/XYZ", (30.0, None, 1.25)),
+            ("/FitH", (None,)),
+            ("/FitBH", (None,)),
+            ("/FitV", (None,)),
+            ("/FitBV", (None,)),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, (mode, arguments) in enumerate(cases):
+                with self.subTest(mode=mode, arguments=arguments):
+                    source = root / f"different-source-{index}.pdf"
+                    output = root / f"different-spread-{index}.pdf"
+                    manifest_path = root / f"different-spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    set_link_destination_mode(
+                        source,
+                        source_page_index=1,
+                        annotation_index=0,
+                        target_page_index=5,
+                        mode=mode,
+                        arguments=arguments,
+                    )
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "Cannot preserve null",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            direction="rtl",
+                            cover_separate=True,
+                        )
+
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
+    def test_destination_operands_require_pdf_name_and_numbers(self) -> None:
+        cases = (
+            (
+                TextStringObject("/Fit"),
+                (),
+                "Invalid internal destination mode object",
+            ),
+            (
+                NameObject("/XYZ"),
+                (
+                    TextStringObject("30"),
+                    FloatObject(160.0),
+                    FloatObject(1.25),
+                ),
+                "Invalid internal destination /XYZ left",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, (mode, arguments, message) in enumerate(cases):
+                with self.subTest(mode=mode):
+                    source = root / f"operand-source-{index}.pdf"
+                    output = root / f"operand-spread-{index}.pdf"
+                    manifest_path = root / f"operand-spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    set_raw_link_destination(
+                        source,
+                        source_page_index=1,
+                        annotation_index=0,
+                        target_page_index=5,
+                        mode=mode,
+                        arguments=arguments,
+                    )
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        message,
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            direction="rtl",
+                            cover_separate=True,
+                        )
+
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
 
     def test_unsupported_internal_destination_mode_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

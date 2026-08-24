@@ -97,6 +97,15 @@ public final class VirtualSpreadLinkAuthority {
     public static String readPdfDigest(File pdf) throws Exception {
         RandomAccessFile input = new RandomAccessFile(pdf, "r");
         try {
+            return readPdfDigest(input);
+        } finally {
+            input.close();
+        }
+    }
+
+    public static String readPdfDigest(RandomAccessFile input) throws Exception {
+        long originalPosition = input.getFilePointer();
+        try {
             long length = input.length();
             int count = (int) Math.min(length, 4096L);
             if (count <= PDF_MARKER.length() + 65) {
@@ -124,12 +133,21 @@ public final class VirtualSpreadLinkAuthority {
             String digest = tail.substring(digestStart, digestEnd);
             return isSha256(digest) ? digest.toLowerCase() : null;
         } finally {
-            input.close();
+            input.seek(originalPosition);
         }
     }
 
     public static String readPdfLayoutDigest(File pdf) throws Exception {
         RandomAccessFile input = new RandomAccessFile(pdf, "r");
+        try {
+            return readPdfLayoutDigest(input);
+        } finally {
+            input.close();
+        }
+    }
+
+    public static String readPdfLayoutDigest(RandomAccessFile input) throws Exception {
+        long originalPosition = input.getFilePointer();
         try {
             long length = input.length();
             int count = (int) Math.min(length, 4096L);
@@ -159,7 +177,7 @@ public final class VirtualSpreadLinkAuthority {
             String digest = tail.substring(digestStart, digestEnd);
             return isSha256(digest) ? digest.toLowerCase() : null;
         } finally {
-            input.close();
+            input.seek(originalPosition);
         }
     }
 

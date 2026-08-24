@@ -63,9 +63,11 @@ rejected rather than renamed, even with `--force`. Backup destinations are
 created without replacement and are revalidated immediately before each move.
 The persistent OS lock is opened without following links where the platform
 supports it; its path and descriptor must identify the same regular file before
-initialization and again after lock acquisition. Staged artifacts are type- and
-hash-checked before backup moves and immediately before publication, and both
-canonical hashes are verified before recovery evidence is retired.
+initialization and again after lock acquisition. That identity is rechecked
+before every shared transaction mutation, so replacing the lock pathname causes
+the current publisher to fail closed. Staged artifacts are type- and hash-checked
+before backup moves and immediately before publication, and both canonical hashes
+are verified before recovery evidence is retired.
 The PDF and manifest are staged before publication as one recoverable pair. A transaction
 marker is durably published before either previous file is moved. POSIX builds
 sync every affected parent directory; Windows builds use
@@ -73,7 +75,11 @@ sync every affected parent directory; Windows builds use
 rollback, and retirement renames. If the process or machine is interrupted, the
 next run either recognizes the fully published pair by both staged hashes and
 finishes cleanup, or restores the previous PDF and manifest from the recorded
-backups. Ordinary publication errors use that same recovery path immediately.
+backups. Publication marker v2 records the prior pair's SHA-256 values; recovery
+authenticates each backup before restoring it and preserves the marker plus
+evidence if any backup was altered. An interrupted v1 transaction containing
+backups therefore fails closed rather than restoring unauthenticated bytes.
+Ordinary publication errors use that same recovery path immediately.
 The manifest records the staged PDF's exact size and SHA-256, which the runtime
 module verifies before trusting its mappings. A canonical digest of every link
 record is also embedded in the generated PDF and verified against the sidecar,
@@ -85,8 +91,11 @@ geometry. Native module v0.0.15 therefore fails closed on manifests generated
 before this layout authority existed; regenerate an older virtual-spread pair
 before opening it with v0.0.15. Native reader callbacks perform only strong PDF
 and sidecar identity checks. Sidecar reading/hashing, parsing, full-PDF hashing,
-and stable-snapshot verification run on the single background verifier; the
-module fails closed until that verified snapshot is published.
+and stable-snapshot verification run on the single background verifier. That
+verifier opens each PDF and sidecar exactly once, binds the callback identities
+to those descriptors, performs every content and authority read through the same
+open handles, and finally proves the handles still match the visible pathnames.
+The module fails closed until that descriptor-bound snapshot is published.
 
 The generator also enforces the companion runtime's exact 8 MiB sidecar limit
 before publication. Oversized manifests fail with an explicit error while any

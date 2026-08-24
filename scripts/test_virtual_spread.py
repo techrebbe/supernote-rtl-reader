@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -837,6 +838,28 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertFalse(output.exists())
             self.assertFalse(manifest.exists())
 
+    @unittest.skipIf(
+        os.name == "nt",
+        "Windows does not allow an open lock pathname to be unlinked",
+    )
+    def test_publication_lock_replacement_is_detected_while_held(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            lock_path = _publication_lock_path(output)
+
+            with _publication_lock(output) as ownership_guard:
+                lock_path.unlink()
+                lock_path.write_bytes(b"replacement-lock")
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Publication lock must remain one regular, unaliased file",
+                ):
+                    ownership_guard()
+
+            self.assertEqual(lock_path.read_bytes(), b"replacement-lock")
+            self.assertFalse(output.exists())
+
     def test_force_rejects_directory_publication_targets(self) -> None:
         for directory_target in ("output", "manifest"):
             with self.subTest(directory_target=directory_target):
@@ -903,6 +926,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 final_output: Path,
                 staged_manifest: Path,
                 final_manifest: Path,
+                ownership_guard: object = None,
             ) -> dict[str, object]:
                 nonlocal created_backup
                 transaction = real_prepare(
@@ -910,6 +934,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     final_output,
                     staged_manifest,
                     final_manifest,
+                    ownership_guard,
                 )
                 created_backup = Path(transaction["outputBackupPath"])
                 created_backup.mkdir()
@@ -988,12 +1013,14 @@ class VirtualSpreadTests(unittest.TestCase):
                 final_output: Path,
                 staged_manifest: Path,
                 final_manifest: Path,
+                ownership_guard: object = None,
             ) -> dict[str, object]:
                 transaction = real_prepare(
                     staged_output,
                     final_output,
                     staged_manifest,
                     final_manifest,
+                    ownership_guard,
                 )
                 staged_manifest.unlink()
                 staged_manifest.mkdir()
@@ -1250,6 +1277,40 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertFalse(marker.exists())
             self.assertFalse(output_backup.exists())
             self.assertFalse(manifest_backup.exists())
+
+    def test_recovery_rejects_tampered_backup_without_restoring_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            output_backup = Path(transaction["outputBackupPath"])
+            marker = Path(transaction["markerPath"])
+            _durable_replace(output, output_backup)
+            output_backup.write_bytes(b"tampered-old-pdf")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Output backup SHA-256 mismatch",
+            ):
+                _recover_pair_publication(output, manifest)
+
+            self.assertFalse(output.exists())
+            self.assertEqual(output_backup.read_bytes(), b"tampered-old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(marker.is_file())
 
     def test_recovery_finishes_cleanup_after_complete_publication(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

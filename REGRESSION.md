@@ -614,6 +614,17 @@ canonical publication hashes before retiring rollback state. It also moves all
 sidecar reads and hashes off native reader callbacks: UI paths compare strong PDF
 and sidecar identities while the background verifier proves stable content.
 Three fault and alias regressions raise the suite to 29 generator tests.
+A fourteenth review pass binds every PDF, sidecar, full-file hash, and embedded
+authority read to one captured descriptor pair. The verifier rejects a mismatch
+between callback identity and opened handle, rechecks both handles after all
+reads, and proves that each handle still names the visible pathname before
+publishing a cache entry. Publication marker v2 records the previous PDF and
+manifest hashes; recovery authenticates backups before restoring them and leaves
+tampered evidence in place. The generator also carries a live lock-identity guard
+through recovery and publication and rechecks it before each shared namespace
+mutation. A POSIX lock-replacement regression and a tampered-backup regression
+raise the generator suite to 31 tests; the complete Java companion suite and
+signed APK build also pass locally.
 These automated checks do not replace or restate the v0.0.8 hardware result;
 v0.0.15 still requires a focused generated-pair smoke test before release.
 

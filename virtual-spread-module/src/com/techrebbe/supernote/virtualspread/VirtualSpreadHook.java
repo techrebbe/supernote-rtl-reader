@@ -11,9 +11,10 @@ import android.system.Os;
 import android.system.StructStat;
 import android.util.Log;
 
-import java.io.BufferedInputStream;
 import java.io.File;
+import java.io.FileDescriptor;
 import java.io.FileInputStream;
+import java.io.RandomAccessFile;
 import java.lang.ref.WeakReference;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -122,7 +123,14 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
 
         static FileIdentity capture(File file) throws Exception {
-            StructStat stat = Os.stat(file.getPath());
+            return fromStat(Os.stat(file.getPath()));
+        }
+
+        static FileIdentity capture(FileDescriptor descriptor) throws Exception {
+            return fromStat(Os.fstat(descriptor));
+        }
+
+        private static FileIdentity fromStat(StructStat stat) {
             long changedNanos = stat.st_ctim == null
                 ? 0L : stat.st_ctim.tv_nsec;
             return new FileIdentity(
@@ -1149,45 +1157,72 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             if (!verificationId.equals(VERIFYING.get(key))) {
                 return;
             }
-            byte[] sidecarData = readBytes(sidecar);
-            String sidecarDigest = sha256(sidecarData);
-            Manifest parsed = parseManifest(
-                pdf,
-                new String(sidecarData, "UTF-8"),
-                key,
-                sidecarDigest
-            );
-            String currentSidecarDigest = sha256(readBytes(sidecar));
-            FileIdentity pdfAfter = FileIdentity.capture(pdf);
-            FileIdentity sidecarAfter = FileIdentity.capture(sidecar);
-            if (!pdfBefore.matches(pdfAfter)
-                || !sidecarBefore.matches(sidecarAfter)
-                || !sidecarDigest.equals(currentSidecarDigest)) {
-                if (verificationId.equals(VERIFYING.get(key))) {
-                    MANIFESTS.remove(key);
+            try (
+                RandomAccessFile pdfInput = new RandomAccessFile(pdf, "r");
+                FileInputStream sidecarInput = new FileInputStream(sidecar)
+            ) {
+                FileIdentity pdfOpened = FileIdentity.capture(pdfInput.getFD());
+                FileIdentity sidecarOpened = FileIdentity.capture(
+                    sidecarInput.getFD()
+                );
+                if (!pdfBefore.matches(pdfOpened)
+                    || !sidecarBefore.matches(sidecarOpened)) {
+                    log("manifest_rejected reason=snapshot_changed_before_read path="
+                        + key);
+                    return;
                 }
-                log("manifest_rejected reason=snapshot_changed_during_read path="
-                    + key);
-                return;
-            }
-            if (!verificationId.equals(VERIFYING.get(key))) {
-                return;
-            }
-            CachedManifest published = new CachedManifest(
-                pdfAfter,
-                sidecarAfter,
-                sidecarDigest,
-                parsed
-            );
-            MANIFESTS.put(key, published);
-            if (!verificationId.equals(VERIFYING.get(key))) {
-                MANIFESTS.remove(key, published);
-                return;
-            }
-            if (parsed != null) {
-                log("manifest_accepted path=" + key
-                    + " pages=" + parsed.pageCount);
-                scheduleManifestActivation(key, parsed.revision);
+                byte[] sidecarData = readBytes(
+                    sidecarInput,
+                    sidecarOpened.size
+                );
+                String sidecarDigest = sha256(sidecarData);
+                Manifest parsed = parseManifest(
+                    pdfInput,
+                    pdfOpened.size,
+                    new String(sidecarData, "UTF-8"),
+                    key,
+                    sidecarDigest
+                );
+                String currentSidecarDigest = sha256(readBytes(
+                    sidecarInput,
+                    sidecarOpened.size
+                ));
+                FileIdentity pdfAfter = FileIdentity.capture(pdfInput.getFD());
+                FileIdentity sidecarAfter = FileIdentity.capture(
+                    sidecarInput.getFD()
+                );
+                FileIdentity pdfPathAfter = FileIdentity.capture(pdf);
+                FileIdentity sidecarPathAfter = FileIdentity.capture(sidecar);
+                if (!pdfOpened.matches(pdfAfter)
+                    || !sidecarOpened.matches(sidecarAfter)
+                    || !pdfAfter.matches(pdfPathAfter)
+                    || !sidecarAfter.matches(sidecarPathAfter)
+                    || !sidecarDigest.equals(currentSidecarDigest)) {
+                    if (verificationId.equals(VERIFYING.get(key))) {
+                        MANIFESTS.remove(key);
+                    }
+                    log("manifest_rejected reason=snapshot_changed_during_read path="
+                        + key);
+                    return;
+                }
+                if (verificationId.equals(VERIFYING.get(key))) {
+                    CachedManifest published = new CachedManifest(
+                        pdfAfter,
+                        sidecarAfter,
+                        sidecarDigest,
+                        parsed
+                    );
+                    MANIFESTS.put(key, published);
+                    if (!verificationId.equals(VERIFYING.get(key))) {
+                        MANIFESTS.remove(key, published);
+                        return;
+                    }
+                    if (parsed != null) {
+                        log("manifest_accepted path=" + key
+                            + " pages=" + parsed.pageCount);
+                        scheduleManifestActivation(key, parsed.revision);
+                    }
+                }
             }
         } catch (Throwable throwable) {
             if (verificationId.equals(VERIFYING.get(key))) {
@@ -1340,7 +1375,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     }
 
     private static Manifest parseManifest(
-        File pdf,
+        RandomAccessFile pdfInput,
+        long pdfLength,
         String sidecarJson,
         String key,
         String sidecarDigest
@@ -1368,14 +1404,14 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         long expectedSize = output.optLong("size", -1L);
         String expectedHash = output.optString("sha256", "");
         int pageCount = output.optInt("pageCount", -1);
-        if (expectedSize != pdf.length()
+        if (expectedSize != pdfLength
             || pageCount <= 0
             || spreadsJson.length() != pageCount) {
             log("manifest_rejected reason=output_identity path=" + key);
             return null;
         }
         if (!isSha256(expectedHash)
-            || !expectedHash.equalsIgnoreCase(sha256File(pdf))) {
+            || !expectedHash.equalsIgnoreCase(sha256File(pdfInput))) {
             log("manifest_rejected reason=output_hash path=" + key);
             return null;
         }
@@ -1384,7 +1420,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             ""
         );
         String embeddedLinkAuthority =
-            VirtualSpreadLinkAuthority.readPdfDigest(pdf);
+            VirtualSpreadLinkAuthority.readPdfDigest(pdfInput);
         if (!isSha256(expectedLinkAuthority)
             || !expectedLinkAuthority.equalsIgnoreCase(embeddedLinkAuthority)) {
             log("manifest_rejected reason=link_authority path=" + key);
@@ -1395,7 +1431,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             ""
         );
         String embeddedLayoutAuthority =
-            VirtualSpreadLinkAuthority.readPdfLayoutDigest(pdf);
+            VirtualSpreadLinkAuthority.readPdfLayoutDigest(pdfInput);
         if (!isSha256(expectedLayoutAuthority)
             || !expectedLayoutAuthority.equalsIgnoreCase(embeddedLayoutAuthority)) {
             log("manifest_rejected reason=layout_authority path=" + key);
@@ -1608,12 +1644,15 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     }
 
 
-    private static byte[] readBytes(File file) throws Exception {
-        if (file.length() > MAX_MANIFEST_BYTES) {
+    private static byte[] readBytes(
+        FileInputStream input,
+        long length
+    ) throws Exception {
+        if (length < 0L || length > MAX_MANIFEST_BYTES) {
             throw new IllegalArgumentException("manifest is too large");
         }
-        byte[] data = new byte[(int) file.length()];
-        FileInputStream input = new FileInputStream(file);
+        byte[] data = new byte[(int) length];
+        input.getChannel().position(0L);
         try {
             int offset = 0;
             while (offset < data.length) {
@@ -1626,8 +1665,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             if (offset != data.length) {
                 throw new IllegalStateException("short manifest read");
             }
+            if (input.read() >= 0) {
+                throw new IllegalStateException("long manifest read");
+            }
         } finally {
-            input.close();
+            input.getChannel().position(0L);
         }
         return data;
     }
@@ -1638,13 +1680,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         return toHex(digest.digest());
     }
 
-    private static String sha256File(File file) throws Exception {
+    private static String sha256File(RandomAccessFile input) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        BufferedInputStream input = new BufferedInputStream(
-            new FileInputStream(file),
-            64 * 1024
-        );
+        long originalPosition = input.getFilePointer();
         try {
+            input.seek(0L);
             byte[] buffer = new byte[64 * 1024];
             while (true) {
                 int count = input.read(buffer);
@@ -1656,7 +1696,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 }
             }
         } finally {
-            input.close();
+            input.seek(originalPosition);
         }
         return toHex(digest.digest());
     }

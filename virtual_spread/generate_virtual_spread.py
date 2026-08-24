@@ -15,7 +15,7 @@ import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, BinaryIO, Iterable, Iterator
+from typing import Any, BinaryIO, Callable, Iterable, Iterator
 
 from pypdf import PdfReader, PdfWriter, Transformation
 from pypdf.generic import (
@@ -32,11 +32,13 @@ from pypdf.generic import (
 SCHEMA = "techrebbe.supernote.virtual-spread/v1"
 LINK_AUTHORITY_MARKER = b"%SNVirtualSpreadLinksSHA256:"
 LAYOUT_AUTHORITY_MARKER = b"%SNVirtualSpreadLayoutSHA256:"
-PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v1"
+PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v2"
 MOVEFILE_REPLACE_EXISTING = 0x00000001
 MOVEFILE_WRITE_THROUGH = 0x00000008
 WINDOWS_ALREADY_EXISTS = {80, 183}
 MAX_MANIFEST_BYTES = 8 * 1024 * 1024
+
+PublicationOwnershipGuard = Callable[[], None]
 
 
 class VirtualSpreadError(RuntimeError):
@@ -615,6 +617,7 @@ def _publish_pair(
     output_path: Path,
     temporary_manifest: Path,
     manifest_path: Path,
+    ownership_guard: PublicationOwnershipGuard | None = None,
 ) -> None:
     """Publish a matching pair with durable recovery across process death."""
     transaction = _prepare_publication_transaction(
@@ -622,6 +625,7 @@ def _publish_pair(
         output_path,
         temporary_manifest,
         manifest_path,
+        ownership_guard,
     )
     try:
         expected_output_hash = transaction["newOutputSha256"]
@@ -641,17 +645,30 @@ def _publish_pair(
                 output_path,
                 Path(transaction["outputBackupPath"]),
                 transaction["hadOutput"],
+                transaction["oldOutputSha256"],
+                "Existing output",
+                "Output backup",
             ),
             (
                 manifest_path,
                 Path(transaction["manifestBackupPath"]),
                 transaction["hadManifest"],
+                transaction["oldManifestSha256"],
+                "Existing manifest",
+                "Manifest backup",
             ),
         )
-        for final_path, backup, had_final in entries:
+        for (
+            final_path,
+            backup,
+            had_final,
+            old_hash,
+            final_label,
+            backup_label,
+        ) in entries:
             backup_exists = _require_regular_publication_target(
                 backup,
-                "Publication backup",
+                backup_label,
             )
             if backup_exists:
                 raise VirtualSpreadError(
@@ -659,17 +676,29 @@ def _publish_pair(
                 )
             exists_now = _require_regular_publication_target(
                 final_path,
-                "Existing publication target",
+                final_label,
             )
             if had_final:
                 if not exists_now:
                     raise VirtualSpreadError(
                         f"Publication target disappeared: {final_path}"
                     )
+                assert isinstance(old_hash, str)
+                _require_publication_file_hash(
+                    final_path,
+                    old_hash,
+                    final_label,
+                )
+                _validate_publication_ownership(ownership_guard)
                 _durable_replace(
                     final_path,
                     backup,
                     replace_existing=False,
+                )
+                _require_publication_file_hash(
+                    backup,
+                    old_hash,
+                    backup_label,
                 )
             elif exists_now:
                 raise VirtualSpreadError(
@@ -683,6 +712,7 @@ def _publish_pair(
             expected_manifest_hash,
             "Staged manifest",
         )
+        _validate_publication_ownership(ownership_guard)
         _durable_replace(temporary_manifest, manifest_path)
         _require_publication_file_hash(
             manifest_path,
@@ -694,6 +724,7 @@ def _publish_pair(
             expected_output_hash,
             "Staged output",
         )
+        _validate_publication_ownership(ownership_guard)
         _durable_replace(temporary_output, output_path)
         _require_publication_file_hash(
             manifest_path,
@@ -705,10 +736,12 @@ def _publish_pair(
             expected_output_hash,
             "Published output",
         )
-        _finish_publication_transaction(transaction)
+        _finish_publication_transaction(transaction, ownership_guard)
     except BaseException as publication_error:
         try:
-            recovery = _recover_pair_publication(output_path, manifest_path)
+            recovery = _recover_pair_publication(
+                output_path, manifest_path, ownership_guard
+            )
         except BaseException as recovery_error:
             raise VirtualSpreadError(
                 "Virtual-spread publication failed and rollback was incomplete: "
@@ -885,7 +918,7 @@ def _open_publication_lock(lock_path: Path) -> BinaryIO:
 @contextmanager
 def _publication_lock(
     output_path: Path,
-) -> Iterator[None]:
+) -> Iterator[PublicationOwnershipGuard]:
     """Serialize every publisher and recovery owner for one output PDF."""
     lock_path = _publication_lock_path(output_path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -916,7 +949,11 @@ def _publication_lock(
             ) from error
         _require_open_lock_identity(lock_path, stream.fileno())
         acquired = True
-        yield
+
+        def ownership_guard() -> None:
+            _require_open_lock_identity(lock_path, stream.fileno())
+
+        yield ownership_guard
     finally:
         if acquired:
             stream.seek(0)
@@ -934,6 +971,13 @@ def _publication_lock(
                 # if an explicit unlock reports a late platform error.
                 pass
         stream.close()
+
+
+def _validate_publication_ownership(
+    ownership_guard: PublicationOwnershipGuard | None,
+) -> None:
+    if ownership_guard is not None:
+        ownership_guard()
 
 
 def _windows_move_flags(replace_existing: bool) -> int:
@@ -1011,12 +1055,17 @@ def _fsync_parent_directories(*paths: Path) -> None:
             os.close(descriptor)
 
 
-def _durably_remove(path: Path) -> None:
+def _durably_remove(
+    path: Path,
+    ownership_guard: PublicationOwnershipGuard | None = None,
+) -> None:
     retired = path.with_name(path.name + ".retired")
     try:
+        _validate_publication_ownership(ownership_guard)
         _durable_replace(path, retired)
     except FileNotFoundError:
         return
+    _validate_publication_ownership(ownership_guard)
     retired.unlink(missing_ok=True)
     _fsync_parent_directories(retired)
 
@@ -1039,13 +1088,16 @@ def _file_matches_sha256(path: Path, expected_hash: str) -> bool:
 def _write_publication_marker(
     marker_path: Path,
     transaction: dict[str, Any],
+    ownership_guard: PublicationOwnershipGuard | None = None,
 ) -> None:
+    _validate_publication_ownership(ownership_guard)
     marker_path.parent.mkdir(parents=True, exist_ok=True)
     if os.name == "nt":
         staged_marker = _temporary_neighbor(marker_path, ".publish-marker.tmp")
         try:
             _write_json(staged_marker, transaction)
             try:
+                _validate_publication_ownership(ownership_guard)
                 _durable_replace(
                     staged_marker,
                     marker_path,
@@ -1060,6 +1112,7 @@ def _write_publication_marker(
         return
 
     try:
+        _validate_publication_ownership(ownership_guard)
         descriptor = os.open(
             marker_path,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL,
@@ -1082,8 +1135,13 @@ def _write_publication_marker(
             stream.flush()
             os.fsync(stream.fileno())
     except BaseException:
-        marker_path.unlink(missing_ok=True)
+        try:
+            _validate_publication_ownership(ownership_guard)
+            marker_path.unlink(missing_ok=True)
+        except VirtualSpreadError:
+            pass
         raise
+    _validate_publication_ownership(ownership_guard)
     _fsync_parent_directories(marker_path)
 
 
@@ -1113,10 +1171,27 @@ def _validated_publication_transaction(
     for key in ("newOutputSha256", "newManifestSha256"):
         if not _valid_sha256(transaction.get(key)):
             raise VirtualSpreadError("Invalid virtual-spread publication marker")
+    for had_key, old_hash_key in (
+        ("hadOutput", "oldOutputSha256"),
+        ("hadManifest", "oldManifestSha256"),
+    ):
+        old_hash = transaction.get(old_hash_key)
+        if transaction[had_key]:
+            if not _valid_sha256(old_hash):
+                raise VirtualSpreadError(
+                    "Invalid virtual-spread publication marker"
+                )
+        elif old_hash is not None:
+            raise VirtualSpreadError(
+                "Invalid virtual-spread publication marker"
+            )
     return transaction
 
 
-def _finish_publication_transaction(transaction: dict[str, Any]) -> None:
+def _finish_publication_transaction(
+    transaction: dict[str, Any],
+    ownership_guard: PublicationOwnershipGuard | None = None,
+) -> None:
     marker_path = Path(transaction["markerPath"])
     output_backup = Path(transaction["outputBackupPath"])
     manifest_backup = Path(transaction["manifestBackupPath"])
@@ -1128,12 +1203,13 @@ def _finish_publication_transaction(transaction: dict[str, Any]) -> None:
     for path, label in artifacts:
         _require_regular_publication_target(path, label)
     for path, _ in artifacts:
-        _durably_remove(path)
+        _durably_remove(path, ownership_guard)
 
 
 def _recover_pair_publication(
     output_path: Path,
     manifest_path: Path,
+    ownership_guard: PublicationOwnershipGuard | None = None,
 ) -> str | None:
     output_path = _require_unaliased_output_path(output_path)
     manifest_path = _require_runtime_manifest_path(
@@ -1185,7 +1261,7 @@ def _recover_pair_publication(
                 "Publication marker",
             )
             if marker_still_exists:
-                _durably_remove(marker_path)
+                _durably_remove(marker_path, ownership_guard)
             return "discarded"
         raise VirtualSpreadError(
             "Cannot recover invalid virtual-spread publication marker"
@@ -1200,7 +1276,7 @@ def _recover_pair_publication(
         transaction["newManifestSha256"],
     )
     if output_is_new and manifest_is_new:
-        _finish_publication_transaction(transaction)
+        _finish_publication_transaction(transaction, ownership_guard)
         return "committed"
 
     errors: list[str] = []
@@ -1210,44 +1286,70 @@ def _recover_pair_publication(
             output_backup,
             transaction["hadOutput"],
             transaction["newOutputSha256"],
+            transaction["oldOutputSha256"],
+            "Output backup",
         ),
         (
             manifest_path,
             manifest_backup,
             transaction["hadManifest"],
             transaction["newManifestSha256"],
+            transaction["oldManifestSha256"],
+            "Manifest backup",
         ),
     )
-    for final_path, backup, had_final, new_hash in entries:
+    for final_path, backup, had_final, new_hash, old_hash, backup_label in entries:
         try:
             backup_exists = _require_regular_publication_target(
                 backup,
-                "Publication backup",
+                backup_label,
             )
             final_exists = _require_regular_publication_target(
                 final_path,
                 "Publication target",
             )
             if backup_exists:
+                if not had_final:
+                    raise VirtualSpreadError(
+                        f"Unexpected backup without an original: {backup}"
+                    )
+                assert isinstance(old_hash, str)
+                _require_publication_file_hash(
+                    backup,
+                    old_hash,
+                    backup_label,
+                )
+                _validate_publication_ownership(ownership_guard)
                 _durable_replace(backup, final_path)
+                _require_publication_file_hash(
+                    final_path,
+                    old_hash,
+                    "Restored publication target",
+                )
             elif had_final:
                 if not final_exists:
                     raise VirtualSpreadError(
                         f"Missing original and backup: {final_path}"
                     )
+                assert isinstance(old_hash, str)
+                _require_publication_file_hash(
+                    final_path,
+                    old_hash,
+                    "Original publication target",
+                )
             elif final_exists:
                 if not _file_matches_sha256(final_path, new_hash):
                     raise VirtualSpreadError(
                         f"Unexpected publication target: {final_path}"
                     )
-                _durably_remove(final_path)
+                _durably_remove(final_path, ownership_guard)
         except BaseException as error:
             errors.append(f"{final_path}: {error}")
     if errors:
         raise VirtualSpreadError(
             "Virtual-spread recovery was incomplete: " + "; ".join(errors)
         )
-    _finish_publication_transaction(transaction)
+    _finish_publication_transaction(transaction, ownership_guard)
     return "rolled_back"
 
 
@@ -1256,13 +1358,14 @@ def _prepare_publication_transaction(
     output_path: Path,
     temporary_manifest: Path,
     manifest_path: Path,
+    ownership_guard: PublicationOwnershipGuard | None = None,
 ) -> dict[str, Any]:
     output_path = _require_unaliased_output_path(output_path)
     manifest_path = _require_runtime_manifest_path(
         output_path,
         manifest_path,
     )
-    _recover_pair_publication(output_path, manifest_path)
+    _recover_pair_publication(output_path, manifest_path, ownership_guard)
     had_output, had_manifest = _require_regular_publication_targets(
         output_path,
         manifest_path,
@@ -1270,6 +1373,9 @@ def _prepare_publication_transaction(
     marker_path, output_backup, manifest_backup = _publication_artifacts(
         output_path,
     )
+    old_output_hash = sha256_file(output_path) if had_output else None
+    old_manifest_hash = sha256_file(manifest_path) if had_manifest else None
+    _validate_publication_ownership(ownership_guard)
     transaction: dict[str, Any] = {
         "schema": PUBLICATION_SCHEMA,
         "markerPath": str(marker_path),
@@ -1279,12 +1385,14 @@ def _prepare_publication_transaction(
         "manifestBackupPath": str(manifest_backup),
         "hadOutput": had_output,
         "hadManifest": had_manifest,
+        "oldOutputSha256": old_output_hash,
+        "oldManifestSha256": old_manifest_hash,
         "newOutputSha256": sha256_file(temporary_output),
         "newManifestSha256": sha256_file(temporary_manifest),
     }
     marker_record = dict(transaction)
     marker_record.pop("markerPath")
-    _write_publication_marker(marker_path, marker_record)
+    _write_publication_marker(marker_path, marker_record, ownership_guard)
     return transaction
 
 
@@ -1296,6 +1404,7 @@ def _build_virtual_spread_from_snapshot(
     output_path: Path,
     manifest_path: Path,
     *,
+    ownership_guard: PublicationOwnershipGuard | None = None,
     direction: str = "rtl",
     cover_separate: bool = True,
     spread_width: float = 864.0,
@@ -1516,6 +1625,7 @@ def _build_virtual_spread_from_snapshot(
             output_path,
             temporary_manifest,
             manifest_path,
+            ownership_guard,
         )
         return manifest
     finally:
@@ -1529,6 +1639,7 @@ def _build_virtual_spread_locked(
     output_path: Path,
     manifest_path: Path,
     *,
+    ownership_guard: PublicationOwnershipGuard | None = None,
     direction: str = "rtl",
     cover_separate: bool = True,
     spread_width: float = 864.0,
@@ -1546,7 +1657,7 @@ def _build_virtual_spread_locked(
         raise VirtualSpreadError(
             "Source PDF, output PDF, and manifest paths must be distinct"
         )
-    _recover_pair_publication(output_path, manifest_path)
+    _recover_pair_publication(output_path, manifest_path, ownership_guard)
     output_exists, manifest_exists = _require_regular_publication_targets(
         output_path,
         manifest_path,
@@ -1576,6 +1687,7 @@ def _build_virtual_spread_locked(
             output_path,
             manifest_path,
             direction=direction,
+            ownership_guard=ownership_guard,
             cover_separate=cover_separate,
             spread_width=spread_width,
             spread_height=spread_height,
@@ -1610,12 +1722,13 @@ def build_virtual_spread(
         lexical_manifest,
     )
     _require_regular_publication_targets(lexical_output, lexical_manifest)
-    with _publication_lock(lexical_output):
+    with _publication_lock(lexical_output) as ownership_guard:
         return _build_virtual_spread_locked(
             resolved_source,
             lexical_output,
             lexical_manifest,
             direction=direction,
+            ownership_guard=ownership_guard,
             cover_separate=cover_separate,
             spread_width=spread_width,
             spread_height=spread_height,

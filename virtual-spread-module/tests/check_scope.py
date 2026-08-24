@@ -144,10 +144,25 @@ for required in (
     "MANIFEST_VERIFIER.execute",
     "VERIFYING.put(key, verificationId)",
     "verificationId.equals(VERIFYING.get(key))",
-    "byte[] sidecarData = readBytes(sidecar)",
+    'RandomAccessFile pdfInput = new RandomAccessFile(pdf, "r")',
+    "FileInputStream sidecarInput = new FileInputStream(sidecar)",
+    "FileIdentity pdfOpened = FileIdentity.capture(pdfInput.getFD())",
+    "FileIdentity sidecarOpened = FileIdentity.capture(",
+    "!pdfBefore.matches(pdfOpened)",
+    "!sidecarBefore.matches(sidecarOpened)",
+    "byte[] sidecarData = readBytes(",
+    "sidecarInput,",
     "String sidecarDigest = sha256(sidecarData)",
-    "pdfBefore.matches(pdfAfter)",
-    "sidecarBefore.matches(sidecarAfter)",
+    "Manifest parsed = parseManifest(",
+    "pdfInput,",
+    "FileIdentity pdfAfter = FileIdentity.capture(pdfInput.getFD())",
+    "FileIdentity sidecarAfter = FileIdentity.capture(",
+    "FileIdentity pdfPathAfter = FileIdentity.capture(pdf)",
+    "FileIdentity sidecarPathAfter = FileIdentity.capture(sidecar)",
+    "pdfOpened.matches(pdfAfter)",
+    "sidecarOpened.matches(sidecarAfter)",
+    "pdfAfter.matches(pdfPathAfter)",
+    "sidecarAfter.matches(sidecarPathAfter)",
     "sidecarDigest.equals(currentSidecarDigest)",
     "MANIFESTS.put(key, published)",
     "scheduleManifestActivation(key, parsed.revision)",
@@ -160,18 +175,21 @@ for required in (
             f"background manifest verification is missing guard: {required}"
         )
 
-pdf_stable = manifest_verification.find("pdfBefore.matches(pdfAfter)")
-sidecar_identity_stable = manifest_verification.find(
-    "sidecarBefore.matches(sidecarAfter)"
+snapshot_guards = (
+    "!pdfBefore.matches(pdfOpened)",
+    "!sidecarBefore.matches(sidecarOpened)",
+    "pdfOpened.matches(pdfAfter)",
+    "sidecarOpened.matches(sidecarAfter)",
+    "pdfAfter.matches(pdfPathAfter)",
+    "sidecarAfter.matches(sidecarPathAfter)",
+    "sidecarDigest.equals(currentSidecarDigest)",
 )
-sidecar_digest_stable = manifest_verification.find(
-    "sidecarDigest.equals(currentSidecarDigest)"
-)
+snapshot_guard_positions = [
+    manifest_verification.find(guard) for guard in snapshot_guards
+]
 publication = manifest_verification.find("MANIFESTS.put(key, published)")
-if min(
-    pdf_stable, sidecar_identity_stable, sidecar_digest_stable, publication
-) < 0 or publication <= max(
-    pdf_stable, sidecar_identity_stable, sidecar_digest_stable
+if min(*snapshot_guard_positions, publication) < 0 or publication <= max(
+    snapshot_guard_positions
 ):
     raise SystemExit("manifest publication must follow every snapshot check")
 
@@ -185,7 +203,7 @@ for required in (
     "cached.matches(pdfIdentity, sidecarIdentity)",
     "String sidecarDigest = sha256(sidecarData)",
     'output.optString("sha256", "")',
-    "expectedHash.equalsIgnoreCase(sha256File(pdf))",
+    "expectedHash.equalsIgnoreCase(sha256File(pdfInput))",
     'manifest_rejected reason=output_hash',
     'manifest_rejected reason=snapshot_changed_during_read',
     'root.opt("coverSeparate")',
@@ -201,9 +219,9 @@ for required in (
     'if ("uri".equals(kind))',
     'link.opt("uri") instanceof String',
     '"linkAuthoritySha256"',
-    "VirtualSpreadLinkAuthority.readPdfDigest(pdf)",
+    "VirtualSpreadLinkAuthority.readPdfDigest(pdfInput)",
     '"layoutAuthoritySha256"',
-    "VirtualSpreadLinkAuthority.readPdfLayoutDigest(pdf)",
+    "VirtualSpreadLinkAuthority.readPdfLayoutDigest(pdfInput)",
     "VirtualSpreadLinkAuthority.layout(",
     "VirtualSpreadLinkAuthority.layoutDigest(",
     'output.optDouble("gutter", Double.NaN)',
@@ -217,7 +235,7 @@ for required in (
     'manifest_rejected reason=source_layout',
     "x0 > x1",
     "y0 > y1",
-    "file.length() > MAX_MANIFEST_BYTES",
+    "length < 0L || length > MAX_MANIFEST_BYTES",
     'manifest_rejected reason=link_mapping',
     'manifest_rejected reason=link_record',
 ):
@@ -270,33 +288,40 @@ generator = (root.parent / "virtual_spread/generate_virtual_spread.py").read_tex
     encoding="utf-8"
 )
 for required in (
+    'PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v2"',
     "MOVEFILE_WRITE_THROUGH",
     "MAX_MANIFEST_BYTES = 8 * 1024 * 1024",
     "temporary_manifest.stat().st_size > MAX_MANIFEST_BYTES",
     "lexical_output = _require_unaliased_output_path(output_path)",
     "lexical_manifest = _require_runtime_manifest_path(",
-    "with _publication_lock(lexical_output):",
+    "with _publication_lock(lexical_output) as ownership_guard:",
+    "yield ownership_guard",
     "def _publication_lock_path(output_path: Path)",
     "manifest_path = _runtime_manifest_path(output_path)",
     "getattr(os, \"O_NOFOLLOW\", 0)",
     "_require_open_lock_identity(lock_path, descriptor)",
     "_require_open_lock_identity(lock_path, stream.fileno())",
+    "_validate_publication_ownership(ownership_guard)",
     "_require_regular_publication_targets(output_path, manifest_path)",
     '"Staged output"',
     '"Staged manifest"',
     '"Published output"',
     '"Published manifest"',
-    '"Existing publication target"',
+    '"oldOutputSha256"',
+    '"oldManifestSha256"',
     '"Publication marker"',
-    '"Publication backup"',
-    "final_path,\n                    backup,",
+    '"Output backup"',
+    '"Manifest backup"',
+    "for final_path, backup, had_final, new_hash, old_hash, backup_label "
+    "in entries:",
     "replace_existing=False",
     "_durable_replace(temporary_manifest, manifest_path)",
     "_durable_replace(temporary_output, output_path)",
     "replace_existing=False",
     "artifacts = (",
     "for path, _ in artifacts:",
-    "_durably_remove(path)",
+    "_durably_remove(path, ownership_guard)",
+    "_durably_remove(final_path, ownership_guard)",
     '"layoutAuthoritySha256": layout_authority_hash',
     '"/SNVirtualSpreadLayoutSHA256": layout_authority_hash',
 ):
@@ -306,9 +331,15 @@ for required in (
         )
 
 preflight_hash = generator.find('"Staged manifest"')
-backup_move = generator.find("for final_path, backup, had_final in entries:")
+backup_move = generator.find(
+    "for (\n"
+    "            final_path,\n"
+    "            backup,"
+)
 published_manifest_hash = generator.find('"Published manifest"')
-finish_transaction = generator.find("_finish_publication_transaction(transaction)")
+finish_transaction = generator.find(
+    "_finish_publication_transaction(transaction, ownership_guard)"
+)
 if not (
     0 <= preflight_hash < backup_move
     and backup_move < published_manifest_hash < finish_transaction
@@ -325,7 +356,9 @@ public_build = generator[build_start:build_end]
 alias_guard = public_build.find(
     "lexical_output = _require_unaliased_output_path(output_path)"
 )
-publication_lock = public_build.find("with _publication_lock(lexical_output):")
+publication_lock = public_build.find(
+    "with _publication_lock(lexical_output) as ownership_guard:"
+)
 if alias_guard < 0 or publication_lock < 0 or alias_guard >= publication_lock:
     raise SystemExit(
         "output alias rejection must run before publication ownership is acquired"
@@ -340,7 +373,7 @@ locked_alias_guard = locked_build.find(
     "output_path = _require_unaliased_output_path(output_path)"
 )
 locked_recovery = locked_build.find(
-    "_recover_pair_publication(output_path, manifest_path)"
+    "_recover_pair_publication(output_path, manifest_path, ownership_guard)"
 )
 if (
     locked_alias_guard < 0
@@ -350,5 +383,15 @@ if (
     raise SystemExit(
         "output aliases must be rechecked under lock before recovery or mutation"
     )
+
+generator_tests = (root.parent / "scripts/test_virtual_spread.py").read_text(
+    encoding="utf-8"
+)
+for required in (
+    "test_publication_lock_replacement_is_detected_while_held",
+    "test_recovery_rejects_tampered_backup_without_restoring_it",
+):
+    if required not in generator_tests:
+        raise SystemExit("generator transaction regression missing: " + required)
 
 print("VirtualSpread hook scope PASS")

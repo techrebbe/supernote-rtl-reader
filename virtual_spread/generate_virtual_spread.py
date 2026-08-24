@@ -61,6 +61,28 @@ SUPPORTED_LINK_ANNOTATION_KEYS = frozenset({
 })
 SUPPORTED_LINK_HIGHLIGHT_MODES = frozenset({"/N", "/I", "/O", "/P"})
 SUPPORTED_BORDER_STYLES = frozenset({"/S", "/D", "/B", "/I", "/U"})
+SUPPORTED_DOCUMENT_CATALOG_KEYS = frozenset({
+    "/PageLayout",
+    "/PageMode",
+    "/Pages",
+    "/Type",
+})
+SUPPORTED_PAGE_MODES = frozenset({
+    "/FullScreen",
+    "/UseAttachments",
+    "/UseNone",
+    "/UseOC",
+    "/UseOutlines",
+    "/UseThumbs",
+})
+SUPPORTED_PAGE_LAYOUTS = frozenset({
+    "/OneColumn",
+    "/SinglePage",
+    "/TwoColumnLeft",
+    "/TwoColumnRight",
+    "/TwoPageLeft",
+    "/TwoPageRight",
+})
 
 PublicationOwnershipGuard = Callable[[], None]
 
@@ -89,6 +111,12 @@ class SourceIdentity:
     size: int
     modified_ns: int
     changed_ns: int
+
+
+@dataclass(frozen=True)
+class DocumentCatalogSettings:
+    page_mode: NameObject | None
+    page_layout: NameObject | None
 
 
 def _sha256_open_file(stream: BinaryIO) -> str:
@@ -565,7 +593,23 @@ def _dereference_pdf_object(value: Any) -> Any:
     return value.get_object() if isinstance(value, IndirectObject) else value
 
 
-def _require_supported_document_catalog(reader: PdfReader) -> None:
+def _optional_document_catalog_name(
+    catalog: DictionaryObject,
+    key: str,
+    label: str,
+    allowed: frozenset[str],
+) -> NameObject | None:
+    if key not in catalog:
+        return None
+    value = _dereference_pdf_object(catalog.raw_get(key))
+    if not isinstance(value, NameObject) or str(value) not in allowed:
+        raise VirtualSpreadError(f"Invalid document catalog {label}")
+    return NameObject(str(value))
+
+
+def _require_supported_document_catalog(
+    reader: PdfReader,
+) -> DocumentCatalogSettings:
     try:
         catalog = _dereference_pdf_object(
             reader.trailer.raw_get("/Root")
@@ -576,6 +620,23 @@ def _require_supported_document_catalog(reader: PdfReader) -> None:
         ) from error
     if not isinstance(catalog, DictionaryObject):
         raise VirtualSpreadError("Source PDF catalog is not a dictionary")
+    if "/Type" not in catalog:
+        raise VirtualSpreadError("Source PDF catalog has no /Type")
+    catalog_type = _dereference_pdf_object(catalog.raw_get("/Type"))
+    if not isinstance(catalog_type, NameObject) or str(catalog_type) != "/Catalog":
+        raise VirtualSpreadError("Source PDF catalog has an invalid /Type")
+    if "/Pages" not in catalog:
+        raise VirtualSpreadError("Source PDF catalog has no /Pages tree")
+    pages_tree = _dereference_pdf_object(catalog.raw_get("/Pages"))
+    if not isinstance(pages_tree, DictionaryObject):
+        raise VirtualSpreadError("Source PDF /Pages tree is not a dictionary")
+    if "/Type" not in pages_tree:
+        raise VirtualSpreadError("Source PDF /Pages tree has no /Type")
+    pages_type = _dereference_pdf_object(pages_tree.raw_get("/Type"))
+    if not isinstance(pages_type, NameObject) or str(pages_type) != "/Pages":
+        raise VirtualSpreadError(
+            "Source PDF /Pages tree has an invalid /Type"
+        )
     if "/Outlines" in catalog:
         raise VirtualSpreadError(
             "Document outlines are not supported by this prototype; "
@@ -586,6 +647,36 @@ def _require_supported_document_catalog(reader: PdfReader) -> None:
             "Document open actions are not supported by this prototype; "
             "generation would discard the persisted opening destination or action"
         )
+    if "/OCProperties" in catalog:
+        raise VirtualSpreadError(
+            "Optional-content catalogs are not supported by this prototype; "
+            "generation would discard persisted layer visibility"
+        )
+    unsupported = sorted(
+        str(key)
+        for key in catalog.keys()
+        if str(key) not in SUPPORTED_DOCUMENT_CATALOG_KEYS
+    )
+    if unsupported:
+        raise VirtualSpreadError(
+            "Unsupported document catalog entries: " + ", ".join(unsupported)
+        )
+    page_mode = _optional_document_catalog_name(
+        catalog,
+        "/PageMode",
+        "/PageMode",
+        SUPPORTED_PAGE_MODES,
+    )
+    page_layout = _optional_document_catalog_name(
+        catalog,
+        "/PageLayout",
+        "/PageLayout",
+        SUPPORTED_PAGE_LAYOUTS,
+    )
+    return DocumentCatalogSettings(
+        page_mode=page_mode,
+        page_layout=page_layout,
+    )
 
 
 def _required_pdf_name(
@@ -2946,7 +3037,7 @@ def _build_virtual_spread_from_snapshot(
     reader = PdfReader(source_snapshot, strict=True)
     if reader.is_encrypted:
         raise VirtualSpreadError("Encrypted PDFs are not supported by this prototype")
-    _require_supported_document_catalog(reader)
+    document_catalog = _require_supported_document_catalog(reader)
     pairs = build_pairs(len(reader.pages), direction, cover_separate)
     normalized_pages = [_normalized_page(page) for page in reader.pages]
     left_slot = Slot("left", 0.0, 0.0, slot_width, spread_height)
@@ -2955,6 +3046,10 @@ def _build_virtual_spread_from_snapshot(
     )
 
     writer = PdfWriter()
+    if document_catalog.page_mode is not None:
+        writer.page_mode = str(document_catalog.page_mode)
+    if document_catalog.page_layout is not None:
+        writer.page_layout = str(document_catalog.page_layout)
     source_mapping: dict[int, dict[str, Any]] = {}
     spread_records: list[dict[str, Any]] = []
     for virtual_page_index, (left_source, right_source) in enumerate(pairs):

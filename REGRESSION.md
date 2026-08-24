@@ -745,6 +745,15 @@ PDF from silently losing its persisted opening destination, zoom, or action.
 A serialized destination-array fixture verifies that the source and an existing
 published PDF/manifest pair remain byte-for-byte unchanged, raising the
 generator suite to 63 tests on Windows and Linux.
+A twenty-ninth review pass replaces the field-by-field document-catalog guard
+with an explicit complete supported surface. The generator preserves validated
+`/PageMode` and `/PageLayout`, regenerates structural `/Type` and `/Pages`, and
+rejects `/OCProperties` plus every other unsupported or unknown catalog entry
+before staging or publication. A real default-off optional-content-group
+fixture covers the reported visibility-loss case; positive view-setting
+preservation and generic viewer-preference rejection prevent another catalog
+field from being silently dropped. The generator suite now contains 66 tests
+on Windows and Linux.
 These automated checks do not replace or restate the v0.0.8 hardware result;
 v0.0.15 still requires a focused generated-pair smoke test before release.
 

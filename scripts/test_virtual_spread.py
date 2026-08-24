@@ -154,6 +154,64 @@ def add_document_open_action(path: Path) -> None:
         raise AssertionError("fixture document open action is malformed")
 
 
+def add_document_view_settings(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    writer.page_mode = "/FullScreen"
+    writer.page_layout = "/TwoPageRight"
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    persisted = PdfReader(str(path), strict=True)
+    catalog = persisted.trailer["/Root"]
+    if catalog.get("/PageMode") != "/FullScreen":
+        raise AssertionError("fixture page mode was not persisted")
+    if catalog.get("/PageLayout") != "/TwoPageRight":
+        raise AssertionError("fixture page layout was not persisted")
+
+
+def add_optional_content_catalog(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    group = writer._add_object(DictionaryObject({
+        NameObject("/Type"): NameObject("/OCG"),
+        NameObject("/Name"): TextStringObject("Hidden layer"),
+    }))
+    writer._root_object[NameObject("/OCProperties")] = DictionaryObject({
+        NameObject("/OCGs"): ArrayObject([group]),
+        NameObject("/D"): DictionaryObject({
+            NameObject("/OFF"): ArrayObject([group]),
+        }),
+    })
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    persisted = PdfReader(str(path), strict=True)
+    properties = persisted.trailer["/Root"]["/OCProperties"]
+    default = properties["/D"]
+    if len(properties["/OCGs"]) != 1 or len(default["/OFF"]) != 1:
+        raise AssertionError("fixture optional-content default-off group is malformed")
+
+
+def add_viewer_preferences(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    writer._root_object[NameObject("/ViewerPreferences")] = DictionaryObject({
+        NameObject("/HideToolbar"): BooleanObject(True),
+    })
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    persisted = PdfReader(str(path), strict=True)
+    preferences = persisted.trailer["/Root"]["/ViewerPreferences"]
+    hide_toolbar = preferences.raw_get("/HideToolbar")
+    if not isinstance(hide_toolbar, BooleanObject) or not hide_toolbar.value:
+        raise AssertionError("fixture viewer preference was not persisted")
+
+
 def make_annotation_array_indirect(path: Path, page_index: int) -> None:
     source = PdfReader(str(path), strict=True)
     writer = PdfWriter()
@@ -536,6 +594,79 @@ class VirtualSpreadTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 VirtualSpreadError,
                 "Document open actions are not supported",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    force=True,
+                )
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(output.read_bytes(), b"existing-output")
+            self.assertEqual(
+                manifest_path.read_bytes(), b"existing-manifest"
+            )
+
+    def test_supported_catalog_view_settings_are_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "view-settings-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_document_view_settings(source)
+
+            build_virtual_spread(source, output, manifest_path)
+
+            catalog = PdfReader(str(output), strict=True).trailer["/Root"]
+            self.assertEqual(catalog.get("/PageMode"), "/FullScreen")
+            self.assertEqual(catalog.get("/PageLayout"), "/TwoPageRight")
+
+    def test_optional_content_catalog_fails_closed_before_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "optional-content-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_optional_content_catalog(source)
+            source_bytes = source.read_bytes()
+            output.write_bytes(b"existing-output")
+            manifest_path.write_bytes(b"existing-manifest")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Optional-content catalogs are not supported",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    force=True,
+                )
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(output.read_bytes(), b"existing-output")
+            self.assertEqual(
+                manifest_path.read_bytes(), b"existing-manifest"
+            )
+
+    def test_unknown_document_catalog_entry_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "viewer-preferences-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_viewer_preferences(source)
+            source_bytes = source.read_bytes()
+            output.write_bytes(b"existing-output")
+            manifest_path.write_bytes(b"existing-manifest")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Unsupported document catalog entries: /ViewerPreferences",
             ):
                 build_virtual_spread(
                     source,

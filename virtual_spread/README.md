@@ -59,12 +59,15 @@ python .\virtual_spread\generate_virtual_spread.py `
 ```
 
 The command refuses encrypted PDFs, unsupported annotation subtypes, unresolved
-links, document outlines whose native table-of-contents destinations have not
-yet been remapped, document open actions whose destination/action semantics
-have not yet been remapped, and existing outputs unless `--force` is supplied.
-It also rejects a source path that collides with its output's deterministic marker,
-backup, retirement, or lock artifacts before recovery or lock acquisition. It
-copies and hashes the source through one file snapshot, re-reads the opened
+links, and every document-catalog semantic it cannot preserve safely. It
+regenerates the structural `/Type` and `/Pages` entries and preserves validated
+`/PageMode` and `/PageLayout` names. Outlines, opening actions, optional-content
+layer configuration, viewer preferences, and every other unsupported or unknown
+catalog entry fail closed before staging or publication rather than being
+silently discarded. Existing outputs also require `--force`. The command rejects
+a source path that collides with its output's deterministic marker, backup,
+retirement, or lock artifacts before recovery or lock acquisition. It copies
+and hashes the source through one file snapshot, re-reads the opened
 source to prove that
 the copied bytes are stable, generates only from that verified snapshot, and
 rehashes the current source before publication. The PDF and manifest are each

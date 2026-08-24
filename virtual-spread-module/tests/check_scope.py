@@ -373,6 +373,8 @@ generator_tests = (root.parent / "scripts/test_virtual_spread.py").read_text(
 for required in (
     "test_staged_output_swap_is_rejected_at_publication_boundary",
     "test_same_content_staged_output_replacement_is_rejected",
+    "test_obsolete_marker_without_backups_is_discarded",
+    "test_obsolete_marker_with_backup_fails_closed",
 ):
     if required not in generator_tests:
         raise SystemExit(

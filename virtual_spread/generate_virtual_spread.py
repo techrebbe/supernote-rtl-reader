@@ -1882,7 +1882,13 @@ def _recover_pair_publication(
             manifest_backup,
             ownership_guard,
         )
-    except (OSError, ValueError, TypeError, UnicodeError) as error:
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        UnicodeError,
+        VirtualSpreadError,
+    ) as error:
         current_output_backup_exists = _require_regular_publication_target(
             output_backup,
             "Output backup",

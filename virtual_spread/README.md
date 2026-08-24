@@ -125,6 +125,12 @@ same evidence is checked before the sidecar move, before the PDF move, and after
 canonical publication, so exchanging the staged PDF cannot make its sidecar
 describe different bytes.
 
+Recovery discards an obsolete or otherwise invalid transaction marker only when
+neither recovery backup exists, which is the pre-mutation interruption case. If
+either backup exists, validation continues to fail closed and preserves the
+marker and recovery evidence for inspection rather than guessing how to restore
+an older transaction schema.
+
 ## Nomad hardware result: GO
 
 The generated documents were validated on a Supernote Nomad on 2026-08-21

@@ -664,6 +664,13 @@ bytes or byte-identical content on another inode. Both fail before the existing
 PDF/sidecar pair changes. The generator suite now contains 38 tests and passes
 completely on both Windows and Linux, with only the five POSIX-only cases skipped
 on Windows.
+A nineteenth review pass makes invalid-marker recovery handle the generator's
+own validation errors as well as malformed JSON and I/O failures. An obsolete v1
+marker is discarded only when neither backup exists, allowing recovery from a
+crash after marker durability but before canonical mutation. If either backup
+exists, recovery still fails closed and preserves all evidence. Two regressions
+cover both branches, raising the generator suite to 40 tests on Windows and
+Linux.
 These automated checks do not replace or restate the v0.0.8 hardware result;
 v0.0.15 still requires a focused generated-pair smoke test before release.
 

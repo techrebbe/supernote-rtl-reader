@@ -311,6 +311,10 @@ for required in (
     'transaction["_newOutputIdentity"] = new_output_identity',
     '"size": temporary_output_identity.size',
     '"sha256": temporary_output_hash',
+    "def _transformed_internal_destination(",
+    'mode in {"/FitH", "/FitBH"}',
+    'mode in {"/FitV", "/FitBV"}',
+    'mode == "/FitR"',
     "expected_output_identity=temporary_output_identity",
     "expected_output_hash=temporary_output_hash",
     "lexical_output = _require_unaliased_output_path(output_path)",
@@ -383,6 +387,8 @@ for required in (
     "test_legacy_marker_with_unknown_fields_fails_closed",
     "test_obsolete_new_pair_partial_sidecar_fails_closed",
     "test_obsolete_new_pair_complete_publication_fails_closed",
+    "test_internal_destination_modes_are_preserved_and_transformed",
+    "test_unsupported_internal_destination_mode_fails_closed",
     "test_invalid_marker_with_canonical_artifact_fails_closed",
 ):
     if required not in generator_tests:

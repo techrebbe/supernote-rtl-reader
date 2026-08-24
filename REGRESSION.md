@@ -687,6 +687,13 @@ Structurally ambiguous markers bypass the evidence-free invalid-marker discard
 path and remain fail-closed even when no backup exists. Two regressions preserve
 the marker and canonical pair for a duplicate legacy field and an unknown legacy
 field, raising the generator suite to 45 tests on Windows and Linux.
+A twenty-second review pass preserves supported internal destination modes and
+transforms `/XYZ`, horizontal-fit, vertical-fit, and `/FitR` coordinates through
+the target source-to-spread affine transform. Unsupported modes and partial
+coordinates that cannot survive rotation now fail closed instead of silently
+degrading to `/Fit`. Two regressions cover all eight supported destination modes
+and one unsupported mode, raising the generator suite to 47 tests on Windows and
+Linux.
 These automated checks do not replace or restate the v0.0.8 hardware result;
 v0.0.15 still requires a focused generated-pair smoke test before release.
 

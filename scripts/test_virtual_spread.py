@@ -12,7 +12,13 @@ from pathlib import Path
 from unittest import mock
 
 from pypdf import PdfReader, PdfWriter
-from pypdf.generic import IndirectObject, NameObject
+from pypdf.generic import (
+    ArrayObject,
+    FloatObject,
+    IndirectObject,
+    NameObject,
+    NullObject,
+)
 from reportlab.pdfgen import canvas
 
 
@@ -157,6 +163,43 @@ def make_link_destination_indirect(
     ].get_object().raw_get("/Dest")
     if not isinstance(persisted_destination, IndirectObject):
         raise AssertionError("fixture link destination is not indirect")
+
+
+def set_link_destination_mode(
+    path: Path,
+    source_page_index: int,
+    annotation_index: int,
+    target_page_index: int,
+    mode: str,
+    arguments: tuple[float | None, ...],
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    annotations = writer.pages[source_page_index].get("/Annots")
+    if annotations is None:
+        raise AssertionError("fixture page has no annotations")
+    annotation = annotations.get_object()[annotation_index].get_object()
+    target_reference = writer.pages[target_page_index].indirect_reference
+    if target_reference is None:
+        raise AssertionError("fixture target page has no indirect reference")
+    destination_arguments = [
+        NullObject() if value is None else FloatObject(value)
+        for value in arguments
+    ]
+    annotation.pop("/A", None)
+    annotation[NameObject("/Dest")] = ArrayObject(
+        [target_reference, NameObject(mode), *destination_arguments]
+    )
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def transform_point(
+    x: float, y: float, transform: list[float]
+) -> tuple[float, float]:
+    a, b, c, d, e, f = transform
+    return (a * x + c * y + e, b * x + d * y + f)
 
 
 def transform_rect(rect: object, transform: list[float]) -> list[float]:
@@ -634,6 +677,128 @@ class VirtualSpreadTests(unittest.TestCase):
                 destination_page_index(output_reader, first_link),
                 3,
             )
+
+    def test_internal_destination_modes_are_preserved_and_transformed(
+        self,
+    ) -> None:
+        cases = (
+            ("/Fit", ()),
+            ("/FitB", ()),
+            ("/XYZ", (30.0, 160.0, 1.25)),
+            ("/FitH", (160.0,)),
+            ("/FitBH", (160.0,)),
+            ("/FitV", (30.0,)),
+            ("/FitBV", (30.0,)),
+            ("/FitR", (10.0, 20.0, 100.0, 160.0)),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, (mode, arguments) in enumerate(cases):
+                with self.subTest(mode=mode):
+                    source = root / f"source-{index}.pdf"
+                    output = root / f"spread-{index}.pdf"
+                    manifest_path = root / f"spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    set_link_destination_mode(
+                        source,
+                        source_page_index=1,
+                        annotation_index=0,
+                        target_page_index=5,
+                        mode=mode,
+                        arguments=arguments,
+                    )
+
+                    manifest = build_virtual_spread(
+                        source,
+                        output,
+                        manifest_path,
+                        direction="rtl",
+                        cover_separate=True,
+                    )
+                    reader = PdfReader(str(output), strict=True)
+                    source_mapping = manifest["sourcePages"][1]
+                    target_mapping = manifest["sourcePages"][5]
+                    annotation = reader.pages[
+                        source_mapping["virtualPageIndex"]
+                    ]["/Annots"].get_object()[0].get_object()
+                    destination = annotation["/Dest"]
+
+                    self.assertEqual(str(destination[1]), mode)
+                    self.assertEqual(
+                        destination_page_index(reader, annotation),
+                        target_mapping["virtualPageIndex"],
+                    )
+                    transform = target_mapping["transform"]
+                    if mode in {"/Fit", "/FitB"}:
+                        self.assertEqual(len(destination), 2)
+                    elif mode == "/XYZ":
+                        expected_left, expected_top = transform_point(
+                            arguments[0], arguments[1], transform
+                        )
+                        self.assertAlmostEqual(
+                            float(destination[2]), expected_left, places=4
+                        )
+                        self.assertAlmostEqual(
+                            float(destination[3]), expected_top, places=4
+                        )
+                        self.assertAlmostEqual(
+                            float(destination[4]), arguments[2], places=4
+                        )
+                    elif mode in {"/FitH", "/FitBH"}:
+                        _, expected_top = transform_point(
+                            0.0, arguments[0], transform
+                        )
+                        self.assertAlmostEqual(
+                            float(destination[2]), expected_top, places=4
+                        )
+                    elif mode in {"/FitV", "/FitBV"}:
+                        expected_left, _ = transform_point(
+                            arguments[0], 0.0, transform
+                        )
+                        self.assertAlmostEqual(
+                            float(destination[2]), expected_left, places=4
+                        )
+                    elif mode == "/FitR":
+                        expected_rectangle = transform_rect(
+                            arguments, transform
+                        )
+                        for actual, expected in zip(
+                            destination[2:6], expected_rectangle
+                        ):
+                            self.assertAlmostEqual(
+                                float(actual), expected, places=4
+                            )
+
+    def test_unsupported_internal_destination_mode_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_destination_mode(
+                source,
+                source_page_index=1,
+                annotation_index=0,
+                target_page_index=5,
+                mode="/FitWindow",
+                arguments=(),
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Unsupported internal destination mode: /FitWindow",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    direction="rtl",
+                    cover_separate=True,
+                )
+
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
 
     def test_non_finite_spread_geometry_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

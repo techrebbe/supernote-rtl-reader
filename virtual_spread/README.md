@@ -17,8 +17,11 @@ screen. Source pages are fitted independently into fixed left and right slots,
 so unusual source page sizes cannot change the reader's navigation surface.
 Content streams remain vector/text PDF content rather than page screenshots.
 Supported internal and URI links, including indirect destination arrays, are
-copied with transformed hit rectangles; internal destinations are remapped to
-their virtual spread page. A JSON manifest records every source-page affine
+copied with transformed hit rectangles. Internal `/Fit`, `/FitB`, `/XYZ`,
+`/FitH`, `/FitBH`, `/FitV`, `/FitBV`, and `/FitR` destinations retain their
+mode while coordinate parameters are transformed into the target spread;
+unknown modes and rotation-dependent partial coordinates fail closed instead of
+silently degrading to `/Fit`. A JSON manifest records every source-page affine
 transform and target half.
 
 ## Reproducible Python environment

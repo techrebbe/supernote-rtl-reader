@@ -25,6 +25,7 @@ from pypdf.generic import (
     FloatObject,
     IndirectObject,
     NameObject,
+    NullObject,
     NumberObject,
     TextStringObject,
 )
@@ -471,11 +472,10 @@ def _transform_rect(rect: Iterable[Any], transform: list[float]) -> ArrayObject:
     )
 
 
-def _destination_source_page(
+def _resolved_destination_array(
     reader: PdfReader,
     destination: Any,
-    page_ref_to_index: dict[tuple[int, int], int],
-) -> int | None:
+) -> ArrayObject:
     if isinstance(destination, IndirectObject):
         destination = destination.get_object()
     if isinstance(destination, (str, TextStringObject, NameObject)):
@@ -483,11 +483,145 @@ def _destination_source_page(
         named = reader.named_destinations
         for name in names:
             if name in named:
-                return reader.get_destination_page_number(named[name])
+                return named[name].dest_array
+        raise VirtualSpreadError(
+            f"Cannot resolve named internal destination: {destination}"
+        )
+    if isinstance(destination, (list, ArrayObject)) and len(destination) >= 2:
+        return ArrayObject(destination)
+    raise VirtualSpreadError("Internal link destination is not a valid array")
+
+
+def _destination_source_page(
+    destination: ArrayObject,
+    page_ref_to_index: dict[tuple[int, int], int],
+) -> int | None:
+    return page_ref_to_index.get(_page_ref_key(destination[0]))
+
+
+def _destination_number(value: Any, label: str) -> float | None:
+    if isinstance(value, NullObject):
         return None
-    if isinstance(destination, (list, ArrayObject)) and destination:
-        return page_ref_to_index.get(_page_ref_key(destination[0]))
-    return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise VirtualSpreadError(
+            f"Invalid internal destination {label}"
+        ) from error
+    if not math.isfinite(number):
+        raise VirtualSpreadError(f"Invalid internal destination {label}")
+    return number
+
+
+def _destination_object(value: float | None) -> FloatObject | NullObject:
+    return NullObject() if value is None else FloatObject(value)
+
+
+def _transformed_internal_destination(
+    destination: ArrayObject,
+    target_reference: IndirectObject,
+    target_mapping: dict[str, Any],
+) -> ArrayObject:
+    mode = str(destination[1])
+    transform = [float(value) for value in target_mapping["transform"]]
+    if len(transform) != 6 or any(
+        not math.isfinite(value) for value in transform
+    ):
+        raise VirtualSpreadError("Invalid internal destination transform")
+    a, b, c, d, e, f = transform
+    tolerance = 1e-12
+
+    if mode in {"/Fit", "/FitB"}:
+        if len(destination) != 2:
+            raise VirtualSpreadError(
+                f"Invalid internal destination parameters for {mode}"
+            )
+        return ArrayObject([target_reference, NameObject(mode)])
+
+    if mode == "/XYZ":
+        if len(destination) != 5:
+            raise VirtualSpreadError(
+                "Invalid internal destination parameters for /XYZ"
+            )
+        left = _destination_number(destination[2], "/XYZ left")
+        top = _destination_number(destination[3], "/XYZ top")
+        zoom = _destination_number(destination[4], "/XYZ zoom")
+        if left is not None and top is not None:
+            transformed_left = a * left + c * top + e
+            transformed_top = b * left + d * top + f
+        else:
+            if left is not None and abs(b) > tolerance:
+                raise VirtualSpreadError(
+                    "Cannot preserve partial /XYZ through page rotation"
+                )
+            if top is not None and abs(c) > tolerance:
+                raise VirtualSpreadError(
+                    "Cannot preserve partial /XYZ through page rotation"
+                )
+            transformed_left = None if left is None else a * left + e
+            transformed_top = None if top is None else d * top + f
+        return ArrayObject(
+            [
+                target_reference,
+                NameObject(mode),
+                _destination_object(transformed_left),
+                _destination_object(transformed_top),
+                _destination_object(zoom),
+            ]
+        )
+
+    if mode in {"/FitH", "/FitBH"}:
+        if len(destination) != 3 or abs(b) > tolerance:
+            raise VirtualSpreadError(
+                f"Cannot preserve internal destination mode {mode}"
+            )
+        top = _destination_number(destination[2], f"{mode} top")
+        transformed_top = None if top is None else d * top + f
+        return ArrayObject(
+            [
+                target_reference,
+                NameObject(mode),
+                _destination_object(transformed_top),
+            ]
+        )
+
+    if mode in {"/FitV", "/FitBV"}:
+        if len(destination) != 3 or abs(c) > tolerance:
+            raise VirtualSpreadError(
+                f"Cannot preserve internal destination mode {mode}"
+            )
+        left = _destination_number(destination[2], f"{mode} left")
+        transformed_left = None if left is None else a * left + e
+        return ArrayObject(
+            [
+                target_reference,
+                NameObject(mode),
+                _destination_object(transformed_left),
+            ]
+        )
+
+    if mode == "/FitR":
+        if len(destination) != 6:
+            raise VirtualSpreadError(
+                "Invalid internal destination parameters for /FitR"
+            )
+        rectangle = [
+            _destination_number(value, "/FitR rectangle")
+            for value in destination[2:6]
+        ]
+        if any(value is None for value in rectangle):
+            raise VirtualSpreadError("Invalid /FitR destination rectangle")
+        left, bottom, right, top = rectangle
+        if left > right or bottom > top:
+            raise VirtualSpreadError("Invalid /FitR destination rectangle")
+        transformed = _transform_rect(rectangle, transform)
+        return ArrayObject(
+            [target_reference, NameObject(mode), *transformed]
+        )
+
+    raise VirtualSpreadError(
+        f"Unsupported internal destination mode: {mode}"
+    )
 
 
 def _attach_annotation(
@@ -576,8 +710,9 @@ def _copy_link_annotation(
 
     if destination is None:
         raise VirtualSpreadError("Link annotation has neither /Dest nor /A")
+    resolved_destination = _resolved_destination_array(reader, destination)
     target_source_page = _destination_source_page(
-        reader, destination, page_ref_to_index
+        resolved_destination, page_ref_to_index
     )
     if target_source_page is None or target_source_page not in source_mapping:
         raise VirtualSpreadError(
@@ -588,8 +723,10 @@ def _copy_link_annotation(
     target_reference = writer.pages[target_output_page].indirect_reference
     if target_reference is None:
         raise VirtualSpreadError("Output page has no indirect reference")
-    copied[NameObject("/Dest")] = ArrayObject(
-        [target_reference, NameObject("/Fit")]
+    copied[NameObject("/Dest")] = _transformed_internal_destination(
+        resolved_destination,
+        target_reference,
+        target,
     )
     copied[NameObject("/SNTargetSourcePage")] = NumberObject(
         target_source_page

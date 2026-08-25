@@ -2057,6 +2057,52 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertFalse(output.exists())
             self.assertFalse(manifest_path.exists())
 
+    def test_transformed_rectangle_collapse_fails_closed(self) -> None:
+        source_rectangle = ArrayObject([
+            FloatObject(0.0),
+            FloatObject(0.0),
+            FloatObject(1.0),
+            FloatObject(1.0),
+        ])
+        collapsed_transform = [
+            1e-17, 0.0, 0.0, 1.0, 432.0, 0.0
+        ]
+        with self.assertRaisesRegex(
+            VirtualSpreadError,
+            "Invalid transformed link annotation /Rect ordering",
+        ):
+            _transform_rect(source_rectangle, collapsed_transform)
+
+        with self.assertRaisesRegex(
+            VirtualSpreadError,
+            "Link rectangle is not representable by Android runtime floats",
+        ):
+            _require_runtime_float_rect(
+                [432.0, 0.0, 432.0, 1.0], 648.0
+            )
+
+        writer = PdfWriter()
+        target_reference = writer._add_object(DictionaryObject())
+        fit_rectangle = ArrayObject([
+            NullObject(),
+            NameObject("/FitR"),
+            FloatObject(0.0),
+            FloatObject(0.0),
+            FloatObject(1.0),
+            FloatObject(1.0),
+        ])
+        with self.assertRaisesRegex(
+            VirtualSpreadError,
+            "Invalid transformed internal destination /FitR rectangle "
+            "ordering",
+        ):
+            _transformed_internal_destination(
+                fit_rectangle,
+                target_reference,
+                {"transform": [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]},
+                {"transform": collapsed_transform},
+            )
+
     def test_visible_link_border_and_highlight_are_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

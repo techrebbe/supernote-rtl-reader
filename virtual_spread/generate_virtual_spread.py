@@ -339,11 +339,11 @@ def _require_runtime_float_rect(
         or narrowed_height <= 0.0
         or not math.isfinite(runtime_top_y0)
         or not math.isfinite(runtime_top_y1)
-        or x0 > x1
-        or y0 > y1
-        or (x0 < x1 and narrowed_x0 >= narrowed_x1)
-        or (y0 < y1 and narrowed_y0 >= narrowed_y1)
-        or (y0 < y1 and runtime_top_y0 >= runtime_top_y1)
+        or x0 >= x1
+        or y0 >= y1
+        or narrowed_x0 >= narrowed_x1
+        or narrowed_y0 >= narrowed_y1
+        or runtime_top_y0 >= runtime_top_y1
     ):
         raise VirtualSpreadError(
             "Link rectangle is not representable by Android runtime floats"
@@ -663,12 +663,18 @@ def _transform_finite_rectangle(
         for coordinate in point
     ):
         raise VirtualSpreadError(f"Invalid transformed {label}")
+    transformed_left = min(point[0] for point in points)
+    transformed_bottom = min(point[1] for point in points)
+    transformed_right = max(point[0] for point in points)
+    transformed_top = max(point[1] for point in points)
+    if transformed_left >= transformed_right or transformed_bottom >= transformed_top:
+        raise VirtualSpreadError(f"Invalid transformed {label} ordering")
     return ArrayObject(
         [
-            FloatObject(min(point[0] for point in points)),
-            FloatObject(min(point[1] for point in points)),
-            FloatObject(max(point[0] for point in points)),
-            FloatObject(max(point[1] for point in points)),
+            FloatObject(transformed_left),
+            FloatObject(transformed_bottom),
+            FloatObject(transformed_right),
+            FloatObject(transformed_top),
         ]
     )
 

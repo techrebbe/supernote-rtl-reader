@@ -812,6 +812,14 @@ cover `/Border` radii/width/dashes, `/BS` width/dashes, and `/XYZ` zoom, bringin
 the generator suite to 80 tests on Windows and Linux. These semantic guards do
 not change the v0.0.15 hardware-smoke pair, which regenerates byte-identically.
 
+A thirty-sixth review pass requires strict positive area immediately after every
+shared rectangle transform and again at the Android float boundary. A valid
+source link or `/FitR` rectangle whose endpoints collapse under scale and slot
+translation can no longer be published as an unclickable zero-width or zero-
+height region. The regression exercises the translated double-precision collapse,
+the runtime defense, and the shared `/FitR` path, bringing the generator suite to
+81 tests on Windows and Linux. The hardware-smoke pair remains byte-identical.
+
 ## v0.0.15 focused hardware smoke - PASS
 
 A fresh pair was generated from `VS-Link-Target-Sides-source.pdf` with the

@@ -51,6 +51,8 @@ from generate_virtual_spread import (  # noqa: E402
     _publication_artifacts,
     _publication_lock,
     _transform_rect,
+    _transform_link_border,
+    _transform_link_border_style,
     _publication_lock_path,
     _prepare_publication_transaction,
     _recover_pair_publication,
@@ -1574,6 +1576,66 @@ class VirtualSpreadTests(unittest.TestCase):
                         target_mapping,
                     )
 
+    def test_xyz_zoom_underflow_and_negative_values_fail_closed(self) -> None:
+        writer = PdfWriter()
+        target_reference = writer._add_object(DictionaryObject())
+        source_mapping = {
+            "transform": [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+        }
+        underflow_mapping = {
+            "transform": [1e308, 0.0, 0.0, 1e308, 0.0, 0.0]
+        }
+        underflow_destination = ArrayObject([
+            NullObject(),
+            NameObject("/XYZ"),
+            FloatObject(0.0),
+            FloatObject(0.0),
+            FloatObject(1e-320),
+        ])
+        with self.assertRaisesRegex(
+            VirtualSpreadError,
+            "Invalid transformed internal destination /XYZ zoom",
+        ):
+            _transformed_internal_destination(
+                underflow_destination,
+                target_reference,
+                source_mapping,
+                underflow_mapping,
+            )
+
+        zero_destination = ArrayObject([
+            NullObject(),
+            NameObject("/XYZ"),
+            FloatObject(0.0),
+            FloatObject(0.0),
+            FloatObject(0.0),
+        ])
+        transformed_zero = _transformed_internal_destination(
+            zero_destination,
+            target_reference,
+            source_mapping,
+            underflow_mapping,
+        )
+        self.assertEqual(float(transformed_zero[4]), 0.0)
+
+        negative_destination = ArrayObject([
+            NullObject(),
+            NameObject("/XYZ"),
+            NullObject(),
+            NullObject(),
+            FloatObject(-1.0),
+        ])
+        with self.assertRaisesRegex(
+            VirtualSpreadError,
+            "Invalid internal destination /XYZ zoom",
+        ):
+            _transformed_internal_destination(
+                negative_destination,
+                target_reference,
+                source_mapping,
+                source_mapping,
+            )
+
     def test_null_destination_coordinates_survive_matching_transform(
         self,
     ) -> None:
@@ -2065,6 +2127,94 @@ class VirtualSpreadTests(unittest.TestCase):
                 border_style["/D"], (3.0 * scale, 1.0 * scale)
             ):
                 self.assertAlmostEqual(float(actual), expected, places=4)
+
+    def test_transformed_border_measures_must_remain_representable(
+        self,
+    ) -> None:
+        overflow_transform = [
+            1e308, 0.0, 0.0, 1e308, 0.0, 0.0
+        ]
+        underflow_transform = [
+            1e-320, 0.0, 0.0, 1e-320, 0.0, 0.0
+        ]
+        large = FloatObject(2.0)
+        small = FloatObject(1e-10)
+        zero = FloatObject(0.0)
+        cases = (
+            (
+                "border radius overflow",
+                _transform_link_border,
+                DictionaryObject({
+                    NameObject("/Border"): ArrayObject([
+                        large, large, zero
+                    ])
+                }),
+                overflow_transform,
+            ),
+            (
+                "border radius underflow",
+                _transform_link_border,
+                DictionaryObject({
+                    NameObject("/Border"): ArrayObject([
+                        small, small, zero
+                    ])
+                }),
+                underflow_transform,
+            ),
+            (
+                "border width overflow",
+                _transform_link_border,
+                DictionaryObject({
+                    NameObject("/Border"): ArrayObject([
+                        zero, zero, large
+                    ])
+                }),
+                overflow_transform,
+            ),
+            (
+                "border dash underflow",
+                _transform_link_border,
+                DictionaryObject({
+                    NameObject("/Border"): ArrayObject([
+                        zero,
+                        zero,
+                        zero,
+                        ArrayObject([small]),
+                    ])
+                }),
+                underflow_transform,
+            ),
+            (
+                "border-style width overflow",
+                _transform_link_border_style,
+                DictionaryObject({
+                    NameObject("/BS"): DictionaryObject({
+                        NameObject("/S"): NameObject("/S"),
+                        NameObject("/W"): large,
+                    })
+                }),
+                overflow_transform,
+            ),
+            (
+                "border-style dash underflow",
+                _transform_link_border_style,
+                DictionaryObject({
+                    NameObject("/BS"): DictionaryObject({
+                        NameObject("/S"): NameObject("/D"),
+                        NameObject("/W"): zero,
+                        NameObject("/D"): ArrayObject([small]),
+                    })
+                }),
+                underflow_transform,
+            ),
+        )
+        for label, transform_function, annotation, transform in cases:
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Invalid transformed link annotation",
+                ):
+                    transform_function(annotation, transform)
 
     def test_malformed_link_border_or_highlight_fails_closed(self) -> None:
         cases = (

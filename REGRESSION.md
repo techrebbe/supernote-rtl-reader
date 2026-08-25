@@ -801,6 +801,17 @@ publish infinity or NaN through `/XYZ`, `/FitH`, `/FitBH`, `/FitV`, or `/FitBV`.
 Direct overflow subtests exercise the shared guard through all three calculation
 paths and bring the generator suite to 78 tests on Windows and Linux.
 
+A thirty-fifth review pass applies the same fail-closed representability rule to
+all transformed link-border geometry. Every radius contribution, border width,
+border-style width, and dash measurement must remain finite after scaling, and a
+positive source measurement may not collapse to zero. The `/XYZ` destination
+path now likewise rejects a positive explicit zoom that underflows to zero while
+preserving a literal zero as PDF's intentional "retain current zoom" value;
+negative zoom operands fail closed. Direct overflow and underflow regressions
+cover `/Border` radii/width/dashes, `/BS` width/dashes, and `/XYZ` zoom, bringing
+the generator suite to 80 tests on Windows and Linux. These semantic guards do
+not change the v0.0.15 hardware-smoke pair, which regenerates byte-identically.
+
 ## v0.0.15 focused hardware smoke - PASS
 
 A fresh pair was generated from `VS-Link-Target-Sides-source.pdf` with the

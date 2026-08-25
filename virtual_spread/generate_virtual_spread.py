@@ -1005,6 +1005,35 @@ def _border_transform(
     return a, b, c, d, scale_x
 
 
+def _transform_nonnegative_measure_sum(
+    components: tuple[tuple[float, float], ...],
+    label: str,
+) -> float:
+    """Scale nonnegative PDF measures without changing their semantics."""
+    transformed = 0.0
+    has_positive_contribution = False
+    for value, factor in components:
+        if (
+            not math.isfinite(value)
+            or value < 0.0
+            or not math.isfinite(factor)
+            or factor < 0.0
+        ):
+            raise VirtualSpreadError(f"Invalid transformed {label}")
+        contribution = value * factor
+        if not math.isfinite(contribution) or (
+            value > 0.0 and factor > 0.0 and contribution <= 0.0
+        ):
+            raise VirtualSpreadError(f"Invalid transformed {label}")
+        transformed += contribution
+        if not math.isfinite(transformed):
+            raise VirtualSpreadError(f"Invalid transformed {label}")
+        has_positive_contribution |= value > 0.0 and factor > 0.0
+    if has_positive_contribution and transformed <= 0.0:
+        raise VirtualSpreadError(f"Invalid transformed {label}")
+    return transformed
+
+
 def _pdf_number_array(
     value: Any,
     label: str,
@@ -1045,13 +1074,24 @@ def _transform_link_border(
     )
     horizontal_radius, vertical_radius, width = radii_and_width
     copied = ArrayObject([
-        FloatObject(
-            abs(a) * horizontal_radius + abs(c) * vertical_radius
-        ),
-        FloatObject(
-            abs(b) * horizontal_radius + abs(d) * vertical_radius
-        ),
-        FloatObject(width * scale),
+        FloatObject(_transform_nonnegative_measure_sum(
+            (
+                (horizontal_radius, abs(a)),
+                (vertical_radius, abs(c)),
+            ),
+            "link annotation /Border horizontal radius",
+        )),
+        FloatObject(_transform_nonnegative_measure_sum(
+            (
+                (horizontal_radius, abs(b)),
+                (vertical_radius, abs(d)),
+            ),
+            "link annotation /Border vertical radius",
+        )),
+        FloatObject(_transform_nonnegative_measure_sum(
+            ((width, scale),),
+            "link annotation /Border width",
+        )),
     ])
     if len(border) == 4:
         dash = _pdf_number_array(
@@ -1064,7 +1104,13 @@ def _transform_link_border(
                 "Invalid link annotation /Border dash value"
             )
         copied.append(
-            ArrayObject(FloatObject(value * scale) for value in dash)
+            ArrayObject(
+                FloatObject(_transform_nonnegative_measure_sum(
+                    ((value, scale),),
+                    "link annotation /Border dash",
+                ))
+                for value in dash
+            )
         )
     return copied
 
@@ -1114,7 +1160,10 @@ def _transform_link_border_style(
         raise VirtualSpreadError("Invalid link annotation /BS /W")
     copied = DictionaryObject({
         NameObject("/Type"): NameObject("/Border"),
-        NameObject("/W"): FloatObject(width * scale),
+        NameObject("/W"): FloatObject(_transform_nonnegative_measure_sum(
+            ((width, scale),),
+            "link annotation /BS /W",
+        )),
         NameObject("/S"): style_name,
     })
     if "/D" in style or style_name == "/D":
@@ -1129,7 +1178,11 @@ def _transform_link_border_style(
         if dash and all(value == 0.0 for value in dash):
             raise VirtualSpreadError("Invalid link annotation /BS /D")
         copied[NameObject("/D")] = ArrayObject(
-            FloatObject(value * scale) for value in dash
+            FloatObject(_transform_nonnegative_measure_sum(
+                ((value, scale),),
+                "link annotation /BS /D",
+            ))
+            for value in dash
         )
     return copied
 
@@ -1372,6 +1425,10 @@ def _transformed_internal_destination(
         left = _destination_number(destination[2], "/XYZ left")
         top = _destination_number(destination[3], "/XYZ top")
         zoom = _destination_number(destination[4], "/XYZ zoom")
+        if zoom is not None and zoom < 0.0:
+            raise VirtualSpreadError(
+                "Invalid internal destination /XYZ zoom"
+            )
         if left is None and not _destination_axis_is_preserved(
             source_transform, transform, "x"
         ):
@@ -1402,7 +1459,9 @@ def _transformed_internal_destination(
         if zoom is not None:
             scale = _destination_uniform_scale(transform, "/XYZ zoom")
             transformed_zoom = zoom / scale
-            if not math.isfinite(transformed_zoom):
+            if not math.isfinite(transformed_zoom) or (
+                zoom > 0.0 and transformed_zoom <= 0.0
+            ):
                 raise VirtualSpreadError(
                     "Invalid transformed internal destination /XYZ zoom"
                 )

@@ -1065,6 +1065,26 @@ The exact-head CI gate independently runs the generator suite on Linux. Focused
 hardware validation of native metadata lookup and same-path replacement remains
 pending.
 
+## Review pass 46 portrait link viewport and bounded cache - AUTOMATED PASS
+
+The independent full-diff review of v0.0.22 found two process-lifetime edge
+cases. A portrait internal link with an authenticated explicit `/XYZ` or `/FitR`
+destination could have Supernote's native viewport overwritten by the module's
+ordinary half-edge focus. v0.0.23 preserves that native destination view and
+binds every delayed portrait-focus retry to the page-load generation, so an old
+retry cannot move a newer link target. The process-wide manifest cache is now a
+synchronized four-entry access-order LRU rather than an unbounded map.
+
+Local automated validation passes 86 generator tests on Windows (five expected
+filesystem skips), 112 focused navigation/manifest/cache assertions, 12
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both invariant suites, hook-scope validation, and the signed/verified v0.0.23
+(`versionCode=23`) APK build (SHA-256
+`59457392533e6428e5c943eaa2f0c600afe67591041af6595c263e9bd917a9df`).
+The exact-head CI gate independently runs the generator suite on Linux. Focused
+hardware validation of same-path replacement and preserved portrait explicit
+link viewports remains pending.
+
 ## Failure capture
 
 Before reproducing a failure:

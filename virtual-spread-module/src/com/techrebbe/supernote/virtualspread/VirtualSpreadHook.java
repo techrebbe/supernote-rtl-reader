@@ -57,15 +57,20 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final String SCHEMA =
         "techrebbe.supernote.virtual-spread/v1";
     private static final String TAG = "SN_VIRTUAL_SPREAD";
-    private static final String VERSION = "0.0.22";
+    private static final String VERSION = "0.0.23";
     private static final long MAX_MANIFEST_BYTES = 8L * 1024L * 1024L;
+    private static final int MAX_CACHED_MANIFESTS = 4;
 
     private static volatile WeakReference<Activity> activeActivity =
         new WeakReference<>(null);
     private static final Map<Object, ReaderState> STATES =
         new WeakHashMap<>();
-    private static final Map<String, CachedManifest> MANIFESTS =
-        new ConcurrentHashMap<>();
+    private static final VirtualSpreadNavigation.BoundedCache<
+        String,
+        CachedManifest
+    > MANIFESTS = new VirtualSpreadNavigation.BoundedCache<>(
+        MAX_CACHED_MANIFESTS
+    );
     private static final Map<String, String> VERIFYING =
         new ConcurrentHashMap<>();
     private static final ExecutorService MANIFEST_VERIFIER =
@@ -829,10 +834,23 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
 
         Activity activity = activeActivity.get();
         boolean portrait = isPortrait(activity);
+        boolean internalLinkTarget = "internal_link".equals(targetReason);
+        boolean preserveLinkViewport =
+            VirtualSpreadNavigation.shouldPreservePortraitLinkViewport(
+                internalLinkTarget,
+                resetLandscapeFit
+            );
+        boolean resetSelectedLinkLandscapeFit =
+            internalLinkTarget && resetLandscapeFit;
         if (portrait) {
-            focusHalf(viewModel, target, "page_loaded");
-            schedulePortraitFocus(viewModel, "page_loaded_retry");
-        } else if (resetLandscapeFit) {
+            if (preserveLinkViewport) {
+                log("portrait_link_view_preserved page=" + currentPage
+                    + " half=" + target);
+            } else {
+                focusHalf(viewModel, target, "page_loaded");
+                schedulePortraitFocus(viewModel, "page_loaded_retry");
+            }
+        } else if (resetSelectedLinkLandscapeFit) {
             scheduleConfigurationRefresh(
                 activity,
                 viewModel,
@@ -842,7 +860,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         log("page_loaded page=" + currentPage + " portrait="
             + portrait + " target_half=" + target
             + " reason=" + targetReason
-            + " reset_landscape_fit=" + resetLandscapeFit);
+            + " reset_landscape_fit=" + resetSelectedLinkLandscapeFit
+            + " preserve_link_viewport=" + preserveLinkViewport);
     }
 
     private static void schedulePortraitFocus(
@@ -856,6 +875,16 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         if (owner == null) {
             return;
         }
+        final Manifest scheduledManifest = manifestFor(viewModel);
+        if (scheduledManifest == null) {
+            return;
+        }
+        final ReaderState scheduledState = stateFor(
+            viewModel,
+            scheduledManifest
+        );
+        final long scheduledGeneration =
+            scheduledState.pageLoadGeneration;
         final Handler handler = new Handler(owner.getMainLooper());
         final long[] delays = new long[] {0L, 120L, 360L};
         for (final long delay : delays) {
@@ -871,6 +900,12 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                         return;
                     }
                     ReaderState state = stateFor(viewModel, manifest);
+                    if (state != scheduledState
+                        || state.pageLoadGeneration
+                            != scheduledGeneration) {
+                        log("portrait_focus_skipped reason=native_reload");
+                        return;
+                    }
                     int currentPage = intField(viewModel, "currentPage", -1);
                     if (state.lastPage != currentPage) {
                         state.lastPage = currentPage;

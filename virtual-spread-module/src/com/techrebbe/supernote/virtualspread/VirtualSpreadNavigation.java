@@ -6,9 +6,69 @@ import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Objects;
 
 /** Pure, device-independent RTL half-page navigation. */
 public final class VirtualSpreadNavigation {
+    /** Small synchronized access-order cache for process-lifetime metadata. */
+    public static final class BoundedCache<K, V> {
+        private final int maximumEntries;
+        private final LinkedHashMap<K, V> values =
+            new LinkedHashMap<K, V>(16, 0.75f, true);
+
+        public BoundedCache(int maximumEntries) {
+            if (maximumEntries <= 0) {
+                throw new IllegalArgumentException(
+                    "maximumEntries must be positive"
+                );
+            }
+            this.maximumEntries = maximumEntries;
+        }
+
+        public synchronized V get(K key) {
+            return values.get(key);
+        }
+
+        public synchronized V put(K key, V value) {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(value, "value");
+            V previous = values.put(key, value);
+            while (values.size() > maximumEntries) {
+                Map.Entry<K, V> eldest =
+                    values.entrySet().iterator().next();
+                values.remove(eldest.getKey());
+            }
+            return previous;
+        }
+
+        public synchronized V remove(K key) {
+            return values.remove(key);
+        }
+
+        public synchronized boolean remove(K key, V expected) {
+            Iterator<Map.Entry<K, V>> entries =
+                values.entrySet().iterator();
+            while (entries.hasNext()) {
+                Map.Entry<K, V> entry = entries.next();
+                if (Objects.equals(entry.getKey(), key)) {
+                    if (!Objects.equals(entry.getValue(), expected)) {
+                        return false;
+                    }
+                    entries.remove();
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public synchronized int size() {
+            return values.size();
+        }
+    }
+
     public enum Half {
         LEFT,
         RIGHT
@@ -555,6 +615,14 @@ public final class VirtualSpreadNavigation {
 
     public static int reverseLandscapeOffset(int nativeOffset) {
         return -nativeOffset;
+    }
+
+    /** Preserve an authenticated explicit native viewport in portrait. */
+    public static boolean shouldPreservePortraitLinkViewport(
+        boolean internalLinkTarget,
+        boolean resetLandscapeFit
+    ) {
+        return internalLinkTarget && !resetLandscapeFit;
     }
 
     public static boolean manifestMatchesNativeSnapshot(

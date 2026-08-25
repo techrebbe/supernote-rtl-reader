@@ -66,8 +66,32 @@ focus_end = hook.find("private static void scheduleConfigurationRefresh", focus_
 if focus_start < 0 or focus_end < 0:
     raise SystemExit("missing portrait focus scheduler")
 portrait_focus = hook[focus_start:focus_end]
-if "activity != owner" not in portrait_focus:
-    raise SystemExit("portrait focus retries must not mutate a replaced activity")
+for required in (
+    "activity != owner",
+    "scheduledState.pageLoadGeneration",
+    "state.pageLoadGeneration",
+    'portrait_focus_skipped reason=native_reload',
+):
+    if required not in portrait_focus:
+        raise SystemExit(
+            f"portrait focus retry is missing fail-closed guard: {required}"
+        )
+
+page_loaded_start = hook.find("private static void handlePageLoaded")
+page_loaded_end = hook.find("private static void schedulePortraitFocus", page_loaded_start)
+if page_loaded_start < 0 or page_loaded_end < 0:
+    raise SystemExit("missing page-loaded viewport handling")
+page_loaded = hook[page_loaded_start:page_loaded_end]
+for required in (
+    "shouldPreservePortraitLinkViewport(",
+    '"internal_link".equals(targetReason)',
+    "if (preserveLinkViewport)",
+    'portrait_link_view_preserved',
+):
+    if required not in page_loaded:
+        raise SystemExit(
+            f"portrait internal-link viewport is not preserved: {required}"
+        )
 
 turn_start = hook.find("private static void handleTurn")
 turn_end = hook.find("private static void handlePageLoaded", turn_start)
@@ -310,12 +334,19 @@ if not (0 <= duplicate_guard < json_parse):
     )
 
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
-if 'android:versionCode="22"' not in manifest:
+if 'android:versionCode="23"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version code")
-if 'android:versionName="0.0.22"' not in manifest:
+if 'android:versionName="0.0.23"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
-if 'private static final String VERSION = "0.0.22"' not in hook:
+if 'private static final String VERSION = "0.0.23"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
+for required in (
+    "MAX_CACHED_MANIFESTS = 4",
+    "VirtualSpreadNavigation.BoundedCache<",
+    "MAX_CACHED_MANIFESTS",
+):
+    if required not in hook:
+        raise SystemExit(f"manifest cache is not bounded: {required}")
 for required in (
     "pendingLinkResetLandscapeFit",
     "matched.resetLandscapeFit",

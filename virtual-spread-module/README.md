@@ -19,7 +19,7 @@ It activates only when all of these are true:
   native MuPDF `Document` match the authenticated manifest; and
 - the known Supernote document firmware fingerprint and APK size match.
 
-v0.0.22 retains link-authority v2 and the v0.0.17 native-open snapshot
+v0.0.23 retains link-authority v2 and the v0.0.17 native-open snapshot
 binding. It first decodes the raw sidecar bytes with replacement disabled, so
 malformed UTF-8 fails closed even inside an otherwise ignored field. It requires
 exact JSON integer tokens for every consumed page count,
@@ -39,6 +39,13 @@ before using it with this module.
 If multiple tolerance-equivalent runtime link matches disagree on source half,
 target half, or authenticated target-view policy, the match also fails closed
 rather than selecting an order-dependent record.
+
+The process-wide manifest cache is a synchronized four-entry access-order LRU,
+so opening many distinct documents cannot retain every parsed manifest for the
+lifetime of the document process. In portrait, authenticated explicit `/XYZ`
+and `/FitR` internal-link destinations keep Supernote's native viewport rather
+than being shifted to a page edge. Delayed portrait-focus retries are bound to
+the page-load generation and cannot overwrite a newer native link destination.
 
 The manifest cache is content-authoritative but uses an identity-based fast
 path: every lookup captures both PDF and sidecar device, inode, size,

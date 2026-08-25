@@ -152,9 +152,9 @@ link fixture. The companion suite passes 55 focused navigation assertions, 10
 cross-language authority assertions, 8,752 exhaustive assertions, and the hook-
 scope guard.
 
-## v0.0.22 native-open snapshot binding - PENDING HARDWARE
+## v0.0.23 native-open snapshot binding and portrait viewport - PENDING HARDWARE
 
-Review passes 40-45 bind the authenticated sidecar to the actual PDF object
+Review passes 40-46 bind the authenticated sidecar to the actual PDF object
 retained inside Supernote's native reader and harden all transformed link,
 manifest, and page-box boundaries. The generator adds a descriptor-verified
 source-authority marker before the layout and link markers. The companion reads
@@ -169,20 +169,24 @@ outside its MediaBox, and link geometry outside the source CropBox, while scalin
 an omitted link border's PDF-default width.
 
 The local automated gate passes 86 generator tests on Windows (five expected
-platform skips), 99 focused navigation/manifest assertions, 12 cross-language
-authority assertions, 8,752 exhaustive navigation assertions, both native
-invariant suites, hook-scope validation, and the signed/verified v0.0.22
-(`versionCode=22`) APK build. CI independently runs the same generator suite on
+platform skips), 112 focused navigation/manifest/cache assertions, 12
+cross-language authority assertions, 8,752 exhaustive navigation assertions, both native
+invariant suites, hook-scope validation, and the signed/verified v0.0.23
+(`versionCode=23`) APK build (SHA-256
+`59457392533e6428e5c943eaa2f0c600afe67591041af6595c263e9bd917a9df`).
+CI independently runs the same generator suite on
 Linux without the Windows-only skips.
 
 The remaining focused Nomad gate is:
 
-1. cold-open a newly generated v0.0.22 pair and confirm normal activation;
+1. cold-open a newly generated v0.0.23 pair and confirm normal activation;
 2. replace the PDF/sidecar pair at the same path while the original PDF remains
    open and confirm the companion fails closed rather than applying the new
    mappings to stale native content;
 3. reopen the replacement and confirm its matching authorities activate; and
-4. confirm a sidecar-free ordinary PDF remains completely native.
+4. confirm a portrait explicit `/XYZ` or `/FitR` internal link retains its
+   native viewport rather than snapping to the destination page edge; and
+5. confirm a sidecar-free ordinary PDF remains completely native.
 
 ## Decision
 

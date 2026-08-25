@@ -1,4 +1,5 @@
 import com.techrebbe.supernote.virtualspread.VirtualSpreadNavigation;
+import com.techrebbe.supernote.virtualspread.VirtualSpreadNavigation.BoundedCache;
 import com.techrebbe.supernote.virtualspread.VirtualSpreadNavigation.Half;
 import com.techrebbe.supernote.virtualspread.VirtualSpreadNavigation.Kind;
 import com.techrebbe.supernote.virtualspread.VirtualSpreadNavigation.LinkHistory;
@@ -98,6 +99,86 @@ public final class VirtualSpreadNavigationTest {
             "landscape leftward gesture goes back",
             -1,
             VirtualSpreadNavigation.reverseLandscapeOffset(1)
+        );
+        assertBoolean(
+            "explicit portrait link viewport is preserved",
+            true,
+            VirtualSpreadNavigation.shouldPreservePortraitLinkViewport(
+                true,
+                false
+            )
+        );
+        assertBoolean(
+            "source-fit portrait link viewport is normalized",
+            false,
+            VirtualSpreadNavigation.shouldPreservePortraitLinkViewport(
+                true,
+                true
+            )
+        );
+        assertBoolean(
+            "ordinary page loads retain normal half focus",
+            false,
+            VirtualSpreadNavigation.shouldPreservePortraitLinkViewport(
+                false,
+                false
+            )
+        );
+
+        Object cacheA = new Object();
+        Object cacheB = new Object();
+        Object cacheC = new Object();
+        BoundedCache<String, Object> cache = new BoundedCache<>(2);
+        cache.put("a", cacheA);
+        cache.put("b", cacheB);
+        assertBoolean(
+            "manifest cache lookup returns exact value",
+            true,
+            cache.get("a") == cacheA
+        );
+        cache.put("c", cacheC);
+        assertBoolean(
+            "manifest cache refresh protects recent entry",
+            true,
+            cache.get("a") == cacheA
+        );
+        assertBoolean(
+            "manifest cache evicts least-recent entry",
+            true,
+            cache.get("b") == null
+        );
+        assertBoolean(
+            "manifest cache retains newest entry",
+            true,
+            cache.get("c") == cacheC
+        );
+        assertEquals("manifest cache remains bounded", 2, cache.size());
+        assertBoolean(
+            "conditional cache removal rejects stale value",
+            false,
+            cache.remove("a", cacheB)
+        );
+        assertBoolean(
+            "conditional cache removal preserves live value",
+            true,
+            cache.get("a") == cacheA
+        );
+        assertBoolean(
+            "conditional cache removal accepts exact value",
+            true,
+            cache.remove("a", cacheA)
+        );
+        assertEquals("conditional removal updates cache size", 1, cache.size());
+        boolean rejectedZeroCapacity = false;
+        try {
+            new BoundedCache<String, Object>(0);
+        } catch (IllegalArgumentException expected) {
+            rejectedZeroCapacity = true;
+        }
+        assertBoolean(
+            "manifest cache rejects zero capacity",
+            true,
+            rejectedZeroCapacity
         );
         assertPageBar(
             "landscape start",

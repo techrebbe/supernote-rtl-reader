@@ -235,6 +235,14 @@ for required in (
     "exactManifestInteger(",
     "VirtualSpreadNavigation.exactJsonInteger(",
     "exactNonnegativeJsonLong(",
+    "exactFiniteJsonNumber(",
+    'spreadSize.opt(0)',
+    'spreadSize.opt(1)',
+    'output.opt("gutter")',
+    'rect.opt(0)',
+    'rect.opt(1)',
+    'rect.opt(2)',
+    'rect.opt(3)',
     'manifest_rejected reason=manifest_integer',
     '"targetSourcePage"',
     'link.opt("targetView")',
@@ -248,7 +256,6 @@ for required in (
     "VirtualSpreadLinkAuthority.readPdfLayoutDigest(pdfInput)",
     "VirtualSpreadLinkAuthority.layout(",
     "VirtualSpreadLinkAuthority.layoutDigest(",
-    'output.optDouble("gutter", Double.NaN)',
     "VirtualSpreadLinkAuthority.uri(",
     "VirtualSpreadLinkAuthority.internal(",
     "VirtualSpreadLinkAuthority.digest(",
@@ -272,6 +279,8 @@ for required in (
 for forbidden in (
     "optInt(",
     "optLong(",
+    "optDouble(",
+    "getDouble(",
     "if (linksJson != null)",
     'link == null || !"internal".equals(link.optString("kind"))',
 ):
@@ -281,11 +290,11 @@ for forbidden in (
         )
 
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
-if 'android:versionCode="19"' not in manifest:
+if 'android:versionCode="20"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version code")
-if 'android:versionName="0.0.19"' not in manifest:
+if 'android:versionName="0.0.20"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
-if 'private static final String VERSION = "0.0.19"' not in hook:
+if 'private static final String VERSION = "0.0.20"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
 for required in (
     "pendingLinkResetLandscapeFit",

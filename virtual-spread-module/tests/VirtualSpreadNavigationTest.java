@@ -647,6 +647,61 @@ public final class VirtualSpreadNavigationTest {
             null,
             VirtualSpreadNavigation.exactNonnegativeJsonLong(null)
         );
+        assertNullableDouble(
+            "JSON Integer geometry is accepted",
+            Double.valueOf(17.0),
+            VirtualSpreadNavigation.exactFiniteJsonNumber(
+                Integer.valueOf(17)
+            )
+        );
+        assertNullableDouble(
+            "JSON Long geometry is accepted",
+            Double.valueOf(17.0),
+            VirtualSpreadNavigation.exactFiniteJsonNumber(
+                Long.valueOf(17L)
+            )
+        );
+        assertNullableDouble(
+            "JSON Double geometry is accepted",
+            Double.valueOf(17.5),
+            VirtualSpreadNavigation.exactFiniteJsonNumber(
+                Double.valueOf(17.5)
+            )
+        );
+        assertNullableDouble(
+            "numeric JSON geometry string is rejected",
+            null,
+            VirtualSpreadNavigation.exactFiniteJsonNumber("17.5")
+        );
+        assertNullableDouble(
+            "boolean JSON geometry is rejected",
+            null,
+            VirtualSpreadNavigation.exactFiniteJsonNumber(Boolean.TRUE)
+        );
+        assertNullableDouble(
+            "NaN JSON geometry is rejected",
+            null,
+            VirtualSpreadNavigation.exactFiniteJsonNumber(Double.NaN)
+        );
+        assertNullableDouble(
+            "positive infinite JSON geometry is rejected",
+            null,
+            VirtualSpreadNavigation.exactFiniteJsonNumber(
+                Double.POSITIVE_INFINITY
+            )
+        );
+        assertNullableDouble(
+            "negative infinite JSON geometry is rejected",
+            null,
+            VirtualSpreadNavigation.exactFiniteJsonNumber(
+                Double.NEGATIVE_INFINITY
+            )
+        );
+        assertNullableDouble(
+            "missing JSON geometry is rejected",
+            null,
+            VirtualSpreadNavigation.exactFiniteJsonNumber(null)
+        );
 
         String sourceAuthority =
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -789,6 +844,19 @@ public final class VirtualSpreadNavigationTest {
         String name,
         Long expected,
         Long actual
+    ) {
+        if (expected == null ? actual != null : !expected.equals(actual)) {
+            throw new AssertionError(
+                name + ": expected " + expected + " but got " + actual
+            );
+        }
+        assertions++;
+    }
+
+    private static void assertNullableDouble(
+        String name,
+        Double expected,
+        Double actual
     ) {
         if (expected == null ? actual != null : !expected.equals(actual)) {
             throw new AssertionError(

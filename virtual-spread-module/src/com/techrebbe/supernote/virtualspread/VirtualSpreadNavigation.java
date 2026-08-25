@@ -251,6 +251,15 @@ public final class VirtualSpreadNavigation {
         return candidate >= 0L ? Long.valueOf(candidate) : null;
     }
 
+    /** Accept only a finite raw JSON numeric token. */
+    public static Double exactFiniteJsonNumber(Object value) {
+        if (!(value instanceof Number)) {
+            return null;
+        }
+        double candidate = ((Number) value).doubleValue();
+        return finite(candidate) ? Double.valueOf(candidate) : null;
+    }
+
     public static int reverseLandscapeOffset(int nativeOffset) {
         return -nativeOffset;
     }

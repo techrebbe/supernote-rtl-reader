@@ -1006,6 +1006,23 @@ signed/verified v0.0.19 (`versionCode=19`) APK build (SHA-256
 Focused hardware validation of native metadata lookup and same-path replacement
 remains pending.
 
+## Review pass 43 exact geometry typing - AUTOMATED PASS
+
+The exact-head v0.0.19 review found that Android `JSONObject.optDouble()` could
+still coerce numeric strings in `output.spreadSize`, `output.gutter`, or a link
+`rect`. v0.0.20 reads every geometry token raw and accepts only finite JSON
+`Number` values. Strings, booleans, nulls, NaN, and either infinity fail closed
+before layout/link authority recomputation. The hook-scope invariant now bans
+`optDouble()` and `getDouble()` together with the integer coercion APIs.
+
+Automated validation passes 85 generator tests on Windows and Linux, 85 focused
+navigation/manifest assertions, 12 cross-language authority assertions, 8,752
+exhaustive assertions, both invariant suites, hook-scope validation, and the
+signed/verified v0.0.20 (`versionCode=20`) APK build (SHA-256
+`9740d4593ed2b2fb6598b0349adce43d1aa7bba5f879ca76320323a6e6bc0085`).
+Focused hardware validation of native metadata lookup and same-path replacement
+remains pending.
+
 ## Failure capture
 
 Before reproducing a failure:

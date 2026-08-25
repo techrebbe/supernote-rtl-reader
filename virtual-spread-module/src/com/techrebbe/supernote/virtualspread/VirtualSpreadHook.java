@@ -57,7 +57,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final String SCHEMA =
         "techrebbe.supernote.virtual-spread/v1";
     private static final String TAG = "SN_VIRTUAL_SPREAD";
-    private static final String VERSION = "0.0.19";
+    private static final String VERSION = "0.0.20";
     private static final long MAX_MANIFEST_BYTES = 8L * 1024L * 1024L;
 
     private static volatile WeakReference<Activity> activeActivity =
@@ -1625,9 +1625,20 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             log("manifest_rejected reason=output_geometry path=" + key);
             return null;
         }
-        double pageWidth = spreadSize.optDouble(0, Double.NaN);
-        double pageHeight = spreadSize.optDouble(1, Double.NaN);
-        double gutter = output.optDouble("gutter", Double.NaN);
+        Double pageWidthValue = VirtualSpreadNavigation
+            .exactFiniteJsonNumber(spreadSize.opt(0));
+        Double pageHeightValue = VirtualSpreadNavigation
+            .exactFiniteJsonNumber(spreadSize.opt(1));
+        Double gutterValue = VirtualSpreadNavigation
+            .exactFiniteJsonNumber(output.opt("gutter"));
+        if (pageWidthValue == null || pageHeightValue == null
+            || gutterValue == null) {
+            log("manifest_rejected reason=output_geometry path=" + key);
+            return null;
+        }
+        double pageWidth = pageWidthValue.doubleValue();
+        double pageHeight = pageHeightValue.doubleValue();
+        double gutter = gutterValue.doubleValue();
         if (!VirtualSpreadNavigation.runtimeGeometryIsRepresentable(
                 pageWidth, pageHeight, gutter)) {
             log("manifest_rejected reason=output_geometry path=" + key);
@@ -1732,10 +1743,23 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 log("manifest_rejected reason=link_mapping index=" + index);
                 return null;
             }
-            double x0 = rect.optDouble(0, Double.NaN);
-            double y0 = rect.optDouble(1, Double.NaN);
-            double x1 = rect.optDouble(2, Double.NaN);
-            double y1 = rect.optDouble(3, Double.NaN);
+            Double x0Value = VirtualSpreadNavigation
+                .exactFiniteJsonNumber(rect.opt(0));
+            Double y0Value = VirtualSpreadNavigation
+                .exactFiniteJsonNumber(rect.opt(1));
+            Double x1Value = VirtualSpreadNavigation
+                .exactFiniteJsonNumber(rect.opt(2));
+            Double y1Value = VirtualSpreadNavigation
+                .exactFiniteJsonNumber(rect.opt(3));
+            if (x0Value == null || y0Value == null
+                || x1Value == null || y1Value == null) {
+                log("manifest_rejected reason=link_rect index=" + index);
+                return null;
+            }
+            double x0 = x0Value.doubleValue();
+            double y0 = y0Value.doubleValue();
+            double x1 = x1Value.doubleValue();
+            double y1 = y1Value.doubleValue();
             if (!VirtualSpreadNavigation.runtimeRectIsRepresentable(
                     pageHeight, x0, y0, x1, y1)) {
                 log("manifest_rejected reason=link_rect index=" + index);

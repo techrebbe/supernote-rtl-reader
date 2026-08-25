@@ -961,6 +961,33 @@ Automated validation passes:
 Focused hardware validation of native metadata lookup and same-path replacement
 fail-closed behavior remains pending.
 
+## Review pass 41 transformed-link and manifest typing - AUTOMATED PASS
+
+The exact-head draft review identified four additional semantic-preservation
+boundaries. v0.0.18 now rejects URI `/IsMap true`, because a viewer would append
+coordinates from the transformed spread rather than the source page. Link
+`/Rect` and `/QuadPoints` geometry must remain wholly inside the effective source
+CropBox so hidden source interactions cannot become visible after composition.
+When both `/Border` and `/BS` are absent, the generator materializes PDF's
+implicit `[0 0 1]` border with the transformed width. Finally, the Android
+manifest parser accepts only actual JSON Integer or in-range Long tokens for
+every consumed page count and page index; strings and floating-point values no
+longer coerce or truncate into valid mappings.
+
+Automated validation passes:
+
+- 85 generator tests on Windows, with five expected filesystem skips;
+- the same 85 tests on Linux with no skips;
+- 68 focused navigation and manifest-typing assertions;
+- 12 cross-language PDF-authority assertions;
+- 8,752 exhaustive navigation assertions;
+- both native invariant suites and hook-scope validation; and
+- signed APK verification for v0.0.18 (`versionCode=18`) using v2/v3 schemes
+  (SHA-256 `08576673386430ba8ce38c35c314e5a1d04ce2bfd517bbbe422da69675eec92c`).
+
+Focused hardware validation of native metadata lookup and same-path replacement
+fail-closed behavior remains pending.
+
 ## Failure capture
 
 Before reproducing a failure:

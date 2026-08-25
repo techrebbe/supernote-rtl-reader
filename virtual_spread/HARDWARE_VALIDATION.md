@@ -152,25 +152,26 @@ link fixture. The companion suite passes 55 focused navigation assertions, 10
 cross-language authority assertions, 8,752 exhaustive assertions, and the hook-
 scope guard.
 
-## v0.0.17 native-open snapshot binding - PENDING HARDWARE
+## v0.0.18 native-open snapshot binding - PENDING HARDWARE
 
-Review pass 40 binds the authenticated sidecar to the actual PDF object retained
-inside Supernote's native reader. The generator now adds a descriptor-verified
-source-authority marker immediately before the existing layout and link markers.
-After the background path verification succeeds, the companion reads the same
-three authority values through MuPDF's `Document.getMetaData()` on the exact
-native `Document` instance. Any mismatch leaves all virtual-spread behavior
-disabled.
+Review passes 40-41 bind the authenticated sidecar to the actual PDF object
+retained inside Supernote's native reader and harden all transformed link and
+manifest boundaries. The generator adds a descriptor-verified source-authority
+marker before the layout and link markers. The companion reads all three values
+through MuPDF's `Document.getMetaData()` on the exact native `Document` instance.
+It also requires exact JSON integer tokens for page counts and indices. The
+generator rejects transformed URI `/IsMap true` actions and link geometry outside
+the source CropBox, while scaling an omitted link border's PDF-default width.
 
-The automated gate passes 82 generator tests on Windows (five expected platform
-skips) and Linux (no skips), 60 focused navigation assertions, 12 cross-language
-authority assertions, 8,752 exhaustive navigation assertions, both native
-invariant suites, hook-scope validation, and the signed/verified v0.0.17
-(`versionCode=17`) APK build.
+The automated gate passes 85 generator tests on Windows (five expected platform
+skips) and Linux (no skips), 68 focused navigation/manifest assertions, 12
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, and the signed/verified
+v0.0.18 (`versionCode=18`) APK build.
 
 The remaining focused Nomad gate is:
 
-1. cold-open a newly generated v0.0.17 pair and confirm normal activation;
+1. cold-open a newly generated v0.0.18 pair and confirm normal activation;
 2. replace the PDF/sidecar pair at the same path while the original PDF remains
    open and confirm the companion fails closed rather than applying the new
    mappings to stale native content;

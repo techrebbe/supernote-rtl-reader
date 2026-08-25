@@ -803,6 +803,61 @@ def _transform_rect(rect: Any, transform: list[float]) -> ArrayObject:
     )
 
 
+def _require_link_geometry_inside_source_crop(
+    annotation: DictionaryObject,
+    source_crop: list[float],
+) -> None:
+    """Reject links whose interactive geometry is hidden by the source crop."""
+    if len(source_crop) != 4 or any(
+        not math.isfinite(value) for value in source_crop
+    ):
+        raise VirtualSpreadError("Invalid source page effective /CropBox")
+    left, bottom, right, top = source_crop
+    if left >= right or bottom >= top:
+        raise VirtualSpreadError("Invalid source page effective /CropBox")
+
+    rect = _dereference_pdf_object(annotation.raw_get("/Rect"))
+    if not isinstance(rect, ArrayObject) or len(rect) != 4:
+        raise VirtualSpreadError("Invalid link annotation /Rect array")
+    rect_values = [
+        _finite_pdf_number(value, "link annotation /Rect coordinate")
+        for value in rect
+    ]
+    x1, y1, x2, y2 = rect_values
+    if x1 >= x2 or y1 >= y2:
+        raise VirtualSpreadError("Invalid link annotation /Rect ordering")
+    if x1 < left or y1 < bottom or x2 > right or y2 > top:
+        raise VirtualSpreadError(
+            "Link annotation /Rect lies outside source page effective /CropBox"
+        )
+
+    if "/QuadPoints" not in annotation:
+        return
+    quad_points = _dereference_pdf_object(
+        annotation.raw_get("/QuadPoints")
+    )
+    if (
+        not isinstance(quad_points, ArrayObject)
+        or not quad_points
+        or len(quad_points) % 8 != 0
+    ):
+        raise VirtualSpreadError("Invalid link annotation /QuadPoints array")
+    coordinates = [
+        _finite_pdf_number(
+            value, "link annotation /QuadPoints coordinate"
+        )
+        for value in quad_points
+    ]
+    for index in range(0, len(coordinates), 2):
+        x = coordinates[index]
+        y = coordinates[index + 1]
+        if x < left or x > right or y < bottom or y > top:
+            raise VirtualSpreadError(
+                "Link annotation /QuadPoints lies outside source page "
+                "effective /CropBox"
+            )
+
+
 def _link_annotation_flags(annotation: DictionaryObject) -> NumberObject | None:
     if "/F" not in annotation:
         return None
@@ -1188,7 +1243,19 @@ def _transform_link_border(
     transform: list[float],
 ) -> ArrayObject | None:
     if "/Border" not in annotation:
-        return None
+        if "/BS" in annotation:
+            return None
+        _, _, _, _, scale = _border_transform(
+            transform, "implicit link annotation /Border"
+        )
+        return ArrayObject([
+            FloatObject(0.0),
+            FloatObject(0.0),
+            FloatObject(_transform_nonnegative_measure_sum(
+                ((1.0, scale),),
+                "implicit link annotation /Border width",
+            )),
+        ])
     border = _dereference_pdf_object(annotation.raw_get("/Border"))
     if not isinstance(border, ArrayObject) or len(border) not in {3, 4}:
         raise VirtualSpreadError("Invalid link annotation /Border array")
@@ -1733,6 +1800,10 @@ def _copy_link_annotation(
 ) -> dict[str, Any]:
     original = _validate_link_annotation(annotation.get_object())
     mapping = source_mapping[source_page_index]
+    _require_link_geometry_inside_source_crop(
+        original,
+        [float(value) for value in mapping["sourceBox"]],
+    )
     annotation_flags = _link_annotation_flags(original)
     copied = DictionaryObject(
         {
@@ -1804,9 +1875,12 @@ def _copy_link_annotation(
                 )
                 if not isinstance(is_map, BooleanObject):
                     raise VirtualSpreadError("Invalid URI link /IsMap boolean")
-                copied_action[NameObject("/IsMap")] = BooleanObject(
-                    is_map.value
-                )
+                if is_map.value:
+                    raise VirtualSpreadError(
+                        "Cannot preserve URI link /IsMap true after page "
+                        "transformation"
+                    )
+                copied_action[NameObject("/IsMap")] = BooleanObject(False)
             copied[NameObject("/A")] = copied_action
             _attach_annotation(writer, output_page_index, copied)
             return {

@@ -551,6 +551,51 @@ public final class VirtualSpreadNavigationTest {
             )
         );
 
+        assertNullableInteger(
+            "JSON Integer token is accepted",
+            Integer.valueOf(17),
+            VirtualSpreadNavigation.exactJsonInteger(Integer.valueOf(17))
+        );
+        assertNullableInteger(
+            "in-range JSON Long token is accepted",
+            Integer.valueOf(17),
+            VirtualSpreadNavigation.exactJsonInteger(Long.valueOf(17L))
+        );
+        assertNullableInteger(
+            "numeric JSON string is rejected",
+            null,
+            VirtualSpreadNavigation.exactJsonInteger("17")
+        );
+        assertNullableInteger(
+            "fractional JSON number is rejected",
+            null,
+            VirtualSpreadNavigation.exactJsonInteger(Double.valueOf(17.5))
+        );
+        assertNullableInteger(
+            "integral JSON double is rejected",
+            null,
+            VirtualSpreadNavigation.exactJsonInteger(Double.valueOf(17.0))
+        );
+        assertNullableInteger(
+            "overflowing JSON long is rejected",
+            null,
+            VirtualSpreadNavigation.exactJsonInteger(
+                Long.valueOf((long) Integer.MAX_VALUE + 1L)
+            )
+        );
+        assertNullableInteger(
+            "underflowing JSON long is rejected",
+            null,
+            VirtualSpreadNavigation.exactJsonInteger(
+                Long.valueOf((long) Integer.MIN_VALUE - 1L)
+            )
+        );
+        assertNullableInteger(
+            "missing JSON integer is rejected",
+            null,
+            VirtualSpreadNavigation.exactJsonInteger(null)
+        );
+
         String sourceAuthority =
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         String layoutAuthority =
@@ -670,6 +715,19 @@ public final class VirtualSpreadNavigationTest {
                 name + ": expected " + kind + " " + page + " " + half
                     + " but got " + actual.kind + " "
                     + actual.targetPage + " " + actual.targetHalf
+            );
+        }
+        assertions++;
+    }
+
+    private static void assertNullableInteger(
+        String name,
+        Integer expected,
+        Integer actual
+    ) {
+        if (expected == null ? actual != null : !expected.equals(actual)) {
+            throw new AssertionError(
+                name + ": expected " + expected + " but got " + actual
             );
         }
         assertions++;

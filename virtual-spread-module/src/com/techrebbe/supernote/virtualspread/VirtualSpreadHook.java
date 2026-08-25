@@ -57,7 +57,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final String SCHEMA =
         "techrebbe.supernote.virtual-spread/v1";
     private static final String TAG = "SN_VIRTUAL_SPREAD";
-    private static final String VERSION = "0.0.17";
+    private static final String VERSION = "0.0.18";
     private static final long MAX_MANIFEST_BYTES = 8L * 1024L * 1024L;
 
     private static volatile WeakReference<Activity> activeActivity =
@@ -1431,6 +1431,14 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             ? sourcePage : -1;
     }
 
+    private static Integer exactManifestInteger(
+        JSONObject object,
+        String key
+    ) {
+        return object == null ? null
+            : VirtualSpreadNavigation.exactJsonInteger(object.opt(key));
+    }
+
     private static boolean spreadEntryMatches(
         JSONObject spread,
         String side,
@@ -1444,10 +1452,16 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             return spread.isNull(side);
         }
         JSONObject mapping = spread.optJSONObject(side);
-        return mapping != null
-            && expectedSourcePage
-                == mapping.optInt("sourcePageIndex", -1)
-            && virtualPage == mapping.optInt("virtualPageIndex", -1)
+        Integer mappedSourcePage = exactManifestInteger(
+            mapping, "sourcePageIndex"
+        );
+        Integer mappedVirtualPage = exactManifestInteger(
+            mapping, "virtualPageIndex"
+        );
+        return mappedSourcePage != null
+            && mappedVirtualPage != null
+            && expectedSourcePage == mappedSourcePage.intValue()
+            && virtualPage == mappedVirtualPage.intValue()
             && side.equals(mapping.optString("side"));
     }
 
@@ -1456,12 +1470,18 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         int sourcePage,
         boolean coverSeparate
     ) {
-        if (mapping == null
-            || sourcePage != mapping.optInt("sourcePageIndex", -1)) {
+        Integer mappedSourcePage = exactManifestInteger(
+            mapping, "sourcePageIndex"
+        );
+        Integer mappedVirtualPage = exactManifestInteger(
+            mapping, "virtualPageIndex"
+        );
+        if (mappedSourcePage == null || mappedVirtualPage == null
+            || sourcePage != mappedSourcePage.intValue()) {
             return false;
         }
         if (coverSeparate && sourcePage == 0) {
-            return mapping.optInt("virtualPageIndex", -1) == 0
+            return mappedVirtualPage.intValue() == 0
                 && "right".equals(mapping.optString("side"));
         }
         int firstSourcePage = coverSeparate ? 1 : 0;
@@ -1470,7 +1490,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         if (offset < 0) {
             return false;
         }
-        return mapping.optInt("virtualPageIndex", -1)
+        return mappedVirtualPage.intValue()
                 == firstVirtualPage + offset / 2
             && (offset % 2 == 0 ? "right" : "left").equals(
                 mapping.optString("side")
@@ -1490,11 +1510,16 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             return false;
         }
         JSONObject mapping = sourcePages.optJSONObject(sourcePageIndex);
-        return mapping != null
-            && sourcePageIndex
-                == mapping.optInt("sourcePageIndex", -1)
-            && virtualPageIndex
-                == mapping.optInt("virtualPageIndex", -1)
+        Integer mappedSourcePage = exactManifestInteger(
+            mapping, "sourcePageIndex"
+        );
+        Integer mappedVirtualPage = exactManifestInteger(
+            mapping, "virtualPageIndex"
+        );
+        return mappedSourcePage != null
+            && mappedVirtualPage != null
+            && sourcePageIndex == mappedSourcePage.intValue()
+            && virtualPageIndex == mappedVirtualPage.intValue()
             && side.equals(mapping.optString("side"));
     }
 
@@ -1524,14 +1549,22 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             return null;
         }
         boolean coverSeparate = ((Boolean) coverValue).booleanValue();
-        int sourcePageCount = source.optInt("pageCount", -1);
+        Integer sourcePageCountValue = exactManifestInteger(
+            source, "pageCount"
+        );
+        Integer pageCountValue = exactManifestInteger(output, "pageCount");
+        if (sourcePageCountValue == null || pageCountValue == null) {
+            log("manifest_rejected reason=manifest_integer path=" + key);
+            return null;
+        }
+        int sourcePageCount = sourcePageCountValue.intValue();
+        int pageCount = pageCountValue.intValue();
         String expectedSourceAuthority = source.optString(
             "sha256",
             ""
         );
         long expectedSize = output.optLong("size", -1L);
         String expectedHash = output.optString("sha256", "");
-        int pageCount = output.optInt("pageCount", -1);
         if (expectedSize != pdfLength
             || pageCount <= 0
             || spreadsJson.length() != pageCount) {
@@ -1576,8 +1609,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             return null;
         }
         int firstSourcePage = coverSeparate ? 1 : 0;
-        int expectedPageCount = (coverSeparate ? 1 : 0)
-            + (sourcePageCount - firstSourcePage + 1) / 2;
+        long expectedPageCount = (coverSeparate ? 1L : 0L)
+            + (sourcePageCount - (long) firstSourcePage + 1L) / 2L;
         if (sourcePageCount <= 0
             || sourcePagesJson.length() != sourcePageCount
             || pageCount != expectedPageCount) {
@@ -1616,8 +1649,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             new VirtualSpreadNavigation.Spread[pageCount];
         for (int index = 0; index < pageCount; index++) {
             JSONObject spread = spreadsJson.optJSONObject(index);
-            if (spread == null
-                || spread.optInt("virtualPageIndex", -1) != index) {
+            Integer spreadIndex = exactManifestInteger(
+                spread, "virtualPageIndex"
+            );
+            if (spreadIndex == null
+                || spreadIndex.intValue() != index) {
                 log("manifest_rejected reason=spread_index index=" + index);
                 return null;
             }
@@ -1664,8 +1700,19 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 log("manifest_rejected reason=link_record index=" + index);
                 return null;
             }
-            int sourceSourcePage = link.optInt("sourcePage", -1);
-            int sourceOutputPage = link.optInt("outputPage", -1);
+            Integer sourceSourcePageValue = exactManifestInteger(
+                link, "sourcePage"
+            );
+            Integer sourceOutputPageValue = exactManifestInteger(
+                link, "outputPage"
+            );
+            if (sourceSourcePageValue == null
+                || sourceOutputPageValue == null) {
+                log("manifest_rejected reason=manifest_integer index=" + index);
+                return null;
+            }
+            int sourceSourcePage = sourceSourcePageValue.intValue();
+            int sourceOutputPage = sourceOutputPageValue.intValue();
             String sourceSide = link.optString("sourceSide");
             JSONArray rect = link.optJSONArray("rect");
             if (sourceOutputPage < 0 || sourceOutputPage >= pageCount
@@ -1708,11 +1755,19 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 ));
                 continue;
             }
-            int targetSourcePage = link.optInt(
-                "targetSourcePage",
-                -1
+            Integer targetSourcePageValue = exactManifestInteger(
+                link, "targetSourcePage"
             );
-            int targetOutputPage = link.optInt("targetOutputPage", -1);
+            Integer targetOutputPageValue = exactManifestInteger(
+                link, "targetOutputPage"
+            );
+            if (targetSourcePageValue == null
+                || targetOutputPageValue == null) {
+                log("manifest_rejected reason=manifest_integer index=" + index);
+                return null;
+            }
+            int targetSourcePage = targetSourcePageValue.intValue();
+            int targetOutputPage = targetOutputPageValue.intValue();
             String targetSide = link.optString("targetSide");
             Object targetViewValue = link.opt("targetView");
             if (!(targetViewValue instanceof String)) {

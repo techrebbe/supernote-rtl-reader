@@ -19,13 +19,14 @@ It activates only when all of these are true:
   native MuPDF `Document` match the authenticated manifest; and
 - the known Supernote document firmware fingerprint and APK size match.
 
-v0.0.17 retains link-authority v2, which authenticates whether an internal
-destination preserves its explicit view or originated as a source-page `/Fit`.
-It also embeds the source authority in the descriptor-verified PDF tail and
-binds every accepted manifest to the source, layout, and link metadata of the
-native MuPDF object that Supernote is actually displaying. Replacing a PDF and
-sidecar at their existing paths can therefore never apply the replacement
-mapping to an older document that remains open in memory. Older generated pairs
+v0.0.18 retains link-authority v2 and the v0.0.17 native-open snapshot
+binding. It additionally requires exact JSON integer tokens for every consumed
+page count and page index; numeric strings and fractional values fail closed.
+The generator rejects transformed URI `/IsMap true` actions and any link
+rectangle or quadrilateral outside the source page's effective CropBox, and it
+materializes the PDF default link border at the transformed width. Replacing a
+PDF and sidecar at their existing paths can never apply replacement mappings to
+an older native document that remains open in memory. Older generated pairs
 fail closed; regenerate the PDF/sidecar pair before using it with this module.
 If multiple tolerance-equivalent runtime link matches disagree on source half,
 target half, or authenticated target-view policy, the match also fails closed

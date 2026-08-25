@@ -486,6 +486,21 @@ def set_link_quad_points(
         writer.write(stream)
 
 
+def set_page_crop_box(
+    path: Path,
+    source_page_index: int,
+    values: tuple[float, float, float, float],
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    writer.pages[source_page_index][NameObject("/CropBox")] = ArrayObject(
+        FloatObject(value) for value in values
+    )
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
 def set_link_annotation_value(
     path: Path,
     source_page_index: int,
@@ -501,6 +516,25 @@ def set_link_annotation_value(
         raise AssertionError("fixture page has no annotations")
     annotation = annotations.get_object()[annotation_index].get_object()
     annotation[NameObject(key)] = value
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def delete_link_annotation_values(
+    path: Path,
+    source_page_index: int,
+    annotation_index: int,
+    keys: tuple[str, ...],
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    annotations = writer.pages[source_page_index].get("/Annots")
+    if annotations is None:
+        raise AssertionError("fixture page has no annotations")
+    annotation = annotations.get_object()[annotation_index].get_object()
+    for key in keys:
+        annotation.pop(key, None)
     with path.open("wb") as stream:
         writer.write(stream)
 
@@ -1873,6 +1907,79 @@ class VirtualSpreadTests(unittest.TestCase):
                     float(actual_coordinate), expected_coordinate, places=4
                 )
 
+    def test_link_geometry_must_remain_inside_effective_crop(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            boundary_source = root / "crop-boundary-source.pdf"
+            boundary_output = root / "crop-boundary-spread.pdf"
+            boundary_manifest = root / "crop-boundary-spread.pdf.json"
+            create_odd_page_fixture(boundary_source)
+            set_page_crop_box(boundary_source, 1, (15.0, 15.0, 180.0, 93.0))
+            set_link_quad_points(
+                boundary_source,
+                1,
+                0,
+                tuple(
+                    FloatObject(value)
+                    for value in (
+                        15.0, 48.0, 180.0, 48.0,
+                        15.0, 15.0, 180.0, 15.0,
+                    )
+                ),
+            )
+            build_virtual_spread(
+                boundary_source,
+                boundary_output,
+                boundary_manifest,
+                direction="rtl",
+            )
+            self.assertTrue(boundary_output.exists())
+            self.assertTrue(boundary_manifest.exists())
+
+            cases = (
+                (
+                    "partially-cropped-rect",
+                    (20.0, 15.0, 180.0, 93.0),
+                    None,
+                    "/Rect lies outside",
+                ),
+                (
+                    "fully-cropped-rect",
+                    (200.0, 100.0, 290.0, 590.0),
+                    None,
+                    "/Rect lies outside",
+                ),
+                (
+                    "cropped-quadpoints",
+                    (15.0, 15.0, 180.0, 93.0),
+                    (
+                        10.0, 48.0, 165.0, 48.0,
+                        10.0, 30.0, 165.0, 30.0,
+                    ),
+                    "/QuadPoints lies outside",
+                ),
+            )
+            for index, (label, crop, quad, message) in enumerate(cases):
+                with self.subTest(label=label):
+                    source = root / f"crop-source-{index}.pdf"
+                    output = root / f"crop-spread-{index}.pdf"
+                    manifest_path = root / f"crop-spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    set_page_crop_box(source, 1, crop)
+                    if quad is not None:
+                        set_link_quad_points(
+                            source,
+                            1,
+                            0,
+                            tuple(FloatObject(value) for value in quad),
+                        )
+                    with self.assertRaisesRegex(VirtualSpreadError, message):
+                        build_virtual_spread(
+                            source, output, manifest_path, direction="rtl"
+                        )
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
     def test_malformed_link_quad_points_fail_closed(self) -> None:
         cases = (
             tuple(FloatObject(value) for value in range(6)),
@@ -2243,6 +2350,30 @@ class VirtualSpreadTests(unittest.TestCase):
             ):
                 self.assertAlmostEqual(float(actual), expected, places=4)
 
+    def test_implicit_default_link_border_is_scaled(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "default-border-source.pdf"
+            output = root / "default-border-spread.pdf"
+            manifest_path = root / "default-border-spread.pdf.json"
+            create_odd_page_fixture(source)
+            delete_link_annotation_values(
+                source, 1, 0, ("/Border", "/BS")
+            )
+
+            manifest = build_virtual_spread(
+                source, output, manifest_path, direction="rtl"
+            )
+            copied = output_annotation_for_source(output, manifest, 1)
+            scale = math.hypot(*manifest["sourcePages"][1]["transform"][:2])
+            self.assertNotIn("/BS", copied)
+            self.assertEqual(len(copied["/Border"]), 3)
+            self.assertEqual(float(copied["/Border"][0]), 0.0)
+            self.assertEqual(float(copied["/Border"][1]), 0.0)
+            self.assertAlmostEqual(
+                float(copied["/Border"][2]), scale, places=4
+            )
+
     def test_transformed_border_measures_must_remain_representable(
         self,
     ) -> None:
@@ -2368,7 +2499,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     self.assertFalse(output.exists())
                     self.assertFalse(manifest_path.exists())
 
-    def test_uri_action_is_map_is_preserved(self) -> None:
+    def test_uri_action_is_map_false_is_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "uri-source.pdf"
@@ -2385,7 +2516,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     NameObject("/URI"): TextStringObject(
                         "https://example.test/map"
                     ),
-                    NameObject("/IsMap"): BooleanObject(True),
+                    NameObject("/IsMap"): BooleanObject(False),
                 }),
             )
 
@@ -2399,7 +2530,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 action["/URI"], "https://example.test/map"
             )
             self.assertIsInstance(action.raw_get("/IsMap"), BooleanObject)
-            self.assertIs(action["/IsMap"].value, True)
+            self.assertIs(action["/IsMap"].value, False)
             uri_link = next(
                 link for link in manifest["links"]
                 if link["kind"] == "uri"
@@ -2407,6 +2538,35 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertEqual(
                 uri_link["uri"], "https://example.test/map"
             )
+
+    def test_uri_action_is_map_true_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "is-map-source.pdf"
+            output = root / "is-map-spread.pdf"
+            manifest_path = root / "is-map-spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_action(
+                source,
+                1,
+                0,
+                DictionaryObject({
+                    NameObject("/S"): NameObject("/URI"),
+                    NameObject("/URI"): TextStringObject(
+                        "https://example.test/map"
+                    ),
+                    NameObject("/IsMap"): BooleanObject(True),
+                }),
+            )
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot preserve URI link /IsMap true",
+            ):
+                build_virtual_spread(
+                    source, output, manifest_path, direction="rtl"
+                )
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
 
     def test_uri_action_operands_and_chains_fail_closed(self) -> None:
         base = {
@@ -2662,8 +2822,8 @@ class VirtualSpreadTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(
                 VirtualSpreadError,
-                "Link rectangle is not representable by Android "
-                "runtime floats",
+                "Link annotation /Rect lies outside source page effective "
+                "/CropBox",
             ):
                 build_virtual_spread(source, output, manifest)
             self.assertFalse(output.exists())

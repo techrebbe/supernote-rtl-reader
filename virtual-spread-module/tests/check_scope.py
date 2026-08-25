@@ -232,7 +232,9 @@ for required in (
     "spreadEntryMatches(",
     "sourceEntryMatches(",
     "linkEndpointMatches(",
-    'link.optInt("sourcePage", -1)',
+    "exactManifestInteger(",
+    "VirtualSpreadNavigation.exactJsonInteger(",
+    'manifest_rejected reason=manifest_integer',
     '"targetSourcePage"',
     'link.opt("targetView")',
     '"fit-source-page".equals(targetView)',
@@ -267,6 +269,7 @@ for required in (
         )
 
 for forbidden in (
+    "optInt(",
     "if (linksJson != null)",
     'link == null || !"internal".equals(link.optString("kind"))',
 ):
@@ -276,11 +279,11 @@ for forbidden in (
         )
 
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
-if 'android:versionCode="17"' not in manifest:
+if 'android:versionCode="18"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version code")
-if 'android:versionName="0.0.17"' not in manifest:
+if 'android:versionName="0.0.18"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
-if 'private static final String VERSION = "0.0.17"' not in hook:
+if 'private static final String VERSION = "0.0.18"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
 for required in (
     "pendingLinkResetLandscapeFit",
@@ -470,8 +473,11 @@ for required in (
     "test_malformed_link_annotation_flags_fail_closed",
     "test_link_rect_requires_finite_pdf_numbers",
     "test_visible_link_border_and_highlight_are_preserved",
+    "test_implicit_default_link_border_is_scaled",
     "test_malformed_link_border_or_highlight_fails_closed",
-    "test_uri_action_is_map_is_preserved",
+    "test_link_geometry_must_remain_inside_effective_crop",
+    "test_uri_action_is_map_false_is_preserved",
+    "test_uri_action_is_map_true_fails_closed",
     "test_uri_action_operands_and_chains_fail_closed",
     "test_unsupported_link_semantics_fail_closed",
     "test_document_outlines_fail_closed_before_publication",

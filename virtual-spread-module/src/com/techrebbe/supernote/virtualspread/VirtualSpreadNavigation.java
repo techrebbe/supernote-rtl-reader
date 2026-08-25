@@ -223,6 +223,21 @@ public final class VirtualSpreadNavigation {
     private VirtualSpreadNavigation() {
     }
 
+    /** Accept only an exact JSON integer token representable by Java int. */
+    public static Integer exactJsonInteger(Object value) {
+        if (value instanceof Integer) {
+            return (Integer) value;
+        }
+        if (value instanceof Long) {
+            long candidate = ((Long) value).longValue();
+            if (candidate >= Integer.MIN_VALUE
+                && candidate <= Integer.MAX_VALUE) {
+                return Integer.valueOf((int) candidate);
+            }
+        }
+        return null;
+    }
+
     public static int reverseLandscapeOffset(int nativeOffset) {
         return -nativeOffset;
     }

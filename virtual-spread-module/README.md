@@ -14,15 +14,22 @@ It activates only when all of these are true:
 - the persisted `coverSeparate`, spread occupancy, and source-page mappings
   describe the same complete RTL layout;
 - the canonical direction, cover parity, page counts, spread geometry, and
-  gutter digest matches the authority marker embedded in the hashed PDF; and
+  gutter digest match the authority markers embedded in the hashed PDF;
+- the source, layout, and link authorities read from Supernote's actually open
+  native MuPDF `Document` match the authenticated manifest; and
 - the known Supernote document firmware fingerprint and APK size match.
 
-v0.0.16 uses link-authority v2, which authenticates whether an internal
+v0.0.17 retains link-authority v2, which authenticates whether an internal
 destination preserves its explicit view or originated as a source-page `/Fit`.
-Older generated pairs fail closed; regenerate the PDF/sidecar pair before using
-it with this module. If multiple tolerance-equivalent runtime link matches
-disagree on source half, target half, or authenticated target-view policy, the
-match also fails closed rather than selecting an order-dependent record.
+It also embeds the source authority in the descriptor-verified PDF tail and
+binds every accepted manifest to the source, layout, and link metadata of the
+native MuPDF object that Supernote is actually displaying. Replacing a PDF and
+sidecar at their existing paths can therefore never apply the replacement
+mapping to an older document that remains open in memory. Older generated pairs
+fail closed; regenerate the PDF/sidecar pair before using it with this module.
+If multiple tolerance-equivalent runtime link matches disagree on source half,
+target half, or authenticated target-view policy, the match also fails closed
+rather than selecting an order-dependent record.
 
 The manifest cache is content-authoritative but uses an identity-based fast
 path: every lookup captures both PDF and sidecar device, inode, size,
@@ -34,8 +41,11 @@ On a cache miss or identity change, the module fails closed while a single
 background worker opens the PDF and sidecar, hashes the sidecar bytes, parses
 them, and performs the full PDF SHA-256 check. It
 publishes the result only if both the PDF identity and sidecar digest are still
-unchanged, then refreshes the still-open native reader from its main thread.
-Page-bar and page-turn callbacks never perform the full-file hash.
+unchanged. Before any navigation behavior activates, the main-thread callback
+also compares the authenticated authorities with metadata read from the exact
+native MuPDF `Document` instance. A mismatch fails closed until Supernote
+reopens the replacement document. Page-bar and page-turn callbacks never
+perform the full-file hash.
 
 The `links` collection is required. Every entry must be a complete internal or
 URI record whose source page, virtual page, and side agree with the

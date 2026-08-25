@@ -933,6 +933,34 @@ fixture. That guard is reached only when multiple tolerance-equivalent link
 records conflict; the tested fixture has one unique record per link, so the
 completed visual evidence remains directly applicable.
 
+## Review pass 40 native-open snapshot binding - AUTOMATED PASS
+
+The exact-head draft review identified that pathname-level PDF and sidecar
+verification did not prove that Supernote's already-open MuPDF object represented
+those same bytes. A same-path replacement could therefore publish a valid new
+manifest while the native reader still displayed the old object.
+
+v0.0.17 adds a source-authority marker to the descriptor-verified PDF tail and
+stores the authenticated source, layout, and link authorities in the parsed
+manifest. Before activation, the runtime reflects the actual
+`DocumentViewModel.mupdf -> DocumentMupdf.pdfMupdf -> PDFMupdf.document` object,
+reads all three custom Info values with MuPDF `getMetaData()`, and requires an
+exact match. The decision is cached only for that native `Document` object plus
+manifest revision, so a newly opened native object is always revalidated.
+
+Automated validation passes:
+
+- 82 generator tests on Windows, with five expected filesystem skips;
+- the same 82 tests on Linux with no skips;
+- 60 focused navigation assertions;
+- 12 cross-language PDF-authority assertions;
+- 8,752 exhaustive navigation assertions;
+- both native invariant suites and hook-scope validation; and
+- signed APK verification for v0.0.17 (`versionCode=17`) using v2/v3 schemes.
+
+Focused hardware validation of native metadata lookup and same-path replacement
+fail-closed behavior remains pending.
+
 ## Failure capture
 
 Before reproducing a failure:

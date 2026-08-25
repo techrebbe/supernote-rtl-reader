@@ -227,6 +227,27 @@ public final class VirtualSpreadNavigation {
         return -nativeOffset;
     }
 
+    public static boolean manifestMatchesNativeSnapshot(
+        String expectedSource,
+        String expectedLayout,
+        String expectedLinks,
+        String nativeSource,
+        String nativeLayout,
+        String nativeLinks
+    ) {
+        return sameAuthority(expectedSource, nativeSource)
+            && sameAuthority(expectedLayout, nativeLayout)
+            && sameAuthority(expectedLinks, nativeLinks);
+    }
+
+    private static boolean sameAuthority(String expected, String actual) {
+        return expected != null
+            && actual != null
+            && expected.length() == 64
+            && actual.length() == 64
+            && expected.equalsIgnoreCase(actual);
+    }
+
     /** True only when the persisted double geometry survives Android floats. */
     public static boolean runtimeGeometryIsRepresentable(
         double pageWidth,

@@ -57,7 +57,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final String SCHEMA =
         "techrebbe.supernote.virtual-spread/v1";
     private static final String TAG = "SN_VIRTUAL_SPREAD";
-    private static final String VERSION = "0.0.16";
+    private static final String VERSION = "0.0.17";
     private static final long MAX_MANIFEST_BYTES = 8L * 1024L * 1024L;
 
     private static volatile WeakReference<Activity> activeActivity =
@@ -76,6 +76,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final class Manifest {
         final String key;
         final String revision;
+        final String sourceAuthority;
+        final String layoutAuthority;
+        final String linkAuthority;
         final int pageCount;
         final VirtualSpreadNavigation.Spread[] spreads;
         final float pageHeight;
@@ -84,6 +87,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         Manifest(
             String key,
             String revision,
+            String sourceAuthority,
+            String layoutAuthority,
+            String linkAuthority,
             int pageCount,
             VirtualSpreadNavigation.Spread[] spreads,
             float pageHeight,
@@ -91,6 +97,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         ) {
             this.key = key;
             this.revision = revision;
+            this.sourceAuthority = sourceAuthority;
+            this.layoutAuthority = layoutAuthority;
+            this.linkAuthority = linkAuthority;
             this.pageCount = pageCount;
             this.spreads = spreads;
             this.pageHeight = pageHeight;
@@ -187,6 +196,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     }
 
     private static final class ReaderState {
+        Object nativeSnapshotDocument;
+        String nativeSnapshotRevision;
+        boolean nativeSnapshotAccepted;
         String manifestKey;
         String manifestRevision;
         int lastPage = -1;
@@ -1045,16 +1057,109 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         state.pendingHistoryAt = 0L;
     }
 
+    private static ReaderState readerStateLocked(Object viewModel) {
+        ReaderState state = STATES.get(viewModel);
+        if (state == null) {
+            state = new ReaderState();
+            STATES.put(viewModel, state);
+        }
+        return state;
+    }
+
+    private static String nativePdfMetadata(Object document, String key) {
+        if (document == null) {
+            return null;
+        }
+        try {
+            Object value = XposedHelpers.callMethod(
+                document,
+                "getMetaData",
+                "info:" + key
+            );
+            return value instanceof String ? (String) value : null;
+        } catch (Throwable throwable) {
+            return null;
+        }
+    }
+
+    private static Manifest validateNativeSnapshot(
+        Object viewModel,
+        Manifest manifest
+    ) {
+        if (manifest == null) {
+            return null;
+        }
+        Object nativeMupdf = objectField(viewModel, "mupdf");
+        if (nativeMupdf == null) {
+            return null;
+        }
+        Object nativePdfMupdf = objectField(nativeMupdf, "pdfMupdf");
+        Object nativeDocument = objectField(nativePdfMupdf, "document");
+        if (nativeDocument == null) {
+            return null;
+        }
+        synchronized (STATES) {
+            ReaderState state = readerStateLocked(viewModel);
+            if (state.nativeSnapshotDocument == nativeDocument
+                && manifest.revision.equals(
+                    state.nativeSnapshotRevision
+                )) {
+                return state.nativeSnapshotAccepted ? manifest : null;
+            }
+        }
+
+        String nativeSource = nativePdfMetadata(
+            nativeDocument,
+            "SNVirtualSpreadSourceSHA256"
+        );
+        String nativeLayout = nativePdfMetadata(
+            nativeDocument,
+            "SNVirtualSpreadLayoutSHA256"
+        );
+        String nativeLinks = nativePdfMetadata(
+            nativeDocument,
+            "SNVirtualSpreadLinksSHA256"
+        );
+        if (!isSha256(nativeSource)
+            || !isSha256(nativeLayout)
+            || !isSha256(nativeLinks)) {
+            log("manifest_rejected reason=native_snapshot_metadata path="
+                + manifest.key);
+            return null;
+        }
+        boolean accepted = VirtualSpreadNavigation
+            .manifestMatchesNativeSnapshot(
+                manifest.sourceAuthority,
+                manifest.layoutAuthority,
+                manifest.linkAuthority,
+                nativeSource,
+                nativeLayout,
+                nativeLinks
+            );
+        Object currentMupdf = objectField(viewModel, "mupdf");
+        Object currentPdfMupdf = objectField(currentMupdf, "pdfMupdf");
+        if (currentMupdf != nativeMupdf
+            || objectField(currentPdfMupdf, "document") != nativeDocument) {
+            return null;
+        }
+        synchronized (STATES) {
+            ReaderState state = readerStateLocked(viewModel);
+            state.nativeSnapshotDocument = nativeDocument;
+            state.nativeSnapshotRevision = manifest.revision;
+            state.nativeSnapshotAccepted = accepted;
+        }
+        log((accepted ? "native_snapshot_accepted" :
+            "manifest_rejected reason=native_snapshot")
+            + " path=" + manifest.key);
+        return accepted ? manifest : null;
+    }
+
     private static ReaderState stateFor(
         Object viewModel,
         Manifest manifest
     ) {
         synchronized (STATES) {
-            ReaderState state = STATES.get(viewModel);
-            if (state == null) {
-                state = new ReaderState();
-                STATES.put(viewModel, state);
-            }
+            ReaderState state = readerStateLocked(viewModel);
             if (!manifest.key.equals(state.manifestKey)
                 || !manifest.revision.equals(state.manifestRevision)) {
                 state.manifestKey = manifest.key;
@@ -1104,7 +1209,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             CachedManifest cached = MANIFESTS.get(key);
             if (cached != null
                 && cached.matches(pdfIdentity, sidecarIdentity)) {
-                return validatePageCount(viewModel, cached.manifest);
+                return validatePageCount(
+                    viewModel,
+                    validateNativeSnapshot(viewModel, cached.manifest)
+                );
             }
             if (cached != null) {
                 MANIFESTS.remove(key, cached);
@@ -1417,6 +1525,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
         boolean coverSeparate = ((Boolean) coverValue).booleanValue();
         int sourcePageCount = source.optInt("pageCount", -1);
+        String expectedSourceAuthority = source.optString(
+            "sha256",
+            ""
+        );
         long expectedSize = output.optLong("size", -1L);
         String expectedHash = output.optString("sha256", "");
         int pageCount = output.optInt("pageCount", -1);
@@ -1429,6 +1541,16 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         if (!isSha256(expectedHash)
             || !expectedHash.equalsIgnoreCase(sha256File(pdfInput))) {
             log("manifest_rejected reason=output_hash path=" + key);
+            return null;
+        }
+        String embeddedSourceAuthority =
+            VirtualSpreadLinkAuthority.readPdfSourceDigest(pdfInput);
+        if (!isSha256(expectedSourceAuthority)
+            || !expectedSourceAuthority.equalsIgnoreCase(
+                embeddedSourceAuthority
+            )) {
+            log("manifest_rejected reason=source_authority path="
+                + key);
             return null;
         }
         String expectedLinkAuthority = output.optString(
@@ -1659,6 +1781,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         return new Manifest(
             key,
             sidecarDigest,
+            expectedSourceAuthority,
+            expectedLayoutAuthority,
+            expectedLinkAuthority,
             pageCount,
             spreads,
             (float) pageHeight,

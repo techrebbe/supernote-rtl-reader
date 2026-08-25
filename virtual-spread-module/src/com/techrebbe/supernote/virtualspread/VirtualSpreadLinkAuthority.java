@@ -8,6 +8,8 @@ import java.security.MessageDigest;
 /** Pure canonicalization shared by runtime validation and host-side tests. */
 public final class VirtualSpreadLinkAuthority {
     private VirtualSpreadLinkAuthority() {}
+    private static final String SOURCE_PDF_MARKER =
+        "%SNVirtualSpreadSourceSHA256:";
     private static final String PDF_MARKER =
         "%SNVirtualSpreadLinksSHA256:";
     private static final String LAYOUT_PDF_MARKER =
@@ -94,6 +96,52 @@ public final class VirtualSpreadLinkAuthority {
             digest.update((byte) '\n');
         }
         return toHex(digest.digest());
+    }
+
+    public static String readPdfSourceDigest(File pdf) throws Exception {
+        RandomAccessFile input = new RandomAccessFile(pdf, "r");
+        try {
+            return readPdfSourceDigest(input);
+        } finally {
+            input.close();
+        }
+    }
+
+    public static String readPdfSourceDigest(
+        RandomAccessFile input
+    ) throws Exception {
+        long originalPosition = input.getFilePointer();
+        try {
+            long length = input.length();
+            int count = (int) Math.min(length, 4096L);
+            if (count <= SOURCE_PDF_MARKER.length() + 65) {
+                return null;
+            }
+            byte[] data = new byte[count];
+            input.seek(length - count);
+            input.readFully(data);
+            String tail = new String(data, StandardCharsets.ISO_8859_1);
+            int startxref = tail.lastIndexOf("startxref");
+            if (startxref < 0) {
+                return null;
+            }
+            int marker = tail.lastIndexOf(SOURCE_PDF_MARKER, startxref);
+            if (marker < 0) {
+                return null;
+            }
+            int digestStart = marker + SOURCE_PDF_MARKER.length();
+            int digestEnd = digestStart + 64;
+            int nextMarker = digestEnd + 1;
+            if (digestEnd >= tail.length()
+                || tail.charAt(digestEnd) != '\n'
+                || !tail.startsWith(LAYOUT_PDF_MARKER, nextMarker)) {
+                return null;
+            }
+            String digest = tail.substring(digestStart, digestEnd);
+            return isSha256(digest) ? digest.toLowerCase() : null;
+        } finally {
+            input.seek(originalPosition);
+        }
     }
 
     public static String readPdfDigest(File pdf) throws Exception {

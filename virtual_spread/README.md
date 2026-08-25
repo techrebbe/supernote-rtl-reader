@@ -145,16 +145,21 @@ preventing a separately edited sidecar from omitting or retargeting links.
 A second canonical authority binds RTL direction, cover parity, source/output
 page counts, spread dimensions, and gutter to that same hashed PDF. This keeps
 an otherwise internally consistent sidecar from swapping cover pairing or
-geometry. Native module v0.0.16 also authenticates each internal link's target-view
-policy. Its link-authority v2 records therefore fail closed on older generated
-pairs, and older modules fail closed on v0.0.16 pairs; regenerate the PDF and
-sidecar together before opening them with v0.0.16. Native reader callbacks perform only strong PDF
-and sidecar identity checks. Sidecar reading/hashing, parsing, full-PDF hashing,
-and stable-snapshot verification run on the single background verifier. That
-verifier opens each PDF and sidecar exactly once, binds the callback identities
-to those descriptors, performs every content and authority read through the same
-open handles, and finally proves the handles still match the visible pathnames.
-The module fails closed until that descriptor-bound snapshot is published.
+geometry. Native module v0.0.17 authenticates each internal link's target-view
+policy and embeds a third tail authority for the exact source snapshot. Its
+link-authority v2 records and source marker therefore fail closed on older
+generated pairs; regenerate the PDF and sidecar together before opening them
+with v0.0.17. Native reader callbacks perform only strong PDF and sidecar
+identity checks. Sidecar reading/hashing, parsing, full-PDF hashing, and stable-
+snapshot verification run on the single background verifier. That verifier
+opens each PDF and sidecar exactly once, binds the callback identities to those
+descriptors, performs every content and authority read through the same open
+handles, and finally proves the handles still match the visible pathnames. The
+module then reads the source, layout, and link metadata from Supernote's retained
+native MuPDF `Document` and requires all three to match before activating. A
+pathname replacement consequently fails closed while the old native object is
+still open and can activate only after Supernote reopens the replacement. The
+module fails closed until both checks have passed.
 
 The generator also enforces the companion runtime's exact 8 MiB sidecar limit
 before publication. The limit, staged-file identity, and SHA-256 are captured

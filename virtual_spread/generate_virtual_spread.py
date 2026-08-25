@@ -35,6 +35,7 @@ from pypdf.generic import (
 
 
 SCHEMA = "techrebbe.supernote.virtual-spread/v1"
+SOURCE_AUTHORITY_MARKER = b"%SNVirtualSpreadSourceSHA256:"
 LINK_AUTHORITY_MARKER = b"%SNVirtualSpreadLinksSHA256:"
 LAYOUT_AUTHORITY_MARKER = b"%SNVirtualSpreadLayoutSHA256:"
 PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v2"
@@ -434,11 +435,13 @@ def _layout_authority_sha256(
 
 def _bind_pdf_authorities(
     path: Path,
+    source_authority_sha256: str,
     layout_authority_sha256: str,
     link_authority_sha256: str,
     ownership_guard: PublicationOwnershipGuard | None = None,
 ) -> None:
     for label, value in (
+        ("source", source_authority_sha256),
         ("layout", layout_authority_sha256),
         ("link", link_authority_sha256),
     ):
@@ -447,7 +450,10 @@ def _bind_pdf_authorities(
         ):
             raise VirtualSpreadError(f"Invalid {label} authority digest")
     marker = (
-        LAYOUT_AUTHORITY_MARKER
+        SOURCE_AUTHORITY_MARKER
+        + source_authority_sha256.encode("ascii")
+        + b"\n"
+        + LAYOUT_AUTHORITY_MARKER
         + layout_authority_sha256.encode("ascii")
         + b"\n"
         + LINK_AUTHORITY_MARKER
@@ -470,7 +476,8 @@ def _bind_pdf_authorities(
             raise VirtualSpreadError("Written PDF has no final startxref")
         authority_tail = tail[startxref:]
         if (
-            LAYOUT_AUTHORITY_MARKER in authority_tail
+            SOURCE_AUTHORITY_MARKER in authority_tail
+            or LAYOUT_AUTHORITY_MARKER in authority_tail
             or LINK_AUTHORITY_MARKER in authority_tail
         ):
             raise VirtualSpreadError("Written PDF has an invalid authority marker")
@@ -3661,6 +3668,7 @@ def _build_virtual_spread_from_snapshot(
             os.fsync(stream.fileno())
         _bind_pdf_authorities(
             temporary_output,
+            source_hash,
             layout_authority_hash,
             link_authority_hash,
             ownership_guard,

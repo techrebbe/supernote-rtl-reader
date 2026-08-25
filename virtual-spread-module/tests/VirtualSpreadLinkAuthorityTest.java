@@ -73,13 +73,25 @@ public final class VirtualSpreadLinkAuthorityTest {
         );
         Path fixture = Files.createTempFile("virtual-spread-authority", ".pdf");
         try {
+            String sourceDigest =
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
             String bound = "%PDF-1.7\n"
+                + "%SNVirtualSpreadSourceSHA256:"
+                + sourceDigest + "\n"
                 + "%SNVirtualSpreadLayoutSHA256:"
                 + layoutDigest + "\n"
                 + "%SNVirtualSpreadLinksSHA256:"
                 + "da3eeef9e81fe1f232cd3ac200c90841436855c9ac4a517b1a82021bc099800c"
                 + "\nstartxref\n42\n%%EOF\n";
             Files.write(fixture, bound.getBytes(StandardCharsets.ISO_8859_1));
+            assertEquals(
+                "PDF-bound source authority digest",
+                sourceDigest,
+                VirtualSpreadLinkAuthority.readPdfSourceDigest(
+                    fixture.toFile()
+                )
+            );
             assertEquals(
                 "PDF-bound authority digest",
                 "da3eeef9e81fe1f232cd3ac200c90841436855c9ac4a517b1a82021bc099800c",
@@ -89,6 +101,21 @@ public final class VirtualSpreadLinkAuthorityTest {
                 "PDF-bound layout authority digest",
                 layoutDigest,
                 VirtualSpreadLinkAuthority.readPdfLayoutDigest(fixture.toFile())
+            );
+            String displacedSource = bound.replace(
+                "\n%SNVirtualSpreadLayoutSHA256:",
+                "\n\n%SNVirtualSpreadLayoutSHA256:"
+            );
+            Files.write(
+                fixture,
+                displacedSource.getBytes(StandardCharsets.ISO_8859_1)
+            );
+            assertEquals(
+                "displaced source authority marker is rejected",
+                null,
+                VirtualSpreadLinkAuthority.readPdfSourceDigest(
+                    fixture.toFile()
+                )
             );
             String displacedLayout = bound.replace(
                 "\n%SNVirtualSpreadLinksSHA256:",

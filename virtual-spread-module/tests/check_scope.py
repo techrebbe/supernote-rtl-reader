@@ -114,6 +114,7 @@ for required in (
     "FileIdentity pdfIdentity = FileIdentity.capture(pdf)",
     "FileIdentity sidecarIdentity = FileIdentity.capture(sidecar)",
     "cached.matches(pdfIdentity, sidecarIdentity)",
+    "validateNativeSnapshot(viewModel, cached.manifest)",
     "scheduleManifestVerification(",
     "manifest_verification_pending",
     "Fail closed until the background verifier publishes",
@@ -124,6 +125,23 @@ for forbidden in ("parseManifest(", "readBytes(", "sha256(", "sha256File("):
     if forbidden in manifest_lookup:
         raise SystemExit(
             f"manifest lookup performs expensive verification on a UI callback: {forbidden}"
+        )
+
+for required in (
+    "nativeSnapshotDocument",
+    "manifestMatchesNativeSnapshot(",
+    '"info:" + key',
+    '"SNVirtualSpreadSourceSHA256"',
+    '"SNVirtualSpreadLayoutSHA256"',
+    '"SNVirtualSpreadLinksSHA256"',
+    "!isSha256(nativeSource)",
+    'manifest_rejected reason=native_snapshot_metadata',
+    'objectField(currentPdfMupdf, "document") != nativeDocument',
+    "state.nativeSnapshotDocument = nativeDocument",
+):
+    if required not in hook:
+        raise SystemExit(
+            f"native reader snapshot binding is missing: {required}"
         )
 
 if hook.count("parseManifest(") != 2 or hook.count("sha256File(") != 2:
@@ -204,6 +222,7 @@ for required in (
     "String sidecarDigest = sha256(sidecarData)",
     'output.optString("sha256", "")',
     "expectedHash.equalsIgnoreCase(sha256File(pdfInput))",
+    "VirtualSpreadLinkAuthority.readPdfSourceDigest(pdfInput)",
     'manifest_rejected reason=output_hash',
     'manifest_rejected reason=snapshot_changed_during_read',
     'root.opt("coverSeparate")',
@@ -257,11 +276,11 @@ for forbidden in (
         )
 
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
-if 'android:versionCode="16"' not in manifest:
+if 'android:versionCode="17"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version code")
-if 'android:versionName="0.0.16"' not in manifest:
+if 'android:versionName="0.0.17"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
-if 'private static final String VERSION = "0.0.16"' not in hook:
+if 'private static final String VERSION = "0.0.17"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
 for required in (
     "pendingLinkResetLandscapeFit",
@@ -302,6 +321,8 @@ generator = (root.parent / "virtual_spread/generate_virtual_spread.py").read_tex
 )
 for required in (
     'PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v2"',
+    'SOURCE_AUTHORITY_MARKER = b"%SNVirtualSpreadSourceSHA256:"',
+    "source_hash,",
     'LEGACY_PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v1"',
     "class AmbiguousPublicationMarkerError(",
     "object_pairs_hook=_publication_marker_object",

@@ -33,6 +33,7 @@ sys.path.insert(0, str(ROOT / "virtual_spread"))
 from generate_virtual_spread import (  # noqa: E402
     LAYOUT_AUTHORITY_MARKER,
     LINK_AUTHORITY_MARKER,
+    SOURCE_AUTHORITY_MARKER,
     MAX_MANIFEST_BYTES,
     MOVEFILE_REPLACE_EXISTING,
     MOVEFILE_WRITE_THROUGH,
@@ -1080,12 +1081,17 @@ class VirtualSpreadTests(unittest.TestCase):
                 cover_separate=True,
             )
 
+            source_authority = manifest["source"]["sha256"]
             authority = _link_authority_sha256(manifest["links"])
             self.assertEqual(
                 manifest["output"]["linkAuthoritySha256"],
                 authority,
             )
             metadata = PdfReader(str(output), strict=True).metadata
+            self.assertEqual(
+                metadata["/SNVirtualSpreadSourceSHA256"],
+                source_authority,
+            )
             self.assertEqual(
                 metadata["/SNVirtualSpreadLinksSHA256"],
                 authority,
@@ -1125,6 +1131,11 @@ class VirtualSpreadTests(unittest.TestCase):
             with output.open("rb") as stream:
                 stream.seek(max(0, output.stat().st_size - 4096))
                 tail = stream.read()
+            source_marker = (
+                SOURCE_AUTHORITY_MARKER
+                + source_authority.encode("ascii")
+                + b"\n"
+            )
             layout_marker = (
                 LAYOUT_AUTHORITY_MARKER
                 + layout_authority.encode("ascii")
@@ -1133,8 +1144,13 @@ class VirtualSpreadTests(unittest.TestCase):
             link_marker = (
                 LINK_AUTHORITY_MARKER + authority.encode("ascii") + b"\n"
             )
+            self.assertEqual(tail.count(source_marker), 1)
             self.assertEqual(tail.count(layout_marker), 1)
             self.assertEqual(tail.count(link_marker), 1)
+            self.assertEqual(
+                tail.index(source_marker) + len(source_marker),
+                tail.index(layout_marker),
+            )
             self.assertEqual(
                 tail.index(layout_marker) + len(layout_marker),
                 tail.index(link_marker),

@@ -551,6 +551,73 @@ public final class VirtualSpreadNavigationTest {
             )
         );
 
+        String sourceAuthority =
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        String layoutAuthority =
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        String linkAuthority =
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+        assertBoolean(
+            "matching native document authorities are accepted",
+            true,
+            VirtualSpreadNavigation.manifestMatchesNativeSnapshot(
+                sourceAuthority,
+                layoutAuthority,
+                linkAuthority,
+                sourceAuthority.toUpperCase(),
+                layoutAuthority,
+                linkAuthority
+            )
+        );
+        assertBoolean(
+            "replaced native source fails closed",
+            false,
+            VirtualSpreadNavigation.manifestMatchesNativeSnapshot(
+                sourceAuthority,
+                layoutAuthority,
+                linkAuthority,
+                linkAuthority,
+                layoutAuthority,
+                linkAuthority
+            )
+        );
+        assertBoolean(
+            "stale native layout fails closed",
+            false,
+            VirtualSpreadNavigation.manifestMatchesNativeSnapshot(
+                sourceAuthority,
+                layoutAuthority,
+                linkAuthority,
+                sourceAuthority,
+                linkAuthority,
+                linkAuthority
+            )
+        );
+        assertBoolean(
+            "stale native links fail closed",
+            false,
+            VirtualSpreadNavigation.manifestMatchesNativeSnapshot(
+                sourceAuthority,
+                layoutAuthority,
+                linkAuthority,
+                sourceAuthority,
+                layoutAuthority,
+                sourceAuthority
+            )
+        );
+        assertBoolean(
+            "missing native authority fails closed",
+            false,
+            VirtualSpreadNavigation.manifestMatchesNativeSnapshot(
+                sourceAuthority,
+                layoutAuthority,
+                linkAuthority,
+                null,
+                layoutAuthority,
+                linkAuthority
+            )
+        );
+
         LinkHistory history = new LinkHistory();
         history.record(1, Half.RIGHT, 3);
         history.record(3, Half.LEFT, 1);

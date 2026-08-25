@@ -1276,6 +1276,35 @@ def _destination_transform(
     return transform
 
 
+def _destination_uniform_scale(
+    transform: list[float], label: str
+) -> float:
+    """Return an affine transform's uniform scale or fail closed."""
+    a, b, c, d, _, _ = transform
+    x_scale = math.hypot(a, b)
+    y_scale = math.hypot(c, d)
+    tolerance = 1e-9
+    if (
+        not math.isfinite(x_scale)
+        or not math.isfinite(y_scale)
+        or x_scale <= 1e-12
+        or y_scale <= 1e-12
+        or not math.isclose(
+            x_scale, y_scale, rel_tol=tolerance, abs_tol=1e-12
+        )
+        or not math.isclose(
+            a * c + b * d,
+            0.0,
+            rel_tol=0.0,
+            abs_tol=max(1.0, x_scale * y_scale) * tolerance,
+        )
+    ):
+        raise VirtualSpreadError(
+            f"Cannot preserve {label} through non-uniform page transform"
+        )
+    return x_scale
+
+
 def _destination_axis_is_preserved(
     source_transform: list[float],
     target_transform: list[float],
@@ -1349,13 +1378,21 @@ def _transformed_internal_destination(
                 )
             transformed_left = None if left is None else a * left + e
             transformed_top = None if top is None else d * top + f
+        transformed_zoom = None
+        if zoom is not None:
+            scale = _destination_uniform_scale(transform, "/XYZ zoom")
+            transformed_zoom = zoom / scale
+            if not math.isfinite(transformed_zoom):
+                raise VirtualSpreadError(
+                    "Invalid transformed internal destination /XYZ zoom"
+                )
         return ArrayObject(
             [
                 target_reference,
                 NameObject(mode),
                 _destination_object(transformed_left),
                 _destination_object(transformed_top),
-                _destination_object(zoom),
+                _destination_object(transformed_zoom),
             ]
         )
 
@@ -1441,7 +1478,6 @@ def _attach_annotation(
         raise VirtualSpreadError("Output page has no indirect reference")
 
     annotation[NameObject("/P")] = page_reference
-    annotation_reference = writer._add_object(annotation)
     annotations = output_page.get("/Annots")
     if annotations is None:
         annotation_array = ArrayObject()
@@ -1450,6 +1486,29 @@ def _attach_annotation(
         annotation_array = annotations.get_object()
         if not isinstance(annotation_array, ArrayObject):
             raise VirtualSpreadError("Output page /Annots is not an array")
+
+    annotation_name = _optional_text_string(
+        annotation, "/NM", "link annotation /NM"
+    )
+    if annotation_name is not None:
+        for existing_reference in annotation_array:
+            existing = _dereference_pdf_object(existing_reference)
+            if not isinstance(existing, DictionaryObject):
+                raise VirtualSpreadError(
+                    "Output page annotation is not a dictionary"
+                )
+            existing_name = _optional_text_string(
+                existing, "/NM", "output link annotation /NM"
+            )
+            if (
+                existing_name is not None
+                and str(existing_name) == str(annotation_name)
+            ):
+                raise VirtualSpreadError(
+                    "Duplicate link annotation /NM on output page"
+                )
+
+    annotation_reference = writer._add_object(annotation)
     annotation_array.append(annotation_reference)
 
 

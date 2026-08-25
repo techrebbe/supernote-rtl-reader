@@ -774,6 +774,18 @@ arrays, dictionaries, streams, and other unsupported values fail closed. Typed
 numeric-title, and string-typed-`/Trapped` fixtures raise the generator suite to
 72 tests on Windows and Linux.
 
+A thirty-second review pass preserves `/XYZ` magnification after target-page
+fitting by dividing every non-null zoom operand by the target affine scale.
+Only finite, nondegenerate, orthogonal uniform transforms are representable;
+non-uniform or skewed transforms fail closed. The same pass detects duplicate
+annotation `/NM` identifiers after two source pages are paired onto one output
+page and fails before publication instead of emitting ambiguous link identities.
+Explicit scale, transform, and paired-page collision regressions bring the
+generator suite to 76 tests. All 76 pass on Windows (with five platform skips)
+and Linux; both native invariant suites, 47 navigation assertions, 10 link-
+authority assertions, 8,752 exhaustive navigation assertions, hook scope, and
+the signed v0.0.15 APK build also pass.
+
 ## v0.0.15 focused hardware smoke - PASS
 
 A fresh pair was generated from `VS-Link-Target-Sides-source.pdf` with the

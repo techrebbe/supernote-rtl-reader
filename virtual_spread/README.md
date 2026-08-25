@@ -31,8 +31,12 @@ URI operands likewise require real PDF text/Boolean objects. Internal `/Fit`,
 `/FitB`, `/XYZ`,
 `/FitH`, `/FitBH`, `/FitV`, `/FitBV`, and `/FitR` destinations retain their
 mode while coordinate parameters are transformed into the target spread;
-unknown modes, invalid PDF operand types, rotation-dependent partial coordinates,
-and null coordinates whose source and target axis transforms differ fail closed
+a non-null `/XYZ` zoom is divided by the target's validated uniform affine
+scale so the source-page magnification remains unchanged. Duplicate annotation
+`/NM` identifiers that would collide after two source pages are paired fail
+closed before publication. Unknown modes, invalid PDF operand types,
+rotation-dependent partial coordinates, non-uniform zoom transforms, and null
+coordinates whose source and target axis transforms differ fail closed
 instead of silently degrading to `/Fit`. A JSON manifest records every
 source-page affine transform and target half. The companion runtime supports RTL
 virtual spreads only, so the generator rejects LTR at its public boundary before

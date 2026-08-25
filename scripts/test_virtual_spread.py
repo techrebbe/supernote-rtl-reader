@@ -39,6 +39,7 @@ from generate_virtual_spread import (  # noqa: E402
     SourceIdentity,
     VirtualSpreadError,
     _canonical_layout,
+    _destination_uniform_scale,
     _durable_replace,
     _identity,
     _layout_authority_sha256,
@@ -1432,8 +1433,16 @@ class VirtualSpreadTests(unittest.TestCase):
                         self.assertAlmostEqual(
                             float(destination[3]), expected_top, places=4
                         )
+                        target_scale = math.hypot(
+                            transform[0], transform[1]
+                        )
+                        self.assertNotAlmostEqual(
+                            target_scale, 1.0, places=4
+                        )
                         self.assertAlmostEqual(
-                            float(destination[4]), arguments[2], places=4
+                            float(destination[4]),
+                            arguments[2] / target_scale,
+                            places=4,
                         )
                     elif mode in {"/FitH", "/FitBH"}:
                         _, expected_top = transform_point(
@@ -1459,6 +1468,28 @@ class VirtualSpreadTests(unittest.TestCase):
                             self.assertAlmostEqual(
                                 float(actual), expected, places=4
                             )
+
+    def test_xyz_zoom_requires_a_uniform_target_transform(self) -> None:
+        self.assertAlmostEqual(
+            _destination_uniform_scale(
+                [0.0, 0.5, -0.5, 0.0, 10.0, 20.0], "/XYZ zoom"
+            ),
+            0.5,
+        )
+        invalid_transforms = (
+            [2.0, 0.0, 0.0, 3.0, 0.0, 0.0],
+            [1.0, 0.0, 0.25, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        )
+        for transform in invalid_transforms:
+            with self.subTest(transform=transform):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "non-uniform page transform",
+                ):
+                    _destination_uniform_scale(
+                        transform, "/XYZ zoom"
+                    )
 
     def test_null_destination_coordinates_survive_matching_transform(
         self,
@@ -1694,6 +1725,46 @@ class VirtualSpreadTests(unittest.TestCase):
 
                     self.assertFalse(output.exists())
                     self.assertFalse(manifest_path.exists())
+
+    def test_duplicate_annotation_names_on_paired_pages_fail_closed(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "duplicate-names-source.pdf"
+            output = root / "duplicate-names-spread.pdf"
+            manifest_path = root / "duplicate-names-spread.pdf.json"
+            create_odd_page_fixture(source)
+            duplicate_name = TextStringObject("paired-page-link")
+            set_link_annotation_value(
+                source,
+                source_page_index=5,
+                annotation_index=0,
+                key="/NM",
+                value=duplicate_name,
+            )
+            set_link_annotation_value(
+                source,
+                source_page_index=6,
+                annotation_index=0,
+                key="/NM",
+                value=duplicate_name,
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Duplicate link annotation /NM on output page",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    direction="rtl",
+                    cover_separate=True,
+                )
+
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
 
     def test_link_annotation_flags_are_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

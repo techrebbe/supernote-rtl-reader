@@ -13,7 +13,8 @@ virtual page 3:  page 5 | source page 4
 ```
 
 Every virtual page uses the same 4:3 page box, matching the Nomad's landscape
-screen. Source pages are fitted independently into fixed left and right slots,
+screen. Custom coordinate dimensions may scale that box but must retain the 4:3
+ratio; both generator and companion reject other aspects. Source pages are fitted independently into fixed left and right slots,
 so unusual source page sizes cannot change the reader's navigation surface.
 Content streams remain vector/text PDF content rather than page screenshots.
 Supported internal and URI links, including indirect destination arrays, are
@@ -32,7 +33,11 @@ coordinate order; numeric strings and non-finite values are never repaired.
 URI operands likewise require real PDF text/Boolean objects. Internal `/Fit`
 destinations become `/FitR` destinations around the original target source
 page's placed rectangle, preserving Fit-page semantics instead of fitting the
-entire two-page composite. `/XYZ` and `/FitR` retain their representable source
+entire two-page composite. Because source `/Fit` contains no explicit viewport,
+the authenticated `targetView=fit-source-page` policy makes the companion restore
+Supernote's native Fit-page view after the link loads. This path is distinct from
+an explicit source `/FitR` viewport and has passed focused Nomad validation on
+both target halves. `/XYZ` and `/FitR` retain their representable source
 semantics while their coordinates are transformed into the target spread; a
 source `/FitR` rectangle must be positive and remain wholly inside the target
 source page's effective CropBox. Its aspect-fitted portrait viewport must also
@@ -145,7 +150,10 @@ next run either recognizes the fully published pair by both staged hashes and
 finishes cleanup, or restores the previous PDF and manifest from the recorded
 backups. Publication marker v2 records the prior pair's SHA-256 values; recovery
 authenticates each backup before restoring it and preserves the marker plus
-evidence if any backup was altered. An interrupted v1 transaction containing
+evidence if any backup was altered. A canonical target found in front of a valid
+backup is overwritten only when it still matches the transaction's staged hash;
+an unrelated or concurrently replaced target is preserved and recovery fails
+closed. An interrupted v1 transaction containing
 backups therefore fails closed rather than restoring unauthenticated bytes.
 Ordinary publication errors use that same recovery path immediately.
 The manifest records the staged PDF's exact size and SHA-256, which the runtime
@@ -172,6 +180,9 @@ keeps only the newest pending document, and an active full-file hash cooperative
 cancels when a newer document supersedes it. Document observation happens
 before cache and sidecar-existence fast paths, so switching to an already cached
 spread or to an ordinary sidecar-free PDF also cancels stale verification work.
+While a matching PDF/sidecar snapshot is still being verified, native page turns
+are consumed rather than leaking one wrong-direction LTR turn; navigation becomes
+available as soon as the verified manifest is activated.
 Delayed callbacks from an older native view model cannot reclaim ownership. That verifier
 opens each PDF and sidecar exactly once, binds the callback identities to those
 descriptors, performs every content and authority read through the same open

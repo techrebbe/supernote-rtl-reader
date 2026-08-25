@@ -1178,6 +1178,37 @@ The exact-head CI gate independently runs the generator suite on Linux. Focused
 hardware validation of same-path replacement and preserved portrait explicit
 link viewports remains pending.
 
+## Review pass 51 pending turns, recovery evidence, and Nomad aspect - AUTOMATED PASS
+
+The next independent full-branch review found three accepted fail-closed
+boundaries. A cold or replaced spread could receive a native LTR turn while its
+manifest was still being verified; the lookup now returns an explicit pending
+state and consumes turns until the verified RTL manifest is activated. Recovery
+now restores an authenticated backup over a canonical target only when that
+target is absent or still matches the transaction's staged digest. An unrelated
+or concurrently replaced target remains untouched with the marker and backup
+evidence preserved. Finally, both generator and companion require the output
+geometry to retain the Nomad's 4:3 landscape aspect, while still allowing
+proportionally scaled coordinate systems.
+
+The review also suggested applying the explicit `/FitR` viewport guard to source
+`/Fit`. That suggestion was not adopted: source `/Fit` carries no explicit
+viewport, and this branch already authenticates `targetView=fit-source-page` so
+the companion restores Supernote's native Fit-page view after traversal. The
+dedicated v0.0.16 Nomad pass verified that behavior in portrait and landscape on
+both target halves with no zoom, flicker, stale content, or wrong page. A new
+deterministic regression preserves this intentional distinction; explicit
+source `/FitR` remains subject to the fitted-viewport containment guard.
+
+Local automated validation passes 95 generator tests on Windows (five expected
+filesystem skips), 119 focused navigation/manifest/cache assertions, 12
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, and the signed/verified
+v0.0.23 (`versionCode=23`) APK build (SHA-256
+`d8a98b94cfd3ec4a4fcbc4e997aab8c199cb83058e3c91bfa054196d222e69fa`).
+Focused hardware validation of same-path replacement and preserved portrait
+explicit link viewports remains pending.
+
 ## Failure capture
 
 Before reproducing a failure:

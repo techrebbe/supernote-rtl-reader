@@ -26,7 +26,9 @@ exact JSON integer tokens for every consumed page count,
 page index, and the persisted nonnegative output byte size. Every spread
 dimension, gutter, and link rectangle coordinate must also be a raw finite JSON
 number; numeric strings, fractional integer fields, and non-finite values fail
-closed. Before Android's permissive `JSONObject` parser runs, a strict bounded
+closed. Spread coordinates may be scaled, but their width and height must retain
+the Nomad's 4:3 landscape aspect; the generator and runtime independently reject
+other ratios. Before Android's permissive `JSONObject` parser runs, a strict bounded
 scanner rejects malformed JSON and duplicate object names at every nesting level,
 including names that become equal after JSON escape decoding.
 The generator rejects transformed URI `/IsMap true` actions, a source CropBox
@@ -70,7 +72,9 @@ pending document; opening another document invalidates older work, and an
 in-progress full-file hash checks for supersession between chunks. Observation
 precedes cache and sidecar-existence fast paths, so an already cached spread or
 an ordinary sidecar-free PDF also cancels stale work; delayed callbacks carrying
-an older native view model fail closed. It
+an older native view model fail closed. Native page turns are consumed while a
+matching snapshot is pending, so the reader cannot leak one unverified native
+LTR turn before RTL activation. It
 publishes the result only if both the PDF identity and sidecar digest are still
 unchanged. Before any navigation behavior activates, the main-thread callback
 also compares the authenticated authorities with metadata read from the exact

@@ -121,6 +121,16 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
     }
 
+    private static final class ManifestLookup {
+        final Manifest manifest;
+        final boolean verificationPending;
+
+        ManifestLookup(Manifest manifest, boolean verificationPending) {
+            this.manifest = manifest;
+            this.verificationPending = verificationPending;
+        }
+    }
+
     private static final class FileIdentity {
         final long device;
         final long inode;
@@ -750,7 +760,13 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             return;
         }
         Object viewModel = param.thisObject;
-        Manifest manifest = manifestFor(viewModel);
+        ManifestLookup lookup = manifestLookupFor(viewModel);
+        Manifest manifest = lookup.manifest;
+        if (manifest == null && lookup.verificationPending) {
+            param.setResult(null);
+            log("turn_blocked reason=manifest_verification_pending");
+            return;
+        }
         if (manifest == null) {
             return;
         }
@@ -1302,25 +1318,29 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     }
 
     private static Manifest manifestFor(Object viewModel) {
+        return manifestLookupFor(viewModel).manifest;
+    }
+
+    private static ManifestLookup manifestLookupFor(Object viewModel) {
         if (viewModel == null) {
             Activity current = activeActivity.get();
             if (current == null
                 || objectField(current, "documentViewModel") == null) {
                 observeDocumentKey(null);
             }
-            return null;
+            return new ManifestLookup(null, false);
         }
         try {
             Activity activity = activeActivity.get();
             if (activity != null
                 && objectField(activity, "documentViewModel") != viewModel) {
                 log("manifest_lookup_skipped reason=stale_view_model");
-                return null;
+                return new ManifestLookup(null, false);
             }
             Uri uri = (Uri) XposedHelpers.getObjectField(viewModel, "uri");
             if (uri == null || uri.getPath() == null) {
                 observeDocumentKey(null);
-                return null;
+                return new ManifestLookup(null, false);
             }
             File pdf = new File(uri.getPath());
             File sidecar = new File(pdf.getPath() + ".json");
@@ -1328,37 +1348,38 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             observeDocumentKey(key);
             if (!pdf.isFile() || !sidecar.isFile()) {
                 cancelManifestVerificationForKey(key);
-                return null;
+                return new ManifestLookup(null, false);
             }
             FileIdentity pdfIdentity = FileIdentity.capture(pdf);
             FileIdentity sidecarIdentity = FileIdentity.capture(sidecar);
             CachedManifest cached = MANIFESTS.get(key);
             if (cached != null
                 && cached.matches(pdfIdentity, sidecarIdentity)) {
-                return validatePageCount(
+                return new ManifestLookup(validatePageCount(
                     viewModel,
                     validateNativeSnapshot(viewModel, cached.manifest)
-                );
+                ), false);
             }
             if (cached != null) {
                 MANIFESTS.remove(key, cached);
             }
-            if (scheduleManifestVerification(
+            boolean verificationPending = scheduleManifestVerification(
                     pdf,
                     sidecar,
                     key,
                     pdfIdentity,
                     sidecarIdentity
-                )) {
+                );
+            if (verificationPending) {
                 log("manifest_verification_pending path=" + key);
             }
             // Fail closed until the background verifier publishes a stable
             // PDF + sidecar snapshot into MANIFESTS.
-            return null;
+            return new ManifestLookup(null, verificationPending);
         } catch (Throwable throwable) {
             observeDocumentKey(null);
             logFailure("manifest_read_failed", throwable);
-            return null;
+            return new ManifestLookup(null, false);
         }
     }
 
@@ -1395,6 +1416,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
     }
 
+    /**
+     * Returns true while this exact PDF/sidecar snapshot is queued or running.
+     * A caller can therefore block native navigation without racing a duplicate
+     * scheduling attempt that correctly performs no additional work.
+     */
     private static boolean scheduleManifestVerification(
         final File pdf,
         final File sidecar,
@@ -1409,7 +1435,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 return false;
             }
             if (verificationId.equals(VERIFYING.get(key))) {
-                return false;
+                return true;
             }
             // Only the document most recently requested by the native reader
             // may remain current. Invalidate an active older verification and
@@ -1834,7 +1860,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         double pageHeight = pageHeightValue.doubleValue();
         double gutter = gutterValue.doubleValue();
         if (!VirtualSpreadNavigation.runtimeGeometryIsRepresentable(
-                pageWidth, pageHeight, gutter)) {
+                pageWidth, pageHeight, gutter)
+            || !VirtualSpreadNavigation.nomadSpreadAspectIsSupported(
+                pageWidth, pageHeight)) {
             log("manifest_rejected reason=output_geometry path=" + key);
             return null;
         }

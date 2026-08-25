@@ -13,6 +13,9 @@ import java.util.Objects;
 
 /** Pure, device-independent RTL half-page navigation. */
 public final class VirtualSpreadNavigation {
+    private static final double NOMAD_LANDSCAPE_ASPECT = 4.0 / 3.0;
+    private static final double NOMAD_ASPECT_TOLERANCE = 1e-9;
+
     /** Small synchronized access-order cache for process-lifetime metadata. */
     public static final class BoundedCache<K, V> {
         private final int maximumEntries;
@@ -679,6 +682,21 @@ public final class VirtualSpreadNavigation {
             && runtimePositiveFloat(slotWidth)
             && finite(runtimeSlotWidth)
             && runtimeSlotWidth > 0.0f;
+    }
+
+    /** True only for geometry matching the Nomad's 4:3 landscape viewport. */
+    public static boolean nomadSpreadAspectIsSupported(
+        double pageWidth,
+        double pageHeight
+    ) {
+        if (!finite(pageWidth) || !finite(pageHeight)
+            || pageWidth <= 0.0 || pageHeight <= 0.0) {
+            return false;
+        }
+        double aspect = pageWidth / pageHeight;
+        return finite(aspect)
+            && Math.abs(aspect - NOMAD_LANDSCAPE_ASPECT)
+                <= NOMAD_LANDSCAPE_ASPECT * NOMAD_ASPECT_TOLERANCE;
     }
 
     /** True only when a link survives Android's top-down float conversion. */

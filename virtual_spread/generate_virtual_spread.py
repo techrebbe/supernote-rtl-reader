@@ -270,6 +270,25 @@ def _runtime_float32(value: float) -> float:
         ) from error
 
 
+NOMAD_LANDSCAPE_ASPECT = 4.0 / 3.0
+NOMAD_ASPECT_TOLERANCE = 1e-9
+
+
+def _require_nomad_spread_aspect(
+    spread_width: float,
+    spread_height: float,
+) -> None:
+    aspect = spread_width / spread_height
+    if (
+        not math.isfinite(aspect)
+        or abs(aspect - NOMAD_LANDSCAPE_ASPECT)
+            > NOMAD_LANDSCAPE_ASPECT * NOMAD_ASPECT_TOLERANCE
+    ):
+        raise VirtualSpreadError(
+            "Spread dimensions must use the Nomad 4:3 landscape aspect"
+        )
+
+
 def _require_runtime_float_geometry(
     spread_width: float,
     spread_height: float,
@@ -306,6 +325,7 @@ def _require_runtime_float_geometry(
         raise VirtualSpreadError(
             "Spread geometry is not representable by Android runtime floats"
         )
+    _require_nomad_spread_aspect(spread_width, spread_height)
     return slot_width
 
 
@@ -1725,7 +1745,7 @@ def _require_fitr_viewport_inside_target_half(
         [0.0, 0.0, spread_width, spread_height],
         "spread viewport for internal destination /FitR",
     )
-    portrait_aspect = spread_height / spread_width
+    portrait_aspect = 1.0 / NOMAD_LANDSCAPE_ASPECT
     rectangle_width = transformed_rectangle[2] - transformed_rectangle[0]
     rectangle_height = transformed_rectangle[3] - transformed_rectangle[1]
     viewport_width = max(
@@ -1791,6 +1811,11 @@ def _transformed_internal_destination(
         _require_positive_rectangle(
             target_rectangle, "target mapping destination"
         )
+        # Source /Fit carries no explicit viewport to preserve. The generated
+        # /FitR is only a deterministic landing rectangle; its authenticated
+        # targetView=fit-source-page record makes the companion restore the
+        # native Fit-page view after the link loads. Explicit source /FitR is
+        # different: its viewport is authoritative and is guarded below.
         return ArrayObject([
             target_reference,
             NameObject("/FitR"),
@@ -3650,6 +3675,13 @@ def _recover_pair_publication(
                     backup_label,
                     ownership_guard,
                 )
+                if final_exists:
+                    _require_publication_file_hash(
+                        final_path,
+                        new_hash,
+                        "Staged publication target",
+                        ownership_guard,
+                    )
                 _validate_publication_ownership(ownership_guard)
                 _durable_replace(
                     backup,

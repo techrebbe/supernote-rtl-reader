@@ -120,6 +120,21 @@ turn_end = hook.find("private static void handlePageLoaded", turn_start)
 if turn_start < 0 or turn_end < 0:
     raise SystemExit("missing page-turn implementation")
 page_turn = hook[turn_start:turn_end]
+lookup_index = page_turn.find("ManifestLookup lookup = manifestLookupFor(viewModel)")
+verification_block_index = page_turn.find(
+    "if (manifest == null && lookup.verificationPending)"
+)
+passthrough_index = page_turn.find(
+    "if (manifest == null)", verification_block_index + 1
+)
+if not (
+    0 <= lookup_index < verification_block_index < passthrough_index
+    and 'param.setResult(null);\n            log("turn_blocked '
+        in page_turn[verification_block_index:passthrough_index]
+):
+    raise SystemExit(
+        "native turns must fail closed while manifest verification is pending"
+    )
 save_index = page_turn.find("if (!saveNativeTrails(activity))")
 pending_index = page_turn.find("state.pendingPage = plan.targetPage")
 if save_index < 0 or pending_index < 0 or save_index >= pending_index:
@@ -169,6 +184,8 @@ for required in (
     "cached.matches(pdfIdentity, sidecarIdentity)",
     "validateNativeSnapshot(viewModel, cached.manifest)",
     "scheduleManifestVerification(",
+    "boolean verificationPending = scheduleManifestVerification(",
+    "return new ManifestLookup(null, verificationPending)",
     "manifest_verification_pending",
     "Fail closed until the background verifier publishes",
     'observeDocumentKey(null);\n            logFailure("manifest_read_failed"',
@@ -229,6 +246,7 @@ manifest_verification = hook[verification_start:verification_end]
 for required in (
     "MANIFEST_VERIFIER.execute",
     "VERIFYING.put(key, verificationId)",
+    "if (verificationId.equals(VERIFYING.get(key))) {\n                return true;",
     "verificationId.equals(VERIFYING.get(key))",
     'RandomAccessFile pdfInput = new RandomAccessFile(pdf, "r")',
     "FileInputStream sidecarInput = new FileInputStream(sidecar)",
@@ -424,6 +442,7 @@ for required in (
     'manifest_rejected reason=cover_layout',
     'manifest_rejected reason=source_layout',
     "VirtualSpreadNavigation.runtimeGeometryIsRepresentable(",
+    "VirtualSpreadNavigation.nomadSpreadAspectIsSupported(",
     "VirtualSpreadNavigation.runtimeRectIsRepresentable(",
     "pageHeight, x0, y0, x1, y1",
     "length < 0L || length > MAX_MANIFEST_BYTES",
@@ -550,6 +569,9 @@ for required in (
     'copied_action[NameObject("/IsMap")] = BooleanObject(',
     "def _require_supported_document_catalog(",
     "def _require_runtime_float_geometry(",
+    "NOMAD_LANDSCAPE_ASPECT = 4.0 / 3.0",
+    "def _require_nomad_spread_aspect(",
+    "_require_nomad_spread_aspect(spread_width, spread_height)",
     "def _require_runtime_float_rect(",
     "_require_runtime_float_rect(runtime_rect, page_height)",
     "SUPPORTED_DOCUMENT_CATALOG_KEYS",
@@ -572,6 +594,7 @@ for required in (
     "_require_xyz_viewport_inside_target_half(",
     "def _require_fitr_viewport_inside_target_half(",
     "_require_fitr_viewport_inside_target_half(",
+    "portrait_aspect = 1.0 / NOMAD_LANDSCAPE_ASPECT",
     "def _destination_axis_is_preserved(",
     "isinstance(mode_object, NameObject)",
     "isinstance(value, (FloatObject, NumberObject))",
@@ -621,6 +644,7 @@ for required in (
     '"Publication marker"',
     '"Output backup"',
     '"Manifest backup"',
+    '"Staged publication target"',
     "for final_path, backup, had_final, new_hash, old_hash, backup_label "
     "in entries:",
     "replace_existing=False",
@@ -659,6 +683,10 @@ for required in (
     "test_null_top_destination_survives_with_bounded_viewport",
     "test_xyz_viewport_must_stay_inside_target_half",
     "test_fitr_viewport_must_stay_inside_target_half",
+    "test_fit_source_page_uses_authenticated_runtime_reset",
+    "test_non_nomad_spread_aspect_is_rejected",
+    "test_recovery_preserves_unexpected_target_in_front_of_backup",
+    "test_published_hash_mismatch_preserves_unexpected_target",
     "test_unknown_xyz_left_fails_closed_even_matching_transform",
     "test_null_destination_coordinates_reject_different_transforms",
     "test_destination_operands_require_pdf_name_and_numbers",

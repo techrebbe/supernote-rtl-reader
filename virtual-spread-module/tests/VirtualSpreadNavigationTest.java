@@ -272,6 +272,27 @@ public final class VirtualSpreadNavigationTest {
             )
         );
         assertBoolean(
+            "default Nomad spread aspect is supported",
+            true,
+            VirtualSpreadNavigation.nomadSpreadAspectIsSupported(
+                864.0, 648.0
+            )
+        );
+        assertBoolean(
+            "scaled Nomad spread aspect is supported",
+            true,
+            VirtualSpreadNavigation.nomadSpreadAspectIsSupported(
+                1728.0, 1296.0
+            )
+        );
+        assertBoolean(
+            "non-Nomad spread aspect is rejected",
+            false,
+            VirtualSpreadNavigation.nomadSpreadAspectIsSupported(
+                864.0, 864.0
+            )
+        );
+        assertBoolean(
             "normal runtime link rectangle is representable",
             true,
             VirtualSpreadNavigation.runtimeRectIsRepresentable(

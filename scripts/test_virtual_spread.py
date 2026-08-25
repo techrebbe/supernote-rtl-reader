@@ -1720,6 +1720,41 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertFalse(output.exists())
             self.assertFalse(manifest_path.exists())
 
+    def test_fit_source_page_uses_authenticated_runtime_reset(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "fit-source-page.pdf"
+            output = root / "fit-source-page-spread.pdf"
+            manifest_path = output.with_suffix(".pdf.json")
+            create_odd_page_fixture(source)
+            set_link_destination_mode(
+                source,
+                source_page_index=1,
+                annotation_index=0,
+                target_page_index=4,
+                mode="/Fit",
+                arguments=(),
+            )
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                direction="rtl",
+                cover_separate=True,
+            )
+
+            self.assertEqual(
+                manifest["links"][0]["targetView"],
+                "fit-source-page",
+            )
+            reader = PdfReader(str(output), strict=True)
+            source_mapping = manifest["sourcePages"][1]
+            annotation = reader.pages[
+                source_mapping["virtualPageIndex"]
+            ]["/Annots"].get_object()[0].get_object()
+            self.assertEqual(str(annotation["/Dest"][1]), "/FitR")
+
     def test_xyz_viewport_must_stay_inside_target_half(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -3039,6 +3074,43 @@ class VirtualSpreadTests(unittest.TestCase):
                             **values,
                         )
 
+    def test_non_nomad_spread_aspect_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            create_odd_page_fixture(source)
+            invalid_output = root / "invalid-aspect.pdf"
+            invalid_manifest = invalid_output.with_suffix(".pdf.json")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Nomad 4:3 landscape aspect",
+            ):
+                build_virtual_spread(
+                    source,
+                    invalid_output,
+                    invalid_manifest,
+                    spread_width=864.0,
+                    spread_height=864.0,
+                )
+
+            self.assertFalse(invalid_output.exists())
+            self.assertFalse(invalid_manifest.exists())
+
+            valid_output = root / "scaled-aspect.pdf"
+            valid_manifest = valid_output.with_suffix(".pdf.json")
+            manifest = build_virtual_spread(
+                source,
+                valid_output,
+                valid_manifest,
+                spread_width=1728.0,
+                spread_height=1296.0,
+            )
+            self.assertEqual(
+                manifest["output"]["spreadSize"],
+                [1728.0, 1296.0],
+            )
+
     def test_runtime_float_spread_geometry_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -3687,7 +3759,7 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertFalse(any(root.glob("*.bak")))
             self.assertFalse(any(root.glob("*.publish.json")))
 
-    def test_published_hash_mismatch_restores_existing_pair(self) -> None:
+    def test_published_hash_mismatch_preserves_unexpected_target(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             output = root / "spread.pdf"
@@ -3729,7 +3801,7 @@ class VirtualSpreadTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(
                     VirtualSpreadError,
-                    "Published manifest SHA-256 mismatch",
+                    "Staged publication target SHA-256 mismatch",
                 ):
                     _publish_pair(
                         temporary_output,
@@ -3740,10 +3812,14 @@ class VirtualSpreadTests(unittest.TestCase):
 
             self.assertTrue(replaced_stage)
             self.assertEqual(output.read_bytes(), b"old-pdf")
-            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertEqual(manifest.read_bytes(), b"tampered-manifest")
             self.assertTrue(temporary_output.is_file())
-            self.assertFalse(any(root.glob("*.bak")))
-            self.assertFalse(any(root.glob("*.publish.json")))
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            self.assertTrue(marker.is_file())
+            self.assertFalse(output_backup.exists())
+            self.assertEqual(manifest_backup.read_bytes(), b"old-manifest")
 
     def test_live_publication_lock_blocks_recovery_by_second_generator(
         self,
@@ -4488,6 +4564,45 @@ class VirtualSpreadTests(unittest.TestCase):
 
             self.assertFalse(output.exists())
             self.assertEqual(output_backup.read_bytes(), b"tampered-old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(marker.is_file())
+
+    def test_recovery_preserves_unexpected_target_in_front_of_backup(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            output_backup = Path(transaction["outputBackupPath"])
+            marker = Path(transaction["markerPath"])
+            _durable_replace(output, output_backup)
+            output.write_bytes(b"unexpected-concurrent-pdf")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Staged publication target SHA-256 mismatch",
+            ):
+                _recover_pair_publication(output, manifest)
+
+            self.assertEqual(
+                output.read_bytes(),
+                b"unexpected-concurrent-pdf",
+            )
+            self.assertEqual(output_backup.read_bytes(), b"old-pdf")
             self.assertEqual(manifest.read_bytes(), b"old-manifest")
             self.assertTrue(marker.is_file())
 

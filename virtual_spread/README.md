@@ -190,6 +190,12 @@ document process. The unmodified native reader successfully handled:
 - persistence of all tested ink, erasure, lasso, and highlight changes; and
 - native portrait writing followed by a clean document round trip.
 
+A focused v0.0.15 revalidation on 2026-08-25 used a freshly generated
+mixed-shape/link pair. It passed landscape cold-open, all RTL turns and
+boundaries, portrait-half focus and rotation, both internal-link target halves
+with native Back, native pen persistence, and sidecar-free ordinary-PDF
+pass-through. This closes the v0.0.15 hardware release gate.
+
 The portrait persistence check is especially important: `123` written in Box D
 remained visible after switching documents and reopening the calibration PDF.
 The native `.mark` grew from 82,566 bytes to 134,698 bytes and changed SHA-256

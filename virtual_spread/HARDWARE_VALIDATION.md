@@ -88,6 +88,30 @@ The reopened native reader visibly retained `123` in Box D. This is a direct
 regression test for the former failure where portrait handwriting appeared but
 did not survive a reload.
 
+## v0.0.15 focused revalidation - PASS
+
+On 2026-08-25, a fresh `VS-v15-Smoke.pdf` and companion sidecar were generated
+from the mixed-shape, internal-link source fixture. Companion module v0.0.15
+accepted the four-page manifest and activated it on the Nomad. Hardware then
+confirmed:
+
+- landscape cold-open and all RTL spread pairings;
+- correct beginning/end boundaries and reverse navigation;
+- immediate full-size portrait focus for the right source half and immediate
+  complete-spread restoration after rotating back;
+- both internal-link target halves and exact native Back restoration;
+- native pen persistence across a portrait page round trip and into the
+  corresponding landscape half; and
+- complete pass-through for the same seven-page source PDF when opened without
+  a sidecar, including native single-page landscape layout and LTR portrait
+  turns.
+
+The regenerated output PDF SHA-256 was
+`322f0845b3c62a32c95bd9a5ee23cb8917faf64d32265cc05dc23cfff7a5e8b7`.
+The runtime activation revision was
+`ed5a1e7eca9088336ef7cb7171d9585188be783dbea8d1f6dac0b93ad81ac0f9`.
+No v0.0.8 annotation subsystem was reimplemented or intercepted by v0.0.15.
+
 ## Decision
 
 Proceed with the virtual-spread architecture. Do not port the legacy dual-page

@@ -773,8 +773,31 @@ arrays, dictionaries, streams, and other unsupported values fail closed. Typed
 `/Trapped`, custom number/Boolean, malformed rotation, unsupported metadata,
 numeric-title, and string-typed-`/Trapped` fixtures raise the generator suite to
 72 tests on Windows and Linux.
-These automated checks do not replace or restate the v0.0.8 hardware result;
-v0.0.15 still requires a focused generated-pair smoke test before release.
+
+## v0.0.15 focused hardware smoke - PASS
+
+A fresh pair was generated from `VS-Link-Target-Sides-source.pdf` with the
+v0.0.15 generator and opened on the Nomad with companion module v0.0.15
+(`versionCode=15`). The runtime accepted all four virtual spreads and activated
+the exact regenerated manifest revision. The focused 2026-08-25 smoke pass
+confirmed:
+
+- initial landscape cold-open displayed `blank | page 1` without a page turn;
+- rightward RTL turns displayed `3 | 2`, `5 | 4`, and `7 | 6` in order;
+- an additional rightward turn at the end was an exact visual no-op, and the
+  reverse turn returned to `5 | 4`;
+- portrait focus immediately displayed full-size page 4 and later page 2, while
+  both rotations back to landscape immediately restored the complete spread;
+- internal links from page 2 opened the exact page 7 left half and page 6 right
+  half, and native Back restored page 2 after each link;
+- a native pen stroke written on portrait page 2 survived a page 3 round trip
+  and appeared in the correct position on the right half of the landscape
+  `3 | 2` spread; and
+- the same source PDF opened without a sidecar remained an ordinary native
+  single-page document and retained native LTR turns in portrait.
+
+This closes the v0.0.15 release gate without repeating the already completed
+v0.0.8 annotation campaign.
 
 ## Failure capture
 

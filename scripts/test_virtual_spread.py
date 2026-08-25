@@ -2692,6 +2692,33 @@ class VirtualSpreadTests(unittest.TestCase):
                     self.assertFalse(output.exists())
                     self.assertFalse(manifest_path.exists())
 
+    def test_crop_box_must_be_contained_by_media_box(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, side in enumerate(("left", "bottom", "right", "top")):
+                with self.subTest(side=side):
+                    source = root / f"crop-media-source-{index}.pdf"
+                    output = root / f"crop-media-spread-{index}.pdf"
+                    manifest_path = root / f"crop-media-spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    page = PdfReader(str(source), strict=True).pages[0]
+                    media = page.mediabox
+                    crop = [
+                        float(media.left),
+                        float(media.bottom),
+                        float(media.right),
+                        float(media.top),
+                    ]
+                    crop[index] += -1.0 if index < 2 else 1.0
+                    set_page_crop_box(source, 0, tuple(crop))
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "effective /CropBox extends outside /MediaBox",
+                    ):
+                        build_virtual_spread(source, output, manifest_path)
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
     def test_page_boxes_require_raw_pdf_number_operands(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

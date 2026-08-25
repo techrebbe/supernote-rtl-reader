@@ -236,6 +236,8 @@ for required in (
     "VirtualSpreadNavigation.exactJsonInteger(",
     "exactNonnegativeJsonLong(",
     "exactFiniteJsonNumber(",
+    "jsonObjectHasUniqueKeys(sidecarJson)",
+    'manifest_rejected reason=duplicate_or_invalid_json',
     'spreadSize.opt(0)',
     'spreadSize.opt(1)',
     'output.opt("gutter")',
@@ -289,12 +291,21 @@ for forbidden in (
             f"manifest parser still skips malformed link metadata: {forbidden}"
         )
 
+duplicate_guard = manifest_validation.find(
+    "jsonObjectHasUniqueKeys(sidecarJson)"
+)
+json_parse = manifest_validation.find("new JSONObject(sidecarJson)")
+if not (0 <= duplicate_guard < json_parse):
+    raise SystemExit(
+        "duplicate-key validation must run before Android JSONObject parsing"
+    )
+
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
-if 'android:versionCode="20"' not in manifest:
+if 'android:versionCode="21"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version code")
-if 'android:versionName="0.0.20"' not in manifest:
+if 'android:versionName="0.0.21"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
-if 'private static final String VERSION = "0.0.20"' not in hook:
+if 'private static final String VERSION = "0.0.21"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
 for required in (
     "pendingLinkResetLandscapeFit",
@@ -397,6 +408,9 @@ for required in (
     "isinstance(mode_object, NameObject)",
     "isinstance(value, (FloatObject, NumberObject))",
     "def _raw_page_box_values(",
+    "def _require_rectangle_contained(",
+    "_require_rectangle_contained(\n            raw_crop_box,",
+    "_require_rectangle_contained(\n            crop_box,",
     "def _require_nondegenerate_quadrilateral(",
     'mode in {"/FitB", "/FitH", "/FitBH", "/FitV", "/FitBV"}',
     'NameObject("/FitR")',
@@ -487,6 +501,7 @@ for required in (
     "test_implicit_default_link_border_is_scaled",
     "test_malformed_link_border_or_highlight_fails_closed",
     "test_link_geometry_must_remain_inside_effective_crop",
+    "test_crop_box_must_be_contained_by_media_box",
     "test_uri_action_is_map_false_is_preserved",
     "test_uri_action_is_map_true_fails_closed",
     "test_uri_action_operands_and_chains_fail_closed",

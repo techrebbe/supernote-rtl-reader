@@ -582,6 +582,20 @@ def _require_positive_rectangle(
         raise VirtualSpreadError(f"Invalid {label} ordering")
 
 
+def _require_rectangle_contained(
+    inner: list[float], outer: list[float], label: str
+) -> None:
+    _require_positive_rectangle(inner, label)
+    _require_positive_rectangle(outer, f"{label} container")
+    if (
+        inner[0] < outer[0]
+        or inner[1] < outer[1]
+        or inner[2] > outer[2]
+        or inner[3] > outer[3]
+    ):
+        raise VirtualSpreadError(f"{label} extends outside /MediaBox")
+
+
 def _page_box_values(page: Any, attribute: str, label: str) -> list[float]:
     try:
         box = getattr(page, attribute)
@@ -977,23 +991,33 @@ def _require_supported_document_catalog(
 def _require_supported_source_pages(reader: PdfReader) -> None:
     for page_index, page in enumerate(reader.pages):
         page_number = page_index + 1
-        _raw_page_box_values(
+        raw_media_box = _raw_page_box_values(
             page,
             "/MediaBox",
             (),
             f"source page {page_number} /MediaBox",
         )
-        _raw_page_box_values(
+        raw_crop_box = _raw_page_box_values(
             page,
             "/CropBox",
             ("/MediaBox",),
             f"source page {page_number} effective /CropBox",
         )
-        _page_box_values(
+        _require_rectangle_contained(
+            raw_crop_box,
+            raw_media_box,
+            f"source page {page_number} effective /CropBox",
+        )
+        media_box = _page_box_values(
             page, "mediabox", f"source page {page_number} /MediaBox"
         )
-        _page_box_values(
+        crop_box = _page_box_values(
             page, "cropbox", f"source page {page_number} effective /CropBox"
+        )
+        _require_rectangle_contained(
+            crop_box,
+            media_box,
+            f"source page {page_number} effective /CropBox",
         )
         if "/Rotate" in page:
             rotation = _dereference_pdf_object(page.raw_get("/Rotate"))

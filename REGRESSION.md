@@ -1023,6 +1023,27 @@ signed/verified v0.0.20 (`versionCode=20`) APK build (SHA-256
 Focused hardware validation of native metadata lookup and same-path replacement
 remains pending.
 
+## Review pass 44 unambiguous manifest and page boxes - AUTOMATED PASS
+
+The exact-head v0.0.20 review found two remaining ambiguous-input boundaries.
+Android's `JSONObject` silently keeps one value when an object repeats a name, so
+v0.0.21 first scans the complete manifest with a bounded strict JSON parser and
+rejects duplicate names at every nested object, including escape-equivalent
+spellings. The generator now also requires each effective source CropBox to be
+fully contained within its MediaBox in both the raw PDF operands and pypdf's
+resolved rectangle view. Any protruding left, bottom, right, or top edge fails
+closed before an output PDF or manifest can be published.
+
+Local automated validation passes 86 generator tests on Windows (five expected
+filesystem skips), 93 focused navigation/manifest assertions, 12 cross-language
+authority assertions, 8,752 exhaustive assertions, both invariant suites, hook-
+scope validation, and the signed/verified v0.0.21 (`versionCode=21`) APK build
+(SHA-256
+`60acd2fb4f10cebb6be57613a331c179eb3e30dfef0e3e64b9f4ca297d8f38ba`).
+The exact-head CI gate independently runs the generator suite on Linux. Focused
+hardware validation of native metadata lookup and same-path replacement remains
+pending.
+
 ## Failure capture
 
 Before reproducing a failure:

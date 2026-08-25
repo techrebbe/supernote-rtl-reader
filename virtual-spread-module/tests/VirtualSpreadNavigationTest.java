@@ -702,6 +702,64 @@ public final class VirtualSpreadNavigationTest {
             null,
             VirtualSpreadNavigation.exactFiniteJsonNumber(null)
         );
+        assertBoolean(
+            "unique nested JSON object keys are accepted",
+            true,
+            VirtualSpreadNavigation.jsonObjectHasUniqueKeys(
+                "{\"root\":{\"value\":1},"
+                    + "\"items\":[{\"value\":2}],"
+                    + "\"flag\":true,\"none\":null}"
+            )
+        );
+        assertBoolean(
+            "duplicate root JSON key is rejected",
+            false,
+            VirtualSpreadNavigation.jsonObjectHasUniqueKeys(
+                "{\"a\":1,\"a\":2}"
+            )
+        );
+        assertBoolean(
+            "duplicate nested JSON key is rejected",
+            false,
+            VirtualSpreadNavigation.jsonObjectHasUniqueKeys(
+                "{\"root\":{\"a\":1,\"a\":2}}"
+            )
+        );
+        assertBoolean(
+            "duplicate JSON key inside array is rejected",
+            false,
+            VirtualSpreadNavigation.jsonObjectHasUniqueKeys(
+                "{\"items\":[{\"a\":1,\"a\":2}]}"
+            )
+        );
+        String escapedDuplicate = "{\"a\":1,\""
+            + ((char) 92) + "u0061\":2}";
+        assertBoolean(
+            "escape-equivalent duplicate JSON key is rejected",
+            false,
+            VirtualSpreadNavigation.jsonObjectHasUniqueKeys(escapedDuplicate)
+        );
+        assertBoolean(
+            "malformed JSON is rejected before JSONObject",
+            false,
+            VirtualSpreadNavigation.jsonObjectHasUniqueKeys(
+                "{\"a\":1,}"
+            )
+        );
+        assertBoolean(
+            "trailing JSON content is rejected",
+            false,
+            VirtualSpreadNavigation.jsonObjectHasUniqueKeys(
+                "{\"a\":1}{}"
+            )
+        );
+        assertBoolean(
+            "non-object JSON root is rejected",
+            false,
+            VirtualSpreadNavigation.jsonObjectHasUniqueKeys(
+                "[{\"a\":1}]"
+            )
+        );
 
         String sourceAuthority =
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";

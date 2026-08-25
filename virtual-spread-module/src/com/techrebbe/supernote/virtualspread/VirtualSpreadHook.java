@@ -57,7 +57,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final String SCHEMA =
         "techrebbe.supernote.virtual-spread/v1";
     private static final String TAG = "SN_VIRTUAL_SPREAD";
-    private static final String VERSION = "0.0.20";
+    private static final String VERSION = "0.0.21";
     private static final long MAX_MANIFEST_BYTES = 8L * 1024L * 1024L;
 
     private static volatile WeakReference<Activity> activeActivity =
@@ -1530,6 +1530,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         String key,
         String sidecarDigest
     ) throws Exception {
+        if (!VirtualSpreadNavigation.jsonObjectHasUniqueKeys(sidecarJson)) {
+            log("manifest_rejected reason=duplicate_or_invalid_json path="
+                + key);
+            return null;
+        }
         JSONObject root = new JSONObject(sidecarJson);
         if (!SCHEMA.equals(root.optString("schema"))
             || !"rtl".equalsIgnoreCase(root.optString("direction"))) {

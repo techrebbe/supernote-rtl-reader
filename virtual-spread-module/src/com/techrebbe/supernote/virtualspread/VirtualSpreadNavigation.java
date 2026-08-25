@@ -1,6 +1,7 @@
 package com.techrebbe.supernote.virtualspread;
 
 import java.util.ArrayDeque;
+import java.util.HashSet;
 
 /** Pure, device-independent RTL half-page navigation. */
 public final class VirtualSpreadNavigation {
@@ -258,6 +259,278 @@ public final class VirtualSpreadNavigation {
         }
         double candidate = ((Number) value).doubleValue();
         return finite(candidate) ? Double.valueOf(candidate) : null;
+    }
+
+    /** Strictly validate one JSON object and reject duplicate names anywhere. */
+    public static boolean jsonObjectHasUniqueKeys(String json) {
+        if (json == null) {
+            return false;
+        }
+        try {
+            return new JsonKeyScanner(json).scanObject();
+        } catch (IllegalArgumentException error) {
+            return false;
+        }
+    }
+
+    private static final class JsonKeyScanner {
+        private static final int MAX_DEPTH = 128;
+
+        private final String text;
+        private int position;
+
+        JsonKeyScanner(String text) {
+            this.text = text;
+        }
+
+        boolean scanObject() {
+            skipWhitespace();
+            if (position >= text.length() || text.charAt(position) != '{') {
+                return false;
+            }
+            parseObject(1);
+            skipWhitespace();
+            return position == text.length();
+        }
+
+        private void parseValue(int depth) {
+            requireDepth(depth);
+            skipWhitespace();
+            if (position >= text.length()) {
+                fail();
+            }
+            char token = text.charAt(position);
+            if (token == '{') {
+                parseObject(depth);
+            } else if (token == '[') {
+                parseArray(depth);
+            } else if (token == '"') {
+                parseString(false);
+            } else if (token == 't') {
+                parseLiteral("true");
+            } else if (token == 'f') {
+                parseLiteral("false");
+            } else if (token == 'n') {
+                parseLiteral("null");
+            } else {
+                parseNumber();
+            }
+        }
+
+        private void parseObject(int depth) {
+            requireDepth(depth);
+            expect('{');
+            skipWhitespace();
+            HashSet<String> names = new HashSet<>();
+            if (take('}')) {
+                return;
+            }
+            while (true) {
+                skipWhitespace();
+                if (position >= text.length()
+                    || text.charAt(position) != '"') {
+                    fail();
+                }
+                String name = parseString(true);
+                if (!names.add(name)) {
+                    fail();
+                }
+                skipWhitespace();
+                expect(':');
+                parseValue(depth + 1);
+                skipWhitespace();
+                if (take('}')) {
+                    return;
+                }
+                expect(',');
+            }
+        }
+
+        private void parseArray(int depth) {
+            requireDepth(depth);
+            expect('[');
+            skipWhitespace();
+            if (take(']')) {
+                return;
+            }
+            while (true) {
+                parseValue(depth + 1);
+                skipWhitespace();
+                if (take(']')) {
+                    return;
+                }
+                expect(',');
+            }
+        }
+
+        private String parseString(boolean capture) {
+            expect('"');
+            StringBuilder result = capture ? new StringBuilder() : null;
+            while (position < text.length()) {
+                char current = text.charAt(position++);
+                if (current == '"') {
+                    return result == null ? "" : result.toString();
+                }
+                if (current == '\\') {
+                    if (position >= text.length()) {
+                        fail();
+                    }
+                    char escaped = text.charAt(position++);
+                    char decoded;
+                    if (escaped == '"' || escaped == '\\'
+                        || escaped == '/') {
+                        decoded = escaped;
+                    } else if (escaped == 'b') {
+                        decoded = '\b';
+                    } else if (escaped == 'f') {
+                        decoded = '\f';
+                    } else if (escaped == 'n') {
+                        decoded = '\n';
+                    } else if (escaped == 'r') {
+                        decoded = '\r';
+                    } else if (escaped == 't') {
+                        decoded = '\t';
+                    } else if (escaped == 'u') {
+                        decoded = parseUnicodeEscape();
+                    } else {
+                        fail();
+                        return "";
+                    }
+                    if (result != null) {
+                        result.append(decoded);
+                    }
+                } else {
+                    if (current < 0x20) {
+                        fail();
+                    }
+                    if (result != null) {
+                        result.append(current);
+                    }
+                }
+            }
+            fail();
+            return "";
+        }
+
+        private char parseUnicodeEscape() {
+            if (position + 4 > text.length()) {
+                fail();
+            }
+            int value = 0;
+            for (int index = 0; index < 4; index++) {
+                value = value * 16 + hexValue(text.charAt(position++));
+            }
+            return (char) value;
+        }
+
+        private void parseNumber() {
+            if (take('-') && position >= text.length()) {
+                fail();
+            }
+            if (take('0')) {
+                // A leading zero can only be followed by a fraction/exponent.
+            } else {
+                if (position >= text.length()
+                    || text.charAt(position) < '1'
+                    || text.charAt(position) > '9') {
+                    fail();
+                }
+                while (position < text.length()
+                    && isDigit(text.charAt(position))) {
+                    position++;
+                }
+            }
+            if (take('.')) {
+                requireDigit();
+                while (position < text.length()
+                    && isDigit(text.charAt(position))) {
+                    position++;
+                }
+            }
+            if (position < text.length()
+                && (text.charAt(position) == 'e'
+                    || text.charAt(position) == 'E')) {
+                position++;
+                if (position < text.length()
+                    && (text.charAt(position) == '+'
+                        || text.charAt(position) == '-')) {
+                    position++;
+                }
+                requireDigit();
+                while (position < text.length()
+                    && isDigit(text.charAt(position))) {
+                    position++;
+                }
+            }
+        }
+
+        private void parseLiteral(String literal) {
+            if (!text.regionMatches(position, literal, 0, literal.length())) {
+                fail();
+            }
+            position += literal.length();
+        }
+
+        private void requireDigit() {
+            if (position >= text.length()
+                || !isDigit(text.charAt(position))) {
+                fail();
+            }
+        }
+
+        private static boolean isDigit(char value) {
+            return value >= '0' && value <= '9';
+        }
+
+        private static int hexValue(char value) {
+            if (value >= '0' && value <= '9') {
+                return value - '0';
+            }
+            if (value >= 'a' && value <= 'f') {
+                return value - 'a' + 10;
+            }
+            if (value >= 'A' && value <= 'F') {
+                return value - 'A' + 10;
+            }
+            fail();
+            return 0;
+        }
+
+        private void skipWhitespace() {
+            while (position < text.length()) {
+                char value = text.charAt(position);
+                if (value != ' ' && value != '\t'
+                    && value != '\r' && value != '\n') {
+                    return;
+                }
+                position++;
+            }
+        }
+
+        private boolean take(char expected) {
+            if (position < text.length()
+                && text.charAt(position) == expected) {
+                position++;
+                return true;
+            }
+            return false;
+        }
+
+        private void expect(char expected) {
+            if (!take(expected)) {
+                fail();
+            }
+        }
+
+        private static void requireDepth(int depth) {
+            if (depth > MAX_DEPTH) {
+                fail();
+            }
+        }
+
+        private static void fail() {
+            throw new IllegalArgumentException("invalid or duplicate-key JSON");
+        }
     }
 
     public static int reverseLandscapeOffset(int nativeOffset) {

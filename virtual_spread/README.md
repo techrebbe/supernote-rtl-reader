@@ -145,15 +145,16 @@ preventing a separately edited sidecar from omitting or retargeting links.
 A second canonical authority binds RTL direction, cover parity, source/output
 page counts, spread dimensions, and gutter to that same hashed PDF. This keeps
 an otherwise internally consistent sidecar from swapping cover pairing or
-geometry. Native module v0.0.20 authenticates each internal link's target-view
+geometry. Native module v0.0.21 authenticates each internal link's target-view
 policy and the exact source snapshot. It rejects non-integral manifest page
 indices or output sizes, numeric strings/non-finite values in spread or link
-geometry, transformed URI `/IsMap true` actions, and link geometry outside the
-effective source CropBox, while preserving an omitted PDF link border at its
-correct transformed default width. Link-authority v2 records and the source
-marker fail closed on older generated pairs; regenerate the PDF and sidecar
-together before opening them with v0.0.20. Native reader callbacks perform only
-strong PDF and sidecar
+geometry, malformed or duplicate-key manifest JSON at any nesting level,
+transformed URI `/IsMap true` actions, a source CropBox outside its MediaBox, and
+link geometry outside the effective source CropBox. It preserves an omitted PDF
+link border at its correct transformed default width. Link-authority v2 records
+and the source marker fail closed on older generated pairs; regenerate the PDF
+and sidecar together before opening them with v0.0.21. Native reader callbacks
+perform only strong PDF and sidecar
 identity checks. Sidecar reading/hashing, parsing, full-PDF hashing, and stable-
 snapshot verification run on the single background verifier. That verifier
 opens each PDF and sidecar exactly once, binds the callback identities to those

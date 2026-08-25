@@ -152,28 +152,31 @@ link fixture. The companion suite passes 55 focused navigation assertions, 10
 cross-language authority assertions, 8,752 exhaustive assertions, and the hook-
 scope guard.
 
-## v0.0.20 native-open snapshot binding - PENDING HARDWARE
+## v0.0.21 native-open snapshot binding - PENDING HARDWARE
 
-Review passes 40-43 bind the authenticated sidecar to the actual PDF object
-retained inside Supernote's native reader and harden all transformed link and
-manifest boundaries. The generator adds a descriptor-verified source-authority
-marker before the layout and link markers. The companion reads all three values
-through MuPDF's `Document.getMetaData()` on the exact native `Document` instance.
-It requires exact JSON integer tokens for page counts, indices, and the persisted
-nonnegative output byte size. Spread dimensions, gutter, and link rectangle
-coordinates must be raw finite JSON numbers. The generator rejects transformed
-URI `/IsMap true` actions and link geometry outside the source CropBox, while
-scaling an omitted link border's PDF-default width.
+Review passes 40-44 bind the authenticated sidecar to the actual PDF object
+retained inside Supernote's native reader and harden all transformed link,
+manifest, and page-box boundaries. The generator adds a descriptor-verified
+source-authority marker before the layout and link markers. The companion reads
+all three values through MuPDF's `Document.getMetaData()` on the exact native
+`Document` instance. It requires exact JSON integer tokens for page counts,
+indices, and the persisted nonnegative output byte size. Spread dimensions,
+gutter, and link rectangle coordinates must be raw finite JSON numbers. A strict
+pre-parser rejects malformed JSON and duplicate names anywhere in the manifest.
+The generator rejects transformed URI `/IsMap true` actions, a CropBox extending
+outside its MediaBox, and link geometry outside the source CropBox, while scaling
+an omitted link border's PDF-default width.
 
-The automated gate passes 85 generator tests on Windows (five expected platform
-skips) and Linux (no skips), 85 focused navigation/manifest assertions, 12
-cross-language authority assertions, 8,752 exhaustive navigation assertions,
-both native invariant suites, hook-scope validation, and the signed/verified
-v0.0.20 (`versionCode=20`) APK build.
+The local automated gate passes 86 generator tests on Windows (five expected
+platform skips), 93 focused navigation/manifest assertions, 12 cross-language
+authority assertions, 8,752 exhaustive navigation assertions, both native
+invariant suites, hook-scope validation, and the signed/verified v0.0.21
+(`versionCode=21`) APK build. CI independently runs the same generator suite on
+Linux without the Windows-only skips.
 
 The remaining focused Nomad gate is:
 
-1. cold-open a newly generated v0.0.20 pair and confirm normal activation;
+1. cold-open a newly generated v0.0.21 pair and confirm normal activation;
 2. replace the PDF/sidecar pair at the same path while the original PDF remains
    open and confirm the companion fails closed rather than applying the new
    mappings to stale native content;

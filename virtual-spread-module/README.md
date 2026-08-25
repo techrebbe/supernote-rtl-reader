@@ -19,18 +19,21 @@ It activates only when all of these are true:
   native MuPDF `Document` match the authenticated manifest; and
 - the known Supernote document firmware fingerprint and APK size match.
 
-v0.0.20 retains link-authority v2 and the v0.0.17 native-open snapshot
+v0.0.21 retains link-authority v2 and the v0.0.17 native-open snapshot
 binding. It requires exact JSON integer tokens for every consumed page count,
 page index, and the persisted nonnegative output byte size. Every spread
 dimension, gutter, and link rectangle coordinate must also be a raw finite JSON
 number; numeric strings, fractional integer fields, and non-finite values fail
-closed.
-The generator rejects transformed URI `/IsMap true` actions and any link
-rectangle or quadrilateral outside the source page's effective CropBox, and it
-materializes the PDF default link border at the transformed width. Replacing a
-PDF and sidecar at their existing paths can never apply replacement mappings to
-an older native document that remains open in memory. Older generated pairs
-fail closed; regenerate the PDF/sidecar pair before using it with this module.
+closed. Before Android's permissive `JSONObject` parser runs, a strict bounded
+scanner rejects malformed JSON and duplicate object names at every nesting level,
+including names that become equal after JSON escape decoding.
+The generator rejects transformed URI `/IsMap true` actions, a source CropBox
+that extends beyond its MediaBox, and any link rectangle or quadrilateral outside
+the source page's effective CropBox. It materializes the PDF default link border
+at the transformed width. Replacing a PDF and sidecar at their existing paths can
+never apply replacement mappings to an older native document that remains open
+in memory. Older generated pairs fail closed; regenerate the PDF/sidecar pair
+before using it with this module.
 If multiple tolerance-equivalent runtime link matches disagree on source half,
 target half, or authenticated target-view policy, the match also fails closed
 rather than selecting an order-dependent record.

@@ -124,10 +124,26 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final class ManifestLookup {
         final Manifest manifest;
         final boolean verificationPending;
+        final boolean nativeSnapshotBlocked;
 
-        ManifestLookup(Manifest manifest, boolean verificationPending) {
+        ManifestLookup(
+            Manifest manifest,
+            boolean verificationPending,
+            boolean nativeSnapshotBlocked
+        ) {
             this.manifest = manifest;
             this.verificationPending = verificationPending;
+            this.nativeSnapshotBlocked = nativeSnapshotBlocked;
+        }
+
+        boolean navigationBlocked() {
+            return verificationPending || nativeSnapshotBlocked;
+        }
+
+        String navigationBlockReason() {
+            return nativeSnapshotBlocked
+                ? "native_snapshot_mismatch"
+                : "manifest_verification_pending";
         }
     }
 
@@ -283,6 +299,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         VirtualSpreadNavigation.Half pendingLinkHalf;
         boolean pendingLinkResetLandscapeFit;
         long pendingLinkAt;
+        int preservedLinkViewportPage = -1;
+        VirtualSpreadNavigation.Half preservedLinkViewportHalf;
         int pendingHistoryPage = -1;
         VirtualSpreadNavigation.Half pendingHistoryHalf;
         long pendingHistoryAt;
@@ -762,9 +780,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         Object viewModel = param.thisObject;
         ManifestLookup lookup = manifestLookupFor(viewModel);
         Manifest manifest = lookup.manifest;
-        if (manifest == null && lookup.verificationPending) {
+        if (manifest == null && lookup.navigationBlocked()) {
             param.setResult(null);
-            log("turn_blocked reason=manifest_verification_pending");
+            log("turn_blocked reason=" + lookup.navigationBlockReason());
             return;
         }
         if (manifest == null) {
@@ -812,6 +830,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
 
         if (plan.kind == VirtualSpreadNavigation.Kind.SAME_SPREAD) {
+            clearPreservedLinkViewport(state);
             state.half = plan.targetHalf;
             state.lastPage = plan.targetPage;
             int adjusted = plan.targetHalf == VirtualSpreadNavigation.Half.LEFT
@@ -923,10 +942,22 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         Activity activity = activeActivity.get();
         boolean portrait = isPortrait(activity);
         boolean internalLinkTarget = "internal_link".equals(targetReason);
+        boolean retainedLinkViewport = "existing_state".equals(targetReason)
+            && state.preservedLinkViewportPage == currentPage
+            && state.preservedLinkViewportHalf == target;
+        if (internalLinkTarget && !resetLandscapeFit) {
+            state.preservedLinkViewportPage = currentPage;
+            state.preservedLinkViewportHalf = target;
+            retainedLinkViewport = true;
+        } else if (!"existing_state".equals(targetReason)) {
+            clearPreservedLinkViewport(state);
+            retainedLinkViewport = false;
+        }
         boolean preserveLinkViewport =
             VirtualSpreadNavigation.shouldPreservePortraitLinkViewport(
                 internalLinkTarget,
-                resetLandscapeFit
+                resetLandscapeFit,
+                retainedLinkViewport
             );
         boolean resetSelectedLinkLandscapeFit =
             internalLinkTarget && resetLandscapeFit;
@@ -1185,6 +1216,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         state.pendingHistoryAt = 0L;
     }
 
+    private static void clearPreservedLinkViewport(ReaderState state) {
+        state.preservedLinkViewportPage = -1;
+        state.preservedLinkViewportHalf = null;
+    }
+
     private static ReaderState readerStateLocked(Object viewModel) {
         ReaderState state = STATES.get(viewModel);
         if (state == null) {
@@ -1297,6 +1333,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 state.pendingHalf = null;
                 clearPendingLink(state);
                 clearPendingHistory(state);
+                clearPreservedLinkViewport(state);
                 state.linkHistory.clear();
                 state.half = VirtualSpreadNavigation.Half.RIGHT;
                 state.pageLoadGeneration = 0L;
@@ -1328,19 +1365,19 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 || objectField(current, "documentViewModel") == null) {
                 observeDocumentKey(null);
             }
-            return new ManifestLookup(null, false);
+            return new ManifestLookup(null, false, false);
         }
         try {
             Activity activity = activeActivity.get();
             if (activity != null
                 && objectField(activity, "documentViewModel") != viewModel) {
                 log("manifest_lookup_skipped reason=stale_view_model");
-                return new ManifestLookup(null, false);
+                return new ManifestLookup(null, false, false);
             }
             Uri uri = (Uri) XposedHelpers.getObjectField(viewModel, "uri");
             if (uri == null || uri.getPath() == null) {
                 observeDocumentKey(null);
-                return new ManifestLookup(null, false);
+                return new ManifestLookup(null, false, false);
             }
             File pdf = new File(uri.getPath());
             File sidecar = new File(pdf.getPath() + ".json");
@@ -1348,17 +1385,28 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             observeDocumentKey(key);
             if (!pdf.isFile() || !sidecar.isFile()) {
                 cancelManifestVerificationForKey(key);
-                return new ManifestLookup(null, false);
+                return new ManifestLookup(null, false, false);
             }
             FileIdentity pdfIdentity = FileIdentity.capture(pdf);
             FileIdentity sidecarIdentity = FileIdentity.capture(sidecar);
             CachedManifest cached = MANIFESTS.get(key);
             if (cached != null
                 && cached.matches(pdfIdentity, sidecarIdentity)) {
-                return new ManifestLookup(validatePageCount(
+                if (cached.manifest == null) {
+                    return new ManifestLookup(null, false, false);
+                }
+                Manifest validated = validatePageCount(
                     viewModel,
                     validateNativeSnapshot(viewModel, cached.manifest)
-                ), false);
+                );
+                // A valid sidecar/PDF pair must remain fail-closed when the
+                // live MuPDF document still represents an older same-path
+                // snapshot (or has not yet exposed a matching page count).
+                return new ManifestLookup(
+                    validated,
+                    false,
+                    validated == null
+                );
             }
             if (cached != null) {
                 MANIFESTS.remove(key, cached);
@@ -1375,11 +1423,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             }
             // Fail closed until the background verifier publishes a stable
             // PDF + sidecar snapshot into MANIFESTS.
-            return new ManifestLookup(null, verificationPending);
+            return new ManifestLookup(null, verificationPending, false);
         } catch (Throwable throwable) {
             observeDocumentKey(null);
             logFailure("manifest_read_failed", throwable);
-            return new ManifestLookup(null, false);
+            return new ManifestLookup(null, false, false);
         }
     }
 

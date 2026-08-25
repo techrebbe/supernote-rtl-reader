@@ -182,7 +182,9 @@ before cache and sidecar-existence fast paths, so switching to an already cached
 spread or to an ordinary sidecar-free PDF also cancels stale verification work.
 While a matching PDF/sidecar snapshot is still being verified, native page turns
 are consumed rather than leaking one wrong-direction LTR turn; navigation becomes
-available as soon as the verified manifest is activated.
+available as soon as the verified manifest is activated. A verified replacement
+pair whose authority does not match Supernote's still-open native document also
+keeps turns blocked until that document is reopened.
 Delayed callbacks from an older native view model cannot reclaim ownership. That verifier
 opens each PDF and sidecar exactly once, binds the callback identities to those
 descriptors, performs every content and authority read through the same open

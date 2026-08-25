@@ -107,6 +107,13 @@ page_loaded = hook[page_loaded_start:page_loaded_end]
 for required in (
     "shouldPreservePortraitLinkViewport(",
     '"internal_link".equals(targetReason)',
+    '"existing_state".equals(targetReason)',
+    "state.preservedLinkViewportPage == currentPage",
+    "state.preservedLinkViewportHalf == target",
+    "state.preservedLinkViewportPage = currentPage",
+    "state.preservedLinkViewportHalf = target",
+    "clearPreservedLinkViewport(state)",
+    "retainedLinkViewport",
     "if (preserveLinkViewport)",
     'portrait_link_view_preserved',
 ):
@@ -122,7 +129,7 @@ if turn_start < 0 or turn_end < 0:
 page_turn = hook[turn_start:turn_end]
 lookup_index = page_turn.find("ManifestLookup lookup = manifestLookupFor(viewModel)")
 verification_block_index = page_turn.find(
-    "if (manifest == null && lookup.verificationPending)"
+    "if (manifest == null && lookup.navigationBlocked())"
 )
 passthrough_index = page_turn.find(
     "if (manifest == null)", verification_block_index + 1
@@ -133,7 +140,7 @@ if not (
         in page_turn[verification_block_index:passthrough_index]
 ):
     raise SystemExit(
-        "native turns must fail closed while manifest verification is pending"
+        "native turns must fail closed while manifest authority is unresolved"
     )
 save_index = page_turn.find("if (!saveNativeTrails(activity))")
 pending_index = page_turn.find("state.pendingPage = plan.targetPage")
@@ -182,16 +189,20 @@ for required in (
     "FileIdentity pdfIdentity = FileIdentity.capture(pdf)",
     "FileIdentity sidecarIdentity = FileIdentity.capture(sidecar)",
     "cached.matches(pdfIdentity, sidecarIdentity)",
+    "if (cached.manifest == null)",
     "validateNativeSnapshot(viewModel, cached.manifest)",
+    "validated == null",
     "scheduleManifestVerification(",
     "boolean verificationPending = scheduleManifestVerification(",
-    "return new ManifestLookup(null, verificationPending)",
+    "return new ManifestLookup(null, verificationPending, false)",
     "manifest_verification_pending",
     "Fail closed until the background verifier publishes",
     'observeDocumentKey(null);\n            logFailure("manifest_read_failed"',
 ):
     if required not in manifest_lookup:
         raise SystemExit(f"manifest lookup is missing fail-closed guard: {required}")
+if '"native_snapshot_mismatch"' not in hook:
+    raise SystemExit("native snapshot mismatch is missing its blocked-turn reason")
 for forbidden in ("parseManifest(", "readBytes(", "sha256(", "sha256File("):
     if forbidden in manifest_lookup:
         raise SystemExit(
@@ -483,6 +494,24 @@ if 'android:versionName="0.0.23"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
 if 'private static final String VERSION = "0.0.23"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
+
+build_script = (root / "build.ps1").read_text(encoding="utf-8")
+payload_update = build_script.find("& jar uf $unsignedApk")
+payload_failure = build_script.find(
+    'throw "APK payload injection failed with exit code $LASTEXITCODE"'
+)
+zipalign = build_script.find("& $zipalign", payload_update)
+if not (0 <= payload_update < payload_failure < zipalign):
+    raise SystemExit("APK payload injection must fail before zip alignment")
+for required in (
+    "$archiveEntries = @(& jar tf $unsignedApk)",
+    "'classes.dex'",
+    "'assets/xposed_init'",
+    "'META-INF/xposed/scope.list'",
+    'throw "APK payload is missing required entry: $requiredEntry"',
+):
+    if required not in build_script[payload_update:zipalign]:
+        raise SystemExit(f"APK payload verification is missing: {required}")
 for required in (
     "MAX_CACHED_MANIFESTS = 4",
     "VirtualSpreadNavigation.BoundedCache<",

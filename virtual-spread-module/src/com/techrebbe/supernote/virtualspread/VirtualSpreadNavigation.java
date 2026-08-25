@@ -636,9 +636,11 @@ public final class VirtualSpreadNavigation {
     /** Preserve an authenticated explicit native viewport in portrait. */
     public static boolean shouldPreservePortraitLinkViewport(
         boolean internalLinkTarget,
-        boolean resetLandscapeFit
+        boolean resetLandscapeFit,
+        boolean retainedExplicitLinkViewport
     ) {
-        return internalLinkTarget && !resetLandscapeFit;
+        return retainedExplicitLinkViewport
+            || (internalLinkTarget && !resetLandscapeFit);
     }
 
     public static boolean manifestMatchesNativeSnapshot(

@@ -1209,6 +1209,28 @@ v0.0.23 (`versionCode=23`) APK build (SHA-256
 Focused hardware validation of same-path replacement and preserved portrait
 explicit link viewports remains pending.
 
+## Review pass 52 native mismatch, retained link view, and APK payload - AUTOMATED PASS
+
+The next independent full-branch review found three additional fail-closed and
+lifecycle boundaries. A fully verified replacement pair now continues consuming
+page turns when Supernote still holds an older, authority-mismatched MuPDF
+document at the same path; reopening the document is required before navigation
+can activate. An authenticated explicit `/XYZ` or `/FitR` destination now retains
+its native portrait viewport across repeated page-loaded, orientation, and native
+screen-reload callbacks for the same page, while an actual page/half transition
+clears that state. Finally, APK assembly checks the exit status of both JAR
+operations and verifies that `classes.dex`, `assets/xposed_init`, and the LSPosed
+scope entry are present before alignment and signing.
+
+Local automated validation passes 95 generator tests on Windows (five expected
+filesystem skips), 120 focused navigation/manifest/cache assertions, 12
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, and the signed/verified
+v0.0.23 (`versionCode=23`) APK build (SHA-256
+`c8c05613416966a3f6d1b9b2e65ee38c647ecb6e57c70b6799247850f2862341`).
+Focused hardware validation of same-path replacement and preserved portrait
+explicit link viewports remains pending.
+
 ## Failure capture
 
 Before reproducing a failure:

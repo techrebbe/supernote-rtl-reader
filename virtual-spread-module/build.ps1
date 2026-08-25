@@ -102,6 +102,9 @@ if ($LASTEXITCODE -ne 0) {
 
 $moduleJar = Join-Path $buildRoot 'virtual-spread-navigation.jar'
 & jar cf $moduleJar -C $classesDir 'com/techrebbe/supernote/virtualspread'
+if ($LASTEXITCODE -ne 0) {
+    throw "module jar creation failed with exit code $LASTEXITCODE"
+}
 
 & $d8 `
     --lib $androidJar `
@@ -129,6 +132,23 @@ if ($LASTEXITCODE -ne 0) {
 & jar uf $unsignedApk `
     -C $dexDir classes.dex `
     -C (Join-Path $projectRoot 'meta') META-INF
+if ($LASTEXITCODE -ne 0) {
+    throw "APK payload injection failed with exit code $LASTEXITCODE"
+}
+
+$archiveEntries = @(& jar tf $unsignedApk)
+if ($LASTEXITCODE -ne 0) {
+    throw "APK payload listing failed with exit code $LASTEXITCODE"
+}
+foreach ($requiredEntry in @(
+    'classes.dex',
+    'assets/xposed_init',
+    'META-INF/xposed/scope.list'
+)) {
+    if ($archiveEntries -notcontains $requiredEntry) {
+        throw "APK payload is missing required entry: $requiredEntry"
+    }
+}
 
 $alignedApk = Join-Path $buildRoot 'virtual-spread-aligned.apk'
 & $zipalign -f -p 4 $unsignedApk $alignedApk

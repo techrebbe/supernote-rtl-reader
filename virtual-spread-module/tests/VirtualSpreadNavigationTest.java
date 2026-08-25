@@ -105,6 +105,7 @@ public final class VirtualSpreadNavigationTest {
             true,
             VirtualSpreadNavigation.shouldPreservePortraitLinkViewport(
                 true,
+                false,
                 false
             )
         );
@@ -113,7 +114,8 @@ public final class VirtualSpreadNavigationTest {
             false,
             VirtualSpreadNavigation.shouldPreservePortraitLinkViewport(
                 true,
-                true
+                true,
+                false
             )
         );
         assertBoolean(
@@ -121,7 +123,17 @@ public final class VirtualSpreadNavigationTest {
             false,
             VirtualSpreadNavigation.shouldPreservePortraitLinkViewport(
                 false,
+                false,
                 false
+            )
+        );
+        assertBoolean(
+            "explicit portrait link viewport survives native reload",
+            true,
+            VirtualSpreadNavigation.shouldPreservePortraitLinkViewport(
+                false,
+                false,
+                true
             )
         );
 

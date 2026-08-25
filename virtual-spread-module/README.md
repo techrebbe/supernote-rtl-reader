@@ -46,8 +46,10 @@ The process-wide manifest cache is a synchronized four-entry access-order LRU,
 so opening many distinct documents cannot retain every parsed manifest for the
 lifetime of the document process. In portrait, authenticated explicit `/XYZ`
 and `/FitR` internal-link destinations keep Supernote's native viewport rather
-than being shifted to a page edge. Delayed portrait-focus retries are bound to
-the page-load generation and cannot overwrite a newer native link destination.
+than being shifted to a page edge. That authenticated preservation state remains
+attached to the current page across native reload and orientation callbacks until
+real navigation supersedes it. Delayed portrait-focus retries are bound to the
+page-load generation and cannot overwrite a newer native link destination.
 The generator accepts an explicit `/FitR` viewport only when its complete,
 positive rectangle remains inside the target source page's effective CropBox
 and its aspect-fitted portrait viewport remains inside the target half; an
@@ -74,7 +76,9 @@ precedes cache and sidecar-existence fast paths, so an already cached spread or
 an ordinary sidecar-free PDF also cancels stale work; delayed callbacks carrying
 an older native view model fail closed. Native page turns are consumed while a
 matching snapshot is pending, so the reader cannot leak one unverified native
-LTR turn before RTL activation. It
+LTR turn before RTL activation. Turns also remain blocked when a verified
+replacement pair does not match Supernote's still-open native document; reopening
+the document is required before the new authority can activate. It
 publishes the result only if both the PDF identity and sidecar digest are still
 unchanged. Before any navigation behavior activates, the main-thread callback
 also compares the authenticated authorities with metadata read from the exact
@@ -126,7 +130,9 @@ or hook any annotation subsystem.
 
 GitHub CI runs this module's complete host-side suite and then invokes the same
 cross-platform build used locally, compiling the Android hook and producing,
-signing, and verifying the companion APK.
+signing, and verifying the companion APK. The build fails before signing if
+payload injection fails or if `classes.dex`, `assets/xposed_init`, or the LSPosed
+scope entry is absent from the assembled archive.
 
 ## Build and test
 

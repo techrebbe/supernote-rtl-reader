@@ -156,7 +156,7 @@ scope guard.
 
 ## v0.0.23 native-open snapshot binding and portrait viewport - PENDING HARDWARE
 
-Review passes 40-46 bind the authenticated sidecar to the actual PDF object
+Review passes 40-52 bind the authenticated sidecar to the actual PDF object
 retained inside Supernote's native reader and harden all transformed link,
 manifest, and page-box boundaries. The generator adds a descriptor-verified
 source-authority marker before the layout and link markers. The companion reads
@@ -171,11 +171,11 @@ outside its MediaBox, and link geometry outside the source CropBox, while scalin
 an omitted link border's PDF-default width.
 
 The local automated gate passes 95 generator tests on Windows (five expected
-platform skips), 119 focused navigation/manifest/cache assertions, 12
+platform skips), 120 focused navigation/manifest/cache assertions, 12
 cross-language authority assertions, 8,752 exhaustive navigation assertions, both native
 invariant suites, hook-scope validation, and the signed/verified v0.0.23
 (`versionCode=23`) APK build (SHA-256
-`d8a98b94cfd3ec4a4fcbc4e997aab8c199cb83058e3c91bfa054196d222e69fa`).
+`c8c05613416966a3f6d1b9b2e65ee38c647ecb6e57c70b6799247850f2862341`).
 CI independently runs the same generator suite on
 Linux without the Windows-only skips.
 

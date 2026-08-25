@@ -820,6 +820,22 @@ height region. The regression exercises the translated double-precision collapse
 the runtime defense, and the shared `/FitR` path, bringing the generator suite to
 81 tests on Windows and Linux. The hardware-smoke pair remains byte-identical.
 
+A thirty-seventh review pass closes the same invariant at every remaining
+geometry boundary. The Android manifest parser and runtime link matcher now
+reject exact zero-width or zero-height rectangles rather than publishing an
+unmatchable target. Each transformed `/QuadPoints` group must retain strict
+positive horizontal and vertical extent independently of its larger `/Rect`, so
+slot translation cannot collapse a valid source quadrilateral into a line. The
+generator also validates effective source page boxes before normalization and
+rejects any derived page placement whose finite affine arithmetic collapses or
+overflows. Deterministic regressions exercise both exact Android zero-area forms,
+degenerate observed and persisted link targets, the translated quadrilateral
+counterexample, and an extreme finite page box that previously produced a
+zero-width placement. The generator remains at 81 tests on Windows and Linux;
+the focused companion suite now passes 51 assertions, alongside 10 link-authority
+and 8,752 exhaustive-navigation assertions. These fail-closed guards do not
+alter the valid v0.0.15 hardware-smoke pair.
+
 ## v0.0.15 focused hardware smoke - PASS
 
 A fresh pair was generated from `VS-Link-Target-Sides-source.pdf` with the

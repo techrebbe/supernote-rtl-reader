@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from pypdf import PdfReader, PdfWriter
+from pypdf import PdfReader, PdfWriter, Transformation
 from pypdf.generic import (
     ArrayObject,
     BooleanObject,
@@ -36,6 +36,7 @@ from generate_virtual_spread import (  # noqa: E402
     MAX_MANIFEST_BYTES,
     MOVEFILE_REPLACE_EXISTING,
     MOVEFILE_WRITE_THROUGH,
+    Slot,
     SourceIdentity,
     VirtualSpreadError,
     _canonical_layout,
@@ -45,7 +46,9 @@ from generate_virtual_spread import (  # noqa: E402
     _layout_authority_sha256,
     _link_authority_sha256,
     _link_annotation_flags,
+    _layout_for_page,
     _require_runtime_float_rect,
+    _transform_quad_points,
     _publish_pair,
     _require_unaliased_output_path,
     _publication_artifacts,
@@ -2072,6 +2075,34 @@ class VirtualSpreadTests(unittest.TestCase):
             "Invalid transformed link annotation /Rect ordering",
         ):
             _transform_rect(source_rectangle, collapsed_transform)
+
+        quadrilateral = ArrayObject([
+            FloatObject(value)
+            for value in (0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0)
+        ])
+        with self.assertRaisesRegex(
+            VirtualSpreadError,
+            "Invalid transformed link annotation /QuadPoints quadrilateral "
+            "ordering",
+        ):
+            _transform_quad_points(quadrilateral, collapsed_transform)
+
+        collapsed_page = mock.Mock()
+        collapsed_page.cropbox = mock.Mock(
+            left=0.0,
+            bottom=0.0,
+            right=1e-320,
+            top=1.0,
+        )
+        with self.assertRaisesRegex(
+            VirtualSpreadError,
+            "Invalid source page layout destination ordering",
+        ):
+            _layout_for_page(
+                collapsed_page,
+                Slot("left", 0.0, 0.0, 432.0, 648.0),
+                Transformation(),
+            )
 
         with self.assertRaisesRegex(
             VirtualSpreadError,

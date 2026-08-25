@@ -233,7 +233,7 @@ public final class VirtualSpreadNavigation {
     ) {
         if (!finite(pageHeight) || pageHeight <= 0.0
             || !finite(x0) || !finite(y0) || !finite(x1) || !finite(y1)
-            || x0 > x1 || y0 > y1) {
+            || x0 >= x1 || y0 >= y1) {
             return false;
         }
         float narrowedPageHeight = (float) pageHeight;
@@ -251,9 +251,9 @@ public final class VirtualSpreadNavigation {
             && finite(narrowedY1)
             && finite(topDownY0)
             && finite(topDownY1)
-            && (x0 == x1 || narrowedX0 < narrowedX1)
-            && (y0 == y1 || narrowedY0 < narrowedY1)
-            && (y0 == y1 || topDownY0 < topDownY1);
+            && narrowedX0 < narrowedX1
+            && narrowedY0 < narrowedY1
+            && topDownY0 < topDownY1;
     }
 
     private static boolean runtimePositiveFloat(double value) {
@@ -341,7 +341,7 @@ public final class VirtualSpreadNavigation {
             || !finite(pageHeight) || pageHeight <= 0.0f
             || !finite(x0) || !finite(y0)
             || !finite(x1) || !finite(y1)
-            || x0 > x1 || y0 > y1) {
+            || x0 >= x1 || y0 >= y1) {
             return null;
         }
         LinkTarget matched = null;
@@ -352,7 +352,7 @@ public final class VirtualSpreadNavigation {
                 || target.targetHalf == null
                 || !finite(target.x0) || !finite(target.y0)
                 || !finite(target.x1) || !finite(target.y1)
-                || target.x0 > target.x1 || target.y0 > target.y1) {
+                || target.x0 >= target.x1 || target.y0 >= target.y1) {
                 continue;
             }
             // The manifest is bottom-up, while MuPDF reports top-down bounds.
@@ -361,8 +361,7 @@ public final class VirtualSpreadNavigation {
             float expectedNativeY0 = pageHeight - target.y1;
             float expectedNativeY1 = pageHeight - target.y0;
             if (!finite(expectedNativeY0) || !finite(expectedNativeY1)
-                || (target.y0 < target.y1
-                    && expectedNativeY0 >= expectedNativeY1)
+                || expectedNativeY0 >= expectedNativeY1
                 || Math.abs(target.x0 - x0) > tolerance
                 || Math.abs(expectedNativeY0 - y0) > tolerance
                 || Math.abs(target.x1 - x1) > tolerance

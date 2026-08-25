@@ -561,20 +561,50 @@ def _normalized_page(source_page: Any) -> tuple[Any, Transformation]:
     return page, normalization
 
 
+def _require_positive_rectangle(
+    values: list[float], label: str
+) -> None:
+    if len(values) != 4 or any(
+        not math.isfinite(value) for value in values
+    ):
+        raise VirtualSpreadError(f"Invalid {label}")
+    left, bottom, right, top = values
+    if left >= right or bottom >= top:
+        raise VirtualSpreadError(f"Invalid {label} ordering")
+
+
+def _page_box_values(page: Any, attribute: str, label: str) -> list[float]:
+    try:
+        box = getattr(page, attribute)
+        values = [
+            float(box.left),
+            float(box.bottom),
+            float(box.right),
+            float(box.top),
+        ]
+    except (
+        ArithmeticError,
+        AttributeError,
+        IndexError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as error:
+        raise VirtualSpreadError(f"Invalid {label}") from error
+    _require_positive_rectangle(values, label)
+    return values
+
+
 def _layout_for_page(
     page: Any,
     slot: Slot,
     source_transform: Transformation,
 ) -> dict[str, Any]:
-    box = page.cropbox
-    source_left = float(box.left)
-    source_bottom = float(box.bottom)
-    source_width = float(box.width)
-    source_height = float(box.height)
-    if source_width <= 0 or source_height <= 0:
-        raise VirtualSpreadError(
-            f"Invalid source page box: {source_width} x {source_height}"
-        )
+    source_left, source_bottom, source_right, source_top = (
+        _page_box_values(page, "cropbox", "source page box")
+    )
+    source_width = source_right - source_left
+    source_height = source_top - source_bottom
     scale = min(slot.width / source_width, slot.height / source_height)
     placed_width = source_width * scale
     placed_height = source_height * scale
@@ -598,13 +628,25 @@ def _layout_for_page(
         slot.left + (slot.width + placed_width) / 2.0,
         slot.bottom + (slot.height + placed_height) / 2.0,
     ]
+    geometry = [
+        scale,
+        placed_width,
+        placed_height,
+        translate_x,
+        translate_y,
+        *content_transform.ctm,
+        *source_to_spread.ctm,
+    ]
+    if any(not math.isfinite(value) for value in geometry):
+        raise VirtualSpreadError("Invalid source page layout geometry")
+    _require_positive_rectangle(destination, "source page layout destination")
     return {
         "side": slot.side,
         "normalizedSourceBox": [
             source_left,
             source_bottom,
-            source_left + source_width,
-            source_bottom + source_height,
+            source_right,
+            source_top,
         ],
         "slot": [
             slot.left,
@@ -817,6 +859,12 @@ def _require_supported_document_catalog(
 def _require_supported_source_pages(reader: PdfReader) -> None:
     for page_index, page in enumerate(reader.pages):
         page_number = page_index + 1
+        _page_box_values(
+            page, "mediabox", f"source page {page_number} /MediaBox"
+        )
+        _page_box_values(
+            page, "cropbox", f"source page {page_number} effective /CropBox"
+        )
         if "/Rotate" in page:
             rotation = _dereference_pdf_object(page.raw_get("/Rotate"))
             if (
@@ -1315,6 +1363,7 @@ def _transform_quad_points(
         coordinates.append(coordinate)
 
     a, b, c, d, e, f = transform
+    transformed_coordinates: list[float] = []
     transformed = ArrayObject()
     for index in range(0, len(coordinates), 2):
         x = a * coordinates[index] + c * coordinates[index + 1] + e
@@ -1323,7 +1372,16 @@ def _transform_quad_points(
             raise VirtualSpreadError(
                 "Invalid transformed link annotation /QuadPoints"
             )
+        transformed_coordinates.extend((x, y))
         transformed.extend((FloatObject(x), FloatObject(y)))
+    for index in range(0, len(transformed_coordinates), 8):
+        quadrilateral = transformed_coordinates[index:index + 8]
+        xs = quadrilateral[0::2]
+        ys = quadrilateral[1::2]
+        _require_positive_rectangle(
+            [min(xs), min(ys), max(xs), max(ys)],
+            "transformed link annotation /QuadPoints quadrilateral",
+        )
     return transformed
 
 

@@ -210,6 +210,20 @@ public final class VirtualSpreadNavigationTest {
             )
         );
         assertBoolean(
+            "zero-width runtime link rectangle fails closed",
+            false,
+            VirtualSpreadNavigation.runtimeRectIsRepresentable(
+                648.0, 10.0, 20.0, 10.0, 50.0
+            )
+        );
+        assertBoolean(
+            "zero-height runtime link rectangle fails closed",
+            false,
+            VirtualSpreadNavigation.runtimeRectIsRepresentable(
+                648.0, 10.0, 20.0, 100.0, 20.0
+            )
+        );
+        assertBoolean(
             "tall-page link retains top-down float ordering",
             true,
             VirtualSpreadNavigation.runtimeRectIsRepresentable(
@@ -409,6 +423,34 @@ public final class VirtualSpreadNavigationTest {
                 588.0f,
                 Float.NaN,
                 0.5f
+            )
+        );
+        assertHalf(
+            "zero-area observed link fails closed",
+            null,
+            VirtualSpreadNavigation.matchLinkTarget(
+                linkTargets,
+                1,
+                3,
+                486.0f,
+                546.0f,
+                486.0f,
+                588.0f,
+                648.0f,
+                400.0f
+            )
+        );
+        assertHalf(
+            "zero-area manifest target fails closed",
+            null,
+            VirtualSpreadNavigation.matchLinkTarget(
+                new LinkTarget[] {
+                    new LinkTarget(
+                        1, 3, Half.RIGHT, Half.LEFT,
+                        10.0f, 20.0f, 10.0f, 50.0f
+                    )
+                },
+                1, 3, 9.0f, 598.0f, 11.0f, 628.0f, 648.0f, 2.0f
             )
         );
         assertHalf(

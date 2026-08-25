@@ -1688,6 +1688,38 @@ class VirtualSpreadTests(unittest.TestCase):
                     self.assertFalse(output.exists())
                     self.assertFalse(manifest_path.exists())
 
+    def test_fitr_viewport_must_stay_inside_target_half(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "fitr-viewport-source.pdf"
+            output = root / "fitr-viewport-spread.pdf"
+            manifest_path = output.with_suffix(".pdf.json")
+            create_odd_page_fixture(source)
+            set_link_destination_mode(
+                source,
+                source_page_index=1,
+                annotation_index=0,
+                target_page_index=4,
+                mode="/FitR",
+                arguments=(0.0, 0.0, 200.0, 700.0),
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot preserve internal destination /FitR viewport "
+                "inside target half",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    direction="rtl",
+                    cover_separate=True,
+                )
+
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+
     def test_xyz_viewport_must_stay_inside_target_half(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1782,6 +1814,8 @@ class VirtualSpreadTests(unittest.TestCase):
                         target_reference,
                         source_mapping,
                         target_mapping,
+                        20.0,
+                        10.0,
                     )
 
     def test_xyz_zoom_underflow_and_negative_values_fail_closed(self) -> None:
@@ -1813,6 +1847,8 @@ class VirtualSpreadTests(unittest.TestCase):
                 target_reference,
                 source_mapping,
                 underflow_mapping,
+                20.0,
+                10.0,
             )
 
         zero_destination = ArrayObject([
@@ -1832,6 +1868,8 @@ class VirtualSpreadTests(unittest.TestCase):
                 target_reference,
                 source_mapping,
                 underflow_mapping,
+                20.0,
+                10.0,
             )
 
         negative_destination = ArrayObject([
@@ -1850,6 +1888,8 @@ class VirtualSpreadTests(unittest.TestCase):
                 target_reference,
                 source_mapping,
                 source_mapping,
+                20.0,
+                10.0,
             )
 
     def test_null_top_destination_survives_with_bounded_viewport(
@@ -2445,6 +2485,8 @@ class VirtualSpreadTests(unittest.TestCase):
                     "transform": collapsed_transform,
                     "sourceBox": [0.0, 0.0, 1.0, 1.0],
                 },
+                20.0,
+                10.0,
             )
 
     def test_visible_link_border_and_highlight_are_preserved(self) -> None:

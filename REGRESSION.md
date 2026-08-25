@@ -1156,6 +1156,28 @@ The exact-head CI gate independently runs the generator suite on Linux. Focused
 hardware validation of same-path replacement and preserved portrait explicit
 link viewports remains pending.
 
+## Review pass 50 fitted viewport and document-switch cancellation - AUTOMATED PASS
+
+The next independent full-branch review found two remaining fail-closed
+boundaries. An explicit `/FitR` rectangle could lie inside one composed half
+while PDF aspect fitting expanded the actual portrait viewport into the other
+half. The generator now computes that fitted viewport from the authenticated
+spread aspect and rejects any neighboring-half exposure. The background
+manifest verifier now observes the active canonical document before cache and
+sidecar-existence fast paths. Switching to a cached spread, an ordinary PDF, a
+missing sidecar, or no document cancels old active and queued verification;
+delayed callbacks from a stale native view model cannot reclaim ownership.
+
+Local automated validation passes 92 generator tests on Windows (five expected
+filesystem skips), 116 focused navigation/manifest/cache assertions, 12
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, and the signed/verified
+v0.0.23 (`versionCode=23`) APK build (SHA-256
+`76d37364a059c957cbe19b1ac38886cc1b77db97efc24941b223fdf40a177492`).
+The exact-head CI gate independently runs the generator suite on Linux. Focused
+hardware validation of same-path replacement and preserved portrait explicit
+link viewports remains pending.
+
 ## Failure capture
 
 Before reproducing a failure:

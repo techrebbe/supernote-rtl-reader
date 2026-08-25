@@ -35,9 +35,10 @@ page's placed rectangle, preserving Fit-page semantics instead of fitting the
 entire two-page composite. `/XYZ` and `/FitR` retain their representable source
 semantics while their coordinates are transformed into the target spread; a
 source `/FitR` rectangle must be positive and remain wholly inside the target
-source page's effective CropBox, so it cannot expose a neighboring composed
-page. Every explicit `/XYZ` left or top coordinate must likewise remain inside
-that CropBox. Preserving `/XYZ` also requires an explicit horizontal anchor and
+source page's effective CropBox. Its aspect-fitted portrait viewport must also
+remain wholly inside the target half, so it cannot expose a neighboring
+composed page. Every explicit `/XYZ` left or top coordinate must likewise remain
+inside that CropBox. Preserving `/XYZ` also requires an explicit horizontal anchor and
 a positive explicit zoom whose resulting portrait viewport remains wholly
 inside the target half; retained/zero zoom, an unknown horizontal anchor, or a
 viewport that reaches the neighboring half fails closed. A positive `/XYZ`
@@ -168,7 +169,10 @@ perform only strong PDF and sidecar
 identity checks. Sidecar reading/hashing, parsing, full-PDF hashing, and stable-
 snapshot verification run on the single background verifier. Its bounded queue
 keeps only the newest pending document, and an active full-file hash cooperatively
-cancels when a newer document supersedes it. That verifier
+cancels when a newer document supersedes it. Document observation happens
+before cache and sidecar-existence fast paths, so switching to an already cached
+spread or to an ordinary sidecar-free PDF also cancels stale verification work.
+Delayed callbacks from an older native view model cannot reclaim ownership. That verifier
 opens each PDF and sidecar exactly once, binds the callback identities to those
 descriptors, performs every content and authority read through the same open
 handles, and finally proves the handles still match the visible pathnames. The

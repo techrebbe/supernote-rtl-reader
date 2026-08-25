@@ -47,8 +47,9 @@ and `/FitR` internal-link destinations keep Supernote's native viewport rather
 than being shifted to a page edge. Delayed portrait-focus retries are bound to
 the page-load generation and cannot overwrite a newer native link destination.
 The generator accepts an explicit `/FitR` viewport only when its complete,
-positive rectangle remains inside the target source page's effective CropBox;
-an out-of-page viewport fails closed before publication. Explicit `/XYZ` left
+positive rectangle remains inside the target source page's effective CropBox
+and its aspect-fitted portrait viewport remains inside the target half; an
+out-of-page or neighboring-half viewport fails closed before publication. Explicit `/XYZ` left
 and top coordinates obey the same CropBox boundary. An explicit `/XYZ` view is
 accepted only when its horizontal anchor and positive zoom prove that the
 complete portrait viewport stays inside the target half; retained/zero zoom,
@@ -66,7 +67,10 @@ On a cache miss or identity change, the module fails closed while a single
 background worker opens the PDF and sidecar, hashes the sidecar bytes, parses
 them, and performs the full PDF SHA-256 check. Its queue retains only the latest
 pending document; opening another document invalidates older work, and an
-in-progress full-file hash checks for supersession between chunks. It
+in-progress full-file hash checks for supersession between chunks. Observation
+precedes cache and sidecar-existence fast paths, so an already cached spread or
+an ordinary sidecar-free PDF also cancels stale work; delayed callbacks carrying
+an older native view model fail closed. It
 publishes the result only if both the PDF identity and sidecar digest are still
 unchanged. Before any navigation behavior activates, the main-thread callback
 also compares the authenticated authorities with metadata read from the exact

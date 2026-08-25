@@ -1702,11 +1702,69 @@ def _require_xyz_viewport_inside_target_half(
         )
 
 
+def _require_fitr_viewport_inside_target_half(
+    target_mapping: dict[str, Any],
+    transformed_rectangle: list[float],
+    spread_width: float,
+    spread_height: float,
+) -> None:
+    try:
+        slot = [float(value) for value in target_mapping["slot"]]
+    except (KeyError, TypeError, ValueError, OverflowError) as error:
+        raise VirtualSpreadError(
+            "Invalid target half for internal destination /FitR"
+        ) from error
+    _require_positive_rectangle(
+        slot, "target half for internal destination /FitR"
+    )
+    _require_positive_rectangle(
+        transformed_rectangle,
+        "transformed internal destination /FitR rectangle",
+    )
+    _require_positive_rectangle(
+        [0.0, 0.0, spread_width, spread_height],
+        "spread viewport for internal destination /FitR",
+    )
+    portrait_aspect = spread_height / spread_width
+    rectangle_width = transformed_rectangle[2] - transformed_rectangle[0]
+    rectangle_height = transformed_rectangle[3] - transformed_rectangle[1]
+    viewport_width = max(
+        rectangle_width,
+        rectangle_height * portrait_aspect,
+    )
+    viewport_height = max(
+        rectangle_height,
+        rectangle_width / portrait_aspect,
+    )
+    center_x = (transformed_rectangle[0] + transformed_rectangle[2]) / 2.0
+    center_y = (transformed_rectangle[1] + transformed_rectangle[3]) / 2.0
+    viewport = [
+        center_x - viewport_width / 2.0,
+        center_y - viewport_height / 2.0,
+        center_x + viewport_width / 2.0,
+        center_y + viewport_height / 2.0,
+    ]
+    tolerance = 1e-9
+    if (
+        any(not math.isfinite(value) for value in viewport)
+        or viewport[0] < slot[0] - tolerance
+        or viewport[1] < slot[1] - tolerance
+        or viewport[2] > slot[2] + tolerance
+        or viewport[3] > slot[3] + tolerance
+    ):
+        raise VirtualSpreadError(
+            "Cannot preserve internal destination /FitR viewport inside "
+            "target half"
+        )
+
+
 def _transformed_internal_destination(
     destination: ArrayObject,
     target_reference: IndirectObject,
     source_mapping: dict[str, Any],
     target_mapping: dict[str, Any],
+    spread_width: float,
+    spread_height: float,
 ) -> ArrayObject:
     mode_object = destination[1]
     if not isinstance(mode_object, NameObject):
@@ -1860,6 +1918,12 @@ def _transformed_internal_destination(
             transform,
             "internal destination /FitR rectangle",
         )
+        _require_fitr_viewport_inside_target_half(
+            target_mapping,
+            [float(value) for value in transformed],
+            spread_width,
+            spread_height,
+        )
         return ArrayObject(
             [target_reference, NameObject(mode), *transformed]
         )
@@ -1924,6 +1988,7 @@ def _copy_link_annotation(
     source_page_index: int,
     source_mapping: dict[int, dict[str, Any]],
     page_ref_to_index: dict[tuple[int, int], int],
+    page_width: float,
     page_height: float,
 ) -> dict[str, Any]:
     original = _validate_link_annotation(annotation.get_object())
@@ -2040,6 +2105,8 @@ def _copy_link_annotation(
         target_reference,
         mapping,
         target,
+        page_width,
+        page_height,
     )
     copied[NameObject("/Dest")] = transformed_destination
     copied[NameObject("/SNTargetSourcePage")] = NumberObject(
@@ -3826,6 +3893,7 @@ def _build_virtual_spread_from_snapshot(
                     source_page_index=source_page_index,
                     source_mapping=source_mapping,
                     page_ref_to_index=page_ref_to_index,
+                    page_width=spread_width,
                     page_height=spread_height,
                 )
             )

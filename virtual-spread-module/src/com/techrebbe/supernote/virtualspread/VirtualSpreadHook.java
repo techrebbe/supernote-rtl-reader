@@ -75,6 +75,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final Map<String, String> VERIFYING =
         new ConcurrentHashMap<>();
     private static final Object MANIFEST_VERIFIER_LOCK = new Object();
+    private static volatile String observedDocumentKey;
     private static final ThreadPoolExecutor MANIFEST_VERIFIER =
         new ThreadPoolExecutor(
             1,
@@ -388,6 +389,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     Activity current = activeActivity.get();
                     if (current == activity) {
                         activeActivity = new WeakReference<>(null);
+                        observeDocumentKey(null);
                     }
                     log("activity_destroyed");
                 }
@@ -1013,8 +1015,13 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             @Override
             public void run() {
                 Activity activity = activeActivity.get();
+                if (activity != owner
+                    || objectField(activity, "documentViewModel")
+                        != viewModel) {
+                    return;
+                }
                 Manifest currentManifest = manifestFor(viewModel);
-                if (activity != owner || currentManifest == null) {
+                if (currentManifest == null) {
                     return;
                 }
                 ReaderState currentState = stateFor(
@@ -1296,19 +1303,33 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
 
     private static Manifest manifestFor(Object viewModel) {
         if (viewModel == null) {
+            Activity current = activeActivity.get();
+            if (current == null
+                || objectField(current, "documentViewModel") == null) {
+                observeDocumentKey(null);
+            }
             return null;
         }
         try {
+            Activity activity = activeActivity.get();
+            if (activity != null
+                && objectField(activity, "documentViewModel") != viewModel) {
+                log("manifest_lookup_skipped reason=stale_view_model");
+                return null;
+            }
             Uri uri = (Uri) XposedHelpers.getObjectField(viewModel, "uri");
             if (uri == null || uri.getPath() == null) {
+                observeDocumentKey(null);
                 return null;
             }
             File pdf = new File(uri.getPath());
             File sidecar = new File(pdf.getPath() + ".json");
+            String key = pdf.getCanonicalPath();
+            observeDocumentKey(key);
             if (!pdf.isFile() || !sidecar.isFile()) {
+                cancelManifestVerificationForKey(key);
                 return null;
             }
-            String key = pdf.getCanonicalPath();
             FileIdentity pdfIdentity = FileIdentity.capture(pdf);
             FileIdentity sidecarIdentity = FileIdentity.capture(sidecar);
             CachedManifest cached = MANIFESTS.get(key);
@@ -1335,8 +1356,42 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             // PDF + sidecar snapshot into MANIFESTS.
             return null;
         } catch (Throwable throwable) {
+            observeDocumentKey(null);
             logFailure("manifest_read_failed", throwable);
             return null;
+        }
+    }
+
+    private static boolean sameDocumentKey(String first, String second) {
+        return first == null ? second == null : first.equals(second);
+    }
+
+    private static void observeDocumentKey(String key) {
+        synchronized (MANIFEST_VERIFIER_LOCK) {
+            if (sameDocumentKey(key, observedDocumentKey)) {
+                return;
+            }
+            observedDocumentKey = key;
+            cancelManifestVerificationLocked();
+            log("manifest_document_observed path=" + key);
+        }
+    }
+
+    private static void cancelManifestVerificationForKey(String key) {
+        synchronized (MANIFEST_VERIFIER_LOCK) {
+            if (sameDocumentKey(key, observedDocumentKey)) {
+                cancelManifestVerificationLocked();
+            }
+        }
+    }
+
+    private static void cancelManifestVerificationLocked() {
+        VERIFYING.clear();
+        Runnable stale;
+        while ((stale = MANIFEST_VERIFIER.getQueue().poll()) != null) {
+            if (stale instanceof ManifestVerificationTask) {
+                ((ManifestVerificationTask) stale).cancelBeforeRun();
+            }
         }
     }
 
@@ -1350,19 +1405,16 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         final String verificationId = pdfBefore.token()
             + ":" + sidecarBefore.token();
         synchronized (MANIFEST_VERIFIER_LOCK) {
+            if (!key.equals(observedDocumentKey)) {
+                return false;
+            }
             if (verificationId.equals(VERIFYING.get(key))) {
                 return false;
             }
             // Only the document most recently requested by the native reader
             // may remain current. Invalidate an active older verification and
             // retain at most one pending task behind it.
-            VERIFYING.clear();
-            Runnable stale;
-            while ((stale = MANIFEST_VERIFIER.getQueue().poll()) != null) {
-                if (stale instanceof ManifestVerificationTask) {
-                    ((ManifestVerificationTask) stale).cancelBeforeRun();
-                }
-            }
+            cancelManifestVerificationLocked();
             VERIFYING.put(key, verificationId);
             try {
                 MANIFEST_VERIFIER.execute(new ManifestVerificationTask(

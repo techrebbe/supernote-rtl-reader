@@ -69,6 +69,8 @@ if refresh_start < 0 or refresh_end < 0:
 configuration_refresh = hook[refresh_start:refresh_end]
 for required in (
     "activity != owner",
+    'objectField(activity, "documentViewModel")',
+    "!= viewModel",
     "currentManifest == null",
     "scheduledState.pageLoadGeneration",
     "currentState.pageLoadGeneration",
@@ -155,6 +157,13 @@ if lookup_start < 0 or lookup_end < 0:
     raise SystemExit("missing fail-closed manifest lookup implementation")
 manifest_lookup = hook[lookup_start:lookup_end]
 for required in (
+    'objectField(current, "documentViewModel") == null',
+    'objectField(activity, "documentViewModel") != viewModel',
+    'manifest_lookup_skipped reason=stale_view_model',
+    "observeDocumentKey(null)",
+    "String key = pdf.getCanonicalPath()",
+    "observeDocumentKey(key)",
+    "cancelManifestVerificationForKey(key)",
     "FileIdentity pdfIdentity = FileIdentity.capture(pdf)",
     "FileIdentity sidecarIdentity = FileIdentity.capture(sidecar)",
     "cached.matches(pdfIdentity, sidecarIdentity)",
@@ -162,6 +171,7 @@ for required in (
     "scheduleManifestVerification(",
     "manifest_verification_pending",
     "Fail closed until the background verifier publishes",
+    'observeDocumentKey(null);\n            logFailure("manifest_read_failed"',
 ):
     if required not in manifest_lookup:
         raise SystemExit(f"manifest lookup is missing fail-closed guard: {required}")
@@ -170,6 +180,20 @@ for forbidden in ("parseManifest(", "readBytes(", "sha256(", "sha256File("):
         raise SystemExit(
             f"manifest lookup performs expensive verification on a UI callback: {forbidden}"
         )
+
+lookup_positions = (
+    manifest_lookup.find("String key = pdf.getCanonicalPath()"),
+    manifest_lookup.find("observeDocumentKey(key)"),
+    manifest_lookup.find("if (!pdf.isFile() || !sidecar.isFile())"),
+    manifest_lookup.find("cancelManifestVerificationForKey(key)"),
+    manifest_lookup.find("CachedManifest cached = MANIFESTS.get(key)"),
+)
+if min(lookup_positions) < 0 or tuple(sorted(lookup_positions)) != (
+    lookup_positions
+):
+    raise SystemExit(
+        "document observation must precede sidecar and cache fast paths"
+    )
 
 for required in (
     "nativeSnapshotDocument",
@@ -242,6 +266,10 @@ for required in (
 for required in (
     "new ArrayBlockingQueue<Runnable>(1)",
     "synchronized (MANIFEST_VERIFIER_LOCK)",
+    "private static volatile String observedDocumentKey",
+    "observedDocumentKey = key",
+    "cancelManifestVerificationLocked()",
+    "cancelManifestVerificationForKey(key)",
     "VERIFYING.clear()",
     "MANIFEST_VERIFIER.getQueue().poll()",
     "((ManifestVerificationTask) stale).cancelBeforeRun()",
@@ -256,6 +284,45 @@ for required in (
 if "Executors.newSingleThreadExecutor()" in hook:
     raise SystemExit("manifest verification must not use an unbounded queue")
 
+observer_start = hook.find("private static void observeDocumentKey")
+observer_end = hook.find(
+    "private static void cancelManifestVerificationForKey", observer_start
+)
+cancellation_start = hook.find(
+    "private static void cancelManifestVerificationLocked"
+)
+cancellation_end = hook.find(
+    "private static boolean scheduleManifestVerification",
+    cancellation_start,
+)
+if min(observer_start, observer_end, cancellation_start, cancellation_end) < 0:
+    raise SystemExit("missing document-verification cancellation helpers")
+observer = hook[observer_start:observer_end]
+observer_positions = (
+    observer.find("observedDocumentKey = key"),
+    observer.find("cancelManifestVerificationLocked()"),
+)
+if min(observer_positions) < 0 or tuple(sorted(observer_positions)) != (
+    observer_positions
+):
+    raise SystemExit(
+        "document observation must publish the key before cancellation"
+    )
+cancellation = hook[cancellation_start:cancellation_end]
+cancellation_positions = (
+    cancellation.find("VERIFYING.clear()"),
+    cancellation.find("MANIFEST_VERIFIER.getQueue().poll()"),
+    cancellation.find(
+        "((ManifestVerificationTask) stale).cancelBeforeRun()"
+    ),
+)
+if min(cancellation_positions) < 0 or tuple(
+    sorted(cancellation_positions)
+) != cancellation_positions:
+    raise SystemExit(
+        "verification cancellation must invalidate, drain, then cancel"
+    )
+
 scheduler_start = hook.find("private static boolean scheduleManifestVerification")
 scheduler_end = hook.find(
     "private static void requireCurrentVerification", scheduler_start
@@ -264,8 +331,8 @@ if scheduler_start < 0 or scheduler_end < 0:
     raise SystemExit("missing latest-only verification scheduler")
 scheduler = hook[scheduler_start:scheduler_end]
 scheduler_positions = (
-    scheduler.find("VERIFYING.clear()"),
-    scheduler.find("MANIFEST_VERIFIER.getQueue().poll()"),
+    scheduler.find("if (!key.equals(observedDocumentKey))"),
+    scheduler.find("cancelManifestVerificationLocked()"),
     scheduler.find("VERIFYING.put(key, verificationId)"),
     scheduler.find("MANIFEST_VERIFIER.execute"),
 )
@@ -273,7 +340,7 @@ if min(scheduler_positions) < 0 or tuple(sorted(scheduler_positions)) != (
     scheduler_positions
 ):
     raise SystemExit(
-        "manifest verification must invalidate, drain, publish, then enqueue"
+        "manifest verification must check ownership, invalidate, publish, then enqueue"
     )
 
 snapshot_guards = (
@@ -503,6 +570,8 @@ for required in (
     "def _transformed_internal_destination(",
     "def _require_xyz_viewport_inside_target_half(",
     "_require_xyz_viewport_inside_target_half(",
+    "def _require_fitr_viewport_inside_target_half(",
+    "_require_fitr_viewport_inside_target_half(",
     "def _destination_axis_is_preserved(",
     "isinstance(mode_object, NameObject)",
     "isinstance(value, (FloatObject, NumberObject))",
@@ -589,6 +658,7 @@ for required in (
     "test_representable_internal_destinations_are_transformed",
     "test_null_top_destination_survives_with_bounded_viewport",
     "test_xyz_viewport_must_stay_inside_target_half",
+    "test_fitr_viewport_must_stay_inside_target_half",
     "test_unknown_xyz_left_fails_closed_even_matching_transform",
     "test_null_destination_coordinates_reject_different_transforms",
     "test_destination_operands_require_pdf_name_and_numbers",

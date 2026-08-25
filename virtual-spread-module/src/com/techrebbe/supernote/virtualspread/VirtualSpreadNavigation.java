@@ -238,6 +238,19 @@ public final class VirtualSpreadNavigation {
         return null;
     }
 
+    /** Accept only a nonnegative exact JSON integer representable by Java long. */
+    public static Long exactNonnegativeJsonLong(Object value) {
+        long candidate;
+        if (value instanceof Integer) {
+            candidate = ((Integer) value).longValue();
+        } else if (value instanceof Long) {
+            candidate = ((Long) value).longValue();
+        } else {
+            return null;
+        }
+        return candidate >= 0L ? Long.valueOf(candidate) : null;
+    }
+
     public static int reverseLandscapeOffset(int nativeOffset) {
         return -nativeOffset;
     }

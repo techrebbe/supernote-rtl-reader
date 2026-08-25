@@ -234,6 +234,7 @@ for required in (
     "linkEndpointMatches(",
     "exactManifestInteger(",
     "VirtualSpreadNavigation.exactJsonInteger(",
+    "exactNonnegativeJsonLong(",
     'manifest_rejected reason=manifest_integer',
     '"targetSourcePage"',
     'link.opt("targetView")',
@@ -270,6 +271,7 @@ for required in (
 
 for forbidden in (
     "optInt(",
+    "optLong(",
     "if (linksJson != null)",
     'link == null || !"internal".equals(link.optString("kind"))',
 ):
@@ -279,11 +281,11 @@ for forbidden in (
         )
 
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
-if 'android:versionCode="18"' not in manifest:
+if 'android:versionCode="19"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version code")
-if 'android:versionName="0.0.18"' not in manifest:
+if 'android:versionName="0.0.19"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
-if 'private static final String VERSION = "0.0.18"' not in hook:
+if 'private static final String VERSION = "0.0.19"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
 for required in (
     "pendingLinkResetLandscapeFit",

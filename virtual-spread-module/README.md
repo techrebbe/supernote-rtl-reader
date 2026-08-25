@@ -19,9 +19,10 @@ It activates only when all of these are true:
   native MuPDF `Document` match the authenticated manifest; and
 - the known Supernote document firmware fingerprint and APK size match.
 
-v0.0.18 retains link-authority v2 and the v0.0.17 native-open snapshot
+v0.0.19 retains link-authority v2 and the v0.0.17 native-open snapshot
 binding. It additionally requires exact JSON integer tokens for every consumed
-page count and page index; numeric strings and fractional values fail closed.
+page count, page index, and the persisted nonnegative output byte size; numeric
+strings and fractional values fail closed.
 The generator rejects transformed URI `/IsMap true` actions and any link
 rectangle or quadrilateral outside the source page's effective CropBox, and it
 materializes the PDF default link border at the transformed width. Replacing a

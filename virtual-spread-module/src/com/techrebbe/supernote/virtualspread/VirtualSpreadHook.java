@@ -57,7 +57,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final String SCHEMA =
         "techrebbe.supernote.virtual-spread/v1";
     private static final String TAG = "SN_VIRTUAL_SPREAD";
-    private static final String VERSION = "0.0.18";
+    private static final String VERSION = "0.0.19";
     private static final long MAX_MANIFEST_BYTES = 8L * 1024L * 1024L;
 
     private static volatile WeakReference<Activity> activeActivity =
@@ -1553,7 +1553,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             source, "pageCount"
         );
         Integer pageCountValue = exactManifestInteger(output, "pageCount");
-        if (sourcePageCountValue == null || pageCountValue == null) {
+        Long expectedSizeValue = VirtualSpreadNavigation
+            .exactNonnegativeJsonLong(output.opt("size"));
+        if (sourcePageCountValue == null || pageCountValue == null
+            || expectedSizeValue == null) {
             log("manifest_rejected reason=manifest_integer path=" + key);
             return null;
         }
@@ -1563,7 +1566,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             "sha256",
             ""
         );
-        long expectedSize = output.optLong("size", -1L);
+        long expectedSize = expectedSizeValue.longValue();
         String expectedHash = output.optString("sha256", "");
         if (expectedSize != pdfLength
             || pageCount <= 0

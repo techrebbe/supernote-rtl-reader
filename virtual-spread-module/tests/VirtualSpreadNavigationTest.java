@@ -595,6 +595,58 @@ public final class VirtualSpreadNavigationTest {
             null,
             VirtualSpreadNavigation.exactJsonInteger(null)
         );
+        assertNullableLong(
+            "JSON Integer size is accepted",
+            Long.valueOf(17L),
+            VirtualSpreadNavigation.exactNonnegativeJsonLong(
+                Integer.valueOf(17)
+            )
+        );
+        assertNullableLong(
+            "JSON Long size is accepted",
+            Long.valueOf(Long.MAX_VALUE),
+            VirtualSpreadNavigation.exactNonnegativeJsonLong(
+                Long.valueOf(Long.MAX_VALUE)
+            )
+        );
+        assertNullableLong(
+            "numeric JSON size string is rejected",
+            null,
+            VirtualSpreadNavigation.exactNonnegativeJsonLong("17")
+        );
+        assertNullableLong(
+            "fractional JSON size is rejected",
+            null,
+            VirtualSpreadNavigation.exactNonnegativeJsonLong(
+                Double.valueOf(17.9)
+            )
+        );
+        assertNullableLong(
+            "integral JSON size double is rejected",
+            null,
+            VirtualSpreadNavigation.exactNonnegativeJsonLong(
+                Double.valueOf(17.0)
+            )
+        );
+        assertNullableLong(
+            "negative JSON Integer size is rejected",
+            null,
+            VirtualSpreadNavigation.exactNonnegativeJsonLong(
+                Integer.valueOf(-1)
+            )
+        );
+        assertNullableLong(
+            "negative JSON Long size is rejected",
+            null,
+            VirtualSpreadNavigation.exactNonnegativeJsonLong(
+                Long.valueOf(-1L)
+            )
+        );
+        assertNullableLong(
+            "missing JSON size is rejected",
+            null,
+            VirtualSpreadNavigation.exactNonnegativeJsonLong(null)
+        );
 
         String sourceAuthority =
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -724,6 +776,19 @@ public final class VirtualSpreadNavigationTest {
         String name,
         Integer expected,
         Integer actual
+    ) {
+        if (expected == null ? actual != null : !expected.equals(actual)) {
+            throw new AssertionError(
+                name + ": expected " + expected + " but got " + actual
+            );
+        }
+        assertions++;
+    }
+
+    private static void assertNullableLong(
+        String name,
+        Long expected,
+        Long actual
     ) {
         if (expected == null ? actual != null : !expected.equals(actual)) {
             throw new AssertionError(

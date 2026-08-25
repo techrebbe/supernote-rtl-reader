@@ -988,6 +988,24 @@ Automated validation passes:
 Focused hardware validation of native metadata lookup and same-path replacement
 fail-closed behavior remains pending.
 
+## Review pass 42 exact output-size typing - AUTOMATED PASS
+
+The exact-head v0.0.18 review found that Android `JSONObject.optLong()` could
+still coerce a numeric string or truncate a fractional `output.size` value to
+the actual PDF length. v0.0.19 reads the raw token and accepts only a
+nonnegative JSON Integer or Long. Strings, Doubles (including integral-valued
+ones), negative values, and missing values fail closed before identity checks.
+The hook-scope invariant now bans both `optInt()` and `optLong()` from manifest
+validation.
+
+Automated validation passes 85 generator tests on Windows and Linux, 76 focused
+navigation/manifest assertions, 12 cross-language authority assertions, 8,752
+exhaustive assertions, both invariant suites, hook-scope validation, and the
+signed/verified v0.0.19 (`versionCode=19`) APK build (SHA-256
+`03852fe6c37a7cd99f0735f0f504702ee87368293e082bf045d73796d811c507`).
+Focused hardware validation of native metadata lookup and same-path replacement
+remains pending.
+
 ## Failure capture
 
 Before reproducing a failure:

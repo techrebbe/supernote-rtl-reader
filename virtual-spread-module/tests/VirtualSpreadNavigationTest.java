@@ -260,6 +260,27 @@ public final class VirtualSpreadNavigationTest {
                 162.0f
             )
         };
+        LinkTarget fitLinkTarget = new LinkTarget(
+            1,
+            3,
+            Half.RIGHT,
+            Half.LEFT,
+            true,
+            10.0f,
+            20.0f,
+            30.0f,
+            40.0f
+        );
+        assertBoolean(
+            "Fit link retains authenticated landscape reset",
+            true,
+            fitLinkTarget.resetLandscapeFit
+        );
+        assertBoolean(
+            "ordinary link defaults to preserving destination view",
+            false,
+            linkTargets[0].resetLandscapeFit
+        );
         assertHalf(
             "right link target",
             Half.RIGHT,

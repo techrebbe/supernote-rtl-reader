@@ -27,18 +27,21 @@ appearances, optional-content visibility, additional actions, and every other
 unimplemented link semantic fail closed rather than being silently discarded.
 Link `/Rect` arrays require four finite PDF number objects in increasing
 coordinate order; numeric strings and non-finite values are never repaired.
-URI operands likewise require real PDF text/Boolean objects. Internal `/Fit`,
-`/FitB`, `/XYZ`,
-`/FitH`, `/FitBH`, `/FitV`, `/FitBV`, and `/FitR` destinations retain their
-mode while coordinate parameters are transformed into the target spread;
-a non-null `/XYZ` zoom is divided by the target's validated uniform affine
-scale so the source-page magnification remains unchanged. Duplicate annotation
-`/NM` identifiers that would collide after two source pages are paired fail
-closed before publication. Unknown modes, invalid PDF operand types,
-rotation-dependent partial coordinates, non-uniform zoom transforms, and null
-coordinates whose source and target axis transforms differ fail closed
-instead of silently degrading to `/Fit`; every transformed destination operand
-is also rechecked for finite output before serialization. A JSON manifest records every
+URI operands likewise require real PDF text/Boolean objects. Internal `/Fit`
+destinations become `/FitR` destinations around the original target source
+page's placed rectangle, preserving Fit-page semantics instead of fitting the
+entire two-page composite. `/XYZ` and `/FitR` retain their representable source
+semantics while their coordinates are transformed into the target spread; a
+non-null `/XYZ` zoom is divided by the target's validated uniform affine scale
+so the source-page magnification remains unchanged. Viewport- and content-bound
+`/FitB`, `/FitH`, `/FitBH`, `/FitV`, and `/FitBV` destinations cannot be
+represented faithfully after composition and therefore fail closed. Duplicate
+annotation `/NM` identifiers that would collide after two source pages are
+paired likewise fail closed before publication. Unknown modes, invalid PDF
+operand types, rotation-dependent partial coordinates, non-uniform zoom
+transforms, and null coordinates whose source and target axis transforms differ
+fail closed instead of silently degrading; every transformed destination
+operand is also rechecked for finite output before serialization. A JSON manifest records every
 source-page affine transform and target half. The companion runtime supports RTL
 virtual spreads only, so the generator rejects LTR at its public boundary before
 acquiring a publication lock or touching an output.
@@ -142,9 +145,10 @@ preventing a separately edited sidecar from omitting or retargeting links.
 A second canonical authority binds RTL direction, cover parity, source/output
 page counts, spread dimensions, and gutter to that same hashed PDF. This keeps
 an otherwise internally consistent sidecar from swapping cover pairing or
-geometry. Native module v0.0.15 therefore fails closed on manifests generated
-before this layout authority existed; regenerate an older virtual-spread pair
-before opening it with v0.0.15. Native reader callbacks perform only strong PDF
+geometry. Native module v0.0.16 also authenticates each internal link's target-view
+policy. Its link-authority v2 records therefore fail closed on older generated
+pairs, and older modules fail closed on v0.0.16 pairs; regenerate the PDF and
+sidecar together before opening them with v0.0.16. Native reader callbacks perform only strong PDF
 and sidecar identity checks. Sidecar reading/hashing, parsing, full-PDF hashing,
 and stable-snapshot verification run on the single background verifier. That
 verifier opens each PDF and sidecar exactly once, binds the callback identities

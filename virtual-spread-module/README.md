@@ -17,8 +17,10 @@ It activates only when all of these are true:
   gutter digest matches the authority marker embedded in the hashed PDF; and
 - the known Supernote document firmware fingerprint and APK size match.
 
-Manifests generated before v0.0.15 lack that layout authority and fail closed.
-Regenerate the PDF/sidecar pair before using it with this module.
+v0.0.16 uses link-authority v2, which authenticates whether an internal
+destination preserves its explicit view or originated as a source-page `/Fit`.
+Older generated pairs fail closed; regenerate the PDF/sidecar pair before using
+it with this module.
 
 The manifest cache is content-authoritative but uses an identity-based fast
 path: every lookup captures both PDF and sidecar device, inode, size,
@@ -62,6 +64,8 @@ For a matching document it:
   reading order;
 - preserves an internal link's intended left or right destination half when
   the linked spread opens in portrait;
+- restores the complete landscape spread after a source-page `/Fit` link, while
+  leaving explicit `/XYZ` and `/FitR` destination views untouched;
 - restores the correct source half for native Back and Original Back, while
   leaving Supernote's own link-history stack authoritative; and
 - reruns Supernote's own orientation refresh after a configuration transition,

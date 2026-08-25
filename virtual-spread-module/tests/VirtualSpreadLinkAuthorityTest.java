@@ -18,12 +18,14 @@ public final class VirtualSpreadLinkAuthorityTest {
             40.0,
             5,
             3,
-            "right"
+            "right",
+            "fit-source-page"
         );
         assertEquals(
             "internal canonical form",
-            "v1|internal|1|right|1|4025000000000000|4034000000000000"
-                + "|404e200000000000|4044000000000000|5|3|right",
+            "v2|internal|1|right|1|4025000000000000|4034000000000000"
+                + "|404e200000000000|4044000000000000|5|3|right"
+                + "|fit-source-page",
             internal
         );
 
@@ -39,7 +41,7 @@ public final class VirtualSpreadLinkAuthorityTest {
         );
         assertEquals(
             "URI canonical form",
-            "v1|uri|2|left|1|0000000000000000|8000000000000000"
+            "v2|uri|2|left|1|0000000000000000|8000000000000000"
                 + "|4059000000000000|4069000000000000"
                 + "|68e5babec42067702f302e53b929c9f3e0041bd7164c7d90818ac5f281dd523b",
             uri
@@ -61,7 +63,7 @@ public final class VirtualSpreadLinkAuthorityTest {
         );
         assertEquals(
             "combined authority digest",
-            "2a54578ef38e06780c09c695bd2c78b9f3017744cbefda2199d88f041a3c3a9b",
+            "da3eeef9e81fe1f232cd3ac200c90841436855c9ac4a517b1a82021bc099800c",
             VirtualSpreadLinkAuthority.digest(new String[] {internal, uri})
         );
         assertEquals(
@@ -75,12 +77,12 @@ public final class VirtualSpreadLinkAuthorityTest {
                 + "%SNVirtualSpreadLayoutSHA256:"
                 + layoutDigest + "\n"
                 + "%SNVirtualSpreadLinksSHA256:"
-                + "2a54578ef38e06780c09c695bd2c78b9f3017744cbefda2199d88f041a3c3a9b"
+                + "da3eeef9e81fe1f232cd3ac200c90841436855c9ac4a517b1a82021bc099800c"
                 + "\nstartxref\n42\n%%EOF\n";
             Files.write(fixture, bound.getBytes(StandardCharsets.ISO_8859_1));
             assertEquals(
                 "PDF-bound authority digest",
-                "2a54578ef38e06780c09c695bd2c78b9f3017744cbefda2199d88f041a3c3a9b",
+                "da3eeef9e81fe1f232cd3ac200c90841436855c9ac4a517b1a82021bc099800c",
                 VirtualSpreadLinkAuthority.readPdfDigest(fixture.toFile())
             );
             assertEquals(

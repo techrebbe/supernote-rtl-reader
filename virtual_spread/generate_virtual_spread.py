@@ -15,6 +15,7 @@ import struct
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Iterator
 
@@ -353,7 +354,7 @@ def _require_runtime_float_rect(
 def _canonical_link(link: dict[str, Any]) -> str:
     kind = str(link["kind"])
     fields = [
-        "v1",
+        "v2",
         kind,
         str(int(link["sourcePage"])),
         str(link["sourceSide"]),
@@ -366,6 +367,7 @@ def _canonical_link(link: dict[str, Any]) -> str:
                 str(int(link["targetSourcePage"])),
                 str(int(link["targetOutputPage"])),
                 str(link["targetSide"]),
+                str(link["targetView"]),
             ]
         )
     elif kind == "uri":
@@ -593,6 +595,60 @@ def _page_box_values(page: Any, attribute: str, label: str) -> list[float]:
         raise VirtualSpreadError(f"Invalid {label}") from error
     _require_positive_rectangle(values, label)
     return values
+
+
+def _raw_page_box_values(
+    page: Any,
+    key: str,
+    fallbacks: tuple[str, ...],
+    label: str,
+) -> list[float]:
+    for candidate in (key, *fallbacks):
+        try:
+            if candidate not in page:
+                continue
+            raw_box = _dereference_pdf_object(page.raw_get(candidate))
+        except (AttributeError, IndexError, KeyError, TypeError) as error:
+            raise VirtualSpreadError(f"Invalid {label}") from error
+        if isinstance(raw_box, NullObject):
+            continue
+        if not isinstance(raw_box, ArrayObject) or len(raw_box) != 4:
+            raise VirtualSpreadError(f"Invalid {label}")
+        values = [
+            _finite_pdf_number(
+                _dereference_pdf_object(value),
+                f"{label} coordinate",
+            )
+            for value in raw_box
+        ]
+        _require_positive_rectangle(values, label)
+        return values
+    raise VirtualSpreadError(f"Invalid {label}")
+
+
+def _require_nondegenerate_quadrilateral(
+    values: list[float], label: str
+) -> None:
+    if len(values) != 8:
+        raise VirtualSpreadError(f"Invalid {label}")
+    xs = values[0::2]
+    ys = values[1::2]
+    _require_positive_rectangle(
+        [min(xs), min(ys), max(xs), max(ys)], label
+    )
+    points = [
+        (Fraction.from_float(x), Fraction.from_float(y))
+        for x, y in zip(xs, ys)
+    ]
+    for first in range(2):
+        for second in range(first + 1, 3):
+            for third in range(second + 1, 4):
+                x1, y1 = points[first]
+                x2, y2 = points[second]
+                x3, y3 = points[third]
+                if (x2 - x1) * (y3 - y1) != (y2 - y1) * (x3 - x1):
+                    return
+    raise VirtualSpreadError(f"Invalid {label} area")
 
 
 def _layout_for_page(
@@ -859,6 +915,18 @@ def _require_supported_document_catalog(
 def _require_supported_source_pages(reader: PdfReader) -> None:
     for page_index, page in enumerate(reader.pages):
         page_number = page_index + 1
+        _raw_page_box_values(
+            page,
+            "/MediaBox",
+            (),
+            f"source page {page_number} /MediaBox",
+        )
+        _raw_page_box_values(
+            page,
+            "/CropBox",
+            ("/MediaBox",),
+            f"source page {page_number} effective /CropBox",
+        )
         _page_box_values(
             page, "mediabox", f"source page {page_number} /MediaBox"
         )
@@ -1362,6 +1430,12 @@ def _transform_quad_points(
         )
         coordinates.append(coordinate)
 
+    for index in range(0, len(coordinates), 8):
+        _require_nondegenerate_quadrilateral(
+            coordinates[index:index + 8],
+            "link annotation /QuadPoints quadrilateral",
+        )
+
     a, b, c, d, e, f = transform
     transformed_coordinates: list[float] = []
     transformed = ArrayObject()
@@ -1373,15 +1447,13 @@ def _transform_quad_points(
                 "Invalid transformed link annotation /QuadPoints"
             )
         transformed_coordinates.extend((x, y))
-        transformed.extend((FloatObject(x), FloatObject(y)))
     for index in range(0, len(transformed_coordinates), 8):
-        quadrilateral = transformed_coordinates[index:index + 8]
-        xs = quadrilateral[0::2]
-        ys = quadrilateral[1::2]
-        _require_positive_rectangle(
-            [min(xs), min(ys), max(xs), max(ys)],
+        _require_nondegenerate_quadrilateral(
+            transformed_coordinates[index:index + 8],
             "transformed link annotation /QuadPoints quadrilateral",
         )
+    for value in transformed_coordinates:
+        transformed.append(FloatObject(value))
     return transformed
 
 
@@ -1474,12 +1546,40 @@ def _transformed_internal_destination(
     a, b, c, d, e, f = transform
     tolerance = 1e-12
 
-    if mode in {"/Fit", "/FitB"}:
+    if mode == "/Fit":
         if len(destination) != 2:
             raise VirtualSpreadError(
                 f"Invalid internal destination parameters for {mode}"
             )
-        return ArrayObject([target_reference, NameObject(mode)])
+        try:
+            target_rectangle = [
+                float(value) for value in target_mapping["destination"]
+            ]
+        except (KeyError, TypeError, ValueError, OverflowError) as error:
+            raise VirtualSpreadError(
+                "Invalid target mapping for internal destination /Fit"
+            ) from error
+        _require_positive_rectangle(
+            target_rectangle, "target mapping destination"
+        )
+        return ArrayObject([
+            target_reference,
+            NameObject("/FitR"),
+            *(FloatObject(value) for value in target_rectangle),
+        ])
+
+    if mode in {"/FitB", "/FitH", "/FitBH", "/FitV", "/FitBV"}:
+        expected_length = 2 if mode == "/FitB" else 3
+        if len(destination) != expected_length:
+            raise VirtualSpreadError(
+                f"Invalid internal destination parameters for {mode}"
+            )
+        if expected_length == 3:
+            _destination_number(destination[2], f"{mode} coordinate")
+        raise VirtualSpreadError(
+            f"Cannot preserve internal destination mode {mode} "
+            "after composing source pages"
+        )
 
     if mode == "/XYZ":
         if len(destination) != 5:
@@ -1536,48 +1636,6 @@ def _transformed_internal_destination(
                 _destination_object(transformed_left),
                 _destination_object(transformed_top),
                 _destination_object(transformed_zoom),
-            ]
-        )
-
-    if mode in {"/FitH", "/FitBH"}:
-        if len(destination) != 3 or abs(b) > tolerance:
-            raise VirtualSpreadError(
-                f"Cannot preserve internal destination mode {mode}"
-            )
-        top = _destination_number(destination[2], f"{mode} top")
-        if top is None and not _destination_axis_is_preserved(
-            source_transform, transform, "y"
-        ):
-            raise VirtualSpreadError(
-                f"Cannot preserve null {mode} top across page transforms"
-            )
-        transformed_top = None if top is None else d * top + f
-        return ArrayObject(
-            [
-                target_reference,
-                NameObject(mode),
-                _destination_object(transformed_top),
-            ]
-        )
-
-    if mode in {"/FitV", "/FitBV"}:
-        if len(destination) != 3 or abs(c) > tolerance:
-            raise VirtualSpreadError(
-                f"Cannot preserve internal destination mode {mode}"
-            )
-        left = _destination_number(destination[2], f"{mode} left")
-        if left is None and not _destination_axis_is_preserved(
-            source_transform, transform, "x"
-        ):
-            raise VirtualSpreadError(
-                f"Cannot preserve null {mode} left across page transforms"
-            )
-        transformed_left = None if left is None else a * left + e
-        return ArrayObject(
-            [
-                target_reference,
-                NameObject(mode),
-                _destination_object(transformed_left),
             ]
         )
 
@@ -1768,12 +1826,13 @@ def _copy_link_annotation(
     target_reference = writer.pages[target_output_page].indirect_reference
     if target_reference is None:
         raise VirtualSpreadError("Output page has no indirect reference")
-    copied[NameObject("/Dest")] = _transformed_internal_destination(
+    transformed_destination = _transformed_internal_destination(
         resolved_destination,
         target_reference,
         mapping,
         target,
     )
+    copied[NameObject("/Dest")] = transformed_destination
     copied[NameObject("/SNTargetSourcePage")] = NumberObject(
         target_source_page
     )
@@ -1789,6 +1848,10 @@ def _copy_link_annotation(
         "targetSourcePage": target_source_page,
         "targetOutputPage": target_output_page,
         "targetSide": target["side"],
+        "targetView": (
+            "fit-source-page"
+            if str(resolved_destination[1]) == "/Fit" else "preserve"
+        ),
         "rect": runtime_rect,
     }
 

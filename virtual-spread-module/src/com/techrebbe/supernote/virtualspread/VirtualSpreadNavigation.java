@@ -73,6 +73,7 @@ public final class VirtualSpreadNavigation {
         public final int targetPage;
         public final Half sourceHalf;
         public final Half targetHalf;
+        public final boolean resetLandscapeFit;
         public final float x0;
         public final float y0;
         public final float x1;
@@ -88,10 +89,35 @@ public final class VirtualSpreadNavigation {
             float x1,
             float y1
         ) {
+            this(
+                sourcePage,
+                targetPage,
+                sourceHalf,
+                targetHalf,
+                false,
+                x0,
+                y0,
+                x1,
+                y1
+            );
+        }
+
+        public LinkTarget(
+            int sourcePage,
+            int targetPage,
+            Half sourceHalf,
+            Half targetHalf,
+            boolean resetLandscapeFit,
+            float x0,
+            float y0,
+            float x1,
+            float y1
+        ) {
             this.sourcePage = sourcePage;
             this.targetPage = targetPage;
             this.sourceHalf = sourceHalf;
             this.targetHalf = targetHalf;
+            this.resetLandscapeFit = resetLandscapeFit;
             this.x0 = x0;
             this.y0 = y0;
             this.x1 = x1;

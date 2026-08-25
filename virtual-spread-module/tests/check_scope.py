@@ -215,6 +215,8 @@ for required in (
     "linkEndpointMatches(",
     'link.optInt("sourcePage", -1)',
     '"targetSourcePage"',
+    'link.opt("targetView")',
+    '"fit-source-page".equals(targetView)',
     '!("internal".equals(kind) || "uri".equals(kind))',
     'if ("uri".equals(kind))',
     'link.opt("uri") instanceof String',
@@ -255,12 +257,22 @@ for forbidden in (
         )
 
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
-if 'android:versionCode="15"' not in manifest:
+if 'android:versionCode="16"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version code")
-if 'android:versionName="0.0.15"' not in manifest:
+if 'android:versionName="0.0.16"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
-if 'private static final String VERSION = "0.0.15"' not in hook:
+if 'private static final String VERSION = "0.0.16"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
+for required in (
+    "pendingLinkResetLandscapeFit",
+    "matched.resetLandscapeFit",
+    '"internal_link_fit_reset"',
+    "scheduleConfigurationRefresh(",
+):
+    if required not in hook:
+        raise SystemExit(
+            f"runtime is missing authenticated Fit-view handling: {required}"
+        )
 if "MAX_MANIFEST_BYTES = 8L * 1024L * 1024L" not in hook:
     raise SystemExit(
         "runtime and generator manifest-size limits must remain aligned"
@@ -349,9 +361,11 @@ for required in (
     "def _destination_axis_is_preserved(",
     "isinstance(mode_object, NameObject)",
     "isinstance(value, (FloatObject, NumberObject))",
-    'mode in {"/FitH", "/FitBH"}',
-    'mode in {"/FitV", "/FitBV"}',
-    'mode == "/FitR"',
+    "def _raw_page_box_values(",
+    "def _require_nondegenerate_quadrilateral(",
+    'mode in {"/FitB", "/FitH", "/FitBH", "/FitV", "/FitBV"}',
+    'NameObject("/FitR")',
+    '"targetView": (',
     "expected_output_identity=temporary_output_identity",
     "expected_output_hash=temporary_output_hash",
     "lexical_output = _require_unaliased_output_path(output_path)",
@@ -424,7 +438,7 @@ for required in (
     "test_legacy_marker_with_unknown_fields_fails_closed",
     "test_obsolete_new_pair_partial_sidecar_fails_closed",
     "test_obsolete_new_pair_complete_publication_fails_closed",
-    "test_internal_destination_modes_are_preserved_and_transformed",
+    "test_representable_internal_destinations_are_transformed",
     "test_null_destination_coordinates_survive_matching_transform",
     "test_null_destination_coordinates_reject_different_transforms",
     "test_destination_operands_require_pdf_name_and_numbers",

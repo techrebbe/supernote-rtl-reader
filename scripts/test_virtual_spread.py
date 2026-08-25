@@ -267,6 +267,43 @@ def add_invalid_page_rotation(path: Path, value: object) -> None:
         writer.write(stream)
 
 
+def set_raw_page_box_coordinate(
+    path: Path,
+    key: str,
+    value: object,
+    *,
+    inherited: bool,
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    page = writer.pages[0]
+    box = ArrayObject([
+        value,
+        NumberObject(0),
+        NumberObject(432),
+        NumberObject(576),
+    ])
+    if inherited:
+        parent_reference = page.raw_get("/Parent")
+        parent = parent_reference.get_object()
+        if not isinstance(parent, DictionaryObject):
+            raise AssertionError("fixture page parent is not a dictionary")
+        parent[NameObject(key)] = box
+        page.pop(key, None)
+    else:
+        page[NameObject(key)] = box
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    persisted = PdfReader(str(path), strict=True)
+    raw_box = persisted.pages[0].raw_get(key)
+    if not isinstance(raw_box, ArrayObject):
+        raise AssertionError("fixture raw page box was not persisted")
+    if not isinstance(raw_box[0], type(value)):
+        raise AssertionError("fixture raw page-box operand type changed")
+
+
 def add_typed_document_information(path: Path) -> None:
     source = PdfReader(str(path), strict=True)
     writer = PdfWriter()
@@ -1421,22 +1458,17 @@ class VirtualSpreadTests(unittest.TestCase):
                 3,
             )
 
-    def test_internal_destination_modes_are_preserved_and_transformed(
+    def test_representable_internal_destinations_are_transformed(
         self,
     ) -> None:
         cases = (
-            ("/Fit", ()),
-            ("/FitB", ()),
-            ("/XYZ", (30.0, 160.0, 1.25)),
-            ("/FitH", (160.0,)),
-            ("/FitBH", (160.0,)),
-            ("/FitV", (30.0,)),
-            ("/FitBV", (30.0,)),
-            ("/FitR", (10.0, 20.0, 100.0, 160.0)),
+            ("/Fit", (), "/FitR"),
+            ("/XYZ", (30.0, 160.0, 1.25), "/XYZ"),
+            ("/FitR", (10.0, 20.0, 100.0, 160.0), "/FitR"),
         )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for index, (mode, arguments) in enumerate(cases):
+            for index, (mode, arguments, output_mode) in enumerate(cases):
                 with self.subTest(mode=mode):
                     source = root / f"source-{index}.pdf"
                     output = root / f"spread-{index}.pdf"
@@ -1466,14 +1498,24 @@ class VirtualSpreadTests(unittest.TestCase):
                     ]["/Annots"].get_object()[0].get_object()
                     destination = annotation["/Dest"]
 
-                    self.assertEqual(str(destination[1]), mode)
+                    self.assertEqual(str(destination[1]), output_mode)
                     self.assertEqual(
                         destination_page_index(reader, annotation),
                         target_mapping["virtualPageIndex"],
                     )
                     transform = target_mapping["transform"]
-                    if mode in {"/Fit", "/FitB"}:
-                        self.assertEqual(len(destination), 2)
+                    if mode == "/Fit":
+                        self.assertEqual(len(destination), 6)
+                        for actual, expected in zip(
+                            destination[2:6], target_mapping["destination"]
+                        ):
+                            self.assertAlmostEqual(
+                                float(actual), expected, places=4
+                            )
+                        self.assertEqual(
+                            manifest["links"][0]["targetView"],
+                            "fit-source-page",
+                        )
                     elif mode == "/XYZ":
                         expected_left, expected_top = transform_point(
                             arguments[0], arguments[1], transform
@@ -1495,20 +1537,6 @@ class VirtualSpreadTests(unittest.TestCase):
                             arguments[2] / target_scale,
                             places=4,
                         )
-                    elif mode in {"/FitH", "/FitBH"}:
-                        _, expected_top = transform_point(
-                            0.0, arguments[0], transform
-                        )
-                        self.assertAlmostEqual(
-                            float(destination[2]), expected_top, places=4
-                        )
-                    elif mode in {"/FitV", "/FitBV"}:
-                        expected_left, _ = transform_point(
-                            arguments[0], 0.0, transform
-                        )
-                        self.assertAlmostEqual(
-                            float(destination[2]), expected_left, places=4
-                        )
                     elif mode == "/FitR":
                         expected_rectangle = transform_rect(
                             arguments, transform
@@ -1519,6 +1547,10 @@ class VirtualSpreadTests(unittest.TestCase):
                             self.assertAlmostEqual(
                                 float(actual), expected, places=4
                             )
+                    if mode != "/Fit":
+                        self.assertEqual(
+                            manifest["links"][0]["targetView"], "preserve"
+                        )
 
     def test_xyz_zoom_requires_a_uniform_target_transform(self) -> None:
         self.assertAlmostEqual(
@@ -1558,12 +1590,6 @@ class VirtualSpreadTests(unittest.TestCase):
                 FloatObject(2.0),
                 FloatObject(2.0),
                 NullObject(),
-            ]),
-            ArrayObject([
-                NullObject(), NameObject("/FitH"), FloatObject(2.0)
-            ]),
-            ArrayObject([
-                NullObject(), NameObject("/FitV"), FloatObject(2.0)
             ]),
         )
         for destination in cases:
@@ -1645,10 +1671,6 @@ class VirtualSpreadTests(unittest.TestCase):
         cases = (
             ("/XYZ", (None, 160.0, 1.25), 2),
             ("/XYZ", (30.0, None, 1.25), 3),
-            ("/FitH", (None,), 2),
-            ("/FitBH", (None,), 2),
-            ("/FitV", (None,), 2),
-            ("/FitBV", (None,), 2),
         )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1690,10 +1712,6 @@ class VirtualSpreadTests(unittest.TestCase):
         cases = (
             ("/XYZ", (None, 160.0, 1.25)),
             ("/XYZ", (30.0, None, 1.25)),
-            ("/FitH", (None,)),
-            ("/FitBH", (None,)),
-            ("/FitV", (None,)),
-            ("/FitBV", (None,)),
         )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1845,6 +1863,10 @@ class VirtualSpreadTests(unittest.TestCase):
             (
                 TextStringObject("15"),
                 *(FloatObject(value) for value in range(1, 8)),
+            ),
+            tuple(
+                FloatObject(value)
+                for value in (0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0)
             ),
         )
         with tempfile.TemporaryDirectory() as directory:
@@ -2454,33 +2476,68 @@ class VirtualSpreadTests(unittest.TestCase):
     def test_unsupported_internal_destination_mode_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = root / "source.pdf"
-            output = root / "spread.pdf"
-            manifest_path = root / "spread.pdf.json"
-            create_odd_page_fixture(source)
-            set_link_destination_mode(
-                source,
-                source_page_index=1,
-                annotation_index=0,
-                target_page_index=5,
-                mode="/FitWindow",
-                arguments=(),
+            cases = (
+                ("/FitB", ()),
+                ("/FitH", (160.0,)),
+                ("/FitBH", (160.0,)),
+                ("/FitV", (30.0,)),
+                ("/FitBV", (30.0,)),
+                ("/FitWindow", ()),
             )
+            for index, (mode, arguments) in enumerate(cases):
+                with self.subTest(mode=mode):
+                    source = root / f"source-{index}.pdf"
+                    output = root / f"spread-{index}.pdf"
+                    manifest_path = root / f"spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    set_link_destination_mode(
+                        source,
+                        source_page_index=1,
+                        annotation_index=0,
+                        target_page_index=5,
+                        mode=mode,
+                        arguments=arguments,
+                    )
+                    expected_error = (
+                        "Unsupported internal destination mode: /FitWindow"
+                        if mode == "/FitWindow"
+                        else "Cannot preserve internal destination mode"
+                    )
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError, expected_error
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            direction="rtl",
+                            cover_separate=True,
+                        )
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
 
-            with self.assertRaisesRegex(
-                VirtualSpreadError,
-                "Unsupported internal destination mode: /FitWindow",
-            ):
-                build_virtual_spread(
-                    source,
-                    output,
-                    manifest_path,
-                    direction="rtl",
-                    cover_separate=True,
-                )
-
-            self.assertFalse(output.exists())
-            self.assertFalse(manifest_path.exists())
+    def test_page_boxes_require_raw_pdf_number_operands(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cases = (("/CropBox", False), ("/MediaBox", True))
+            for index, (key, inherited) in enumerate(cases):
+                with self.subTest(key=key, inherited=inherited):
+                    source = root / f"page-box-source-{index}.pdf"
+                    output = root / f"page-box-spread-{index}.pdf"
+                    manifest_path = root / f"page-box-spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    set_raw_page_box_coordinate(
+                        source,
+                        key,
+                        TextStringObject("0"),
+                        inherited=inherited,
+                    )
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError, "page.*coordinate"
+                    ):
+                        build_virtual_spread(source, output, manifest_path)
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
 
     def test_non_finite_spread_geometry_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

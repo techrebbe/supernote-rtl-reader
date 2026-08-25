@@ -47,7 +47,8 @@ public final class VirtualSpreadLinkAuthority {
         double y1,
         int targetSourcePage,
         int targetOutputPage,
-        String targetSide
+        String targetSide,
+        String targetView
     ) {
         return common(
             "internal",
@@ -60,7 +61,8 @@ public final class VirtualSpreadLinkAuthority {
             y1
         ) + "|" + targetSourcePage
             + "|" + targetOutputPage
-            + "|" + targetSide;
+            + "|" + targetSide
+            + "|" + targetView;
     }
 
     public static String uri(
@@ -191,7 +193,7 @@ public final class VirtualSpreadLinkAuthority {
         double x1,
         double y1
     ) {
-        return "v1|" + kind
+        return "v2|" + kind
             + "|" + sourcePage
             + "|" + sourceSide
             + "|" + outputPage

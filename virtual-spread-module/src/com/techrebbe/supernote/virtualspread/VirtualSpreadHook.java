@@ -57,7 +57,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final String SCHEMA =
         "techrebbe.supernote.virtual-spread/v1";
     private static final String TAG = "SN_VIRTUAL_SPREAD";
-    private static final String VERSION = "0.0.15";
+    private static final String VERSION = "0.0.16";
     private static final long MAX_MANIFEST_BYTES = 8L * 1024L * 1024L;
 
     private static volatile WeakReference<Activity> activeActivity =
@@ -198,6 +198,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         VirtualSpreadNavigation.Half pendingLinkSourceHalf;
         int pendingLinkPage = -1;
         VirtualSpreadNavigation.Half pendingLinkHalf;
+        boolean pendingLinkResetLandscapeFit;
         long pendingLinkAt;
         int pendingHistoryPage = -1;
         VirtualSpreadNavigation.Half pendingHistoryHalf;
@@ -487,11 +488,15 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             state.pendingLinkSourceHalf = sourceHalf;
             state.pendingLinkPage = targetPage;
             state.pendingLinkHalf = matched.targetHalf;
+            state.pendingLinkResetLandscapeFit =
+                matched.resetLandscapeFit;
             state.pendingLinkAt = System.currentTimeMillis();
             log("link_target_captured source=" + sourcePage
                 + " source_half=" + sourceHalf
                 + " target=" + targetPage
-                + " target_half=" + matched.targetHalf);
+                + " target_half=" + matched.targetHalf
+                + " reset_landscape_fit="
+                + matched.resetLandscapeFit);
         } catch (Throwable throwable) {
             clearPendingLink(state);
             logFailure("link_target_capture_failed", throwable);
@@ -765,6 +770,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             && state.pendingLinkHalf != null
             && linkAge >= 0L
             && linkAge <= 60000L;
+        boolean resetLandscapeFit = hasLinkTarget
+            && state.pendingLinkResetLandscapeFit;
         long historyAge = now - state.pendingHistoryAt;
         boolean hasHistoryTarget = state.pendingHistoryPage == currentPage
             && state.pendingHistoryHalf != null
@@ -809,13 +816,21 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         state.half = target;
 
         Activity activity = activeActivity.get();
-        if (isPortrait(activity)) {
+        boolean portrait = isPortrait(activity);
+        if (portrait) {
             focusHalf(viewModel, target, "page_loaded");
             schedulePortraitFocus(viewModel, "page_loaded_retry");
+        } else if (resetLandscapeFit) {
+            scheduleConfigurationRefresh(
+                activity,
+                viewModel,
+                "internal_link_fit_reset"
+            );
         }
         log("page_loaded page=" + currentPage + " portrait="
-            + isPortrait(activity) + " target_half=" + target
-            + " reason=" + targetReason);
+            + portrait + " target_half=" + target
+            + " reason=" + targetReason
+            + " reset_landscape_fit=" + resetLandscapeFit);
     }
 
     private static void schedulePortraitFocus(
@@ -1020,6 +1035,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         state.pendingLinkSourceHalf = null;
         state.pendingLinkPage = -1;
         state.pendingLinkHalf = null;
+        state.pendingLinkResetLandscapeFit = false;
         state.pendingLinkAt = 0L;
     }
 
@@ -1576,6 +1592,17 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             );
             int targetOutputPage = link.optInt("targetOutputPage", -1);
             String targetSide = link.optString("targetSide");
+            Object targetViewValue = link.opt("targetView");
+            if (!(targetViewValue instanceof String)) {
+                log("manifest_rejected reason=link_record index=" + index);
+                return null;
+            }
+            String targetView = (String) targetViewValue;
+            if (!("preserve".equals(targetView)
+                || "fit-source-page".equals(targetView))) {
+                log("manifest_rejected reason=link_record index=" + index);
+                return null;
+            }
             if (targetOutputPage < 0 || targetOutputPage >= pageCount) {
                 log("manifest_rejected reason=link_record index=" + index);
                 return null;
@@ -1599,7 +1626,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 y1,
                 targetSourcePage,
                 targetOutputPage,
-                targetSide
+                targetSide,
+                targetView
             ));
             VirtualSpreadNavigation.Half sourceHalf = "left".equals(
                 sourceSide
@@ -1612,6 +1640,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 "left".equals(targetSide)
                     ? VirtualSpreadNavigation.Half.LEFT
                     : VirtualSpreadNavigation.Half.RIGHT,
+                "fit-source-page".equals(targetView),
                 (float) x0,
                 (float) y0,
                 (float) x1,

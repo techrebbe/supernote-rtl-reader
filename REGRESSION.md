@@ -861,6 +861,47 @@ confirmed:
 This closes the v0.0.15 release gate without repeating the already completed
 v0.0.8 annotation campaign.
 
+## Review pass 38 and v0.0.16 automated gate - PASS
+
+The thirty-eighth review pass closes three remaining malformed-input and link-
+view gaps. Effective `/MediaBox` and `/CropBox` coordinates must now be genuine
+finite PDF number objects even when inherited through the page tree, preventing
+pypdf's rectangle accessor from coercing numeric strings. Every source and
+transformed `/QuadPoints` quadrilateral must contain at least one non-collinear
+triple, so a diagonal line with positive horizontal and vertical bounding extent
+cannot masquerade as a link activation region.
+
+Source `/Fit` links are now encoded as `/FitR` around the original target source
+page's placed rectangle rather than fitting the complete composite spread.
+Viewport- and content-dependent `/FitB`, `/FitH`, `/FitBH`, `/FitV`, and `/FitBV`
+forms fail closed because their original semantics cannot be represented safely
+after two pages are composed. Link-authority v2 authenticates a `targetView`
+field for every internal link. The companion uses that authenticated value to
+restore the complete spread after a `/Fit` traversal in landscape while leaving
+explicit `/XYZ` and `/FitR` views untouched; absent, non-string, or unknown view
+values reject the whole manifest.
+
+All 82 generator tests pass on Windows (with five platform-specific skips) and
+Linux. Both native invariant suites pass. The companion passes 53 navigation
+assertions, 10 cross-language link-authority assertions, 8,752 exhaustive
+navigation assertions, hook-scope validation, and a signed/verified v0.0.16
+(`versionCode=16`) APK build. A focused Nomad link smoke remains required before
+v0.0.16 can be called hardware-validated.
+
+## v0.0.16 focused hardware smoke - PENDING
+
+Regenerate the link fixture with the v0.0.16 generator before testing because
+the link-authority record changed from v1 to v2. Required hardware checks are:
+
+- a source `/Fit` link in portrait opens the intended source page at native
+  Fit-page size and native Back restores the exact source half;
+- the same link in landscape returns to the complete two-page spread with the
+  intended target half active and without a persistent zoomed-half state;
+- links to both target halves, RTL turns, and native Back remain correct;
+- ordinary PDFs without the authenticated sidecar remain untouched; and
+- no persistent flicker, stale zoom, or incorrect page is visible after the
+  delayed landscape refresh.
+
 ## Failure capture
 
 Before reproducing a failure:

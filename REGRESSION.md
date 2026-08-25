@@ -1,6 +1,8 @@
 # RTL Reader hardware regression
 
-Device baseline: Supernote Nomad, plugin beta firmware.
+Device baseline: Supernote Nomad running firmware fingerprint
+`Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys`
+with SupernoteDocument `1.02.446`.
 
 v0.0.9 established the hardware-validated reading-engine baseline. v0.1.1 subsequently validated the polished UI and direction-aware footer. v0.4.2 is the current merged hardware-validated direct-render and direction-aware native bitmap-prefetch baseline.
 
@@ -545,9 +547,12 @@ the transient preview to the half-page scale is tracked as post-v0.4.10 polish.
 
 ## Native Virtual Spread v0.0.8 architecture validation — PASS
 
-Hardware validation was completed on 2026-08-21 on a Supernote Nomad, using
-the native `com.supernote.document` reader. The legacy dual-page Native Spread
-compositor was disabled and absent from the document process.
+Hardware validation was completed on 2026-08-21 on a Supernote Nomad running
+firmware fingerprint
+`Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys`
+and SupernoteDocument `1.02.446`, using the native
+`com.supernote.document` reader. The legacy dual-page Native Spread compositor
+was disabled and absent from the document process.
 
 - [x] Native landscape displayed `blank | cover`, `3 | 2`, `5 | 4`, and
   `7 | 6` as real fixed PDF spread pages.
@@ -1081,6 +1086,28 @@ cross-language authority assertions, 8,752 exhaustive navigation assertions,
 both invariant suites, hook-scope validation, and the signed/verified v0.0.23
 (`versionCode=23`) APK build (SHA-256
 `59457392533e6428e5c943eaa2f0c600afe67591041af6595c263e9bd917a9df`).
+The exact-head CI gate independently runs the generator suite on Linux. Focused
+hardware validation of same-path replacement and preserved portrait explicit
+link viewports remains pending.
+
+## Review pass 47 FitR containment and latest-only verification - AUTOMATED PASS
+
+The second independent full-branch review found three remaining hardening
+issues. Explicit `/FitR` destinations are now required to be positive rectangles
+fully contained by the target source page's effective CropBox, preventing a
+crafted viewport from exposing the neighboring page in a composed spread. The
+manifest verifier now has a one-entry pending queue: a newer document invalidates
+older work, queued stale jobs are removed, and active full-PDF hashing checks for
+supersession between chunks. Hardware evidence now records the exact Nomad
+firmware fingerprint and SupernoteDocument version rather than only the device
+model and date.
+
+Local automated validation passes 87 generator tests on Windows (five expected
+filesystem skips), 112 focused navigation/manifest/cache assertions, 12
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both invariant suites, hook-scope validation, and the signed/verified v0.0.23
+(`versionCode=23`) APK build (SHA-256
+`bd51d1397c7057fa0fd2957ea476cba43417b66a98f2e9b99edf1d56f4010c0c`).
 The exact-head CI gate independently runs the generator suite on Linux. Focused
 hardware validation of same-path replacement and preserved portrait explicit
 link viewports remains pending.

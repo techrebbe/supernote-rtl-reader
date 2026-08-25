@@ -2,6 +2,8 @@
 
 - Date: 2026-08-21
 - Device: Supernote Nomad
+- Firmware fingerprint: `Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys`
+- SupernoteDocument: `1.02.446`
 - Reader: native `com.supernote.document`
 - Legacy Native Spread compositor: disabled and not mapped into the process
 
@@ -168,12 +170,12 @@ The generator rejects transformed URI `/IsMap true` actions, a CropBox extending
 outside its MediaBox, and link geometry outside the source CropBox, while scaling
 an omitted link border's PDF-default width.
 
-The local automated gate passes 86 generator tests on Windows (five expected
+The local automated gate passes 87 generator tests on Windows (five expected
 platform skips), 112 focused navigation/manifest/cache assertions, 12
 cross-language authority assertions, 8,752 exhaustive navigation assertions, both native
 invariant suites, hook-scope validation, and the signed/verified v0.0.23
 (`versionCode=23`) APK build (SHA-256
-`59457392533e6428e5c943eaa2f0c600afe67591041af6595c263e9bd917a9df`).
+`bd51d1397c7057fa0fd2957ea476cba43417b66a98f2e9b99edf1d56f4010c0c`).
 CI independently runs the same generator suite on
 Linux without the Windows-only skips.
 

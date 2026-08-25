@@ -1602,6 +1602,51 @@ class VirtualSpreadTests(unittest.TestCase):
                             manifest["links"][0]["targetView"], "preserve"
                         )
 
+    def test_fitr_destination_must_be_inside_target_crop_box(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target_box = (0.0, 0.0, 700.0, 200.0)
+            cases = (
+                (target_box[0] - 1.0, 20.0, 100.0, 160.0),
+                (10.0, target_box[1] - 1.0, 100.0, 160.0),
+                (10.0, 20.0, target_box[2] + 1.0, 160.0),
+                (10.0, 20.0, 100.0, target_box[3] + 1.0),
+            )
+            for index, rectangle in enumerate(cases):
+                with self.subTest(rectangle=rectangle):
+                    source = root / f"fitr-outside-{index}.pdf"
+                    output = root / f"fitr-outside-{index}-spread.pdf"
+                    manifest_path = output.with_suffix(".pdf.json")
+                    create_odd_page_fixture(source)
+                    actual_target_box = PdfReader(
+                        str(source), strict=True
+                    ).pages[5].cropbox
+                    self.assertEqual(
+                        tuple(float(value) for value in actual_target_box),
+                        target_box,
+                    )
+                    set_link_destination_mode(
+                        source,
+                        source_page_index=1,
+                        annotation_index=0,
+                        target_page_index=5,
+                        mode="/FitR",
+                        arguments=rectangle,
+                    )
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "internal destination /FitR rectangle extends "
+                        "outside target source /CropBox",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            direction="rtl",
+                            cover_separate=True,
+                        )
+
     def test_xyz_zoom_requires_a_uniform_target_transform(self) -> None:
         self.assertAlmostEqual(
             _destination_uniform_scale(
@@ -2276,7 +2321,10 @@ class VirtualSpreadTests(unittest.TestCase):
                 fit_rectangle,
                 target_reference,
                 {"transform": [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]},
-                {"transform": collapsed_transform},
+                {
+                    "transform": collapsed_transform,
+                    "sourceBox": [0.0, 0.0, 1.0, 1.0],
+                },
             )
 
     def test_visible_link_border_and_highlight_are_preserved(self) -> None:

@@ -20,9 +20,10 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.WeakHashMap;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -73,8 +74,15 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     );
     private static final Map<String, String> VERIFYING =
         new ConcurrentHashMap<>();
-    private static final ExecutorService MANIFEST_VERIFIER =
-        Executors.newSingleThreadExecutor();
+    private static final Object MANIFEST_VERIFIER_LOCK = new Object();
+    private static final ThreadPoolExecutor MANIFEST_VERIFIER =
+        new ThreadPoolExecutor(
+            1,
+            1,
+            0L,
+            TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<Runnable>(1)
+        );
     private static final ThreadLocal<int[]> PAGE_BAR_VALUES =
         new ThreadLocal<>();
 
@@ -198,6 +206,53 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             return pdfIdentity.matches(pdf)
                 && sidecarIdentity.matches(sidecar);
         }
+    }
+
+    private static final class ManifestVerificationTask implements Runnable {
+        final File pdf;
+        final File sidecar;
+        final String key;
+        final FileIdentity pdfBefore;
+        final FileIdentity sidecarBefore;
+        final String verificationId;
+
+        ManifestVerificationTask(
+            File pdf,
+            File sidecar,
+            String key,
+            FileIdentity pdfBefore,
+            FileIdentity sidecarBefore,
+            String verificationId
+        ) {
+            this.pdf = pdf;
+            this.sidecar = sidecar;
+            this.key = key;
+            this.pdfBefore = pdfBefore;
+            this.sidecarBefore = sidecarBefore;
+            this.verificationId = verificationId;
+        }
+
+        @Override
+        public void run() {
+            verifyManifestSnapshot(
+                pdf,
+                sidecar,
+                key,
+                pdfBefore,
+                sidecarBefore,
+                verificationId
+            );
+        }
+
+        void cancelBeforeRun() {
+            VERIFYING.remove(key, verificationId);
+            log("manifest_verification_superseded path=" + key);
+        }
+    }
+
+    private static final class ManifestVerificationSuperseded
+        extends Exception {
+        private static final long serialVersionUID = 1L;
     }
 
     private static final class ReaderState {
@@ -1279,28 +1334,44 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     ) {
         final String verificationId = pdfBefore.token()
             + ":" + sidecarBefore.token();
-        String previous = VERIFYING.put(key, verificationId);
-        if (verificationId.equals(previous)) {
-            return false;
-        }
-        try {
-            MANIFEST_VERIFIER.execute(new Runnable() {
-                @Override
-                public void run() {
-                    verifyManifestSnapshot(
-                        pdf,
-                        sidecar,
-                        key,
-                        pdfBefore,
-                        sidecarBefore,
-                        verificationId
-                    );
+        synchronized (MANIFEST_VERIFIER_LOCK) {
+            if (verificationId.equals(VERIFYING.get(key))) {
+                return false;
+            }
+            // Only the document most recently requested by the native reader
+            // may remain current. Invalidate an active older verification and
+            // retain at most one pending task behind it.
+            VERIFYING.clear();
+            Runnable stale;
+            while ((stale = MANIFEST_VERIFIER.getQueue().poll()) != null) {
+                if (stale instanceof ManifestVerificationTask) {
+                    ((ManifestVerificationTask) stale).cancelBeforeRun();
                 }
-            });
-            return true;
-        } catch (RuntimeException exception) {
-            VERIFYING.remove(key, verificationId);
-            throw exception;
+            }
+            VERIFYING.put(key, verificationId);
+            try {
+                MANIFEST_VERIFIER.execute(new ManifestVerificationTask(
+                    pdf,
+                    sidecar,
+                    key,
+                    pdfBefore,
+                    sidecarBefore,
+                    verificationId
+                ));
+                return true;
+            } catch (RuntimeException exception) {
+                VERIFYING.remove(key, verificationId);
+                throw exception;
+            }
+        }
+    }
+
+    private static void requireCurrentVerification(
+        String key,
+        String verificationId
+    ) throws ManifestVerificationSuperseded {
+        if (!verificationId.equals(VERIFYING.get(key))) {
+            throw new ManifestVerificationSuperseded();
         }
     }
 
@@ -1347,7 +1418,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                         pdfOpened.size,
                         sidecarJson,
                         key,
-                        sidecarDigest
+                        sidecarDigest,
+                        verificationId
                     );
                 }
                 String currentSidecarDigest = sha256(readBytes(
@@ -1571,8 +1643,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         long pdfLength,
         String sidecarJson,
         String key,
-        String sidecarDigest
+        String sidecarDigest,
+        String verificationId
     ) throws Exception {
+        requireCurrentVerification(key, verificationId);
         if (!VirtualSpreadNavigation.jsonObjectHasUniqueKeys(sidecarJson)) {
             log("manifest_rejected reason=duplicate_or_invalid_json path="
                 + key);
@@ -1623,10 +1697,13 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             return null;
         }
         if (!isSha256(expectedHash)
-            || !expectedHash.equalsIgnoreCase(sha256File(pdfInput))) {
+            || !expectedHash.equalsIgnoreCase(
+                sha256File(pdfInput, key, verificationId)
+            )) {
             log("manifest_rejected reason=output_hash path=" + key);
             return null;
         }
+        requireCurrentVerification(key, verificationId);
         String embeddedSourceAuthority =
             VirtualSpreadLinkAuthority.readPdfSourceDigest(pdfInput);
         if (!isSha256(expectedSourceAuthority)
@@ -1641,6 +1718,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             "linkAuthoritySha256",
             ""
         );
+        requireCurrentVerification(key, verificationId);
         String embeddedLinkAuthority =
             VirtualSpreadLinkAuthority.readPdfDigest(pdfInput);
         if (!isSha256(expectedLinkAuthority)
@@ -1652,6 +1730,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             "layoutAuthoritySha256",
             ""
         );
+        requireCurrentVerification(key, verificationId);
         String embeddedLayoutAuthority =
             VirtualSpreadLinkAuthority.readPdfLayoutDigest(pdfInput);
         if (!isSha256(expectedLayoutAuthority)
@@ -1710,6 +1789,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         VirtualSpreadNavigation.Spread[] spreads =
             new VirtualSpreadNavigation.Spread[pageCount];
         for (int index = 0; index < pageCount; index++) {
+            requireCurrentVerification(key, verificationId);
             JSONObject spread = spreadsJson.optJSONObject(index);
             Integer spreadIndex = exactManifestInteger(
                 spread, "virtualPageIndex"
@@ -1739,6 +1819,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             );
         }
         for (int index = 0; index < sourcePageCount; index++) {
+            requireCurrentVerification(key, verificationId);
             if (!sourceEntryMatches(
                     sourcePagesJson.optJSONObject(index),
                     index,
@@ -1752,6 +1833,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             new ArrayList<>();
         ArrayList<String> linkAuthorityRecords = new ArrayList<>();
         for (int index = 0; index < linksJson.length(); index++) {
+            requireCurrentVerification(key, verificationId);
             JSONObject link = linksJson.optJSONObject(index);
             if (link == null) {
                 log("manifest_rejected reason=link_record index=" + index);
@@ -1908,6 +1990,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             log("manifest_rejected reason=link_authority_records path=" + key);
             return null;
         }
+        requireCurrentVerification(key, verificationId);
         return new Manifest(
             key,
             sidecarDigest,
@@ -1958,13 +2041,18 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         return toHex(digest.digest());
     }
 
-    private static String sha256File(RandomAccessFile input) throws Exception {
+    private static String sha256File(
+        RandomAccessFile input,
+        String key,
+        String verificationId
+    ) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         long originalPosition = input.getFilePointer();
         try {
             input.seek(0L);
             byte[] buffer = new byte[64 * 1024];
             while (true) {
+                requireCurrentVerification(key, verificationId);
                 int count = input.read(buffer);
                 if (count < 0) {
                     break;

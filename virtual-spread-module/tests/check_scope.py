@@ -219,6 +219,43 @@ for required in (
             f"background manifest verification is missing guard: {required}"
         )
 
+for required in (
+    "new ArrayBlockingQueue<Runnable>(1)",
+    "synchronized (MANIFEST_VERIFIER_LOCK)",
+    "VERIFYING.clear()",
+    "MANIFEST_VERIFIER.getQueue().poll()",
+    "((ManifestVerificationTask) stale).cancelBeforeRun()",
+    "new ManifestVerificationTask(",
+    "requireCurrentVerification(key, verificationId)",
+    "sha256File(pdfInput, key, verificationId)",
+):
+    if required not in hook:
+        raise SystemExit(
+            f"latest-only manifest verification is missing: {required}"
+        )
+if "Executors.newSingleThreadExecutor()" in hook:
+    raise SystemExit("manifest verification must not use an unbounded queue")
+
+scheduler_start = hook.find("private static boolean scheduleManifestVerification")
+scheduler_end = hook.find(
+    "private static void requireCurrentVerification", scheduler_start
+)
+if scheduler_start < 0 or scheduler_end < 0:
+    raise SystemExit("missing latest-only verification scheduler")
+scheduler = hook[scheduler_start:scheduler_end]
+scheduler_positions = (
+    scheduler.find("VERIFYING.clear()"),
+    scheduler.find("MANIFEST_VERIFIER.getQueue().poll()"),
+    scheduler.find("VERIFYING.put(key, verificationId)"),
+    scheduler.find("MANIFEST_VERIFIER.execute"),
+)
+if min(scheduler_positions) < 0 or tuple(sorted(scheduler_positions)) != (
+    scheduler_positions
+):
+    raise SystemExit(
+        "manifest verification must invalidate, drain, publish, then enqueue"
+    )
+
 snapshot_guards = (
     "!pdfBefore.matches(pdfOpened)",
     "!sidecarBefore.matches(sidecarOpened)",
@@ -254,7 +291,7 @@ for required in (
     "cached.matches(pdfIdentity, sidecarIdentity)",
     "String sidecarDigest = sha256(sidecarData)",
     'output.optString("sha256", "")',
-    "expectedHash.equalsIgnoreCase(sha256File(pdfInput))",
+    "sha256File(pdfInput, key, verificationId)",
     "VirtualSpreadLinkAuthority.readPdfSourceDigest(pdfInput)",
     'manifest_rejected reason=output_hash',
     'manifest_rejected reason=snapshot_changed_during_read',

@@ -32,6 +32,9 @@ destinations become `/FitR` destinations around the original target source
 page's placed rectangle, preserving Fit-page semantics instead of fitting the
 entire two-page composite. `/XYZ` and `/FitR` retain their representable source
 semantics while their coordinates are transformed into the target spread; a
+source `/FitR` rectangle must be positive and remain wholly inside the target
+source page's effective CropBox, so it cannot expose a neighboring composed
+page. A
 non-null `/XYZ` zoom is divided by the target's validated uniform affine scale
 so the source-page magnification remains unchanged. Viewport- and content-bound
 `/FitB`, `/FitH`, `/FitBH`, `/FitV`, and `/FitBV` destinations cannot be
@@ -157,7 +160,9 @@ and the source marker fail closed on older generated pairs; regenerate the PDF
 and sidecar together before opening them with v0.0.23. Native reader callbacks
 perform only strong PDF and sidecar
 identity checks. Sidecar reading/hashing, parsing, full-PDF hashing, and stable-
-snapshot verification run on the single background verifier. That verifier
+snapshot verification run on the single background verifier. Its bounded queue
+keeps only the newest pending document, and an active full-file hash cooperatively
+cancels when a newer document supersedes it. That verifier
 opens each PDF and sidecar exactly once, binds the callback identities to those
 descriptors, performs every content and authority read through the same open
 handles, and finally proves the handles still match the visible pathnames. The

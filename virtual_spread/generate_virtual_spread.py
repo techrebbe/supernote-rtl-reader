@@ -583,7 +583,10 @@ def _require_positive_rectangle(
 
 
 def _require_rectangle_contained(
-    inner: list[float], outer: list[float], label: str
+    inner: list[float],
+    outer: list[float],
+    label: str,
+    container_label: str = "/MediaBox",
 ) -> None:
     _require_positive_rectangle(inner, label)
     _require_positive_rectangle(outer, f"{label} container")
@@ -593,7 +596,9 @@ def _require_rectangle_contained(
         or inner[2] > outer[2]
         or inner[3] > outer[3]
     ):
-        raise VirtualSpreadError(f"{label} extends outside /MediaBox")
+        raise VirtualSpreadError(
+            f"{label} extends outside {container_label}"
+        )
 
 
 def _page_box_values(page: Any, attribute: str, label: str) -> list[float]:
@@ -1748,9 +1753,20 @@ def _transformed_internal_destination(
         ]
         if any(value is None for value in rectangle):
             raise VirtualSpreadError("Invalid /FitR destination rectangle")
-        left, bottom, right, top = rectangle
-        if left > right or bottom > top:
-            raise VirtualSpreadError("Invalid /FitR destination rectangle")
+        try:
+            target_source_box = [
+                float(value) for value in target_mapping["sourceBox"]
+            ]
+        except (KeyError, TypeError, ValueError, OverflowError) as error:
+            raise VirtualSpreadError(
+                "Invalid target source /CropBox for /FitR destination"
+            ) from error
+        _require_rectangle_contained(
+            rectangle,
+            target_source_box,
+            "internal destination /FitR rectangle",
+            "target source /CropBox",
+        )
         transformed = _transform_finite_rectangle(
             rectangle,
             transform,

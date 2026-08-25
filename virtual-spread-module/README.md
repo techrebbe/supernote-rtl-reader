@@ -46,6 +46,9 @@ lifetime of the document process. In portrait, authenticated explicit `/XYZ`
 and `/FitR` internal-link destinations keep Supernote's native viewport rather
 than being shifted to a page edge. Delayed portrait-focus retries are bound to
 the page-load generation and cannot overwrite a newer native link destination.
+The generator accepts an explicit `/FitR` viewport only when its complete,
+positive rectangle remains inside the target source page's effective CropBox;
+an out-of-page viewport fails closed before publication.
 
 The manifest cache is content-authoritative but uses an identity-based fast
 path: every lookup captures both PDF and sidecar device, inode, size,
@@ -55,7 +58,9 @@ sidecar ceiling; the generator rejects an oversized manifest before publishing
 it, while the runtime independently fails closed if that invariant is violated.
 On a cache miss or identity change, the module fails closed while a single
 background worker opens the PDF and sidecar, hashes the sidecar bytes, parses
-them, and performs the full PDF SHA-256 check. It
+them, and performs the full PDF SHA-256 check. Its queue retains only the latest
+pending document; opening another document invalidates older work, and an
+in-progress full-file hash checks for supersession between chunks. It
 publishes the result only if both the PDF identity and sidecar digest are still
 unchanged. Before any navigation behavior activates, the main-thread callback
 also compares the authenticated authorities with metadata read from the exact

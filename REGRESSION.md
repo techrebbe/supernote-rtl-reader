@@ -1132,6 +1132,30 @@ The exact-head CI gate independently runs the generator suite on Linux. Focused
 hardware validation of same-path replacement and preserved portrait explicit
 link viewports remains pending.
 
+## Review pass 49 bounded XYZ viewport and Original Back chain - AUTOMATED PASS
+
+The following full-branch review found two remaining navigation boundaries.
+An explicit `/XYZ` anchor could lie inside the target CropBox while the retained
+portrait viewport still extended into the neighboring composed page. The
+generator now requires an explicit horizontal anchor and positive zoom, derives
+the portrait viewport width in spread coordinates, and publishes the link only
+when the complete viewport remains inside the authenticated target half.
+Retained/zero zoom and unknown horizontal anchors fail closed. Native direct
+Original Back after multiple link jumps now validates the newest recorded
+destination against the currently open page before restoring the oldest source
+half; a mismatched in-process history mirror is cleared and cannot fall back to
+ambiguous manifest inference.
+
+Local automated validation passes 91 generator tests on Windows (five expected
+filesystem skips), 116 focused navigation/manifest/cache assertions, 12
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, and the signed/verified
+v0.0.23 (`versionCode=23`) APK build (SHA-256
+`64ff19234647d324335a42b7e2e231bd2f62365c416499099226aff1d7ce8223`).
+The exact-head CI gate independently runs the generator suite on Linux. Focused
+hardware validation of same-path replacement and preserved portrait explicit
+link viewports remains pending.
+
 ## Failure capture
 
 Before reproducing a failure:

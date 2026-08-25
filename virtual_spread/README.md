@@ -37,9 +37,12 @@ semantics while their coordinates are transformed into the target spread; a
 source `/FitR` rectangle must be positive and remain wholly inside the target
 source page's effective CropBox, so it cannot expose a neighboring composed
 page. Every explicit `/XYZ` left or top coordinate must likewise remain inside
-that CropBox. A non-null `/XYZ` zoom is divided by the target's validated
-uniform affine scale
-so the source-page magnification remains unchanged. Viewport- and content-bound
+that CropBox. Preserving `/XYZ` also requires an explicit horizontal anchor and
+a positive explicit zoom whose resulting portrait viewport remains wholly
+inside the target half; retained/zero zoom, an unknown horizontal anchor, or a
+viewport that reaches the neighboring half fails closed. A positive `/XYZ`
+zoom is divided by the target's validated uniform affine scale so the
+source-page magnification remains unchanged. Viewport- and content-bound
 `/FitB`, `/FitH`, `/FitBH`, `/FitV`, and `/FitBV` destinations cannot be
 represented faithfully after composition and therefore fail closed. Duplicate
 annotation `/NM` identifiers that would collide after two source pages are

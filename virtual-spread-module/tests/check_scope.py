@@ -42,6 +42,26 @@ for expected in expected_hooks:
 if hook.count("findAndHookMethod(") != len(expected_hooks):
     raise SystemExit("unexpected extra LSPosed method hook")
 
+history_start = hook.find("private static void captureHistoryReturn")
+history_end = hook.find("private static void captureLinkTarget", history_start)
+if history_start < 0 or history_end < 0:
+    raise SystemExit("missing native-link history return handling")
+history_return = hook[history_start:history_end]
+for required in (
+    "currentPage < 0 || currentPage >= manifest.pageCount",
+    "(!original && currentPage != targetPage)",
+    "boolean hadRuntimeHistory = state.linkHistory.size() > 0",
+    "state.linkHistory.takeOriginal(",
+    "sourcePage, targetPage, currentPage",
+    "state.linkHistory.takeBack(",
+    "if (hadRuntimeHistory && visit == null)",
+    '" origin=runtime"',
+):
+    if required not in history_return:
+        raise SystemExit(
+            f"native-link history return is missing fail-closed guard: {required}"
+        )
+
 refresh_start = hook.find("private static void scheduleConfigurationRefresh")
 refresh_end = hook.find("private static boolean focusHalf", refresh_start)
 if refresh_start < 0 or refresh_end < 0:
@@ -481,6 +501,8 @@ for required in (
     "def _require_source_outside_publication_namespace(",
     "_require_source_outside_publication_namespace(\n",
     "def _transformed_internal_destination(",
+    "def _require_xyz_viewport_inside_target_half(",
+    "_require_xyz_viewport_inside_target_half(",
     "def _destination_axis_is_preserved(",
     "isinstance(mode_object, NameObject)",
     "isinstance(value, (FloatObject, NumberObject))",
@@ -565,7 +587,9 @@ for required in (
     "test_obsolete_new_pair_partial_sidecar_fails_closed",
     "test_obsolete_new_pair_complete_publication_fails_closed",
     "test_representable_internal_destinations_are_transformed",
-    "test_null_destination_coordinates_survive_matching_transform",
+    "test_null_top_destination_survives_with_bounded_viewport",
+    "test_xyz_viewport_must_stay_inside_target_half",
+    "test_unknown_xyz_left_fails_closed_even_matching_transform",
     "test_null_destination_coordinates_reject_different_transforms",
     "test_destination_operands_require_pdf_name_and_numbers",
     "test_link_quad_points_are_preserved_and_transformed",
@@ -575,6 +599,7 @@ for required in (
     "test_malformed_link_annotation_flags_fail_closed",
     "test_link_rect_requires_finite_pdf_numbers",
     "test_visible_link_border_and_highlight_are_preserved",
+    "test_underlined_link_border_requires_preserved_bottom_edge",
     "test_implicit_default_link_border_is_scaled",
     "test_malformed_link_border_or_highlight_fails_closed",
     "test_link_geometry_must_remain_inside_effective_crop",

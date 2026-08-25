@@ -1688,6 +1688,45 @@ class VirtualSpreadTests(unittest.TestCase):
                     self.assertFalse(output.exists())
                     self.assertFalse(manifest_path.exists())
 
+    def test_xyz_viewport_must_stay_inside_target_half(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cases = (
+                (432.0, 500.0, 4.0),
+                (0.0, 500.0, 1.0),
+                (0.0, 500.0, None),
+            )
+            for index, arguments in enumerate(cases):
+                with self.subTest(arguments=arguments):
+                    source = root / f"xyz-viewport-{index}.pdf"
+                    output = root / f"xyz-viewport-{index}-spread.pdf"
+                    manifest_path = output.with_suffix(".pdf.json")
+                    create_odd_page_fixture(source)
+                    set_link_destination_mode(
+                        source,
+                        source_page_index=1,
+                        annotation_index=0,
+                        target_page_index=6,
+                        mode="/XYZ",
+                        arguments=arguments,
+                    )
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "Cannot preserve internal destination /XYZ "
+                        "viewport inside target half",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            direction="rtl",
+                            cover_separate=True,
+                        )
+
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
     def test_xyz_zoom_requires_a_uniform_target_transform(self) -> None:
         self.assertAlmostEqual(
             _destination_uniform_scale(
@@ -1751,10 +1790,12 @@ class VirtualSpreadTests(unittest.TestCase):
         source_mapping = {
             "transform": [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
             "sourceBox": [0.0, 0.0, 10.0, 10.0],
+            "slot": [0.0, 0.0, 10.0, 10.0],
         }
         underflow_mapping = {
             "transform": [1e308, 0.0, 0.0, 1e308, 0.0, 0.0],
             "sourceBox": [0.0, 0.0, 10.0, 10.0],
+            "slot": [0.0, 0.0, 10.0, 10.0],
         }
         underflow_destination = ArrayObject([
             NullObject(),
@@ -1781,13 +1822,17 @@ class VirtualSpreadTests(unittest.TestCase):
             FloatObject(0.0),
             FloatObject(0.0),
         ])
-        transformed_zero = _transformed_internal_destination(
-            zero_destination,
-            target_reference,
-            source_mapping,
-            underflow_mapping,
-        )
-        self.assertEqual(float(transformed_zero[4]), 0.0)
+        with self.assertRaisesRegex(
+            VirtualSpreadError,
+            "Cannot preserve internal destination /XYZ viewport inside "
+            "target half",
+        ):
+            _transformed_internal_destination(
+                zero_destination,
+                target_reference,
+                source_mapping,
+                underflow_mapping,
+            )
 
         negative_destination = ArrayObject([
             NullObject(),
@@ -1807,46 +1852,74 @@ class VirtualSpreadTests(unittest.TestCase):
                 source_mapping,
             )
 
-    def test_null_destination_coordinates_survive_matching_transform(
+    def test_null_top_destination_survives_with_bounded_viewport(
         self,
     ) -> None:
-        cases = (
-            ("/XYZ", (None, 160.0, 1.25), 2),
-            ("/XYZ", (30.0, None, 1.25), 3),
-        )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for index, (mode, arguments, null_index) in enumerate(cases):
-                with self.subTest(mode=mode, arguments=arguments):
-                    source = root / f"matching-source-{index}.pdf"
-                    output = root / f"matching-spread-{index}.pdf"
-                    manifest_path = root / f"matching-spread-{index}.pdf.json"
-                    create_odd_page_fixture(source)
-                    set_link_destination_mode(
-                        source,
-                        source_page_index=1,
-                        annotation_index=0,
-                        target_page_index=1,
-                        mode=mode,
-                        arguments=arguments,
-                    )
+            source = root / "matching-source.pdf"
+            output = root / "matching-spread.pdf"
+            manifest_path = root / "matching-spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_destination_mode(
+                source,
+                source_page_index=1,
+                annotation_index=0,
+                target_page_index=1,
+                mode="/XYZ",
+                arguments=(30.0, None, 3.0),
+            )
 
-                    manifest = build_virtual_spread(
-                        source,
-                        output,
-                        manifest_path,
-                        direction="rtl",
-                        cover_separate=True,
-                    )
-                    reader = PdfReader(str(output), strict=True)
-                    source_mapping = manifest["sourcePages"][1]
-                    annotation = reader.pages[
-                        source_mapping["virtualPageIndex"]
-                    ]["/Annots"].get_object()[0].get_object()
-                    destination = annotation["/Dest"]
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                direction="rtl",
+                cover_separate=True,
+            )
+            reader = PdfReader(str(output), strict=True)
+            source_mapping = manifest["sourcePages"][1]
+            annotation = reader.pages[
+                source_mapping["virtualPageIndex"]
+            ]["/Annots"].get_object()[0].get_object()
+            destination = annotation["/Dest"]
 
-                    self.assertEqual(str(destination[1]), mode)
-                    self.assertIsInstance(destination[null_index], NullObject)
+            self.assertEqual(str(destination[1]), "/XYZ")
+            self.assertIsInstance(destination[3], NullObject)
+
+    def test_unknown_xyz_left_fails_closed_even_matching_transform(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "unknown-left-source.pdf"
+            output = root / "unknown-left-spread.pdf"
+            manifest_path = root / "unknown-left-spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_destination_mode(
+                source,
+                source_page_index=1,
+                annotation_index=0,
+                target_page_index=1,
+                mode="/XYZ",
+                arguments=(None, 160.0, 3.0),
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot preserve internal destination /XYZ viewport inside "
+                "target half",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    direction="rtl",
+                    cover_separate=True,
+                )
+
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
 
     def test_null_destination_coordinates_reject_different_transforms(
         self,

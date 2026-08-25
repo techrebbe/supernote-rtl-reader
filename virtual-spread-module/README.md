@@ -49,9 +49,12 @@ the page-load generation and cannot overwrite a newer native link destination.
 The generator accepts an explicit `/FitR` viewport only when its complete,
 positive rectangle remains inside the target source page's effective CropBox;
 an out-of-page viewport fails closed before publication. Explicit `/XYZ` left
-and top coordinates obey the same CropBox boundary. An underlined `/BS /U`
-link also fails closed when page rotation would move its underline to a
-different edge after composition.
+and top coordinates obey the same CropBox boundary. An explicit `/XYZ` view is
+accepted only when its horizontal anchor and positive zoom prove that the
+complete portrait viewport stays inside the target half; retained/zero zoom,
+an unknown anchor, or a neighboring-half spill fails closed. An underlined
+`/BS /U` link also fails closed when page rotation would move its underline to
+a different edge after composition.
 
 The manifest cache is content-authoritative but uses an identity-based fast
 path: every lookup captures both PDF and sidecar device, inode, size,
@@ -103,7 +106,9 @@ For a matching document it:
 - restores the complete landscape spread after a source-page `/Fit` link, while
   leaving explicit `/XYZ` and `/FitR` destination views untouched;
 - restores the correct source half for native Back and Original Back, while
-  leaving Supernote's own link-history stack authoritative; and
+  leaving Supernote's own link-history stack authoritative; direct Original
+  Back after several link jumps validates the newest native destination before
+  restoring the oldest recorded source half; and
 - reruns Supernote's own orientation refresh after a configuration transition,
   so its native split mode, toolbar, handwriting state, and bitmap all move to
   the new orientation together.

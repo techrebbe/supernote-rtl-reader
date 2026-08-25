@@ -959,7 +959,7 @@ public final class VirtualSpreadNavigationTest {
         assertEquals("history records two visits", 2, history.size());
         assertVisit(
             "Back restores latest link source",
-            history.takeBack(3, 1),
+            history.takeBack(3, 1, 1),
             3,
             Half.LEFT,
             1
@@ -967,7 +967,7 @@ public final class VirtualSpreadNavigationTest {
         assertEquals("Back consumes one visit", 1, history.size());
         assertVisit(
             "Original Back restores oldest link source",
-            history.takeOriginal(1, 3),
+            history.takeOriginal(1, 3, 3),
             1,
             Half.RIGHT,
             3
@@ -977,12 +977,37 @@ public final class VirtualSpreadNavigationTest {
         history.record(1, Half.RIGHT, 3);
         assertVisit(
             "mismatched native history fails closed",
-            history.takeBack(2, 3),
+            history.takeBack(2, 3, 3),
             -1,
             null,
             -1
         );
         assertEquals("mismatch clears stale mirror", 0, history.size());
+
+        history.record(1, Half.RIGHT, 3);
+        history.record(3, Half.LEFT, 5);
+        assertVisit(
+            "direct Original Back validates newest destination",
+            history.takeOriginal(1, 3, 5),
+            1,
+            Half.RIGHT,
+            3
+        );
+        assertEquals(
+            "direct Original Back clears complete history",
+            0,
+            history.size()
+        );
+
+        history.record(1, Half.RIGHT, 3);
+        assertVisit(
+            "stale current page clears native history",
+            history.takeBack(1, 3, 2),
+            -1,
+            null,
+            -1
+        );
+        assertEquals("stale current page clears mirror", 0, history.size());
         history.record(-1, Half.RIGHT, 3);
         history.record(1, null, 3);
         assertEquals("invalid visits are ignored", 0, history.size());

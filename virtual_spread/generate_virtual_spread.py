@@ -1662,6 +1662,46 @@ def _destination_source_box(
     return source_box
 
 
+def _require_xyz_viewport_inside_target_half(
+    target_mapping: dict[str, Any],
+    transformed_left: float | None,
+    transformed_zoom: float | None,
+) -> None:
+    try:
+        slot = [float(value) for value in target_mapping["slot"]]
+    except (KeyError, TypeError, ValueError, OverflowError) as error:
+        raise VirtualSpreadError(
+            "Invalid target half for internal destination /XYZ"
+        ) from error
+    _require_positive_rectangle(
+        slot, "target half for internal destination /XYZ"
+    )
+    if (
+        transformed_left is None
+        or transformed_zoom is None
+        or transformed_zoom <= 0.0
+    ):
+        raise VirtualSpreadError(
+            "Cannot preserve internal destination /XYZ viewport inside "
+            "target half"
+        )
+    # The generated spread fills the Nomad in landscape. After rotation, its
+    # landscape height is the portrait viewport width in spread coordinates.
+    viewport_width = (slot[3] - slot[1]) / transformed_zoom
+    viewport_right = transformed_left + viewport_width
+    if (
+        not math.isfinite(viewport_width)
+        or viewport_width <= 0.0
+        or not math.isfinite(viewport_right)
+        or transformed_left < slot[0]
+        or viewport_right > slot[2]
+    ):
+        raise VirtualSpreadError(
+            "Cannot preserve internal destination /XYZ viewport inside "
+            "target half"
+        )
+
+
 def _transformed_internal_destination(
     destination: ArrayObject,
     target_reference: IndirectObject,
@@ -1777,13 +1817,21 @@ def _transformed_internal_destination(
                 raise VirtualSpreadError(
                     "Invalid transformed internal destination /XYZ zoom"
                 )
+        transformed_left_object = _destination_object(transformed_left)
+        transformed_top_object = _destination_object(transformed_top)
+        transformed_zoom_object = _destination_object(transformed_zoom)
+        _require_xyz_viewport_inside_target_half(
+            target_mapping,
+            transformed_left,
+            transformed_zoom,
+        )
         return ArrayObject(
             [
                 target_reference,
                 NameObject(mode),
-                _destination_object(transformed_left),
-                _destination_object(transformed_top),
-                _destination_object(transformed_zoom),
+                transformed_left_object,
+                transformed_top_object,
+                transformed_zoom_object,
             ]
         )
 

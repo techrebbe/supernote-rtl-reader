@@ -170,12 +170,12 @@ The generator rejects transformed URI `/IsMap true` actions, a CropBox extending
 outside its MediaBox, and link geometry outside the source CropBox, while scaling
 an omitted link border's PDF-default width.
 
-The local automated gate passes 89 generator tests on Windows (five expected
-platform skips), 112 focused navigation/manifest/cache assertions, 12
+The local automated gate passes 91 generator tests on Windows (five expected
+platform skips), 116 focused navigation/manifest/cache assertions, 12
 cross-language authority assertions, 8,752 exhaustive navigation assertions, both native
 invariant suites, hook-scope validation, and the signed/verified v0.0.23
 (`versionCode=23`) APK build (SHA-256
-`6f03e4b4e96053d8d794cc165a135cd09bde4b5a0c5ed922d7375eb7ebfdeca9`).
+`64ff19234647d324335a42b7e2e231bd2f62365c416499099226aff1d7ce8223`).
 CI independently runs the same generator suite on
 Linux without the Windows-only skips.
 

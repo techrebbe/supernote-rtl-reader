@@ -250,19 +250,32 @@ public final class VirtualSpreadNavigation {
             ));
         }
 
-        public LinkVisit takeBack(int sourcePage, int targetPage) {
+        public LinkVisit takeBack(
+            int sourcePage,
+            int targetPage,
+            int currentPage
+        ) {
             LinkVisit candidate = visits.peekFirst();
-            if (!matches(candidate, sourcePage, targetPage)) {
+            if (candidate == null
+                || candidate.targetPage != currentPage
+                || !matches(candidate, sourcePage, targetPage)) {
                 visits.clear();
                 return null;
             }
             return visits.removeFirst();
         }
 
-        public LinkVisit takeOriginal(int sourcePage, int targetPage) {
+        public LinkVisit takeOriginal(
+            int sourcePage,
+            int targetPage,
+            int currentPage
+        ) {
+            LinkVisit newest = visits.peekFirst();
             LinkVisit candidate = visits.peekLast();
             visits.clear();
-            return matches(candidate, sourcePage, targetPage)
+            return newest != null
+                && newest.targetPage == currentPage
+                && matches(candidate, sourcePage, targetPage)
                 ? candidate : null;
         }
 

@@ -462,7 +462,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             int currentPage = intField(viewModel, "currentPage", -1);
             if (sourcePage < 0 || sourcePage >= manifest.pageCount
                 || targetPage < 0 || targetPage >= manifest.pageCount
-                || currentPage != targetPage
+                || currentPage < 0 || currentPage >= manifest.pageCount
+                || (!original && currentPage != targetPage)
                 || !sameCanonicalPath(manifest.key, sourcePath)
                 || !sameCanonicalPath(manifest.key, targetPath)) {
                 log("link_history_ignored original=" + original
@@ -473,9 +474,23 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             }
 
             ReaderState state = stateFor(viewModel, manifest);
+            boolean hadRuntimeHistory = state.linkHistory.size() > 0;
             VirtualSpreadNavigation.LinkVisit visit = original
-                ? state.linkHistory.takeOriginal(sourcePage, targetPage)
-                : state.linkHistory.takeBack(sourcePage, targetPage);
+                ? state.linkHistory.takeOriginal(
+                    sourcePage, targetPage, currentPage
+                )
+                : state.linkHistory.takeBack(
+                    sourcePage, targetPage, currentPage
+                );
+            if (hadRuntimeHistory && visit == null) {
+                clearPendingHistory(state);
+                log("link_history_unmatched original=" + original
+                    + " source=" + sourcePage
+                    + " target=" + targetPage
+                    + " current=" + currentPage
+                    + " origin=runtime");
+                return;
+            }
             VirtualSpreadNavigation.Half sourceHalf = visit == null
                 ? VirtualSpreadNavigation.inferLinkSourceHalf(
                     manifest.links,

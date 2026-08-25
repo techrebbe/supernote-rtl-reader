@@ -125,6 +125,33 @@ copy. The fixes do
 not touch the companion module or any navigation, viewport, focus, or native
 annotation path, so the focused hardware evidence remains applicable.
 
+## v0.0.16 source-Fit link validation - PASS
+
+On 2026-08-25, a fresh v0.0.16 pair was generated from
+`VS-Link-Target-Sides-source.pdf` specifically to exercise link-authority v2
+and source-page `/Fit` preservation. The device accepted sidecar revision
+`9fa9a9b875c0cc29a217c159693cf269b82ec0406372e0139a4ec10f3806ab29`;
+the output PDF SHA-256 was
+`09527f32803161d5d0b664cd68ce0f7409c8e3f2e86e25229847f2c23f0484ef`.
+
+The focused Nomad pass confirmed both page-6/right and page-7/left link targets
+in portrait and landscape. Portrait targets used the native full-page Fit view,
+and native Back restored the exact page-2 source half. Landscape targets settled
+as the complete `7 | 6` spread, native Back restored `3 | 2`, and no visible
+zoom, flicker, stale page, or incorrect target appeared during the guarded
+`internal_link_fit_reset` refresh. A forward/reverse RTL turn also passed. The
+same seven-page source, copied under a new name without a sidecar, remained an
+ordinary native single-page landscape PDF with native LTR swipes.
+
+The exact post-review v0.0.16 APK added one fail-closed ambiguity guard: native
+link matches that agree geometrically but conflict on authenticated target-view
+policy are rejected. Its SHA-256 was
+`73d0e1024c58993a3b8ec7646f75739b2f0886cd7273ef80fbe0b1fb8e57e679`.
+It was installed after the visual run and accepted and activated the same unique-
+link fixture. The companion suite passes 55 focused navigation assertions, 10
+cross-language authority assertions, 8,752 exhaustive assertions, and the hook-
+scope guard.
+
 ## Decision
 
 Proceed with the virtual-spread architecture. Do not port the legacy dual-page

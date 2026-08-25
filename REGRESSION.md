@@ -882,25 +882,56 @@ explicit `/XYZ` and `/FitR` views untouched; absent, non-string, or unknown view
 values reject the whole manifest.
 
 All 82 generator tests pass on Windows (with five platform-specific skips) and
-Linux. Both native invariant suites pass. The companion passes 53 navigation
+Linux. Both native invariant suites pass. The companion passes 55 navigation
 assertions, 10 cross-language link-authority assertions, 8,752 exhaustive
 navigation assertions, hook-scope validation, and a signed/verified v0.0.16
-(`versionCode=16`) APK build. A focused Nomad link smoke remains required before
-v0.0.16 can be called hardware-validated.
+(`versionCode=16`) APK build.
 
-## v0.0.16 focused hardware smoke - PENDING
+## Review pass 39 target-view ambiguity guard - PASS
 
-Regenerate the link fixture with the v0.0.16 generator before testing because
-the link-authority record changed from v1 to v2. Required hardware checks are:
+The final exact-head draft review found that two link records could be
+indistinguishable within the runtime's native-coordinate tolerance while
+disagreeing on their authenticated target-view policy. The matcher now treats a
+`resetLandscapeFit` disagreement exactly like conflicting source or target
+halves and returns no match. A paired positive regression proves that duplicate
+records with the same target-view policy remain deterministic. The focused
+companion suite therefore increased from 53 to 55 assertions without changing
+the valid unique-link path exercised on hardware.
 
-- a source `/Fit` link in portrait opens the intended source page at native
-  Fit-page size and native Back restores the exact source half;
-- the same link in landscape returns to the complete two-page spread with the
-  intended target half active and without a persistent zoomed-half state;
-- links to both target halves, RTL turns, and native Back remain correct;
-- ordinary PDFs without the authenticated sidecar remain untouched; and
-- no persistent flicker, stale zoom, or incorrect page is visible after the
-  delayed landscape refresh.
+## v0.0.16 focused hardware smoke - PASS
+
+On 2026-08-25, `VS-v16-Fit-Smoke.pdf` and its sidecar were regenerated from
+`VS-Link-Target-Sides-source.pdf` with the v0.0.16 generator. The pair contained
+four source `/Fit` links rewritten as target-source-page `/FitR` destinations,
+and every internal sidecar record authenticated
+`targetView=fit-source-page`. The Nomad accepted and activated revision
+`9fa9a9b875c0cc29a217c159693cf269b82ec0406372e0139a4ec10f3806ab29`.
+The output PDF SHA-256 was
+`09527f32803161d5d0b664cd68ce0f7409c8e3f2e86e25229847f2c23f0484ef`.
+
+Hardware confirmed:
+
+- in portrait, links from source page 2 opened page 6 and page 7 at normal
+  native Fit-page size, and native Back restored the exact page-2 source half
+  after each traversal;
+- rotating page 2 to landscape immediately restored the complete `3 | 2`
+  spread without a page turn;
+- both landscape links opened the complete `7 | 6` spread with the intended
+  right or left target half, and both native Back traversals restored `3 | 2`;
+- neither landscape link produced visible zoom, flicker, stale content, or an
+  incorrect page while the authenticated `internal_link_fit_reset` refresh ran;
+- one forward and reverse native page-bar turn retained RTL ordering; and
+- the same seven-page source opened as `VS-v16-Ordinary.pdf` without a sidecar
+  remained the native single-page landscape reader and retained native LTR
+  left/right swipe behavior.
+
+After the visual pass, the review-pass-39 ambiguity guard was built as the exact
+v0.0.16 APK (SHA-256
+`73d0e1024c58993a3b8ec7646f75739b2f0886cd7273ef80fbe0b1fb8e57e679`),
+installed on the same Nomad, and accepted and activated the same authenticated
+fixture. That guard is reached only when multiple tolerance-equivalent link
+records conflict; the tested fixture has one unique record per link, so the
+completed visual evidence remains directly applicable.
 
 ## Failure capture
 

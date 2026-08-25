@@ -396,7 +396,9 @@ public final class VirtualSpreadNavigation {
             }
             if (matched != null
                 && (matched.targetHalf != target.targetHalf
-                    || matched.sourceHalf != target.sourceHalf)) {
+                    || matched.sourceHalf != target.sourceHalf
+                    || matched.resetLandscapeFit
+                        != target.resetLandscapeFit)) {
                 return null;
             }
             matched = target;

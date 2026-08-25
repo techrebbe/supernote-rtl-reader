@@ -474,6 +474,42 @@ public final class VirtualSpreadNavigationTest {
                 1, 3, 9.0f, 598.0f, 11.0f, 628.0f, 648.0f, 2.0f
             )
         );
+        LinkTarget[] conflictingTargetViews = new LinkTarget[] {
+            new LinkTarget(
+                1, 3, Half.RIGHT, Half.LEFT, false,
+                10.0f, 20.0f, 30.0f, 40.0f
+            ),
+            new LinkTarget(
+                1, 3, Half.RIGHT, Half.LEFT, true,
+                10.25f, 20.25f, 30.25f, 40.25f
+            )
+        };
+        assertHalf(
+            "indistinguishable conflicting target views fail closed",
+            null,
+            VirtualSpreadNavigation.matchLinkTarget(
+                conflictingTargetViews,
+                1, 3, 10.0f, 608.0f, 30.0f, 628.0f, 648.0f, 0.5f
+            )
+        );
+        LinkTarget[] duplicateFitTargetViews = new LinkTarget[] {
+            new LinkTarget(
+                1, 3, Half.RIGHT, Half.LEFT, true,
+                10.0f, 20.0f, 30.0f, 40.0f
+            ),
+            new LinkTarget(
+                1, 3, Half.RIGHT, Half.LEFT, true,
+                10.25f, 20.25f, 30.25f, 40.25f
+            )
+        };
+        assertHalf(
+            "indistinguishable matching target views remain deterministic",
+            Half.LEFT,
+            VirtualSpreadNavigation.matchLinkTarget(
+                duplicateFitTargetViews,
+                1, 3, 10.0f, 608.0f, 30.0f, 628.0f, 648.0f, 0.5f
+            )
+        );
         assertHalf(
             "native history source half inferred",
             Half.RIGHT,

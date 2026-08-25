@@ -20,7 +20,9 @@ It activates only when all of these are true:
 v0.0.16 uses link-authority v2, which authenticates whether an internal
 destination preserves its explicit view or originated as a source-page `/Fit`.
 Older generated pairs fail closed; regenerate the PDF/sidecar pair before using
-it with this module.
+it with this module. If multiple tolerance-equivalent runtime link matches
+disagree on source half, target half, or authenticated target-view policy, the
+match also fails closed rather than selecting an order-dependent record.
 
 The manifest cache is content-authoritative but uses an identity-based fast
 path: every lookup captures both PDF and sidecar device, inode, size,

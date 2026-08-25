@@ -112,12 +112,14 @@ The runtime activation revision was
 `ed5a1e7eca9088336ef7cb7171d9585188be783dbea8d1f6dac0b93ad81ac0f9`.
 No v0.0.8 annotation subsystem was reimplemented or intercepted by v0.0.15.
 
-After the hardware pass, link-only review hardening changed `/XYZ` zoom
-normalization and duplicate annotation-name handling. Regenerating the exact
-smoke fixture left every manifest mapping and link entry unchanged; only the
-output PDF hash and size fields changed. The regenerated PDF added one harmless
-whitespace separator to three composed content streams, and all four pages had
-pixel-identical 150-DPI render hashes to the device-tested copy. The fixes do
+After the hardware pass, PDF-semantic review hardening changed `/XYZ` zoom
+normalization, duplicate annotation-name handling, and rejection of incompatible
+source multi-page layouts. The smoke source has no persisted `/PageLayout`.
+Regenerating the exact fixture left every manifest mapping and link entry
+unchanged; only the output PDF hash and size fields changed. The regenerated PDF
+added one harmless whitespace separator to three composed content streams, and
+all four pages had pixel-identical 150-DPI render hashes to the device-tested
+copy. The fixes do
 not touch the companion module or any navigation, viewport, focus, or native
 annotation path, so the focused hardware evidence remains applicable.
 

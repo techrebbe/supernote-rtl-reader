@@ -156,12 +156,14 @@ def add_document_open_action(path: Path) -> None:
         raise AssertionError("fixture document open action is malformed")
 
 
-def add_document_view_settings(path: Path) -> None:
+def add_document_view_settings(
+    path: Path, page_layout: str = "/SinglePage"
+) -> None:
     source = PdfReader(str(path), strict=True)
     writer = PdfWriter()
     writer.clone_document_from_reader(source)
     writer.page_mode = "/FullScreen"
-    writer.page_layout = "/TwoPageRight"
+    writer.page_layout = page_layout
     with path.open("wb") as stream:
         writer.write(stream)
 
@@ -169,7 +171,7 @@ def add_document_view_settings(path: Path) -> None:
     catalog = persisted.trailer["/Root"]
     if catalog.get("/PageMode") != "/FullScreen":
         raise AssertionError("fixture page mode was not persisted")
-    if catalog.get("/PageLayout") != "/TwoPageRight":
+    if catalog.get("/PageLayout") != page_layout:
         raise AssertionError("fixture page layout was not persisted")
 
 
@@ -712,17 +714,60 @@ class VirtualSpreadTests(unittest.TestCase):
     def test_supported_catalog_view_settings_are_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = root / "view-settings-source.pdf"
-            output = root / "spread.pdf"
-            manifest_path = root / "spread.pdf.json"
-            create_odd_page_fixture(source)
-            add_document_view_settings(source)
+            for index, page_layout in enumerate(("/SinglePage", "/OneColumn")):
+                with self.subTest(page_layout=page_layout):
+                    source = root / f"view-settings-source-{index}.pdf"
+                    output = root / f"spread-{index}.pdf"
+                    manifest_path = root / f"spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    add_document_view_settings(source, page_layout)
+                    build_virtual_spread(source, output, manifest_path)
+                    catalog = PdfReader(
+                        str(output), strict=True
+                    ).trailer["/Root"]
+                    self.assertEqual(catalog.get("/PageMode"), "/FullScreen")
+                    self.assertEqual(catalog.get("/PageLayout"), page_layout)
 
-            build_virtual_spread(source, output, manifest_path)
+    def test_multi_page_catalog_layouts_fail_closed_before_publication(
+        self,
+    ) -> None:
+        layouts = (
+            "/TwoColumnLeft",
+            "/TwoColumnRight",
+            "/TwoPageLeft",
+            "/TwoPageRight",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, layout in enumerate(layouts):
+                with self.subTest(layout=layout):
+                    source = root / f"multi-layout-source-{index}.pdf"
+                    output = root / f"multi-layout-spread-{index}.pdf"
+                    manifest_path = (
+                        root / f"multi-layout-spread-{index}.pdf.json"
+                    )
+                    create_odd_page_fixture(source)
+                    add_document_view_settings(source, layout)
+                    source_bytes = source.read_bytes()
+                    output.write_bytes(b"existing-output")
+                    manifest_path.write_bytes(b"existing-manifest")
 
-            catalog = PdfReader(str(output), strict=True).trailer["/Root"]
-            self.assertEqual(catalog.get("/PageMode"), "/FullScreen")
-            self.assertEqual(catalog.get("/PageLayout"), "/TwoPageRight")
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "Multi-page document catalog /PageLayout",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            force=True,
+                        )
+
+                    self.assertEqual(source.read_bytes(), source_bytes)
+                    self.assertEqual(output.read_bytes(), b"existing-output")
+                    self.assertEqual(
+                        manifest_path.read_bytes(), b"existing-manifest"
+                    )
 
     def test_optional_content_catalog_fails_closed_before_publication(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

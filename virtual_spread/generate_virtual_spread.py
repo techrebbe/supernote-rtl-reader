@@ -79,6 +79,8 @@ SUPPORTED_PAGE_MODES = frozenset({
 SUPPORTED_PAGE_LAYOUTS = frozenset({
     "/OneColumn",
     "/SinglePage",
+})
+INCOMPATIBLE_MULTI_PAGE_LAYOUTS = frozenset({
     "/TwoColumnLeft",
     "/TwoColumnRight",
     "/TwoPageLeft",
@@ -782,6 +784,18 @@ def _require_supported_document_catalog(
         "/PageMode",
         SUPPORTED_PAGE_MODES,
     )
+    if "/PageLayout" in catalog:
+        raw_page_layout = _dereference_pdf_object(
+            catalog.raw_get("/PageLayout")
+        )
+        if (
+            isinstance(raw_page_layout, NameObject)
+            and str(raw_page_layout) in INCOMPATIBLE_MULTI_PAGE_LAYOUTS
+        ):
+            raise VirtualSpreadError(
+                "Multi-page document catalog /PageLayout cannot be "
+                "preserved after composing virtual spreads"
+            )
     page_layout = _optional_document_catalog_name(
         catalog,
         "/PageLayout",

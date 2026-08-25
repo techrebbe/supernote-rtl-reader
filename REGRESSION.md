@@ -786,6 +786,14 @@ and Linux; both native invariant suites, 47 navigation assertions, 10 link-
 authority assertions, 8,752 exhaustive navigation assertions, hook scope, and
 the signed v0.0.15 APK build also pass.
 
+A thirty-third review pass restricts persisted `/PageLayout` values to
+`/SinglePage` and `/OneColumn`. All four `/TwoPage*` and `/TwoColumn*` layouts
+now fail closed before staging or publication because retaining them after
+composition would place two complete virtual spreads—up to four source pages—
+beside one another and change the source layout semantics. Subtests cover every
+incompatible name while preserving the source and an existing output pair,
+bringing the generator suite to 77 tests on Windows and Linux.
+
 ## v0.0.15 focused hardware smoke - PASS
 
 A fresh pair was generated from `VS-Link-Target-Sides-source.pdf` with the

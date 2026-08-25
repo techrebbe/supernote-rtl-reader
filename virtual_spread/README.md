@@ -65,9 +65,12 @@ python .\virtual_spread\generate_virtual_spread.py `
 The command refuses encrypted PDFs, unsupported annotation subtypes, unresolved
 links, and every document-catalog semantic it cannot preserve safely. It
 regenerates the structural `/Type` and `/Pages` entries and preserves validated
-`/PageMode` and `/PageLayout` names. Outlines, opening actions, optional-content
-layer configuration, viewer preferences, and every other unsupported or unknown
-catalog entry fail closed before staging or publication rather than being
+`/PageMode` names plus compatible `/SinglePage` and `/OneColumn` page layouts.
+Source `/TwoPage*` and `/TwoColumn*` layouts fail closed because applying them
+after composition would display two virtual spreads—up to four source pages—at
+once. Outlines, opening actions, optional-content layer configuration, viewer
+preferences, and every other unsupported or unknown catalog entry fail closed
+before staging or publication rather than being
 silently discarded. Source page dictionaries use the same complete contract:
 content, resources, geometry, rotation, and supported link annotations are
 consumed explicitly; ReportLab's empty transition placeholder is inert; page

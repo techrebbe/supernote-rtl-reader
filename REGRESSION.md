@@ -794,6 +794,13 @@ beside one another and change the source layout semantics. Subtests cover every
 incompatible name while preserving the source and an existing output pair,
 bringing the generator suite to 77 tests on Windows and Linux.
 
+A thirty-fourth review pass validates every transformed destination coordinate
+again immediately before constructing its PDF number object. Finite source
+operands combined with extreme but finite affine coefficients can no longer
+publish infinity or NaN through `/XYZ`, `/FitH`, `/FitBH`, `/FitV`, or `/FitBV`.
+Direct overflow subtests exercise the shared guard through all three calculation
+paths and bring the generator suite to 78 tests on Windows and Linux.
+
 ## v0.0.15 focused hardware smoke - PASS
 
 A fresh pair was generated from `VS-Link-Target-Sides-source.pdf` with the

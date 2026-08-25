@@ -1269,7 +1269,13 @@ def _transform_quad_points(
 
 
 def _destination_object(value: float | None) -> FloatObject | NullObject:
-    return NullObject() if value is None else FloatObject(value)
+    if value is None:
+        return NullObject()
+    if not math.isfinite(value):
+        raise VirtualSpreadError(
+            "Invalid transformed internal destination coordinate"
+        )
+    return FloatObject(value)
 
 
 def _destination_transform(

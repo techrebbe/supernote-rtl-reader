@@ -54,6 +54,7 @@ from generate_virtual_spread import (  # noqa: E402
     _publication_lock_path,
     _prepare_publication_transaction,
     _recover_pair_publication,
+    _transformed_internal_destination,
     _sha256_open_file,
     _windows_move_flags,
     _write_json,
@@ -1534,6 +1535,43 @@ class VirtualSpreadTests(unittest.TestCase):
                 ):
                     _destination_uniform_scale(
                         transform, "/XYZ zoom"
+                    )
+
+    def test_transformed_destination_coordinate_overflow_fails_closed(
+        self,
+    ) -> None:
+        writer = PdfWriter()
+        target_reference = writer._add_object(DictionaryObject())
+        source_mapping = {"transform": [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]}
+        target_mapping = {
+            "transform": [1e308, 0.0, 0.0, 1e308, 0.0, 0.0]
+        }
+        cases = (
+            ArrayObject([
+                NullObject(),
+                NameObject("/XYZ"),
+                FloatObject(2.0),
+                FloatObject(2.0),
+                NullObject(),
+            ]),
+            ArrayObject([
+                NullObject(), NameObject("/FitH"), FloatObject(2.0)
+            ]),
+            ArrayObject([
+                NullObject(), NameObject("/FitV"), FloatObject(2.0)
+            ]),
+        )
+        for destination in cases:
+            with self.subTest(mode=str(destination[1])):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Invalid transformed internal destination coordinate",
+                ):
+                    _transformed_internal_destination(
+                        destination,
+                        target_reference,
+                        source_mapping,
+                        target_mapping,
                     )
 
     def test_null_destination_coordinates_survive_matching_transform(

@@ -114,9 +114,11 @@ No v0.0.8 annotation subsystem was reimplemented or intercepted by v0.0.15.
 
 After the hardware pass, PDF-semantic review hardening changed `/XYZ` zoom
 normalization, duplicate annotation-name handling, and rejection of incompatible
-source multi-page layouts. The smoke source has no persisted `/PageLayout`.
-Regenerating the exact fixture left every manifest mapping and link entry
-unchanged; only the output PDF hash and size fields changed. The regenerated PDF
+source multi-page layouts, and added finite-result guards for transformed link
+destinations. The smoke source has no persisted `/PageLayout` and uses only
+non-overflowing link geometry. Regenerating the exact fixture left every manifest
+mapping and link entry unchanged; only the output PDF hash and size fields
+changed. The regenerated PDF
 added one harmless whitespace separator to three composed content streams, and
 all four pages had pixel-identical 150-DPI render hashes to the device-tested
 copy. The fixes do

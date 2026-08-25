@@ -37,7 +37,8 @@ scale so the source-page magnification remains unchanged. Duplicate annotation
 closed before publication. Unknown modes, invalid PDF operand types,
 rotation-dependent partial coordinates, non-uniform zoom transforms, and null
 coordinates whose source and target axis transforms differ fail closed
-instead of silently degrading to `/Fit`. A JSON manifest records every
+instead of silently degrading to `/Fit`; every transformed destination operand
+is also rechecked for finite output before serialization. A JSON manifest records every
 source-page affine transform and target half. The companion runtime supports RTL
 virtual spreads only, so the generator rejects LTR at its public boundary before
 acquiring a publication lock or touching an output.

@@ -1112,6 +1112,26 @@ The exact-head CI gate independently runs the generator suite on Linux. Focused
 hardware validation of same-path replacement and preserved portrait explicit
 link viewports remains pending.
 
+## Review pass 48 destination and border edge semantics - AUTOMATED PASS
+
+The next independent full-branch review identified two neighboring-page or
+visual-semantics boundaries. Every non-null `/XYZ` left or top coordinate must
+now lie within the target source page's effective CropBox before it is
+transformed into a composed spread. An underlined link border (`/BS /S /U`) is
+preserved only when the source-to-spread transform leaves the source bottom
+edge as the output bottom edge; quarter-turn and half-turn page rotations fail
+closed rather than drawing the underline on a different edge.
+
+Local automated validation passes 89 generator tests on Windows (five expected
+filesystem skips), 112 focused navigation/manifest/cache assertions, 12
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, and the signed/verified
+v0.0.23 (`versionCode=23`) APK build (SHA-256
+`6f03e4b4e96053d8d794cc165a135cd09bde4b5a0c5ed922d7375eb7ebfdeca9`).
+The exact-head CI gate independently runs the generator suite on Linux. Focused
+hardware validation of same-path replacement and preserved portrait explicit
+link viewports remains pending.
+
 ## Failure capture
 
 Before reproducing a failure:

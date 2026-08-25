@@ -48,7 +48,10 @@ than being shifted to a page edge. Delayed portrait-focus retries are bound to
 the page-load generation and cannot overwrite a newer native link destination.
 The generator accepts an explicit `/FitR` viewport only when its complete,
 positive rectangle remains inside the target source page's effective CropBox;
-an out-of-page viewport fails closed before publication.
+an out-of-page viewport fails closed before publication. Explicit `/XYZ` left
+and top coordinates obey the same CropBox boundary. An underlined `/BS /U`
+link also fails closed when page rotation would move its underline to a
+different edge after composition.
 
 The manifest cache is content-authoritative but uses an identity-based fast
 path: every lookup captures both PDF and sidecar device, inode, size,

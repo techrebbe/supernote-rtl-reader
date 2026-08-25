@@ -1374,9 +1374,20 @@ def _transform_link_border_style(
         )
         if "/S" in style else NameObject("/S")
     )
-    _, _, _, _, scale = _border_transform(
+    a, b, c, d, scale = _border_transform(
         transform, "link annotation /BS"
     )
+    tolerance = 1e-12
+    if style_name == "/U" and not (
+        abs(b) <= tolerance
+        and abs(c) <= tolerance
+        and a > tolerance
+        and d > tolerance
+    ):
+        raise VirtualSpreadError(
+            "Cannot preserve underlined link annotation /BS through "
+            "page rotation"
+        )
     width = (
         _finite_pdf_number(style.raw_get("/W"), "link annotation /BS /W")
         if "/W" in style else 1.0
@@ -1634,6 +1645,23 @@ def _destination_axis_is_preserved(
     )
 
 
+def _destination_source_box(
+    target_mapping: dict[str, Any], mode: str
+) -> list[float]:
+    try:
+        source_box = [
+            float(value) for value in target_mapping["sourceBox"]
+        ]
+    except (KeyError, TypeError, ValueError, OverflowError) as error:
+        raise VirtualSpreadError(
+            f"Invalid target source /CropBox for {mode} destination"
+        ) from error
+    _require_positive_rectangle(
+        source_box, f"target source /CropBox for {mode} destination"
+    )
+    return source_box
+
+
 def _transformed_internal_destination(
     destination: ArrayObject,
     target_reference: IndirectObject,
@@ -1696,6 +1724,23 @@ def _transformed_internal_destination(
             raise VirtualSpreadError(
                 "Invalid internal destination /XYZ zoom"
             )
+        target_source_box = _destination_source_box(
+            target_mapping, "/XYZ"
+        )
+        if left is not None and not (
+            target_source_box[0] <= left <= target_source_box[2]
+        ):
+            raise VirtualSpreadError(
+                "internal destination /XYZ left extends outside target "
+                "source /CropBox"
+            )
+        if top is not None and not (
+            target_source_box[1] <= top <= target_source_box[3]
+        ):
+            raise VirtualSpreadError(
+                "internal destination /XYZ top extends outside target "
+                "source /CropBox"
+            )
         if left is None and not _destination_axis_is_preserved(
             source_transform, transform, "x"
         ):
@@ -1753,14 +1798,9 @@ def _transformed_internal_destination(
         ]
         if any(value is None for value in rectangle):
             raise VirtualSpreadError("Invalid /FitR destination rectangle")
-        try:
-            target_source_box = [
-                float(value) for value in target_mapping["sourceBox"]
-            ]
-        except (KeyError, TypeError, ValueError, OverflowError) as error:
-            raise VirtualSpreadError(
-                "Invalid target source /CropBox for /FitR destination"
-            ) from error
+        target_source_box = _destination_source_box(
+            target_mapping, "/FitR"
+        )
         _require_rectangle_contained(
             rectangle,
             target_source_box,

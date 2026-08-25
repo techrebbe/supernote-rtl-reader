@@ -106,8 +106,8 @@ def create_odd_page_fixture(path: Path) -> None:
     pdf.save()
 
 
-def create_rotated_link_fixture(path: Path) -> None:
-    unrotated = path.with_name("unrotated.pdf")
+def create_rotated_link_fixture(path: Path, rotation: int = 90) -> None:
+    unrotated = path.with_name(f"{path.stem}-unrotated.pdf")
     pdf = canvas.Canvas(str(unrotated), pagesize=(200, 100))
     pdf.bookmarkPage("first")
     pdf.drawString(10, 70, "ROTATED LINK SOURCE")
@@ -122,7 +122,7 @@ def create_rotated_link_fixture(path: Path) -> None:
     source = PdfReader(str(unrotated), strict=True)
     writer = PdfWriter()
     writer.clone_document_from_reader(source)
-    writer.pages[0].rotate(90)
+    writer.pages[0].rotate(rotation)
     with path.open("wb") as stream:
         writer.write(stream)
     unrotated.unlink()
@@ -1647,6 +1647,47 @@ class VirtualSpreadTests(unittest.TestCase):
                             cover_separate=True,
                         )
 
+    def test_xyz_destination_must_be_inside_target_crop_box(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target_box = (0.0, 0.0, 700.0, 200.0)
+            cases = (
+                ((target_box[0] - 1.0, 160.0, 1.25), "left"),
+                ((target_box[2] + 1.0, 160.0, 1.25), "left"),
+                ((30.0, target_box[1] - 1.0, 1.25), "top"),
+                ((30.0, target_box[3] + 1.0, 1.25), "top"),
+            )
+            for index, (arguments, coordinate) in enumerate(cases):
+                with self.subTest(arguments=arguments):
+                    source = root / f"xyz-outside-{index}.pdf"
+                    output = root / f"xyz-outside-{index}-spread.pdf"
+                    manifest_path = output.with_suffix(".pdf.json")
+                    create_odd_page_fixture(source)
+                    set_link_destination_mode(
+                        source,
+                        source_page_index=1,
+                        annotation_index=0,
+                        target_page_index=5,
+                        mode="/XYZ",
+                        arguments=arguments,
+                    )
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        f"internal destination /XYZ {coordinate} extends "
+                        "outside target source /CropBox",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            direction="rtl",
+                            cover_separate=True,
+                        )
+
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
     def test_xyz_zoom_requires_a_uniform_target_transform(self) -> None:
         self.assertAlmostEqual(
             _destination_uniform_scale(
@@ -1674,9 +1715,13 @@ class VirtualSpreadTests(unittest.TestCase):
     ) -> None:
         writer = PdfWriter()
         target_reference = writer._add_object(DictionaryObject())
-        source_mapping = {"transform": [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]}
+        source_mapping = {
+            "transform": [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            "sourceBox": [0.0, 0.0, 10.0, 10.0],
+        }
         target_mapping = {
-            "transform": [1e308, 0.0, 0.0, 1e308, 0.0, 0.0]
+            "transform": [1e308, 0.0, 0.0, 1e308, 0.0, 0.0],
+            "sourceBox": [0.0, 0.0, 10.0, 10.0],
         }
         cases = (
             ArrayObject([
@@ -1704,10 +1749,12 @@ class VirtualSpreadTests(unittest.TestCase):
         writer = PdfWriter()
         target_reference = writer._add_object(DictionaryObject())
         source_mapping = {
-            "transform": [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+            "transform": [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            "sourceBox": [0.0, 0.0, 10.0, 10.0],
         }
         underflow_mapping = {
-            "transform": [1e308, 0.0, 0.0, 1e308, 0.0, 0.0]
+            "transform": [1e308, 0.0, 0.0, 1e308, 0.0, 0.0],
+            "sourceBox": [0.0, 0.0, 10.0, 10.0],
         }
         underflow_destination = ArrayObject([
             NullObject(),
@@ -2397,6 +2444,70 @@ class VirtualSpreadTests(unittest.TestCase):
                 border_style["/D"], (3.0 * scale, 1.0 * scale)
             ):
                 self.assertAlmostEqual(float(actual), expected, places=4)
+
+    def test_underlined_link_border_requires_preserved_bottom_edge(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            unrotated_source = root / "underlined-source.pdf"
+            unrotated_output = root / "underlined-spread.pdf"
+            unrotated_manifest = root / "underlined-spread.pdf.json"
+            create_rotated_link_fixture(unrotated_source, rotation=0)
+            set_link_annotation_value(
+                unrotated_source,
+                0,
+                0,
+                "/BS",
+                DictionaryObject({
+                    NameObject("/Type"): NameObject("/Border"),
+                    NameObject("/W"): FloatObject(2.0),
+                    NameObject("/S"): NameObject("/U"),
+                }),
+            )
+            manifest = build_virtual_spread(
+                unrotated_source,
+                unrotated_output,
+                unrotated_manifest,
+                direction="rtl",
+            )
+            copied = output_annotation_for_source(
+                unrotated_output, manifest, 0
+            )
+            self.assertEqual(copied["/BS"]["/S"], "/U")
+
+            for rotation in (90, 180, 270):
+                with self.subTest(rotation=rotation):
+                    source = root / f"underlined-rotated-{rotation}.pdf"
+                    output = root / f"underlined-rotated-{rotation}-spread.pdf"
+                    manifest_path = output.with_suffix(".pdf.json")
+                    create_rotated_link_fixture(source, rotation=rotation)
+                    set_link_annotation_value(
+                        source,
+                        0,
+                        0,
+                        "/BS",
+                        DictionaryObject({
+                            NameObject("/Type"): NameObject("/Border"),
+                            NameObject("/W"): FloatObject(2.0),
+                            NameObject("/S"): NameObject("/U"),
+                        }),
+                    )
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "Cannot preserve underlined link annotation /BS "
+                        "through page rotation",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            direction="rtl",
+                        )
+
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
 
     def test_implicit_default_link_border_is_scaled(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

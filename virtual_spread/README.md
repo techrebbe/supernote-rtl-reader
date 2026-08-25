@@ -22,7 +22,9 @@ regions are transformed point-for-point rather than widened to their bounding
 rectangle. Standard annotation `/F` flags, visible `/Border` and `/BS` styling,
 border color, and `/H` activation highlight mode are validated and preserved;
 border dimensions and dash patterns follow the source-to-spread scale and page
-rotation. URI actions retain a Boolean `/IsMap`. Chained actions, custom
+rotation. Underlined `/BS /U` links fail closed when page rotation would move
+the underline to a different physical edge. URI actions retain a Boolean
+`/IsMap`. Chained actions, custom
 appearances, optional-content visibility, additional actions, and every other
 unimplemented link semantic fail closed rather than being silently discarded.
 Link `/Rect` arrays require four finite PDF number objects in increasing
@@ -34,8 +36,9 @@ entire two-page composite. `/XYZ` and `/FitR` retain their representable source
 semantics while their coordinates are transformed into the target spread; a
 source `/FitR` rectangle must be positive and remain wholly inside the target
 source page's effective CropBox, so it cannot expose a neighboring composed
-page. A
-non-null `/XYZ` zoom is divided by the target's validated uniform affine scale
+page. Every explicit `/XYZ` left or top coordinate must likewise remain inside
+that CropBox. A non-null `/XYZ` zoom is divided by the target's validated
+uniform affine scale
 so the source-page magnification remains unchanged. Viewport- and content-bound
 `/FitB`, `/FitH`, `/FitBH`, `/FitV`, and `/FitBV` destinations cannot be
 represented faithfully after composition and therefore fail closed. Duplicate

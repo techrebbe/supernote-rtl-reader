@@ -1044,6 +1044,27 @@ The exact-head CI gate independently runs the generator suite on Linux. Focused
 hardware validation of native metadata lookup and same-path replacement remains
 pending.
 
+## Review pass 45 strict sidecar UTF-8 - AUTOMATED PASS
+
+The exact-head v0.0.21 review found that Java's ordinary UTF-8 `String`
+constructor replaces malformed byte sequences with U+FFFD before JSON parsing.
+v0.0.22 now decodes the raw sidecar bytes with a `CharsetDecoder` whose malformed
+and unmappable actions are both `REPORT`. Invalid bytes therefore produce a
+stable cached rejection before the duplicate-key scanner or Android
+`JSONObject` can accept a normalized representation. A legitimately encoded
+U+FFFD remains valid and is preserved exactly.
+
+Local automated validation passes 86 generator tests on Windows (five expected
+filesystem skips), 99 focused navigation/manifest assertions including malformed
+continuation, overlong, truncated, surrogate, and valid-replacement-character
+UTF-8 cases, 12 cross-language authority assertions, 8,752 exhaustive assertions,
+both invariant suites, hook-scope validation, and the signed/verified v0.0.22
+(`versionCode=22`) APK build (SHA-256
+`71cda2d144cf7c732fbb239f209bf8388bec24cd6e4b1bd8d4b48cd43c1ea01d`).
+The exact-head CI gate independently runs the generator suite on Linux. Focused
+hardware validation of native metadata lookup and same-path replacement remains
+pending.
+
 ## Failure capture
 
 Before reproducing a failure:

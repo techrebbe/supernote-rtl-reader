@@ -8,6 +8,8 @@ import com.techrebbe.supernote.virtualspread.VirtualSpreadNavigation.PageBarStat
 import com.techrebbe.supernote.virtualspread.VirtualSpreadNavigation.Plan;
 import com.techrebbe.supernote.virtualspread.VirtualSpreadNavigation.Spread;
 
+import java.nio.charset.StandardCharsets;
+
 public final class VirtualSpreadNavigationTest {
     private static int assertions;
 
@@ -701,6 +703,48 @@ public final class VirtualSpreadNavigationTest {
             "missing JSON geometry is rejected",
             null,
             VirtualSpreadNavigation.exactFiniteJsonNumber(null)
+        );
+        String validUtf8 = "{\"label\":\"שלום \uFFFD\"}";
+        assertBoolean(
+            "valid UTF-8 including a literal replacement character is exact",
+            true,
+            validUtf8.equals(VirtualSpreadNavigation.decodeStrictUtf8(
+                validUtf8.getBytes(StandardCharsets.UTF_8)
+            ))
+        );
+        assertBoolean(
+            "malformed UTF-8 in an ignored field is rejected",
+            true,
+            VirtualSpreadNavigation.decodeStrictUtf8(new byte[] {
+                '{', '"', 'e', 'x', 't', 'r', 'a', '"', ':', '"',
+                (byte) 0x80, '"', '}'
+            }) == null
+        );
+        assertBoolean(
+            "overlong UTF-8 is rejected",
+            true,
+            VirtualSpreadNavigation.decodeStrictUtf8(new byte[] {
+                (byte) 0xC0, (byte) 0xAF
+            }) == null
+        );
+        assertBoolean(
+            "truncated UTF-8 is rejected",
+            true,
+            VirtualSpreadNavigation.decodeStrictUtf8(new byte[] {
+                (byte) 0xE2, (byte) 0x82
+            }) == null
+        );
+        assertBoolean(
+            "UTF-8 encoded surrogate is rejected",
+            true,
+            VirtualSpreadNavigation.decodeStrictUtf8(new byte[] {
+                (byte) 0xED, (byte) 0xA0, (byte) 0x80
+            }) == null
+        );
+        assertBoolean(
+            "missing UTF-8 bytes are rejected",
+            true,
+            VirtualSpreadNavigation.decodeStrictUtf8(null) == null
         );
         assertBoolean(
             "unique nested JSON object keys are accepted",

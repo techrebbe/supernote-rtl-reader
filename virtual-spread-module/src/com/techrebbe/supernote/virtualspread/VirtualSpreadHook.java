@@ -57,7 +57,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final String SCHEMA =
         "techrebbe.supernote.virtual-spread/v1";
     private static final String TAG = "SN_VIRTUAL_SPREAD";
-    private static final String VERSION = "0.0.21";
+    private static final String VERSION = "0.0.22";
     private static final long MAX_MANIFEST_BYTES = 8L * 1024L * 1024L;
 
     private static volatile WeakReference<Activity> activeActivity =
@@ -1300,13 +1300,21 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     sidecarOpened.size
                 );
                 String sidecarDigest = sha256(sidecarData);
-                Manifest parsed = parseManifest(
-                    pdfInput,
-                    pdfOpened.size,
-                    new String(sidecarData, "UTF-8"),
-                    key,
-                    sidecarDigest
-                );
+                String sidecarJson =
+                    VirtualSpreadNavigation.decodeStrictUtf8(sidecarData);
+                Manifest parsed;
+                if (sidecarJson == null) {
+                    log("manifest_rejected reason=invalid_utf8 path=" + key);
+                    parsed = null;
+                } else {
+                    parsed = parseManifest(
+                        pdfInput,
+                        pdfOpened.size,
+                        sidecarJson,
+                        key,
+                        sidecarDigest
+                    );
+                }
                 String currentSidecarDigest = sha256(readBytes(
                     sidecarInput,
                     sidecarOpened.size

@@ -1,5 +1,9 @@
 package com.techrebbe.supernote.virtualspread;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.HashSet;
 
@@ -259,6 +263,22 @@ public final class VirtualSpreadNavigation {
         }
         double candidate = ((Number) value).doubleValue();
         return finite(candidate) ? Double.valueOf(candidate) : null;
+    }
+
+    /** Decode UTF-8 without silently replacing malformed persisted bytes. */
+    public static String decodeStrictUtf8(byte[] value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(value))
+                .toString();
+        } catch (CharacterCodingException error) {
+            return null;
+        }
     }
 
     /** Strictly validate one JSON object and reject duplicate names anywhere. */

@@ -171,7 +171,9 @@ for required in (
     "byte[] sidecarData = readBytes(",
     "sidecarInput,",
     "String sidecarDigest = sha256(sidecarData)",
-    "Manifest parsed = parseManifest(",
+    "VirtualSpreadNavigation.decodeStrictUtf8(sidecarData)",
+    'manifest_rejected reason=invalid_utf8',
+    "Manifest parsed;",
     "pdfInput,",
     "FileIdentity pdfAfter = FileIdentity.capture(pdfInput.getFD())",
     "FileIdentity sidecarAfter = FileIdentity.capture(",
@@ -216,6 +218,13 @@ manifest_end = hook.find("private static boolean isPortrait", manifest_start)
 if manifest_start < 0 or manifest_end < 0:
     raise SystemExit("missing manifest validation implementation")
 manifest_validation = hook[manifest_start:manifest_end]
+if "new String(sidecarData" in manifest_verification:
+    raise SystemExit("manifest bytes must never use replacement UTF-8 decoding")
+utf8_decode = manifest_verification.find("decodeStrictUtf8(sidecarData)")
+manifest_parse = manifest_verification.find("parseManifest(")
+if not (0 <= utf8_decode < manifest_parse):
+    raise SystemExit("strict UTF-8 decoding must precede manifest parsing")
+
 for required in (
     "FileIdentity sidecarIdentity = FileIdentity.capture(sidecar)",
     "cached.matches(pdfIdentity, sidecarIdentity)",
@@ -301,11 +310,11 @@ if not (0 <= duplicate_guard < json_parse):
     )
 
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
-if 'android:versionCode="21"' not in manifest:
+if 'android:versionCode="22"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version code")
-if 'android:versionName="0.0.21"' not in manifest:
+if 'android:versionName="0.0.22"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
-if 'private static final String VERSION = "0.0.21"' not in hook:
+if 'private static final String VERSION = "0.0.22"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
 for required in (
     "pendingLinkResetLandscapeFit",

@@ -5038,6 +5038,52 @@ class VirtualSpreadTests(unittest.TestCase):
 
     @unittest.skipIf(
         os.name == "nt",
+        "POSIX atomic no-replace rename is unavailable on Windows",
+    )
+    def test_posix_no_replace_restores_source_replaced_before_rename(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            staged = root / "staged"
+            published = root / "published"
+            staged.write_bytes(b"authenticated-stage")
+            expected_identity = _identity(staged.stat())
+            real_rename = _posix_rename_noreplace
+            replaced = False
+
+            def replace_before_rename(
+                source: Path | str,
+                target: Path | str,
+                **kwargs: object,
+            ) -> None:
+                nonlocal replaced
+                if not replaced and Path(source) == staged:
+                    replacement = root / "non-cooperating-replacement"
+                    replacement.write_bytes(b"foreign-stage")
+                    os.replace(replacement, staged)
+                    replaced = True
+                real_rename(source, target, **kwargs)  # type: ignore[arg-type]
+
+            with mock.patch(
+                "generate_virtual_spread._posix_rename_noreplace",
+                side_effect=replace_before_rename,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "mismatched entry restored to source",
+                ):
+                    _durable_replace(
+                        staged,
+                        published,
+                        replace_existing=False,
+                        expected_source_identity=expected_identity,
+                    )
+
+            self.assertTrue(replaced)
+            self.assertEqual(staged.read_bytes(), b"foreign-stage")
+            self.assertFalse(published.exists())
+
+    @unittest.skipIf(
+        os.name == "nt",
         "POSIX retained staging-inode attack requires unlinking an open file",
     )
     def test_retained_staging_inode_prevents_source_hardlink_write(self) -> None:

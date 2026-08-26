@@ -107,9 +107,10 @@ tapped during verification is also consumed and queued once. After successful
 activation, the module replays it only if the same document, exact PDF/sidecar
 filesystem snapshot, unique verifier generation, native MuPDF document object,
 embedded source/layout/link authorities, source page, and external/internal
-routing classification are still current and the request is fresh; same-path replacement,
-document/page changes, routing changes, and failed or rejected verification
-discard it. External replay immediately initializes the verified current spread,
+routing classification are still current and the request is fresh; same-path
+replacement, document/page changes, a newer manual turn, routing changes, and
+failed or rejected verification discard it. External replay immediately
+initializes the verified current spread,
 while an internal replay waits for its native page-load callback. Reusing one
 native view model for another document clears all page, half, link-history,
 viewport, queued-link, and native-snapshot state. Delayed callback generations
@@ -150,10 +151,12 @@ remain the same.
 The generator writes and fsyncs its recovery marker under a private staged name
 before atomically exposing the marker on every supported platform. POSIX
 recovery also recognizes the exact link-before-unlink crash state produced by
-an interrupted no-replace backup move, but only when the canonical and backup
-names are the same inode and match the authenticated old digest. Guarded and
-unguarded POSIX no-replace publication use an atomic kernel hard-link operation,
-so no check-then-replace window can overwrite an incumbent destination.
+an older interrupted no-replace backup move, but only when the canonical and
+backup names are the same inode and match the authenticated old digest. Current
+guarded and unguarded POSIX no-replace publication uses
+`renameat2(RENAME_NOREPLACE)`, so no incumbent destination is overwritten. A
+source-name replacement detected after that move is restored to its original
+name before publication fails closed.
 Output, sidecar, and marker staging names are deterministic and reserved.
 Each exclusively created staging inode remains open through all writes and is
 identity-bound before Windows releases its handle for publication. The generator

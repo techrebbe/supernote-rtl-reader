@@ -399,6 +399,8 @@ for required in (
     '"required_pair_unavailable"',
     '"lookup_failed"',
     'observeDocumentKey(null);\n            logFailure("manifest_read_failed"',
+    'return supersededManifestLookup("stale_view_model")',
+    '"manifest_verification_superseded"',
 ):
     if required not in manifest_lookup:
         raise SystemExit(f"manifest lookup is missing fail-closed guard: {required}")
@@ -409,6 +411,22 @@ for forbidden in ("parseManifest(", "readBytes(", "sha256(", "sha256File("):
         raise SystemExit(
             f"manifest lookup performs expensive verification on a UI callback: {forbidden}"
         )
+
+turn_start = hook.find("private static void handleTurn(")
+turn_end = hook.find("private static void handlePageLoaded(", turn_start)
+if turn_start < 0 or turn_end < 0:
+    raise SystemExit("missing native turn handler")
+turn_handler = hook[turn_start:turn_end]
+state_lookup = turn_handler.find("ReaderState state = stateFor(viewModel, manifest)")
+queued_clear = turn_handler.find("clearQueuedLinkInvocation(state)", state_lookup)
+pending_clear = turn_handler.find("clearPendingLink(state)", state_lookup)
+orientation_branch = turn_handler.find("if (!isPortrait(activity))", state_lookup)
+if not (
+    0 <= state_lookup < queued_clear < pending_clear < orientation_branch
+):
+    raise SystemExit(
+        "manual navigation must discard an older queued link before routing"
+    )
 
 lookup_positions = (
     manifest_lookup.find("String key = pdf.getCanonicalPath()"),
@@ -928,6 +946,8 @@ for required in (
     "def _posix_rename_noreplace(",
     "RENAME_NOREPLACE = 1",
     "renameat2(RENAME_NOREPLACE)",
+    "mismatched entry could not be restored",
+    "restored to source",
     "def _publication_paths_share_inode(",
     "Interrupted publication target",
     "def _temporary_neighbor(",

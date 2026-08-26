@@ -133,6 +133,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         final boolean nativeSnapshotBlocked;
         final String snapshotId;
         final long verificationGeneration;
+        final String blockedReason;
 
         ManifestLookup(
             Manifest manifest,
@@ -145,7 +146,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 verificationPending,
                 nativeSnapshotBlocked,
                 snapshotId,
-                0L
+                0L,
+                null
             );
         }
 
@@ -156,11 +158,30 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             String snapshotId,
             long verificationGeneration
         ) {
+            this(
+                manifest,
+                verificationPending,
+                nativeSnapshotBlocked,
+                snapshotId,
+                verificationGeneration,
+                null
+            );
+        }
+
+        ManifestLookup(
+            Manifest manifest,
+            boolean verificationPending,
+            boolean nativeSnapshotBlocked,
+            String snapshotId,
+            long verificationGeneration,
+            String blockedReason
+        ) {
             this.manifest = manifest;
             this.verificationPending = verificationPending;
             this.nativeSnapshotBlocked = nativeSnapshotBlocked;
             this.snapshotId = snapshotId;
             this.verificationGeneration = verificationGeneration;
+            this.blockedReason = blockedReason;
         }
 
         boolean navigationBlocked() {
@@ -168,6 +189,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
 
         String navigationBlockReason() {
+            if (blockedReason != null) {
+                return blockedReason;
+            }
             return nativeSnapshotBlocked
                 ? "native_snapshot_mismatch"
                 : "manifest_verification_pending";
@@ -1159,6 +1183,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
 
         int currentPage = intField(viewModel, "currentPage", -1);
         ReaderState state = stateFor(viewModel, manifest);
+        clearQueuedLinkInvocation(state);
         clearPendingLink(state);
         if (!isPortrait(activity)) {
             int adjusted = VirtualSpreadNavigation.reverseLandscapeOffset(
@@ -1879,6 +1904,18 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         );
     }
 
+    private static ManifestLookup supersededManifestLookup(String reason) {
+        log("manifest_lookup_blocked reason=" + reason);
+        return new ManifestLookup(
+            null,
+            false,
+            true,
+            null,
+            0L,
+            reason
+        );
+    }
+
     private static ManifestLookup manifestLookupFor(Object viewModel) {
         if (!hooksReady) {
             return new ManifestLookup(null, false, false, null);
@@ -1896,7 +1933,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             if (activity != null
                 && objectField(activity, "documentViewModel") != viewModel) {
                 log("manifest_lookup_skipped reason=stale_view_model");
-                return new ManifestLookup(null, false, false, null);
+                return supersededManifestLookup("stale_view_model");
             }
             Uri uri = (Uri) XposedHelpers.getObjectField(viewModel, "uri");
             if (uri == null || uri.getPath() == null) {
@@ -1981,6 +2018,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             boolean verificationPending = verificationOwner != null;
             if (verificationPending) {
                 log("manifest_verification_pending path=" + key);
+            } else {
+                return supersededManifestLookup(
+                    "manifest_verification_superseded"
+                );
             }
             // Fail closed until the background verifier publishes a stable
             // PDF + sidecar snapshot into MANIFESTS.

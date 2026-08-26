@@ -3629,15 +3629,51 @@ def _durable_replace(
             os.replace(source, target)
             _fsync_parent_directories(source, target)
     if expected_source_identity is not None:
-        return _require_publication_path_identity(
-            target,
-            expected_source_identity,
-            "Publication move target",
-            ownership_guard,
-            allow_namespace_ctime_change=(
-                os.name != "nt" and not replace_existing
-            ),
-        )
+        try:
+            return _require_publication_path_identity(
+                target,
+                expected_source_identity,
+                "Publication move target",
+                ownership_guard,
+                allow_namespace_ctime_change=(
+                    os.name != "nt" and not replace_existing
+                ),
+            )
+        except VirtualSpreadError as identity_error:
+            if replace_existing:
+                raise
+            # A non-cooperating writer can replace the checked source pathname
+            # immediately before a no-replace rename. The kernel then moves that
+            # foreign entry, and the identity check above detects the substitution
+            # only after the namespace mutation. Restore the mismatched entry to
+            # its original source name before failing so it is never left under a
+            # canonical output, backup, marker, or retirement name.
+            try:
+                namespace = _publication_namespace(ownership_guard)
+                if namespace is not None:
+                    namespace.replace(
+                        target, source, replace_existing=False
+                    )
+                else:
+                    _validate_publication_ownership(ownership_guard)
+                    if os.name == "nt":
+                        _windows_move_file_ex(
+                            target,
+                            source,
+                            _windows_move_flags(False),
+                        )
+                    else:
+                        _posix_rename_noreplace(target, source)
+                        _fsync_parent_directories(target, source)
+            except BaseException as restore_error:
+                raise VirtualSpreadError(
+                    "Publication move target identity changed and the "
+                    f"mismatched entry could not be restored: {target}"
+                ) from restore_error
+            raise VirtualSpreadError(
+                "Publication move target identity changed; mismatched entry "
+                f"restored to source: {source}"
+            ) from identity_error
     return _require_publication_path_identity(
         target,
         _identity(

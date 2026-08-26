@@ -1527,6 +1527,35 @@ suites, hook-scope validation, and the signed/verified v0.0.24
 A fresh clean exact-head Ultra review and focused hardware validation remain
 release gates; PR #16 stays draft.
 
+## Review pass 64 source restoration and stale-action cancellation - LOCAL PASS
+
+The next exact-head Ultra review found three remaining cross-callback races.
+After a POSIX no-replace move, publication now verifies the moved inode and, if
+a non-cooperating writer substituted the checked source immediately before the
+syscall, atomically restores that foreign entry to its original source name
+before failing closed. It can no longer leave an unauthenticated replacement
+under a canonical output, backup, marker, or retirement name.
+
+Android manifest lookups from an obsolete native view model, or whose verifier
+ownership was superseded between observation and scheduling, are explicitly
+blocked rather than falling through to native LTR navigation. A fresh manual
+turn also clears any link invocation queued by an older cold-verification tap,
+so the delayed activation callback cannot replay that link over newer user
+navigation.
+
+Deterministic regressions cover the source substitution immediately before
+`RENAME_NOREPLACE`, enforce fail-closed stale/superseded lookup returns, and pin
+queued-link cancellation ahead of manual turn routing. Local validation passes
+131 generator tests on Windows (11 expected platform/filesystem or privilege
+skips) and the same 131 on Linux (two Windows-specific skips), 141 focused
+navigation/manifest/cache assertions, 15 cross-language authority assertions,
+8,752 exhaustive navigation assertions, both native invariant suites,
+hook-scope validation, and the signed/verified v0.0.24 (`versionCode=24`) APK
+build (SHA-256
+`77c5e3bf2b22d25e5277182e8d4c0c4e7f2cc4d9f89e2e7a9b083beb2c4739b8`).
+A fresh clean exact-head Ultra review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
 ## Failure capture
 
 Before reproducing a failure:

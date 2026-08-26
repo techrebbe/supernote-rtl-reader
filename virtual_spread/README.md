@@ -154,9 +154,13 @@ same identity required by the subsequent move. The exact output and sidecar stat
 authorized before generation is rechecked at the transaction boundary; a target
 that appears, disappears, or changes meanwhile is preserved and rejected. Final
 publication and backup restoration use atomic
-`renameat2(RENAME_NOREPLACE)` moves on POSIX, closing the last check-to-move
-overwrite window without a link-then-path-unlink race. A host lacking that
-primitive fails closed rather than falling back to a lossy emulation.
+`renameat2(RENAME_NOREPLACE)` moves on POSIX, so an incumbent destination is
+never overwritten and no link-then-path-unlink cleanup can delete a recreated
+source. The moved entry is checked against the authenticated source identity.
+If a non-cooperating writer replaced the source immediately before the syscall,
+the mismatched entry is atomically restored to its original source name and the
+transaction fails closed. A host lacking the no-replace primitive fails closed
+rather than falling back to a lossy emulation.
 Forced-regeneration layout policy is derived from those same captured target
 snapshots, so a target that appears after an earlier existence observation still
 requires explicit cover and geometry choices. Recovery also binds every deletion

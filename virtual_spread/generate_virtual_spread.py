@@ -3655,22 +3655,6 @@ def _valid_sha256(value: Any) -> bool:
     )
 
 
-def _file_matches_sha256(
-    path: Path,
-    expected_hash: str,
-    ownership_guard: PublicationOwnershipGuard | None = None,
-) -> bool:
-    try:
-        return (
-            _require_regular_publication_target(
-                path, "Publication target", ownership_guard
-            )
-            and _publication_sha256(path, ownership_guard) == expected_hash
-        )
-    except OSError:
-        return False
-
-
 def _publication_paths_share_inode(
     first: Path,
     second: Path,
@@ -4122,6 +4106,7 @@ def _recover_pair_publication(
             transaction["newOutputSha256"],
             transaction["oldOutputSha256"],
             "Output backup",
+            _publication_output_evidence,
         ),
         (
             manifest_path,
@@ -4130,9 +4115,18 @@ def _recover_pair_publication(
             transaction["newManifestSha256"],
             transaction["oldManifestSha256"],
             "Manifest backup",
+            _publication_manifest_evidence,
         ),
     )
-    for final_path, backup, had_final, new_hash, old_hash, backup_label in entries:
+    for (
+        final_path,
+        backup,
+        had_final,
+        new_hash,
+        old_hash,
+        backup_label,
+        final_evidence,
+    ) in entries:
         try:
             backup_exists = _require_regular_publication_target(
                 backup,
@@ -4225,13 +4219,22 @@ def _recover_pair_publication(
                     ownership_guard,
                 )
             elif final_exists:
-                if not _file_matches_sha256(
-                    final_path, new_hash, ownership_guard
-                ):
+                try:
+                    final_identity, _ = final_evidence(
+                        final_path,
+                        "Published transaction target",
+                        ownership_guard,
+                        expected_hash=new_hash,
+                    )
+                except (OSError, VirtualSpreadError) as error:
                     raise VirtualSpreadError(
                         f"Unexpected publication target: {final_path}"
-                    )
-                _durably_remove(final_path, ownership_guard)
+                    ) from error
+                _durably_remove(
+                    final_path,
+                    ownership_guard,
+                    expected_identity=final_identity,
+                )
         except BaseException as error:
             errors.append(f"{final_path}: {error}")
     if errors:
@@ -4748,7 +4751,9 @@ def _build_virtual_spread_locked(
         spread_height,
         gutter,
     ) = _resolve_layout_options(
-        replacing=force and (output_exists or manifest_exists),
+        replacing=force and (
+            expected_output_state.exists or expected_manifest_state.exists
+        ),
         cover_separate=cover_separate,
         spread_width=spread_width,
         spread_height=spread_height,

@@ -156,7 +156,7 @@ scope guard.
 
 ## v0.0.24 native-open snapshot binding and portrait viewport - PENDING HARDWARE
 
-Review passes 40-60 bind the authenticated sidecar to the actual PDF object
+Review passes 40-61 bind the authenticated sidecar to the actual PDF object
 retained inside Supernote's native reader and harden all transformed link,
 manifest, and page-box boundaries. The generator adds a descriptor-verified
 source-authority marker before the layout and link markers. The companion reads
@@ -183,16 +183,20 @@ publication and recovery restores never replace a target that appears late.
 Deferred native links are bound to a unique verifier generation and the exact
 open MuPDF document plus its embedded authorities, closing same-path and
 filesystem-identity ABA replay races.
+Recovery deletion is additionally bound to the verified final-target filesystem
+identity, forced-regeneration layout policy uses the same captured target state
+authorized for publication, and Android rejects malformed UTF-16 before
+constructing canonical UTF-8 link-authority records.
 The generator rejects transformed URI `/IsMap true` actions, a CropBox extending
 outside its MediaBox, and link geometry outside the source CropBox, while scaling
 an omitted link border's PDF-default width.
 
-The local automated gate passes 118 generator tests on Windows (eight expected
-platform/filesystem or privilege skips), 135 focused navigation/manifest/cache assertions, 12
+The local automated gate passes 120 generator tests on Windows (eight expected
+platform/filesystem or privilege skips), 135 focused navigation/manifest/cache assertions, 15
 cross-language authority assertions, 8,752 exhaustive navigation assertions, both native
 invariant suites, hook-scope validation, and the signed/verified v0.0.24
 (`versionCode=24`) APK build (SHA-256
-`4c0983bdd2df031f3481509e0f00015a3e1c9cfb284da4fceccee8b2944fdc4c`).
+`120819858eb7ab8a897e032b543aed63687b5b50ecff9b39b32288c6f4464b0b`).
 CI independently runs the same generator suite on
 Linux without the Windows-only skips.
 

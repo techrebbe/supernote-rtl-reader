@@ -61,6 +61,7 @@ from generate_virtual_spread import (  # noqa: E402
     _publication_path_matches,
     _publication_reserved_paths,
     _publication_staging_artifacts,
+    _publication_target_state,
     _transform_rect,
     _transform_link_border,
     _transform_link_border_style,
@@ -4924,6 +4925,57 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertFalse(any(root.glob("*.bak")))
             self.assertFalse(any(root.glob("*.publish.json")))
 
+    def test_force_late_targets_require_explicit_replacement_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            real_target_state = _publication_target_state
+            raced = False
+
+            def capture_after_late_targets(
+                path: Path,
+                label: str,
+                ownership_guard: object = None,
+                *,
+                manifest: bool = False,
+            ) -> object:
+                nonlocal raced
+                if not raced:
+                    output.write_bytes(b"late-output")
+                    manifest_path.write_bytes(b"late-manifest")
+                    raced = True
+                return real_target_state(
+                    path,
+                    label,
+                    ownership_guard,
+                    manifest=manifest,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._publication_target_state",
+                side_effect=capture_after_late_targets,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Forced replacement requires explicit cover, spread width, "
+                    "spread height, and gutter options",
+                ):
+                    build_virtual_spread(
+                        source,
+                        output,
+                        manifest_path,
+                        force=True,
+                    )
+
+            self.assertTrue(raced)
+            self.assertEqual(output.read_bytes(), b"late-output")
+            self.assertEqual(manifest_path.read_bytes(), b"late-manifest")
+            self.assertFalse(any(root.glob("*.bak")))
+            self.assertFalse(any(root.glob("*.publish.json")))
+
     def test_final_publication_never_replaces_a_late_target(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -5045,6 +5097,64 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertEqual(output.read_bytes(), b"late-output")
             self.assertEqual(output_backup.read_bytes(), b"old-pdf")
             self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(marker.is_file())
+
+    def test_recovery_never_deletes_a_replaced_new_target(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            output_stage, manifest_stage, _ = _publication_staging_artifacts(
+                output
+            )
+            output_stage.write_bytes(b"new-pdf")
+            manifest_stage.write_bytes(b"new-manifest")
+            transaction = _prepare_publication_transaction(
+                output_stage,
+                output,
+                manifest_stage,
+                manifest,
+            )
+            marker = Path(transaction["markerPath"])
+            _durable_replace(
+                output_stage,
+                output,
+                replace_existing=False,
+            )
+            real_remove = _durably_remove
+            raced = False
+
+            def replace_before_recovery_delete(
+                path: Path,
+                ownership_guard: object = None,
+                *,
+                expected_identity: object = None,
+            ) -> None:
+                nonlocal raced
+                if not raced and Path(path) == output:
+                    replacement = root / "unrelated-replacement.pdf"
+                    replacement.write_bytes(b"unrelated-replacement")
+                    os.replace(replacement, output)
+                    raced = True
+                real_remove(
+                    Path(path),
+                    ownership_guard,
+                    expected_identity=expected_identity,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._durably_remove",
+                side_effect=replace_before_recovery_delete,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "recovery was incomplete:.*identity changed",
+                ):
+                    _recover_pair_publication(output, manifest)
+
+            self.assertTrue(raced)
+            self.assertEqual(output.read_bytes(), b"unrelated-replacement")
+            self.assertTrue(manifest_stage.is_file())
             self.assertTrue(marker.is_file())
 
     @unittest.skipIf(

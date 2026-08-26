@@ -40,6 +40,9 @@ the Nomad's 4:3 landscape aspect; the generator and runtime independently reject
 other ratios. Before Android's permissive `JSONObject` parser runs, a strict bounded
 scanner rejects malformed JSON and duplicate object names at every nesting level,
 including names that become equal after JSON escape decoding.
+Canonical link-authority encoding also rejects unpaired UTF-16 surrogates in URI
+or record strings before converting them to UTF-8, so Android cannot silently
+hash Unicode replacement characters that the generator never authorized.
 If a generated PDF is present but its required sidecar is missing or cannot be
 inspected, navigation fails closed based on the authority embedded in the native
 open document. A PDF whose native metadata explicitly contains no virtual-spread
@@ -154,6 +157,9 @@ identity-bound before Windows releases its handle for publication. The generator
 captures each canonical target's exact pre-generation state, then rechecks it at
 the transaction boundary. Final moves and rollback restores are no-replace, so a
 late target is preserved rather than overwritten.
+Forced-regeneration layout policy uses those same captured target snapshots, and
+recovery removes a newly published canonical target only while both its verified
+digest and filesystem identity still match.
 Marker-free remnants are preserved and rejected for manual recovery; once a
 valid marker exists, a staged remnant is removed only when its digest matches
 the authenticated transaction. A pre-existing `.retired` path is never deleted

@@ -155,6 +155,11 @@ authorized before generation is rechecked at the transaction boundary; a target
 that appears, disappears, or changes meanwhile is preserved and rejected. Final
 publication and backup restoration use no-replace moves, closing the last
 check-to-move overwrite window.
+Forced-regeneration layout policy is derived from those same captured target
+snapshots, so a target that appears after an earlier existence observation still
+requires explicit cover and geometry choices. Recovery also binds deletion of a
+newly published canonical target to both its authenticated digest and verified
+filesystem identity; a same-content pathname replacement is preserved.
 The PDF and manifest are staged before publication as one recoverable pair.
 Their output-derived temporary names are deterministic, so a process death
 cannot leave an unbounded collection of randomly named files. Before a marker

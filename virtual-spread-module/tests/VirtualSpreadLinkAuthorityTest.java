@@ -71,6 +71,39 @@ public final class VirtualSpreadLinkAuthorityTest {
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
             VirtualSpreadLinkAuthority.digest(new String[0])
         );
+        assertRejected(
+            "URI authority rejects an unpaired high surrogate",
+            new CheckedAction() {
+                @Override
+                public void run() throws Exception {
+                    VirtualSpreadLinkAuthority.uri(
+                        2, "left", 1, 0.0, 0.0, 1.0, 1.0, "\uD800"
+                    );
+                }
+            }
+        );
+        assertRejected(
+            "URI authority rejects an unpaired low surrogate",
+            new CheckedAction() {
+                @Override
+                public void run() throws Exception {
+                    VirtualSpreadLinkAuthority.uri(
+                        2, "left", 1, 0.0, 0.0, 1.0, 1.0, "\uDC00"
+                    );
+                }
+            }
+        );
+        assertRejected(
+            "combined authority rejects malformed UTF-16 records",
+            new CheckedAction() {
+                @Override
+                public void run() throws Exception {
+                    VirtualSpreadLinkAuthority.digest(
+                        new String[] {"valid", "\uD800"}
+                    );
+                }
+            }
+        );
         Path fixture = Files.createTempFile("virtual-spread-authority", ".pdf");
         try {
             String sourceDigest =
@@ -159,5 +192,22 @@ public final class VirtualSpreadLinkAuthorityTest {
                 label + " expected=" + expected + " actual=" + actual
             );
         }
+    }
+
+    private static void assertRejected(
+        String label,
+        CheckedAction action
+    ) throws Exception {
+        assertions++;
+        try {
+            action.run();
+        } catch (IllegalArgumentException expected) {
+            return;
+        }
+        throw new AssertionError(label + " expected rejection");
+    }
+
+    private interface CheckedAction {
+        void run() throws Exception;
     }
 }

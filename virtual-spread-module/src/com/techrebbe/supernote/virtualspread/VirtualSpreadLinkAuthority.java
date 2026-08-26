@@ -86,13 +86,13 @@ public final class VirtualSpreadLinkAuthority {
             y0,
             x1,
             y1
-        ) + "|" + sha256(uri.getBytes(StandardCharsets.UTF_8));
+        ) + "|" + sha256(strictUtf8(uri));
     }
 
     public static String digest(String[] records) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         for (String record : records) {
-            digest.update(record.getBytes(StandardCharsets.UTF_8));
+            digest.update(strictUtf8(record));
             digest.update((byte) '\n');
         }
         return toHex(digest.digest());
@@ -262,6 +262,29 @@ public final class VirtualSpreadLinkAuthority {
         }
         padded.append(hex);
         return padded.toString();
+    }
+
+    private static byte[] strictUtf8(String value) {
+        if (value == null) {
+            throw new IllegalArgumentException("Authority text is missing");
+        }
+        for (int index = 0; index < value.length(); index++) {
+            char current = value.charAt(index);
+            if (Character.isHighSurrogate(current)) {
+                if (index + 1 >= value.length()
+                    || !Character.isLowSurrogate(value.charAt(index + 1))) {
+                    throw new IllegalArgumentException(
+                        "Authority text contains an unpaired UTF-16 surrogate"
+                    );
+                }
+                index++;
+            } else if (Character.isLowSurrogate(current)) {
+                throw new IllegalArgumentException(
+                    "Authority text contains an unpaired UTF-16 surrogate"
+                );
+            }
+        }
+        return value.getBytes(StandardCharsets.UTF_8);
     }
 
     private static String sha256(byte[] value) throws Exception {

@@ -1440,6 +1440,31 @@ build (SHA-256
 A fresh exact-head Ultra review and focused hardware validation remain release
 gates; PR #16 stays draft.
 
+## Review pass 61 recovery identity, captured layout state, and strict URI authority - LOCAL PASS
+
+The fresh exact-head Ultra review found three remaining authority races. Recovery
+now captures the verified filesystem identity of a newly published canonical
+target and supplies that identity to guarded removal. A matching hash is no
+longer sufficient to delete a pathname that may have been concurrently replaced.
+Forced-regeneration layout policy now derives replacement state from the same
+captured output/sidecar snapshots later authorized for publication, rather than
+from earlier existence observations. Finally, Android's link-authority encoder
+rejects unpaired UTF-16 surrogates before UTF-8 hashing, matching the generator's
+strict Unicode contract instead of silently hashing replacement characters.
+
+Deterministic regressions cover a recovery-time same-content pathname
+replacement, a target that appears between the initial observation and captured
+publication state, and malformed high-surrogate, low-surrogate, and record
+strings in the Android authority encoder. Local automated validation passes 120
+generator tests on Windows (eight expected platform/filesystem or privilege
+skips), 135 focused navigation/manifest/cache assertions, 15 cross-language
+authority assertions, 8,752 exhaustive navigation assertions, both native
+invariant suites, hook-scope validation, and the signed/verified v0.0.24
+(`versionCode=24`) APK build (SHA-256
+`120819858eb7ab8a897e032b543aed63687b5b50ecff9b39b32288c6f4464b0b`).
+A clean follow-up exact-head Ultra review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
 ## Failure capture
 
 Before reproducing a failure:

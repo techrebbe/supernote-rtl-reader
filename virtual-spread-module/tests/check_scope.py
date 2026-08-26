@@ -5,6 +5,22 @@ root = Path(__file__).resolve().parents[1]
 hook = (root / "src/com/techrebbe/supernote/virtualspread/VirtualSpreadHook.java").read_text(
     encoding="utf-8"
 )
+link_authority = (
+    root
+    / "src/com/techrebbe/supernote/virtualspread/VirtualSpreadLinkAuthority.java"
+).read_text(encoding="utf-8")
+
+for required in (
+    "sha256(strictUtf8(uri))",
+    "digest.update(strictUtf8(record))",
+    "Character.isHighSurrogate(current)",
+    "Character.isLowSurrogate(current)",
+):
+    if required not in link_authority:
+        raise SystemExit(
+            "link authority must reject malformed UTF-16 before UTF-8 hashing: "
+            + required
+        )
 
 if ('private static final String SCHEMA =\n'
         '        "techrebbe.supernote.virtual-spread/v2";' not in hook):
@@ -909,7 +925,7 @@ for required in (
     '"Output backup"',
     '"Manifest backup"',
     '"Staged publication target"',
-    "for final_path, backup, had_final, new_hash, old_hash, backup_label in entries:",
+    "        final_evidence,\n    ) in entries:",
     "replace_existing=False",
     "temporary_manifest,\n"
     "            manifest_path,\n"
@@ -930,7 +946,8 @@ for required in (
     "artifacts = (",
     "for path, _ in artifacts:",
     "_durably_remove(path, ownership_guard)",
-    "_durably_remove(final_path, ownership_guard)",
+    "                    expected_identity=final_identity,\n"
+    "                )",
     '"layoutAuthoritySha256": layout_authority_hash',
     '"/SNVirtualSpreadLayoutSHA256": layout_authority_hash',
 ):
@@ -962,8 +979,10 @@ for required in (
     "test_staged_tamper_before_move_preserves_original_pair",
     "test_retained_staging_inode_prevents_source_hardlink_write",
     "test_no_force_preserves_targets_that_appear_during_generation",
+    "test_force_late_targets_require_explicit_replacement_layout",
     "test_final_publication_never_replaces_a_late_target",
     "test_recovery_never_replaces_a_target_that_appears_before_restore",
+    "test_recovery_never_deletes_a_replaced_new_target",
     "test_unknown_xyz_left_fails_closed_even_matching_transform",
     "test_null_destination_coordinates_reject_different_transforms",
     "test_destination_operands_require_pdf_name_and_numbers",
@@ -1093,7 +1112,8 @@ if (
     )
 for required in (
     "_resolve_layout_options(",
-    "replacing=force and (output_exists or manifest_exists)",
+    "replacing=force and (",
+    "expected_output_state.exists or expected_manifest_state.exists",
     "Forced replacement requires explicit cover, spread width",
 ):
     if required not in generator:

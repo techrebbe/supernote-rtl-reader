@@ -71,6 +71,7 @@ from generate_virtual_spread import (  # noqa: E402
     _require_runtime_manifest_path,
     _transformed_internal_destination,
     _sha256_open_file,
+    _temporary_neighbor,
     _windows_move_flags,
     _write_json,
     _write_publication_marker,
@@ -1414,8 +1415,14 @@ class VirtualSpreadTests(unittest.TestCase):
                 path: Path,
                 value: dict[str, object],
                 ownership_guard: object = None,
+                retained_descriptor: int | None = None,
             ) -> None:
-                _write_json(path, value, ownership_guard)
+                _write_json(
+                    path,
+                    value,
+                    ownership_guard,
+                    retained_descriptor=retained_descriptor,
+                )
                 source.write_bytes(source.read_bytes() + b"\n% changed\n")
 
             with mock.patch(
@@ -1536,8 +1543,14 @@ class VirtualSpreadTests(unittest.TestCase):
                 path: Path,
                 value: dict[str, object],
                 ownership_guard: object = None,
+                retained_descriptor: int | None = None,
             ) -> None:
-                _write_json(path, value, ownership_guard)
+                _write_json(
+                    path,
+                    value,
+                    ownership_guard,
+                    retained_descriptor=retained_descriptor,
+                )
                 source.write_bytes(changed_contents)
 
             with mock.patch(
@@ -3944,6 +3957,9 @@ class VirtualSpreadTests(unittest.TestCase):
                 staged_manifest: Path,
                 final_manifest: Path,
                 ownership_guard: object = None,
+                expected_output_state: object = None,
+                expected_manifest_state: object = None,
+                replace_authorized: bool = True,
             ) -> dict[str, object]:
                 nonlocal created_backup
                 transaction = real_prepare(
@@ -3952,6 +3968,9 @@ class VirtualSpreadTests(unittest.TestCase):
                     staged_manifest,
                     final_manifest,
                     ownership_guard,
+                    expected_output_state=expected_output_state,
+                    expected_manifest_state=expected_manifest_state,
+                    replace_authorized=replace_authorized,
                 )
                 created_backup = Path(transaction["outputBackupPath"])
                 created_backup.mkdir()
@@ -4031,6 +4050,9 @@ class VirtualSpreadTests(unittest.TestCase):
                 staged_manifest: Path,
                 final_manifest: Path,
                 ownership_guard: object = None,
+                expected_output_state: object = None,
+                expected_manifest_state: object = None,
+                replace_authorized: bool = True,
             ) -> dict[str, object]:
                 transaction = real_prepare(
                     staged_output,
@@ -4038,6 +4060,9 @@ class VirtualSpreadTests(unittest.TestCase):
                     staged_manifest,
                     final_manifest,
                     ownership_guard,
+                    expected_output_state=expected_output_state,
+                    expected_manifest_state=expected_manifest_state,
+                    replace_authorized=replace_authorized,
                 )
                 staged_manifest.unlink()
                 staged_manifest.mkdir()
@@ -4069,7 +4094,7 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertFalse(any(root.glob("*.bak")))
             self.assertFalse(any(root.glob("*.publish.json")))
 
-    def test_published_hash_mismatch_preserves_unexpected_target(self) -> None:
+    def test_staged_tamper_before_move_preserves_original_pair(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             output = root / "spread.pdf"
@@ -4089,6 +4114,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 *,
                 replace_existing: bool = True,
                 ownership_guard: object = None,
+                expected_source_identity: object = None,
             ) -> None:
                 nonlocal replaced_stage
                 if (
@@ -4103,6 +4129,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     Path(target),
                     replace_existing=replace_existing,
                     ownership_guard=ownership_guard,
+                    expected_source_identity=expected_source_identity,
                 )
 
             with mock.patch(
@@ -4111,7 +4138,7 @@ class VirtualSpreadTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(
                     VirtualSpreadError,
-                    "Staged publication target SHA-256 mismatch",
+                    "Publication move source identity changed",
                 ):
                     _publish_pair(
                         temporary_output,
@@ -4122,14 +4149,17 @@ class VirtualSpreadTests(unittest.TestCase):
 
             self.assertTrue(replaced_stage)
             self.assertEqual(output.read_bytes(), b"old-pdf")
-            self.assertEqual(manifest.read_bytes(), b"tampered-manifest")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
             self.assertTrue(temporary_output.is_file())
+            self.assertEqual(
+                temporary_manifest.read_bytes(), b"tampered-manifest"
+            )
             marker, output_backup, manifest_backup = _publication_artifacts(
                 output
             )
-            self.assertTrue(marker.is_file())
+            self.assertFalse(marker.exists())
             self.assertFalse(output_backup.exists())
-            self.assertEqual(manifest_backup.read_bytes(), b"old-manifest")
+            self.assertFalse(manifest_backup.exists())
 
     def test_live_publication_lock_blocks_recovery_by_second_generator(
         self,
@@ -4191,12 +4221,14 @@ class VirtualSpreadTests(unittest.TestCase):
                 path: Path,
                 value: object,
                 ownership_guard: object = None,
+                retained_descriptor: int | None = None,
             ) -> None:
                 del value
                 _write_json(
                     path,
                     {"padding": "x" * MAX_MANIFEST_BYTES},
                     ownership_guard,
+                    retained_descriptor=retained_descriptor,
                 )
 
             with mock.patch(
@@ -4244,6 +4276,9 @@ class VirtualSpreadTests(unittest.TestCase):
                 expected_output_hash: str | None = None,
                 expected_manifest_identity: object = None,
                 expected_manifest_hash: str | None = None,
+                expected_output_state: object = None,
+                expected_manifest_state: object = None,
+                replace_authorized: bool = True,
             ) -> dict[str, object]:
                 nonlocal swapped
                 temporary_manifest.unlink()
@@ -4259,6 +4294,9 @@ class VirtualSpreadTests(unittest.TestCase):
                     expected_output_hash=expected_output_hash,
                     expected_manifest_identity=expected_manifest_identity,
                     expected_manifest_hash=expected_manifest_hash,
+                    expected_output_state=expected_output_state,
+                    expected_manifest_state=expected_manifest_state,
+                    replace_authorized=replace_authorized,
                 )
 
             with mock.patch(
@@ -4305,6 +4343,9 @@ class VirtualSpreadTests(unittest.TestCase):
                 expected_output_hash: str | None = None,
                 expected_manifest_identity: object = None,
                 expected_manifest_hash: str | None = None,
+                expected_output_state: object = None,
+                expected_manifest_state: object = None,
+                replace_authorized: bool = True,
             ) -> dict[str, object]:
                 nonlocal swapped
                 replacement = temporary_manifest.with_name(
@@ -4323,6 +4364,9 @@ class VirtualSpreadTests(unittest.TestCase):
                     expected_output_hash=expected_output_hash,
                     expected_manifest_identity=expected_manifest_identity,
                     expected_manifest_hash=expected_manifest_hash,
+                    expected_output_state=expected_output_state,
+                    expected_manifest_state=expected_manifest_state,
+                    replace_authorized=replace_authorized,
                 )
 
             with mock.patch(
@@ -4369,6 +4413,9 @@ class VirtualSpreadTests(unittest.TestCase):
                 expected_output_hash: str | None = None,
                 expected_manifest_identity: object = None,
                 expected_manifest_hash: str | None = None,
+                expected_output_state: object = None,
+                expected_manifest_state: object = None,
+                replace_authorized: bool = True,
             ) -> dict[str, object]:
                 nonlocal swapped
                 replacement = temporary_output.with_name(
@@ -4387,6 +4434,9 @@ class VirtualSpreadTests(unittest.TestCase):
                     expected_output_hash=expected_output_hash,
                     expected_manifest_identity=expected_manifest_identity,
                     expected_manifest_hash=expected_manifest_hash,
+                    expected_output_state=expected_output_state,
+                    expected_manifest_state=expected_manifest_state,
+                    replace_authorized=replace_authorized,
                 )
 
             with mock.patch(
@@ -4433,6 +4483,9 @@ class VirtualSpreadTests(unittest.TestCase):
                 expected_output_hash: str | None = None,
                 expected_manifest_identity: object = None,
                 expected_manifest_hash: str | None = None,
+                expected_output_state: object = None,
+                expected_manifest_state: object = None,
+                replace_authorized: bool = True,
             ) -> dict[str, object]:
                 nonlocal swapped
                 replacement = temporary_output.with_name(
@@ -4451,6 +4504,9 @@ class VirtualSpreadTests(unittest.TestCase):
                     expected_output_hash=expected_output_hash,
                     expected_manifest_identity=expected_manifest_identity,
                     expected_manifest_hash=expected_manifest_hash,
+                    expected_output_state=expected_output_state,
+                    expected_manifest_state=expected_manifest_state,
+                    replace_authorized=replace_authorized,
                 )
 
             with mock.patch(
@@ -4724,8 +4780,23 @@ class VirtualSpreadTests(unittest.TestCase):
                 path: Path,
                 value: object,
                 ownership_guard: object = None,
+                retained_descriptor: int | None = None,
             ) -> None:
-                path.write_text("{\n", encoding="utf-8")
+                del value, ownership_guard
+                if retained_descriptor is None:
+                    path.write_text("{\n", encoding="utf-8")
+                else:
+                    with os.fdopen(
+                        os.dup(retained_descriptor),
+                        "w",
+                        encoding="utf-8",
+                        newline="\n",
+                    ) as stream:
+                        stream.seek(0)
+                        stream.truncate(0)
+                        stream.write("{\n")
+                        stream.flush()
+                        os.fsync(stream.fileno())
                 raise OSError("simulated marker write interruption")
 
             with mock.patch(
@@ -4769,6 +4840,212 @@ class VirtualSpreadTests(unittest.TestCase):
 
             self.assertEqual(staged.read_bytes(), b"staged")
             self.assertEqual(incumbent.read_bytes(), b"incumbent")
+
+    @unittest.skipIf(
+        os.name == "nt",
+        "POSIX retained staging-inode attack requires unlinking an open file",
+    )
+    def test_retained_staging_inode_prevents_source_hardlink_write(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            source_before = source.read_bytes()
+            staged_output = output.with_name(f".{output.name}.tmp")
+            real_temporary_neighbor = _temporary_neighbor
+            attacked = False
+
+            def replace_stage_with_source_hardlink(
+                path: Path,
+                suffix: str,
+                ownership_guard: object = None,
+            ) -> object:
+                nonlocal attacked
+                artifact = real_temporary_neighbor(
+                    path, suffix, ownership_guard
+                )
+                if path == output and suffix == ".tmp":
+                    artifact.path.unlink()
+                    os.link(source, artifact.path)
+                    attacked = True
+                return artifact
+
+            with mock.patch(
+                "generate_virtual_spread._temporary_neighbor",
+                side_effect=replace_stage_with_source_hardlink,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Staged publication artifact identity changed",
+                ):
+                    build_virtual_spread(source, output, manifest)
+
+            self.assertTrue(attacked)
+            self.assertEqual(source.read_bytes(), source_before)
+            self.assertTrue(staged_output.is_file())
+            self.assertTrue(os.path.samefile(source, staged_output))
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest.exists())
+
+    def test_no_force_preserves_targets_that_appear_during_generation(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            real_publish_pair = _publish_pair
+            raced = False
+
+            def publish_after_late_targets(*args: object, **kwargs: object) -> None:
+                nonlocal raced
+                output.write_bytes(b"late-output")
+                manifest.write_bytes(b"late-manifest")
+                raced = True
+                real_publish_pair(*args, **kwargs)
+
+            with mock.patch(
+                "generate_virtual_spread._publish_pair",
+                side_effect=publish_after_late_targets,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Publication target appeared during generation",
+                ):
+                    build_virtual_spread(source, output, manifest)
+
+            self.assertTrue(raced)
+            self.assertEqual(output.read_bytes(), b"late-output")
+            self.assertEqual(manifest.read_bytes(), b"late-manifest")
+            self.assertFalse(any(root.glob("*.bak")))
+            self.assertFalse(any(root.glob("*.publish.json")))
+
+    def test_final_publication_never_replaces_a_late_target(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+            real_replace = _durable_replace
+            raced = False
+
+            def inject_target_before_final_move(
+                source: object,
+                target: object,
+                *,
+                replace_existing: bool = True,
+                ownership_guard: object = None,
+                expected_source_identity: object = None,
+            ) -> None:
+                nonlocal raced
+                if (
+                    not raced
+                    and Path(source) == temporary_manifest
+                    and Path(target) == manifest
+                ):
+                    manifest.write_bytes(b"late-manifest")
+                    raced = True
+                real_replace(
+                    Path(source),
+                    Path(target),
+                    replace_existing=replace_existing,
+                    ownership_guard=ownership_guard,
+                    expected_source_identity=expected_source_identity,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._durable_replace",
+                side_effect=inject_target_before_final_move,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "rollback was incomplete:.*Unexpected publication target",
+                ):
+                    _publish_pair(
+                        temporary_output,
+                        output,
+                        temporary_manifest,
+                        manifest,
+                    )
+
+            self.assertTrue(raced)
+            self.assertFalse(output.exists())
+            self.assertEqual(manifest.read_bytes(), b"late-manifest")
+            self.assertEqual(temporary_output.read_bytes(), b"new-pdf")
+            self.assertEqual(temporary_manifest.read_bytes(), b"new-manifest")
+
+    def test_recovery_never_replaces_a_target_that_appears_before_restore(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            output_backup = Path(transaction["outputBackupPath"])
+            marker = Path(transaction["markerPath"])
+            _durable_replace(output, output_backup)
+            real_replace = _durable_replace
+            raced = False
+
+            def inject_target_before_restore(
+                source: object,
+                target: object,
+                *,
+                replace_existing: bool = True,
+                ownership_guard: object = None,
+                expected_source_identity: object = None,
+            ) -> None:
+                nonlocal raced
+                if (
+                    not raced
+                    and Path(source) == output_backup
+                    and Path(target) == output
+                ):
+                    output.write_bytes(b"late-output")
+                    raced = True
+                real_replace(
+                    Path(source),
+                    Path(target),
+                    replace_existing=replace_existing,
+                    ownership_guard=ownership_guard,
+                    expected_source_identity=expected_source_identity,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._durable_replace",
+                side_effect=inject_target_before_restore,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "recovery was incomplete",
+                ):
+                    _recover_pair_publication(output, manifest)
+
+            self.assertTrue(raced)
+            self.assertEqual(output.read_bytes(), b"late-output")
+            self.assertEqual(output_backup.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(marker.is_file())
 
     @unittest.skipIf(
         os.name == "nt",
@@ -5123,6 +5400,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 *,
                 replace_existing: bool = True,
                 ownership_guard: object = None,
+                expected_source_identity: object = None,
             ) -> None:
                 if (
                     Path(source) == temporary_output
@@ -5134,6 +5412,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     Path(target),
                     replace_existing=replace_existing,
                     ownership_guard=ownership_guard,
+                    expected_source_identity=expected_source_identity,
                 )
 
             with mock.patch(

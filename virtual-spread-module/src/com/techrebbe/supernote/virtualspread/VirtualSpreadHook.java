@@ -24,6 +24,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -73,8 +74,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     > MANIFESTS = new VirtualSpreadNavigation.BoundedCache<>(
         MAX_CACHED_MANIFESTS
     );
-    private static final Map<String, String> VERIFYING =
+    private static final Map<String, VerificationOwner> VERIFYING =
         new ConcurrentHashMap<>();
+    private static final AtomicLong VERIFICATION_GENERATION = new AtomicLong();
     private static volatile boolean hooksReady;
     private static final Object MANIFEST_VERIFIER_LOCK = new Object();
     private static volatile String observedDocumentKey;
@@ -130,6 +132,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         final boolean verificationPending;
         final boolean nativeSnapshotBlocked;
         final String snapshotId;
+        final long verificationGeneration;
 
         ManifestLookup(
             Manifest manifest,
@@ -137,10 +140,27 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             boolean nativeSnapshotBlocked,
             String snapshotId
         ) {
+            this(
+                manifest,
+                verificationPending,
+                nativeSnapshotBlocked,
+                snapshotId,
+                0L
+            );
+        }
+
+        ManifestLookup(
+            Manifest manifest,
+            boolean verificationPending,
+            boolean nativeSnapshotBlocked,
+            String snapshotId,
+            long verificationGeneration
+        ) {
             this.manifest = manifest;
             this.verificationPending = verificationPending;
             this.nativeSnapshotBlocked = nativeSnapshotBlocked;
             this.snapshotId = snapshotId;
+            this.verificationGeneration = verificationGeneration;
         }
 
         boolean navigationBlocked() {
@@ -246,13 +266,23 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
     }
 
+    private static final class VerificationOwner {
+        final String snapshotId;
+        final long generation;
+
+        VerificationOwner(String snapshotId, long generation) {
+            this.snapshotId = snapshotId;
+            this.generation = generation;
+        }
+    }
+
     private static final class ManifestVerificationTask implements Runnable {
         final File pdf;
         final File sidecar;
         final String key;
         final FileIdentity pdfBefore;
         final FileIdentity sidecarBefore;
-        final String verificationId;
+        final VerificationOwner owner;
 
         ManifestVerificationTask(
             File pdf,
@@ -260,14 +290,14 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             String key,
             FileIdentity pdfBefore,
             FileIdentity sidecarBefore,
-            String verificationId
+            VerificationOwner owner
         ) {
             this.pdf = pdf;
             this.sidecar = sidecar;
             this.key = key;
             this.pdfBefore = pdfBefore;
             this.sidecarBefore = sidecarBefore;
-            this.verificationId = verificationId;
+            this.owner = owner;
         }
 
         @Override
@@ -278,12 +308,12 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 key,
                 pdfBefore,
                 sidecarBefore,
-                verificationId
+                owner
             );
         }
 
         void cancelBeforeRun() {
-            VERIFYING.remove(key, verificationId);
+            VERIFYING.remove(key, owner);
             log("manifest_verification_superseded path=" + key);
         }
     }
@@ -314,7 +344,12 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         Object[] queuedLinkArguments;
         String queuedLinkDocumentPath;
         String queuedLinkSnapshotId;
+        long queuedLinkVerificationGeneration;
         VirtualSpreadNavigation.LinkRouting queuedLinkRouting;
+        Object queuedLinkNativeDocument;
+        String queuedLinkNativeSourceAuthority;
+        String queuedLinkNativeLayoutAuthority;
+        String queuedLinkNativeLinkAuthority;
         int queuedLinkSourcePage = -1;
         long queuedLinkAt;
         int preservedLinkViewportPage = -1;
@@ -639,6 +674,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 viewModel,
                 param.args,
                 lookup.snapshotId,
+                lookup.verificationGeneration,
                 routing
             );
             param.setResult(null);
@@ -751,11 +787,13 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         Object viewModel,
         Object[] arguments,
         String snapshotId,
+        long verificationGeneration,
         VirtualSpreadNavigation.LinkRouting routing
     ) {
         if (viewModel == null || arguments == null || arguments.length < 3
             || arguments[1] == null || !(arguments[2] instanceof Integer)
             || snapshotId == null
+            || verificationGeneration <= 0L
             || (routing != VirtualSpreadNavigation.LinkRouting.EXTERNAL
                 && routing != VirtualSpreadNavigation.LinkRouting.INTERNAL)) {
             clearQueuedLinkInvocation(viewModel);
@@ -765,9 +803,22 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         Uri uri = (Uri) objectField(viewModel, "uri");
         String documentPath = uri == null ? null : uri.getPath();
         int sourcePage = intField(viewModel, "currentPage", -1);
-        if (documentPath == null || sourcePage < 0) {
+        Object nativeDocument = nativePdfDocument(viewModel);
+        String nativeSourceAuthority = nativePdfMetadata(
+            nativeDocument, "SNVirtualSpreadSourceSHA256"
+        );
+        String nativeLayoutAuthority = nativePdfMetadata(
+            nativeDocument, "SNVirtualSpreadLayoutSHA256"
+        );
+        String nativeLinkAuthority = nativePdfMetadata(
+            nativeDocument, "SNVirtualSpreadLinksSHA256"
+        );
+        if (documentPath == null || sourcePage < 0 || nativeDocument == null
+            || !isSha256(nativeSourceAuthority)
+            || !isSha256(nativeLayoutAuthority)
+            || !isSha256(nativeLinkAuthority)) {
             clearQueuedLinkInvocation(viewModel);
-            log("link_jump_not_queued reason=missing_source_state");
+            log("link_jump_not_queued reason=missing_native_source_state");
             return;
         }
         synchronized (STATES) {
@@ -775,7 +826,12 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             state.queuedLinkArguments = arguments.clone();
             state.queuedLinkDocumentPath = documentPath;
             state.queuedLinkSnapshotId = snapshotId;
+            state.queuedLinkVerificationGeneration = verificationGeneration;
             state.queuedLinkRouting = routing;
+            state.queuedLinkNativeDocument = nativeDocument;
+            state.queuedLinkNativeSourceAuthority = nativeSourceAuthority;
+            state.queuedLinkNativeLayoutAuthority = nativeLayoutAuthority;
+            state.queuedLinkNativeLinkAuthority = nativeLinkAuthority;
             state.queuedLinkSourcePage = sourcePage;
             state.queuedLinkAt = System.currentTimeMillis();
         }
@@ -809,7 +865,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static VirtualSpreadNavigation.LinkRouting replayQueuedLink(
         Activity activity,
         Object viewModel,
-        Manifest manifest
+        Manifest manifest,
+        long verificationGeneration
     ) {
         Object[] arguments;
         String documentPath;
@@ -817,6 +874,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         VirtualSpreadNavigation.LinkRouting queuedRouting;
         int sourcePage;
         long queuedAt;
+        long queuedVerificationGeneration;
+        Object queuedNativeDocument;
+        String queuedNativeSourceAuthority;
+        String queuedNativeLayoutAuthority;
+        String queuedNativeLinkAuthority;
         synchronized (STATES) {
             ReaderState state = STATES.get(viewModel);
             if (state == null || state.queuedLinkArguments == null) {
@@ -828,15 +890,44 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             queuedRouting = state.queuedLinkRouting;
             sourcePage = state.queuedLinkSourcePage;
             queuedAt = state.queuedLinkAt;
+            queuedVerificationGeneration =
+                state.queuedLinkVerificationGeneration;
+            queuedNativeDocument = state.queuedLinkNativeDocument;
+            queuedNativeSourceAuthority =
+                state.queuedLinkNativeSourceAuthority;
+            queuedNativeLayoutAuthority =
+                state.queuedLinkNativeLayoutAuthority;
+            queuedNativeLinkAuthority = state.queuedLinkNativeLinkAuthority;
             clearQueuedLinkInvocation(state);
         }
         long age = System.currentTimeMillis() - queuedAt;
         int currentPage = intField(viewModel, "currentPage", -1);
         String verifiedSnapshotId = verifiedSnapshotId(manifest);
+        Object currentNativeDocument = nativePdfDocument(viewModel);
+        boolean sameNativeDocument = currentNativeDocument != null
+            && currentNativeDocument == queuedNativeDocument
+            && queuedNativeSourceAuthority != null
+            && queuedNativeSourceAuthority.equals(nativePdfMetadata(
+                currentNativeDocument,
+                "SNVirtualSpreadSourceSHA256"
+            ))
+            && queuedNativeLayoutAuthority != null
+            && queuedNativeLayoutAuthority.equals(nativePdfMetadata(
+                currentNativeDocument,
+                "SNVirtualSpreadLayoutSHA256"
+            ))
+            && queuedNativeLinkAuthority != null
+            && queuedNativeLinkAuthority.equals(nativePdfMetadata(
+                currentNativeDocument,
+                "SNVirtualSpreadLinksSHA256"
+            ));
         if (!VirtualSpreadNavigation.pendingLinkReplayIsCurrent(
                 sameCanonicalPath(manifest.key, documentPath),
                 snapshotId != null
                     && snapshotId.equals(verifiedSnapshotId),
+                sameNativeDocument
+                    && verificationGeneration > 0L
+                    && queuedVerificationGeneration == verificationGeneration,
                 sourcePage,
                 currentPage,
                 age,
@@ -1499,7 +1590,12 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         state.queuedLinkArguments = null;
         state.queuedLinkDocumentPath = null;
         state.queuedLinkSnapshotId = null;
+        state.queuedLinkVerificationGeneration = 0L;
         state.queuedLinkRouting = null;
+        state.queuedLinkNativeDocument = null;
+        state.queuedLinkNativeSourceAuthority = null;
+        state.queuedLinkNativeLayoutAuthority = null;
+        state.queuedLinkNativeLinkAuthority = null;
         state.queuedLinkSourcePage = -1;
         state.queuedLinkAt = 0L;
     }
@@ -1866,14 +1962,14 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 key,
                 requestedSnapshotId
             );
-            String verificationId = scheduleManifestVerification(
+            VerificationOwner verificationOwner = scheduleManifestVerification(
                     pdf,
                     sidecar,
                     key,
                     pdfIdentity,
                     sidecarIdentity
                 );
-            boolean verificationPending = verificationId != null;
+            boolean verificationPending = verificationOwner != null;
             if (verificationPending) {
                 log("manifest_verification_pending path=" + key);
             }
@@ -1883,7 +1979,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 null,
                 verificationPending,
                 false,
-                verificationId
+                verificationOwner == null
+                    ? null : verificationOwner.snapshotId,
+                verificationOwner == null
+                    ? 0L : verificationOwner.generation
             );
         } catch (Throwable throwable) {
             bindReaderStateToDocument(viewModel, null);
@@ -1954,27 +2053,32 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
      * deferred native action to the same PDF/sidecar bytes without racing a
      * duplicate scheduling attempt that performs no additional work.
      */
-    private static String scheduleManifestVerification(
+    private static VerificationOwner scheduleManifestVerification(
         final File pdf,
         final File sidecar,
         final String key,
         final FileIdentity pdfBefore,
         final FileIdentity sidecarBefore
     ) {
-        final String verificationId = pdfBefore.token()
+        final String snapshotId = pdfBefore.token()
             + ":" + sidecarBefore.token();
         synchronized (MANIFEST_VERIFIER_LOCK) {
             if (!key.equals(observedDocumentKey)) {
                 return null;
             }
-            if (verificationId.equals(VERIFYING.get(key))) {
-                return verificationId;
+            VerificationOwner existing = VERIFYING.get(key);
+            if (existing != null && snapshotId.equals(existing.snapshotId)) {
+                return existing;
             }
             // Only the document most recently requested by the native reader
             // may remain current. Invalidate an active older verification and
             // retain at most one pending task behind it.
             cancelManifestVerificationLocked();
-            VERIFYING.put(key, verificationId);
+            VerificationOwner owner = new VerificationOwner(
+                snapshotId,
+                VERIFICATION_GENERATION.incrementAndGet()
+            );
+            VERIFYING.put(key, owner);
             try {
                 MANIFEST_VERIFIER.execute(new ManifestVerificationTask(
                     pdf,
@@ -1982,11 +2086,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     key,
                     pdfBefore,
                     sidecarBefore,
-                    verificationId
+                    owner
                 ));
-                return verificationId;
+                return owner;
             } catch (RuntimeException exception) {
-                VERIFYING.remove(key, verificationId);
+                VERIFYING.remove(key, owner);
                 throw exception;
             }
         }
@@ -1994,9 +2098,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
 
     private static void requireCurrentVerification(
         String key,
-        String verificationId
+        VerificationOwner owner
     ) throws ManifestVerificationSuperseded {
-        if (!verificationId.equals(VERIFYING.get(key))) {
+        if (VERIFYING.get(key) != owner) {
             throw new ManifestVerificationSuperseded();
         }
     }
@@ -2007,10 +2111,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         String key,
         FileIdentity pdfBefore,
         FileIdentity sidecarBefore,
-        String verificationId
+        VerificationOwner owner
     ) {
         try {
-            if (!verificationId.equals(VERIFYING.get(key))) {
+            if (VERIFYING.get(key) != owner) {
                 return;
             }
             try (
@@ -2025,7 +2129,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     || !sidecarBefore.matches(sidecarOpened)) {
                     scheduleQueuedLinkDiscard(
                         key,
-                        verificationId,
+                        owner,
                         "snapshot_changed_before_read"
                     );
                     log("manifest_rejected reason=snapshot_changed_before_read path="
@@ -2050,7 +2154,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                         sidecarJson,
                         key,
                         sidecarDigest,
-                        verificationId
+                        owner
                     );
                 }
                 String currentSidecarDigest = sha256(readBytes(
@@ -2068,19 +2172,19 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     || !pdfAfter.matches(pdfPathAfter)
                     || !sidecarAfter.matches(sidecarPathAfter)
                     || !sidecarDigest.equals(currentSidecarDigest)) {
-                    if (verificationId.equals(VERIFYING.get(key))) {
+                    if (VERIFYING.get(key) == owner) {
                         MANIFESTS.remove(key);
                     }
                     scheduleQueuedLinkDiscard(
                         key,
-                        verificationId,
+                        owner,
                         "snapshot_changed_during_read"
                     );
                     log("manifest_rejected reason=snapshot_changed_during_read path="
                         + key);
                     return;
                 }
-                if (verificationId.equals(VERIFYING.get(key))) {
+                if (VERIFYING.get(key) == owner) {
                     CachedManifest published = new CachedManifest(
                         pdfAfter,
                         sidecarAfter,
@@ -2088,41 +2192,46 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                         parsed
                     );
                     MANIFESTS.put(key, published);
-                    if (!verificationId.equals(VERIFYING.get(key))) {
+                    if (VERIFYING.get(key) != owner) {
                         MANIFESTS.remove(key, published);
                         return;
                     }
                     if (parsed != null) {
                         log("manifest_accepted path=" + key
                             + " pages=" + parsed.pageCount);
-                        scheduleManifestActivation(key, parsed.revision);
+                        scheduleManifestActivation(
+                            key,
+                            parsed.revision,
+                            owner
+                        );
                     } else {
                         scheduleQueuedLinkDiscard(
                             key,
-                            verificationId,
+                            owner,
                             "manifest_rejected"
                         );
                     }
                 }
             }
         } catch (Throwable throwable) {
-            if (verificationId.equals(VERIFYING.get(key))) {
+            if (VERIFYING.get(key) == owner) {
                 MANIFESTS.remove(key);
                 scheduleQueuedLinkDiscard(
                     key,
-                    verificationId,
+                    owner,
                     "verification_failed"
                 );
                 logFailure("manifest_verification_failed", throwable);
             }
         } finally {
-            VERIFYING.remove(key, verificationId);
+            VERIFYING.remove(key, owner);
         }
     }
 
     private static void scheduleManifestActivation(
         final String key,
-        final String revision
+        final String revision,
+        final VerificationOwner verificationOwner
     ) {
         final Activity owner = activeActivity.get();
         if (owner == null) {
@@ -2148,7 +2257,12 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     return;
                 }
                 VirtualSpreadNavigation.LinkRouting replayedRouting =
-                    replayQueuedLink(owner, viewModel, current);
+                    replayQueuedLink(
+                        owner,
+                        viewModel,
+                        current,
+                        verificationOwner.generation
+                    );
                 if (VirtualSpreadNavigation
                     .replayRequiresImmediateInitialization(replayedRouting)) {
                     handlePageLoaded(viewModel);
@@ -2175,7 +2289,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
 
     private static void scheduleQueuedLinkDiscard(
         final String key,
-        final String snapshotId,
+        final VerificationOwner verificationOwner,
         final String reason
     ) {
         final Activity owner = activeActivity.get();
@@ -2200,10 +2314,12 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                             key,
                             state.queuedLinkDocumentPath
                         )
-                        || snapshotId == null
-                        || !snapshotId.equals(
+                        || verificationOwner == null
+                        || !verificationOwner.snapshotId.equals(
                             state.queuedLinkSnapshotId
-                        )) {
+                        )
+                        || verificationOwner.generation
+                            != state.queuedLinkVerificationGeneration) {
                         return;
                     }
                     clearQueuedLinkInvocation(state);
@@ -2346,9 +2462,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         String sidecarJson,
         String key,
         String sidecarDigest,
-        String verificationId
+        VerificationOwner owner
     ) throws Exception {
-        requireCurrentVerification(key, verificationId);
+        requireCurrentVerification(key, owner);
         if (!VirtualSpreadNavigation.jsonObjectHasUniqueKeys(sidecarJson)) {
             log("manifest_rejected reason=duplicate_or_invalid_json path="
                 + key);
@@ -2400,12 +2516,12 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
         if (!isSha256(expectedHash)
             || !expectedHash.equalsIgnoreCase(
-                sha256File(pdfInput, key, verificationId)
+                sha256File(pdfInput, key, owner)
             )) {
             log("manifest_rejected reason=output_hash path=" + key);
             return null;
         }
-        requireCurrentVerification(key, verificationId);
+        requireCurrentVerification(key, owner);
         String embeddedSourceAuthority =
             VirtualSpreadLinkAuthority.readPdfSourceDigest(pdfInput);
         if (!isSha256(expectedSourceAuthority)
@@ -2420,7 +2536,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             "linkAuthoritySha256",
             ""
         );
-        requireCurrentVerification(key, verificationId);
+        requireCurrentVerification(key, owner);
         String embeddedLinkAuthority =
             VirtualSpreadLinkAuthority.readPdfDigest(pdfInput);
         if (!isSha256(expectedLinkAuthority)
@@ -2432,7 +2548,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             "layoutAuthoritySha256",
             ""
         );
-        requireCurrentVerification(key, verificationId);
+        requireCurrentVerification(key, owner);
         String embeddedLayoutAuthority =
             VirtualSpreadLinkAuthority.readPdfLayoutDigest(pdfInput);
         if (!isSha256(expectedLayoutAuthority)
@@ -2493,7 +2609,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         VirtualSpreadNavigation.Spread[] spreads =
             new VirtualSpreadNavigation.Spread[pageCount];
         for (int index = 0; index < pageCount; index++) {
-            requireCurrentVerification(key, verificationId);
+            requireCurrentVerification(key, owner);
             JSONObject spread = spreadsJson.optJSONObject(index);
             Integer spreadIndex = exactManifestInteger(
                 spread, "virtualPageIndex"
@@ -2523,7 +2639,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             );
         }
         for (int index = 0; index < sourcePageCount; index++) {
-            requireCurrentVerification(key, verificationId);
+            requireCurrentVerification(key, owner);
             if (!sourceEntryMatches(
                     sourcePagesJson.optJSONObject(index),
                     index,
@@ -2537,7 +2653,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             new ArrayList<>();
         ArrayList<String> linkAuthorityRecords = new ArrayList<>();
         for (int index = 0; index < linksJson.length(); index++) {
-            requireCurrentVerification(key, verificationId);
+            requireCurrentVerification(key, owner);
             JSONObject link = linksJson.optJSONObject(index);
             if (link == null) {
                 log("manifest_rejected reason=link_record index=" + index);
@@ -2694,7 +2810,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             log("manifest_rejected reason=link_authority_records path=" + key);
             return null;
         }
-        requireCurrentVerification(key, verificationId);
+        requireCurrentVerification(key, owner);
         return new Manifest(
             key,
             sidecarDigest,
@@ -2748,7 +2864,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static String sha256File(
         RandomAccessFile input,
         String key,
-        String verificationId
+        VerificationOwner owner
     ) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         long originalPosition = input.getFilePointer();
@@ -2756,7 +2872,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             input.seek(0L);
             byte[] buffer = new byte[64 * 1024];
             while (true) {
-                requireCurrentVerification(key, verificationId);
+                requireCurrentVerification(key, owner);
                 int count = input.read(buffer);
                 if (count < 0) {
                     break;

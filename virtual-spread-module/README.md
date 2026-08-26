@@ -99,8 +99,9 @@ replacement pair does not match Supernote's still-open native document; reopenin
 the document is required before the new authority can activate. A native link
 tapped during verification is also consumed and queued once. After successful
 activation, the module replays it only if the same document, exact PDF/sidecar
-filesystem snapshot, source page, and external/internal routing classification
-are still current and the request is fresh; same-path replacement,
+filesystem snapshot, unique verifier generation, native MuPDF document object,
+embedded source/layout/link authorities, source page, and external/internal
+routing classification are still current and the request is fresh; same-path replacement,
 document/page changes, routing changes, and failed or rejected verification
 discard it. External replay immediately initializes the verified current spread,
 while an internal replay waits for its native page-load callback. Reusing one
@@ -148,6 +149,11 @@ names are the same inode and match the authenticated old digest. Guarded and
 unguarded POSIX no-replace publication use an atomic kernel hard-link operation,
 so no check-then-replace window can overwrite an incumbent destination.
 Output, sidecar, and marker staging names are deterministic and reserved.
+Each exclusively created staging inode remains open through all writes and is
+identity-bound before Windows releases its handle for publication. The generator
+captures each canonical target's exact pre-generation state, then rechecks it at
+the transaction boundary. Final moves and rollback restores are no-replace, so a
+late target is preserved rather than overwritten.
 Marker-free remnants are preserved and rejected for manual recovery; once a
 valid marker exists, a staged remnant is removed only when its digest matches
 the authenticated transaction. A pre-existing `.retired` path is never deleted

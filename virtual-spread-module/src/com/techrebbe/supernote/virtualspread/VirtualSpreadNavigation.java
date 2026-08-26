@@ -678,6 +678,7 @@ public final class VirtualSpreadNavigation {
     public static boolean pendingLinkReplayIsCurrent(
         boolean sameDocument,
         boolean sameSnapshot,
+        boolean sameNativeDocument,
         int sourcePage,
         int currentPage,
         long ageMillis,
@@ -685,6 +686,7 @@ public final class VirtualSpreadNavigation {
     ) {
         return sameDocument
             && sameSnapshot
+            && sameNativeDocument
             && sourcePage >= 0
             && sourcePage == currentPage
             && ageMillis >= 0L

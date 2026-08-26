@@ -1408,6 +1408,38 @@ build (SHA-256
 A clean follow-up full-branch review and focused hardware validation remain
 release gates; PR #16 stays draft.
 
+## Review pass 60 publication and deferred-link race closure - LOCAL PASS
+
+The next independent Ultra review identified six final concurrency boundaries.
+Generator staging now keeps each exclusively created inode open through every
+write and binds its identity before Windows must release the handle for an atomic
+move. A replaced staging pathname is preserved, and cleanup no longer masks the
+more precise boundary error already in flight. The exact authorized state of the
+output and sidecar is captured before expensive generation, rechecked before the
+transaction, and carried through publication. Both final moves and every backup
+restore are kernel-level no-replace operations, so a file that appears late is
+never overwritten by either normal publication or rollback.
+
+The Android verifier now gives every task a unique monotonic owner rather than
+using a reusable filesystem snapshot token as task identity, closing an A-to-B-
+to-A cancellation race. A link deferred during cold verification is also bound
+to that unique verifier generation, the exact native MuPDF document object, and
+its three embedded authorities. Same-path replacement can therefore never replay
+a stale native `SuperNoteLink` against a different open document.
+
+Deterministic regressions cover a POSIX staging-name hard-link substitution, a
+no-force target appearing during generation, a late final target, a late target
+during backup restoration, verifier-generation ABA, and native-document mismatch
+during deferred-link replay. Local automated validation passes 118 generator
+tests on Windows (eight expected platform/filesystem or privilege skips), 135
+focused navigation/manifest/cache assertions, 12 cross-language authority
+assertions, 8,752 exhaustive navigation assertions, both native invariant suites,
+hook-scope validation, and the signed/verified v0.0.24 (`versionCode=24`) APK
+build (SHA-256
+`4c0983bdd2df031f3481509e0f00015a3e1c9cfb284da4fceccee8b2944fdc4c`).
+A fresh exact-head Ultra review and focused hardware validation remain release
+gates; PR #16 stays draft.
+
 ## Failure capture
 
 Before reproducing a failure:

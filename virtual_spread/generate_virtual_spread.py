@@ -11,6 +11,7 @@ import math
 import os
 import stat
 import struct
+import sys
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -141,6 +142,25 @@ class SourceIdentity:
     size: int
     modified_ns: int
     changed_ns: int
+
+
+@dataclass(frozen=True)
+class PublicationTargetState:
+    """The exact canonical target state authorized before generation starts."""
+
+    exists: bool
+    identity: SourceIdentity | None
+    sha256: str | None
+
+
+@dataclass
+class StagedPublicationFile:
+    """An exclusively created staging inode retained until publication ends."""
+
+    path: Path
+    descriptor: int
+    ownership_guard: PublicationOwnershipGuard | None
+    retained_identity: SourceIdentity | None = None
 
 
 @dataclass(frozen=True)
@@ -503,6 +523,7 @@ def _bind_pdf_authorities(
     layout_authority_sha256: str,
     link_authority_sha256: str,
     ownership_guard: PublicationOwnershipGuard | None = None,
+    retained_descriptor: int | None = None,
 ) -> None:
     for label, value in (
         ("source", source_authority_sha256),
@@ -524,11 +545,17 @@ def _bind_pdf_authorities(
         + link_authority_sha256.encode("ascii")
         + b"\n"
     )
-    flags = os.O_RDWR
-    flags |= getattr(os, "O_BINARY", 0)
-    flags |= getattr(os, "O_NOINHERIT", 0)
-    flags |= getattr(os, "O_NOFOLLOW", 0)
-    descriptor = _publication_open_file(path, flags, ownership_guard)
+    if retained_descriptor is None:
+        flags = os.O_RDWR
+        flags |= getattr(os, "O_BINARY", 0)
+        flags |= getattr(os, "O_NOINHERIT", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = _publication_open_file(path, flags, ownership_guard)
+    else:
+        _require_staged_path_identity(
+            path, retained_descriptor, ownership_guard
+        )
+        descriptor = os.dup(retained_descriptor)
     with os.fdopen(descriptor, "r+b", buffering=0) as stream:
         stream.seek(0, os.SEEK_END)
         length = stream.tell()
@@ -551,6 +578,10 @@ def _bind_pdf_authorities(
         stream.truncate()
         stream.flush()
         os.fsync(stream.fileno())
+    if retained_descriptor is not None:
+        _require_staged_path_identity(
+            path, retained_descriptor, ownership_guard
+        )
 
 
 def _require_supported_direction(direction: str) -> str:
@@ -2205,29 +2236,42 @@ def _write_json(
     path: Path,
     value: dict[str, Any],
     ownership_guard: PublicationOwnershipGuard | None = None,
+    retained_descriptor: int | None = None,
 ) -> None:
-    flags = os.O_WRONLY | os.O_TRUNC
-    flags |= getattr(os, "O_BINARY", 0)
-    flags |= getattr(os, "O_NOINHERIT", 0)
-    flags |= getattr(os, "O_NOFOLLOW", 0)
-    descriptor = _publication_open_file(path, flags, ownership_guard)
+    if retained_descriptor is None:
+        flags = os.O_WRONLY
+        flags |= getattr(os, "O_BINARY", 0)
+        flags |= getattr(os, "O_NOINHERIT", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = _publication_open_file(path, flags, ownership_guard)
+    else:
+        _require_staged_path_identity(
+            path, retained_descriptor, ownership_guard
+        )
+        descriptor = os.dup(retained_descriptor)
     with os.fdopen(
         descriptor,
         "w",
         encoding="utf-8",
         newline="\n",
     ) as stream:
+        stream.seek(0)
+        stream.truncate(0)
         json.dump(value, stream, ensure_ascii=False, indent=2, sort_keys=True)
         stream.write("\n")
         stream.flush()
         os.fsync(stream.fileno())
+    if retained_descriptor is not None:
+        _require_staged_path_identity(
+            path, retained_descriptor, ownership_guard
+        )
 
 
 def _temporary_neighbor(
     path: Path,
     suffix: str,
     ownership_guard: PublicationOwnershipGuard | None = None,
-) -> Path:
+) -> StagedPublicationFile:
     path = _lexical_absolute(path)
     candidate = path.with_name(f".{path.name}{suffix}")
     flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
@@ -2243,11 +2287,8 @@ def _temporary_neighbor(
                 "Staged publication artifact already exists and requires "
                 f"recovery: {candidate}"
             ) from error
-        try:
-            os.close(descriptor)
-        finally:
-            namespace.fsync()
-        return candidate
+        namespace.fsync()
+        return StagedPublicationFile(candidate, descriptor, ownership_guard)
     _validate_publication_ownership(ownership_guard)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -2257,9 +2298,114 @@ def _temporary_neighbor(
             "Staged publication artifact already exists and requires "
             f"recovery: {candidate}"
         ) from error
-    os.close(descriptor)
     _fsync_parent_directories(candidate)
-    return candidate
+    return StagedPublicationFile(candidate, descriptor, ownership_guard)
+
+
+def _require_staged_path_identity(
+    path: Path,
+    descriptor: int,
+    ownership_guard: PublicationOwnershipGuard | None,
+) -> SourceIdentity:
+    """Require a staging name to still reference its retained open inode."""
+    try:
+        opened = os.fstat(descriptor)
+        namespace = _publication_namespace(ownership_guard)
+        path_entry = (
+            namespace.lstat(path)
+            if namespace is not None
+            else _lexical_absolute(path).lstat()
+        )
+    except OSError as error:
+        raise VirtualSpreadError(
+            f"Staged publication artifact disappeared: {path}"
+        ) from error
+    if not stat.S_ISREG(opened.st_mode) or not stat.S_ISREG(path_entry.st_mode):
+        raise VirtualSpreadError(
+            f"Staged publication artifact must remain a regular file: {path}"
+        )
+    opened_identity = _identity(opened)
+    path_identity = _identity(path_entry)
+    if (
+        opened_identity.device != path_identity.device
+        or opened_identity.inode != path_identity.inode
+    ):
+        raise VirtualSpreadError(
+            f"Staged publication artifact identity changed: {path}"
+        )
+    return opened_identity
+
+
+def _close_staged_artifact(
+    artifact: StagedPublicationFile,
+    *,
+    missing_ok: bool = True,
+) -> None:
+    """Remove only the retained staging inode; preserve a replaced path."""
+    cleanup_error: BaseException | None = None
+    try:
+        try:
+            if artifact.descriptor >= 0:
+                artifact.retained_identity = _require_staged_path_identity(
+                    artifact.path,
+                    artifact.descriptor,
+                    artifact.ownership_guard,
+                )
+                if os.name == "nt":
+                    os.close(artifact.descriptor)
+                    artifact.descriptor = -1
+            if artifact.retained_identity is not None:
+                _require_publication_path_identity(
+                    artifact.path,
+                    artifact.retained_identity,
+                    "Staged publication artifact",
+                    artifact.ownership_guard,
+                )
+            elif artifact.descriptor < 0:
+                raise VirtualSpreadError(
+                    f"Staged publication artifact has no retained identity: "
+                    f"{artifact.path}"
+                )
+        except VirtualSpreadError as error:
+            try:
+                namespace = _publication_namespace(artifact.ownership_guard)
+                if namespace is not None:
+                    namespace.lstat(artifact.path)
+                else:
+                    _lexical_absolute(artifact.path).lstat()
+            except FileNotFoundError:
+                if not missing_ok:
+                    cleanup_error = error
+            else:
+                cleanup_error = error
+        else:
+            _publication_unlink(
+                artifact.path,
+                artifact.ownership_guard,
+                missing_ok=missing_ok,
+            )
+    finally:
+        if artifact.descriptor >= 0:
+            os.close(artifact.descriptor)
+            artifact.descriptor = -1
+    if cleanup_error is not None:
+        raise cleanup_error
+
+
+def _release_staged_artifact_for_move(
+    artifact: StagedPublicationFile,
+) -> SourceIdentity:
+    """Release Windows' non-share-delete handle after binding its inode."""
+    identity = _require_staged_path_identity(
+        artifact.path,
+        artifact.descriptor,
+        artifact.ownership_guard,
+    )
+    artifact.retained_identity = identity
+    if os.name == "nt":
+        os.close(artifact.descriptor)
+        artifact.descriptor = -1
+    return identity
 
 
 def _publish_pair(
@@ -2272,6 +2418,9 @@ def _publish_pair(
     expected_output_hash: str | None = None,
     expected_manifest_identity: SourceIdentity | None = None,
     expected_manifest_hash: str | None = None,
+    expected_output_state: PublicationTargetState | None = None,
+    expected_manifest_state: PublicationTargetState | None = None,
+    replace_authorized: bool = True,
 ) -> None:
     """Publish a matching pair with durable recovery across process death."""
     expected_publication_arguments: dict[str, Any] = {}
@@ -2297,6 +2446,9 @@ def _publish_pair(
         temporary_manifest,
         manifest_path,
         ownership_guard,
+        expected_output_state=expected_output_state,
+        expected_manifest_state=expected_manifest_state,
+        replace_authorized=replace_authorized,
         **expected_publication_arguments,
     )
     try:
@@ -2326,6 +2478,7 @@ def _publish_pair(
                 transaction["oldOutputSha256"],
                 "Existing output",
                 "Output backup",
+                transaction["_oldOutputIdentity"],
             ),
             (
                 manifest_path,
@@ -2334,6 +2487,7 @@ def _publish_pair(
                 transaction["oldManifestSha256"],
                 "Existing manifest",
                 "Manifest backup",
+                transaction["_oldManifestIdentity"],
             ),
         )
         for (
@@ -2343,6 +2497,7 @@ def _publish_pair(
             old_hash,
             final_label,
             backup_label,
+            old_identity,
         ) in entries:
             backup_exists = _require_regular_publication_target(
                 backup,
@@ -2364,6 +2519,7 @@ def _publish_pair(
                         f"Publication target disappeared: {final_path}"
                     )
                 assert isinstance(old_hash, str)
+                assert isinstance(old_identity, SourceIdentity)
                 _require_publication_file_hash(
                     final_path,
                     old_hash,
@@ -2376,6 +2532,7 @@ def _publish_pair(
                     backup,
                     replace_existing=False,
                     ownership_guard=ownership_guard,
+                    expected_source_identity=old_identity,
                 )
                 _require_publication_file_hash(
                     backup,
@@ -2408,7 +2565,9 @@ def _publish_pair(
         _durable_replace(
             temporary_manifest,
             manifest_path,
+            replace_existing=False,
             ownership_guard=ownership_guard,
+            expected_source_identity=published_manifest_identity,
         )
         _require_publication_manifest_hash(
             manifest_path,
@@ -2428,7 +2587,9 @@ def _publish_pair(
         _durable_replace(
             temporary_output,
             output_path,
+            replace_existing=False,
             ownership_guard=ownership_guard,
+            expected_source_identity=published_output_identity,
         )
         _require_publication_manifest_hash(
             manifest_path,
@@ -3097,6 +3258,61 @@ def _publication_manifest_matches_sha256(
         return False
 
 
+def _publication_target_state(
+    path: Path,
+    label: str,
+    ownership_guard: PublicationOwnershipGuard | None,
+    *,
+    manifest: bool = False,
+) -> PublicationTargetState:
+    exists = _require_regular_publication_target(
+        path, label, ownership_guard
+    )
+    if not exists:
+        return PublicationTargetState(False, None, None)
+    evidence = (
+        _publication_manifest_evidence
+        if manifest else _publication_output_evidence
+    )
+    identity, digest = evidence(path, label, ownership_guard)
+    return PublicationTargetState(True, identity, digest)
+
+
+def _require_publication_target_state(
+    path: Path,
+    label: str,
+    expected: PublicationTargetState,
+    ownership_guard: PublicationOwnershipGuard | None,
+    *,
+    manifest: bool = False,
+) -> None:
+    current_exists = _require_regular_publication_target(
+        path, label, ownership_guard
+    )
+    if current_exists != expected.exists:
+        change = "appeared" if current_exists else "disappeared"
+        raise VirtualSpreadError(
+            f"Publication target {change} during generation: {path}"
+        )
+    if not current_exists:
+        return
+    if expected.identity is None or expected.sha256 is None:
+        raise VirtualSpreadError(
+            f"Missing authorized publication target evidence: {path}"
+        )
+    evidence = (
+        _publication_manifest_evidence
+        if manifest else _publication_output_evidence
+    )
+    evidence(
+        path,
+        label,
+        ownership_guard,
+        expected_identity=expected.identity,
+        expected_hash=expected.sha256,
+    )
+
+
 def _publication_unlink(
     path: Path,
     ownership_guard: PublicationOwnershipGuard | None,
@@ -3274,36 +3490,73 @@ def _durable_replace(
     *,
     replace_existing: bool = True,
     ownership_guard: PublicationOwnershipGuard | None = None,
+    expected_source_identity: SourceIdentity | None = None,
 ) -> None:
     source = Path(source)
     target = Path(target)
+    if expected_source_identity is not None:
+        _require_publication_path_identity(
+            source,
+            expected_source_identity,
+            "Publication move source",
+            ownership_guard,
+        )
     namespace = _publication_namespace(ownership_guard)
     if namespace is not None:
         namespace.replace(
             source, target, replace_existing=replace_existing
         )
-        return
-    _validate_publication_ownership(ownership_guard)
-    if os.name == "nt":
-        _windows_move_file_ex(
-            source,
+    else:
+        _validate_publication_ownership(ownership_guard)
+        if os.name == "nt":
+            _windows_move_file_ex(
+                source,
+                target,
+                _windows_move_flags(replace_existing),
+            )
+        elif not replace_existing:
+            # POSIX os.replace() always permits replacement. Publish a hard link
+            # instead so the kernel performs the existence check and insertion as
+            # one namespace operation, even for test/helper callers that do not
+            # hold a PublicationOwnershipGuard. The staged and final paths are
+            # siblings, so they necessarily share a filesystem.
+            os.link(source, target, follow_symlinks=False)
+            _fsync_parent_directories(source, target)
+            os.unlink(source)
+            _fsync_parent_directories(source, target)
+        else:
+            os.replace(source, target)
+            _fsync_parent_directories(source, target)
+    if expected_source_identity is not None:
+        _require_publication_path_identity(
             target,
-            _windows_move_flags(replace_existing),
+            expected_source_identity,
+            "Publication move target",
+            ownership_guard,
         )
-        return
-    if not replace_existing:
-        # POSIX os.replace() always permits replacement. Publish a hard link
-        # instead so the kernel performs the existence check and insertion as
-        # one namespace operation, even for test/helper callers that do not
-        # hold a PublicationOwnershipGuard. The staged and final paths are
-        # siblings, so they necessarily share a filesystem.
-        os.link(source, target, follow_symlinks=False)
-        _fsync_parent_directories(source, target)
-        os.unlink(source)
-        _fsync_parent_directories(source, target)
-        return
-    os.replace(source, target)
-    _fsync_parent_directories(source, target)
+
+
+def _require_publication_path_identity(
+    path: Path,
+    expected: SourceIdentity,
+    label: str,
+    ownership_guard: PublicationOwnershipGuard | None,
+) -> SourceIdentity:
+    try:
+        namespace = _publication_namespace(ownership_guard)
+        entry = (
+            namespace.lstat(path)
+            if namespace is not None
+            else _lexical_absolute(path).lstat()
+        )
+    except OSError as error:
+        raise VirtualSpreadError(f"{label} disappeared: {path}") from error
+    if not stat.S_ISREG(entry.st_mode):
+        raise VirtualSpreadError(f"{label} must be a regular file: {path}")
+    actual = _identity(entry)
+    if not _same_open_file(expected, actual):
+        raise VirtualSpreadError(f"{label} identity changed: {path}")
+    return actual
 
 
 def _fsync_parent_directories(*paths: Path) -> None:
@@ -3333,6 +3586,8 @@ def _fsync_parent_directories(*paths: Path) -> None:
 def _durably_remove(
     path: Path,
     ownership_guard: PublicationOwnershipGuard | None = None,
+    *,
+    expected_identity: SourceIdentity | None = None,
 ) -> None:
     retired = path.with_name(path.name + ".retired")
     if _require_regular_publication_target(
@@ -3350,6 +3605,7 @@ def _durably_remove(
             retired,
             replace_existing=False,
             ownership_guard=ownership_guard,
+            expected_source_identity=expected_identity,
         )
     except FileNotFoundError:
         return
@@ -3464,25 +3720,28 @@ def _write_publication_marker(
         ownership_guard,
     )
     try:
-        _write_json(staged_marker, transaction, ownership_guard)
+        _write_json(
+            staged_marker.path,
+            transaction,
+            ownership_guard,
+            retained_descriptor=staged_marker.descriptor,
+        )
+        staged_identity = _release_staged_artifact_for_move(staged_marker)
         try:
             _validate_publication_ownership(ownership_guard)
             _durable_replace(
-                staged_marker,
+                staged_marker.path,
                 marker_path,
                 replace_existing=False,
                 ownership_guard=ownership_guard,
+                expected_source_identity=staged_identity,
             )
         except FileExistsError as error:
             raise VirtualSpreadError(
                 f"Publication is already in progress: {marker_path}"
             ) from error
     finally:
-        _publication_unlink(
-            staged_marker,
-            ownership_guard,
-            missing_ok=True,
-        )
+        _close_staged_artifact(staged_marker)
 
 
 def _publication_marker_object(
@@ -3891,11 +4150,11 @@ def _recover_pair_publication(
                         f"Unexpected backup without an original: {backup}"
                     )
                 assert isinstance(old_hash, str)
-                _require_publication_file_hash(
+                backup_identity, _ = _publication_file_evidence(
                     backup,
-                    old_hash,
                     backup_label,
                     ownership_guard,
+                    expected_hash=old_hash,
                 )
                 if final_exists:
                     if _publication_paths_share_inode(
@@ -3909,24 +4168,43 @@ def _recover_pair_publication(
                         # same authenticated old inode. Treat that exact state
                         # as an interrupted backup move, not as a concurrent
                         # untrusted replacement.
-                        _require_publication_file_hash(
+                        final_identity, _ = _publication_file_evidence(
                             final_path,
-                            old_hash,
                             "Interrupted publication target",
                             ownership_guard,
+                            expected_hash=old_hash,
                         )
-                    else:
-                        _require_publication_file_hash(
+                        _durably_remove(
+                            backup,
+                            ownership_guard,
+                            expected_identity=backup_identity,
+                        )
+                        _require_publication_path_identity(
                             final_path,
-                            new_hash,
+                            final_identity,
+                            "Restored publication target",
+                            ownership_guard,
+                        )
+                        continue
+                    else:
+                        final_identity, _ = _publication_file_evidence(
+                            final_path,
                             "Staged publication target",
                             ownership_guard,
+                            expected_hash=new_hash,
+                        )
+                        _durably_remove(
+                            final_path,
+                            ownership_guard,
+                            expected_identity=final_identity,
                         )
                 _validate_publication_ownership(ownership_guard)
                 _durable_replace(
                     backup,
                     final_path,
+                    replace_existing=False,
                     ownership_guard=ownership_guard,
+                    expected_source_identity=backup_identity,
                 )
                 _require_publication_file_hash(
                     final_path,
@@ -3974,6 +4252,9 @@ def _prepare_publication_transaction(
     expected_output_hash: str | None = None,
     expected_manifest_identity: SourceIdentity | None = None,
     expected_manifest_hash: str | None = None,
+    expected_output_state: PublicationTargetState | None = None,
+    expected_manifest_state: PublicationTargetState | None = None,
+    replace_authorized: bool = True,
 ) -> dict[str, Any]:
     output_path = _require_unaliased_output_path(output_path)
     manifest_path = _require_runtime_manifest_path(
@@ -3986,24 +4267,44 @@ def _prepare_publication_transaction(
         ownership_guard,
         active_staged_paths=(temporary_output, temporary_manifest),
     )
-    had_output, had_manifest = _require_regular_publication_targets(
+    if expected_output_state is None:
+        expected_output_state = _publication_target_state(
+            output_path, "Existing output", ownership_guard
+        )
+    if expected_manifest_state is None:
+        expected_manifest_state = _publication_target_state(
+            manifest_path,
+            "Existing manifest",
+            ownership_guard,
+            manifest=True,
+        )
+    if (
+        not replace_authorized
+        and (expected_output_state.exists or expected_manifest_state.exists)
+    ):
+        raise VirtualSpreadError(
+            "Output already exists; pass --force to replace it"
+        )
+    _require_publication_target_state(
         output_path,
-        manifest_path,
+        "Existing output",
+        expected_output_state,
         ownership_guard,
     )
+    _require_publication_target_state(
+        manifest_path,
+        "Existing manifest",
+        expected_manifest_state,
+        ownership_guard,
+        manifest=True,
+    )
+    had_output = expected_output_state.exists
+    had_manifest = expected_manifest_state.exists
     marker_path, output_backup, manifest_backup = _publication_artifacts(
         output_path,
     )
-    old_output_hash = (
-        _publication_sha256(output_path, ownership_guard)
-        if had_output
-        else None
-    )
-    old_manifest_hash = (
-        _publication_sha256(manifest_path, ownership_guard)
-        if had_manifest
-        else None
-    )
+    old_output_hash = expected_output_state.sha256
+    old_manifest_hash = expected_manifest_state.sha256
     new_output_identity, new_output_hash = _publication_output_evidence(
         temporary_output,
         "Staged output",
@@ -4038,6 +4339,8 @@ def _prepare_publication_transaction(
     _write_publication_marker(marker_path, marker_record, ownership_guard)
     transaction["_newOutputIdentity"] = new_output_identity
     transaction["_newManifestIdentity"] = new_manifest_identity
+    transaction["_oldOutputIdentity"] = expected_output_state.identity
+    transaction["_oldManifestIdentity"] = expected_manifest_state.identity
     return transaction
 
 
@@ -4056,6 +4359,8 @@ def _build_virtual_spread_from_snapshot(
     spread_height: float = 648.0,
     gutter: float = 0.0,
     force: bool = False,
+    expected_output_state: PublicationTargetState,
+    expected_manifest_state: PublicationTargetState,
 ) -> dict[str, Any]:
     source_path = source_path.resolve()
     output_path = _require_unaliased_output_path(output_path)
@@ -4063,10 +4368,18 @@ def _build_virtual_spread_from_snapshot(
         output_path,
         manifest_path,
     )
-    output_exists, manifest_exists = _require_regular_publication_targets(
+    _require_publication_target_state(
         output_path,
-        manifest_path,
+        "Existing output",
+        expected_output_state,
         ownership_guard,
+    )
+    _require_publication_target_state(
+        manifest_path,
+        "Existing manifest",
+        expected_manifest_state,
+        ownership_guard,
+        manifest=True,
     )
     if not source_path.is_file():
         raise VirtualSpreadError(f"Source PDF does not exist: {source_path}")
@@ -4075,7 +4388,9 @@ def _build_virtual_spread_from_snapshot(
         output_path,
         manifest_path,
     )
-    if not force and (output_exists or manifest_exists):
+    if not force and (
+        expected_output_state.exists or expected_manifest_state.exists
+    ):
         raise VirtualSpreadError("Output already exists; pass --force to replace it")
     slot_width = _require_runtime_float_geometry(
         spread_width, spread_height, gutter
@@ -4205,31 +4520,39 @@ def _build_virtual_spread_from_snapshot(
     temporary_output = _temporary_neighbor(
         output_path, ".tmp", ownership_guard
     )
-    temporary_manifest: Path | None = None
+    temporary_manifest: StagedPublicationFile | None = None
     try:
-        output_flags = os.O_WRONLY | os.O_TRUNC
-        output_flags |= getattr(os, "O_BINARY", 0)
-        output_flags |= getattr(os, "O_NOINHERIT", 0)
-        output_flags |= getattr(os, "O_NOFOLLOW", 0)
-        output_descriptor = _publication_open_file(
-            temporary_output, output_flags, ownership_guard
+        _require_staged_path_identity(
+            temporary_output.path,
+            temporary_output.descriptor,
+            ownership_guard,
         )
+        output_descriptor = os.dup(temporary_output.descriptor)
         with os.fdopen(output_descriptor, "wb", buffering=0) as stream:
+            stream.seek(0)
+            stream.truncate(0)
             writer.write(stream)
             stream.flush()
             os.fsync(stream.fileno())
         _bind_pdf_authorities(
-            temporary_output,
+            temporary_output.path,
             source_hash,
             layout_authority_hash,
             link_authority_hash,
             ownership_guard,
+            retained_descriptor=temporary_output.descriptor,
+        )
+        retained_output_identity = _require_staged_path_identity(
+            temporary_output.path,
+            temporary_output.descriptor,
+            ownership_guard,
         )
         temporary_output_identity, temporary_output_hash = (
             _publication_output_evidence(
-                temporary_output,
+                temporary_output.path,
                 "Generated output PDF",
                 ownership_guard,
+                expected_identity=retained_output_identity,
             )
         )
         verification_flags = os.O_RDONLY
@@ -4237,7 +4560,7 @@ def _build_virtual_spread_from_snapshot(
         verification_flags |= getattr(os, "O_NOINHERIT", 0)
         verification_flags |= getattr(os, "O_NOFOLLOW", 0)
         verification_descriptor = _publication_open_file(
-            temporary_output, verification_flags, ownership_guard
+            temporary_output.path, verification_flags, ownership_guard
         )
         with os.fdopen(
             verification_descriptor, "rb", buffering=0
@@ -4259,7 +4582,7 @@ def _build_virtual_spread_from_snapshot(
                         "Written PDF has inconsistent page geometry"
                     )
         _publication_output_evidence(
-            temporary_output,
+            temporary_output.path,
             "Generated output PDF",
             ownership_guard,
             expected_identity=temporary_output_identity,
@@ -4299,43 +4622,76 @@ def _build_virtual_spread_from_snapshot(
             ".tmp",
             ownership_guard,
         )
-        _write_json(temporary_manifest, manifest, ownership_guard)
+        _write_json(
+            temporary_manifest.path,
+            manifest,
+            ownership_guard,
+            retained_descriptor=temporary_manifest.descriptor,
+        )
+        retained_manifest_identity = _require_staged_path_identity(
+            temporary_manifest.path,
+            temporary_manifest.descriptor,
+            ownership_guard,
+        )
         temporary_manifest_identity, temporary_manifest_hash = (
             _publication_manifest_evidence(
-                temporary_manifest,
+                temporary_manifest.path,
                 "Generated manifest",
                 ownership_guard,
+                expected_identity=retained_manifest_identity,
             )
         )
+        released_output_identity = _release_staged_artifact_for_move(
+            temporary_output
+        )
+        released_manifest_identity = _release_staged_artifact_for_move(
+            temporary_manifest
+        )
+        if not _same_open_file(
+            temporary_output_identity, released_output_identity
+        ) or not _same_open_file(
+            temporary_manifest_identity, released_manifest_identity
+        ):
+            raise VirtualSpreadError(
+                "Staged publication artifact changed before publication"
+            )
         _require_source_snapshot(
             source_path,
             source_identity,
             source_hash,
         )
         _publish_pair(
-            temporary_output,
+            temporary_output.path,
             output_path,
-            temporary_manifest,
+            temporary_manifest.path,
             manifest_path,
             ownership_guard,
             expected_output_identity=temporary_output_identity,
             expected_output_hash=temporary_output_hash,
             expected_manifest_identity=temporary_manifest_identity,
             expected_manifest_hash=temporary_manifest_hash,
+            expected_output_state=expected_output_state,
+            expected_manifest_state=expected_manifest_state,
+            replace_authorized=force,
         )
         return manifest
     finally:
-        _publication_unlink(
-            temporary_output,
-            ownership_guard,
-            missing_ok=True,
-        )
-        if temporary_manifest is not None:
-            _publication_unlink(
-                temporary_manifest,
-                ownership_guard,
-                missing_ok=True,
-            )
+        # A hostile staging-name replacement is itself important evidence, but
+        # it must not obscure the more precise boundary check that already
+        # rejected that replacement.  Still close every retained descriptor and
+        # preserve every unexpected path.  Surface cleanup failure only when no
+        # generation/publication exception is already propagating.
+        primary_exception = sys.exc_info()[1]
+        cleanup_errors: list[BaseException] = []
+        for staged_artifact in (temporary_output, temporary_manifest):
+            if staged_artifact is None:
+                continue
+            try:
+                _close_staged_artifact(staged_artifact)
+            except BaseException as cleanup_error:
+                cleanup_errors.append(cleanup_error)
+        if primary_exception is None and cleanup_errors:
+            raise cleanup_errors[0]
 
 
 def _build_virtual_spread_locked(
@@ -4375,6 +4731,17 @@ def _build_virtual_spread_locked(
         raise VirtualSpreadError(f"Source PDF does not exist: {source_path}")
     if not force and (output_exists or manifest_exists):
         raise VirtualSpreadError("Output already exists; pass --force to replace it")
+    expected_output_state = _publication_target_state(
+        output_path,
+        "Existing output",
+        ownership_guard,
+    )
+    expected_manifest_state = _publication_target_state(
+        manifest_path,
+        "Existing manifest",
+        ownership_guard,
+        manifest=True,
+    )
     (
         cover_separate,
         spread_width,
@@ -4412,6 +4779,8 @@ def _build_virtual_spread_locked(
             spread_height=spread_height,
             gutter=gutter,
             force=force,
+            expected_output_state=expected_output_state,
+            expected_manifest_state=expected_manifest_state,
         )
 
 

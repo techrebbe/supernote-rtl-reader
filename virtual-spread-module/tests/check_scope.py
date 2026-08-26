@@ -12,6 +12,28 @@ if ('private static final String SCHEMA =\n'
         "runtime must require the v2 native-snapshot-capable manifest schema"
     )
 
+for required in (
+    "private static final Map<String, VerificationOwner> VERIFYING",
+    "private static final AtomicLong VERIFICATION_GENERATION",
+    "private static final class VerificationOwner",
+    "final long generation;",
+    "final VerificationOwner owner;",
+):
+    if required not in hook:
+        raise SystemExit(
+            "manifest verification lacks unique task ownership: " + required
+        )
+for forbidden in (
+    "Map<String, String> VERIFYING",
+    "VERIFYING.put(key, snapshotId)",
+    "VERIFYING.remove(key, snapshotId)",
+):
+    if forbidden in hook:
+        raise SystemExit(
+            "filesystem snapshot IDs must not act as verifier task identity: "
+            + forbidden
+        )
+
 for forbidden in (
     "HandWriteView",
     "setImage",
@@ -132,11 +154,19 @@ for required in (
     'link_jump_passthrough kind=external authority=verified',
     "ManifestLookup lookup = manifestLookupFor(viewModel)",
     "if (lookup.verificationPending)",
-    "lookup.snapshotId,\n                routing",
+    "lookup.snapshotId,\n                lookup.verificationGeneration,\n                routing",
     "param.setResult(null)",
     "state.queuedLinkArguments = arguments.clone()",
     "state.queuedLinkSnapshotId = snapshotId",
+    "state.queuedLinkVerificationGeneration = verificationGeneration",
     "state.queuedLinkRouting = routing",
+    "state.queuedLinkNativeDocument = nativeDocument",
+    "state.queuedLinkNativeSourceAuthority = nativeSourceAuthority",
+    "state.queuedLinkNativeLayoutAuthority = nativeLayoutAuthority",
+    "state.queuedLinkNativeLinkAuthority = nativeLinkAuthority",
+    "currentNativeDocument == queuedNativeDocument",
+    "queuedNativeSourceAuthority.equals(nativePdfMetadata(",
+    "queuedVerificationGeneration == verificationGeneration",
     "pendingLinkReplayIsCurrent(",
     "sameCanonicalPath(manifest.key, documentPath)",
     "snapshotId.equals(verifiedSnapshotId)",
@@ -312,7 +342,7 @@ if "state.pageLoadGeneration = 0L" in reader_state:
 
 lookup_start = hook.find("private static Manifest manifestFor")
 lookup_end = hook.find(
-    "private static String scheduleManifestVerification",
+    "private static VerificationOwner scheduleManifestVerification",
     lookup_start,
 )
 if lookup_start < 0 or lookup_end < 0:
@@ -338,8 +368,8 @@ for required in (
     "validateNativeSnapshot(viewModel, cached.manifest)",
     "validated == null",
     "scheduleManifestVerification(",
-    "String verificationId = scheduleManifestVerification(",
-    "boolean verificationPending = verificationId != null",
+    "VerificationOwner verificationOwner = scheduleManifestVerification(",
+    "boolean verificationPending = verificationOwner != null",
     "discardQueuedLinkForDifferentSnapshot(",
     "cached.snapshotId()",
     "manifest_verification_pending",
@@ -416,9 +446,12 @@ if verification_end < 0:
 manifest_verification = hook[verification_start:verification_end]
 for required in (
     "MANIFEST_VERIFIER.execute",
-    "VERIFYING.put(key, verificationId)",
-    "if (verificationId.equals(VERIFYING.get(key))) {\n                return verificationId;",
-    "verificationId.equals(VERIFYING.get(key))",
+    "VERIFYING.put(key, owner)",
+    "snapshotId.equals(existing.snapshotId)",
+    "VERIFYING.get(key) == owner",
+    "VERIFYING.get(key) != owner",
+    "VERIFYING.remove(key, owner)",
+    "VERIFICATION_GENERATION.incrementAndGet()",
     'RandomAccessFile pdfInput = new RandomAccessFile(pdf, "r")',
     "FileInputStream sidecarInput = new FileInputStream(sidecar)",
     "FileIdentity pdfOpened = FileIdentity.capture(pdfInput.getFD())",
@@ -442,12 +475,12 @@ for required in (
     "sidecarAfter.matches(sidecarPathAfter)",
     "sidecarDigest.equals(currentSidecarDigest)",
     "MANIFESTS.put(key, published)",
-    "scheduleManifestActivation(key, parsed.revision)",
+    "scheduleManifestActivation(\n                            key,",
     '"manifest_rejected"',
     '"snapshot_changed_before_read"',
     '"snapshot_changed_during_read"',
     "VirtualSpreadNavigation.LinkRouting replayedRouting =",
-    "replayQueuedLink(owner, viewModel, current)",
+    "replayQueuedLink(\n                        owner,",
     "replayRequiresImmediateInitialization(replayedRouting)",
     "new Handler(owner.getMainLooper()).post",
     "handlePageLoaded(viewModel)",
@@ -469,8 +502,8 @@ for required in (
     "MANIFEST_VERIFIER.getQueue().poll()",
     "((ManifestVerificationTask) stale).cancelBeforeRun()",
     "new ManifestVerificationTask(",
-    "requireCurrentVerification(key, verificationId)",
-    "sha256File(pdfInput, key, verificationId)",
+    "requireCurrentVerification(key, owner)",
+    "sha256File(pdfInput, key, owner)",
 ):
     if required not in hook:
         raise SystemExit(
@@ -487,7 +520,7 @@ cancellation_start = hook.find(
     "private static void cancelManifestVerificationLocked"
 )
 cancellation_end = hook.find(
-    "private static String scheduleManifestVerification",
+    "private static VerificationOwner scheduleManifestVerification",
     cancellation_start,
 )
 if min(observer_start, observer_end, cancellation_start, cancellation_end) < 0:
@@ -518,7 +551,9 @@ if min(cancellation_positions) < 0 or tuple(
         "verification cancellation must invalidate, drain, then cancel"
     )
 
-scheduler_start = hook.find("private static String scheduleManifestVerification")
+scheduler_start = hook.find(
+    "private static VerificationOwner scheduleManifestVerification"
+)
 scheduler_end = hook.find(
     "private static void requireCurrentVerification", scheduler_start
 )
@@ -528,7 +563,7 @@ scheduler = hook[scheduler_start:scheduler_end]
 scheduler_positions = (
     scheduler.find("if (!key.equals(observedDocumentKey))"),
     scheduler.find("cancelManifestVerificationLocked()"),
-    scheduler.find("VERIFYING.put(key, verificationId)"),
+    scheduler.find("VERIFYING.put(key, owner)"),
     scheduler.find("MANIFEST_VERIFIER.execute"),
 )
 if min(scheduler_positions) < 0 or tuple(sorted(scheduler_positions)) != (
@@ -573,7 +608,7 @@ for required in (
     "cached.matches(pdfIdentity, sidecarIdentity)",
     "String sidecarDigest = sha256(sidecarData)",
     'output.optString("sha256", "")',
-    "sha256File(pdfInput, key, verificationId)",
+    "sha256File(pdfInput, key, owner)",
     "VirtualSpreadLinkAuthority.readPdfSourceDigest(pdfInput)",
     'manifest_rejected reason=output_hash',
     'manifest_rejected reason=snapshot_changed_during_read',
@@ -821,6 +856,11 @@ for required in (
     '"targetView": (',
     "expected_output_identity=temporary_output_identity",
     "expected_output_hash=temporary_output_hash",
+    "expected_output_state=expected_output_state",
+    "expected_manifest_state=expected_manifest_state",
+    "replace_authorized=force",
+    'transaction["_oldOutputIdentity"] = expected_output_state.identity',
+    'transaction["_oldManifestIdentity"] = expected_manifest_state.identity',
     "lexical_output = _require_unaliased_output_path(output_path)",
     "lexical_manifest = _require_runtime_manifest_path(",
     "with _publication_lock(lexical_output) as ownership_guard:",
@@ -848,7 +888,12 @@ for required in (
     "Interrupted publication target",
     "def _temporary_neighbor(",
     "namespace.open_file(candidate, flags, 0o600)",
-    "_write_json(temporary_manifest, manifest, ownership_guard)",
+    "class StagedPublicationFile:",
+    "descriptor = os.dup(retained_descriptor)",
+    "retained_descriptor=temporary_manifest.descriptor",
+    "_require_staged_path_identity(",
+    "def _release_staged_artifact_for_move(",
+    "_close_staged_artifact(",
     "PdfReader(verification_stream, strict=True)",
     "with tempfile.TemporaryFile(",
     "_publication_sha256(path, ownership_guard)",
@@ -864,15 +909,23 @@ for required in (
     '"Output backup"',
     '"Manifest backup"',
     '"Staged publication target"',
-    "for final_path, backup, had_final, new_hash, old_hash, backup_label "
-    "in entries:",
+    "for final_path, backup, had_final, new_hash, old_hash, backup_label in entries:",
     "replace_existing=False",
     "temporary_manifest,\n"
     "            manifest_path,\n"
-    "            ownership_guard=ownership_guard",
+    "            replace_existing=False,\n"
+    "            ownership_guard=ownership_guard,\n"
+    "            expected_source_identity=published_manifest_identity",
     "temporary_output,\n"
     "            output_path,\n"
-    "            ownership_guard=ownership_guard",
+    "            replace_existing=False,\n"
+    "            ownership_guard=ownership_guard,\n"
+    "            expected_source_identity=published_output_identity",
+    "backup,\n"
+    "                    final_path,\n"
+    "                    replace_existing=False,\n"
+    "                    ownership_guard=ownership_guard,\n"
+    "                    expected_source_identity=backup_identity",
     "replace_existing=False",
     "artifacts = (",
     "for path, _ in artifacts:",
@@ -906,7 +959,11 @@ for required in (
     "test_fit_source_page_uses_authenticated_runtime_reset",
     "test_non_nomad_spread_aspect_is_rejected",
     "test_recovery_preserves_unexpected_target_in_front_of_backup",
-    "test_published_hash_mismatch_preserves_unexpected_target",
+    "test_staged_tamper_before_move_preserves_original_pair",
+    "test_retained_staging_inode_prevents_source_hardlink_write",
+    "test_no_force_preserves_targets_that_appear_during_generation",
+    "test_final_publication_never_replaces_a_late_target",
+    "test_recovery_never_replaces_a_target_that_appears_before_restore",
     "test_unknown_xyz_left_fails_closed_even_matching_transform",
     "test_null_destination_coordinates_reject_different_transforms",
     "test_destination_operands_require_pdf_name_and_numbers",

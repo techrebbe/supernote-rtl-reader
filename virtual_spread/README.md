@@ -147,7 +147,14 @@ it is exchanged between validation and the syscall, the descriptor-relative
 operation remains confined to the originally locked directory and cannot touch
 the replacement tree. Staged artifacts are type- and hash-checked before backup
 moves and immediately before publication, and both canonical hashes are verified
-before recovery evidence is retired.
+before recovery evidence is retired. Every exclusively created staging inode is
+kept open through all writes, so replacing its pathname cannot redirect output
+into a source hard link. Windows releases that handle only after recording the
+same identity required by the subsequent move. The exact output and sidecar state
+authorized before generation is rechecked at the transaction boundary; a target
+that appears, disappears, or changes meanwhile is preserved and rejected. Final
+publication and backup restoration use no-replace moves, closing the last
+check-to-move overwrite window.
 The PDF and manifest are staged before publication as one recoverable pair.
 Their output-derived temporary names are deterministic, so a process death
 cannot leave an unbounded collection of randomly named files. Before a marker
@@ -211,8 +218,10 @@ pair whose authority does not match Supernote's still-open native document also
 keeps turns blocked until that document is reopened.
 Native links tapped during that cold verification window are likewise consumed,
 queued once, and replayed only after the same document and source page acquire
-verified authority. The queued invocation is discarded after a document/page
-change, verification rejection, or its bounded freshness window. If a generated
+verified authority. It is bound to a unique verifier generation, the exact native
+MuPDF document object, and all three embedded authorities rather than merely a
+reusable path snapshot. The queued invocation is discarded after a document/page
+change, verification rejection, native-document replacement, or its bounded freshness window. If a generated
 PDF is missing its sidecar—or the native authority metadata cannot be inspected—
 navigation remains blocked; an ordinary PDF whose native document explicitly has
 no virtual-spread authority remains fully native.

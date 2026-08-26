@@ -156,7 +156,7 @@ scope guard.
 
 ## v0.0.24 native-open snapshot binding and portrait viewport - PENDING HARDWARE
 
-Review passes 40-59 bind the authenticated sidecar to the actual PDF object
+Review passes 40-60 bind the authenticated sidecar to the actual PDF object
 retained inside Supernote's native reader and harden all transformed link,
 manifest, and page-box boundaries. The generator adds a descriptor-verified
 source-authority marker before the layout and link markers. The companion reads
@@ -177,17 +177,22 @@ deterministic staged files are removed only with matching transaction hashes,
 and unknown `.retired` artifacts are preserved for manual recovery. Source,
 output, and manifest separation now follows host filesystem case rules and
 existing-file identity, preventing a forced case-alias or hard-link output from
-replacing the source PDF.
+replacing the source PDF. Exclusively created staging inodes stay open through
+all writes, pre-generation target state is rechecked at publication, and final
+publication and recovery restores never replace a target that appears late.
+Deferred native links are bound to a unique verifier generation and the exact
+open MuPDF document plus its embedded authorities, closing same-path and
+filesystem-identity ABA replay races.
 The generator rejects transformed URI `/IsMap true` actions, a CropBox extending
 outside its MediaBox, and link geometry outside the source CropBox, while scaling
 an omitted link border's PDF-default width.
 
-The local automated gate passes 114 generator tests on Windows (seven expected
-platform/filesystem or privilege skips), 134 focused navigation/manifest/cache assertions, 12
+The local automated gate passes 118 generator tests on Windows (eight expected
+platform/filesystem or privilege skips), 135 focused navigation/manifest/cache assertions, 12
 cross-language authority assertions, 8,752 exhaustive navigation assertions, both native
 invariant suites, hook-scope validation, and the signed/verified v0.0.24
 (`versionCode=24`) APK build (SHA-256
-`65a62b821b45d95b48ba9cb1b9ac6e9c7971330c59c62336ecbdd5ca630804b2`).
+`4c0983bdd2df031f3481509e0f00015a3e1c9cfb284da4fceccee8b2944fdc4c`).
 CI independently runs the same generator suite on
 Linux without the Windows-only skips.
 

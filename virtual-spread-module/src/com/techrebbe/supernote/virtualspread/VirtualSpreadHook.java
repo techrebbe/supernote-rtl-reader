@@ -69,7 +69,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final String SCHEMA =
         "techrebbe.supernote.virtual-spread/v2";
     private static final String TAG = "SN_VIRTUAL_SPREAD";
-    private static final String VERSION = "0.0.24";
+    private static final String VERSION = "0.0.24-r1";
     private static final long MAX_MANIFEST_BYTES = 8L * 1024L * 1024L;
     private static final int MAX_CACHED_MANIFESTS = 4;
     private static final long PENDING_LINK_MAX_AGE_MS = 60000L;
@@ -1115,9 +1115,12 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
         if (routing == VirtualSpreadNavigation.LinkRouting.BLOCKED) {
             // An uninspectable current link must not allow an older queued
-            // link to replay after manifest verification completes.
+            // link to replay after manifest verification completes. The
+            // firmware method returns primitive boolean, so every blocked
+            // invocation must supply Boolean.FALSE rather than null; its
+            // caller immediately unboxes the result.
             clearQueuedLinkInvocation(viewModel);
-            param.setResult(null);
+            param.setResult(Boolean.FALSE);
             log("link_jump_blocked reason=uninspectable_link_kind");
             return;
         }
@@ -1132,7 +1135,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                         lookup.manifest,
                         superNoteLink
                     )) {
-                    param.setResult(null);
+                    param.setResult(Boolean.FALSE);
                     log("link_jump_blocked reason=unmatched_authenticated_uri");
                     return;
                 }
@@ -1145,7 +1148,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 superNoteLink,
                 targetPage
             )) {
-                param.setResult(null);
+                param.setResult(Boolean.FALSE);
                 log("link_jump_blocked reason=unmatched_authenticated_link");
             }
             return;
@@ -1158,13 +1161,13 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 lookup.verificationGeneration,
                 routing
             );
-            param.setResult(null);
+            param.setResult(Boolean.FALSE);
             log("link_jump_blocked reason=manifest_verification_pending");
             return;
         }
         if (lookup.navigationBlocked()) {
             clearQueuedLinkInvocation(viewModel);
-            param.setResult(null);
+            param.setResult(Boolean.FALSE);
             log("link_jump_blocked reason="
                 + lookup.navigationBlockReason());
         }
@@ -2283,9 +2286,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 "info:SNVirtualSpreadLinksSHA256"
             );
             return Boolean.valueOf(
-                nativeSource != null
-                    || nativeLayout != null
-                    || nativeLinks != null
+                VirtualSpreadNavigation.nativeMetadataClaimsVirtualSpread(
+                    nativeSource,
+                    nativeLayout,
+                    nativeLinks
+                )
             );
         } catch (Throwable throwable) {
             logFailure("native_snapshot_metadata_probe_failed", throwable);

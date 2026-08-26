@@ -154,7 +154,7 @@ link fixture. The companion suite passes 55 focused navigation assertions, 10
 cross-language authority assertions, 8,752 exhaustive assertions, and the hook-
 scope guard.
 
-## v0.0.24 native-open snapshot binding and portrait viewport - PENDING HARDWARE
+## v0.0.24-r1 native-open snapshot binding and portrait viewport - PASS
 
 Review passes 40-61 bind the authenticated sidecar to the actual PDF object
 retained inside Supernote's native reader and harden all transformed link,
@@ -191,31 +191,56 @@ The generator rejects transformed URI `/IsMap true` actions, a CropBox extending
 outside its MediaBox, and link geometry outside the source CropBox, while scaling
 an omitted link border's PDF-default width.
 
-The local automated gate passes 120 generator tests on Windows (eight expected
-platform/filesystem or privilege skips), 135 focused navigation/manifest/cache assertions, 15
-cross-language authority assertions, 8,752 exhaustive navigation assertions, both native
-invariant suites, hook-scope validation, and the signed/verified v0.0.24
-(`versionCode=24`) APK build (SHA-256
-`120819858eb7ab8a897e032b543aed63687b5b50ecff9b39b32288c6f4464b0b`).
-CI independently runs the same generator suite on
-Linux without the Windows-only skips.
+The final local automated gate passes 154 generator tests on Windows (14
+expected platform/filesystem or privilege skips), 165 focused
+navigation/manifest/cache assertions, 15 cross-language authority assertions,
+8,752 exhaustive navigation assertions, both native invariant suites,
+hook-scope validation, and the signed/verified v0.0.24-r1 (`versionCode=25`)
+APK build. The upgrade-compatible certificate SHA-256 is
+`a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`;
+the final APK SHA-256 is
+`4454237d921a090174c2b0e7c60726e2f73fd8164539557614fa18fe29bd57c4`.
 
-The remaining focused Nomad gate is:
+The focused Nomad gate passed on 2026-08-26 using an isolated seven-page
+mixed-geometry source and two freshly generated schema-v2 pairs. Pair A used
+cover-separate RTL spreads (`blank | 1`, `3 | 2`, `5 | 4`, `7 | 6`); Pair B
+used ordinary RTL parity (`2 | 1`, `4 | 3`, `6 | 5`, `blank | 7`). The source
+SHA-256 was
+`accd723f2d709a80c70a47e24d19f87c99b86deec1e9992263ca52cf0a650a65`;
+Pair A and Pair B PDF SHA-256 values were respectively
+`c056e8a08456b03f71e11526ab3258ffe5d64853615381344303e3f8283ba43e`
+and
+`ec9e21531f3e44007766f0cedd7779db36adf02068e7ea0ca789774b63f06150`.
 
-1. cold-open a newly generated v0.0.24 schema-v2 pair and confirm normal activation;
-2. replace the PDF/sidecar pair at the same path while the original PDF remains
-   open and confirm the companion fails closed rather than applying the new
-   mappings to stale native content;
-3. reopen the replacement and confirm its matching authorities activate; and
-4. confirm a portrait explicit `/XYZ` or `/FitR` internal link retains its
-   native viewport rather than snapping to the destination page edge, including
-   after an orientation/screen refresh; and
-5. confirm a rejected generated pair blocks navigation rather than leaking a
-   native LTR turn; and
-6. tap a native link while cold verification is pending and confirm it executes
-   once, after verified activation, without first navigating natively; and
-7. confirm a generated PDF whose sidecar is missing stays blocked while a
-   sidecar-free ordinary PDF remains completely native.
+Hardware confirmed all release gates:
+
+1. Pair A cold-opened and authenticated as `blank | cover` in landscape.
+2. Replacing both files at the same path while Pair A remained open invalidated
+   the cached filesystem generation and blocked the turn; replacement mappings
+   were never applied to the stale native MuPDF document.
+3. Reopening the path authenticated Pair B and displayed `2 | 1` correctly.
+4. A portrait `/XYZ [50 560 2.0]` link opened source page 7 at its native 2x
+   viewport. Portrait/landscape refreshes preserved that viewport, and native
+   link history restored the exact page-2 left half.
+5. A generated PDF without its sidecar remained on `1 / 4` and logged
+   `turn_blocked reason=manifest_verification_pending`.
+6. An internal link issued while a new verification owner was pending logged
+   one `link_jump_queued`, one `link_jump_replayed`, and activated with
+   `queued_link=INTERNAL`; it reached page 7 once without native pre-navigation.
+7. The identical seven-page source copied without a sidecar advanced natively
+   from `1 / 7` to `2 / 7` and, on the final exact APK, from `2 / 7` to `3 / 7`
+   with no manifest or blocked-turn log.
+8. A native pen stroke on page 2 survived a page round trip and remained
+   correctly positioned.
+
+The gate exposed two firmware-boundary details that v0.0.24-r1 now covers.
+MuPDF returns an empty string, rather than null, for an absent document-info
+key; blank metadata is therefore treated as absent while nonblank or
+unexpectedly typed metadata remains fail-closed. Supernote's
+`showLinkJumpView(...)` returns primitive `boolean`; blocked link invocations
+now return `Boolean.FALSE` rather than null. Reproducing an identical-sidecar
+generation change confirmed zero `Boolean.booleanValue()` crashes, followed by
+the authenticated single queued replay described above.
 
 ## Decision
 

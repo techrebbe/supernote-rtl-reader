@@ -1267,6 +1267,51 @@ public final class VirtualSpreadNavigationTest {
                 linkAuthority
             )
         );
+        assertBoolean(
+            "null native metadata is ordinary",
+            false,
+            VirtualSpreadNavigation.nativeMetadataClaimsVirtualSpread(
+                null,
+                null,
+                null
+            )
+        );
+        assertBoolean(
+            "MuPDF empty native metadata is ordinary",
+            false,
+            VirtualSpreadNavigation.nativeMetadataClaimsVirtualSpread(
+                "",
+                "   ",
+                "\t"
+            )
+        );
+        assertBoolean(
+            "one generated authority claims Virtual Spread",
+            true,
+            VirtualSpreadNavigation.nativeMetadataClaimsVirtualSpread(
+                sourceAuthority,
+                "",
+                null
+            )
+        );
+        assertBoolean(
+            "malformed nonblank authority remains fail closed",
+            true,
+            VirtualSpreadNavigation.nativeMetadataClaimsVirtualSpread(
+                "malformed",
+                null,
+                null
+            )
+        );
+        assertBoolean(
+            "unexpected typed authority remains fail closed",
+            true,
+            VirtualSpreadNavigation.nativeMetadataClaimsVirtualSpread(
+                Integer.valueOf(1),
+                null,
+                null
+            )
+        );
 
         LinkHistory history = new LinkHistory();
         history.record(1, Half.RIGHT, 3);

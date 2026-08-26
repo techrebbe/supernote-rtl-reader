@@ -1864,6 +1864,42 @@ upgrade-compatible certificate and has SHA-256
 The clean exact-head Ultra review reports no actionable findings. Focused
 hardware validation remains the release gate; PR #16 stays draft.
 
+## v0.0.24-r1 focused Nomad gate - HARDWARE PASS
+
+The complete v0.0.24 gate passed on the Nomad on 2026-08-26 with isolated
+schema-v2 fixtures. Cold activation, cover and non-cover RTL parity, same-path
+replacement fail-closed behavior, replacement reopen, explicit `/XYZ` viewport
+preservation across orientation refresh, native link-history restoration, a
+rejected missing-sidecar turn, native ink persistence, and ordinary sidecar-free
+PDF pass-through all behaved as required.
+
+The final pass also exercised the cold-verification link queue. An internal
+link under a newly scheduled verifier owner logged exactly one queue and one
+replay, then opened page 7 only after authenticated activation. An earlier
+retry-backoff invocation exposed a firmware crash because the hooked
+`showLinkJumpView(...)` primitive-boolean result had been replaced with null.
+The module now returns `Boolean.FALSE` on every blocked link path; the exact
+race then produced no fatal or `Boolean.booleanValue()` log and the document
+reader remained usable.
+
+MuPDF's absent metadata values were also observed as empty strings on hardware.
+The native authority classifier now treats null and trimmed-empty strings as
+absent, keeps nonblank and unexpected typed values fail-closed, and is pinned by
+focused tests and the hook-scope guard. On the exact rebuilt APK, the ordinary
+fixture advanced from `2 / 7` to `3 / 7` with zero blocked-navigation lines,
+while the generated missing-sidecar fixture stayed at `1 / 4` and logged the
+expected blocked turn.
+
+The signed v0.0.24-r1 (`versionCode=25`) APK SHA-256 is
+`4454237d921a090174c2b0e7c60726e2f73fd8164539557614fa18fe29bd57c4`;
+its signer certificate SHA-256 is
+`a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`.
+Final local validation passes 154 generator tests (14 expected Windows skips),
+165 focused navigation assertions, 15 cross-language authority assertions,
+8,752 exhaustive navigation assertions, both native invariant suites,
+hook-scope validation, and the signed APK build. PR #16 remains draft until
+fresh exact-head CI and review complete.
+
 ## Failure capture
 
 Before reproducing a failure:

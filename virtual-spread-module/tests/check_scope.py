@@ -310,7 +310,7 @@ for required in (
     "ManifestLookup lookup = manifestLookupFor(viewModel)",
     "if (lookup.verificationPending)",
     "lookup.snapshotId,\n                lookup.verificationGeneration,\n                routing",
-    "param.setResult(null)",
+    "param.setResult(Boolean.FALSE)",
     "state.queuedLinkArguments = arguments.clone()",
     "state.queuedLinkSnapshotId = snapshotId",
     "state.queuedLinkVerificationGeneration = verificationGeneration",
@@ -630,7 +630,7 @@ blocked_handler = link_handler[blocked_branch:blocked_branch_end]
 blocked_queued_clear = blocked_handler.find(
     "clearQueuedLinkInvocation(viewModel)"
 )
-blocked_result = blocked_handler.find("param.setResult(null)")
+blocked_result = blocked_handler.find("param.setResult(Boolean.FALSE)")
 if not (
     0 <= blocked_branch < blocked_branch_end
     and 0 <= blocked_queued_clear < blocked_result
@@ -638,6 +638,11 @@ if not (
     raise SystemExit(
         "an uninspectable current link must discard an older queued link "
         "before returning"
+    )
+if "param.setResult(null)" in link_handler:
+    raise SystemExit(
+        "blocked showLinkJumpView calls must return primitive boolean false, "
+        "not a null result that crashes the firmware caller during unboxing"
     )
 verified_branch = link_handler.find("if (lookup.manifest != null)")
 verified_clear = link_handler.find(
@@ -673,6 +678,7 @@ for required in (
     "nativeSnapshotDocument",
     "private static Object nativePdfDocument(Object viewModel)",
     "private static Boolean nativeSnapshotClaimsVirtualSpread(",
+    "VirtualSpreadNavigation.nativeMetadataClaimsVirtualSpread(",
     "nativeAuthority == null",
     "nativeAuthority.booleanValue()",
     'native_snapshot_metadata_probe_failed',
@@ -689,6 +695,17 @@ for required in (
     if required not in hook:
         raise SystemExit(
             f"native reader snapshot binding is missing: {required}"
+        )
+
+for required in (
+    "public static boolean nativeMetadataClaimsVirtualSpread(",
+    "return !((String) value).trim().isEmpty();",
+    "if (!(value instanceof String))",
+):
+    if required not in navigation:
+        raise SystemExit(
+            "native metadata absence/authority classification is missing: "
+            + required
         )
 
 if "nativePageCount <= 0" not in hook:
@@ -1071,11 +1088,11 @@ if not (0 <= duplicate_guard < json_parse):
     )
 
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
-if 'android:versionCode="24"' not in manifest:
+if 'android:versionCode="25"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version code")
-if 'android:versionName="0.0.24"' not in manifest:
+if 'android:versionName="0.0.24-r1"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
-if 'private static final String VERSION = "0.0.24"' not in hook:
+if 'private static final String VERSION = "0.0.24-r1"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
 if (
     'android:name="xposedscope"' not in manifest

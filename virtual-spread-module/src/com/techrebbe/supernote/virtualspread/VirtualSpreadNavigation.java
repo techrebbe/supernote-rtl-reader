@@ -823,6 +823,33 @@ public final class VirtualSpreadNavigation {
             && sameAuthority(expectedLinks, nativeLinks);
     }
 
+    /**
+     * MuPDF returns an empty String, rather than null, for an absent document
+     * information key on the Nomad. Only a nonblank value claims generated
+     * Virtual Spread authority. An unexpected non-String value remains a
+     * claim so malformed metadata fails closed instead of becoming native
+     * pass-through.
+     */
+    public static boolean nativeMetadataClaimsVirtualSpread(
+        Object source,
+        Object layout,
+        Object links
+    ) {
+        return nativeAuthorityValuePresent(source)
+            || nativeAuthorityValuePresent(layout)
+            || nativeAuthorityValuePresent(links);
+    }
+
+    private static boolean nativeAuthorityValuePresent(Object value) {
+        if (value == null) {
+            return false;
+        }
+        if (!(value instanceof String)) {
+            return true;
+        }
+        return !((String) value).trim().isEmpty();
+    }
+
     private static boolean sameAuthority(String expected, String actual) {
         return expected != null
             && actual != null

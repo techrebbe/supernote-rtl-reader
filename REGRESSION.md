@@ -1380,6 +1380,34 @@ build (SHA-256
 The updated full-branch local review and focused hardware validation remain
 pending; PR #16 stays draft.
 
+## Review pass 59 filesystem-aware publication separation - LOCAL PASS
+
+The next Ultra whole-branch review found that a source and output whose names
+differed only by case could pass Python's case-sensitive `Path`-set check on
+Windows even though both names addressed the same filesystem entry. A forced
+publication could consequently replace the source PDF and then discard its
+backup. All three publication layers now share one filesystem-aware distinctness
+guard. It compares host-normalized paths and existing-file identity, rejecting
+case aliases and hard-link aliases before publication. The CLI also reports the
+actual output-derived sidecar spelling rather than a case-equivalent caller
+spelling.
+
+Deterministic regressions exercise the dangerous case-only collision on the real
+Windows filesystem, an existing hard-link alias, emulated host case semantics,
+and CLI sidecar reporting. Both aliases leave the source bytes intact. A static
+invariant pins the common guard at every repeated publication boundary and bans
+the former case-sensitive `Path`-set checks.
+
+Local automated validation passes 114 generator tests on Windows (seven
+expected platform/filesystem or privilege skips), 134 focused
+navigation/manifest/cache assertions, 12 cross-language authority assertions,
+8,752 exhaustive navigation assertions, both native invariant suites,
+hook-scope validation, and the signed/verified v0.0.24 (`versionCode=24`) APK
+build (SHA-256
+`65a62b821b45d95b48ba9cb1b9ac6e9c7971330c59c62336ecbdd5ca630804b2`).
+A clean follow-up full-branch review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
 ## Failure capture
 
 Before reproducing a failure:

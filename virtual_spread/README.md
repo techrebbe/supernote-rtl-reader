@@ -302,4 +302,8 @@ half restoration. The project does not yet:
 
 Annotation code remains deliberately untouched. The manifest supplies the
 source-page, half, and affine-transform data needed for a later InkBridge
-conversion layer.
+conversion layer. The versioned ownership, mapping-authority, cache, and
+regeneration boundary for that work is recorded in
+[`INKBRIDGE_REPRESENTATION_CONTRACT.md`](INKBRIDGE_REPRESENTATION_CONTRACT.md).
+It begins only after the exact v0.0.24 review and hardware gate; it does not add
+annotation interception to this companion.

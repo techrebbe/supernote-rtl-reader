@@ -733,6 +733,9 @@ for required in (
     "def _publication_path_matches(",
     "os.path.normcase(actual)",
     "os.path.normcase(str(_lexical_absolute(expected)))",
+    "def _filesystem_paths_collide(",
+    "os.path.samefile(first, second)",
+    "def _require_distinct_publication_paths(",
     "not _publication_path_matches(transaction.get(key), value)",
     "set(transaction) != expected_fields",
     "MOVEFILE_WRITE_THROUGH",
@@ -940,6 +943,11 @@ for required in (
     "test_publication_marker_paths_use_filesystem_case_semantics",
     "test_runtime_manifest_uses_output_derived_case_spelling",
     "test_case_equivalent_manifest_is_republished_with_exact_name",
+    "test_distinct_paths_follow_host_case_semantics",
+    "test_existing_hardlink_source_output_is_rejected_without_mutation",
+    "test_path_identity_inspection_error_fails_closed",
+    "test_case_equivalent_source_output_is_rejected_without_mutation",
+    "test_cli_reports_output_derived_manifest_spelling",
     "test_forced_replacement_requires_all_layout_options",
     "test_recovery_rejects_unauthenticated_retired_artifacts",
     "test_publication_staging_paths_are_deterministic",
@@ -994,6 +1002,17 @@ publication_lock = public_build.find(
 if alias_guard < 0 or publication_lock < 0 or alias_guard >= publication_lock:
     raise SystemExit(
         "output alias rejection must run before publication ownership is acquired"
+    )
+if generator.count("_require_distinct_publication_paths(") != 4:
+    raise SystemExit(
+        "filesystem-aware path distinctness must be enforced at all three "
+        "publication layers"
+    )
+if "len({source_path, output_path, manifest_path})" in generator or (
+    "len({resolved_source, lexical_output, lexical_manifest})" in generator
+):
+    raise SystemExit(
+        "case-sensitive Path sets must not guard publication distinctness"
     )
 
 locked_start = generator.find("def _build_virtual_spread_locked(")

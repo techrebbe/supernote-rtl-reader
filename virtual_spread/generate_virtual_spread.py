@@ -2465,6 +2465,38 @@ def _lexical_absolute(path: Path) -> Path:
     return Path(os.path.abspath(os.fspath(path)))
 
 
+def _filesystem_paths_collide(first: Path, second: Path) -> bool:
+    """Compare paths using host case rules and existing-file identity."""
+    first = _lexical_absolute(first)
+    second = _lexical_absolute(second)
+    if os.path.normcase(str(first)) == os.path.normcase(str(second)):
+        return True
+    try:
+        return os.path.samefile(first, second)
+    except FileNotFoundError:
+        return False
+    except OSError as error:
+        raise VirtualSpreadError(
+            "Cannot verify publication path distinctness: "
+            f"{first}, {second}"
+        ) from error
+
+
+def _require_distinct_publication_paths(
+    source_path: Path,
+    output_path: Path,
+    manifest_path: Path,
+) -> None:
+    paths = (source_path, output_path, manifest_path)
+    for index, first in enumerate(paths):
+        for second in paths[index + 1:]:
+            if _filesystem_paths_collide(first, second):
+                raise VirtualSpreadError(
+                    "Source PDF, output PDF, and manifest paths must be "
+                    "distinct"
+                )
+
+
 def _require_unaliased_output_path(output_path: Path) -> Path:
     """Reject output aliases whose runtime sidecar path would be ambiguous."""
     lexical = _lexical_absolute(output_path)
@@ -4038,10 +4070,11 @@ def _build_virtual_spread_from_snapshot(
     )
     if not source_path.is_file():
         raise VirtualSpreadError(f"Source PDF does not exist: {source_path}")
-    if len({source_path, output_path, manifest_path}) != 3:
-        raise VirtualSpreadError(
-            "Source PDF, output PDF, and manifest paths must be distinct"
-        )
+    _require_distinct_publication_paths(
+        source_path,
+        output_path,
+        manifest_path,
+    )
     if not force and (output_exists or manifest_exists):
         raise VirtualSpreadError("Output already exists; pass --force to replace it")
     slot_width = _require_runtime_float_geometry(
@@ -4324,10 +4357,11 @@ def _build_virtual_spread_locked(
         output_path,
         manifest_path,
     )
-    if len({source_path, output_path, manifest_path}) != 3:
-        raise VirtualSpreadError(
-            "Source PDF, output PDF, and manifest paths must be distinct"
-        )
+    _require_distinct_publication_paths(
+        source_path,
+        output_path,
+        manifest_path,
+    )
     _require_source_outside_publication_namespace(
         source_path, output_path
     )
@@ -4397,10 +4431,11 @@ def build_virtual_spread(
     resolved_source = source_path.resolve()
     lexical_output = _require_unaliased_output_path(output_path)
     lexical_manifest = _lexical_absolute(manifest_path)
-    if len({resolved_source, lexical_output, lexical_manifest}) != 3:
-        raise VirtualSpreadError(
-            "Source PDF, output PDF, and manifest paths must be distinct"
-        )
+    _require_distinct_publication_paths(
+        resolved_source,
+        lexical_output,
+        lexical_manifest,
+    )
     lexical_manifest = _require_runtime_manifest_path(
         lexical_output,
         lexical_manifest,
@@ -4463,7 +4498,10 @@ def main() -> int:
         force=args.force,
     )
     print(f"Virtual spread PDF: {manifest['output']['path']}")
-    print(f"Mapping manifest:   {_lexical_absolute(manifest_path)}")
+    print(
+        "Mapping manifest:   "
+        + str(_runtime_manifest_path(Path(manifest["output"]["path"])))
+    )
     print(f"Source pages:       {manifest['source']['pageCount']}")
     print(f"Virtual spreads:    {manifest['output']['pageCount']}")
     print(f"Output SHA-256:      {manifest['output']['sha256']}")

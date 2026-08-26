@@ -156,7 +156,7 @@ scope guard.
 
 ## v0.0.24 native-open snapshot binding and portrait viewport - PENDING HARDWARE
 
-Review passes 40-58 bind the authenticated sidecar to the actual PDF object
+Review passes 40-59 bind the authenticated sidecar to the actual PDF object
 retained inside Supernote's native reader and harden all transformed link,
 manifest, and page-box boundaries. The generator adds a descriptor-verified
 source-authority marker before the layout and link markers. The companion reads
@@ -174,17 +174,20 @@ preserves and verifies the source PDF language-version header. Required runtime
 hooks activate as one capability set, so a missing hook leaves the companion
 fully native pass-through. Sidecars are published with the output-derived case;
 deterministic staged files are removed only with matching transaction hashes,
-and unknown `.retired` artifacts are preserved for manual recovery.
+and unknown `.retired` artifacts are preserved for manual recovery. Source,
+output, and manifest separation now follows host filesystem case rules and
+existing-file identity, preventing a forced case-alias or hard-link output from
+replacing the source PDF.
 The generator rejects transformed URI `/IsMap true` actions, a CropBox extending
 outside its MediaBox, and link geometry outside the source CropBox, while scaling
 an omitted link border's PDF-default width.
 
-The local automated gate passes 109 generator tests on Windows (seven expected
+The local automated gate passes 114 generator tests on Windows (seven expected
 platform/filesystem or privilege skips), 134 focused navigation/manifest/cache assertions, 12
 cross-language authority assertions, 8,752 exhaustive navigation assertions, both native
 invariant suites, hook-scope validation, and the signed/verified v0.0.24
 (`versionCode=24`) APK build (SHA-256
-`3e2e9df0435beef69b2d6b9b677bb864363d21010e487a91499d590cbf40e7d2`).
+`65a62b821b45d95b48ba9cb1b9ac6e9c7971330c59c62336ecbdd5ca630804b2`).
 CI independently runs the same generator suite on
 Linux without the Windows-only skips.
 

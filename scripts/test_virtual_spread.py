@@ -45,11 +45,13 @@ from generate_virtual_spread import (  # noqa: E402
     _destination_uniform_scale,
     _durably_remove,
     _durable_replace,
+    _filesystem_paths_collide,
     _identity,
     _layout_authority_sha256,
     _link_authority_sha256,
     _link_annotation_flags,
     _layout_for_page,
+    _lexical_absolute,
     _require_runtime_float_rect,
     _transform_quad_points,
     _publish_pair,
@@ -65,6 +67,7 @@ from generate_virtual_spread import (  # noqa: E402
     _publication_lock_path,
     _prepare_publication_transaction,
     _recover_pair_publication,
+    _require_distinct_publication_paths,
     _require_runtime_manifest_path,
     _transformed_internal_destination,
     _sha256_open_file,
@@ -73,6 +76,7 @@ from generate_virtual_spread import (  # noqa: E402
     _write_publication_marker,
     build_pairs,
     build_virtual_spread,
+    main,
 )
 
 
@@ -1575,6 +1579,139 @@ class VirtualSpreadTests(unittest.TestCase):
                     **EXPLICIT_DEFAULT_LAYOUT,
                 )
             self.assertFalse(collision.exists())
+
+    def test_distinct_paths_follow_host_case_semantics(self) -> None:
+        windows_normcase = lambda value: value.replace("/", "\\").lower()
+        with mock.patch(
+            "generate_virtual_spread.os.path.normcase",
+            side_effect=windows_normcase,
+        ):
+            self.assertTrue(
+                _filesystem_paths_collide(
+                    Path("C:/Books/Book.pdf"),
+                    Path("c:/books/book.PDF"),
+                )
+            )
+            with self.assertRaisesRegex(VirtualSpreadError, "must be distinct"):
+                _require_distinct_publication_paths(
+                    Path("C:/Books/Book.pdf"),
+                    Path("c:/books/book.PDF"),
+                    Path("C:/Books/book.PDF.json"),
+                )
+
+    def test_existing_hardlink_source_output_is_rejected_without_mutation(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "output.pdf"
+            manifest_path = root / "output.pdf.json"
+            create_odd_page_fixture(source)
+            source_bytes = source.read_bytes()
+            try:
+                os.link(source, output)
+            except OSError as error:
+                self.skipTest(f"hard links unavailable: {error}")
+
+            with self.assertRaisesRegex(VirtualSpreadError, "must be distinct"):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(output.read_bytes(), source_bytes)
+            self.assertFalse(manifest_path.exists())
+
+    def test_path_identity_inspection_error_fails_closed(self) -> None:
+        with mock.patch(
+            "generate_virtual_spread.os.path.samefile",
+            side_effect=PermissionError("simulated identity denial"),
+        ):
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot verify publication path distinctness",
+            ):
+                _require_distinct_publication_paths(
+                    Path("source.pdf"),
+                    Path("output.pdf"),
+                    Path("output.pdf.json"),
+                )
+
+    @unittest.skipUnless(
+        os.name == "nt",
+        "case-equivalent path mutation is specific to Windows",
+    )
+    def test_case_equivalent_source_output_is_rejected_without_mutation(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "Book.pdf"
+            output = root / "book.pdf"
+            manifest_path = root / "book.pdf.json"
+            create_odd_page_fixture(source)
+            source_bytes = source.read_bytes()
+
+            with self.assertRaisesRegex(VirtualSpreadError, "must be distinct"):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertFalse(manifest_path.exists())
+            self.assertEqual(
+                [entry.name for entry in root.iterdir()],
+                [source.name],
+            )
+
+    def test_cli_reports_output_derived_manifest_spelling(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "Spread.PDF"
+            caller_manifest = root / "spread.pdf.JSON"
+            generated = {
+                "source": {"pageCount": 2},
+                "output": {
+                    "path": str(output),
+                    "pageCount": 1,
+                    "sha256": "a" * 64,
+                },
+            }
+            with mock.patch.object(
+                sys,
+                "argv",
+                [
+                    "generate_virtual_spread.py",
+                    str(source),
+                    str(output),
+                    "--manifest",
+                    str(caller_manifest),
+                ],
+            ), mock.patch(
+                "generate_virtual_spread.build_virtual_spread",
+                return_value=generated,
+            ), mock.patch("builtins.print") as print_mock:
+                self.assertEqual(main(), 0)
+
+            messages = [call.args[0] for call in print_mock.call_args_list]
+            self.assertIn(
+                "Mapping manifest:   " + str(Path(str(output) + ".json")),
+                messages,
+            )
+            self.assertNotIn(
+                "Mapping manifest:   " + str(_lexical_absolute(caller_manifest)),
+                messages,
+            )
 
     def test_source_reserved_artifact_collisions_fail_before_locking(
         self,

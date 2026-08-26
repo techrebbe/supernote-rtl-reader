@@ -568,13 +568,15 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
         Activity activity = activeActivity.get();
         Object viewModel = objectField(activity, "documentViewModel");
+        // Every concrete Back/Original Back action is newer than a link tap
+        // queued during cold verification. Invalidate that older intent even
+        // when the accepted manifest has already entered MANIFESTS but its
+        // main-thread activation callback has not run yet.
+        clearQueuedLinkInvocation(viewModel);
         ManifestLookup lookup = manifestLookupFor(viewModel);
         Manifest manifest = lookup.manifest;
         if (manifest == null) {
             if (lookup.navigationBlocked()) {
-                // A newer Back/Original Back action supersedes any link
-                // invocation left queued by an older cold verification.
-                clearQueuedLinkInvocation(viewModel);
                 param.setResult(null);
                 log("link_history_blocked reason="
                     + lookup.navigationBlockReason());

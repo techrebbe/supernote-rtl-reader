@@ -3817,11 +3817,11 @@ def _retired_publication_artifacts(
             raise VirtualSpreadError(
                 f"Cannot inspect retired publication artifact: {candidate}"
             ) from error
-        # Successful ordinary cleanup leaves an authenticated zero-length
-        # tombstone because deleting by pathname cannot be made
-        # inode-conditional on POSIX. Non-regular or non-empty entries,
-        # including a retained legacy hard-link alias, remain fail-closed
-        # recovery evidence for a later run.
+        # Older builds left authenticated zero-length retirement tombstones;
+        # those completed-cleanup markers remain inert. Current cleanup moves
+        # authenticated bytes into the separate .retained namespace instead.
+        # Non-regular or non-empty .retired entries remain fail-closed recovery
+        # evidence for a later run.
         if stat.S_ISREG(entry.st_mode) and entry.st_size == 0:
             continue
         suspicious.append(candidate)
@@ -3875,45 +3875,29 @@ def _durably_remove(
         ownership_guard,
         allow_namespace_ctime_change=(os.name != "nt"),
     )
-    flags = os.O_WRONLY
-    flags |= getattr(os, "O_BINARY", 0)
-    flags |= getattr(os, "O_NOINHERIT", 0)
-    flags |= getattr(os, "O_NOFOLLOW", 0)
-    descriptor = _publication_open_file(retired, flags, ownership_guard)
-    try:
-        opened_identity = _identity(os.fstat(descriptor))
-        if not _same_open_file(retired_identity, opened_identity):
-            raise VirtualSpreadError(
-                f"Retired publication artifact identity changed: {retired}"
-            )
-        opened_entry = os.fstat(descriptor)
-        if opened_entry.st_nlink > 1:
-            # An interrupted legacy hard-link backup may still alias the
-            # canonical output. Retaining that authenticated alias is safe and
-            # consumes no additional data; truncating it would corrupt the
-            # canonical file through the shared inode.
-            emptied_identity = opened_identity
-        else:
-            # POSIX has no conditional, inode-bound unlink operation. Truncate
-            # the authenticated open inode instead of deleting a pathname that
-            # a non-cooperating writer could replace between validation and
-            # unlink. The zero-length retirement tombstone is deliberately
-            # retained and ignored by subsequent recovery scans.
-            os.ftruncate(descriptor, 0)
-            os.fsync(descriptor)
-            emptied_identity = _identity(os.fstat(descriptor))
-    finally:
-        os.close(descriptor)
-    final_identity = _require_publication_path_identity(
-        retired,
-        emptied_identity,
-        "Retired publication artifact",
-        ownership_guard,
+    retained = path.with_name(
+        path.name + ".retained." + secrets.token_hex(RETIREMENT_TOKEN_BYTES)
     )
-    if final_identity.size != 0 and final_identity != opened_identity:
-        raise VirtualSpreadError(
-            f"Retired publication artifact was not emptied: {retired}"
-        )
+    # No POSIX primitive can prove that an opened inode did not acquire a new
+    # hard link between an st_nlink check and mutation. Never truncate or
+    # unlink authenticated retirement bytes. Move them once more, without
+    # replacement, into an inert unguessable retention namespace. A concurrent
+    # source or destination substitution is preserved by _durable_replace and
+    # fails closed; a late hard link remains byte-for-byte intact.
+    _durable_replace(
+        retired,
+        retained,
+        replace_existing=False,
+        ownership_guard=ownership_guard,
+        expected_source_identity=retired_identity,
+    )
+    _require_publication_path_identity(
+        retained,
+        retired_identity,
+        "Retained publication artifact",
+        ownership_guard,
+        allow_namespace_ctime_change=(os.name != "nt"),
+    )
 
 
 def _reject_retired_publication_artifacts(

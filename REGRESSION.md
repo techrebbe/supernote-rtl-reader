@@ -1633,6 +1633,10 @@ still aliases a live canonical inode, so cleanup cannot corrupt the restored
 PDF through a shared inode; a later run treats that nonempty alias as
 fail-closed recovery evidence.
 
+Review pass 69 supersedes this descriptor-truncation implementation after a
+later review proved that a new hard-link alias could still be created between
+the link-count check and the mutation.
+
 The generator now rejects a link carrying `/NoZoom` whenever the source page is
 scaled into its virtual half; copying transformed annotation geometry while
 retaining that flag would change its visible semantics. On Android, an
@@ -1682,6 +1686,39 @@ assertions, 8,752 exhaustive navigation assertions, both native invariant
 suites, hook-scope validation, syntax checks, and the signed/verified v0.0.24
 (`versionCode=24`) APK build (SHA-256
 `e189fc6b8a489e1fd98988fd00b5137233e56dab206216a508e00bd88796c4f1`).
+A fresh clean exact-head Ultra review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
+## Review pass 69 immutable retirement and cold Back supersession - LOCAL PASS
+
+The fresh exact-head Ultra review found two remaining races. Publication
+cleanup could observe one link to an authenticated retired inode and then
+truncate it after a non-cooperating writer created another hard-link alias. The
+cleanup path now never truncates or unlinks authenticated retirement bytes. It
+moves the exact inode without replacement from its unguessable `.retired...`
+name into an inert unguessable `.retained...` namespace, preserving every late
+alias byte-for-byte and failing closed on either source or destination
+substitution. Retained bytes are deliberately kept until the containing
+versioned cache directory can be safely garbage-collected.
+
+The same review found a narrow cold-verification interval in which an accepted
+manifest had entered the verifier cache but had not yet activated on the main
+thread. Back or Original Back during that interval could miss the manifest-null
+queue-clear branch and allow an older queued link to replay later. Every
+concrete history-return action now clears the older queued link immediately
+after resolving the view model and before any manifest lookup.
+
+Deterministic regressions create a hard-link alias after the first retirement
+move and prove both names retain the original bytes, replace the retired path
+before the retention move and prove the unrelated replacement survives, pin
+the inert retention namespace, and require history queue cancellation before
+manifest lookup. Local validation passes 141 generator tests on Windows (12
+expected platform/filesystem or privilege skips) and the same 141 on Linux
+(two Windows-specific skips), 141 focused navigation/manifest/cache assertions,
+15 cross-language authority assertions, 8,752 exhaustive navigation
+assertions, both native invariant suites, hook-scope validation, syntax checks,
+and the signed/verified v0.0.24 (`versionCode=24`) APK build (SHA-256
+`c0eeb6b83f7b7fef7b7366a0eb46bb35205fa50c0d672f2c6f40bf6cf59536b5`).
 A fresh clean exact-head Ultra review and focused hardware validation remain
 release gates; PR #16 stays draft.
 

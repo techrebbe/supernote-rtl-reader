@@ -182,12 +182,15 @@ snapshots, so a target that appears after an earlier existence observation still
 requires explicit cover and geometry choices. Recovery also binds every cleanup
 to both its authenticated digest and exact filesystem identity. The marker,
 stages, and backups are authenticated before cleanup begins, then each exact
-identity is carried through an unguessable retirement name. Cleanup opens and
-revalidates that exact retired inode and empties it through the descriptor
-rather than unlinking a replaceable pathname. Its inert zero-length tombstone is
-retained; a legacy hard-link retirement is retained without truncation while it
-still aliases a live canonical inode and remains fail-closed recovery evidence
-for a later run. A same-content pathname replacement is preserved. POSIX
+identity is carried first through an unguessable `.retired...` name and then,
+without replacement, into an unguessable `.retained...` namespace. Cleanup
+never truncates or unlinks those authenticated bytes: POSIX cannot prove that
+an inode has not gained a new hard-link alias between a link-count check and a
+mutation. A late alias therefore remains byte-for-byte intact, while a source
+or destination substitution is preserved and fails closed. Successfully
+retained files are inert and ignored by transaction recovery; they are kept
+until the containing versioned cache directory can be safely garbage-collected.
+A same-content pathname replacement is preserved. POSIX
 identity checks include
 ctime so an in-place, same-size mutation cannot hide behind a restored mtime;
 the generator permits only the ctime transition caused by its own
@@ -202,7 +205,8 @@ stage only after its SHA-256 matches that marker's authenticated transaction;
 a mismatched stage is preserved. Likewise, a nonempty or non-regular legacy or
 tokenized `.retired...` name is never treated as disposable scratch data:
 publication and recovery stop without changing it. Authenticated zero-length
-retirement tombstones from completed cleanup are inert and ignored. A
+`.retired...` tombstones left by an older completed cleanup remain inert and
+ignored; current cleanup publishes nonempty bytes only under `.retained...`. A
 transaction marker is durably published before
 either previous file is moved. POSIX builds
 sync every affected parent directory; Windows builds use

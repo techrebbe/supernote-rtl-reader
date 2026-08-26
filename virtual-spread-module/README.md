@@ -186,17 +186,20 @@ recovery removes a newly published canonical target only while both its verified
 digest and filesystem identity still match.
 Transaction cleanup authenticates the complete set of marker, stage, and backup
 artifacts before retiring any of them, then carries each exact identity through
-an unguessable retirement name. The exact retired inode is opened and emptied
-through its descriptor rather than unlinked by a replaceable pathname; an inert
-zero-length tombstone remains. A legacy hard-link retirement remains intact
-while it aliases a live canonical inode and remains fail-closed recovery
-evidence for a later run. POSIX ctime participates in identity checks, so
+an unguessable `.retired...` name and, without replacement, into an inert
+`.retained...` namespace. Cleanup never truncates or unlinks authenticated
+retirement bytes because a new hard-link alias can appear after any link-count
+check. Late aliases remain byte-for-byte intact; source or destination
+substitution is preserved and fails closed. Retained files are ignored by
+transaction recovery and kept until their containing versioned cache directory
+can be safely garbage-collected. POSIX ctime participates in identity checks, so
 an in-place same-size mutation cannot be hidden by restoring mtime.
 Marker-free remnants are preserved and rejected for manual recovery; once a
 valid marker exists, a staged remnant is removed only when its digest matches
 the authenticated transaction. A nonempty or non-regular legacy or tokenized
-`.retired...` path is never deleted merely because of its filename; an
-authenticated zero-length retirement tombstone from completed cleanup is inert.
+`.retired...` path is never deleted merely because of its filename. A zero-length
+`.retired...` tombstone left by an older completed cleanup remains inert, while
+current authenticated cleanup publishes only nonempty `.retained...` files.
 The sidecar's published spelling is always the
 exact output-derived `<PDF filename>.json`, including case.
 

@@ -190,23 +190,21 @@ for required in (
             f"native-link history return is missing fail-closed guard: {required}"
         )
 
-history_manifest_missing = history_return.find("if (manifest == null)")
-history_blocked = history_return.find(
-    "if (lookup.navigationBlocked())", history_manifest_missing
+history_view_model = history_return.find(
+    'Object viewModel = objectField(activity, "documentViewModel")'
 )
-history_missing_end = history_return.find("try {", history_blocked)
-history_blocked_branch = history_return[history_blocked:history_missing_end]
-history_queued_clear = history_blocked_branch.find(
-    "clearQueuedLinkInvocation(viewModel)"
+history_queued_clear = history_return.find(
+    "clearQueuedLinkInvocation(viewModel)", history_view_model
 )
-history_result_block = history_blocked_branch.find("param.setResult(null)")
+history_manifest_lookup = history_return.find(
+    "ManifestLookup lookup = manifestLookupFor(viewModel)", history_view_model
+)
 if not (
-    0 <= history_manifest_missing < history_blocked < history_missing_end
-    and 0 <= history_queued_clear < history_result_block
+    0 <= history_view_model < history_queued_clear < history_manifest_lookup
 ):
     raise SystemExit(
-        "a blocked Back/Original Back action must discard an older queued "
-        "link before returning"
+        "every Back/Original Back action must discard an older queued link "
+        "before consulting the asynchronously activated manifest"
     )
 
 link_hook_start = hook.find("private static void handleLinkTarget")
@@ -1229,9 +1227,9 @@ for required in (
     "test_cleanup_never_deletes_replaced_stage_or_marker",
     "test_cleanup_rejects_backup_for_absent_original",
     "test_unique_retirement_preserves_a_replaced_entry",
-    "test_retirement_keeps_an_inert_identity_bound_tombstone",
-    "test_retirement_never_truncates_a_late_path_replacement",
-    "test_posix_retirement_preserves_replacement_after_open",
+    "test_retirement_keeps_identity_bound_bytes_in_inert_retention",
+    "test_retirement_preserves_a_late_path_replacement",
+    "test_retirement_never_mutates_a_late_hardlink_alias",
     "test_no_zoom_link_on_scaled_page_fails_closed",
     "test_publication_staging_paths_are_deterministic",
     "test_recovery_preserves_orphaned_deterministic_staging",
@@ -1257,8 +1255,10 @@ for required in (
 for required in (
     "ANNOTATION_FLAG_NO_ZOOM = 0x0008",
     "Cannot preserve NoZoom link annotation flag through page scaling",
-    "os.ftruncate(descriptor, 0)",
-    "zero-length retirement tombstone",
+    'path.name + ".retained."',
+    "Never truncate or",
+    "late hard link remains byte-for-byte intact",
+    "expected_source_identity=retired_identity",
 ):
     if required not in generator:
         raise SystemExit(
@@ -1268,6 +1268,11 @@ for required in (
 if "_publication_unlink(retired," in generator:
     raise SystemExit(
         "retired publication cleanup must not delete an untrusted pathname"
+    )
+if "os.ftruncate(" in generator:
+    raise SystemExit(
+        "retired publication cleanup must not mutate an inode that may gain "
+        "a late hard-link alias"
     )
 
 preflight_hash = generator.find('"Staged manifest"')

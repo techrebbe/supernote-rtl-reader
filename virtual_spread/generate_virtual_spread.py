@@ -3282,23 +3282,6 @@ def _require_publication_output_hash(
     )
 
 
-def _publication_output_matches_sha256(
-    path: Path,
-    expected_hash: str,
-    ownership_guard: PublicationOwnershipGuard | None,
-) -> bool:
-    try:
-        _publication_output_evidence(
-            path,
-            "Published output",
-            ownership_guard,
-            expected_hash=expected_hash,
-        )
-        return True
-    except (OSError, VirtualSpreadError):
-        return False
-
-
 def _publication_manifest_evidence(
     path: Path,
     label: str,
@@ -3331,23 +3314,6 @@ def _require_publication_manifest_hash(
         expected_identity=expected_identity,
         expected_hash=expected_hash,
     )
-
-
-def _publication_manifest_matches_sha256(
-    path: Path,
-    expected_hash: str,
-    ownership_guard: PublicationOwnershipGuard | None,
-) -> bool:
-    try:
-        _publication_manifest_evidence(
-            path,
-            "Published manifest",
-            ownership_guard,
-            expected_hash=expected_hash,
-        )
-        return True
-    except (OSError, VirtualSpreadError):
-        return False
 
 
 def _publication_target_state(
@@ -4169,41 +4135,44 @@ def _validated_publication_transaction(
     return transaction
 
 
-def _legacy_publication_is_pre_mutation(
+def _legacy_publication_pre_mutation_states(
     transaction: dict[str, Any],
     output_path: Path,
     manifest_path: Path,
     ownership_guard: PublicationOwnershipGuard | None,
-) -> bool:
-    """Recognize only the unambiguous pre-mutation state of a v1 marker."""
+) -> tuple[PublicationTargetState, PublicationTargetState] | None:
+    """Capture the only unambiguous pre-mutation state of a v1 marker."""
     entries = (
         (
             output_path,
             transaction["hadOutput"],
             transaction["newOutputSha256"],
             "Output PDF",
-            _publication_output_matches_sha256,
+            False,
         ),
         (
             manifest_path,
             transaction["hadManifest"],
             transaction["newManifestSha256"],
             "Manifest",
-            _publication_manifest_matches_sha256,
+            True,
         ),
     )
-    for final_path, had_final, new_hash, label, matches in entries:
-        exists = _require_regular_publication_target(
+    states: list[PublicationTargetState] = []
+    for final_path, had_final, new_hash, label, is_manifest in entries:
+        state = _publication_target_state(
             final_path,
             label,
             ownership_guard,
+            manifest=is_manifest,
         )
         if had_final:
-            if not exists or matches(final_path, new_hash, ownership_guard):
-                return False
-        elif exists:
-            return False
-    return True
+            if not state.exists or state.sha256 == new_hash:
+                return None
+        elif state.exists:
+            return None
+        states.append(state)
+    return states[0], states[1]
 
 
 def _finish_publication_transaction(
@@ -4213,6 +4182,8 @@ def _finish_publication_transaction(
     outcome: str,
     committed_output_identity: SourceIdentity | None = None,
     committed_manifest_identity: SourceIdentity | None = None,
+    settled_output_state: PublicationTargetState | None = None,
+    settled_manifest_state: PublicationTargetState | None = None,
 ) -> None:
     if outcome not in {"committed", "rolled_back", "discarded"}:
         raise VirtualSpreadError("Invalid publication cleanup outcome")
@@ -4232,25 +4203,39 @@ def _finish_publication_transaction(
         or not isinstance(committed_manifest_identity, SourceIdentity)
     ):
         raise VirtualSpreadError("Missing authenticated committed-pair evidence")
-
-    def require_committed_pair() -> None:
-        if outcome != "committed":
-            return
+    if outcome == "committed":
         assert isinstance(committed_output_identity, SourceIdentity)
         assert isinstance(committed_manifest_identity, SourceIdentity)
-        _publication_output_evidence(
-            output_path,
-            "Committed output",
-            ownership_guard,
-            expected_identity=committed_output_identity,
-            expected_hash=transaction["newOutputSha256"],
+        settled_output_state = PublicationTargetState(
+            True,
+            committed_output_identity,
+            transaction["newOutputSha256"],
         )
-        _publication_manifest_evidence(
-            manifest_path,
-            "Committed manifest",
+        settled_manifest_state = PublicationTargetState(
+            True,
+            committed_manifest_identity,
+            transaction["newManifestSha256"],
+        )
+    elif not isinstance(
+        settled_output_state, PublicationTargetState
+    ) or not isinstance(settled_manifest_state, PublicationTargetState):
+        raise VirtualSpreadError("Missing authenticated settled-pair evidence")
+
+    def require_settled_pair() -> None:
+        assert isinstance(settled_output_state, PublicationTargetState)
+        assert isinstance(settled_manifest_state, PublicationTargetState)
+        _require_publication_target_state(
+            output_path,
+            "Settled output",
+            settled_output_state,
             ownership_guard,
-            expected_identity=committed_manifest_identity,
-            expected_hash=transaction["newManifestSha256"],
+        )
+        _require_publication_target_state(
+            manifest_path,
+            "Settled manifest",
+            settled_manifest_state,
+            ownership_guard,
+            manifest=True,
         )
 
     cleanup: list[tuple[Path, SourceIdentity]] = []
@@ -4346,10 +4331,10 @@ def _finish_publication_transaction(
 
     # Authenticate the entire cleanup set before deleting any entry. Every
     # removal then carries the exact captured identity through retirement. A
-    # committed pair is revalidated immediately before every retirement so a
-    # pathname replacement cannot consume rollback evidence under stale proof.
+    # settled pair is revalidated immediately before every retirement so a
+    # pathname replacement cannot consume recovery evidence under stale proof.
     for path, identity in cleanup:
-        require_committed_pair()
+        require_settled_pair()
         _durably_remove(
             path,
             ownership_guard,
@@ -4465,17 +4450,22 @@ def _recover_pair_publication(
             raise VirtualSpreadError(
                 "Cannot recover obsolete virtual-spread publication marker"
             )
-        if not _legacy_publication_is_pre_mutation(
+        settled_pair = _legacy_publication_pre_mutation_states(
             transaction,
             output_path,
             manifest_path,
             ownership_guard,
-        ):
+        )
+        if settled_pair is None:
             raise VirtualSpreadError(
                 "Cannot recover obsolete virtual-spread publication marker"
             )
         _finish_publication_transaction(
-            transaction, ownership_guard, outcome="discarded"
+            transaction,
+            ownership_guard,
+            outcome="discarded",
+            settled_output_state=settled_pair[0],
+            settled_manifest_state=settled_pair[1],
         )
         return "discarded"
     try:
@@ -4510,6 +4500,7 @@ def _recover_pair_publication(
         return "committed"
 
     errors: list[str] = []
+    settled_states: dict[Path, PublicationTargetState] = {}
     entries = (
         (
             output_path,
@@ -4598,6 +4589,11 @@ def _recover_pair_publication(
                                 "Restored publication target identity changed: "
                                 f"{final_path}"
                             )
+                        settled_states[final_path] = PublicationTargetState(
+                            True,
+                            restored_identity,
+                            old_hash,
+                        )
                         continue
                     else:
                         final_identity, _ = _publication_file_evidence(
@@ -4612,18 +4608,24 @@ def _recover_pair_publication(
                             expected_identity=final_identity,
                         )
                 _validate_publication_ownership(ownership_guard)
-                _durable_replace(
+                moved_identity = _durable_replace(
                     backup,
                     final_path,
                     replace_existing=False,
                     ownership_guard=ownership_guard,
                     expected_source_identity=backup_identity,
                 )
-                _require_publication_file_hash(
+                restored_identity, _ = final_evidence(
                     final_path,
-                    old_hash,
                     "Restored publication target",
                     ownership_guard,
+                    expected_identity=moved_identity,
+                    expected_hash=old_hash,
+                )
+                settled_states[final_path] = PublicationTargetState(
+                    True,
+                    restored_identity,
+                    old_hash,
                 )
             elif had_final:
                 if not final_exists:
@@ -4631,11 +4633,16 @@ def _recover_pair_publication(
                         f"Missing original and backup: {final_path}"
                     )
                 assert isinstance(old_hash, str)
-                _require_publication_file_hash(
+                original_identity, _ = final_evidence(
                     final_path,
-                    old_hash,
                     "Original publication target",
                     ownership_guard,
+                    expected_hash=old_hash,
+                )
+                settled_states[final_path] = PublicationTargetState(
+                    True,
+                    original_identity,
+                    old_hash,
                 )
             elif final_exists:
                 try:
@@ -4654,14 +4661,37 @@ def _recover_pair_publication(
                     ownership_guard,
                     expected_identity=final_identity,
                 )
+                settled_states[final_path] = PublicationTargetState(
+                    False,
+                    None,
+                    None,
+                )
+            else:
+                settled_states[final_path] = PublicationTargetState(
+                    False,
+                    None,
+                    None,
+                )
         except BaseException as error:
             errors.append(f"{final_path}: {error}")
     if errors:
         raise VirtualSpreadError(
             "Virtual-spread recovery was incomplete: " + "; ".join(errors)
         )
+    settled_output_state = settled_states.get(output_path)
+    settled_manifest_state = settled_states.get(manifest_path)
+    if not isinstance(
+        settled_output_state, PublicationTargetState
+    ) or not isinstance(settled_manifest_state, PublicationTargetState):
+        raise VirtualSpreadError(
+            "Virtual-spread recovery did not authenticate the settled pair"
+        )
     _finish_publication_transaction(
-        transaction, ownership_guard, outcome="rolled_back"
+        transaction,
+        ownership_guard,
+        outcome="rolled_back",
+        settled_output_state=settled_output_state,
+        settled_manifest_state=settled_manifest_state,
     )
     return "rolled_back"
 

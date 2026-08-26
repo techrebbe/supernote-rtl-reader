@@ -217,8 +217,9 @@ finishes cleanup, or restores the previous PDF and manifest from the recorded
 backups. Publication marker v2 records the prior pair's SHA-256 values; recovery
 reads, hashes, and parses that marker through one descriptor-bound snapshot,
 authenticates each backup before restoring it, and preserves the marker plus
-evidence if any backup was altered. Before retiring any rollback evidence for a
-committed transaction, it revalidates both canonical path identities and hashes.
+evidence if any backup was altered. Before every retirement for a committed,
+rolled-back, or discarded transaction, it revalidates both canonical path
+existence states, identities, and hashes captured for the settled pair.
 A canonical target found in front of a valid
 backup is overwritten only when it still matches the transaction's staged hash;
 an unrelated or concurrently replaced target is preserved and recovery fails
@@ -269,7 +270,9 @@ Native links tapped during that cold verification window are likewise consumed,
 queued once, and replayed only after the same document and source page acquire
 verified authority. It is bound to a unique verifier generation, the exact native
 MuPDF document object, and all three embedded authorities rather than merely a
-reusable path snapshot. The queued invocation is discarded after a document/page
+reusable path snapshot. Every native page-load callback advances a monotonic
+generation even before manifest activation, and replay requires the exact
+generation captured with the tap. The queued invocation is discarded after a document/page
 change, verification rejection, native-document replacement, a newer manual
 turn (including one blocked during verification), a newer already-verified
 link, or its bounded freshness window. If a generated PDF is missing its

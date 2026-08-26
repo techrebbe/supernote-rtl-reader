@@ -121,7 +121,8 @@ tapped during verification is also consumed and queued once. After successful
 activation, the module replays it only if the same document, exact PDF/sidecar
 filesystem snapshot, unique verifier generation, native MuPDF document object,
 embedded source/layout/link authorities, source page, and external/internal
-routing classification are still current and the request is fresh; same-path
+routing classification are still current, no native page-load callback has
+occurred since the tap, and the request is fresh; same-path
 replacement, document/page changes, a newer manual turn (even while authority
 remains pending or blocked), a newer already-verified link, a newer
 uninspectable/blocked link, Back or Original Back while authority is blocked,
@@ -200,6 +201,10 @@ the authenticated transaction. A nonempty or non-regular legacy or tokenized
 `.retired...` path is never deleted merely because of its filename. A zero-length
 `.retired...` tombstone left by an older completed cleanup remains inert, while
 current authenticated cleanup publishes only nonempty `.retained...` files.
+Before each such retirement, cleanup revalidates the complete settled canonical
+PDF/sidecar state for committed, rolled-back, and discarded transactions. A
+replacement of either path therefore preserves the remaining recovery evidence
+and fails closed instead of accepting a mixed pair.
 The sidecar's published spelling is always the
 exact output-derived `<PDF filename>.json`, including case.
 

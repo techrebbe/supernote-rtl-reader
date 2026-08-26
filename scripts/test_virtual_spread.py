@@ -4866,6 +4866,61 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertFalse(output_backup.exists())
             self.assertFalse(manifest_backup.exists())
 
+    def test_discarded_marker_revalidates_pair_before_retirement(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            marker.write_text(
+                json.dumps(
+                    {
+                        "schema": (
+                            "techrebbe.supernote."
+                            "virtual-spread-publication/v1"
+                        ),
+                        "outputPath": str(output),
+                        "manifestPath": str(manifest),
+                        "outputBackupPath": str(output_backup),
+                        "manifestBackupPath": str(manifest_backup),
+                        "hadOutput": True,
+                        "hadManifest": True,
+                        "newOutputSha256": "0" * 64,
+                        "newManifestSha256": "1" * 64,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            real_finish = _finish_publication_transaction
+            raced = False
+
+            def replace_after_pair_capture(*args: object, **kwargs: object) -> None:
+                nonlocal raced
+                replacement = root / "late-output.pdf"
+                replacement.write_bytes(b"late-output")
+                os.replace(replacement, output)
+                raced = True
+                real_finish(*args, **kwargs)
+
+            with mock.patch(
+                "generate_virtual_spread._finish_publication_transaction",
+                side_effect=replace_after_pair_capture,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Settled output",
+                ):
+                    _recover_pair_publication(output, manifest)
+
+            self.assertTrue(raced)
+            self.assertEqual(output.read_bytes(), b"late-output")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(marker.is_file())
+
     def test_recovery_rejects_unauthenticated_retired_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -5647,6 +5702,60 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertTrue(raced)
             self.assertEqual(output.read_bytes(), b"unrelated-replacement")
             self.assertTrue(manifest_stage.is_file())
+            self.assertTrue(marker.is_file())
+
+    def test_rollback_revalidates_pair_before_retiring_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            output_backup = Path(transaction["outputBackupPath"])
+            manifest_backup = Path(transaction["manifestBackupPath"])
+            marker = Path(transaction["markerPath"])
+            _durable_replace(output, output_backup)
+            _durable_replace(manifest, manifest_backup)
+            _durable_replace(
+                temporary_output,
+                output,
+                replace_existing=False,
+            )
+            real_finish = _finish_publication_transaction
+            raced = False
+
+            def replace_after_pair_capture(*args: object, **kwargs: object) -> None:
+                nonlocal raced
+                replacement = root / "late-output.pdf"
+                replacement.write_bytes(b"late-output")
+                os.replace(replacement, output)
+                raced = True
+                real_finish(*args, **kwargs)
+
+            with mock.patch(
+                "generate_virtual_spread._finish_publication_transaction",
+                side_effect=replace_after_pair_capture,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Settled output",
+                ):
+                    _recover_pair_publication(output, manifest)
+
+            self.assertTrue(raced)
+            self.assertEqual(output.read_bytes(), b"late-output")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
             self.assertTrue(marker.is_file())
 
     @unittest.skipIf(
@@ -6445,7 +6554,7 @@ class VirtualSpreadTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(
                     VirtualSpreadError,
-                    "Committed output identity changed",
+                    "Settled output identity changed",
                 ):
                     _recover_pair_publication(output, manifest)
 

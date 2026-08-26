@@ -369,6 +369,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         String queuedLinkDocumentPath;
         String queuedLinkSnapshotId;
         long queuedLinkVerificationGeneration;
+        long queuedLinkPageLoadGeneration = -1L;
         VirtualSpreadNavigation.LinkRouting queuedLinkRouting;
         Object queuedLinkNativeDocument;
         String queuedLinkNativeSourceAuthority;
@@ -863,6 +864,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             state.queuedLinkDocumentPath = documentPath;
             state.queuedLinkSnapshotId = snapshotId;
             state.queuedLinkVerificationGeneration = verificationGeneration;
+            state.queuedLinkPageLoadGeneration = state.pageLoadGeneration;
             state.queuedLinkRouting = routing;
             state.queuedLinkNativeDocument = nativeDocument;
             state.queuedLinkNativeSourceAuthority = nativeSourceAuthority;
@@ -911,6 +913,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         int sourcePage;
         long queuedAt;
         long queuedVerificationGeneration;
+        long queuedPageLoadGeneration;
+        long currentPageLoadGeneration;
         Object queuedNativeDocument;
         String queuedNativeSourceAuthority;
         String queuedNativeLayoutAuthority;
@@ -937,6 +941,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             queuedAt = state.queuedLinkAt;
             queuedVerificationGeneration =
                 state.queuedLinkVerificationGeneration;
+            queuedPageLoadGeneration = state.queuedLinkPageLoadGeneration;
+            currentPageLoadGeneration = state.pageLoadGeneration;
             queuedNativeDocument = state.queuedLinkNativeDocument;
             queuedNativeSourceAuthority =
                 state.queuedLinkNativeSourceAuthority;
@@ -973,6 +979,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 sameNativeDocument
                     && verificationGeneration > 0L
                     && queuedVerificationGeneration == verificationGeneration,
+                queuedPageLoadGeneration >= 0L
+                    && queuedPageLoadGeneration == currentPageLoadGeneration,
                 sourcePage,
                 currentPage,
                 age,
@@ -1293,12 +1301,16 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     }
 
     private static void handlePageLoaded(Object viewModel) {
+        ReaderState state;
+        synchronized (STATES) {
+            state = readerStateLocked(viewModel);
+            state.pageLoadGeneration++;
+        }
         Manifest manifest = manifestFor(viewModel);
         if (manifest == null) {
             return;
         }
-        ReaderState state = stateFor(viewModel, manifest);
-        state.pageLoadGeneration++;
+        state = stateFor(viewModel, manifest);
         int currentPage = intField(viewModel, "currentPage", -1);
         long now = System.currentTimeMillis();
         long linkAge = now - state.pendingLinkAt;
@@ -1649,6 +1661,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         state.queuedLinkDocumentPath = null;
         state.queuedLinkSnapshotId = null;
         state.queuedLinkVerificationGeneration = 0L;
+        state.queuedLinkPageLoadGeneration = -1L;
         state.queuedLinkRouting = null;
         state.queuedLinkNativeDocument = null;
         state.queuedLinkNativeSourceAuthority = null;

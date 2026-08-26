@@ -1722,6 +1722,37 @@ and the signed/verified v0.0.24 (`versionCode=24`) APK build (SHA-256
 A fresh clean exact-head Ultra review and focused hardware validation remain
 release gates; PR #16 stays draft.
 
+## Review pass 70 settled-pair and deferred-link generations - LOCAL PASS
+
+The next exact-head Ultra review found two remaining cross-layer races. Recovery
+could restore and authenticate the PDF, then restore the sidecar, yet retire all
+transaction evidence without rechecking a non-cooperating writer's intervening
+replacement of the first path. Every committed, rolled-back, and discarded
+cleanup now carries the exact settled PDF/sidecar existence, identity, and hash
+state and revalidates the complete pair before each retirement. A changed path
+therefore remains in place and the marker or other remaining evidence is
+preserved for fail-closed recovery.
+
+A native page-load callback that arrived while cold manifest verification was
+pending also returned before advancing the token used by a queued link. Moving
+away from and back to the original page could consequently replay the older tap.
+Every native page-load callback now advances a monotonic generation before
+manifest lookup; a queued link captures that generation and must match it at
+replay.
+
+Deterministic regressions replace the settled output after both rollback and
+legacy-discard state capture and prove cleanup preserves the marker, and reject
+a queued link after any intervening page load even when the final page number is
+unchanged. Local validation passes 143 generator tests on Windows (12 expected
+platform/filesystem or privilege skips) and the same 143 on Linux (two
+Windows-specific skips), 142 focused navigation/manifest/cache assertions, 15
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, and the signed/verified
+v0.0.24 (`versionCode=24`) APK build (SHA-256
+`7d3bd74eea3d74176777e4db6a29cb41f8f84d6dd35ee1ae0cd3cb9a3dd9ee6d`).
+A fresh clean exact-head Ultra review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
 ## Failure capture
 
 Before reproducing a failure:

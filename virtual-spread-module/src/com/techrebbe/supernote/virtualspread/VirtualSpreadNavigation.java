@@ -681,6 +681,7 @@ public final class VirtualSpreadNavigation {
         boolean sameDocument,
         boolean sameSnapshot,
         boolean sameNativeDocument,
+        boolean samePageLoadGeneration,
         int sourcePage,
         int currentPage,
         long ageMillis,
@@ -689,6 +690,7 @@ public final class VirtualSpreadNavigation {
         return sameDocument
             && sameSnapshot
             && sameNativeDocument
+            && samePageLoadGeneration
             && sourcePage >= 0
             && sourcePage == currentPage
             && ageMillis >= 0L

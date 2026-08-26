@@ -226,6 +226,7 @@ for required in (
     "state.queuedLinkArguments = arguments.clone()",
     "state.queuedLinkSnapshotId = snapshotId",
     "state.queuedLinkVerificationGeneration = verificationGeneration",
+    "state.queuedLinkPageLoadGeneration = state.pageLoadGeneration",
     "state.queuedLinkRouting = routing",
     "state.queuedLinkNativeDocument = nativeDocument",
     "state.queuedLinkNativeSourceAuthority = nativeSourceAuthority",
@@ -236,6 +237,7 @@ for required in (
     "currentNativeDocument == queuedNativeDocument",
     "queuedNativeSourceAuthority.equals(nativePdfMetadata(",
     "queuedVerificationGeneration == verificationGeneration",
+    "queuedPageLoadGeneration == currentPageLoadGeneration",
     "pendingLinkReplayIsCurrent(",
     "sameCanonicalPath(manifest.key, documentPath)",
     "snapshotId.equals(verifiedSnapshotId)",
@@ -323,6 +325,19 @@ page_loaded_end = hook.find("private static void schedulePortraitFocus", page_lo
 if page_loaded_start < 0 or page_loaded_end < 0:
     raise SystemExit("missing page-loaded viewport handling")
 page_loaded = hook[page_loaded_start:page_loaded_end]
+page_load_state = page_loaded.find("state = readerStateLocked(viewModel)")
+page_load_generation = page_loaded.find(
+    "state.pageLoadGeneration++", page_load_state
+)
+page_load_manifest = page_loaded.find(
+    "Manifest manifest = manifestFor(viewModel)", page_load_state
+)
+if not (
+    0 <= page_load_state < page_load_generation < page_load_manifest
+):
+    raise SystemExit(
+        "every native page load must supersede deferred work before manifest lookup"
+    )
 for required in (
     "shouldPreservePortraitLinkViewport(",
     '"internal_link".equals(targetReason)',
@@ -967,9 +982,7 @@ for required in (
     "expected_identity=expected_manifest_identity",
     "expected_hash=expected_manifest_hash",
     "def _require_publication_output_hash(",
-    "def _publication_output_matches_sha256(",
     "def _require_publication_manifest_hash(",
-    "def _publication_manifest_matches_sha256(",
     'transaction["_newOutputIdentity"] = new_output_identity',
     '"size": temporary_output_identity.size',
     '"sha256": temporary_output_hash',
@@ -1134,9 +1147,12 @@ for required in (
     "transaction, marker_identity, marker_hash = _read_publication_marker(",
     "committed_output_identity=published_output_identity",
     "committed_manifest_identity=published_manifest_identity",
-    "def require_committed_pair()",
-    'expected_identity=committed_output_identity',
-    'expected_identity=committed_manifest_identity',
+    "def _legacy_publication_pre_mutation_states(",
+    "def require_settled_pair()",
+    '"Missing authenticated settled-pair evidence"',
+    "settled_output_state = PublicationTargetState(",
+    "settled_manifest_state = PublicationTargetState(",
+    "settled_states[final_path] = PublicationTargetState(",
     "path_identity.changed_ns == open_identity.changed_ns",
     "_same_file_after_namespace_move(\n"
     "                            final_identity, restored_identity",
@@ -1156,6 +1172,7 @@ for required in (
     "test_staged_output_swap_is_rejected_at_publication_boundary",
     "test_same_content_staged_output_replacement_is_rejected",
     "test_obsolete_marker_without_backups_is_discarded",
+    "test_discarded_marker_revalidates_pair_before_retirement",
     "test_obsolete_marker_with_backup_fails_closed",
     "test_legacy_marker_with_duplicate_keys_fails_closed",
     "test_legacy_marker_with_unknown_fields_fails_closed",
@@ -1177,6 +1194,7 @@ for required in (
     "test_final_publication_never_replaces_a_late_target",
     "test_recovery_never_replaces_a_target_that_appears_before_restore",
     "test_recovery_never_deletes_a_replaced_new_target",
+    "test_rollback_revalidates_pair_before_retiring_evidence",
     "test_unknown_xyz_left_fails_closed_even_matching_transform",
     "test_null_destination_coordinates_reject_different_transforms",
     "test_destination_operands_require_pdf_name_and_numbers",

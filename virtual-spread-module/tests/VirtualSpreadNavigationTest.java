@@ -168,42 +168,49 @@ public final class VirtualSpreadNavigationTest {
             "pending link replays on its original page",
             true,
             VirtualSpreadNavigation.pendingLinkReplayIsCurrent(
-                true, true, true, 4, 4, 1000L, 60000L
+                true, true, true, true, 4, 4, 1000L, 60000L
             )
         );
         assertBoolean(
             "pending link cannot cross documents",
             false,
             VirtualSpreadNavigation.pendingLinkReplayIsCurrent(
-                false, true, true, 4, 4, 1000L, 60000L
+                false, true, true, true, 4, 4, 1000L, 60000L
             )
         );
         assertBoolean(
             "pending link cannot cross document snapshots",
             false,
             VirtualSpreadNavigation.pendingLinkReplayIsCurrent(
-                true, false, true, 4, 4, 1000L, 60000L
+                true, false, true, true, 4, 4, 1000L, 60000L
             )
         );
         assertBoolean(
             "pending link cannot cross native document instances",
             false,
             VirtualSpreadNavigation.pendingLinkReplayIsCurrent(
-                true, true, false, 4, 4, 1000L, 60000L
+                true, true, false, true, 4, 4, 1000L, 60000L
+            )
+        );
+        assertBoolean(
+            "pending link cannot survive an intervening page load",
+            false,
+            VirtualSpreadNavigation.pendingLinkReplayIsCurrent(
+                true, true, true, false, 4, 4, 1000L, 60000L
             )
         );
         assertBoolean(
             "pending link cannot cross pages",
             false,
             VirtualSpreadNavigation.pendingLinkReplayIsCurrent(
-                true, true, true, 4, 5, 1000L, 60000L
+                true, true, true, true, 4, 5, 1000L, 60000L
             )
         );
         assertBoolean(
             "expired pending link is discarded",
             false,
             VirtualSpreadNavigation.pendingLinkReplayIsCurrent(
-                true, true, true, 4, 4, 60001L, 60000L
+                true, true, true, true, 4, 4, 60001L, 60000L
             )
         );
         assertBoolean(

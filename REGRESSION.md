@@ -1753,6 +1753,39 @@ v0.0.24 (`versionCode=24`) APK build (SHA-256
 A fresh clean exact-head Ultra review and focused hardware validation remain
 release gates; PR #16 stays draft.
 
+## Review pass 71 source commit and stable APK identity - LOCAL PASS
+
+The fresh exact-head Ultra review found two release-path defects. The generator
+previously rehashed the canonical source immediately before calling the pair
+publisher, leaving publication itself free to commit an older snapshot after a
+concurrent source replacement. Source validation now belongs to the publication
+transaction: it runs before transaction evidence is created and again after the
+new canonical PDF and sidecar are authenticated but before rollback evidence is
+retired. A failure at that commit boundary disables committed-pair recovery, so
+the previous pair is restored (or a first-published pair is removed) and the
+changed source is preserved.
+
+GitHub-hosted runners also generated a new Android debug certificate for every
+run while uploading each APK. CI now restores a stable keystore from the
+encrypted `VIRTUAL_SPREAD_APK_KEYSTORE_BASE64` repository secret. If that secret
+is unavailable, an ephemeral signer is still sufficient for build verification,
+but the non-upgradeable APK is deliberately not uploaded. Deterministic invariant
+checks pin that upload gate and the build's selected-keystore argument.
+
+The source-race regression atomically replaces the source immediately after the
+new output reaches its canonical path and proves publication raises, the changed
+source survives, and the complete earlier PDF/sidecar pair is restored without a
+marker or backup remnant. Local validation passes 144 generator tests on Windows
+(12 expected platform/filesystem or privilege skips) and the same 144 on Linux
+(two Windows-specific skips), 142 focused navigation/manifest/cache assertions,
+15 cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, workflow YAML parsing, and
+the signed/verified v0.0.24 (`versionCode=24`) APK build. The APK uses the existing
+upgrade-compatible certificate and has SHA-256
+`0922b0bdd53732c6c07b26576c4795d01cdc0ffe16ff95c67a41c3fa23edf7f2`.
+A fresh exact-head Ultra review and focused hardware validation remain release
+gates; PR #16 stays draft.
+
 ## Failure capture
 
 Before reproducing a failure:

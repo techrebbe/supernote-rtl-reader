@@ -1465,6 +1465,79 @@ class VirtualSpreadTests(unittest.TestCase):
                 ]),
             )
 
+    def test_source_replacement_at_publication_commit_rolls_back_pair(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            replacement = root / "replacement.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            build_virtual_spread(source, output, manifest_path)
+            previous_output = output.read_bytes()
+            previous_manifest = manifest_path.read_bytes()
+
+            create_odd_page_fixture(replacement)
+            replacement.write_bytes(
+                replacement.read_bytes() + b"\n% replacement source\n"
+            )
+            replacement_bytes = replacement.read_bytes()
+            real_durable_replace = _durable_replace
+            replaced_at_commit = False
+
+            def move_then_replace_source(
+                moving_source: Path,
+                target: Path,
+                replace_existing: bool,
+                ownership_guard: object = None,
+                expected_source_identity: SourceIdentity | None = None,
+            ) -> SourceIdentity:
+                nonlocal replaced_at_commit
+                moved_identity = real_durable_replace(
+                    moving_source,
+                    target,
+                    replace_existing=replace_existing,
+                    ownership_guard=ownership_guard,
+                    expected_source_identity=expected_source_identity,
+                )
+                if (
+                    not replaced_at_commit
+                    and _lexical_absolute(target) == _lexical_absolute(output)
+                    and moving_source.name == f".{output.name}.tmp"
+                ):
+                    os.replace(replacement, source)
+                    replaced_at_commit = True
+                return moved_identity
+
+            with mock.patch(
+                "generate_virtual_spread._durable_replace",
+                side_effect=move_then_replace_source,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Source PDF changed before publication",
+                ):
+                    build_virtual_spread(
+                        source,
+                        output,
+                        manifest_path,
+                        force=True,
+                        **EXPLICIT_DEFAULT_LAYOUT,
+                    )
+
+            self.assertTrue(replaced_at_commit)
+            self.assertEqual(source.read_bytes(), replacement_bytes)
+            self.assertEqual(output.read_bytes(), previous_output)
+            self.assertEqual(manifest_path.read_bytes(), previous_manifest)
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            self.assertFalse(marker.exists())
+            self.assertFalse(output_backup.exists())
+            self.assertFalse(manifest_backup.exists())
+
     def test_source_change_during_snapshot_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

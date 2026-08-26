@@ -946,9 +946,20 @@ if "run: ./virtual-spread-module/test.ps1" not in workflow:
     raise SystemExit(
         "CI must run the complete virtual-spread companion test script"
     )
-if "run: ./virtual-spread-module/build.ps1" not in workflow:
+if (
+    "./virtual-spread-module/build.ps1" not in workflow
+    or "-DebugKeystore $env:VIRTUAL_SPREAD_KEYSTORE" not in workflow
+):
     raise SystemExit(
-        "CI must build and verify the virtual-spread companion APK"
+        "CI must build and verify the virtual-spread companion APK with "
+        "the selected signing key"
+    )
+if (
+    "VIRTUAL_SPREAD_APK_KEYSTORE_BASE64" not in workflow
+    or "if: steps.companion-signing.outputs.stable == 'true'" not in workflow
+):
+    raise SystemExit(
+        "CI must upload companion APKs only under stable signing"
     )
 
 generator = (root.parent / "virtual_spread/generate_virtual_spread.py").read_text(
@@ -1059,6 +1070,9 @@ for required in (
     "expected_output_state=expected_output_state",
     "expected_manifest_state=expected_manifest_state",
     "replace_authorized=force",
+    "source_commit_validator: Callable[[], None] | None = None",
+    "allow_commit=commit_allowed",
+    "source_commit_validator=lambda: _require_source_snapshot(",
     'transaction["_oldOutputIdentity"] = expected_output_state.identity',
     'transaction["_oldManifestIdentity"] = expected_manifest_state.identity',
     'transaction["_markerIdentity"] = marker_identity',
@@ -1263,6 +1277,7 @@ for required in (
     "test_recovery_accepts_interrupted_posix_backup_hard_link",
     "test_committed_cleanup_revalidates_pair_before_backup_retirement",
     "test_runtime_float_link_rect_is_rejected",
+    "test_source_replacement_at_publication_commit_rolls_back_pair",
 ):
     if required not in generator_tests:
         raise SystemExit(

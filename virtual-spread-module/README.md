@@ -238,7 +238,13 @@ GitHub CI runs this module's complete host-side suite and then invokes the same
 cross-platform build used locally, compiling the Android hook and producing,
 signing, and verifying the companion APK. The build fails before signing if
 payload injection fails or if `classes.dex`, `assets/xposed_init`, or the LSPosed
-scope entry is absent from the assembled archive.
+scope entry is absent from the assembled archive. Repository CI restores the
+maintainer's stable debug keystore from the
+`VIRTUAL_SPREAD_APK_KEYSTORE_BASE64` secret before building, so every uploaded
+artifact has the same Android signing identity and can upgrade the preceding
+build. When that secret is unavailable (for example, on an untrusted fork), CI
+still builds and verifies with an ephemeral key but deliberately does not upload
+that non-upgradeable APK.
 
 ## Build and test
 

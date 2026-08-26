@@ -166,7 +166,12 @@ into a source hard link. Windows releases that handle only after recording the
 same identity required by the subsequent move. The exact output and sidecar state
 authorized before generation is rechecked at the transaction boundary; a target
 that appears, disappears, or changes meanwhile is preserved and rejected. Final
-publication and backup restoration use atomic
+publication also reopens and hashes the canonical source immediately before
+transaction preparation and again after the new PDF/sidecar pair has moved but
+before rollback evidence is retired. If the source path changed during that
+window, commit classification is disabled and the old pair is restored (or the
+new pair is removed when no old pair existed). Publication and backup
+restoration use atomic
 `renameat2(RENAME_NOREPLACE)` moves on POSIX, so an incumbent destination is
 never overwritten and no link-then-path-unlink cleanup can delete a recreated
 source. The moved entry is checked against the authenticated source identity.

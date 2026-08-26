@@ -36,6 +36,7 @@ def check(repo_root: Path) -> None:
     pdf_view_path = repo_root / "native" / "PdfPageView.kt.template"
     pdf_view_manager_path = repo_root / "native" / "PdfPageViewManager.kt.template"
     direct_patch_path = repo_root / "scripts" / "patch_direct_view.py"
+    workflow_path = repo_root / ".github" / "workflows" / "build.yml"
 
     plugin = plugin_path.read_text(encoding="utf-8")
     module = module_path.read_text(encoding="utf-8")
@@ -45,6 +46,29 @@ def check(repo_root: Path) -> None:
     pdf_view = pdf_view_path.read_text(encoding="utf-8")
     pdf_view_manager = pdf_view_manager_path.read_text(encoding="utf-8")
     direct_patch = direct_patch_path.read_text(encoding="utf-8")
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    require_markers(
+        workflow,
+        (
+            "VIRTUAL_SPREAD_APK_KEYSTORE_BASE64",
+            "id: companion-signing",
+            'echo "stable=true" >> "$GITHUB_OUTPUT"',
+            'echo "stable=false" >> "$GITHUB_OUTPUT"',
+            "-DebugKeystore $env:VIRTUAL_SPREAD_KEYSTORE",
+            "if: steps.companion-signing.outputs.stable == 'true'",
+        ),
+        "stable companion APK signing",
+    )
+    upload_start = workflow.find(
+        "- name: Upload virtual-spread companion APK"
+    )
+    next_job = workflow.find("\n  build:", upload_start)
+    if upload_start < 0 or next_job < 0:
+        fail("could not isolate companion APK upload step")
+    upload_step = workflow[upload_start:next_job]
+    if "steps.companion-signing.outputs.stable == 'true'" not in upload_step:
+        fail("companion APK upload is not gated by stable signing")
 
     require_markers(
         plugin,

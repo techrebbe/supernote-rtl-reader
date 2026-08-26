@@ -2508,8 +2508,14 @@ def _publish_pair(
     expected_output_state: PublicationTargetState | None = None,
     expected_manifest_state: PublicationTargetState | None = None,
     replace_authorized: bool = True,
+    source_commit_validator: Callable[[], None] | None = None,
 ) -> None:
     """Publish a matching pair with durable recovery across process death."""
+    # Validate once before creating transaction evidence. The second validation
+    # below is the commit-point check: it runs after both canonical files have
+    # moved and been authenticated, but before rollback evidence is retired.
+    if source_commit_validator is not None:
+        source_commit_validator()
     expected_publication_arguments: dict[str, Any] = {}
     if expected_output_identity is not None:
         expected_publication_arguments["expected_output_identity"] = (
@@ -2538,6 +2544,7 @@ def _publish_pair(
         replace_authorized=replace_authorized,
         **expected_publication_arguments,
     )
+    commit_allowed = True
     try:
         expected_output_hash = transaction["newOutputSha256"]
         expected_manifest_hash = transaction["newManifestSha256"]
@@ -2692,6 +2699,15 @@ def _publish_pair(
             "Published output",
             ownership_guard,
         )
+        if source_commit_validator is not None:
+            try:
+                source_commit_validator()
+            except BaseException:
+                # Both new paths may already be visible. Recovery must roll the
+                # transaction back rather than classify that matching pair as a
+                # successful commit for a source path that has since changed.
+                commit_allowed = False
+                raise
         _finish_publication_transaction(
             transaction,
             ownership_guard,
@@ -2702,7 +2718,10 @@ def _publish_pair(
     except BaseException as publication_error:
         try:
             recovery = _recover_pair_publication(
-                output_path, manifest_path, ownership_guard
+                output_path,
+                manifest_path,
+                ownership_guard,
+                allow_commit=commit_allowed,
             )
         except BaseException as recovery_error:
             raise VirtualSpreadError(
@@ -4348,6 +4367,7 @@ def _recover_pair_publication(
     ownership_guard: PublicationOwnershipGuard | None = None,
     *,
     active_staged_paths: tuple[Path, ...] = (),
+    allow_commit: bool = True,
 ) -> str | None:
     output_path = _require_unaliased_output_path(output_path)
     manifest_path = _require_runtime_manifest_path(
@@ -4487,7 +4507,8 @@ def _recover_pair_publication(
     except (OSError, VirtualSpreadError):
         committed_manifest_identity = None
     if (
-        committed_output_identity is not None
+        allow_commit
+        and committed_output_identity is not None
         and committed_manifest_identity is not None
     ):
         _finish_publication_transaction(
@@ -5117,11 +5138,6 @@ def _build_virtual_spread_from_snapshot(
             raise VirtualSpreadError(
                 "Staged publication artifact changed before publication"
             )
-        _require_source_snapshot(
-            source_path,
-            source_identity,
-            source_hash,
-        )
         _publish_pair(
             temporary_output.path,
             output_path,
@@ -5135,6 +5151,11 @@ def _build_virtual_spread_from_snapshot(
             expected_output_state=expected_output_state,
             expected_manifest_state=expected_manifest_state,
             replace_authorized=force,
+            source_commit_validator=lambda: _require_source_snapshot(
+                source_path,
+                source_identity,
+                source_hash,
+            ),
         )
         return manifest
     finally:

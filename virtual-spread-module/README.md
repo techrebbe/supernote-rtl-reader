@@ -51,12 +51,13 @@ If a generated PDF is present but its required sidecar is missing or cannot be
 inspected, navigation fails closed based on the authority embedded in the native
 open document. A PDF whose native metadata explicitly contains no virtual-spread
 authority remains an ordinary native document.
-MuPDF represents an absent document-information value as either null or a blank
-string depending on the firmware path. v0.0.24-r1 treats both forms as absent;
-nonblank strings and unexpected non-string values still claim generated-document
-authority and fail closed. Blocked `showLinkJumpView(...)` calls return primitive
-boolean false, matching the firmware signature and preventing a null-unboxing
-crash while verification is pending.
+On the tested Nomad, MuPDF represented an absent document-information value as
+a blank string rather than null. v0.0.24-r1 treats that observed form as absent
+and also handles null defensively; focused tests cover both. Nonblank strings and
+unexpected non-string values still claim generated-document authority and fail
+closed. Blocked `showLinkJumpView(...)` calls return primitive boolean false,
+matching the firmware signature and preventing a null-unboxing crash while
+verification is pending.
 The generator rejects transformed URI `/IsMap true` actions, relative URI
 actions, a `/NoRotate` link annotation on a rotated source page, a `/NoZoom`
 link annotation on a scaled source page, a source

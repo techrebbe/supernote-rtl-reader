@@ -1265,7 +1265,9 @@ requests are discarded. Forced replacement now requires explicit cover parity,
 spread width, spread height, and gutter values, preventing implicit defaults from
 resetting persisted layout. Recovery also removes deterministic `.retired`
 artifacts left by a crash, including the case where the active path was already
-removed.
+removed. Review pass 58 supersedes that cleanup behavior: because a bare
+`.retired` filename is not authenticated transaction evidence, current recovery
+preserves and rejects it for manual inspection instead of deleting it.
 
 Local automated validation passes 98 generator tests on Windows (five expected
 filesystem skips), 124 focused navigation/manifest/cache assertions, 12
@@ -1347,6 +1349,36 @@ hook-scope validation, and the signed/verified v0.0.24 (`versionCode=24`) APK
 build (SHA-256
 `de8ec66a858573a17fcdf8b2f8edbf3fd22c029f9850033e2f9900b31f942a4d`).
 Focused hardware validation of this exact build remains pending.
+
+## Review pass 58 publication namespace and atomic hook activation - LOCAL PASS
+
+The follow-up Ultra whole-branch review accepted four release-boundary defects.
+The generator now publishes the sidecar with the exact output-derived filename
+case even when Windows accepts a case-equivalent caller spelling. Publication
+stages use deterministic, reserved names so a process death cannot create an
+unbounded set of random orphan files. A stage without authenticated transaction
+evidence is preserved and rejected; after a valid marker exists, recovery
+removes a stage only when its SHA-256 matches that transaction. Pre-existing
+`.retired` paths are likewise preserved and rejected rather than being deleted
+based solely on their names.
+
+The companion now treats its activity, view-model, page-bar, link-target, and
+link-history hooks as one required capability set. Virtual-spread behavior is
+enabled only after all five install successfully; a failure leaves any already
+installed callback native pass-through for the process. Deterministic tests pin
+the output-derived case spelling and physical Windows directory entry, every
+reserved retirement path, orphaned and authenticated stage recovery, mismatch
+preservation, and the process-wide readiness gate.
+
+Local automated validation passes 109 generator tests on Windows (seven
+expected platform/filesystem or privilege skips), 134 focused
+navigation/manifest/cache assertions, 12 cross-language authority assertions,
+8,752 exhaustive navigation assertions, both native invariant suites,
+hook-scope validation, and the signed/verified v0.0.24 (`versionCode=24`) APK
+build (SHA-256
+`3e2e9df0435beef69b2d6b9b677bb864363d21010e487a91499d590cbf40e7d2`).
+The updated full-branch local review and focused hardware validation remain
+pending; PR #16 stays draft.
 
 ## Failure capture
 

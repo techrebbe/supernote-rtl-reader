@@ -148,8 +148,16 @@ operation remains confined to the originally locked directory and cannot touch
 the replacement tree. Staged artifacts are type- and hash-checked before backup
 moves and immediately before publication, and both canonical hashes are verified
 before recovery evidence is retired.
-The PDF and manifest are staged before publication as one recoverable pair. A transaction
-marker is durably published before either previous file is moved. POSIX builds
+The PDF and manifest are staged before publication as one recoverable pair.
+Their output-derived temporary names are deterministic, so a process death
+cannot leave an unbounded collection of randomly named files. Before a marker
+exists, any occupied staged name is preserved and generation fails closed for
+manual recovery. After a valid marker exists, recovery removes a remaining
+stage only after its SHA-256 matches that marker's authenticated transaction;
+a mismatched stage is preserved. Likewise, an already occupied `.retired`
+name is never treated as disposable scratch data: publication and recovery
+stop without changing it. A transaction marker is durably published before
+either previous file is moved. POSIX builds
 sync every affected parent directory; Windows builds use
 `MoveFileExW(MOVEFILE_WRITE_THROUGH)` for the marker, backup, publication,
 rollback, and retirement renames. If the process or machine is interrupted, the
@@ -165,6 +173,9 @@ backups therefore fails closed rather than restoring unauthenticated bytes.
 Recovery compares recorded paths with the host filesystem's case and separator
 semantics, so a Windows drive/path casing change does not strand an otherwise
 authentic transaction; dot-segment and other lexical aliases remain rejected.
+The published sidecar nevertheless always uses the exact output-derived
+`<PDF filename>.json` spelling, including case, so copying the pair onto
+Supernote's case-sensitive storage cannot make the runtime sidecar invisible.
 Ordinary publication errors use that same recovery path immediately.
 Manifest schema `techrebbe.supernote.virtual-spread/v2` deliberately requires a
 snapshot-binding-capable companion. Older companions reject newly generated v2

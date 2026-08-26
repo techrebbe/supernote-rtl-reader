@@ -48,6 +48,52 @@ for expected in expected_hooks:
 if hook.count("findAndHookMethod(") != len(expected_hooks):
     raise SystemExit("unexpected extra LSPosed method hook")
 
+load_start = hook.find("public void handleLoadPackage(")
+load_end = hook.find("private static void hookActivity", load_start)
+if load_start < 0 or load_end < 0:
+    raise SystemExit("missing atomic required-hook activation")
+load_package = hook[load_start:load_end]
+required_hook_order = (
+    "hooksReady = false;",
+    "try {",
+    "hookActivity(loadPackageParam.classLoader);",
+    "hookViewModel(loadPackageParam.classLoader);",
+    "hookPageBar(loadPackageParam.classLoader);",
+    "hookLinkTarget(loadPackageParam.classLoader);",
+    "hookLinkHistory(loadPackageParam.classLoader);",
+    'logFailure("disabled reason=required_hook_failed", throwable);',
+    "return;",
+    "hooksReady = true;",
+)
+last_required = -1
+for required in required_hook_order:
+    current = load_package.find(required, last_required + 1)
+    if current < 0:
+        raise SystemExit(
+            "required hooks must activate atomically and fail closed: "
+            + required
+        )
+    last_required = current
+if "private static volatile boolean hooksReady;" not in hook:
+    raise SystemExit("required-hook readiness gate is missing")
+lookup_start = hook.find("private static ManifestLookup manifestLookupFor(")
+lookup_end = hook.find(
+    "private static void discardQueuedLinkForDifferentSnapshot(",
+    lookup_start,
+)
+if lookup_start < 0 or lookup_end < 0:
+    raise SystemExit("missing manifest lookup readiness gate")
+lookup = hook[lookup_start:lookup_end]
+for required in (
+    "if (!hooksReady)",
+    "return new ManifestLookup(null, false, false, null);",
+):
+    if required not in lookup:
+        raise SystemExit(
+            "partially installed hooks can still activate virtual behavior: "
+            + required
+        )
+
 history_start = hook.find("private static void captureHistoryReturn")
 history_end = hook.find("private static boolean captureLinkTarget", history_start)
 if history_start < 0 or history_end < 0:
@@ -744,6 +790,13 @@ for required in (
     "verification.pdf_header != reader.pdf_header",
     '"Written PDF did not preserve the source PDF version"',
     "def _publication_reserved_paths(",
+    "def _publication_staging_artifacts(",
+    'output_path.with_name(f".{output_path.name}.tmp")',
+    'manifest_path.with_name(f".{manifest_path.name}.tmp")',
+    "active_staged_paths: tuple[Path, ...] = ()",
+    "Orphaned virtual-spread staged artifact requires recovery",
+    "Authenticate every deterministic stage before deleting any of them.",
+    "return expected",
     "def _require_source_outside_publication_namespace(",
     "_require_source_outside_publication_namespace(\n",
     "def _transformed_internal_destination(",
@@ -885,8 +938,14 @@ for required in (
     "test_unsupported_internal_destination_mode_fails_closed",
     "test_invalid_marker_with_canonical_artifact_fails_closed",
     "test_publication_marker_paths_use_filesystem_case_semantics",
+    "test_runtime_manifest_uses_output_derived_case_spelling",
+    "test_case_equivalent_manifest_is_republished_with_exact_name",
     "test_forced_replacement_requires_all_layout_options",
-    "test_recovery_cleans_crash_retired_artifacts",
+    "test_recovery_rejects_unauthenticated_retired_artifacts",
+    "test_publication_staging_paths_are_deterministic",
+    "test_recovery_preserves_orphaned_deterministic_staging",
+    "test_recovery_removes_authenticated_deterministic_staging",
+    "test_recovery_preserves_mismatched_deterministic_staging",
     "test_interrupted_marker_write_never_exposes_partial_record",
     "test_unguarded_marker_publication_is_atomically_exclusive",
     "test_unguarded_posix_no_replace_uses_atomic_link",
@@ -966,13 +1025,14 @@ for required in (
             "forced regeneration can reset persisted layout state: " + required
         )
 for required in (
-    "def _cleanup_retired_publication_artifacts(",
-    "_cleanup_retired_publication_artifacts(\n        output_path,",
-    "_publication_unlink(\n            retired,",
+    "def _reject_retired_publication_artifacts(",
+    "_reject_retired_publication_artifacts(\n        output_path,",
+    "Retired publication artifact requires manual recovery",
+    "replace_existing=False,\n            ownership_guard=ownership_guard",
 ):
     if required not in generator:
         raise SystemExit(
-            "publication recovery does not clean crash-retired artifacts: "
+            "publication recovery does not preserve untrusted retired artifacts: "
             + required
         )
 

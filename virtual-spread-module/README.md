@@ -19,6 +19,12 @@ It activates only when all of these are true:
   native MuPDF `Document` match the authenticated manifest; and
 - the known Supernote document firmware fingerprint and APK size match.
 
+The activity, view-model, page-bar, link-target, and link-history hooks form one
+required capability set. The module keeps virtual-spread behavior disabled
+until every hook installs successfully; if any required hook is unavailable,
+already installed callbacks remain native pass-through for that process rather
+than leaving a partially active navigation layer.
+
 v0.0.24 retains link-authority v2 and the v0.0.17 native-open snapshot
 binding. Manifest schema v2 is intentionally incompatible with older companions:
 it prevents a pre-snapshot-binding runtime from accepting a newly generated pair.
@@ -141,6 +147,12 @@ an interrupted no-replace backup move, but only when the canonical and backup
 names are the same inode and match the authenticated old digest. Guarded and
 unguarded POSIX no-replace publication use an atomic kernel hard-link operation,
 so no check-then-replace window can overwrite an incumbent destination.
+Output, sidecar, and marker staging names are deterministic and reserved.
+Marker-free remnants are preserved and rejected for manual recovery; once a
+valid marker exists, a staged remnant is removed only when its digest matches
+the authenticated transaction. A pre-existing `.retired` path is never deleted
+merely because of its filename. The sidecar's published spelling is always the
+exact output-derived `<PDF filename>.json`, including case.
 
 For a matching document it:
 

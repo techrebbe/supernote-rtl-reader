@@ -9,7 +9,6 @@ import hashlib
 import json
 import math
 import os
-import secrets
 import stat
 import struct
 import tempfile
@@ -2230,33 +2229,37 @@ def _temporary_neighbor(
     ownership_guard: PublicationOwnershipGuard | None = None,
 ) -> Path:
     path = _lexical_absolute(path)
+    candidate = path.with_name(f".{path.name}{suffix}")
+    flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
+    flags |= getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_NOINHERIT", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
     namespace = _publication_namespace(ownership_guard)
     if namespace is not None and namespace.directory_descriptor is not None:
-        flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
-        flags |= getattr(os, "O_BINARY", 0)
-        flags |= getattr(os, "O_NOINHERIT", 0)
-        flags |= getattr(os, "O_NOFOLLOW", 0)
-        for _ in range(128):
-            candidate = path.with_name(
-                f".{path.name}.{secrets.token_hex(16)}{suffix}"
-            )
-            try:
-                descriptor = namespace.open_file(candidate, flags, 0o600)
-            except FileExistsError:
-                continue
+        try:
+            descriptor = namespace.open_file(candidate, flags, 0o600)
+        except FileExistsError as error:
+            raise VirtualSpreadError(
+                "Staged publication artifact already exists and requires "
+                f"recovery: {candidate}"
+            ) from error
+        try:
             os.close(descriptor)
+        finally:
             namespace.fsync()
-            return candidate
-        raise VirtualSpreadError(
-            f"Cannot allocate a staged publication file: {path}"
-        )
+        return candidate
     _validate_publication_ownership(ownership_guard)
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, name = tempfile.mkstemp(
-        prefix=f".{path.name}.", suffix=suffix, dir=path.parent
-    )
+    try:
+        descriptor = os.open(candidate, flags, 0o600)
+    except FileExistsError as error:
+        raise VirtualSpreadError(
+            "Staged publication artifact already exists and requires "
+            f"recovery: {candidate}"
+        ) from error
     os.close(descriptor)
-    return Path(name)
+    _fsync_parent_directories(candidate)
+    return candidate
 
 
 def _publish_pair(
@@ -2491,13 +2494,16 @@ def _require_runtime_manifest_path(
             "Manifest path must be the runtime sibling "
             f"{expected}; got {actual}"
         )
-    resolved = actual.resolve()
-    if os.path.normcase(str(actual)) != os.path.normcase(str(resolved)):
+    resolved = expected.resolve()
+    if os.path.normcase(str(expected)) != os.path.normcase(str(resolved)):
         raise VirtualSpreadError(
             "Manifest path must not contain symlinks or filesystem aliases: "
-            f"{actual} resolves to {resolved}"
+            f"{expected} resolves to {resolved}"
         )
-    return actual
+    # Always publish using the output-derived spelling. Windows accepts case-
+    # equivalent caller input, but Supernote later probes its case-sensitive
+    # storage for the exact `<output>.json` sibling.
+    return expected
 
 
 def _require_regular_publication_target(
@@ -2586,6 +2592,19 @@ def _publication_artifacts(
     return marker, output_backup, manifest_backup
 
 
+def _publication_staging_artifacts(
+    output_path: Path,
+) -> tuple[Path, Path, Path]:
+    output_path = _lexical_absolute(output_path)
+    manifest_path = _runtime_manifest_path(output_path)
+    marker, _, _ = _publication_artifacts(output_path)
+    return (
+        output_path.with_name(f".{output_path.name}.tmp"),
+        manifest_path.with_name(f".{manifest_path.name}.tmp"),
+        marker.with_name(f".{marker.name}.publish-marker.tmp"),
+    )
+
+
 def _publication_lock_path(output_path: Path) -> Path:
     marker, _, _ = _publication_artifacts(output_path)
     return marker.with_name(marker.name + ".lock")
@@ -2600,13 +2619,15 @@ def _publication_reserved_paths(output_path: Path) -> tuple[Path, ...]:
         _lexical_absolute(output_path),
         _runtime_manifest_path(output_path),
     )
+    staging = _publication_staging_artifacts(output_path)
     retired = tuple(
         path.with_name(path.name + ".retired")
-        for path in (*removable, *canonical)
+        for path in (*removable, *canonical, *staging)
     )
     return (
         *removable,
         *retired,
+        *staging,
         _publication_lock_path(output_path),
     )
 
@@ -3282,18 +3303,23 @@ def _durably_remove(
     ownership_guard: PublicationOwnershipGuard | None = None,
 ) -> None:
     retired = path.with_name(path.name + ".retired")
+    if _require_regular_publication_target(
+        retired,
+        "Retired publication artifact",
+        ownership_guard,
+    ):
+        raise VirtualSpreadError(
+            "Retired publication artifact requires manual recovery: "
+            f"{retired}"
+        )
     try:
         _durable_replace(
             path,
             retired,
+            replace_existing=False,
             ownership_guard=ownership_guard,
         )
     except FileNotFoundError:
-        _publication_unlink(
-            retired,
-            ownership_guard,
-            missing_ok=True,
-        )
         return
     namespace = _publication_namespace(ownership_guard)
     if namespace is not None:
@@ -3304,7 +3330,7 @@ def _durably_remove(
         _fsync_parent_directories(retired)
 
 
-def _cleanup_retired_publication_artifacts(
+def _reject_retired_publication_artifacts(
     output_path: Path,
     manifest_path: Path,
     ownership_guard: PublicationOwnershipGuard | None = None,
@@ -3312,12 +3338,14 @@ def _cleanup_retired_publication_artifacts(
     marker, output_backup, manifest_backup = _publication_artifacts(
         output_path
     )
+    staging = _publication_staging_artifacts(output_path)
     for active in (
         marker,
         output_backup,
         manifest_backup,
         output_path,
         manifest_path,
+        *staging,
     ):
         retired = active.with_name(active.name + ".retired")
         if _require_regular_publication_target(
@@ -3325,10 +3353,9 @@ def _cleanup_retired_publication_artifacts(
             "Retired publication artifact",
             ownership_guard,
         ):
-            _publication_unlink(
-                retired,
-                ownership_guard,
-                missing_ok=False,
+            raise VirtualSpreadError(
+                "Retired publication artifact requires manual recovery: "
+                f"{retired}"
             )
 
 
@@ -3569,6 +3596,7 @@ def _finish_publication_transaction(
     ownership_guard: PublicationOwnershipGuard | None = None,
 ) -> None:
     marker_path = Path(transaction["markerPath"])
+    output_path = Path(transaction["outputPath"])
     output_backup = Path(transaction["outputBackupPath"])
     manifest_backup = Path(transaction["manifestBackupPath"])
     artifacts = (
@@ -3580,6 +3608,51 @@ def _finish_publication_transaction(
         _require_regular_publication_target(
             path, label, ownership_guard
         )
+    output_stage, manifest_stage, marker_stage = (
+        _publication_staging_artifacts(output_path)
+    )
+    staged_artifacts: list[Path] = []
+    for path, expected_hash, label in (
+        (
+            output_stage,
+            transaction["newOutputSha256"],
+            "Staged output",
+        ),
+        (
+            manifest_stage,
+            transaction["newManifestSha256"],
+            "Staged manifest",
+        ),
+    ):
+        if _require_regular_publication_target(
+            path,
+            label,
+            ownership_guard,
+        ):
+            _require_publication_file_hash(
+                path,
+                expected_hash,
+                label,
+                ownership_guard,
+            )
+            staged_artifacts.append(path)
+    if _require_regular_publication_target(
+        marker_stage,
+        "Staged publication marker",
+        ownership_guard,
+    ):
+        marker_hash = _publication_sha256(marker_path, ownership_guard)
+        _require_publication_file_hash(
+            marker_stage,
+            marker_hash,
+            "Staged publication marker",
+            ownership_guard,
+        )
+        staged_artifacts.append(marker_stage)
+    # Authenticate every deterministic stage before deleting any of them.
+    # A mismatch preserves the complete namespace for manual recovery.
+    for path in staged_artifacts:
+        _durably_remove(path, ownership_guard)
     for path, _ in artifacts:
         _durably_remove(path, ownership_guard)
 
@@ -3588,13 +3661,15 @@ def _recover_pair_publication(
     output_path: Path,
     manifest_path: Path,
     ownership_guard: PublicationOwnershipGuard | None = None,
+    *,
+    active_staged_paths: tuple[Path, ...] = (),
 ) -> str | None:
     output_path = _require_unaliased_output_path(output_path)
     manifest_path = _require_runtime_manifest_path(
         output_path,
         manifest_path,
     )
-    _cleanup_retired_publication_artifacts(
+    _reject_retired_publication_artifacts(
         output_path,
         manifest_path,
         ownership_guard,
@@ -3604,6 +3679,19 @@ def _recover_pair_publication(
     )
     marker_path, output_backup, manifest_backup = _publication_artifacts(
         output_path,
+    )
+    staging = _publication_staging_artifacts(output_path)
+    active_staging = {
+        os.path.normcase(str(_lexical_absolute(path)))
+        for path in active_staged_paths
+    }
+    staged_exists = tuple(
+        _require_regular_publication_target(
+            path,
+            "Staged publication artifact",
+            ownership_guard,
+        )
+        for path in staging
     )
     marker_exists = _require_regular_publication_target(
         marker_path,
@@ -3624,6 +3712,18 @@ def _recover_pair_publication(
         if output_backup_exists or manifest_backup_exists:
             raise VirtualSpreadError(
                 "Orphaned virtual-spread publication backup requires recovery"
+            )
+        orphaned_staging = tuple(
+            path
+            for path, exists in zip(staging, staged_exists, strict=True)
+            if exists
+            and os.path.normcase(str(_lexical_absolute(path)))
+            not in active_staging
+        )
+        if orphaned_staging:
+            raise VirtualSpreadError(
+                "Orphaned virtual-spread staged artifact requires recovery: "
+                + ", ".join(str(path) for path in orphaned_staging)
             )
         return None
     try:
@@ -3668,6 +3768,7 @@ def _recover_pair_publication(
             and not current_manifest_backup_exists
             and not current_output_exists
             and not current_manifest_exists
+            and not any(staged_exists)
         ):
             marker_still_exists = _require_regular_publication_target(
                 marker_path,
@@ -3847,7 +3948,12 @@ def _prepare_publication_transaction(
         output_path,
         manifest_path,
     )
-    _recover_pair_publication(output_path, manifest_path, ownership_guard)
+    _recover_pair_publication(
+        output_path,
+        manifest_path,
+        ownership_guard,
+        active_staged_paths=(temporary_output, temporary_manifest),
+    )
     had_output, had_manifest = _require_regular_publication_targets(
         output_path,
         manifest_path,

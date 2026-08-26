@@ -57,12 +57,15 @@ from generate_virtual_spread import (  # noqa: E402
     _publication_artifacts,
     _publication_lock,
     _publication_path_matches,
+    _publication_reserved_paths,
+    _publication_staging_artifacts,
     _transform_rect,
     _transform_link_border,
     _transform_link_border_style,
     _publication_lock_path,
     _prepare_publication_transaction,
     _recover_pair_publication,
+    _require_runtime_manifest_path,
     _transformed_internal_destination,
     _sha256_open_file,
     _windows_move_flags,
@@ -1342,6 +1345,59 @@ class VirtualSpreadTests(unittest.TestCase):
             )
             self.assertFalse(_publication_path_matches(None, expected))
 
+    def test_runtime_manifest_uses_output_derived_case_spelling(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "Spread.PDF"
+            caller_manifest = root / "spread.pdf.JSON"
+            expected_manifest = root / "Spread.PDF.json"
+            windows_normcase = lambda value: value.replace("/", "\\").lower()
+
+            with mock.patch(
+                "generate_virtual_spread.os.path.normcase",
+                side_effect=windows_normcase,
+            ):
+                selected = _require_runtime_manifest_path(
+                    output,
+                    caller_manifest,
+                )
+
+            self.assertEqual(selected, expected_manifest)
+            self.assertNotEqual(str(selected), str(caller_manifest))
+
+    @unittest.skipUnless(
+        os.name == "nt",
+        "case-equivalent publication is specific to Windows",
+    )
+    def test_case_equivalent_manifest_is_republished_with_exact_name(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "Spread.PDF"
+            caller_manifest = root / "spread.pdf.JSON"
+            expected_manifest = root / "Spread.PDF.json"
+            caller_manifest.write_bytes(b"old-manifest")
+            staged = root / ".Spread.PDF.json.tmp"
+            staged.write_bytes(b"new-manifest")
+
+            selected = _require_runtime_manifest_path(
+                output,
+                caller_manifest,
+            )
+            _durable_replace(staged, selected)
+
+            self.assertEqual(selected, expected_manifest)
+            self.assertEqual(expected_manifest.read_bytes(), b"new-manifest")
+            self.assertIn(
+                expected_manifest.name,
+                tuple(path.name for path in root.iterdir()),
+            )
+            self.assertNotIn(
+                caller_manifest.name,
+                tuple(path.name for path in root.iterdir()),
+            )
+
     def test_source_change_before_publication_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1525,32 +1581,15 @@ class VirtualSpreadTests(unittest.TestCase):
     ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for index in range(9):
+            sample_output = root / "sample" / "spread.pdf"
+            reserved_count = len(_publication_reserved_paths(sample_output))
+            for index in range(reserved_count):
                 with self.subTest(index=index):
                     case_root = root / str(index)
                     case_root.mkdir()
                     output = case_root / "spread.pdf"
                     manifest_path = case_root / "spread.pdf.json"
-                    marker, output_backup, manifest_backup = (
-                        _publication_artifacts(output)
-                    )
-                    removable = (
-                        marker,
-                        output_backup,
-                        manifest_backup,
-                    )
-                    reserved = (
-                        *removable,
-                        *(
-                            path.with_name(path.name + ".retired")
-                            for path in (
-                                *removable,
-                                output,
-                                manifest_path,
-                            )
-                        ),
-                        _publication_lock_path(output),
-                    )
+                    reserved = _publication_reserved_paths(output)
                     source = reserved[index]
                     create_odd_page_fixture(source)
                     source_bytes = source.read_bytes()
@@ -4339,43 +4378,189 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertFalse(output_backup.exists())
             self.assertFalse(manifest_backup.exists())
 
-    def test_recovery_cleans_crash_retired_artifacts(self) -> None:
+    def test_recovery_rejects_unauthenticated_retired_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            output = root / "spread.pdf"
-            manifest = root / "spread.pdf.json"
-            output.write_bytes(b"stable-pdf")
-            manifest.write_bytes(b"stable-manifest")
-            marker, output_backup, manifest_backup = _publication_artifacts(
-                output
+            sample_output = root / "sample" / "spread.pdf"
+            sample_reserved = _publication_reserved_paths(sample_output)
+            retired_count = sum(
+                path.name.endswith(".retired")
+                for path in sample_reserved
             )
-            active_artifacts = (
-                marker,
-                output_backup,
-                manifest_backup,
-                output,
-                manifest,
-            )
-            retired_artifacts = tuple(
-                path.with_name(path.name + ".retired")
-                for path in active_artifacts
-            )
-            for retired in retired_artifacts:
-                retired.write_bytes(b"cleanup-interrupted")
+            for index in range(retired_count):
+                with self.subTest(index=index):
+                    case_root = root / str(index)
+                    case_root.mkdir()
+                    output = case_root / "spread.pdf"
+                    manifest = case_root / "spread.pdf.json"
+                    output.write_bytes(b"stable-pdf")
+                    manifest.write_bytes(b"stable-manifest")
+                    retired_artifacts = tuple(
+                        path
+                        for path in _publication_reserved_paths(output)
+                        if path.name.endswith(".retired")
+                    )
+                    retired = retired_artifacts[index]
+                    retired.write_bytes(b"untrusted-retired")
 
-            self.assertEqual(
-                _recover_pair_publication(output, manifest),
-                None,
-            )
-            self.assertEqual(output.read_bytes(), b"stable-pdf")
-            self.assertEqual(manifest.read_bytes(), b"stable-manifest")
-            self.assertFalse(any(path.exists() for path in retired_artifacts))
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "Retired publication artifact requires manual recovery",
+                    ):
+                        _recover_pair_publication(output, manifest)
+
+                    self.assertEqual(output.read_bytes(), b"stable-pdf")
+                    self.assertEqual(manifest.read_bytes(), b"stable-manifest")
+                    self.assertEqual(retired.read_bytes(), b"untrusted-retired")
 
             orphan = root / "orphan"
             orphan_retired = orphan.with_name(orphan.name + ".retired")
             orphan_retired.write_bytes(b"retired")
-            _durably_remove(orphan)
-            self.assertFalse(orphan_retired.exists())
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Retired publication artifact requires manual recovery",
+            ):
+                _durably_remove(orphan)
+            self.assertEqual(orphan_retired.read_bytes(), b"retired")
+
+    def test_publication_staging_paths_are_deterministic(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "Spread.pdf"
+            marker, _, _ = _publication_artifacts(output)
+
+            self.assertEqual(
+                _publication_staging_artifacts(output),
+                (
+                    root / ".Spread.pdf.tmp",
+                    root / ".Spread.pdf.json.tmp",
+                    marker.with_name(
+                        f".{marker.name}.publish-marker.tmp"
+                    ),
+                ),
+            )
+
+    def test_recovery_preserves_orphaned_deterministic_staging(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index in range(3):
+                with self.subTest(index=index):
+                    case_root = root / str(index)
+                    case_root.mkdir()
+                    output = case_root / "spread.pdf"
+                    manifest = case_root / "spread.pdf.json"
+                    output.write_bytes(b"stable-pdf")
+                    manifest.write_bytes(b"stable-manifest")
+                    stage = _publication_staging_artifacts(output)[index]
+                    stage.write_bytes(b"orphaned-stage")
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "Orphaned virtual-spread staged artifact requires recovery",
+                    ):
+                        _recover_pair_publication(output, manifest)
+
+                    self.assertEqual(output.read_bytes(), b"stable-pdf")
+                    self.assertEqual(manifest.read_bytes(), b"stable-manifest")
+                    self.assertEqual(stage.read_bytes(), b"orphaned-stage")
+
+    def test_recovery_removes_authenticated_deterministic_staging(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            output.write_bytes(b"new-pdf")
+            manifest.write_bytes(b"new-manifest")
+            output_stage, manifest_stage, marker_stage = (
+                _publication_staging_artifacts(output)
+            )
+            output_stage.write_bytes(output.read_bytes())
+            manifest_stage.write_bytes(manifest.read_bytes())
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            with output.open("rb") as stream:
+                output_hash = _sha256_open_file(stream)
+            with manifest.open("rb") as stream:
+                manifest_hash = _sha256_open_file(stream)
+            _write_publication_marker(
+                marker,
+                {
+                    "schema": (
+                        "techrebbe.supernote."
+                        "virtual-spread-publication/v2"
+                    ),
+                    "outputPath": str(output),
+                    "manifestPath": str(manifest),
+                    "outputBackupPath": str(output_backup),
+                    "manifestBackupPath": str(manifest_backup),
+                    "hadOutput": False,
+                    "hadManifest": False,
+                    "oldOutputSha256": None,
+                    "oldManifestSha256": None,
+                    "newOutputSha256": output_hash,
+                    "newManifestSha256": manifest_hash,
+                },
+            )
+            marker_stage.write_bytes(marker.read_bytes())
+
+            self.assertEqual(
+                _recover_pair_publication(output, manifest),
+                "committed",
+            )
+            self.assertEqual(output.read_bytes(), b"new-pdf")
+            self.assertEqual(manifest.read_bytes(), b"new-manifest")
+            self.assertFalse(marker.exists())
+            self.assertFalse(output_stage.exists())
+            self.assertFalse(manifest_stage.exists())
+            self.assertFalse(marker_stage.exists())
+
+    def test_recovery_preserves_mismatched_deterministic_staging(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            output.write_bytes(b"new-pdf")
+            manifest.write_bytes(b"new-manifest")
+            output_stage, _, _ = _publication_staging_artifacts(output)
+            output_stage.write_bytes(b"untrusted-stage")
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            with output.open("rb") as stream:
+                output_hash = _sha256_open_file(stream)
+            with manifest.open("rb") as stream:
+                manifest_hash = _sha256_open_file(stream)
+            _write_publication_marker(
+                marker,
+                {
+                    "schema": (
+                        "techrebbe.supernote."
+                        "virtual-spread-publication/v2"
+                    ),
+                    "outputPath": str(output),
+                    "manifestPath": str(manifest),
+                    "outputBackupPath": str(output_backup),
+                    "manifestBackupPath": str(manifest_backup),
+                    "hadOutput": False,
+                    "hadManifest": False,
+                    "oldOutputSha256": None,
+                    "oldManifestSha256": None,
+                    "newOutputSha256": output_hash,
+                    "newManifestSha256": manifest_hash,
+                },
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Staged output SHA-256 mismatch",
+            ):
+                _recover_pair_publication(output, manifest)
+
+            self.assertEqual(output.read_bytes(), b"new-pdf")
+            self.assertEqual(manifest.read_bytes(), b"new-manifest")
+            self.assertEqual(output_stage.read_bytes(), b"untrusted-stage")
+            self.assertTrue(marker.exists())
 
     def test_interrupted_marker_write_never_exposes_partial_record(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

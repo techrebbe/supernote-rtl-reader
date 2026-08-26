@@ -75,6 +75,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     );
     private static final Map<String, String> VERIFYING =
         new ConcurrentHashMap<>();
+    private static volatile boolean hooksReady;
     private static final Object MANIFEST_VERIFIER_LOCK = new Object();
     private static volatile String observedDocumentKey;
     private static final ThreadPoolExecutor MANIFEST_VERIFIER =
@@ -340,19 +341,19 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             return;
         }
 
-        hookActivity(loadPackageParam.classLoader);
-        hookViewModel(loadPackageParam.classLoader);
-        hookPageBar(loadPackageParam.classLoader);
+        hooksReady = false;
         try {
+            hookActivity(loadPackageParam.classLoader);
+            hookViewModel(loadPackageParam.classLoader);
+            hookPageBar(loadPackageParam.classLoader);
             hookLinkTarget(loadPackageParam.classLoader);
-        } catch (Throwable throwable) {
-            logFailure("link_target_hook_failed", throwable);
-        }
-        try {
             hookLinkHistory(loadPackageParam.classLoader);
         } catch (Throwable throwable) {
-            logFailure("link_history_hook_failed", throwable);
+            hooksReady = false;
+            logFailure("disabled reason=required_hook_failed", throwable);
+            return;
         }
+        hooksReady = true;
         log("loaded version=" + VERSION);
     }
 
@@ -1774,6 +1775,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     }
 
     private static ManifestLookup manifestLookupFor(Object viewModel) {
+        if (!hooksReady) {
+            return new ManifestLookup(null, false, false, null);
+        }
         if (viewModel == null) {
             Activity current = activeActivity.get();
             if (current == null

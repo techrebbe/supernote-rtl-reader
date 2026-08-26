@@ -298,6 +298,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         final int targetPage;
         final String uri;
         final Boolean external;
+        final long verificationGeneration;
         final long pageLoadGeneration;
         final long createdAt;
 
@@ -312,6 +313,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             int targetPage,
             String uri,
             Boolean external,
+            long verificationGeneration,
             long pageLoadGeneration,
             long createdAt
         ) {
@@ -325,6 +327,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             this.targetPage = targetPage;
             this.uri = uri;
             this.external = external;
+            this.verificationGeneration = verificationGeneration;
             this.pageLoadGeneration = pageLoadGeneration;
             this.createdAt = createdAt;
         }
@@ -341,6 +344,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 targetPage,
                 uri,
                 external,
+                verificationGeneration,
                 generation,
                 createdAt
             );
@@ -908,12 +912,16 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                         activity,
                         "documentViewModel"
                     );
-                    // A concrete Back action supersedes every older queued
-                    // link. HISTORY_SERIALIZATION remains held until the
-                    // listener returns, so its getter, list mutation, and
+                    // A concrete Back action supersedes every older queued or
+                    // mixed-menu link. HISTORY_SERIALIZATION remains held until
+                    // the listener returns, so its getter, list mutation, and
                     // same/external-document branch are one native transaction.
                     clearQueuedLinkInvocation(viewModel);
+                    clearMixedLinkCandidate(viewModel);
                     ManifestLookup lookup = manifestLookupFor(viewModel);
+                    // As with a turn, let a freshness lookup capture the prior
+                    // token, then claim Back before any blocked/native return.
+                    noteReaderIntent(viewModel);
                     if (lookup.navigationBlocked()) {
                         blockHistoryAction(
                             param,
@@ -1386,6 +1394,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 targetPage,
                 uri,
                 external,
+                lookup.verificationGeneration,
                 state.pageLoadGeneration,
                 System.currentTimeMillis()
             );
@@ -1434,6 +1443,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         long age = System.currentTimeMillis() - candidate.createdAt;
         boolean current = currentPageLoadGeneration >= 0L
             && candidate.link != null
+            && VirtualSpreadNavigation
+                .mixedLinkSurvivesVerificationBinding(
+                    candidate.verificationGeneration,
+                    lookup.verificationGeneration
+                )
             && targetPage == candidate.targetPage
             && sameText(uri, candidate.uri)
             && external != null
@@ -2913,8 +2927,14 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         boolean clearQueuedLink,
         long bindingVerificationGeneration
     ) {
-        MixedLinkCandidate retainedMixedLink = clearQueuedLink
-            ? null : state.mixedLinkCandidate;
+        MixedLinkCandidate retainedMixedLink = !clearQueuedLink
+            && state.mixedLinkCandidate != null
+            && VirtualSpreadNavigation
+                .mixedLinkSurvivesVerificationBinding(
+                    state.mixedLinkCandidate.verificationGeneration,
+                    bindingVerificationGeneration
+                )
+                    ? state.mixedLinkCandidate : null;
         boolean rebindQueuedLink = !clearQueuedLink
             && state.queuedLinkArguments != null
             && VirtualSpreadNavigation
@@ -3144,7 +3164,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     validated,
                     false,
                     validated == null,
-                    cached.snapshotId()
+                    cached.snapshotId(),
+                    cached.verificationGeneration
                 );
             }
             if (cached != null) {

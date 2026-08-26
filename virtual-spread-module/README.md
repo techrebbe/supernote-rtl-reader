@@ -154,8 +154,10 @@ carry a token captured before dispatch/removal, so they cannot clear a newer
 turn, link, history action, queue, or mixed-menu candidate. Passive UI callbacks
 may rebind only deferred intent owned by the same verification; real native page
 loads invalidate it, while explicit synthetic activation can preserve an open
-mixed menu without making stale intent current again. The verifier publishes the
-result only if both the PDF identity and
+mixed menu without making stale intent current again. Back/Original Back clears
+that menu candidate before any blocked or native return, and candidates carry
+their verifier generation so a later verification cannot adopt them. The
+verifier publishes the result only if both the PDF identity and
 sidecar digest are still unchanged. Before any
 navigation behavior activates, the main-thread callback
 also compares the authenticated authorities with metadata read from the exact

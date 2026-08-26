@@ -267,11 +267,16 @@ activation may preserve and rebind an open mixed menu. These invariants prevent
 delayed callbacks from consuming or resurrecting newer turns, links, Back
 history, queues, or menu candidates.
 
-Local automated validation passes 196 focused navigation assertions, 15
+The final review batch also makes Back/Original Back synchronously clear an open
+mixed-menu candidate and advance the intent token. Every candidate records its
+verifier generation, and passive rebinding or direct dispatch rejects candidates
+from an older or unbound generation.
+
+Local automated validation passes 199 focused navigation assertions, 15
 cross-language authority assertions, 8,752 exhaustive navigation assertions,
 the hook-scope guard, both native invariant suites, and signed compilation as
 v0.0.24-r2 (`versionCode=26`). The upgrade-compatible APK SHA-256 is
-`709f258ebb1f201febce0768c114da4ed1dff9f3ab78f7fb212aae002a53231f`.
+`be2427543b8e41d6c4e5e42131fcfda92cbe8e82eeafa32582aa55083558fd38`.
 Fresh hardware evidence is still required for:
 
 1. blocked pure-link taps remaining on the same page with no fallthrough turn;

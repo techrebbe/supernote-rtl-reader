@@ -836,6 +836,15 @@ public final class VirtualSpreadNavigation {
             && queuedVerificationGeneration == bindingVerificationGeneration;
     }
 
+    /** A native mixed-link menu remains valid only for its verifier owner. */
+    public static boolean mixedLinkSurvivesVerificationBinding(
+        long candidateVerificationGeneration,
+        long bindingVerificationGeneration
+    ) {
+        return candidateVerificationGeneration > 0L
+            && candidateVerificationGeneration == bindingVerificationGeneration;
+    }
+
     /** Only synthetic activation preserves deferred link/menu intent. */
     public static boolean pageLoadPreservesDeferredLinkIntent(
         boolean manifestActivationInitialization

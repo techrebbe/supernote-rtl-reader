@@ -1925,14 +1925,19 @@ intent while explicit synthetic activation may preserve an open mixed menu; and
 pre-removal freshness tokens cannot erase a newer turn, link, history action,
 queue, or menu candidate.
 
+The final review batch also makes Back/Original Back synchronously supersede an
+open mixed-link menu and binds every retained mixed-menu candidate to its exact
+verifier generation. A candidate from an older or unbound verification cannot
+be rebound or authenticated by a newer manifest.
+
 Deterministic checks pin pure-versus-mixed classification, TRUE tap consumption,
 annotation-only supersession, exact direct-jump arguments, candidate invalidation,
 dual replay dispatch, and the concurrency state machine. Local validation passes
-196 focused navigation
+199 focused navigation
 assertions, 15 authority assertions, 8,752 exhaustive assertions, hook-scope
 validation, both native invariant suites, and signed compilation as
 v0.0.24-r2 (`versionCode=26`). The upgrade-compatible APK SHA-256 is
-`709f258ebb1f201febce0768c114da4ed1dff9f3ab78f7fb212aae002a53231f`.
+`be2427543b8e41d6c4e5e42131fcfda92cbe8e82eeafa32582aa55083558fd38`.
 The fresh r2 hardware matrix remains pending and the PR stays draft.
 
 ## Failure capture

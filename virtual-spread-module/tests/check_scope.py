@@ -200,8 +200,10 @@ for required in (
     '"onBackClick"',
     '"onOriginalBackClick"',
     "clearQueuedLinkInvocation(viewModel)",
+    "clearMixedLinkCandidate(viewModel)",
     "lockHistoryAction()",
     "ManifestLookup lookup = manifestLookupFor(viewModel)",
+    "noteReaderIntent(viewModel)",
     "if (lookup.navigationBlocked())",
     "param.setResult(null)",
     'link_history_action_blocked reason=',
@@ -219,6 +221,22 @@ for required in (
 ):
     if required not in history_actions:
         raise SystemExit("history action guard is missing: " + required)
+
+history_queue_clear = history_actions.find("clearQueuedLinkInvocation(viewModel)")
+history_candidate_clear = history_actions.find("clearMixedLinkCandidate(viewModel)")
+history_lookup = history_actions.find(
+    "ManifestLookup lookup = manifestLookupFor(viewModel)"
+)
+history_intent = history_actions.find("noteReaderIntent(viewModel)", history_lookup)
+history_blocked = history_actions.find("if (lookup.navigationBlocked())", history_intent)
+if not (
+    0 <= history_queue_clear < history_candidate_clear < history_lookup
+    < history_intent < history_blocked
+):
+    raise SystemExit(
+        "Back must supersede queued and mixed-menu link intent before every "
+        "blocked or native return"
+    )
 
 for required in (
     "private static final ReentrantLock HISTORY_SERIALIZATION",
@@ -309,6 +327,8 @@ for required in (
     "PURE_LINK_DISPATCH.set(Boolean.TRUE)",
     "!Boolean.TRUE.equals(PURE_LINK_DISPATCH.get())",
     "state.mixedLinkCandidate = new MixedLinkCandidate(",
+    "candidate.verificationGeneration",
+    "lookup.verificationGeneration,\n                state.pageLoadGeneration",
     "state.mixedLinkCandidate = null",
     'mixed_link_jump_blocked reason=missing_menu_context',
     "queuedDirectJump ? \"jumpLink\" : \"showLinkJumpView\"",
@@ -546,6 +566,7 @@ for required in (
     "state.linkHistory.clear()",
     "state.pageLoadGeneration++",
     "queuedLinkSurvivesVerificationBinding(",
+    "mixedLinkSurvivesVerificationBinding(",
     "state.queuedLinkPageLoadGeneration = state.pageLoadGeneration",
     "retainedMixedLink",
     ".withPageLoadGeneration(state.pageLoadGeneration)",
@@ -602,6 +623,7 @@ for required in (
     'return supersededManifestLookup("stale_view_model")',
     '"manifest_verification_superseded"',
     '"manifest_retry_backoff"',
+    "cached.verificationGeneration",
 ):
     if required not in manifest_lookup:
         raise SystemExit(f"manifest lookup is missing fail-closed guard: {required}")

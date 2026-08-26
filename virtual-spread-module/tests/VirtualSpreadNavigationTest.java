@@ -362,6 +362,27 @@ public final class VirtualSpreadNavigationTest {
             )
         );
         assertBoolean(
+            "passive state binding retains its verification menu",
+            true,
+            VirtualSpreadNavigation.mixedLinkSurvivesVerificationBinding(
+                8L, 8L
+            )
+        );
+        assertBoolean(
+            "passive state binding rejects an older verification menu",
+            false,
+            VirtualSpreadNavigation.mixedLinkSurvivesVerificationBinding(
+                7L, 8L
+            )
+        );
+        assertBoolean(
+            "unbound mixed menu cannot enter a verified generation",
+            false,
+            VirtualSpreadNavigation.mixedLinkSurvivesVerificationBinding(
+                0L, 8L
+            )
+        );
+        assertBoolean(
             "synthetic manifest initialization preserves deferred link intent",
             true,
             VirtualSpreadNavigation.pageLoadPreservesDeferredLinkIntent(true)

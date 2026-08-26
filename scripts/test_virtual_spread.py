@@ -54,6 +54,7 @@ from generate_virtual_spread import (  # noqa: E402
     _require_unaliased_output_path,
     _publication_artifacts,
     _publication_lock,
+    _publication_path_matches,
     _transform_rect,
     _transform_link_border,
     _transform_link_border_style,
@@ -1213,6 +1214,38 @@ class VirtualSpreadTests(unittest.TestCase):
             _windows_move_flags(True),
             MOVEFILE_WRITE_THROUGH | MOVEFILE_REPLACE_EXISTING,
         )
+
+    def test_publication_marker_paths_use_filesystem_case_semantics(
+        self,
+    ) -> None:
+        windows_normcase = lambda value: value.replace("/", "\\").lower()
+        expected = Path("C:/Books/Spread.pdf")
+        with mock.patch(
+            "generate_virtual_spread.os.path.normcase",
+            side_effect=windows_normcase,
+        ), mock.patch(
+            "generate_virtual_spread._lexical_absolute",
+            return_value=expected,
+        ):
+            self.assertTrue(
+                _publication_path_matches(
+                    "c:\\books\\SPREAD.PDF",
+                    expected,
+                )
+            )
+            self.assertFalse(
+                _publication_path_matches(
+                    "c:\\books\\other.pdf",
+                    expected,
+                )
+            )
+            self.assertFalse(
+                _publication_path_matches(
+                    "c:\\books\\folder\\..\\spread.pdf",
+                    expected,
+                )
+            )
+            self.assertFalse(_publication_path_matches(None, expected))
 
     def test_source_change_before_publication_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -3365,6 +3365,15 @@ def _publication_marker_object(
     return marker
 
 
+def _publication_path_matches(actual: Any, expected: Path) -> bool:
+    """Compare persisted paths with the host filesystem's case semantics."""
+    return (
+        isinstance(actual, str)
+        and os.path.normcase(actual)
+        == os.path.normcase(str(_lexical_absolute(expected)))
+    )
+
+
 def _validated_publication_transaction(
     marker_path: Path,
     output_path: Path,
@@ -3385,11 +3394,11 @@ def _validated_publication_transaction(
             stream,
             object_pairs_hook=_publication_marker_object,
         )
-    expected = {
-        "outputPath": str(_lexical_absolute(output_path)),
-        "manifestPath": str(_lexical_absolute(manifest_path)),
-        "outputBackupPath": str(_lexical_absolute(output_backup)),
-        "manifestBackupPath": str(_lexical_absolute(manifest_backup)),
+    expected_paths = {
+        "outputPath": output_path,
+        "manifestPath": manifest_path,
+        "outputBackupPath": output_backup,
+        "manifestBackupPath": manifest_backup,
     }
     if not isinstance(transaction, dict):
         raise VirtualSpreadError("Invalid virtual-spread publication marker")
@@ -3398,7 +3407,7 @@ def _validated_publication_transaction(
         raise VirtualSpreadError("Invalid virtual-spread publication marker")
     common_fields = {
         "schema",
-        *expected.keys(),
+        *expected_paths.keys(),
         "hadOutput",
         "hadManifest",
         "newOutputSha256",
@@ -3415,7 +3424,8 @@ def _validated_publication_transaction(
             "Unexpected virtual-spread publication marker fields"
         )
     if any(
-        transaction.get(key) != value for key, value in expected.items()
+        not _publication_path_matches(transaction.get(key), value)
+        for key, value in expected_paths.items()
     ):
         raise VirtualSpreadError("Invalid virtual-spread publication marker")
     for key in ("hadOutput", "hadManifest"):

@@ -48,8 +48,13 @@ lifetime of the document process. In portrait, authenticated explicit `/XYZ`
 and `/FitR` internal-link destinations keep Supernote's native viewport rather
 than being shifted to a page edge. That authenticated preservation state remains
 attached to the current page across native reload and orientation callbacks until
-real navigation supersedes it. Delayed portrait-focus retries are bound to the
-page-load generation and cannot overwrite a newer native link destination.
+real navigation supersedes it. Native screen changes and delayed portrait-focus
+retries recheck that preservation state, so neither can overwrite a newer native
+link destination. A cached manifest rejection remains fail-closed when the open
+MuPDF document carries any virtual-spread authority marker (or its metadata is
+not yet available); an ordinary PDF with no such marker remains fully native.
+Activation also waits for a positive native page count that exactly matches the
+authenticated output.
 The generator accepts an explicit `/FitR` viewport only when its complete,
 positive rectangle remains inside the target source page's effective CropBox
 and its aspect-fitted portrait viewport remains inside the target half; an

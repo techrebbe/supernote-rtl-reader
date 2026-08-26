@@ -1231,6 +1231,27 @@ v0.0.23 (`versionCode=23`) APK build (SHA-256
 Focused hardware validation of same-path replacement and preserved portrait
 explicit link viewports remains pending.
 
+## Review pass 53 retry authority, rejected manifests, and recovery paths - AUTOMATED PASS
+
+The following whole-branch review found four further boundaries. Portrait
+`screenChange` callbacks and already queued focus retries now recheck the
+authenticated explicit-link viewport before changing the visible half. A
+generated PDF whose sidecar verification was rejected continues consuming
+native turns when its retained MuPDF document contains virtual-spread authority
+metadata; an unavailable metadata probe also fails closed, while an ordinary
+PDF with no such metadata remains native. Manifest activation now requires a
+positive native page count that exactly matches the authenticated output. On
+Windows, interrupted-publication recovery compares persisted paths using the
+filesystem's case and separator semantics without accepting dot-segment aliases.
+
+Local automated validation passes 96 generator tests on Windows (five expected
+filesystem skips), 120 focused navigation/manifest/cache assertions, 12
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, and the signed/verified
+v0.0.23 (`versionCode=23`) APK build (SHA-256
+`792226ff3048ad4fb24244e50b8b5efb4c91113b65cde5aaa31f027a835f5115`).
+Focused hardware validation remains pending.
+
 ## Failure capture
 
 Before reproducing a failure:

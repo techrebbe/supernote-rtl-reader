@@ -93,10 +93,39 @@ for required in (
     "scheduledState.pageLoadGeneration",
     "state.pageLoadGeneration",
     'portrait_focus_skipped reason=native_reload',
+    "if (hasPreservedLinkViewport(viewModel))",
+    "if (hasPreservedLinkViewport(state, currentPage))",
+    "reason=preserved_link_viewport stage=schedule",
+    "reason=preserved_link_viewport stage=retry",
 ):
     if required not in portrait_focus:
         raise SystemExit(
             f"portrait focus retry is missing fail-closed guard: {required}"
+        )
+
+activity_start = hook.find("private static void hookActivity")
+activity_end = hook.find("private static void hookViewModel", activity_start)
+if activity_start < 0 or activity_end < 0:
+    raise SystemExit("missing activity hook implementation")
+activity_hooks = hook[activity_start:activity_end]
+screen_change_start = activity_hooks.find('"screenChange"')
+configuration_start = activity_hooks.find(
+    '"onConfigurationChanged"',
+    screen_change_start,
+)
+if screen_change_start < 0 or configuration_start < 0:
+    raise SystemExit("missing screen-change hook implementation")
+screen_change = activity_hooks[screen_change_start:configuration_start]
+for required in (
+    "if (hasPreservedLinkViewport(viewModel))",
+    "reason=preserved_link_viewport",
+    "stage=screen_change",
+    'schedulePortraitFocus(\n                                viewModel,\n                                "screen_change"',
+):
+    if required not in screen_change:
+        raise SystemExit(
+            "screen-change focus can overwrite a preserved link viewport: "
+            + required
         )
 
 page_loaded_start = hook.find("private static void handlePageLoaded")
@@ -190,6 +219,9 @@ for required in (
     "FileIdentity sidecarIdentity = FileIdentity.capture(sidecar)",
     "cached.matches(pdfIdentity, sidecarIdentity)",
     "if (cached.manifest == null)",
+    "nativeSnapshotClaimsVirtualSpread(viewModel)",
+    "generatedDocumentBlocked",
+    'manifest_rejected_cached ',
     "validateNativeSnapshot(viewModel, cached.manifest)",
     "validated == null",
     "scheduleManifestVerification(",
@@ -225,6 +257,11 @@ if min(lookup_positions) < 0 or tuple(sorted(lookup_positions)) != (
 
 for required in (
     "nativeSnapshotDocument",
+    "private static Object nativePdfDocument(Object viewModel)",
+    "private static Boolean nativeSnapshotClaimsVirtualSpread(",
+    "nativeAuthority == null",
+    "nativeAuthority.booleanValue()",
+    'native_snapshot_metadata_probe_failed',
     "manifestMatchesNativeSnapshot(",
     '"info:" + key',
     '"SNVirtualSpreadSourceSHA256"',
@@ -239,6 +276,11 @@ for required in (
         raise SystemExit(
             f"native reader snapshot binding is missing: {required}"
         )
+
+if "nativePageCount <= 0" not in hook:
+    raise SystemExit(
+        "manifest activation must wait for a positive native page count"
+    )
 
 if hook.count("parseManifest(") != 2 or hook.count("sha256File(") != 2:
     raise SystemExit(
@@ -563,6 +605,10 @@ for required in (
     'LEGACY_PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v1"',
     "class AmbiguousPublicationMarkerError(",
     "object_pairs_hook=_publication_marker_object",
+    "def _publication_path_matches(",
+    "os.path.normcase(actual)",
+    "os.path.normcase(str(_lexical_absolute(expected)))",
+    "not _publication_path_matches(transaction.get(key), value)",
     "set(transaction) != expected_fields",
     "MOVEFILE_WRITE_THROUGH",
     "MAX_MANIFEST_BYTES = 8 * 1024 * 1024",
@@ -749,6 +795,7 @@ for required in (
     "test_source_reserved_artifact_collisions_fail_before_locking",
     "test_unsupported_internal_destination_mode_fails_closed",
     "test_invalid_marker_with_canonical_artifact_fails_closed",
+    "test_publication_marker_paths_use_filesystem_case_semantics",
     "test_runtime_float_link_rect_is_rejected",
 ):
     if required not in generator_tests:

@@ -370,7 +370,16 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                         "documentViewModel"
                     );
                     if (isPortrait(activity)) {
-                        schedulePortraitFocus(viewModel, "screen_change");
+                        if (hasPreservedLinkViewport(viewModel)) {
+                            log("portrait_focus_skipped "
+                                + "reason=preserved_link_viewport "
+                                + "stage=screen_change");
+                        } else {
+                            schedulePortraitFocus(
+                                viewModel,
+                                "screen_change"
+                            );
+                        }
                     }
                 }
             }
@@ -990,6 +999,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         if (viewModel == null) {
             return;
         }
+        if (hasPreservedLinkViewport(viewModel)) {
+            log("portrait_focus_skipped "
+                + "reason=preserved_link_viewport stage=schedule");
+            return;
+        }
         final Activity owner = activeActivity.get();
         if (owner == null) {
             return;
@@ -1026,6 +1040,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                         return;
                     }
                     int currentPage = intField(viewModel, "currentPage", -1);
+                    if (hasPreservedLinkViewport(state, currentPage)) {
+                        log("portrait_focus_skipped "
+                            + "reason=preserved_link_viewport stage=retry");
+                        return;
+                    }
                     if (state.lastPage != currentPage) {
                         state.lastPage = currentPage;
                         state.half = firstHalf(manifest, currentPage);
@@ -1221,6 +1240,28 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         state.preservedLinkViewportHalf = null;
     }
 
+    private static boolean hasPreservedLinkViewport(Object viewModel) {
+        Manifest manifest = manifestFor(viewModel);
+        if (manifest == null) {
+            return false;
+        }
+        ReaderState state = stateFor(viewModel, manifest);
+        return hasPreservedLinkViewport(
+            state,
+            intField(viewModel, "currentPage", -1)
+        );
+    }
+
+    private static boolean hasPreservedLinkViewport(
+        ReaderState state,
+        int currentPage
+    ) {
+        return currentPage >= 0
+            && state.preservedLinkViewportPage == currentPage
+            && state.preservedLinkViewportHalf != null
+            && state.preservedLinkViewportHalf == state.half;
+    }
+
     private static ReaderState readerStateLocked(Object viewModel) {
         ReaderState state = STATES.get(viewModel);
         if (state == null) {
@@ -1242,6 +1283,46 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             );
             return value instanceof String ? (String) value : null;
         } catch (Throwable throwable) {
+            return null;
+        }
+    }
+
+    private static Object nativePdfDocument(Object viewModel) {
+        Object nativeMupdf = objectField(viewModel, "mupdf");
+        Object nativePdfMupdf = objectField(nativeMupdf, "pdfMupdf");
+        return objectField(nativePdfMupdf, "document");
+    }
+
+    private static Boolean nativeSnapshotClaimsVirtualSpread(
+        Object viewModel
+    ) {
+        Object nativeDocument = nativePdfDocument(viewModel);
+        if (nativeDocument == null) {
+            return null;
+        }
+        try {
+            Object nativeSource = XposedHelpers.callMethod(
+                nativeDocument,
+                "getMetaData",
+                "info:SNVirtualSpreadSourceSHA256"
+            );
+            Object nativeLayout = XposedHelpers.callMethod(
+                nativeDocument,
+                "getMetaData",
+                "info:SNVirtualSpreadLayoutSHA256"
+            );
+            Object nativeLinks = XposedHelpers.callMethod(
+                nativeDocument,
+                "getMetaData",
+                "info:SNVirtualSpreadLinksSHA256"
+            );
+            return Boolean.valueOf(
+                nativeSource != null
+                    || nativeLayout != null
+                    || nativeLinks != null
+            );
+        } catch (Throwable throwable) {
+            logFailure("native_snapshot_metadata_probe_failed", throwable);
             return null;
         }
     }
@@ -1393,7 +1474,23 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             if (cached != null
                 && cached.matches(pdfIdentity, sidecarIdentity)) {
                 if (cached.manifest == null) {
-                    return new ManifestLookup(null, false, false);
+                    Boolean nativeAuthority =
+                        nativeSnapshotClaimsVirtualSpread(viewModel);
+                    boolean generatedDocumentBlocked =
+                        nativeAuthority == null
+                            || nativeAuthority.booleanValue();
+                    if (generatedDocumentBlocked) {
+                        log("manifest_rejected_cached "
+                            + "native_authority="
+                            + (nativeAuthority == null
+                                ? "unknown" : "present")
+                            + " path=" + key);
+                    }
+                    return new ManifestLookup(
+                        null,
+                        false,
+                        generatedDocumentBlocked
+                    );
                 }
                 Manifest validated = validatePageCount(
                     viewModel,
@@ -1661,7 +1758,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             return null;
         }
         int nativePageCount = intField(viewModel, "pageCount", 0);
-        if (nativePageCount > 0 && nativePageCount != manifest.pageCount) {
+        if (nativePageCount <= 0
+            || nativePageCount != manifest.pageCount) {
             log("manifest_rejected reason=page_count expected="
                 + manifest.pageCount + " actual=" + nativePageCount);
             return null;

@@ -155,6 +155,9 @@ backup is overwritten only when it still matches the transaction's staged hash;
 an unrelated or concurrently replaced target is preserved and recovery fails
 closed. An interrupted v1 transaction containing
 backups therefore fails closed rather than restoring unauthenticated bytes.
+Recovery compares recorded paths with the host filesystem's case and separator
+semantics, so a Windows drive/path casing change does not strand an otherwise
+authentic transaction; dot-segment and other lexical aliases remain rejected.
 Ordinary publication errors use that same recovery path immediately.
 The manifest records the staged PDF's exact size and SHA-256, which the runtime
 module verifies before trusting its mappings. A canonical digest of every link

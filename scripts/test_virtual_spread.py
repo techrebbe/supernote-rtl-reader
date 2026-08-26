@@ -75,6 +75,7 @@ from generate_virtual_spread import (  # noqa: E402
     _recover_pair_publication,
     _require_distinct_publication_paths,
     _require_runtime_manifest_path,
+    _retired_publication_artifacts,
     _transformed_internal_destination,
     _sha256_open_file,
     _temporary_neighbor,
@@ -1444,8 +1445,20 @@ class VirtualSpreadTests(unittest.TestCase):
 
             self.assertFalse(output.exists())
             self.assertFalse(manifest_path.exists())
+            retirement_tombstones = tuple(
+                path for path in root.iterdir()
+                if ".retired." in path.name
+            )
+            self.assertTrue(retirement_tombstones)
+            self.assertTrue(all(
+                path.is_file() and path.stat().st_size == 0
+                for path in retirement_tombstones
+            ))
             self.assertEqual(
-                sorted(path.name for path in root.iterdir()),
+                sorted(
+                    path.name for path in root.iterdir()
+                    if path not in retirement_tombstones
+                ),
                 sorted([
                     "source.pdf",
                     _publication_lock_path(output).name,
@@ -1575,8 +1588,20 @@ class VirtualSpreadTests(unittest.TestCase):
 
             self.assertFalse(output.exists())
             self.assertFalse(manifest_path.exists())
+            retirement_tombstones = tuple(
+                path for path in root.iterdir()
+                if ".retired." in path.name
+            )
+            self.assertTrue(retirement_tombstones)
+            self.assertTrue(all(
+                path.is_file() and path.stat().st_size == 0
+                for path in retirement_tombstones
+            ))
             self.assertEqual(
-                sorted(path.name for path in root.iterdir()),
+                sorted(
+                    path.name for path in root.iterdir()
+                    if path not in retirement_tombstones
+                ),
                 sorted([
                     "source.pdf",
                     _publication_lock_path(output).name,
@@ -2690,6 +2715,36 @@ class VirtualSpreadTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 VirtualSpreadError,
                 "Cannot preserve NoRotate link annotation flag",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    direction="rtl",
+                    cover_separate=True,
+                )
+
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+
+    def test_no_zoom_link_on_scaled_page_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "no-zoom-source.pdf"
+            output = root / "no-zoom-spread.pdf"
+            manifest_path = root / "no-zoom-spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_annotation_value(
+                source,
+                source_page_index=1,
+                annotation_index=0,
+                key="/F",
+                value=NumberObject(0x08),
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot preserve NoZoom link annotation flag",
             ):
                 build_virtual_spread(
                     source,
@@ -5577,6 +5632,15 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertEqual(manifest.read_bytes(), b"old-manifest")
             self.assertFalse(marker.exists())
             self.assertFalse(output_backup.exists())
+            retained_aliases = tuple(
+                root.glob(output_backup.name + ".retired.*")
+            )
+            self.assertEqual(len(retained_aliases), 1)
+            self.assertTrue(os.path.samefile(retained_aliases[0], output))
+            self.assertEqual(
+                _retired_publication_artifacts(output_backup),
+                retained_aliases,
+            )
 
     def test_legacy_marker_with_duplicate_keys_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -6385,6 +6449,128 @@ class VirtualSpreadTests(unittest.TestCase):
                 r"^cleanup-target\.retired\.[0-9a-f]{32}$",
             )
             self.assertEqual(replacement_path.read_bytes(), b"unrelated")
+
+    def test_retirement_keeps_an_inert_identity_bound_tombstone(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "cleanup-target"
+            target.write_bytes(b"authorized")
+            expected = _identity(target.stat())
+
+            _durably_remove(target, expected_identity=expected)
+
+            self.assertFalse(target.exists())
+            retired = tuple(root.glob("cleanup-target.retired.*"))
+            self.assertEqual(len(retired), 1)
+            self.assertEqual(retired[0].read_bytes(), b"")
+            self.assertEqual(_retired_publication_artifacts(target), ())
+
+    def test_retirement_never_truncates_a_late_path_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "cleanup-target"
+            target.write_bytes(b"authorized")
+            expected = _identity(target.stat())
+            real_replace = _durable_replace
+            real_open = _publication_open_file
+            retired_path: Path | None = None
+            replaced = False
+
+            def observe_retirement(
+                source: Path,
+                destination: Path,
+                **kwargs: object,
+            ) -> object:
+                nonlocal retired_path
+                result = real_replace(source, destination, **kwargs)
+                if Path(source) == target:
+                    retired_path = Path(destination)
+                return result
+
+            def replace_before_open(
+                path: Path,
+                flags: int,
+                ownership_guard: object,
+                mode: int = 0o666,
+            ) -> int:
+                nonlocal replaced
+                assert retired_path is not None
+                if Path(path) == retired_path and not replaced:
+                    replacement = root / "unrelated-retired-replacement"
+                    replacement.write_bytes(b"unrelated")
+                    os.replace(replacement, retired_path)
+                    replaced = True
+                return real_open(
+                    path,
+                    flags,
+                    ownership_guard,  # type: ignore[arg-type]
+                    mode,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._durable_replace",
+                side_effect=observe_retirement,
+            ), mock.patch(
+                "generate_virtual_spread._publication_open_file",
+                side_effect=replace_before_open,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Retired publication artifact identity changed",
+                ):
+                    _durably_remove(target, expected_identity=expected)
+
+            self.assertTrue(replaced)
+            assert retired_path is not None
+            self.assertEqual(retired_path.read_bytes(), b"unrelated")
+
+    @unittest.skipIf(
+        os.name == "nt",
+        "Windows denies replacement of an open retirement handle",
+    )
+    def test_posix_retirement_preserves_replacement_after_open(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "cleanup-target"
+            target.write_bytes(b"authorized")
+            expected = _identity(target.stat())
+            real_replace = _durable_replace
+            real_ftruncate = os.ftruncate
+            retired_path: Path | None = None
+
+            def observe_retirement(
+                source: Path,
+                destination: Path,
+                **kwargs: object,
+            ) -> object:
+                nonlocal retired_path
+                result = real_replace(source, destination, **kwargs)
+                if Path(source) == target:
+                    retired_path = Path(destination)
+                return result
+
+            def replace_after_open(descriptor: int, length: int) -> None:
+                assert retired_path is not None
+                replacement = root / "unrelated-retired-replacement"
+                replacement.write_bytes(b"unrelated")
+                os.replace(replacement, retired_path)
+                real_ftruncate(descriptor, length)
+
+            with mock.patch(
+                "generate_virtual_spread._durable_replace",
+                side_effect=observe_retirement,
+            ), mock.patch(
+                "generate_virtual_spread.os.ftruncate",
+                side_effect=replace_after_open,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Retired publication artifact identity changed",
+                ):
+                    _durably_remove(target, expected_identity=expected)
+
+            assert retired_path is not None
+            self.assertEqual(retired_path.read_bytes(), b"unrelated")
 
 
 

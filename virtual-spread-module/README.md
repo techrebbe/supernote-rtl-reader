@@ -51,7 +51,8 @@ inspected, navigation fails closed based on the authority embedded in the native
 open document. A PDF whose native metadata explicitly contains no virtual-spread
 authority remains an ordinary native document.
 The generator rejects transformed URI `/IsMap true` actions, relative URI
-actions, a `/NoRotate` link annotation on a rotated source page, a source
+actions, a `/NoRotate` link annotation on a rotated source page, a `/NoZoom`
+link annotation on a scaled source page, a source
 CropBox that extends beyond its MediaBox, and any link rectangle or quadrilateral
 outside the source page's effective CropBox. It materializes the PDF default
 link border at the transformed width. Replacing a PDF and sidecar at their existing paths can
@@ -92,6 +93,9 @@ modification time, and change time, and reuses only a snapshot previously
 verified with those exact identities. Generator and runtime share an 8 MiB
 sidecar ceiling; the generator rejects an oversized manifest before publishing
 it, while the runtime independently fails closed if that invariant is violated.
+An unchanged oversized sidecar is recorded as a stable negative cache entry, so
+an ordinary PDF returns to native behavior and a generated PDF remains blocked
+without repeatedly scheduling the same doomed verification.
 On a cache miss or identity change, the module fails closed while a single
 background worker opens the PDF and sidecar, hashes the sidecar bytes, parses
 them, and performs the full PDF SHA-256 check. Its queue retains only the latest
@@ -172,13 +176,19 @@ Forced-regeneration layout policy uses those same captured target snapshots, and
 recovery removes a newly published canonical target only while both its verified
 digest and filesystem identity still match.
 Transaction cleanup authenticates the complete set of marker, stage, and backup
-artifacts before deleting any of them, then carries each exact identity through
-an unguessable retirement name. POSIX ctime participates in identity checks, so
+artifacts before retiring any of them, then carries each exact identity through
+an unguessable retirement name. The exact retired inode is opened and emptied
+through its descriptor rather than unlinked by a replaceable pathname; an inert
+zero-length tombstone remains. A legacy hard-link retirement remains intact
+while it aliases a live canonical inode and remains fail-closed recovery
+evidence for a later run. POSIX ctime participates in identity checks, so
 an in-place same-size mutation cannot be hidden by restoring mtime.
 Marker-free remnants are preserved and rejected for manual recovery; once a
 valid marker exists, a staged remnant is removed only when its digest matches
-the authenticated transaction. A pre-existing legacy or tokenized `.retired...`
-path is never deleted merely because of its filename. The sidecar's published spelling is always the
+the authenticated transaction. A nonempty or non-regular legacy or tokenized
+`.retired...` path is never deleted merely because of its filename; an
+authenticated zero-length retirement tombstone from completed cleanup is inert.
+The sidecar's published spelling is always the
 exact output-derived `<PDF filename>.json`, including case.
 
 For a matching document it:

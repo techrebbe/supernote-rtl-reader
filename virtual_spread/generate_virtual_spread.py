@@ -57,6 +57,7 @@ PDF_MIN_PAGE_DIMENSION = 3.0
 PDF_MAX_PAGE_DIMENSION = 14400.0
 RETIREMENT_TOKEN_BYTES = 16
 SUPPORTED_ANNOTATION_FLAGS_MASK = 0x03FF
+ANNOTATION_FLAG_NO_ZOOM = 0x0008
 ANNOTATION_FLAG_NO_ROTATE = 0x0010
 ABSOLUTE_URI_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 SUPPORTED_LINK_ANNOTATION_KEYS = frozenset({
@@ -1026,6 +1027,7 @@ def _require_link_geometry_inside_source_crop(
 def _link_annotation_flags(
     annotation: DictionaryObject,
     source_rotation: int = 0,
+    source_scale: float = 1.0,
 ) -> NumberObject | None:
     if "/F" not in annotation:
         return None
@@ -1041,6 +1043,15 @@ def _link_annotation_flags(
     if normalized_rotation not in {0, 90, 180, 270}:
         raise VirtualSpreadError(
             f"Unsupported source page rotation: {normalized_rotation}"
+        )
+    if not math.isfinite(source_scale) or source_scale <= 0.0:
+        raise VirtualSpreadError("Invalid source page scale for link annotation")
+    if (
+        flags & ANNOTATION_FLAG_NO_ZOOM
+        and not math.isclose(source_scale, 1.0, rel_tol=0.0, abs_tol=1e-12)
+    ):
+        raise VirtualSpreadError(
+            "Cannot preserve NoZoom link annotation flag through page scaling"
         )
     if flags & ANNOTATION_FLAG_NO_ROTATE and normalized_rotation != 0:
         raise VirtualSpreadError(
@@ -2163,7 +2174,11 @@ def _copy_link_annotation(
     source_rotation = int(
         reader.pages[source_page_index].get("/Rotate", 0) or 0
     ) % 360
-    annotation_flags = _link_annotation_flags(original, source_rotation)
+    annotation_flags = _link_annotation_flags(
+        original,
+        source_rotation,
+        float(mapping["scale"]),
+    )
     copied = DictionaryObject(
         {
             NameObject("/Type"): NameObject("/Annot"),
@@ -3764,11 +3779,32 @@ def _retired_publication_artifacts(
         ) from error
     legacy_name = path.name + ".retired"
     unique_prefix = legacy_name + "."
-    return tuple(
-        path.with_name(name)
-        for name in sorted(names)
-        if name == legacy_name or name.startswith(unique_prefix)
-    )
+    suspicious: list[Path] = []
+    for name in sorted(names):
+        if name != legacy_name and not name.startswith(unique_prefix):
+            continue
+        candidate = path.with_name(name)
+        try:
+            entry = (
+                namespace.lstat(candidate)
+                if namespace is not None
+                else candidate.lstat()
+            )
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            raise VirtualSpreadError(
+                f"Cannot inspect retired publication artifact: {candidate}"
+            ) from error
+        # Successful ordinary cleanup leaves an authenticated zero-length
+        # tombstone because deleting by pathname cannot be made
+        # inode-conditional on POSIX. Non-regular or non-empty entries,
+        # including a retained legacy hard-link alias, remain fail-closed
+        # recovery evidence for a later run.
+        if stat.S_ISREG(entry.st_mode) and entry.st_size == 0:
+            continue
+        suspicious.append(candidate)
+    return tuple(suspicious)
 
 
 def _durably_remove(
@@ -3818,7 +3854,45 @@ def _durably_remove(
         ownership_guard,
         allow_namespace_ctime_change=(os.name != "nt"),
     )
-    _publication_unlink(retired, ownership_guard, missing_ok=False)
+    flags = os.O_WRONLY
+    flags |= getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_NOINHERIT", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = _publication_open_file(retired, flags, ownership_guard)
+    try:
+        opened_identity = _identity(os.fstat(descriptor))
+        if not _same_open_file(retired_identity, opened_identity):
+            raise VirtualSpreadError(
+                f"Retired publication artifact identity changed: {retired}"
+            )
+        opened_entry = os.fstat(descriptor)
+        if opened_entry.st_nlink > 1:
+            # An interrupted legacy hard-link backup may still alias the
+            # canonical output. Retaining that authenticated alias is safe and
+            # consumes no additional data; truncating it would corrupt the
+            # canonical file through the shared inode.
+            emptied_identity = opened_identity
+        else:
+            # POSIX has no conditional, inode-bound unlink operation. Truncate
+            # the authenticated open inode instead of deleting a pathname that
+            # a non-cooperating writer could replace between validation and
+            # unlink. The zero-length retirement tombstone is deliberately
+            # retained and ignored by subsequent recovery scans.
+            os.ftruncate(descriptor, 0)
+            os.fsync(descriptor)
+            emptied_identity = _identity(os.fstat(descriptor))
+    finally:
+        os.close(descriptor)
+    final_identity = _require_publication_path_identity(
+        retired,
+        emptied_identity,
+        "Retired publication artifact",
+        ownership_guard,
+    )
+    if final_identity.size != 0 and final_identity != opened_identity:
+        raise VirtualSpreadError(
+            f"Retired publication artifact was not emptied: {retired}"
+        )
 
 
 def _reject_retired_publication_artifacts(

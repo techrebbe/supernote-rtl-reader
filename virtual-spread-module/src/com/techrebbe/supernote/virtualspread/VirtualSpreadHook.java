@@ -1929,6 +1929,27 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         );
     }
 
+    private static ManifestLookup rejectedManifestLookup(
+        Object viewModel,
+        String key,
+        CachedManifest rejected,
+        String reason
+    ) {
+        Boolean nativeAuthority = nativeSnapshotClaimsVirtualSpread(viewModel);
+        boolean generatedDocumentBlocked = nativeAuthority == null
+            || nativeAuthority.booleanValue();
+        log("manifest_rejected_cached reason=" + reason
+            + " native_authority="
+            + (nativeAuthority == null ? "unknown" : "present")
+            + " path=" + key);
+        return new ManifestLookup(
+            null,
+            false,
+            generatedDocumentBlocked,
+            rejected.snapshotId()
+        );
+    }
+
     private static ManifestLookup manifestLookupFor(Object viewModel) {
         if (!hooksReady) {
             return new ManifestLookup(null, false, false, null);
@@ -1978,23 +1999,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             if (cached != null
                 && cached.matches(pdfIdentity, sidecarIdentity)) {
                 if (cached.manifest == null) {
-                    Boolean nativeAuthority =
-                        nativeSnapshotClaimsVirtualSpread(viewModel);
-                    boolean generatedDocumentBlocked =
-                        nativeAuthority == null
-                            || nativeAuthority.booleanValue();
-                    if (generatedDocumentBlocked) {
-                        log("manifest_rejected_cached "
-                            + "native_authority="
-                            + (nativeAuthority == null
-                                ? "unknown" : "present")
-                            + " path=" + key);
-                    }
-                    return new ManifestLookup(
-                        null,
-                        false,
-                        generatedDocumentBlocked,
-                        cached.snapshotId()
+                    return rejectedManifestLookup(
+                        viewModel,
+                        key,
+                        cached,
+                        "stable_snapshot"
                     );
                 }
                 Manifest validated = validatePageCount(
@@ -2013,6 +2022,25 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             }
             if (cached != null) {
                 MANIFESTS.remove(key, cached);
+            }
+            if (sidecarIdentity.size < 0L
+                || sidecarIdentity.size > MAX_MANIFEST_BYTES) {
+                cancelManifestVerificationForKey(key);
+                CachedManifest rejected = new CachedManifest(
+                    pdfIdentity,
+                    sidecarIdentity,
+                    "",
+                    null
+                );
+                MANIFESTS.put(key, rejected);
+                clearQueuedLinkInvocation(viewModel);
+                log("manifest_rejected reason=manifest_too_large path=" + key);
+                return rejectedManifestLookup(
+                    viewModel,
+                    key,
+                    rejected,
+                    "manifest_too_large"
+                );
             }
             String requestedSnapshotId = pdfIdentity.token()
                 + ":" + sidecarIdentity.token();

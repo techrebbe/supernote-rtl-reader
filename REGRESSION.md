@@ -1620,6 +1620,40 @@ signed/verified v0.0.24 (`versionCode=24`) APK build (SHA-256
 A fresh clean exact-head Ultra review and focused hardware validation remain
 release gates; PR #16 stays draft.
 
+## Review pass 67 identity-bound retirement and stable rejection - LOCAL PASS
+
+The full-branch Ultra review found three remaining release-boundary defects.
+Publication cleanup no longer performs a pathname-only unlink after moving an
+authenticated stage, backup, or marker to its unguessable retirement name.
+Instead it opens and revalidates the exact retired inode, empties that inode
+through its descriptor, fsyncs it, and retains an inert zero-length tombstone.
+A non-cooperating writer's late pathname replacement is therefore preserved.
+An interrupted POSIX hard-link backup is retained without truncation while it
+still aliases a live canonical inode, so cleanup cannot corrupt the restored
+PDF through a shared inode; a later run treats that nonempty alias as
+fail-closed recovery evidence.
+
+The generator now rejects a link carrying `/NoZoom` whenever the source page is
+scaled into its virtual half; copying transformed annotation geometry while
+retaining that flag would change its visible semantics. On Android, an
+unchanged sidecar outside the 8 MiB ceiling is stored as a stable negative cache
+entry. An ordinary PDF with such an unrelated sidecar returns to native behavior
+after that deterministic rejection, while an authoritative generated PDF stays
+blocked without repeatedly scheduling the same verifier.
+
+Deterministic regressions cover pre-open and POSIX post-open retirement
+replacement, inert retirement tombstones, legacy hard-link recovery, scaled
+`/NoZoom` rejection, and ordering of the oversized-sidecar negative-cache path.
+Local validation passes 138 generator tests on Windows (13 expected
+platform/filesystem or privilege skips) and the same 138 on Linux (two
+Windows-specific skips), 141 focused navigation/manifest/cache assertions, 15
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, syntax checks, and the
+signed/verified v0.0.24 (`versionCode=24`) APK build (SHA-256
+`fea075f10b10701d73c8b7bf5c3998bb243fa31b1b89f27f47c745bc24c347c4`).
+A fresh clean exact-head Ultra review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
 ## Failure capture
 
 Before reproducing a failure:

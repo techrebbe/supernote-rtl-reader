@@ -28,7 +28,9 @@ border color, and `/H` activation highlight mode are validated and preserved;
 border dimensions and dash patterns follow the source-to-spread scale and page
 rotation. A `/NoRotate` annotation flag on a rotated source page fails closed
 because source rotation is baked into an unrotated virtual spread; copying that
-flag would change its meaning. Underlined `/BS /U` links likewise fail closed
+flag would change its meaning. A `/NoZoom` flag likewise fails closed whenever
+the source page is scaled into its half, because transformed annotation geometry
+would otherwise have different viewer semantics. Underlined `/BS /U` links likewise fail closed
 when page rotation would move the underline to a different physical edge. URI
 actions retain a Boolean `/IsMap`, but the URI must be absolute. A relative URI
 depends on document-catalog base state that this representation does not
@@ -170,11 +172,16 @@ the no-replace primitive fails closed rather than falling back to a lossy
 emulation.
 Forced-regeneration layout policy is derived from those same captured target
 snapshots, so a target that appears after an earlier existence observation still
-requires explicit cover and geometry choices. Recovery also binds every deletion
+requires explicit cover and geometry choices. Recovery also binds every cleanup
 to both its authenticated digest and exact filesystem identity. The marker,
 stages, and backups are authenticated before cleanup begins, then each exact
-identity is carried through an unguessable retirement name before removal. A
-same-content pathname replacement is preserved. POSIX identity checks include
+identity is carried through an unguessable retirement name. Cleanup opens and
+revalidates that exact retired inode and empties it through the descriptor
+rather than unlinking a replaceable pathname. Its inert zero-length tombstone is
+retained; a legacy hard-link retirement is retained without truncation while it
+still aliases a live canonical inode and remains fail-closed recovery evidence
+for a later run. A same-content pathname replacement is preserved. POSIX
+identity checks include
 ctime so an in-place, same-size mutation cannot hide behind a restored mtime;
 the generator permits only the ctime transition caused by its own
 atomic namespace move. The returned post-move identity becomes authoritative
@@ -185,10 +192,11 @@ cannot leave an unbounded collection of randomly named files. Before a marker
 exists, any occupied staged name is preserved and generation fails closed for
 manual recovery. After a valid marker exists, recovery removes a remaining
 stage only after its SHA-256 matches that marker's authenticated transaction;
-a mismatched stage is preserved. Likewise, an already occupied legacy or
+a mismatched stage is preserved. Likewise, a nonempty or non-regular legacy or
 tokenized `.retired...` name is never treated as disposable scratch data:
-publication and recovery
-stop without changing it. A transaction marker is durably published before
+publication and recovery stop without changing it. Authenticated zero-length
+retirement tombstones from completed cleanup are inert and ignored. A
+transaction marker is durably published before
 either previous file is moved. POSIX builds
 sync every affected parent directory; Windows builds use
 `MoveFileExW(MOVEFILE_WRITE_THROUGH)` for the marker, backup, publication,

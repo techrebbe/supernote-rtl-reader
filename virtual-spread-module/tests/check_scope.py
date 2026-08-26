@@ -136,6 +136,36 @@ for required in (
             + required
         )
 
+oversized_rejection = lookup.find(
+    "sidecarIdentity.size > MAX_MANIFEST_BYTES"
+)
+oversized_cancel = lookup.find(
+    "cancelManifestVerificationForKey(key)", oversized_rejection
+)
+oversized_cache = lookup.find("MANIFESTS.put(key, rejected)", oversized_cancel)
+oversized_clear = lookup.find(
+    "clearQueuedLinkInvocation(viewModel)", oversized_cache
+)
+oversized_return = lookup.find(
+    "return rejectedManifestLookup(", oversized_clear
+)
+if not (
+    0 <= oversized_rejection < oversized_cancel < oversized_cache
+    < oversized_clear < oversized_return
+):
+    raise SystemExit(
+        "an unchanged oversized sidecar must publish one stable negative "
+        "cache entry instead of rescheduling verification forever"
+    )
+for required in (
+    "private static ManifestLookup rejectedManifestLookup(",
+    'manifest_rejected_cached reason=',
+):
+    if required not in hook:
+        raise SystemExit(
+            "stable manifest rejection caching is missing: " + required
+        )
+
 history_start = hook.find("private static void captureHistoryReturn")
 history_end = hook.find("private static boolean captureLinkTarget", history_start)
 if history_start < 0 or history_end < 0:
@@ -1161,6 +1191,10 @@ for required in (
     "test_cleanup_never_deletes_replaced_stage_or_marker",
     "test_cleanup_rejects_backup_for_absent_original",
     "test_unique_retirement_preserves_a_replaced_entry",
+    "test_retirement_keeps_an_inert_identity_bound_tombstone",
+    "test_retirement_never_truncates_a_late_path_replacement",
+    "test_posix_retirement_preserves_replacement_after_open",
+    "test_no_zoom_link_on_scaled_page_fails_closed",
     "test_publication_staging_paths_are_deterministic",
     "test_recovery_preserves_orphaned_deterministic_staging",
     "test_recovery_removes_authenticated_deterministic_staging",
@@ -1181,6 +1215,22 @@ for required in (
             "generator is missing staged-output publication regression: "
             f"{required}"
         )
+
+for required in (
+    "ANNOTATION_FLAG_NO_ZOOM = 0x0008",
+    "Cannot preserve NoZoom link annotation flag through page scaling",
+    "os.ftruncate(descriptor, 0)",
+    "zero-length retirement tombstone",
+):
+    if required not in generator:
+        raise SystemExit(
+            "generator is missing reviewed fail-closed cleanup/link behavior: "
+            + required
+        )
+if "_publication_unlink(retired," in generator:
+    raise SystemExit(
+        "retired publication cleanup must not delete an untrusted pathname"
+    )
 
 preflight_hash = generator.find('"Staged manifest"')
 preflight_output_hash = generator.find('"Staged output"')

@@ -31,6 +31,10 @@ the Nomad's 4:3 landscape aspect; the generator and runtime independently reject
 other ratios. Before Android's permissive `JSONObject` parser runs, a strict bounded
 scanner rejects malformed JSON and duplicate object names at every nesting level,
 including names that become equal after JSON escape decoding.
+If a generated PDF is present but its required sidecar is missing or cannot be
+inspected, navigation fails closed based on the authority embedded in the native
+open document. A PDF whose native metadata explicitly contains no virtual-spread
+authority remains an ordinary native document.
 The generator rejects transformed URI `/IsMap true` actions, a source CropBox
 that extends beyond its MediaBox, and any link rectangle or quadrilateral outside
 the source page's effective CropBox. It materializes the PDF default link border
@@ -83,9 +87,13 @@ an older native view model fail closed. Native page turns are consumed while a
 matching snapshot is pending, so the reader cannot leak one unverified native
 LTR turn before RTL activation. Turns also remain blocked when a verified
 replacement pair does not match Supernote's still-open native document; reopening
-the document is required before the new authority can activate. It
-publishes the result only if both the PDF identity and sidecar digest are still
-unchanged. Before any navigation behavior activates, the main-thread callback
+the document is required before the new authority can activate. A native link
+tapped during verification is also consumed and queued once. After successful
+activation, the module replays it only if the same document and source page are
+still current and the request is fresh; document/page changes and failed or
+rejected verification discard it. The verifier publishes the result only if
+both the PDF identity and sidecar digest are still unchanged. Before any
+navigation behavior activates, the main-thread callback
 also compares the authenticated authorities with metadata read from the exact
 native MuPDF `Document` instance. A mismatch fails closed until Supernote
 reopens the replacement document. Page-bar and page-turn callbacks never

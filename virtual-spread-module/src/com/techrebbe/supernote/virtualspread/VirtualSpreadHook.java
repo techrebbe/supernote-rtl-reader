@@ -61,6 +61,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final String VERSION = "0.0.23";
     private static final long MAX_MANIFEST_BYTES = 8L * 1024L * 1024L;
     private static final int MAX_CACHED_MANIFESTS = 4;
+    private static final long PENDING_LINK_MAX_AGE_MS = 60000L;
 
     private static volatile WeakReference<Activity> activeActivity =
         new WeakReference<>(null);
@@ -85,6 +86,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             new ArrayBlockingQueue<Runnable>(1)
         );
     private static final ThreadLocal<int[]> PAGE_BAR_VALUES =
+        new ThreadLocal<>();
+    private static final ThreadLocal<Boolean> REPLAYING_LINK =
         new ThreadLocal<>();
 
     private static final class Manifest {
@@ -299,6 +302,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         VirtualSpreadNavigation.Half pendingLinkHalf;
         boolean pendingLinkResetLandscapeFit;
         long pendingLinkAt;
+        Object[] queuedLinkArguments;
+        String queuedLinkDocumentPath;
+        int queuedLinkSourcePage = -1;
+        long queuedLinkAt;
         int preservedLinkViewportPage = -1;
         VirtualSpreadNavigation.Half preservedLinkViewportHalf;
         int pendingHistoryPage = -1;
@@ -448,11 +455,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
-                    captureLinkTarget(
-                        (Activity) param.thisObject,
-                        param.args[1],
-                        ((Integer) param.args[2]).intValue()
-                    );
+                    if (!Boolean.TRUE.equals(REPLAYING_LINK.get())) {
+                        handleLinkTarget(param);
+                    }
                 }
             }
         );
@@ -558,16 +563,41 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
     }
 
+    private static void handleLinkTarget(
+        XC_MethodHook.MethodHookParam param
+    ) {
+        Activity activity = (Activity) param.thisObject;
+        Object viewModel = objectField(activity, "documentViewModel");
+        ManifestLookup lookup = manifestLookupFor(viewModel);
+        if (lookup.manifest != null) {
+            captureLinkTarget(
+                viewModel,
+                lookup.manifest,
+                param.args[1],
+                ((Integer) param.args[2]).intValue()
+            );
+            return;
+        }
+        if (lookup.verificationPending) {
+            queueLinkInvocation(viewModel, param.args);
+            param.setResult(null);
+            log("link_jump_blocked reason=manifest_verification_pending");
+            return;
+        }
+        if (lookup.navigationBlocked()) {
+            clearQueuedLinkInvocation(viewModel);
+            param.setResult(null);
+            log("link_jump_blocked reason="
+                + lookup.navigationBlockReason());
+        }
+    }
+
     private static void captureLinkTarget(
-        Activity activity,
+        Object viewModel,
+        Manifest manifest,
         Object superNoteLink,
         int targetPage
     ) {
-        Object viewModel = objectField(activity, "documentViewModel");
-        Manifest manifest = manifestFor(viewModel);
-        if (manifest == null) {
-            return;
-        }
         ReaderState state = stateFor(viewModel, manifest);
         clearPendingLink(state);
         if (superNoteLink == null || targetPage < 0) {
@@ -626,6 +656,91 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         } catch (Throwable throwable) {
             clearPendingLink(state);
             logFailure("link_target_capture_failed", throwable);
+        }
+    }
+
+    private static void queueLinkInvocation(
+        Object viewModel,
+        Object[] arguments
+    ) {
+        if (viewModel == null || arguments == null || arguments.length < 3
+            || arguments[1] == null || !(arguments[2] instanceof Integer)
+            || ((Integer) arguments[2]).intValue() < 0) {
+            clearQueuedLinkInvocation(viewModel);
+            log("link_jump_not_queued reason=invalid_invocation");
+            return;
+        }
+        Uri uri = (Uri) objectField(viewModel, "uri");
+        String documentPath = uri == null ? null : uri.getPath();
+        int sourcePage = intField(viewModel, "currentPage", -1);
+        if (documentPath == null || sourcePage < 0) {
+            clearQueuedLinkInvocation(viewModel);
+            log("link_jump_not_queued reason=missing_source_state");
+            return;
+        }
+        synchronized (STATES) {
+            ReaderState state = readerStateLocked(viewModel);
+            state.queuedLinkArguments = arguments.clone();
+            state.queuedLinkDocumentPath = documentPath;
+            state.queuedLinkSourcePage = sourcePage;
+            state.queuedLinkAt = System.currentTimeMillis();
+        }
+        log("link_jump_queued source=" + sourcePage
+            + " target=" + arguments[2]);
+    }
+
+    private static boolean replayQueuedLink(
+        Activity activity,
+        Object viewModel,
+        Manifest manifest
+    ) {
+        Object[] arguments;
+        String documentPath;
+        int sourcePage;
+        long queuedAt;
+        synchronized (STATES) {
+            ReaderState state = STATES.get(viewModel);
+            if (state == null || state.queuedLinkArguments == null) {
+                return false;
+            }
+            arguments = state.queuedLinkArguments;
+            documentPath = state.queuedLinkDocumentPath;
+            sourcePage = state.queuedLinkSourcePage;
+            queuedAt = state.queuedLinkAt;
+            clearQueuedLinkInvocation(state);
+        }
+        long age = System.currentTimeMillis() - queuedAt;
+        int currentPage = intField(viewModel, "currentPage", -1);
+        if (!VirtualSpreadNavigation.pendingLinkReplayIsCurrent(
+                sameCanonicalPath(manifest.key, documentPath),
+                sourcePage,
+                currentPage,
+                age,
+                PENDING_LINK_MAX_AGE_MS
+            ) || arguments.length < 3
+            || arguments[1] == null
+            || !(arguments[2] instanceof Integer)) {
+            log("link_jump_discarded reason=stale_or_invalid");
+            return false;
+        }
+        try {
+            captureLinkTarget(
+                viewModel,
+                manifest,
+                arguments[1],
+                ((Integer) arguments[2]).intValue()
+            );
+            REPLAYING_LINK.set(Boolean.TRUE);
+            XposedHelpers.callMethod(activity, "showLinkJumpView", arguments);
+            log("link_jump_replayed source=" + sourcePage
+                + " target=" + arguments[2]);
+            return true;
+        } catch (Throwable throwable) {
+            clearPendingLink(stateFor(viewModel, manifest));
+            logFailure("link_jump_replay_failed", throwable);
+            return false;
+        } finally {
+            REPLAYING_LINK.remove();
         }
     }
 
@@ -1229,6 +1344,25 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         state.pendingLinkAt = 0L;
     }
 
+    private static void clearQueuedLinkInvocation(Object viewModel) {
+        if (viewModel == null) {
+            return;
+        }
+        synchronized (STATES) {
+            ReaderState state = STATES.get(viewModel);
+            if (state != null) {
+                clearQueuedLinkInvocation(state);
+            }
+        }
+    }
+
+    private static void clearQueuedLinkInvocation(ReaderState state) {
+        state.queuedLinkArguments = null;
+        state.queuedLinkDocumentPath = null;
+        state.queuedLinkSourcePage = -1;
+        state.queuedLinkAt = 0L;
+    }
+
     private static void clearPendingHistory(ReaderState state) {
         state.pendingHistoryPage = -1;
         state.pendingHistoryHalf = null;
@@ -1439,6 +1573,23 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         return manifestLookupFor(viewModel).manifest;
     }
 
+    private static ManifestLookup unavailableManifestLookup(
+        Object viewModel,
+        String reason,
+        String key
+    ) {
+        Boolean nativeAuthority = nativeSnapshotClaimsVirtualSpread(viewModel);
+        boolean generatedDocumentBlocked = nativeAuthority == null
+            || nativeAuthority.booleanValue();
+        if (generatedDocumentBlocked) {
+            log("manifest_unavailable reason=" + reason
+                + " native_authority="
+                + (nativeAuthority == null ? "unknown" : "present")
+                + (key == null ? "" : " path=" + key));
+        }
+        return new ManifestLookup(null, false, generatedDocumentBlocked);
+    }
+
     private static ManifestLookup manifestLookupFor(Object viewModel) {
         if (viewModel == null) {
             Activity current = activeActivity.get();
@@ -1457,16 +1608,26 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             }
             Uri uri = (Uri) XposedHelpers.getObjectField(viewModel, "uri");
             if (uri == null || uri.getPath() == null) {
+                ManifestLookup unavailable = unavailableManifestLookup(
+                    viewModel,
+                    "missing_uri",
+                    null
+                );
                 observeDocumentKey(null);
-                return new ManifestLookup(null, false, false);
+                return unavailable;
             }
             File pdf = new File(uri.getPath());
             File sidecar = new File(pdf.getPath() + ".json");
             String key = pdf.getCanonicalPath();
             observeDocumentKey(key);
+            discardQueuedLinkForDifferentDocument(viewModel, key);
             if (!pdf.isFile() || !sidecar.isFile()) {
                 cancelManifestVerificationForKey(key);
-                return new ManifestLookup(null, false, false);
+                return unavailableManifestLookup(
+                    viewModel,
+                    "required_pair_unavailable",
+                    key
+                );
             }
             FileIdentity pdfIdentity = FileIdentity.capture(pdf);
             FileIdentity sidecarIdentity = FileIdentity.capture(sidecar);
@@ -1522,9 +1683,31 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             // PDF + sidecar snapshot into MANIFESTS.
             return new ManifestLookup(null, verificationPending, false);
         } catch (Throwable throwable) {
+            ManifestLookup unavailable = unavailableManifestLookup(
+                viewModel,
+                "lookup_failed",
+                null
+            );
             observeDocumentKey(null);
             logFailure("manifest_read_failed", throwable);
-            return new ManifestLookup(null, false, false);
+            return unavailable;
+        }
+    }
+
+    private static void discardQueuedLinkForDifferentDocument(
+        Object viewModel,
+        String key
+    ) {
+        synchronized (STATES) {
+            ReaderState state = STATES.get(viewModel);
+            if (state != null && state.queuedLinkArguments != null
+                && !sameCanonicalPath(
+                    key,
+                    state.queuedLinkDocumentPath
+                )) {
+                clearQueuedLinkInvocation(state);
+                log("link_jump_discarded reason=document_changed");
+            }
         }
     }
 
@@ -1698,12 +1881,15 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                         log("manifest_accepted path=" + key
                             + " pages=" + parsed.pageCount);
                         scheduleManifestActivation(key, parsed.revision);
+                    } else {
+                        scheduleQueuedLinkDiscard(key, "manifest_rejected");
                     }
                 }
             }
         } catch (Throwable throwable) {
             if (verificationId.equals(VERIFYING.get(key))) {
                 MANIFESTS.remove(key);
+                scheduleQueuedLinkDiscard(key, "verification_failed");
                 logFailure("manifest_verification_failed", throwable);
             }
         } finally {
@@ -1738,6 +1924,12 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     || !revision.equals(current.revision)) {
                     return;
                 }
+                if (replayQueuedLink(owner, viewModel, current)) {
+                    log("manifest_activated path=" + key
+                        + " revision=" + revision
+                        + " queued_link=replayed");
+                    return;
+                }
                 handlePageLoaded(viewModel);
                 scheduleConfigurationRefresh(
                     owner,
@@ -1746,6 +1938,41 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 );
                 log("manifest_activated path=" + key
                     + " revision=" + revision);
+            }
+        });
+    }
+
+    private static void scheduleQueuedLinkDiscard(
+        final String key,
+        final String reason
+    ) {
+        final Activity owner = activeActivity.get();
+        if (owner == null) {
+            return;
+        }
+        new Handler(owner.getMainLooper()).post(new Runnable() {
+            @Override
+            public void run() {
+                Activity activity = activeActivity.get();
+                if (activity != owner) {
+                    return;
+                }
+                Object viewModel = objectField(
+                    owner,
+                    "documentViewModel"
+                );
+                synchronized (STATES) {
+                    ReaderState state = STATES.get(viewModel);
+                    if (state == null || state.queuedLinkArguments == null
+                        || !sameCanonicalPath(
+                            key,
+                            state.queuedLinkDocumentPath
+                        )) {
+                        return;
+                    }
+                    clearQueuedLinkInvocation(state);
+                }
+                log("link_jump_discarded reason=" + reason);
             }
         });
     }

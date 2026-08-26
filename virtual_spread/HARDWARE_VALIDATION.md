@@ -156,7 +156,7 @@ scope guard.
 
 ## v0.0.23 native-open snapshot binding and portrait viewport - PENDING HARDWARE
 
-Review passes 40-53 bind the authenticated sidecar to the actual PDF object
+Review passes 40-54 bind the authenticated sidecar to the actual PDF object
 retained inside Supernote's native reader and harden all transformed link,
 manifest, and page-box boundaries. The generator adds a descriptor-verified
 source-authority marker before the layout and link markers. The companion reads
@@ -170,12 +170,12 @@ The generator rejects transformed URI `/IsMap true` actions, a CropBox extending
 outside its MediaBox, and link geometry outside the source CropBox, while scaling
 an omitted link border's PDF-default width.
 
-The local automated gate passes 96 generator tests on Windows (five expected
-platform skips), 120 focused navigation/manifest/cache assertions, 12
+The local automated gate passes 98 generator tests on Windows (five expected
+platform skips), 124 focused navigation/manifest/cache assertions, 12
 cross-language authority assertions, 8,752 exhaustive navigation assertions, both native
 invariant suites, hook-scope validation, and the signed/verified v0.0.23
 (`versionCode=23`) APK build (SHA-256
-`792226ff3048ad4fb24244e50b8b5efb4c91113b65cde5aaa31f027a835f5115`).
+`1dcfee90040039914b7ac7ff173f56536e262d8de81d3ee89eb465657d2abc38`).
 CI independently runs the same generator suite on
 Linux without the Windows-only skips.
 
@@ -191,7 +191,10 @@ The remaining focused Nomad gate is:
    after an orientation/screen refresh; and
 5. confirm a rejected generated pair blocks navigation rather than leaking a
    native LTR turn; and
-6. confirm a sidecar-free ordinary PDF remains completely native.
+6. tap a native link while cold verification is pending and confirm it executes
+   once, after verified activation, without first navigating natively; and
+7. confirm a generated PDF whose sidecar is missing stays blocked while a
+   sidecar-free ordinary PDF remains completely native.
 
 ## Decision
 

@@ -1252,6 +1252,29 @@ v0.0.23 (`versionCode=23`) APK build (SHA-256
 `792226ff3048ad4fb24244e50b8b5efb4c91113b65cde5aaa31f027a835f5115`).
 Focused hardware validation remains pending.
 
+## Review pass 54 deferred links and publication-state retention - AUTOMATED PASS
+
+The next whole-branch review identified four remaining authority windows.
+Generated PDFs whose sidecar is missing or whose native metadata cannot be
+inspected now fail closed, while an ordinary native PDF is allowed through only
+after its open MuPDF document explicitly proves that no virtual-spread authority
+is present. Native link taps made during cold manifest verification are consumed,
+queued once, and replayed only after the same document and source page acquire
+verified authority; rejected, failed, stale, cross-page, and cross-document
+requests are discarded. Forced replacement now requires explicit cover parity,
+spread width, spread height, and gutter values, preventing implicit defaults from
+resetting persisted layout. Recovery also removes deterministic `.retired`
+artifacts left by a crash, including the case where the active path was already
+removed.
+
+Local automated validation passes 98 generator tests on Windows (five expected
+filesystem skips), 124 focused navigation/manifest/cache assertions, 12
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, and the signed/verified
+v0.0.23 (`versionCode=23`) APK build (SHA-256
+`1dcfee90040039914b7ac7ff173f56536e262d8de81d3ee89eb465657d2abc38`).
+Focused hardware validation remains pending.
+
 ## Failure capture
 
 Before reproducing a failure:

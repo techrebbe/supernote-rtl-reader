@@ -99,7 +99,11 @@ must be a true PDF integer divisible by 90. The document information dictionary
 is copied with primitive PDF types intact; standardized text and `/Trapped`
 entries are validated, while arrays, dictionaries, streams, or other unsupported
 values fail closed rather than being stringified. Existing outputs also require
-`--force`. The command rejects a source path that collides with its output's
+`--force`. A forced replacement must also state every persisted layout choice
+explicitly: `--cover-separate` or `--no-cover-separate`, `--spread-width`,
+`--spread-height`, and `--gutter`. This prevents an unattended regeneration from
+silently resetting a document's cover parity or spread geometry to defaults.
+The command rejects a source path that collides with its output's
 deterministic marker, backup, retirement, or lock artifacts before recovery or
 lock acquisition. It copies and hashes the source through one file snapshot,
 re-reads the opened
@@ -188,6 +192,13 @@ are consumed rather than leaking one wrong-direction LTR turn; navigation become
 available as soon as the verified manifest is activated. A verified replacement
 pair whose authority does not match Supernote's still-open native document also
 keeps turns blocked until that document is reopened.
+Native links tapped during that cold verification window are likewise consumed,
+queued once, and replayed only after the same document and source page acquire
+verified authority. The queued invocation is discarded after a document/page
+change, verification rejection, or its bounded freshness window. If a generated
+PDF is missing its sidecar—or the native authority metadata cannot be inspected—
+navigation remains blocked; an ordinary PDF whose native document explicitly has
+no virtual-spread authority remains fully native.
 Delayed callbacks from an older native view model cannot reclaim ownership. That verifier
 opens each PDF and sidecar exactly once, binds the callback identities to those
 descriptors, performs every content and authority read through the same open

@@ -44,6 +44,10 @@ MOVEFILE_REPLACE_EXISTING = 0x00000001
 MOVEFILE_WRITE_THROUGH = 0x00000008
 WINDOWS_ALREADY_EXISTS = {80, 183}
 MAX_MANIFEST_BYTES = 8 * 1024 * 1024
+DEFAULT_COVER_SEPARATE = True
+DEFAULT_SPREAD_WIDTH = 864.0
+DEFAULT_SPREAD_HEIGHT = 648.0
+DEFAULT_GUTTER = 0.0
 SUPPORTED_ANNOTATION_FLAGS_MASK = 0x03FF
 SUPPORTED_LINK_ANNOTATION_KEYS = frozenset({
     "/A",
@@ -327,6 +331,47 @@ def _require_runtime_float_geometry(
         )
     _require_nomad_spread_aspect(spread_width, spread_height)
     return slot_width
+
+
+def _resolve_layout_options(
+    *,
+    replacing: bool,
+    cover_separate: bool | None,
+    spread_width: float | None,
+    spread_height: float | None,
+    gutter: float | None,
+) -> tuple[bool, float, float, float]:
+    supplied = (
+        cover_separate is not None,
+        spread_width is not None,
+        spread_height is not None,
+        gutter is not None,
+    )
+    if replacing and not all(supplied):
+        raise VirtualSpreadError(
+            "Forced replacement requires explicit cover, spread width, "
+            "spread height, and gutter options"
+        )
+    if cover_separate is not None and type(cover_separate) is not bool:
+        raise VirtualSpreadError("Cover-separate must be a boolean")
+    resolved_cover = (
+        DEFAULT_COVER_SEPARATE
+        if cover_separate is None
+        else cover_separate
+    )
+    resolved_width = (
+        DEFAULT_SPREAD_WIDTH if spread_width is None else spread_width
+    )
+    resolved_height = (
+        DEFAULT_SPREAD_HEIGHT if spread_height is None else spread_height
+    )
+    resolved_gutter = DEFAULT_GUTTER if gutter is None else gutter
+    return (
+        resolved_cover,
+        resolved_width,
+        resolved_height,
+        resolved_gutter,
+    )
 
 
 def _require_runtime_float_rect(
@@ -3237,6 +3282,11 @@ def _durably_remove(
             ownership_guard=ownership_guard,
         )
     except FileNotFoundError:
+        _publication_unlink(
+            retired,
+            ownership_guard,
+            missing_ok=True,
+        )
         return
     namespace = _publication_namespace(ownership_guard)
     if namespace is not None:
@@ -3245,6 +3295,34 @@ def _durably_remove(
         _validate_publication_ownership(ownership_guard)
         retired.unlink(missing_ok=True)
         _fsync_parent_directories(retired)
+
+
+def _cleanup_retired_publication_artifacts(
+    output_path: Path,
+    manifest_path: Path,
+    ownership_guard: PublicationOwnershipGuard | None = None,
+) -> None:
+    marker, output_backup, manifest_backup = _publication_artifacts(
+        output_path
+    )
+    for active in (
+        marker,
+        output_backup,
+        manifest_backup,
+        output_path,
+        manifest_path,
+    ):
+        retired = active.with_name(active.name + ".retired")
+        if _require_regular_publication_target(
+            retired,
+            "Retired publication artifact",
+            ownership_guard,
+        ):
+            _publication_unlink(
+                retired,
+                ownership_guard,
+                missing_ok=False,
+            )
 
 
 def _valid_sha256(value: Any) -> bool:
@@ -3519,6 +3597,11 @@ def _recover_pair_publication(
     manifest_path = _require_runtime_manifest_path(
         output_path,
         manifest_path,
+    )
+    _cleanup_retired_publication_artifacts(
+        output_path,
+        manifest_path,
+        ownership_guard,
     )
     _require_regular_publication_targets(
         output_path, manifest_path, ownership_guard
@@ -4101,10 +4184,10 @@ def _build_virtual_spread_locked(
     *,
     ownership_guard: PublicationOwnershipGuard | None = None,
     direction: str = "rtl",
-    cover_separate: bool = True,
-    spread_width: float = 864.0,
-    spread_height: float = 648.0,
-    gutter: float = 0.0,
+    cover_separate: bool | None = None,
+    spread_width: float | None = None,
+    spread_height: float | None = None,
+    gutter: float | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     source_path = source_path.resolve()
@@ -4130,6 +4213,18 @@ def _build_virtual_spread_locked(
         raise VirtualSpreadError(f"Source PDF does not exist: {source_path}")
     if not force and (output_exists or manifest_exists):
         raise VirtualSpreadError("Output already exists; pass --force to replace it")
+    (
+        cover_separate,
+        spread_width,
+        spread_height,
+        gutter,
+    ) = _resolve_layout_options(
+        replacing=force and (output_exists or manifest_exists),
+        cover_separate=cover_separate,
+        spread_width=spread_width,
+        spread_height=spread_height,
+        gutter=gutter,
+    )
     _require_runtime_float_geometry(spread_width, spread_height, gutter)
 
     with tempfile.TemporaryFile(
@@ -4164,10 +4259,10 @@ def build_virtual_spread(
     manifest_path: Path,
     *,
     direction: str = "rtl",
-    cover_separate: bool = True,
-    spread_width: float = 864.0,
-    spread_height: float = 648.0,
-    gutter: float = 0.0,
+    cover_separate: bool | None = None,
+    spread_width: float | None = None,
+    spread_height: float | None = None,
+    gutter: float | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     direction = _require_supported_direction(direction)
@@ -4214,11 +4309,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--cover-separate",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=None,
     )
-    parser.add_argument("--spread-width", type=float, default=864.0)
-    parser.add_argument("--spread-height", type=float, default=648.0)
-    parser.add_argument("--gutter", type=float, default=0.0)
+    parser.add_argument("--spread-width", type=float, default=None)
+    parser.add_argument("--spread-height", type=float, default=None)
+    parser.add_argument("--gutter", type=float, default=None)
     parser.add_argument("--force", action="store_true")
     return parser
 

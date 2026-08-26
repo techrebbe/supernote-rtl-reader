@@ -633,6 +633,22 @@ public final class VirtualSpreadNavigation {
         return -nativeOffset;
     }
 
+    /** Replay a deferred native link only in its original document/page window. */
+    public static boolean pendingLinkReplayIsCurrent(
+        boolean sameDocument,
+        int sourcePage,
+        int currentPage,
+        long ageMillis,
+        long maximumAgeMillis
+    ) {
+        return sameDocument
+            && sourcePage >= 0
+            && sourcePage == currentPage
+            && ageMillis >= 0L
+            && maximumAgeMillis >= 0L
+            && ageMillis <= maximumAgeMillis;
+    }
+
     /** Preserve an authenticated explicit native viewport in portrait. */
     public static boolean shouldPreservePortraitLinkViewport(
         boolean internalLinkTarget,

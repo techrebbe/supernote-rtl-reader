@@ -101,6 +101,34 @@ public final class VirtualSpreadNavigationTest {
             VirtualSpreadNavigation.reverseLandscapeOffset(1)
         );
         assertBoolean(
+            "pending link replays on its original page",
+            true,
+            VirtualSpreadNavigation.pendingLinkReplayIsCurrent(
+                true, 4, 4, 1000L, 60000L
+            )
+        );
+        assertBoolean(
+            "pending link cannot cross documents",
+            false,
+            VirtualSpreadNavigation.pendingLinkReplayIsCurrent(
+                false, 4, 4, 1000L, 60000L
+            )
+        );
+        assertBoolean(
+            "pending link cannot cross pages",
+            false,
+            VirtualSpreadNavigation.pendingLinkReplayIsCurrent(
+                true, 4, 5, 1000L, 60000L
+            )
+        );
+        assertBoolean(
+            "expired pending link is discarded",
+            false,
+            VirtualSpreadNavigation.pendingLinkReplayIsCurrent(
+                true, 4, 4, 60001L, 60000L
+            )
+        );
+        assertBoolean(
             "explicit portrait link viewport is preserved",
             true,
             VirtualSpreadNavigation.shouldPreservePortraitLinkViewport(

@@ -62,6 +62,28 @@ for required in (
             f"native-link history return is missing fail-closed guard: {required}"
         )
 
+link_hook_start = hook.find("private static void handleLinkTarget")
+link_hook_end = hook.find("private static void hookViewModel", link_hook_start)
+if link_hook_start < 0 or link_hook_end < 0:
+    raise SystemExit("missing deferred native-link handling")
+link_hook = hook[link_hook_start:link_hook_end]
+for required in (
+    "ManifestLookup lookup = manifestLookupFor(viewModel)",
+    "if (lookup.verificationPending)",
+    "queueLinkInvocation(viewModel, param.args)",
+    "param.setResult(null)",
+    "state.queuedLinkArguments = arguments.clone()",
+    "pendingLinkReplayIsCurrent(",
+    "sameCanonicalPath(manifest.key, documentPath)",
+    "XposedHelpers.callMethod(activity, \"showLinkJumpView\", arguments)",
+    "REPLAYING_LINK.set(Boolean.TRUE)",
+    "REPLAYING_LINK.remove()",
+):
+    if required not in link_hook:
+        raise SystemExit(
+            f"pending native link is missing authority guard: {required}"
+        )
+
 refresh_start = hook.find("private static void scheduleConfigurationRefresh")
 refresh_end = hook.find("private static boolean focusHalf", refresh_start)
 if refresh_start < 0 or refresh_end < 0:
@@ -229,6 +251,8 @@ for required in (
     "return new ManifestLookup(null, verificationPending, false)",
     "manifest_verification_pending",
     "Fail closed until the background verifier publishes",
+    '"required_pair_unavailable"',
+    '"lookup_failed"',
     'observeDocumentKey(null);\n            logFailure("manifest_read_failed"',
 ):
     if required not in manifest_lookup:
@@ -325,6 +349,8 @@ for required in (
     "sidecarDigest.equals(currentSidecarDigest)",
     "MANIFESTS.put(key, published)",
     "scheduleManifestActivation(key, parsed.revision)",
+    'scheduleQueuedLinkDiscard(key, "manifest_rejected")',
+    "if (replayQueuedLink(owner, viewModel, current))",
     "new Handler(owner.getMainLooper()).post",
     "handlePageLoaded(viewModel)",
     '"manifest_verified"',
@@ -796,6 +822,8 @@ for required in (
     "test_unsupported_internal_destination_mode_fails_closed",
     "test_invalid_marker_with_canonical_artifact_fails_closed",
     "test_publication_marker_paths_use_filesystem_case_semantics",
+    "test_forced_replacement_requires_all_layout_options",
+    "test_recovery_cleans_crash_retired_artifacts",
     "test_runtime_float_link_rect_is_rejected",
 ):
     if required not in generator_tests:
@@ -861,6 +889,25 @@ if (
     raise SystemExit(
         "output aliases must be rechecked under lock before recovery or mutation"
     )
+for required in (
+    "_resolve_layout_options(",
+    "replacing=force and (output_exists or manifest_exists)",
+    "Forced replacement requires explicit cover, spread width",
+):
+    if required not in generator:
+        raise SystemExit(
+            "forced regeneration can reset persisted layout state: " + required
+        )
+for required in (
+    "def _cleanup_retired_publication_artifacts(",
+    "_cleanup_retired_publication_artifacts(\n        output_path,",
+    "_publication_unlink(\n            retired,",
+):
+    if required not in generator:
+        raise SystemExit(
+            "publication recovery does not clean crash-retired artifacts: "
+            + required
+        )
 
 generator_tests = (root.parent / "scripts/test_virtual_spread.py").read_text(
     encoding="utf-8"

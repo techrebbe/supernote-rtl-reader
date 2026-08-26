@@ -42,6 +42,7 @@ from generate_virtual_spread import (  # noqa: E402
     VirtualSpreadError,
     _canonical_layout,
     _destination_uniform_scale,
+    _durably_remove,
     _durable_replace,
     _identity,
     _layout_authority_sha256,
@@ -79,6 +80,13 @@ PAGE_SIZES = [
     (700, 200),
     (432, 576),
 ]
+
+EXPLICIT_DEFAULT_LAYOUT = {
+    "cover_separate": True,
+    "spread_width": 864.0,
+    "spread_height": 648.0,
+    "gutter": 0.0,
+}
 
 
 def create_odd_page_fixture(path: Path) -> None:
@@ -634,6 +642,54 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertFalse(manifest_path.exists())
             self.assertFalse(_publication_lock_path(output).exists())
 
+    def test_forced_replacement_requires_all_layout_options(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                cover_separate=False,
+                spread_width=1200.0,
+                spread_height=900.0,
+                gutter=12.0,
+            )
+            output_before = output.read_bytes()
+            manifest_before = manifest_path.read_bytes()
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Forced replacement requires explicit cover, spread width, "
+                "spread height, and gutter options",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    force=True,
+                )
+
+            self.assertEqual(output.read_bytes(), output_before)
+            self.assertEqual(manifest_path.read_bytes(), manifest_before)
+
+            regenerated = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                cover_separate=False,
+                spread_width=1200.0,
+                spread_height=900.0,
+                gutter=12.0,
+                force=True,
+            )
+            self.assertIs(regenerated["coverSeparate"], False)
+            self.assertEqual(regenerated["output"]["spreadSize"], [1200.0, 900.0])
+            self.assertEqual(regenerated["output"]["gutter"], 12.0)
+
     def test_odd_pages_text_and_links_survive(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -753,6 +809,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     output,
                     manifest_path,
                     force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
                 )
 
             self.assertEqual(source.read_bytes(), source_bytes)
@@ -782,6 +839,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     output,
                     manifest_path,
                     force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
                 )
 
             self.assertEqual(source.read_bytes(), source_bytes)
@@ -840,6 +898,7 @@ class VirtualSpreadTests(unittest.TestCase):
                             output,
                             manifest_path,
                             force=True,
+                            **EXPLICIT_DEFAULT_LAYOUT,
                         )
 
                     self.assertEqual(source.read_bytes(), source_bytes)
@@ -869,6 +928,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     output,
                     manifest_path,
                     force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
                 )
 
             self.assertEqual(source.read_bytes(), source_bytes)
@@ -898,6 +958,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     output,
                     manifest_path,
                     force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
                 )
 
             self.assertEqual(source.read_bytes(), source_bytes)
@@ -934,6 +995,7 @@ class VirtualSpreadTests(unittest.TestCase):
                             output,
                             manifest_path,
                             force=True,
+                            **EXPLICIT_DEFAULT_LAYOUT,
                         )
 
                     self.assertEqual(source.read_bytes(), source_bytes)
@@ -963,6 +1025,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     output,
                     manifest_path,
                     force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
                 )
 
             self.assertEqual(source.read_bytes(), source_bytes)
@@ -999,6 +1062,7 @@ class VirtualSpreadTests(unittest.TestCase):
                             output,
                             manifest_path,
                             force=True,
+                            **EXPLICIT_DEFAULT_LAYOUT,
                         )
 
                     self.assertEqual(source.read_bytes(), source_bytes)
@@ -1050,6 +1114,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     output,
                     manifest_path,
                     force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
                 )
 
             self.assertEqual(source.read_bytes(), source_bytes)
@@ -1092,6 +1157,7 @@ class VirtualSpreadTests(unittest.TestCase):
                             output,
                             manifest_path,
                             force=True,
+                            **EXPLICIT_DEFAULT_LAYOUT,
                         )
 
                     self.assertEqual(source.read_bytes(), source_bytes)
@@ -1421,6 +1487,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     collision,
                     collision,
                     force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
                 )
             self.assertFalse(collision.exists())
 
@@ -1468,6 +1535,7 @@ class VirtualSpreadTests(unittest.TestCase):
                             output,
                             manifest_path,
                             force=True,
+                            **EXPLICIT_DEFAULT_LAYOUT,
                         )
 
                     self.assertEqual(source.read_bytes(), source_bytes)
@@ -3319,6 +3387,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     output,
                     custom_manifest,
                     force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
                 )
 
             self.assertEqual(output.read_bytes(), b"old-pdf")
@@ -3382,6 +3451,7 @@ class VirtualSpreadTests(unittest.TestCase):
                         output,
                         manifest,
                         force=True,
+                        **EXPLICIT_DEFAULT_LAYOUT,
                     )
 
             self.assertEqual(alias_guard.call_count, 2)
@@ -3413,6 +3483,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     output,
                     manifest,
                     force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
                 )
 
             self.assertEqual(victim.read_bytes(), b"victim")
@@ -3632,6 +3703,7 @@ class VirtualSpreadTests(unittest.TestCase):
                             output,
                             manifest,
                             force=True,
+                            **EXPLICIT_DEFAULT_LAYOUT,
                         )
 
                     self.assertTrue(blocked.is_dir())
@@ -3888,6 +3960,7 @@ class VirtualSpreadTests(unittest.TestCase):
                         output,
                         manifest,
                         force=True,
+                        **EXPLICIT_DEFAULT_LAYOUT,
                     )
                 self.assertEqual(marker.read_bytes(), marker_before)
                 self.assertEqual(output.read_bytes(), b"old-pdf")
@@ -3930,7 +4003,11 @@ class VirtualSpreadTests(unittest.TestCase):
                     "exceeds the runtime limit",
                 ):
                     build_virtual_spread(
-                        source, output, manifest, force=True
+                        source,
+                        output,
+                        manifest,
+                        force=True,
+                        **EXPLICIT_DEFAULT_LAYOUT,
                     )
 
             self.assertEqual(output.read_bytes(), b"old-pdf")
@@ -3987,7 +4064,13 @@ class VirtualSpreadTests(unittest.TestCase):
                     VirtualSpreadError,
                     "exceeds the runtime limit",
                 ):
-                    build_virtual_spread(source, output, manifest, force=True)
+                    build_virtual_spread(
+                        source,
+                        output,
+                        manifest,
+                        force=True,
+                        **EXPLICIT_DEFAULT_LAYOUT,
+                    )
 
             self.assertTrue(swapped)
             self.assertEqual(output.read_bytes(), b"old-pdf")
@@ -4045,7 +4128,13 @@ class VirtualSpreadTests(unittest.TestCase):
                     VirtualSpreadError,
                     "identity changed before publication",
                 ):
-                    build_virtual_spread(source, output, manifest, force=True)
+                    build_virtual_spread(
+                        source,
+                        output,
+                        manifest,
+                        force=True,
+                        **EXPLICIT_DEFAULT_LAYOUT,
+                    )
 
             self.assertTrue(swapped)
             self.assertEqual(output.read_bytes(), b"old-pdf")
@@ -4103,7 +4192,13 @@ class VirtualSpreadTests(unittest.TestCase):
                     VirtualSpreadError,
                     "Staged output SHA-256 mismatch",
                 ):
-                    build_virtual_spread(source, output, manifest, force=True)
+                    build_virtual_spread(
+                        source,
+                        output,
+                        manifest,
+                        force=True,
+                        **EXPLICIT_DEFAULT_LAYOUT,
+                    )
 
             self.assertTrue(swapped)
             self.assertEqual(output.read_bytes(), b"old-pdf")
@@ -4161,7 +4256,13 @@ class VirtualSpreadTests(unittest.TestCase):
                     VirtualSpreadError,
                     "identity changed before publication",
                 ):
-                    build_virtual_spread(source, output, manifest, force=True)
+                    build_virtual_spread(
+                        source,
+                        output,
+                        manifest,
+                        force=True,
+                        **EXPLICIT_DEFAULT_LAYOUT,
+                    )
 
             self.assertTrue(swapped)
             self.assertEqual(output.read_bytes(), b"old-pdf")
@@ -4208,6 +4309,44 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertFalse(marker.exists())
             self.assertFalse(output_backup.exists())
             self.assertFalse(manifest_backup.exists())
+
+    def test_recovery_cleans_crash_retired_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            output.write_bytes(b"stable-pdf")
+            manifest.write_bytes(b"stable-manifest")
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            active_artifacts = (
+                marker,
+                output_backup,
+                manifest_backup,
+                output,
+                manifest,
+            )
+            retired_artifacts = tuple(
+                path.with_name(path.name + ".retired")
+                for path in active_artifacts
+            )
+            for retired in retired_artifacts:
+                retired.write_bytes(b"cleanup-interrupted")
+
+            self.assertEqual(
+                _recover_pair_publication(output, manifest),
+                None,
+            )
+            self.assertEqual(output.read_bytes(), b"stable-pdf")
+            self.assertEqual(manifest.read_bytes(), b"stable-manifest")
+            self.assertFalse(any(path.exists() for path in retired_artifacts))
+
+            orphan = root / "orphan"
+            orphan_retired = orphan.with_name(orphan.name + ".retired")
+            orphan_retired.write_bytes(b"retired")
+            _durably_remove(orphan)
+            self.assertFalse(orphan_retired.exists())
 
     def test_legacy_marker_with_duplicate_keys_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

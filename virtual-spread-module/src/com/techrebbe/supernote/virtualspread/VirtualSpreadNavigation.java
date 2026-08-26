@@ -664,6 +664,16 @@ public final class VirtualSpreadNavigation {
             : LinkRouting.BLOCKED;
     }
 
+    /**
+     * An internal replay owns a subsequent native page-load callback. Every
+     * other outcome must initialize the verified current spread immediately.
+     */
+    public static boolean replayRequiresImmediateInitialization(
+        LinkRouting routing
+    ) {
+        return routing != LinkRouting.INTERNAL;
+    }
+
     /** Replay a deferred native link only in its original document/page window. */
     public static boolean pendingLinkReplayIsCurrent(
         boolean sameDocument,

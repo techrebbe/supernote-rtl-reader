@@ -137,6 +137,34 @@ public final class VirtualSpreadNavigationTest {
             )
         );
         assertBoolean(
+            "external replay initializes the verified spread immediately",
+            true,
+            VirtualSpreadNavigation.replayRequiresImmediateInitialization(
+                LinkRouting.EXTERNAL
+            )
+        );
+        assertBoolean(
+            "blocked replay initializes the verified spread immediately",
+            true,
+            VirtualSpreadNavigation.replayRequiresImmediateInitialization(
+                LinkRouting.BLOCKED
+            )
+        );
+        assertBoolean(
+            "no queued link initializes the verified spread immediately",
+            true,
+            VirtualSpreadNavigation.replayRequiresImmediateInitialization(
+                LinkRouting.NON_LINK
+            )
+        );
+        assertBoolean(
+            "internal replay waits for its native page-load callback",
+            false,
+            VirtualSpreadNavigation.replayRequiresImmediateInitialization(
+                LinkRouting.INTERNAL
+            )
+        );
+        assertBoolean(
             "pending link replays on its original page",
             true,
             VirtualSpreadNavigation.pendingLinkReplayIsCurrent(

@@ -33,6 +33,7 @@ sys.path.insert(0, str(ROOT / "virtual_spread"))
 from generate_virtual_spread import (  # noqa: E402
     LAYOUT_AUTHORITY_MARKER,
     LINK_AUTHORITY_MARKER,
+    SCHEMA,
     SOURCE_AUTHORITY_MARKER,
     MAX_MANIFEST_BYTES,
     MOVEFILE_REPLACE_EXISTING,
@@ -615,6 +616,29 @@ def destination_page_index(reader: PdfReader, annotation: object) -> int:
 
 
 class VirtualSpreadTests(unittest.TestCase):
+    def test_source_pdf_version_is_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source-1.7.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+
+            source_bytes = source.read_bytes()
+            self.assertTrue(source_bytes.startswith(b"%PDF-1."))
+            source.write_bytes(b"%PDF-1.7" + source_bytes[8:])
+            self.assertEqual(
+                PdfReader(str(source), strict=True).pdf_header,
+                "%PDF-1.7",
+            )
+
+            build_virtual_spread(source, output, manifest_path)
+
+            self.assertEqual(
+                PdfReader(str(output), strict=True).pdf_header,
+                "%PDF-1.7",
+            )
+
     def test_rtl_cover_pairing(self) -> None:
         self.assertEqual(
             build_pairs(7, "rtl", True),
@@ -740,7 +764,11 @@ class VirtualSpreadTests(unittest.TestCase):
             )
             self.assertEqual(
                 json.loads(manifest_path.read_text(encoding="utf-8"))["schema"],
-                "techrebbe.supernote.virtual-spread/v1",
+                SCHEMA,
+            )
+            self.assertEqual(
+                SCHEMA,
+                "techrebbe.supernote.virtual-spread/v2",
             )
 
             reader = PdfReader(str(output), strict=True)

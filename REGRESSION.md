@@ -1323,6 +1323,31 @@ signed/verified v0.0.23 (`versionCode=23`) APK build (SHA-256
 `098208ae1a7f875e2a3c2b0c39561af5f90dd2a48b50cb217bee2d414558ce4b`).
 Focused hardware validation of this exact build remains pending.
 
+## Review pass 57 capability epoch and reader-state lifecycle - AUTOMATED PASS
+
+The required Ultra whole-branch review found five release-boundary defects before
+push. Manifest schema v2 now makes newly generated pairs incompatible with old
+companions that predate native-open snapshot binding. The companion clears every
+manifest-bound page, half, pending-link, history, viewport, queued-link, and
+native-snapshot value when a reused view model changes documents; its delayed-
+callback generation is incremented rather than reset, closing the prior ABA
+window. Deferred external links initialize the current verified spread
+immediately after native replay, while internal links continue to wait for their
+native page-load callback. The generator preserves the source PDF language-
+version header and verifies it after staging rather than silently emitting
+`%PDF-1.3`.
+
+Deterministic regressions pin schema v2, source-header preservation, all four
+queued-link initialization outcomes, complete document-state invalidation, and
+monotonic generations. Local automated validation passes 103 generator tests on
+Windows (seven expected platform/filesystem or privilege skips), 134 focused
+navigation/manifest/cache assertions, 12 cross-language authority assertions,
+8,752 exhaustive navigation assertions, both native invariant suites,
+hook-scope validation, and the signed/verified v0.0.24 (`versionCode=24`) APK
+build (SHA-256
+`de8ec66a858573a17fcdf8b2f8edbf3fd22c029f9850033e2f9900b31f942a4d`).
+Focused hardware validation of this exact build remains pending.
+
 ## Failure capture
 
 Before reproducing a failure:

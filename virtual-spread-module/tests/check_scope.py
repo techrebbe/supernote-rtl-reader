@@ -6,6 +6,12 @@ hook = (root / "src/com/techrebbe/supernote/virtualspread/VirtualSpreadHook.java
     encoding="utf-8"
 )
 
+if ('private static final String SCHEMA =\n'
+        '        "techrebbe.supernote.virtual-spread/v2";' not in hook):
+    raise SystemExit(
+        "runtime must require the v2 native-snapshot-capable manifest schema"
+    )
+
 for forbidden in (
     "HandWriteView",
     "setImage",
@@ -229,14 +235,34 @@ state_end = hook.find("private static VirtualSpreadNavigation.Half firstHalf", s
 if state_start < 0 or state_end < 0:
     raise SystemExit("missing reader-state revision implementation")
 reader_state = hook[state_start:state_end]
+if "String documentKey;" not in hook:
+    raise SystemExit("reader state must remember its bound canonical document")
 for required in (
     "manifest.revision.equals(state.manifestRevision)",
     "state.manifestRevision = manifest.revision",
+    "private static void clearManifestTransientState(",
+    "private static void bindReaderStateToDocument(",
+    "state.nativeSnapshotDocument = null",
+    "state.nativeSnapshotRevision = null",
+    "state.nativeSnapshotAccepted = false",
+    "state.lastPage = -1",
+    "state.pendingPage = -1",
+    "state.pendingHalf = null",
+    "clearPendingLink(state)",
+    "clearPendingHistory(state)",
+    "clearPreservedLinkViewport(state)",
+    "clearQueuedLinkInvocation(state)",
+    "state.linkHistory.clear()",
+    "state.pageLoadGeneration++",
 ):
     if required not in reader_state:
         raise SystemExit(
             f"reader state is not bound to the manifest revision: {required}"
         )
+if "state.pageLoadGeneration = 0L" in reader_state:
+    raise SystemExit(
+        "reader-state generation must remain monotonic across manifest changes"
+    )
 
 lookup_start = hook.find("private static Manifest manifestFor")
 lookup_end = hook.find(
@@ -253,6 +279,8 @@ for required in (
     "observeDocumentKey(null)",
     "String key = pdf.getCanonicalPath()",
     "observeDocumentKey(key)",
+    "bindReaderStateToDocument(viewModel, key)",
+    "bindReaderStateToDocument(viewModel, null)",
     "cancelManifestVerificationForKey(key)",
     "FileIdentity pdfIdentity = FileIdentity.capture(pdf)",
     "FileIdentity sidecarIdentity = FileIdentity.capture(sidecar)",
@@ -287,6 +315,7 @@ for forbidden in ("parseManifest(", "readBytes(", "sha256(", "sha256File("):
 lookup_positions = (
     manifest_lookup.find("String key = pdf.getCanonicalPath()"),
     manifest_lookup.find("observeDocumentKey(key)"),
+    manifest_lookup.find("bindReaderStateToDocument(viewModel, key)"),
     manifest_lookup.find("if (!pdf.isFile() || !sidecar.isFile())"),
     manifest_lookup.find("cancelManifestVerificationForKey(key)"),
     manifest_lookup.find("CachedManifest cached = MANIFESTS.get(key)"),
@@ -371,7 +400,9 @@ for required in (
     '"manifest_rejected"',
     '"snapshot_changed_before_read"',
     '"snapshot_changed_during_read"',
-    "if (replayQueuedLink(owner, viewModel, current))",
+    "VirtualSpreadNavigation.LinkRouting replayedRouting =",
+    "replayQueuedLink(owner, viewModel, current)",
+    "replayRequiresImmediateInitialization(replayedRouting)",
     "new Handler(owner.getMainLooper()).post",
     "handlePageLoaded(viewModel)",
     '"manifest_verified"',
@@ -577,11 +608,11 @@ if not (0 <= duplicate_guard < json_parse):
     )
 
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
-if 'android:versionCode="23"' not in manifest:
+if 'android:versionCode="24"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version code")
-if 'android:versionName="0.0.23"' not in manifest:
+if 'android:versionName="0.0.24"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
-if 'private static final String VERSION = "0.0.23"' not in hook:
+if 'private static final String VERSION = "0.0.24"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
 
 build_script = (root / "build.ps1").read_text(encoding="utf-8")
@@ -646,6 +677,7 @@ generator = (root.parent / "virtual_spread/generate_virtual_spread.py").read_tex
     encoding="utf-8"
 )
 for required in (
+    'SCHEMA = "techrebbe.supernote.virtual-spread/v2"',
     'PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v2"',
     'SOURCE_AUTHORITY_MARKER = b"%SNVirtualSpreadSourceSHA256:"',
     "source_hash,",
@@ -708,6 +740,9 @@ for required in (
     "writer._info = information",
     "writer.page_mode = str(document_catalog.page_mode)",
     "writer.page_layout = str(document_catalog.page_layout)",
+    "writer.pdf_header = reader.pdf_header",
+    "verification.pdf_header != reader.pdf_header",
+    '"Written PDF did not preserve the source PDF version"',
     "def _publication_reserved_paths(",
     "def _require_source_outside_publication_namespace(",
     "_require_source_outside_publication_namespace(\n",
@@ -799,6 +834,7 @@ generator_tests = (root.parent / "scripts/test_virtual_spread.py").read_text(
     encoding="utf-8"
 )
 for required in (
+    "test_source_pdf_version_is_preserved",
     "test_staged_output_swap_is_rejected_at_publication_boundary",
     "test_same_content_staged_output_replacement_is_rejected",
     "test_obsolete_marker_without_backups_is_discarded",

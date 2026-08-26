@@ -56,9 +56,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         "/system_ext/app/SupernoteDocument/SupernoteDocument.apk";
     private static final long TARGET_DOCUMENT_APK_LENGTH = 138486560L;
     private static final String SCHEMA =
-        "techrebbe.supernote.virtual-spread/v1";
+        "techrebbe.supernote.virtual-spread/v2";
     private static final String TAG = "SN_VIRTUAL_SPREAD";
-    private static final String VERSION = "0.0.23";
+    private static final String VERSION = "0.0.24";
     private static final long MAX_MANIFEST_BYTES = 8L * 1024L * 1024L;
     private static final int MAX_CACHED_MANIFESTS = 4;
     private static final long PENDING_LINK_MAX_AGE_MS = 60000L;
@@ -296,6 +296,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         Object nativeSnapshotDocument;
         String nativeSnapshotRevision;
         boolean nativeSnapshotAccepted;
+        String documentKey;
         String manifestKey;
         String manifestRevision;
         int lastPage = -1;
@@ -804,7 +805,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
     }
 
-    private static boolean replayQueuedLink(
+    private static VirtualSpreadNavigation.LinkRouting replayQueuedLink(
         Activity activity,
         Object viewModel,
         Manifest manifest
@@ -818,7 +819,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         synchronized (STATES) {
             ReaderState state = STATES.get(viewModel);
             if (state == null || state.queuedLinkArguments == null) {
-                return false;
+                return VirtualSpreadNavigation.LinkRouting.NON_LINK;
             }
             arguments = state.queuedLinkArguments;
             documentPath = state.queuedLinkDocumentPath;
@@ -843,7 +844,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             || arguments[1] == null
             || !(arguments[2] instanceof Integer)) {
             log("link_jump_discarded reason=stale_or_invalid");
-            return false;
+            return VirtualSpreadNavigation.LinkRouting.BLOCKED;
         }
         try {
             int targetPage = ((Integer) arguments[2]).intValue();
@@ -854,7 +855,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     && currentRouting
                         != VirtualSpreadNavigation.LinkRouting.INTERNAL)) {
                 log("link_jump_discarded reason=link_kind_changed");
-                return false;
+                return VirtualSpreadNavigation.LinkRouting.BLOCKED;
             }
             if (currentRouting == VirtualSpreadNavigation.LinkRouting.INTERNAL
                 && !captureLinkTarget(
@@ -864,18 +865,18 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     targetPage
                 )) {
                 log("link_jump_discarded reason=unmatched_authenticated_link");
-                return false;
+                return VirtualSpreadNavigation.LinkRouting.BLOCKED;
             }
             REPLAYING_LINK.set(Boolean.TRUE);
             XposedHelpers.callMethod(activity, "showLinkJumpView", arguments);
             log("link_jump_replayed source=" + sourcePage
                 + " target=" + arguments[2]
                 + " kind=" + currentRouting);
-            return true;
+            return currentRouting;
         } catch (Throwable throwable) {
             clearPendingLink(stateFor(viewModel, manifest));
             logFailure("link_jump_replay_failed", throwable);
-            return false;
+            return VirtualSpreadNavigation.LinkRouting.BLOCKED;
         } finally {
             REPLAYING_LINK.remove();
         }
@@ -1676,23 +1677,61 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         Object viewModel,
         Manifest manifest
     ) {
+        bindReaderStateToDocument(viewModel, manifest.key);
         synchronized (STATES) {
             ReaderState state = readerStateLocked(viewModel);
             if (!manifest.key.equals(state.manifestKey)
                 || !manifest.revision.equals(state.manifestRevision)) {
                 state.manifestKey = manifest.key;
                 state.manifestRevision = manifest.revision;
-                state.lastPage = -1;
-                state.pendingPage = -1;
-                state.pendingHalf = null;
-                clearPendingLink(state);
-                clearPendingHistory(state);
-                clearPreservedLinkViewport(state);
-                state.linkHistory.clear();
-                state.half = VirtualSpreadNavigation.Half.RIGHT;
-                state.pageLoadGeneration = 0L;
+                clearManifestTransientState(state, false);
             }
             return state;
+        }
+    }
+
+    private static void clearManifestTransientState(
+        ReaderState state,
+        boolean clearQueuedLink
+    ) {
+        state.lastPage = -1;
+        state.pendingPage = -1;
+        state.pendingHalf = null;
+        clearPendingLink(state);
+        clearPendingHistory(state);
+        clearPreservedLinkViewport(state);
+        if (clearQueuedLink) {
+            clearQueuedLinkInvocation(state);
+        }
+        state.linkHistory.clear();
+        state.half = VirtualSpreadNavigation.Half.RIGHT;
+        // Never reset this counter: delayed work compares it to reject stale
+        // callbacks, so reusing an earlier value would create an ABA window.
+        state.pageLoadGeneration++;
+    }
+
+    private static void bindReaderStateToDocument(
+        Object viewModel,
+        String key
+    ) {
+        if (viewModel == null) {
+            return;
+        }
+        synchronized (STATES) {
+            ReaderState state = readerStateLocked(viewModel);
+            if (sameDocumentKey(key, state.documentKey)) {
+                return;
+            }
+            String previous = state.documentKey;
+            state.documentKey = key;
+            state.manifestKey = null;
+            state.manifestRevision = null;
+            state.nativeSnapshotDocument = null;
+            state.nativeSnapshotRevision = null;
+            state.nativeSnapshotAccepted = false;
+            clearManifestTransientState(state, true);
+            log("reader_state_document_changed from=" + previous
+                + " to=" + key);
         }
     }
 
@@ -1752,6 +1791,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             }
             Uri uri = (Uri) XposedHelpers.getObjectField(viewModel, "uri");
             if (uri == null || uri.getPath() == null) {
+                bindReaderStateToDocument(viewModel, null);
                 ManifestLookup unavailable = unavailableManifestLookup(
                     viewModel,
                     "missing_uri",
@@ -1764,7 +1804,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             File sidecar = new File(pdf.getPath() + ".json");
             String key = pdf.getCanonicalPath();
             observeDocumentKey(key);
-            discardQueuedLinkForDifferentDocument(viewModel, key);
+            bindReaderStateToDocument(viewModel, key);
             if (!pdf.isFile() || !sidecar.isFile()) {
                 cancelManifestVerificationForKey(key);
                 return unavailableManifestLookup(
@@ -1842,6 +1882,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 verificationId
             );
         } catch (Throwable throwable) {
+            bindReaderStateToDocument(viewModel, null);
             ManifestLookup unavailable = unavailableManifestLookup(
                 viewModel,
                 "lookup_failed",
@@ -1850,23 +1891,6 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             observeDocumentKey(null);
             logFailure("manifest_read_failed", throwable);
             return unavailable;
-        }
-    }
-
-    private static void discardQueuedLinkForDifferentDocument(
-        Object viewModel,
-        String key
-    ) {
-        synchronized (STATES) {
-            ReaderState state = STATES.get(viewModel);
-            if (state != null && state.queuedLinkArguments != null
-                && !sameCanonicalPath(
-                    key,
-                    state.queuedLinkDocumentPath
-                )) {
-                clearQueuedLinkInvocation(state);
-                log("link_jump_discarded reason=document_changed");
-            }
         }
     }
 
@@ -2119,18 +2143,26 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     || !revision.equals(current.revision)) {
                     return;
                 }
-                if (replayQueuedLink(owner, viewModel, current)) {
+                VirtualSpreadNavigation.LinkRouting replayedRouting =
+                    replayQueuedLink(owner, viewModel, current);
+                if (VirtualSpreadNavigation
+                    .replayRequiresImmediateInitialization(replayedRouting)) {
+                    handlePageLoaded(viewModel);
+                    scheduleConfigurationRefresh(
+                        owner,
+                        viewModel,
+                        "manifest_verified"
+                    );
+                }
+                if (replayedRouting
+                        == VirtualSpreadNavigation.LinkRouting.EXTERNAL
+                    || replayedRouting
+                        == VirtualSpreadNavigation.LinkRouting.INTERNAL) {
                     log("manifest_activated path=" + key
                         + " revision=" + revision
-                        + " queued_link=replayed");
+                        + " queued_link=" + replayedRouting);
                     return;
                 }
-                handlePageLoaded(viewModel);
-                scheduleConfigurationRefresh(
-                    owner,
-                    viewModel,
-                    "manifest_verified"
-                );
                 log("manifest_activated path=" + key
                     + " revision=" + revision);
             }

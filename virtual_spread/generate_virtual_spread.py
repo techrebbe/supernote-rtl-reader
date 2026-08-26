@@ -34,7 +34,7 @@ from pypdf.generic import (
 )
 
 
-SCHEMA = "techrebbe.supernote.virtual-spread/v1"
+SCHEMA = "techrebbe.supernote.virtual-spread/v2"
 SOURCE_AUTHORITY_MARKER = b"%SNVirtualSpreadSourceSHA256:"
 LINK_AUTHORITY_MARKER = b"%SNVirtualSpreadLinksSHA256:"
 LAYOUT_AUTHORITY_MARKER = b"%SNVirtualSpreadLayoutSHA256:"
@@ -3955,6 +3955,10 @@ def _build_virtual_spread_from_snapshot(
     )
 
     writer = PdfWriter()
+    # Merging pages does not make pypdf raise its default %PDF-1.3 header.
+    # Retain the source declaration so copied resources and annotations are
+    # never advertised as belonging to an older PDF language version.
+    writer.pdf_header = reader.pdf_header
     if document_catalog.page_mode is not None:
         writer.page_mode = str(document_catalog.page_mode)
     if document_catalog.page_layout is not None:
@@ -4100,6 +4104,10 @@ def _build_virtual_spread_from_snapshot(
             verification_descriptor, "rb", buffering=0
         ) as verification_stream:
             verification = PdfReader(verification_stream, strict=True)
+            if verification.pdf_header != reader.pdf_header:
+                raise VirtualSpreadError(
+                    "Written PDF did not preserve the source PDF version"
+                )
             if len(verification.pages) != len(pairs):
                 raise VirtualSpreadError(
                     "Written PDF failed page-count verification"

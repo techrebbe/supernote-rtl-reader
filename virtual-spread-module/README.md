@@ -8,7 +8,7 @@ untouched.
 It activates only when all of these are true:
 
 - the open file has a sibling `<pdf>.json` manifest;
-- the manifest schema is `techrebbe.supernote.virtual-spread/v1`;
+- the manifest schema is `techrebbe.supernote.virtual-spread/v2`;
 - the manifest direction is `rtl`;
 - the PDF byte length, page count, and full SHA-256 match the manifest;
 - the persisted `coverSeparate`, spread occupancy, and source-page mappings
@@ -19,8 +19,11 @@ It activates only when all of these are true:
   native MuPDF `Document` match the authenticated manifest; and
 - the known Supernote document firmware fingerprint and APK size match.
 
-v0.0.23 retains link-authority v2 and the v0.0.17 native-open snapshot
-binding. It first decodes the raw sidecar bytes with replacement disabled, so
+v0.0.24 retains link-authority v2 and the v0.0.17 native-open snapshot
+binding. Manifest schema v2 is intentionally incompatible with older companions:
+it prevents a pre-snapshot-binding runtime from accepting a newly generated pair.
+Regenerate existing v1 PDF/sidecar pairs before opening them with this build.
+It first decodes the raw sidecar bytes with replacement disabled, so
 malformed UTF-8 fails closed even inside an otherwise ignored field. It requires
 exact JSON integer tokens for every consumed page count,
 page index, and the persisted nonnegative output byte size. Every spread
@@ -93,7 +96,12 @@ activation, the module replays it only if the same document, exact PDF/sidecar
 filesystem snapshot, source page, and external/internal routing classification
 are still current and the request is fresh; same-path replacement,
 document/page changes, routing changes, and failed or rejected verification
-discard it. The verifier publishes the result only if both the PDF identity and
+discard it. External replay immediately initializes the verified current spread,
+while an internal replay waits for its native page-load callback. Reusing one
+native view model for another document clears all page, half, link-history,
+viewport, queued-link, and native-snapshot state. Delayed callback generations
+remain monotonic across document and manifest changes, preventing an older task
+from matching a newly reset counter. The verifier publishes the result only if both the PDF identity and
 sidecar digest are still unchanged. Before any
 navigation behavior activates, the main-thread callback
 also compares the authenticated authorities with metadata read from the exact

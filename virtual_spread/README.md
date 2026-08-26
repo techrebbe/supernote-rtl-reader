@@ -17,6 +17,9 @@ screen. Custom coordinate dimensions may scale that box but must retain the 4:3
 ratio; both generator and companion reject other aspects. Source pages are fitted independently into fixed left and right slots,
 so unusual source page sizes cannot change the reader's navigation surface.
 Content streams remain vector/text PDF content rather than page screenshots.
+The output retains the source document's declared PDF language version rather
+than silently falling back to pypdf's `%PDF-1.3` default, and the staged output
+is reread to verify that header before publication.
 Supported internal and URI links, including indirect destination arrays, are
 copied with transformed hit rectangles. Multiline `/QuadPoints` activation
 regions are transformed point-for-point rather than widened to their bounding
@@ -163,14 +166,17 @@ Recovery compares recorded paths with the host filesystem's case and separator
 semantics, so a Windows drive/path casing change does not strand an otherwise
 authentic transaction; dot-segment and other lexical aliases remain rejected.
 Ordinary publication errors use that same recovery path immediately.
-The manifest records the staged PDF's exact size and SHA-256, which the runtime
+Manifest schema `techrebbe.supernote.virtual-spread/v2` deliberately requires a
+snapshot-binding-capable companion. Older companions reject newly generated v2
+pairs, and v0.0.24 rejects legacy v1 pairs; regenerate the PDF and sidecar
+together when upgrading. The manifest records the staged PDF's exact size and SHA-256, which the runtime
 module verifies before trusting its mappings. A canonical digest of every link
 record is also embedded in the generated PDF and verified against the sidecar,
 preventing a separately edited sidecar from omitting or retargeting links.
 A second canonical authority binds RTL direction, cover parity, source/output
 page counts, spread dimensions, and gutter to that same hashed PDF. This keeps
 an otherwise internally consistent sidecar from swapping cover pairing or
-geometry. Native module v0.0.23 authenticates each internal link's target-view
+geometry. Native module v0.0.24 authenticates each internal link's target-view
 policy and the exact source snapshot. It rejects malformed UTF-8 bytes before
 decoding, non-integral manifest page indices or output sizes, numeric strings or
 non-finite values in spread/link geometry, and malformed or duplicate-key
@@ -179,7 +185,7 @@ transformed URI `/IsMap true` actions, a source CropBox outside its MediaBox, an
 link geometry outside the effective source CropBox. It preserves an omitted PDF
 link border at its correct transformed default width. Link-authority v2 records
 and the source marker fail closed on older generated pairs; regenerate the PDF
-and sidecar together before opening them with v0.0.23. Native reader callbacks
+and sidecar together before opening them with v0.0.24. Native reader callbacks
 perform only strong PDF and sidecar
 identity checks. Sidecar reading/hashing, parsing, full-PDF hashing, and stable-
 snapshot verification run on the single background verifier. Its bounded queue

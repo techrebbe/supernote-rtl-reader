@@ -83,6 +83,14 @@ public final class VirtualSpreadNavigation {
         BOUNDARY
     }
 
+    /** Routing decision for Supernote's shared link/annotation callback. */
+    public enum LinkRouting {
+        NON_LINK,
+        EXTERNAL,
+        INTERNAL,
+        BLOCKED
+    }
+
     public static final class Spread {
         public final boolean hasLeft;
         public final boolean hasRight;
@@ -633,15 +641,40 @@ public final class VirtualSpreadNavigation {
         return -nativeOffset;
     }
 
+    /**
+     * Distinguish annotation/digest callbacks and external links from internal
+     * page jumps. Only the latter require an authenticated target-half match.
+     */
+    public static LinkRouting classifyLinkInvocation(
+        boolean hasLink,
+        Boolean external,
+        int targetPage
+    ) {
+        if (!hasLink) {
+            return LinkRouting.NON_LINK;
+        }
+        if (external == null) {
+            return LinkRouting.BLOCKED;
+        }
+        if (external.booleanValue()) {
+            return LinkRouting.EXTERNAL;
+        }
+        return targetPage >= 0
+            ? LinkRouting.INTERNAL
+            : LinkRouting.BLOCKED;
+    }
+
     /** Replay a deferred native link only in its original document/page window. */
     public static boolean pendingLinkReplayIsCurrent(
         boolean sameDocument,
+        boolean sameSnapshot,
         int sourcePage,
         int currentPage,
         long ageMillis,
         long maximumAgeMillis
     ) {
         return sameDocument
+            && sameSnapshot
             && sourcePage >= 0
             && sourcePage == currentPage
             && ageMillis >= 0L

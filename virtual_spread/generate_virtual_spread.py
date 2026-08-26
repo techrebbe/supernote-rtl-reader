@@ -3238,10 +3238,17 @@ def _durable_replace(
             _windows_move_flags(replace_existing),
         )
         return
-    if not replace_existing and target.exists():
-        raise FileExistsError(
-            f"Publication target already exists: {target}"
-        )
+    if not replace_existing:
+        # POSIX os.replace() always permits replacement. Publish a hard link
+        # instead so the kernel performs the existence check and insertion as
+        # one namespace operation, even for test/helper callers that do not
+        # hold a PublicationOwnershipGuard. The staged and final paths are
+        # siblings, so they necessarily share a filesystem.
+        os.link(source, target, follow_symlinks=False)
+        _fsync_parent_directories(source, target)
+        os.unlink(source)
+        _fsync_parent_directories(source, target)
+        return
     os.replace(source, target)
     _fsync_parent_directories(source, target)
 
@@ -3349,6 +3356,36 @@ def _file_matches_sha256(
         return False
 
 
+def _publication_paths_share_inode(
+    first: Path,
+    second: Path,
+    ownership_guard: PublicationOwnershipGuard | None = None,
+) -> bool:
+    """Recognize the POSIX link-before-unlink publication crash window."""
+    if os.name == "nt":
+        return False
+    try:
+        namespace = _publication_namespace(ownership_guard)
+        first_entry = (
+            namespace.lstat(first)
+            if namespace is not None
+            else _lexical_absolute(first).lstat()
+        )
+        second_entry = (
+            namespace.lstat(second)
+            if namespace is not None
+            else _lexical_absolute(second).lstat()
+        )
+    except OSError:
+        return False
+    return (
+        stat.S_ISREG(first_entry.st_mode)
+        and stat.S_ISREG(second_entry.st_mode)
+        and first_entry.st_dev == second_entry.st_dev
+        and first_entry.st_ino == second_entry.st_ino
+    )
+
+
 def _write_publication_marker(
     marker_path: Path,
     transaction: dict[str, Any],
@@ -3358,76 +3395,35 @@ def _write_publication_marker(
     namespace = _publication_namespace(ownership_guard)
     if namespace is None:
         marker_path.parent.mkdir(parents=True, exist_ok=True)
-    if os.name == "nt":
-        staged_marker = _temporary_neighbor(
-            marker_path,
-            ".publish-marker.tmp",
-            ownership_guard,
-        )
+    # Never expose the marker name until a complete, fsynced JSON record is
+    # ready. This is required on POSIX too: creating the final path first can
+    # leave a truncated marker after process death, making authenticated
+    # recovery impossible on the next run.
+    staged_marker = _temporary_neighbor(
+        marker_path,
+        ".publish-marker.tmp",
+        ownership_guard,
+    )
+    try:
+        _write_json(staged_marker, transaction, ownership_guard)
         try:
-            _write_json(staged_marker, transaction, ownership_guard)
-            try:
-                _validate_publication_ownership(ownership_guard)
-                _durable_replace(
-                    staged_marker,
-                    marker_path,
-                    replace_existing=False,
-                    ownership_guard=ownership_guard,
-                )
-            except FileExistsError as error:
-                raise VirtualSpreadError(
-                    f"Publication is already in progress: {marker_path}"
-                ) from error
-        finally:
-            _publication_unlink(
+            _validate_publication_ownership(ownership_guard)
+            _durable_replace(
                 staged_marker,
-                ownership_guard,
-                missing_ok=True,
-            )
-        return
-
-    marker_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    marker_flags |= getattr(os, "O_NOINHERIT", 0)
-    marker_flags |= getattr(os, "O_NOFOLLOW", 0)
-    try:
-        _validate_publication_ownership(ownership_guard)
-        descriptor = _publication_open_file(
-            marker_path,
-            marker_flags,
-            ownership_guard,
-            0o600,
-        )
-    except FileExistsError as error:
-        raise VirtualSpreadError(
-            f"Publication is already in progress: {marker_path}"
-        ) from error
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
-            json.dump(
-                transaction,
-                stream,
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
-            )
-            stream.write("\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-    except BaseException:
-        try:
-            _publication_unlink(
                 marker_path,
-                ownership_guard,
-                missing_ok=True,
+                replace_existing=False,
+                ownership_guard=ownership_guard,
             )
-        except VirtualSpreadError:
-            pass
-        raise
-    _validate_publication_ownership(ownership_guard)
-    if namespace is not None:
-        namespace.fsync()
-    else:
-        _fsync_parent_directories(marker_path)
+        except FileExistsError as error:
+            raise VirtualSpreadError(
+                f"Publication is already in progress: {marker_path}"
+            ) from error
+    finally:
+        _publication_unlink(
+            staged_marker,
+            ownership_guard,
+            missing_ok=True,
+        )
 
 
 def _publication_marker_object(
@@ -3769,12 +3765,30 @@ def _recover_pair_publication(
                     ownership_guard,
                 )
                 if final_exists:
-                    _require_publication_file_hash(
+                    if _publication_paths_share_inode(
                         final_path,
-                        new_hash,
-                        "Staged publication target",
+                        backup,
                         ownership_guard,
-                    )
+                    ):
+                        # POSIX no-replace publication links the old canonical
+                        # name to its backup before unlinking the source. A
+                        # crash between those syscalls leaves two names for the
+                        # same authenticated old inode. Treat that exact state
+                        # as an interrupted backup move, not as a concurrent
+                        # untrusted replacement.
+                        _require_publication_file_hash(
+                            final_path,
+                            old_hash,
+                            "Interrupted publication target",
+                            ownership_guard,
+                        )
+                    else:
+                        _require_publication_file_hash(
+                            final_path,
+                            new_hash,
+                            "Staged publication target",
+                            ownership_guard,
+                        )
                 _validate_publication_ownership(ownership_guard)
                 _durable_replace(
                     backup,

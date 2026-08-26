@@ -3,6 +3,7 @@ import com.techrebbe.supernote.virtualspread.VirtualSpreadNavigation.BoundedCach
 import com.techrebbe.supernote.virtualspread.VirtualSpreadNavigation.Half;
 import com.techrebbe.supernote.virtualspread.VirtualSpreadNavigation.Kind;
 import com.techrebbe.supernote.virtualspread.VirtualSpreadNavigation.LinkHistory;
+import com.techrebbe.supernote.virtualspread.VirtualSpreadNavigation.LinkRouting;
 import com.techrebbe.supernote.virtualspread.VirtualSpreadNavigation.LinkTarget;
 import com.techrebbe.supernote.virtualspread.VirtualSpreadNavigation.LinkVisit;
 import com.techrebbe.supernote.virtualspread.VirtualSpreadNavigation.PageBarState;
@@ -100,32 +101,74 @@ public final class VirtualSpreadNavigationTest {
             -1,
             VirtualSpreadNavigation.reverseLandscapeOffset(1)
         );
+        assertLinkRouting(
+            "annotation callback bypasses link routing",
+            LinkRouting.NON_LINK,
+            VirtualSpreadNavigation.classifyLinkInvocation(
+                false, null, -1
+            )
+        );
+        assertLinkRouting(
+            "external URI uses authenticated native handling",
+            LinkRouting.EXTERNAL,
+            VirtualSpreadNavigation.classifyLinkInvocation(
+                true, Boolean.TRUE, -1
+            )
+        );
+        assertLinkRouting(
+            "internal page link requires target capture",
+            LinkRouting.INTERNAL,
+            VirtualSpreadNavigation.classifyLinkInvocation(
+                true, Boolean.FALSE, 4
+            )
+        );
+        assertLinkRouting(
+            "uninspectable link fails closed",
+            LinkRouting.BLOCKED,
+            VirtualSpreadNavigation.classifyLinkInvocation(
+                true, null, 4
+            )
+        );
+        assertLinkRouting(
+            "negative internal target fails closed",
+            LinkRouting.BLOCKED,
+            VirtualSpreadNavigation.classifyLinkInvocation(
+                true, Boolean.FALSE, -1
+            )
+        );
         assertBoolean(
             "pending link replays on its original page",
             true,
             VirtualSpreadNavigation.pendingLinkReplayIsCurrent(
-                true, 4, 4, 1000L, 60000L
+                true, true, 4, 4, 1000L, 60000L
             )
         );
         assertBoolean(
             "pending link cannot cross documents",
             false,
             VirtualSpreadNavigation.pendingLinkReplayIsCurrent(
-                false, 4, 4, 1000L, 60000L
+                false, true, 4, 4, 1000L, 60000L
+            )
+        );
+        assertBoolean(
+            "pending link cannot cross document snapshots",
+            false,
+            VirtualSpreadNavigation.pendingLinkReplayIsCurrent(
+                true, false, 4, 4, 1000L, 60000L
             )
         );
         assertBoolean(
             "pending link cannot cross pages",
             false,
             VirtualSpreadNavigation.pendingLinkReplayIsCurrent(
-                true, 4, 5, 1000L, 60000L
+                true, true, 4, 5, 1000L, 60000L
             )
         );
         assertBoolean(
             "expired pending link is discarded",
             false,
             VirtualSpreadNavigation.pendingLinkReplayIsCurrent(
-                true, 4, 4, 60001L, 60000L
+                true, true, 4, 4, 60001L, 60000L
             )
         );
         assertBoolean(
@@ -1172,6 +1215,19 @@ public final class VirtualSpreadNavigationTest {
         boolean actual
     ) {
         if (expected != actual) {
+            throw new AssertionError(
+                name + ": expected " + expected + " but got " + actual
+            );
+        }
+        assertions++;
+    }
+
+    private static void assertLinkRouting(
+        String name,
+        LinkRouting expected,
+        LinkRouting actual
+    ) {
+        if (actual != expected) {
             throw new AssertionError(
                 name + ": expected " + expected + " but got " + actual
             );

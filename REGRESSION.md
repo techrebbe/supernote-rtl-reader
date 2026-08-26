@@ -1275,6 +1275,54 @@ v0.0.23 (`versionCode=23`) APK build (SHA-256
 `1dcfee90040039914b7ac7ff173f56536e262d8de81d3ee89eb465657d2abc38`).
 Focused hardware validation remains pending.
 
+## Review pass 55 navigation snapshot binding and POSIX recovery - AUTOMATED PASS
+
+The next independent review found five related authority and crash-consistency
+windows. Native Back and Original Back now return no destination while manifest
+or native-snapshot authority is unresolved, and authenticated virtual-spread
+links with missing, malformed, unmatched, or ambiguous runtime geometry are
+consumed rather than navigating without a trusted half mapping. A link tapped
+during verification is bound to the exact PDF and sidecar filesystem identities
+being verified; same-path replacement or any verification snapshot change
+discards the queued invocation before native replay.
+
+Publication markers are now fully written and fsynced under a staged name on
+POSIX as well as Windows before the final marker path becomes visible. Recovery
+also recognizes the precise POSIX link-before-unlink crash state for an original
+being moved to its backup, requiring the canonical and backup names to share one
+inode and both to match the marker's authenticated old digest before rollback.
+
+Local automated validation passes 100 generator tests on Windows (six expected
+filesystem/platform skips), 125 focused navigation/manifest/cache assertions,
+12 cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, and the signed/verified
+v0.0.23 (`versionCode=23`) APK build (SHA-256
+`772b25ff8a163e148ae896f9bebb2990014d3986596d76417fa2d51a8c57ea5e`).
+Focused hardware validation of this exact build remains pending.
+
+## Review pass 56 native-link compatibility and atomic no-replace - AUTOMATED PASS
+
+A focused follow-up review found two regressions in pass 55. The shared
+`showLinkJumpView` callback now bypasses the companion when it is serving a
+native annotation or digest menu rather than a link. Authenticated external URI
+links also remain in Supernote's native handler; only internal page links require
+an authenticated target-half match. A link queued during manifest verification
+retains its exact external/internal routing classification as well as its exact
+PDF/sidecar snapshot, and is discarded if either changes before replay.
+
+Unguarded POSIX no-replace publication now uses the kernel's atomic hard-link
+operation instead of a check followed by overwrite-capable `os.replace`. A
+deterministic cross-platform emulation test proves that an incumbent destination
+cannot be displaced even when a stale existence check claims it is absent.
+
+Local automated validation passes 102 generator tests on Windows (seven expected
+filesystem/platform or privilege skips), 130 focused navigation/manifest/cache
+assertions, 12 cross-language authority assertions, 8,752 exhaustive navigation
+assertions, both native invariant suites, hook-scope validation, and the
+signed/verified v0.0.23 (`versionCode=23`) APK build (SHA-256
+`098208ae1a7f875e2a3c2b0c39561af5f90dd2a48b50cb217bee2d414558ce4b`).
+Focused hardware validation of this exact build remains pending.
+
 ## Failure capture
 
 Before reproducing a failure:

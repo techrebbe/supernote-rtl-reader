@@ -66,6 +66,7 @@ from generate_virtual_spread import (  # noqa: E402
     _sha256_open_file,
     _windows_move_flags,
     _write_json,
+    _write_publication_marker,
     build_pairs,
     build_virtual_spread,
 )
@@ -4347,6 +4348,151 @@ class VirtualSpreadTests(unittest.TestCase):
             orphan_retired.write_bytes(b"retired")
             _durably_remove(orphan)
             self.assertFalse(orphan_retired.exists())
+
+    def test_interrupted_marker_write_never_exposes_partial_record(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            transaction = {
+                "schema": "techrebbe.supernote.virtual-spread-publication/v2",
+                "outputPath": str(output),
+                "manifestPath": str(Path(str(output) + ".json")),
+                "outputBackupPath": str(output_backup),
+                "manifestBackupPath": str(manifest_backup),
+                "hadOutput": False,
+                "hadManifest": False,
+                "oldOutputSha256": None,
+                "oldManifestSha256": None,
+                "newOutputSha256": "0" * 64,
+                "newManifestSha256": "1" * 64,
+            }
+
+            def interrupt_staged_write(
+                path: Path,
+                value: object,
+                ownership_guard: object = None,
+            ) -> None:
+                path.write_text("{\n", encoding="utf-8")
+                raise OSError("simulated marker write interruption")
+
+            with mock.patch(
+                "generate_virtual_spread._write_json",
+                side_effect=interrupt_staged_write,
+            ):
+                with self.assertRaisesRegex(
+                    OSError,
+                    "simulated marker write interruption",
+                ):
+                    _write_publication_marker(marker, transaction)
+
+            self.assertFalse(marker.exists())
+            self.assertEqual(
+                list(root.glob("*.publish-marker.tmp")),
+                [],
+            )
+
+    def test_unguarded_posix_no_replace_uses_atomic_link(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            staged = root / "staged-marker"
+            incumbent = root / "published-marker"
+            staged.write_bytes(b"staged")
+            incumbent.write_bytes(b"incumbent")
+
+            # Exercise the POSIX branch on every CI host. The existence probe
+            # recreates the pre-fix race; the kernel-level link must still
+            # reject the occupied destination without changing either file.
+            with mock.patch("generate_virtual_spread.os.name", "posix"):
+                with mock.patch(
+                    "generate_virtual_spread._fsync_parent_directories"
+                ):
+                    with mock.patch.object(Path, "exists", return_value=False):
+                        with self.assertRaises(FileExistsError):
+                            _durable_replace(
+                                staged,
+                                incumbent,
+                                replace_existing=False,
+                            )
+
+            self.assertEqual(staged.read_bytes(), b"staged")
+            self.assertEqual(incumbent.read_bytes(), b"incumbent")
+
+    @unittest.skipIf(
+        os.name == "nt",
+        "POSIX unguarded no-replace publication is not used on Windows",
+    )
+    def test_unguarded_marker_publication_is_atomically_exclusive(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            marker = root / "spread.pdf.publish.json"
+            marker.write_bytes(b"incumbent-marker")
+            transaction = {
+                "schema": "techrebbe.supernote.virtual-spread-publication/v2",
+                "outputPath": str(root / "spread.pdf"),
+                "manifestPath": str(root / "spread.pdf.json"),
+                "outputBackupPath": str(root / "spread.pdf.backup"),
+                "manifestBackupPath": str(root / "spread.pdf.json.backup"),
+                "hadOutput": False,
+                "hadManifest": False,
+                "oldOutputSha256": None,
+                "oldManifestSha256": None,
+                "newOutputSha256": "0" * 64,
+                "newManifestSha256": "1" * 64,
+            }
+
+            # Recreate the old check-then-replace race deterministically: an
+            # existence probe lies that the incumbent is absent. Atomic link
+            # publication must still reject the occupied marker name.
+            with mock.patch.object(Path, "exists", return_value=False):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Publication is already in progress",
+                ):
+                    _write_publication_marker(marker, transaction)
+
+            self.assertEqual(marker.read_bytes(), b"incumbent-marker")
+            self.assertEqual(
+                list(root.glob("*.publish-marker.tmp")),
+                [],
+            )
+
+    @unittest.skipIf(
+        os.name == "nt",
+        "POSIX link-before-unlink recovery is not used on Windows",
+    )
+    def test_recovery_accepts_interrupted_posix_backup_hard_link(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            output_backup = Path(transaction["outputBackupPath"])
+            marker = Path(transaction["markerPath"])
+            os.link(output, output_backup)
+
+            self.assertEqual(
+                _recover_pair_publication(output, manifest),
+                "rolled_back",
+            )
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertFalse(marker.exists())
+            self.assertFalse(output_backup.exists())
 
     def test_legacy_marker_with_duplicate_keys_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

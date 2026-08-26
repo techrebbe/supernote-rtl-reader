@@ -89,15 +89,24 @@ LTR turn before RTL activation. Turns also remain blocked when a verified
 replacement pair does not match Supernote's still-open native document; reopening
 the document is required before the new authority can activate. A native link
 tapped during verification is also consumed and queued once. After successful
-activation, the module replays it only if the same document and source page are
-still current and the request is fresh; document/page changes and failed or
-rejected verification discard it. The verifier publishes the result only if
-both the PDF identity and sidecar digest are still unchanged. Before any
+activation, the module replays it only if the same document, exact PDF/sidecar
+filesystem snapshot, source page, and external/internal routing classification
+are still current and the request is fresh; same-path replacement,
+document/page changes, routing changes, and failed or rejected verification
+discard it. The verifier publishes the result only if both the PDF identity and
+sidecar digest are still unchanged. Before any
 navigation behavior activates, the main-thread callback
 also compares the authenticated authorities with metadata read from the exact
 native MuPDF `Document` instance. A mismatch fails closed until Supernote
 reopens the replacement document. Page-bar and page-turn callbacks never
 perform the full-file hash.
+
+Supernote shares `showLinkJumpView` between link activation and native
+annotation/digest menus. A callback without a `SuperNoteLink` therefore bypasses
+the companion completely. Authenticated external URI links likewise remain in
+Supernote's native handler. Only internal page links require the companion to
+capture and restore an authenticated destination half; missing, malformed,
+unmatched, or ambiguous internal targets are consumed.
 
 The `links` collection is required. Every entry must be a complete internal or
 URI record whose source page, virtual page, and side agree with the
@@ -117,6 +126,14 @@ exact match. This prevents a stale or substituted sidecar from changing cover
 parity or spread geometry even when the source and output page counts happen to
 remain the same.
 
+The generator writes and fsyncs its recovery marker under a private staged name
+before atomically exposing the marker on every supported platform. POSIX
+recovery also recognizes the exact link-before-unlink crash state produced by
+an interrupted no-replace backup move, but only when the canonical and backup
+names are the same inode and match the authenticated old digest. Guarded and
+unguarded POSIX no-replace publication use an atomic kernel hard-link operation,
+so no check-then-replace window can overwrite an incumbent destination.
+
 For a matching document it:
 
 - reverses native page turns in landscape;
@@ -133,7 +150,9 @@ For a matching document it:
 - restores the correct source half for native Back and Original Back, while
   leaving Supernote's own link-history stack authoritative; direct Original
   Back after several link jumps validates the newest native destination before
-  restoring the oldest recorded source half; and
+  restoring the oldest recorded source half; unresolved history authority and
+  unmatched or ambiguous internal link targets are consumed rather than being
+  allowed to navigate without an authenticated half mapping; and
 - reruns Supernote's own orientation refresh after a configuration transition,
   so its native split mode, toolbar, handwriting state, and bitmap all move to
   the new orientation together.

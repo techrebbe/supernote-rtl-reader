@@ -43,11 +43,15 @@ if hook.count("findAndHookMethod(") != len(expected_hooks):
     raise SystemExit("unexpected extra LSPosed method hook")
 
 history_start = hook.find("private static void captureHistoryReturn")
-history_end = hook.find("private static void captureLinkTarget", history_start)
+history_end = hook.find("private static boolean captureLinkTarget", history_start)
 if history_start < 0 or history_end < 0:
     raise SystemExit("missing native-link history return handling")
 history_return = hook[history_start:history_end]
 for required in (
+    "ManifestLookup lookup = manifestLookupFor(viewModel)",
+    "if (lookup.navigationBlocked())",
+    'link_history_blocked reason=',
+    "param.setResult(null)",
     "currentPage < 0 || currentPage >= manifest.pageCount",
     "(!original && currentPage != targetPage)",
     "boolean hadRuntimeHistory = state.linkHistory.size() > 0",
@@ -68,13 +72,26 @@ if link_hook_start < 0 or link_hook_end < 0:
     raise SystemExit("missing deferred native-link handling")
 link_hook = hook[link_hook_start:link_hook_end]
 for required in (
+    "if (superNoteLink == null)",
+    "lookup.manifest == null && !lookup.navigationBlocked()",
+    "classifyLinkInvocation(superNoteLink, targetPage)",
+    "routing == VirtualSpreadNavigation.LinkRouting.NON_LINK",
+    "routing == VirtualSpreadNavigation.LinkRouting.EXTERNAL",
+    'link_jump_passthrough kind=external authority=verified',
     "ManifestLookup lookup = manifestLookupFor(viewModel)",
     "if (lookup.verificationPending)",
-    "queueLinkInvocation(viewModel, param.args)",
+    "lookup.snapshotId,\n                routing",
     "param.setResult(null)",
     "state.queuedLinkArguments = arguments.clone()",
+    "state.queuedLinkSnapshotId = snapshotId",
+    "state.queuedLinkRouting = routing",
     "pendingLinkReplayIsCurrent(",
     "sameCanonicalPath(manifest.key, documentPath)",
+    "snapshotId.equals(verifiedSnapshotId)",
+    "currentRouting != queuedRouting",
+    "currentRouting == VirtualSpreadNavigation.LinkRouting.INTERNAL",
+    "if (!captureLinkTarget(",
+    'link_jump_blocked reason=unmatched_authenticated_link',
     "XposedHelpers.callMethod(activity, \"showLinkJumpView\", arguments)",
     "REPLAYING_LINK.set(Boolean.TRUE)",
     "REPLAYING_LINK.remove()",
@@ -223,7 +240,7 @@ for required in (
 
 lookup_start = hook.find("private static Manifest manifestFor")
 lookup_end = hook.find(
-    "private static boolean scheduleManifestVerification",
+    "private static String scheduleManifestVerification",
     lookup_start,
 )
 if lookup_start < 0 or lookup_end < 0:
@@ -247,8 +264,10 @@ for required in (
     "validateNativeSnapshot(viewModel, cached.manifest)",
     "validated == null",
     "scheduleManifestVerification(",
-    "boolean verificationPending = scheduleManifestVerification(",
-    "return new ManifestLookup(null, verificationPending, false)",
+    "String verificationId = scheduleManifestVerification(",
+    "boolean verificationPending = verificationId != null",
+    "discardQueuedLinkForDifferentSnapshot(",
+    "cached.snapshotId()",
     "manifest_verification_pending",
     "Fail closed until the background verifier publishes",
     '"required_pair_unavailable"',
@@ -323,7 +342,7 @@ manifest_verification = hook[verification_start:verification_end]
 for required in (
     "MANIFEST_VERIFIER.execute",
     "VERIFYING.put(key, verificationId)",
-    "if (verificationId.equals(VERIFYING.get(key))) {\n                return true;",
+    "if (verificationId.equals(VERIFYING.get(key))) {\n                return verificationId;",
     "verificationId.equals(VERIFYING.get(key))",
     'RandomAccessFile pdfInput = new RandomAccessFile(pdf, "r")',
     "FileInputStream sidecarInput = new FileInputStream(sidecar)",
@@ -349,7 +368,9 @@ for required in (
     "sidecarDigest.equals(currentSidecarDigest)",
     "MANIFESTS.put(key, published)",
     "scheduleManifestActivation(key, parsed.revision)",
-    'scheduleQueuedLinkDiscard(key, "manifest_rejected")',
+    '"manifest_rejected"',
+    '"snapshot_changed_before_read"',
+    '"snapshot_changed_during_read"',
     "if (replayQueuedLink(owner, viewModel, current))",
     "new Handler(owner.getMainLooper()).post",
     "handlePageLoaded(viewModel)",
@@ -389,7 +410,7 @@ cancellation_start = hook.find(
     "private static void cancelManifestVerificationLocked"
 )
 cancellation_end = hook.find(
-    "private static boolean scheduleManifestVerification",
+    "private static String scheduleManifestVerification",
     cancellation_start,
 )
 if min(observer_start, observer_end, cancellation_start, cancellation_end) < 0:
@@ -420,7 +441,7 @@ if min(cancellation_positions) < 0 or tuple(
         "verification cancellation must invalidate, drain, then cancel"
     )
 
-scheduler_start = hook.find("private static boolean scheduleManifestVerification")
+scheduler_start = hook.find("private static String scheduleManifestVerification")
 scheduler_end = hook.find(
     "private static void requireCurrentVerification", scheduler_start
 )
@@ -728,6 +749,12 @@ for required in (
     "dir_fd=self.directory_descriptor",
     "def _publication_open_file(",
     "def _publication_unlink(",
+    "Never expose the marker name until a complete, fsynced JSON record",
+    'staged_marker = _temporary_neighbor(',
+    '".publish-marker.tmp"',
+    "os.link(source, target, follow_symlinks=False)",
+    "def _publication_paths_share_inode(",
+    "Interrupted publication target",
     "def _temporary_neighbor(",
     "namespace.open_file(candidate, flags, 0o600)",
     "_write_json(temporary_manifest, manifest, ownership_guard)",
@@ -824,6 +851,10 @@ for required in (
     "test_publication_marker_paths_use_filesystem_case_semantics",
     "test_forced_replacement_requires_all_layout_options",
     "test_recovery_cleans_crash_retired_artifacts",
+    "test_interrupted_marker_write_never_exposes_partial_record",
+    "test_unguarded_marker_publication_is_atomically_exclusive",
+    "test_unguarded_posix_no_replace_uses_atomic_link",
+    "test_recovery_accepts_interrupted_posix_backup_hard_link",
     "test_runtime_float_link_rect_is_rejected",
 ):
     if required not in generator_tests:

@@ -1654,6 +1654,37 @@ signed/verified v0.0.24 (`versionCode=24`) APK build (SHA-256
 A fresh clean exact-head Ultra review and focused hardware validation remain
 release gates; PR #16 stays draft.
 
+## Review pass 68 exclusive lock initialization and deterministic rejection - LOCAL PASS
+
+The next full-branch Ultra review found four remaining fail-closed gaps. A
+publication-lock pathname is now initialized only when the generator created an
+unaliased inode with exclusive-create. A pre-existing empty lock and a lock that
+hard-links another file are rejected without changing either inode. The
+generator's spread width, height, and gutter boundary also rejects Python
+Booleans and every non-finite or nonnumeric value before staging, so it cannot
+publish a JSON Boolean that Android correctly refuses as geometry.
+
+On Android, stable JSON/canonical-string parse failures now become bounded
+negative cache entries only after exact PDF/sidecar descriptor, pathname, and
+digest authority has been rechecked. A malformed unchanged sidecar therefore
+does not repeatedly trigger a full-PDF hash, and a replaced snapshot cannot
+inherit the rejection. A verified virtual-spread turn is also consumed while
+the activity is temporarily unbound or the orientation is unavailable, rather
+than entering Supernote's native LTR offset path with stale lifecycle state.
+
+Deterministic regressions cover Boolean geometry, an empty hard-linked lock,
+an existing empty lock, stable malformed-manifest negative caching, activity-
+null turn blocking, and unknown-orientation turn blocking. Local validation
+passes 141 generator tests on Windows (13 expected platform/filesystem or
+privilege skips) and the same 141 on Linux (two Windows-specific skips), 141
+focused navigation/manifest/cache assertions, 15 cross-language authority
+assertions, 8,752 exhaustive navigation assertions, both native invariant
+suites, hook-scope validation, syntax checks, and the signed/verified v0.0.24
+(`versionCode=24`) APK build (SHA-256
+`e189fc6b8a489e1fd98988fd00b5137233e56dab206216a508e00bd88796c4f1`).
+A fresh clean exact-head Ultra review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
 ## Failure capture
 
 Before reproducing a failure:

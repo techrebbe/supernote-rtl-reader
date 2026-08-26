@@ -1191,14 +1191,23 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
         Activity activity = activeActivity.get();
         if (activity == null) {
-            log("turn_passthrough reason=no_activity");
+            param.setResult(null);
+            log("turn_blocked reason=no_activity");
+            return;
+        }
+        int orientation = activity.getResources()
+            .getConfiguration().orientation;
+        if (orientation != Configuration.ORIENTATION_PORTRAIT
+            && orientation != Configuration.ORIENTATION_LANDSCAPE) {
+            param.setResult(null);
+            log("turn_blocked reason=orientation_unavailable");
             return;
         }
 
         int currentPage = intField(viewModel, "currentPage", -1);
         ReaderState state = stateFor(viewModel, manifest);
         clearPendingLink(state);
-        if (!isPortrait(activity)) {
+        if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
             int adjusted = VirtualSpreadNavigation.reverseLandscapeOffset(
                 nativeOffset
             );
@@ -2235,18 +2244,30 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 String sidecarJson =
                     VirtualSpreadNavigation.decodeStrictUtf8(sidecarData);
                 Manifest parsed;
+                Throwable deterministicParseFailure = null;
                 if (sidecarJson == null) {
                     log("manifest_rejected reason=invalid_utf8 path=" + key);
                     parsed = null;
                 } else {
-                    parsed = parseManifest(
-                        pdfInput,
-                        pdfOpened.size,
-                        sidecarJson,
-                        key,
-                        sidecarDigest,
-                        owner
-                    );
+                    try {
+                        parsed = parseManifest(
+                            pdfInput,
+                            pdfOpened.size,
+                            sidecarJson,
+                            key,
+                            sidecarDigest,
+                            owner
+                        );
+                    } catch (
+                        org.json.JSONException | IllegalArgumentException error
+                    ) {
+                        // These exceptions are determined entirely by the
+                        // authenticated JSON/authority bytes. Finish all
+                        // descriptor and pathname checks below before caching
+                        // the rejection for this exact stable snapshot.
+                        deterministicParseFailure = error;
+                        parsed = null;
+                    }
                 }
                 String currentSidecarDigest = sha256(readBytes(
                     sidecarInput,
@@ -2286,6 +2307,13 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     if (VERIFYING.get(key) != owner) {
                         MANIFESTS.remove(key, published);
                         return;
+                    }
+                    if (deterministicParseFailure != null) {
+                        logFailure(
+                            "manifest_rejected reason=deterministic_parse path="
+                                + key,
+                            deterministicParseFailure
+                        );
                     }
                     if (parsed != null) {
                         log("manifest_accepted path=" + key

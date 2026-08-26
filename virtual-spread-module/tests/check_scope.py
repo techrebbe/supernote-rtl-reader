@@ -470,15 +470,32 @@ turn_lookup = turn_handler.find("ManifestLookup lookup = manifestLookupFor(viewM
 state_lookup = turn_handler.find("ReaderState state = stateFor(viewModel, manifest)")
 queued_clear = turn_handler.find("clearQueuedLinkInvocation(viewModel)")
 pending_clear = turn_handler.find("clearPendingLink(state)", state_lookup)
-orientation_branch = turn_handler.find("if (!isPortrait(activity))", state_lookup)
+activity_null = turn_handler.find("if (activity == null)", turn_lookup)
+activity_block = turn_handler.find("param.setResult(null)", activity_null)
+orientation_read = turn_handler.find(
+    "int orientation = activity.getResources()", activity_block
+)
+orientation_unknown = turn_handler.find(
+    "orientation != Configuration.ORIENTATION_PORTRAIT", orientation_read
+)
+orientation_unknown_block = turn_handler.find(
+    "param.setResult(null)", orientation_unknown
+)
+orientation_branch = turn_handler.find(
+    "if (orientation == Configuration.ORIENTATION_LANDSCAPE)", state_lookup
+)
 if not (
-    0 <= queued_clear < turn_lookup < state_lookup < pending_clear
+    0 <= queued_clear < turn_lookup < activity_null < activity_block
+    < orientation_read < orientation_unknown < orientation_unknown_block
+    < state_lookup < pending_clear
     < orientation_branch
 ):
     raise SystemExit(
-        "manual navigation must discard an older queued link before lookup "
-        "can return pending or blocked"
+        "manual navigation must discard older intent and fail closed until "
+        "activity/orientation authority is available"
     )
+if "turn_passthrough reason=no_activity" in turn_handler:
+    raise SystemExit("verified turns must not pass through without an activity")
 
 link_start = hook.find("private static void handleLinkTarget(")
 link_end = hook.find("private static VirtualSpreadNavigation.LinkRouting", link_start)
@@ -597,6 +614,9 @@ for required in (
     "VirtualSpreadNavigation.decodeStrictUtf8(sidecarData)",
     'manifest_rejected reason=invalid_utf8',
     "Manifest parsed;",
+    "Throwable deterministicParseFailure = null",
+    "org.json.JSONException | IllegalArgumentException error",
+    "deterministicParseFailure = error",
     "pdfInput,",
     "FileIdentity pdfAfter = FileIdentity.capture(pdfInput.getFD())",
     "FileIdentity sidecarAfter = FileIdentity.capture(",
@@ -608,6 +628,7 @@ for required in (
     "sidecarAfter.matches(sidecarPathAfter)",
     "sidecarDigest.equals(currentSidecarDigest)",
     "MANIFESTS.put(key, published)",
+    'manifest_rejected reason=deterministic_parse path=',
     "scheduleManifestActivation(\n                            key,",
     '"manifest_rejected"',
     '"snapshot_changed_before_read"',
@@ -723,6 +744,23 @@ if min(*snapshot_guard_positions, publication) < 0 or publication <= max(
     snapshot_guard_positions
 ):
     raise SystemExit("manifest publication must follow every snapshot check")
+deterministic_parse = manifest_verification.find(
+    "deterministicParseFailure = error"
+)
+deterministic_cache = manifest_verification.find(
+    "MANIFESTS.put(key, published)", deterministic_parse
+)
+deterministic_log = manifest_verification.find(
+    'manifest_rejected reason=deterministic_parse path=', deterministic_cache
+)
+if not (
+    0 <= deterministic_parse < max(snapshot_guard_positions)
+    < deterministic_cache < deterministic_log
+):
+    raise SystemExit(
+        "deterministic manifest failures must be cached only after every "
+        "snapshot identity check"
+    )
 
 manifest_start = hook.find("private static Manifest manifestFor")
 manifest_end = hook.find("private static boolean isPortrait", manifest_start)

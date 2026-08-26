@@ -3525,6 +3525,36 @@ class VirtualSpreadTests(unittest.TestCase):
                             **values,
                         )
 
+    def test_boolean_spread_geometry_is_rejected_before_publication(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            create_odd_page_fixture(source)
+            cases = (
+                {"spread_width": True},
+                {"spread_height": False},
+                {"gutter": True},
+                {"gutter": False},
+            )
+            for index, values in enumerate(cases):
+                with self.subTest(values=values):
+                    output = root / f"spread-{index}.pdf"
+                    manifest = root / f"spread-{index}.pdf.json"
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "dimensions and gutter",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest,
+                            **values,
+                        )
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest.exists())
+
     def test_non_nomad_spread_aspect_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -3907,6 +3937,66 @@ class VirtualSpreadTests(unittest.TestCase):
 
             self.assertEqual(victim.read_bytes(), b"victim")
             self.assertTrue(lock_path.is_symlink())
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest.exists())
+
+    def test_publication_lock_hardlink_never_touches_target(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            victim = root / "victim.bin"
+            create_odd_page_fixture(source)
+            victim.write_bytes(b"")
+            lock_path = _publication_lock_path(output)
+            try:
+                os.link(victim, lock_path)
+            except OSError as error:
+                self.skipTest(f"hard-link creation unavailable: {error}")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "one regular, unaliased file",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest,
+                    force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+
+            self.assertEqual(victim.read_bytes(), b"")
+            self.assertEqual(lock_path.read_bytes(), b"")
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest.exists())
+
+    def test_preexisting_empty_publication_lock_is_never_initialized(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            lock_path = _publication_lock_path(output)
+            lock_path.write_bytes(b"")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "must contain its lock byte",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest,
+                    force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+
+            self.assertEqual(lock_path.read_bytes(), b"")
             self.assertFalse(output.exists())
             self.assertFalse(manifest.exists())
 

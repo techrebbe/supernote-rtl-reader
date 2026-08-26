@@ -14,7 +14,10 @@ virtual page 3:  page 5 | source page 4
 
 Every virtual page uses the same 4:3 page box, matching the Nomad's landscape
 screen. Custom coordinate dimensions may scale that box but must retain the 4:3
-ratio; both generator and companion reject other aspects. Source pages are fitted independently into fixed left and right slots,
+ratio; both generator and companion reject other aspects. The generator's
+programmatic boundary accepts only finite real numeric values for the spread
+width, height, and gutter; Python Booleans are rejected rather than being
+serialized as JSON values that Android would later reject. Source pages are fitted independently into fixed left and right slots,
 so unusual source page sizes cannot change the reader's navigation surface.
 Content streams remain vector/text PDF content rather than page screenshots.
 The output retains the source document's declared PDF language version rather
@@ -122,7 +125,11 @@ rehashes the current source before publication. The PDF and manifest are each
 protected by a deterministic OS-owned lock keyed only by the output PDF for the
 entire recovery, generation, and publication operation. A concurrent generator
 targeting the same output fails without touching the live transaction; a crashed
-process releases the lock so the next invocation can recover it. The Android
+process releases the lock so the next invocation can recover it. A new lock
+file is initialized only when its inode was created with exclusive-create and
+is still an unaliased regular file. An existing empty lock or any lock with
+multiple hard links fails closed and is never initialized or otherwise mutated,
+so a hostile lock pathname cannot be used to alter another file. The Android
 runtime discovers only the sibling `<output>.json` sidecar. The generator uses
 that path by default and rejects any other `--manifest` path before acquiring a
 lock or changing an output, preventing alternate sidecars from bypassing either

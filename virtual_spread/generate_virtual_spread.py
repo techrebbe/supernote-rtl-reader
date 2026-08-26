@@ -348,9 +348,10 @@ def _require_runtime_float_geometry(
     spread_height: float,
     gutter: float,
 ) -> float:
-    if not all(math.isfinite(value) for value in (
-        spread_width, spread_height, gutter
-    )) or spread_width <= 0 or spread_height <= 0 or gutter < 0:
+    geometry = (spread_width, spread_height, gutter)
+    if any(type(value) not in (int, float) for value in geometry) or not all(
+        math.isfinite(value) for value in geometry
+    ) or spread_width <= 0 or spread_height <= 0 or gutter < 0:
         raise VirtualSpreadError("Spread dimensions and gutter must be valid")
     slot_width = (spread_width - gutter) / 2.0
     if slot_width <= 0:
@@ -2957,6 +2958,8 @@ def _require_open_lock_identity(
         or not stat.S_ISREG(opened_entry.st_mode)
         or path_entry.st_dev != opened_entry.st_dev
         or path_entry.st_ino != opened_entry.st_ino
+        or path_entry.st_nlink != 1
+        or opened_entry.st_nlink != 1
     ):
         raise VirtualSpreadError(
             "Publication lock must remain one regular, unaliased file: "
@@ -3440,20 +3443,28 @@ def _open_publication_lock(
                 "Publication lock must be a regular file when it exists: "
                 f"{lock_path}"
             )
-    flags = os.O_RDWR | os.O_CREAT
+    flags = os.O_RDWR
     flags |= getattr(os, "O_BINARY", 0)
     flags |= getattr(os, "O_NOINHERIT", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
-    try:
+
+    def open_descriptor(open_flags: int) -> int:
         if directory_descriptor is None:
-            descriptor = os.open(lock_path, flags, 0o600)
-        else:
-            descriptor = os.open(
-                lock_path.name,
-                flags,
-                0o600,
-                dir_fd=directory_descriptor,
-            )
+            return os.open(lock_path, open_flags, 0o600)
+        return os.open(
+            lock_path.name,
+            open_flags,
+            0o600,
+            dir_fd=directory_descriptor,
+        )
+
+    created = False
+    try:
+        try:
+            descriptor = open_descriptor(flags | os.O_CREAT | os.O_EXCL)
+            created = True
+        except FileExistsError:
+            descriptor = open_descriptor(flags)
     except OSError as error:
         raise VirtualSpreadError(
             f"Cannot open publication lock safely: {lock_path}"
@@ -3462,6 +3473,21 @@ def _open_publication_lock(
         _require_open_lock_identity(
             lock_path, descriptor, directory_descriptor
         )
+        opened_entry = os.fstat(descriptor)
+        if created:
+            if os.write(descriptor, b"\0") != 1:
+                raise VirtualSpreadError(
+                    f"Cannot initialize publication lock: {lock_path}"
+                )
+            os.fsync(descriptor)
+            _require_open_lock_identity(
+                lock_path, descriptor, directory_descriptor
+            )
+        elif opened_entry.st_size == 0:
+            raise VirtualSpreadError(
+                "Pre-existing publication lock must contain its lock byte: "
+                f"{lock_path}"
+            )
         return os.fdopen(descriptor, "r+b", buffering=0)
     except BaseException:
         os.close(descriptor)
@@ -3485,11 +3511,6 @@ def _publication_lock(
         )
         acquired = False
         try:
-            stream.seek(0, os.SEEK_END)
-            if stream.tell() == 0:
-                stream.write(b"\0")
-                stream.flush()
-                os.fsync(stream.fileno())
             stream.seek(0)
             try:
                 if os.name == "nt":

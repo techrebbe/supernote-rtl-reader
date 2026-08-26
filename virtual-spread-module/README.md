@@ -95,7 +95,12 @@ sidecar ceiling; the generator rejects an oversized manifest before publishing
 it, while the runtime independently fails closed if that invariant is violated.
 An unchanged oversized sidecar is recorded as a stable negative cache entry, so
 an ordinary PDF returns to native behavior and a generated PDF remains blocked
-without repeatedly scheduling the same doomed verification.
+without repeatedly scheduling the same doomed verification. Stable malformed
+JSON and canonical-string failures are likewise published as negative entries,
+but only after the verifier rechecks the exact PDF/sidecar descriptors, path
+identities, and sidecar digest. A malformed unchanged sidecar therefore cannot
+force repeated full-PDF hashing, while a replaced snapshot cannot inherit the
+older rejection.
 On a cache miss or identity change, the module fails closed while a single
 background worker opens the PDF and sidecar, hashes the sidecar bytes, parses
 them, and performs the full PDF SHA-256 check. Its queue retains only the latest
@@ -107,7 +112,11 @@ an older native view model fail closed. Native page turns are consumed while a
 matching snapshot is pending, so the reader cannot leak one unverified native
 LTR turn before RTL activation. Turns also remain blocked when a verified
 replacement pair does not match Supernote's still-open native document; reopening
-the document is required before the new authority can activate. A native link
+the document is required before the new authority can activate. After authority
+is verified, a turn is also consumed if the current activity is temporarily
+unbound or Android has not yet reported a definite portrait/landscape
+orientation. It is never passed into Supernote's native LTR offset logic using
+stale lifecycle state. A native link
 tapped during verification is also consumed and queued once. After successful
 activation, the module replays it only if the same document, exact PDF/sidecar
 filesystem snapshot, unique verifier generation, native MuPDF document object,

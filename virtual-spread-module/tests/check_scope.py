@@ -954,13 +954,37 @@ if (
         "CI must build and verify the virtual-spread companion APK with "
         "the selected signing key"
     )
-if (
-    "VIRTUAL_SPREAD_APK_KEYSTORE_BASE64" not in workflow
-    or "if: steps.companion-signing.outputs.stable == 'true'" not in workflow
-):
+release_start = workflow.find("\n  virtual-spread-release-apk:")
+next_job = workflow.find("\n  build:", release_start)
+if release_start < 0 or next_job < 0:
     raise SystemExit(
-        "CI must upload companion APKs only under stable signing"
+        "CI must isolate the protected companion APK release job"
     )
+test_job = workflow[:release_start]
+release_job = workflow[release_start:next_job]
+if "VIRTUAL_SPREAD_APK_KEYSTORE_BASE64" in test_job:
+    raise SystemExit(
+        "pull-request-controlled CI must not access the stable signer"
+    )
+if workflow.count("VIRTUAL_SPREAD_APK_KEYSTORE_BASE64") != 1:
+    raise SystemExit(
+        "stable signer must appear only in the protected release job"
+    )
+for required in (
+    "Prepare ephemeral companion signing key",
+    "-validity 2",
+):
+    if required not in test_job:
+        raise SystemExit(f"ephemeral CI signer is missing: {required}")
+for required in (
+    "if: github.event_name == 'push' && github.ref == 'refs/heads/main'",
+    "needs: virtual-spread-tests",
+    "environment: virtual-spread-release",
+    "VIRTUAL_SPREAD_APK_KEYSTORE_BASE64",
+    "Upload upgrade-compatible companion APK",
+):
+    if required not in release_job:
+        raise SystemExit(f"protected CI signer is missing: {required}")
 
 generator = (root.parent / "virtual_spread/generate_virtual_spread.py").read_text(
     encoding="utf-8"
@@ -968,6 +992,7 @@ generator = (root.parent / "virtual_spread/generate_virtual_spread.py").read_tex
 for required in (
     'SCHEMA = "techrebbe.supernote.virtual-spread/v2"',
     'PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v2"',
+    '"techrebbe.supernote.virtual-spread-source-commit/v1"',
     'SOURCE_AUTHORITY_MARKER = b"%SNVirtualSpreadSourceSHA256:"',
     "source_hash,",
     'LEGACY_PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v1"',
@@ -1070,9 +1095,16 @@ for required in (
     "expected_output_state=expected_output_state",
     "expected_manifest_state=expected_manifest_state",
     "replace_authorized=force",
-    "source_commit_validator: Callable[[], None] | None = None",
+    "source_commit_evidence: PublicationSourceEvidence | None = None",
+    "def _publication_source_commit_artifacts(",
+    "def _write_source_commit_record(",
+    "def _validated_source_commit_record(",
+    "source_validation_required: bool = False",
+    "commit_allowed = source_commit_evidence is None",
+    "and source_commit_authorizes",
+    "def _recover_orphaned_source_commit(",
     "allow_commit=commit_allowed",
-    "source_commit_validator=lambda: _require_source_snapshot(",
+    "source_commit_evidence=PublicationSourceEvidence(",
     'transaction["_oldOutputIdentity"] = expected_output_state.identity',
     'transaction["_oldManifestIdentity"] = expected_manifest_state.identity',
     'transaction["_markerIdentity"] = marker_identity',

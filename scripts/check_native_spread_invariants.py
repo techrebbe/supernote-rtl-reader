@@ -48,27 +48,40 @@ def check(repo_root: Path) -> None:
     direct_patch = direct_patch_path.read_text(encoding="utf-8")
     workflow = workflow_path.read_text(encoding="utf-8")
 
+    release_start = workflow.find("\n  virtual-spread-release-apk:")
+    next_job = workflow.find("\n  build:", release_start)
+    if release_start < 0 or next_job < 0:
+        fail("could not isolate protected companion APK release job")
+    test_job = workflow[:release_start]
+    release_job = workflow[release_start:next_job]
     require_markers(
-        workflow,
+        test_job,
         (
-            "VIRTUAL_SPREAD_APK_KEYSTORE_BASE64",
+            "Prepare ephemeral companion signing key",
             "id: companion-signing",
-            'echo "stable=true" >> "$GITHUB_OUTPUT"',
-            'echo "stable=false" >> "$GITHUB_OUTPUT"',
+            "-validity 2",
             "-DebugKeystore $env:VIRTUAL_SPREAD_KEYSTORE",
-            "if: steps.companion-signing.outputs.stable == 'true'",
         ),
-        "stable companion APK signing",
+        "ephemeral pull-request APK signing",
     )
-    upload_start = workflow.find(
-        "- name: Upload virtual-spread companion APK"
+    if "VIRTUAL_SPREAD_APK_KEYSTORE_BASE64" in test_job:
+        fail("pull-request-controlled CI can access the stable APK signer")
+    if workflow.count("VIRTUAL_SPREAD_APK_KEYSTORE_BASE64") != 1:
+        fail("stable APK signer must appear only in the protected release job")
+    require_markers(
+        release_job,
+        (
+            "if: github.event_name == 'push' && github.ref == 'refs/heads/main'",
+            "needs: virtual-spread-tests",
+            "environment: virtual-spread-release",
+            "VIRTUAL_SPREAD_APK_KEYSTORE_BASE64",
+            "Prepare protected stable signing key",
+            "Build and verify upgrade-compatible companion APK",
+            "Upload upgrade-compatible companion APK",
+            "-DebugKeystore $env:VIRTUAL_SPREAD_KEYSTORE",
+        ),
+        "protected stable companion APK signing",
     )
-    next_job = workflow.find("\n  build:", upload_start)
-    if upload_start < 0 or next_job < 0:
-        fail("could not isolate companion APK upload step")
-    upload_step = workflow[upload_start:next_job]
-    if "steps.companion-signing.outputs.stable == 'true'" not in upload_step:
-        fail("companion APK upload is not gated by stable signing")
 
     require_markers(
         plugin,

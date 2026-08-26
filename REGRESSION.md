@@ -1786,6 +1786,43 @@ upgrade-compatible certificate and has SHA-256
 A fresh exact-head Ultra review and focused hardware validation remain release
 gates; PR #16 stays draft.
 
+## Review pass 72 protected signer and crash-safe source commit - LOCAL PASS
+
+The next exact-head Ultra review found two release blockers in pass 71. The
+stable Android signer is no longer referenced by any pull-request-controlled
+job. Pull requests build and verify with a two-day ephemeral certificate. Only
+a successful trusted `main` push enters the `virtual-spread-release` GitHub
+environment and publishes an upgrade-compatible APK. That environment accepts
+deployments only from `main`; it now contains the sole encrypted signer secret,
+and the repository-wide duplicate was removed.
+
+A matching newly published PDF and sidecar are also no longer sufficient for
+crash recovery to infer commit. Source-validated publication starts
+rollback-only. After both canonical files are authenticated, the generator
+rehashes the original source and no-replace publishes a fsynced source-commit
+record bound to the publication-marker hash, both new pair hashes, and the exact
+source path, identity, timestamps, size, and SHA-256. Recovery commits only when
+that record is structurally exact and the persisted source snapshot still
+matches; a crash before the record or a changed source restores the previous
+pair. Committed cleanup keeps the source-commit record until after marker
+retirement, and an orphaned final record can retire itself only after
+reauthenticating both canonical files.
+
+Deterministic regressions cover a complete pair without commit evidence, an
+unchanged validated source, source replacement after durable commit evidence,
+marker-binding mutation, interrupted committed cleanup, mismatched orphaned
+pair bytes, all deterministic source-commit staging/reserved paths, and exact
+cleanup identities. Local validation passes 150 generator tests on Windows (12
+expected platform/filesystem or privilege skips) and the same 150 on Linux (two
+Windows-specific skips), 142 focused navigation assertions, 15 cross-language
+authority assertions, 8,752 exhaustive navigation assertions, both native
+invariant suites, hook-scope validation, workflow YAML parsing, and the
+signed/verified v0.0.24 (`versionCode=24`) APK build. The APK retains the
+upgrade-compatible signer and has SHA-256
+`1cef6b0bdb88ee57901e6d37b87920a49118e727af2977acbba6ffa24a374c25`.
+A fresh clean exact-head Ultra review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
 ## Failure capture
 
 Before reproducing a failure:

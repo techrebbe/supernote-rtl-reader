@@ -43,6 +43,9 @@ LINK_AUTHORITY_MARKER = b"%SNVirtualSpreadLinksSHA256:"
 LAYOUT_AUTHORITY_MARKER = b"%SNVirtualSpreadLayoutSHA256:"
 PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v2"
 LEGACY_PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v1"
+SOURCE_COMMIT_SCHEMA = (
+    "techrebbe.supernote.virtual-spread-source-commit/v1"
+)
 MOVEFILE_REPLACE_EXISTING = 0x00000001
 MOVEFILE_WRITE_THROUGH = 0x00000008
 WINDOWS_ALREADY_EXISTS = {80, 183}
@@ -153,6 +156,15 @@ class SourceIdentity:
     size: int
     modified_ns: int
     changed_ns: int
+
+
+@dataclass(frozen=True)
+class PublicationSourceEvidence:
+    """The exact source snapshot authorized to commit a generated pair."""
+
+    path: Path
+    identity: SourceIdentity
+    sha256: str
 
 
 @dataclass(frozen=True)
@@ -2508,14 +2520,18 @@ def _publish_pair(
     expected_output_state: PublicationTargetState | None = None,
     expected_manifest_state: PublicationTargetState | None = None,
     replace_authorized: bool = True,
-    source_commit_validator: Callable[[], None] | None = None,
+    source_commit_evidence: PublicationSourceEvidence | None = None,
 ) -> None:
     """Publish a matching pair with durable recovery across process death."""
-    # Validate once before creating transaction evidence. The second validation
-    # below is the commit-point check: it runs after both canonical files have
-    # moved and been authenticated, but before rollback evidence is retired.
-    if source_commit_validator is not None:
-        source_commit_validator()
+    # Validate once before creating transaction evidence. Recovery remains
+    # rollback-only until the same source evidence has been validated after
+    # both canonical files move and a bound source-commit record is durable.
+    if source_commit_evidence is not None:
+        _require_source_snapshot(
+            source_commit_evidence.path,
+            source_commit_evidence.identity,
+            source_commit_evidence.sha256,
+        )
     expected_publication_arguments: dict[str, Any] = {}
     if expected_output_identity is not None:
         expected_publication_arguments["expected_output_identity"] = (
@@ -2542,9 +2558,10 @@ def _publish_pair(
         expected_output_state=expected_output_state,
         expected_manifest_state=expected_manifest_state,
         replace_authorized=replace_authorized,
+        source_validation_required=source_commit_evidence is not None,
         **expected_publication_arguments,
     )
-    commit_allowed = True
+    commit_allowed = source_commit_evidence is None
     try:
         expected_output_hash = transaction["newOutputSha256"]
         expected_manifest_hash = transaction["newManifestSha256"]
@@ -2699,9 +2716,34 @@ def _publish_pair(
             "Published output",
             ownership_guard,
         )
-        if source_commit_validator is not None:
+        if source_commit_evidence is not None:
             try:
-                source_commit_validator()
+                _require_source_snapshot(
+                    source_commit_evidence.path,
+                    source_commit_evidence.identity,
+                    source_commit_evidence.sha256,
+                )
+                source_commit_identity, source_commit_hash = (
+                    _write_source_commit_record(
+                        output_path,
+                        transaction,
+                        source_commit_evidence,
+                        ownership_guard,
+                    )
+                )
+                transaction["_sourceCommitIdentity"] = (
+                    source_commit_identity
+                )
+                transaction["_sourceCommitSha256"] = source_commit_hash
+                # A crash after the durable record is safe because recovery
+                # revalidates the persisted source snapshot. The live process
+                # also checks once more before retiring rollback evidence.
+                _require_source_snapshot(
+                    source_commit_evidence.path,
+                    source_commit_evidence.identity,
+                    source_commit_evidence.sha256,
+                )
+                commit_allowed = True
             except BaseException:
                 # Both new paths may already be visible. Recovery must roll the
                 # transaction back rather than classify that matching pair as a
@@ -2910,6 +2952,15 @@ def _publication_staging_artifacts(
     )
 
 
+def _publication_source_commit_artifacts(
+    output_path: Path,
+) -> tuple[Path, Path]:
+    marker, _, _ = _publication_artifacts(output_path)
+    record = marker.with_name(marker.name + ".source-commit.json")
+    staged_record = record.with_name(f".{record.name}.tmp")
+    return record, staged_record
+
+
 def _publication_lock_path(output_path: Path) -> Path:
     marker, _, _ = _publication_artifacts(output_path)
     return marker.with_name(marker.name + ".lock")
@@ -2925,14 +2976,25 @@ def _publication_reserved_paths(output_path: Path) -> tuple[Path, ...]:
         _runtime_manifest_path(output_path),
     )
     staging = _publication_staging_artifacts(output_path)
+    source_commit, source_commit_stage = (
+        _publication_source_commit_artifacts(output_path)
+    )
     retired = tuple(
         path.with_name(path.name + ".retired")
-        for path in (*removable, *canonical, *staging)
+        for path in (
+            *removable,
+            *canonical,
+            *staging,
+            source_commit,
+            source_commit_stage,
+        )
     )
     return (
         *removable,
+        source_commit,
         *retired,
         *staging,
+        source_commit_stage,
         _publication_lock_path(output_path),
     )
 
@@ -3894,13 +3956,18 @@ def _reject_retired_publication_artifacts(
         output_path
     )
     staging = _publication_staging_artifacts(output_path)
+    source_commit, source_commit_stage = (
+        _publication_source_commit_artifacts(output_path)
+    )
     for active in (
         marker,
         output_backup,
         manifest_backup,
+        source_commit,
         output_path,
         manifest_path,
         *staging,
+        source_commit_stage,
     ):
         retired = _retired_publication_artifacts(active, ownership_guard)
         if retired:
@@ -3989,6 +4056,93 @@ def _write_publication_marker(
             ) from error
     finally:
         _close_staged_artifact(staged_marker)
+
+
+def _source_commit_record(
+    transaction: dict[str, Any],
+    source_evidence: PublicationSourceEvidence | None,
+) -> dict[str, Any]:
+    marker_hash = transaction.get("_markerSha256")
+    if not _valid_sha256(marker_hash):
+        raise VirtualSpreadError(
+            "Missing authenticated publication marker evidence"
+        )
+    record: dict[str, Any] = {
+        "schema": SOURCE_COMMIT_SCHEMA,
+        "publicationMarkerSha256": marker_hash,
+        "newOutputSha256": transaction["newOutputSha256"],
+        "newManifestSha256": transaction["newManifestSha256"],
+        "sourceValidationRequired": source_evidence is not None,
+        "sourcePath": None,
+        "sourceSha256": None,
+        "sourceDevice": None,
+        "sourceInode": None,
+        "sourceSize": None,
+        "sourceModifiedNs": None,
+        "sourceChangedNs": None,
+    }
+    if source_evidence is not None:
+        record.update({
+            "sourcePath": str(_lexical_absolute(source_evidence.path)),
+            "sourceSha256": source_evidence.sha256,
+            "sourceDevice": source_evidence.identity.device,
+            "sourceInode": source_evidence.identity.inode,
+            "sourceSize": source_evidence.identity.size,
+            "sourceModifiedNs": source_evidence.identity.modified_ns,
+            "sourceChangedNs": source_evidence.identity.changed_ns,
+        })
+    return record
+
+
+def _write_source_commit_record(
+    output_path: Path,
+    transaction: dict[str, Any],
+    source_evidence: PublicationSourceEvidence | None,
+    ownership_guard: PublicationOwnershipGuard | None = None,
+) -> tuple[SourceIdentity, str]:
+    """Durably authorize recovery to commit this exact generated pair."""
+    record_path, expected_stage = _publication_source_commit_artifacts(
+        output_path
+    )
+    staged_record = _temporary_neighbor(
+        record_path,
+        ".tmp",
+        ownership_guard,
+    )
+    if _lexical_absolute(staged_record.path) != _lexical_absolute(
+        expected_stage
+    ):
+        _close_staged_artifact(staged_record)
+        raise VirtualSpreadError("Unexpected source-commit staging path")
+    try:
+        _write_json(
+            staged_record.path,
+            _source_commit_record(transaction, source_evidence),
+            ownership_guard,
+            retained_descriptor=staged_record.descriptor,
+        )
+        staged_identity = _release_staged_artifact_for_move(staged_record)
+        try:
+            _validate_publication_ownership(ownership_guard)
+            _durable_replace(
+                staged_record.path,
+                record_path,
+                replace_existing=False,
+                ownership_guard=ownership_guard,
+                expected_source_identity=staged_identity,
+            )
+        except FileExistsError as error:
+            raise VirtualSpreadError(
+                f"Source-commit record appeared concurrently: {record_path}"
+            ) from error
+    finally:
+        _close_staged_artifact(staged_record)
+    return _publication_file_evidence(
+        record_path,
+        "Source-commit record",
+        ownership_guard,
+        maximum_bytes=MAX_MANIFEST_BYTES,
+    )
 
 
 def _publication_marker_object(
@@ -4154,6 +4308,95 @@ def _validated_publication_transaction(
     return transaction
 
 
+def _validated_source_commit_record(
+    record_path: Path,
+    transaction: dict[str, Any] | None,
+    ownership_guard: PublicationOwnershipGuard | None = None,
+) -> tuple[dict[str, Any], SourceIdentity, str]:
+    """Authenticate durable permission to finish a published pair."""
+    record, record_identity, record_hash = _read_publication_marker(
+        record_path,
+        ownership_guard,
+    )
+    expected_fields = {
+        "schema",
+        "publicationMarkerSha256",
+        "newOutputSha256",
+        "newManifestSha256",
+        "sourceValidationRequired",
+        "sourcePath",
+        "sourceSha256",
+        "sourceDevice",
+        "sourceInode",
+        "sourceSize",
+        "sourceModifiedNs",
+        "sourceChangedNs",
+    }
+    if not isinstance(record, dict) or set(record) != expected_fields:
+        raise AmbiguousPublicationMarkerError(
+            "Unexpected source-commit record fields"
+        )
+    if record.get("schema") != SOURCE_COMMIT_SCHEMA:
+        raise VirtualSpreadError("Invalid source-commit record")
+    for field in (
+        "publicationMarkerSha256",
+        "newOutputSha256",
+        "newManifestSha256",
+    ):
+        if not _valid_sha256(record.get(field)):
+            raise VirtualSpreadError("Invalid source-commit record")
+    if transaction is not None:
+        if record["publicationMarkerSha256"] != transaction.get(
+            "_markerSha256"
+        ) or record["newOutputSha256"] != transaction.get(
+            "newOutputSha256"
+        ) or record["newManifestSha256"] != transaction.get(
+            "newManifestSha256"
+        ):
+            raise VirtualSpreadError(
+                "Source-commit record does not match publication marker"
+            )
+    if type(record.get("sourceValidationRequired")) is not bool:
+        raise VirtualSpreadError("Invalid source-commit record")
+    source_fields = (
+        "sourcePath",
+        "sourceSha256",
+        "sourceDevice",
+        "sourceInode",
+        "sourceSize",
+        "sourceModifiedNs",
+        "sourceChangedNs",
+    )
+    if not record["sourceValidationRequired"]:
+        if any(record.get(field) is not None for field in source_fields):
+            raise VirtualSpreadError("Invalid source-commit record")
+        return record, record_identity, record_hash
+
+    source_path_value = record.get("sourcePath")
+    if not isinstance(source_path_value, str):
+        raise VirtualSpreadError("Invalid source-commit record")
+    source_path = Path(source_path_value)
+    if not source_path.is_absolute() or os.path.normcase(
+        str(_lexical_absolute(source_path))
+    ) != os.path.normcase(source_path_value):
+        raise VirtualSpreadError("Invalid source-commit record")
+    if not _valid_sha256(record.get("sourceSha256")):
+        raise VirtualSpreadError("Invalid source-commit record")
+    identity_values = tuple(
+        record.get(field)
+        for field in (
+            "sourceDevice",
+            "sourceInode",
+            "sourceSize",
+            "sourceModifiedNs",
+            "sourceChangedNs",
+        )
+    )
+    if any(type(value) is not int or value < 0 for value in identity_values):
+        raise VirtualSpreadError("Invalid source-commit record")
+    return record, record_identity, record_hash
+
+
 def _legacy_publication_pre_mutation_states(
     transaction: dict[str, Any],
     output_path: Path,
@@ -4209,6 +4452,9 @@ def _finish_publication_transaction(
     marker_path = Path(transaction["markerPath"])
     output_path = Path(transaction["outputPath"])
     manifest_path = Path(transaction["manifestPath"])
+    source_commit_path, source_commit_stage = (
+        _publication_source_commit_artifacts(output_path)
+    )
     output_backup = Path(transaction["outputBackupPath"])
     manifest_backup = Path(transaction["manifestBackupPath"])
     marker_identity = transaction.get("_markerIdentity")
@@ -4300,6 +4546,21 @@ def _finish_publication_transaction(
             expected_hash=marker_hash,
         )
         cleanup.append((marker_stage, staged_marker_identity))
+    if _require_regular_publication_target(
+        source_commit_stage,
+        "Staged source-commit record",
+        ownership_guard,
+    ):
+        _, staged_source_commit_identity, _ = (
+            _validated_source_commit_record(
+                source_commit_stage,
+                transaction,
+                ownership_guard,
+            )
+        )
+        cleanup.append(
+            (source_commit_stage, staged_source_commit_identity)
+        )
 
     for path, had_original, old_hash, label, evidence in (
         (
@@ -4338,6 +4599,50 @@ def _finish_publication_transaction(
             )
             cleanup.append((path, identity))
 
+    source_commit_cleanup: tuple[Path, SourceIdentity] | None = None
+    source_commit_exists = _require_regular_publication_target(
+        source_commit_path,
+        "Source-commit record",
+        ownership_guard,
+    )
+    if source_commit_exists:
+        _, source_commit_identity, source_commit_hash = (
+            _validated_source_commit_record(
+                source_commit_path,
+                transaction,
+                ownership_guard,
+            )
+        )
+        expected_source_commit_identity = transaction.get(
+            "_sourceCommitIdentity"
+        )
+        expected_source_commit_hash = transaction.get(
+            "_sourceCommitSha256"
+        )
+        if isinstance(expected_source_commit_identity, SourceIdentity) and not (
+            _same_open_file(
+                expected_source_commit_identity,
+                source_commit_identity,
+            )
+        ):
+            raise VirtualSpreadError(
+                "Source-commit record identity changed before cleanup"
+            )
+        if _valid_sha256(expected_source_commit_hash) and (
+            source_commit_hash != expected_source_commit_hash
+        ):
+            raise VirtualSpreadError(
+                "Source-commit record changed before cleanup"
+            )
+        source_commit_cleanup = (
+            source_commit_path,
+            source_commit_identity,
+        )
+    elif outcome == "committed":
+        raise VirtualSpreadError(
+            "Committed publication is missing durable source-commit evidence"
+        )
+
     current_marker_identity, _ = _publication_file_evidence(
         marker_path,
         "Publication marker",
@@ -4346,7 +4651,14 @@ def _finish_publication_transaction(
         expected_identity=marker_identity,
         expected_hash=marker_hash,
     )
+    # Rollback keeps the marker as the last recovery authority. Commit keeps
+    # the source-commit record last, so a crash after marker retirement can be
+    # recognized as completed publication cleanup rather than rolled back.
+    if outcome != "committed" and source_commit_cleanup is not None:
+        cleanup.append(source_commit_cleanup)
     cleanup.append((marker_path, current_marker_identity))
+    if outcome == "committed" and source_commit_cleanup is not None:
+        cleanup.append(source_commit_cleanup)
 
     # Authenticate the entire cleanup set before deleting any entry. Every
     # removal then carries the exact captured identity through retirement. A
@@ -4359,6 +4671,67 @@ def _finish_publication_transaction(
             ownership_guard,
             expected_identity=identity,
         )
+
+
+def _recover_orphaned_source_commit(
+    output_path: Path,
+    manifest_path: Path,
+    source_commit_path: Path,
+    ownership_guard: PublicationOwnershipGuard | None,
+) -> str:
+    """Finish cleanup after a committed marker was retired first."""
+    try:
+        record, record_identity, _ = _validated_source_commit_record(
+            source_commit_path,
+            None,
+            ownership_guard,
+        )
+        output_identity, _ = _publication_output_evidence(
+            output_path,
+            "Committed output",
+            ownership_guard,
+            expected_hash=record["newOutputSha256"],
+        )
+        manifest_identity, _ = _publication_manifest_evidence(
+            manifest_path,
+            "Committed manifest",
+            ownership_guard,
+            expected_hash=record["newManifestSha256"],
+        )
+        _publication_output_evidence(
+            output_path,
+            "Committed output",
+            ownership_guard,
+            expected_identity=output_identity,
+            expected_hash=record["newOutputSha256"],
+        )
+        _publication_manifest_evidence(
+            manifest_path,
+            "Committed manifest",
+            ownership_guard,
+            expected_identity=manifest_identity,
+            expected_hash=record["newManifestSha256"],
+        )
+    except AmbiguousPublicationMarkerError as error:
+        raise VirtualSpreadError(
+            "Cannot recover ambiguous orphaned source-commit record"
+        ) from error
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        UnicodeError,
+        VirtualSpreadError,
+    ) as error:
+        raise VirtualSpreadError(
+            "Cannot recover invalid orphaned source-commit record"
+        ) from error
+    _durably_remove(
+        source_commit_path,
+        ownership_guard,
+        expected_identity=record_identity,
+    )
+    return "committed"
 
 
 def _recover_pair_publication(
@@ -4385,7 +4758,13 @@ def _recover_pair_publication(
     marker_path, output_backup, manifest_backup = _publication_artifacts(
         output_path,
     )
-    staging = _publication_staging_artifacts(output_path)
+    source_commit_path, source_commit_stage = (
+        _publication_source_commit_artifacts(output_path)
+    )
+    staging = (
+        *_publication_staging_artifacts(output_path),
+        source_commit_stage,
+    )
     active_staging = {
         os.path.normcase(str(_lexical_absolute(path)))
         for path in active_staged_paths
@@ -4413,6 +4792,11 @@ def _recover_pair_publication(
         "Manifest backup",
         ownership_guard,
     )
+    source_commit_exists = _require_regular_publication_target(
+        source_commit_path,
+        "Source-commit record",
+        ownership_guard,
+    )
     if not marker_exists:
         if output_backup_exists or manifest_backup_exists:
             raise VirtualSpreadError(
@@ -4429,6 +4813,13 @@ def _recover_pair_publication(
             raise VirtualSpreadError(
                 "Orphaned virtual-spread staged artifact requires recovery: "
                 + ", ".join(str(path) for path in orphaned_staging)
+            )
+        if source_commit_exists:
+            return _recover_orphaned_source_commit(
+                output_path,
+                manifest_path,
+                source_commit_path,
+                ownership_guard,
             )
         return None
     try:
@@ -4456,6 +4847,10 @@ def _recover_pair_publication(
         ) from error
     transaction["markerPath"] = str(marker_path)
     if transaction["schema"] == LEGACY_PUBLICATION_SCHEMA:
+        if source_commit_exists:
+            raise VirtualSpreadError(
+                "Obsolete publication has unexpected source-commit evidence"
+            )
         current_output_backup_exists = _require_regular_publication_target(
             output_backup,
             "Output backup",
@@ -4488,6 +4883,49 @@ def _recover_pair_publication(
             settled_manifest_state=settled_pair[1],
         )
         return "discarded"
+    source_commit_authorizes = False
+    if source_commit_exists:
+        try:
+            source_commit_record, source_commit_identity, source_commit_hash = (
+                _validated_source_commit_record(
+                    source_commit_path,
+                    transaction,
+                    ownership_guard,
+                )
+            )
+        except AmbiguousPublicationMarkerError as error:
+            raise VirtualSpreadError(
+                "Cannot recover ambiguous source-commit record"
+            ) from error
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            UnicodeError,
+            VirtualSpreadError,
+        ) as error:
+            raise VirtualSpreadError(
+                "Cannot recover invalid source-commit record"
+            ) from error
+        transaction["_sourceCommitIdentity"] = source_commit_identity
+        transaction["_sourceCommitSha256"] = source_commit_hash
+        source_commit_authorizes = True
+        if allow_commit and source_commit_record["sourceValidationRequired"]:
+            source_identity = SourceIdentity(
+                source_commit_record["sourceDevice"],
+                source_commit_record["sourceInode"],
+                source_commit_record["sourceSize"],
+                source_commit_record["sourceModifiedNs"],
+                source_commit_record["sourceChangedNs"],
+            )
+            try:
+                _require_source_snapshot(
+                    Path(source_commit_record["sourcePath"]),
+                    source_identity,
+                    source_commit_record["sourceSha256"],
+                )
+            except VirtualSpreadError:
+                source_commit_authorizes = False
     try:
         committed_output_identity, _ = _publication_output_evidence(
             output_path,
@@ -4508,6 +4946,7 @@ def _recover_pair_publication(
         committed_manifest_identity = None
     if (
         allow_commit
+        and source_commit_authorizes
         and committed_output_identity is not None
         and committed_manifest_identity is not None
     ):
@@ -4730,6 +5169,7 @@ def _prepare_publication_transaction(
     expected_output_state: PublicationTargetState | None = None,
     expected_manifest_state: PublicationTargetState | None = None,
     replace_authorized: bool = True,
+    source_validation_required: bool = False,
 ) -> dict[str, Any]:
     output_path = _require_unaliased_output_path(output_path)
     manifest_path = _require_runtime_manifest_path(
@@ -4824,6 +5264,17 @@ def _prepare_publication_transaction(
     transaction["_oldManifestIdentity"] = expected_manifest_state.identity
     transaction["_markerIdentity"] = marker_identity
     transaction["_markerSha256"] = marker_hash
+    if not source_validation_required:
+        source_commit_identity, source_commit_hash = (
+            _write_source_commit_record(
+                output_path,
+                transaction,
+                None,
+                ownership_guard,
+            )
+        )
+        transaction["_sourceCommitIdentity"] = source_commit_identity
+        transaction["_sourceCommitSha256"] = source_commit_hash
     return transaction
 
 
@@ -5151,10 +5602,10 @@ def _build_virtual_spread_from_snapshot(
             expected_output_state=expected_output_state,
             expected_manifest_state=expected_manifest_state,
             replace_authorized=force,
-            source_commit_validator=lambda: _require_source_snapshot(
-                source_path,
-                source_identity,
-                source_hash,
+            source_commit_evidence=PublicationSourceEvidence(
+                path=source_path,
+                identity=source_identity,
+                sha256=source_hash,
             ),
         )
         return manifest

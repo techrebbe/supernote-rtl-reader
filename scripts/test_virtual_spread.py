@@ -38,6 +38,7 @@ from generate_virtual_spread import (  # noqa: E402
     MAX_MANIFEST_BYTES,
     MOVEFILE_REPLACE_EXISTING,
     MOVEFILE_WRITE_THROUGH,
+    PublicationSourceEvidence,
     Slot,
     SourceIdentity,
     VirtualSpreadError,
@@ -63,8 +64,10 @@ from generate_virtual_spread import (  # noqa: E402
     _publication_lock,
     _publication_path_matches,
     _publication_reserved_paths,
+    _publication_source_commit_artifacts,
     _publication_staging_artifacts,
     _publication_target_state,
+    _require_source_snapshot,
     _transform_rect,
     _transform_link_border,
     _transform_link_border_style,
@@ -82,6 +85,7 @@ from generate_virtual_spread import (  # noqa: E402
     _windows_move_flags,
     _write_json,
     _write_publication_marker,
+    _write_source_commit_record,
     _validated_publication_transaction,
     build_pairs,
     build_virtual_spread,
@@ -105,6 +109,44 @@ EXPLICIT_DEFAULT_LAYOUT = {
     "spread_height": 648.0,
     "gutter": 0.0,
 }
+
+
+def authorize_publication_without_source(
+    output: Path,
+    manifest: Path,
+) -> Path:
+    marker, output_backup, manifest_backup = _publication_artifacts(output)
+    transaction = _validated_publication_transaction(
+        marker,
+        output,
+        manifest,
+        output_backup,
+        manifest_backup,
+    )
+    transaction["markerPath"] = str(marker)
+    identity, digest = _write_source_commit_record(
+        output,
+        transaction,
+        None,
+    )
+    transaction["_sourceCommitIdentity"] = identity
+    transaction["_sourceCommitSha256"] = digest
+    return _publication_source_commit_artifacts(output)[0]
+
+
+def move_prepared_pair(
+    transaction: dict[str, object],
+    temporary_output: Path,
+    output: Path,
+    temporary_manifest: Path,
+    manifest: Path,
+) -> None:
+    if transaction["hadOutput"]:
+        _durable_replace(output, Path(transaction["outputBackupPath"]))
+    if transaction["hadManifest"]:
+        _durable_replace(manifest, Path(transaction["manifestBackupPath"]))
+    _durable_replace(temporary_manifest, manifest)
+    _durable_replace(temporary_output, output)
 
 
 def create_odd_page_fixture(path: Path) -> None:
@@ -4328,6 +4370,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 expected_output_state: object = None,
                 expected_manifest_state: object = None,
                 replace_authorized: bool = True,
+                source_validation_required: bool = False,
             ) -> dict[str, object]:
                 nonlocal created_backup
                 transaction = real_prepare(
@@ -4339,6 +4382,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     expected_output_state=expected_output_state,
                     expected_manifest_state=expected_manifest_state,
                     replace_authorized=replace_authorized,
+                    source_validation_required=source_validation_required,
                 )
                 created_backup = Path(transaction["outputBackupPath"])
                 created_backup.mkdir()
@@ -4421,6 +4465,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 expected_output_state: object = None,
                 expected_manifest_state: object = None,
                 replace_authorized: bool = True,
+                source_validation_required: bool = False,
             ) -> dict[str, object]:
                 transaction = real_prepare(
                     staged_output,
@@ -4431,6 +4476,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     expected_output_state=expected_output_state,
                     expected_manifest_state=expected_manifest_state,
                     replace_authorized=replace_authorized,
+                    source_validation_required=source_validation_required,
                 )
                 staged_manifest.unlink()
                 staged_manifest.mkdir()
@@ -4647,6 +4693,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 expected_output_state: object = None,
                 expected_manifest_state: object = None,
                 replace_authorized: bool = True,
+                source_validation_required: bool = False,
             ) -> dict[str, object]:
                 nonlocal swapped
                 temporary_manifest.unlink()
@@ -4665,6 +4712,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     expected_output_state=expected_output_state,
                     expected_manifest_state=expected_manifest_state,
                     replace_authorized=replace_authorized,
+                    source_validation_required=source_validation_required,
                 )
 
             with mock.patch(
@@ -4714,6 +4762,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 expected_output_state: object = None,
                 expected_manifest_state: object = None,
                 replace_authorized: bool = True,
+                source_validation_required: bool = False,
             ) -> dict[str, object]:
                 nonlocal swapped
                 replacement = temporary_manifest.with_name(
@@ -4735,6 +4784,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     expected_output_state=expected_output_state,
                     expected_manifest_state=expected_manifest_state,
                     replace_authorized=replace_authorized,
+                    source_validation_required=source_validation_required,
                 )
 
             with mock.patch(
@@ -4784,6 +4834,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 expected_output_state: object = None,
                 expected_manifest_state: object = None,
                 replace_authorized: bool = True,
+                source_validation_required: bool = False,
             ) -> dict[str, object]:
                 nonlocal swapped
                 replacement = temporary_output.with_name(
@@ -4805,6 +4856,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     expected_output_state=expected_output_state,
                     expected_manifest_state=expected_manifest_state,
                     replace_authorized=replace_authorized,
+                    source_validation_required=source_validation_required,
                 )
 
             with mock.patch(
@@ -4854,6 +4906,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 expected_output_state: object = None,
                 expected_manifest_state: object = None,
                 replace_authorized: bool = True,
+                source_validation_required: bool = False,
             ) -> dict[str, object]:
                 nonlocal swapped
                 replacement = temporary_output.with_name(
@@ -4875,6 +4928,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     expected_output_state=expected_output_state,
                     expected_manifest_state=expected_manifest_state,
                     replace_authorized=replace_authorized,
+                    source_validation_required=source_validation_required,
                 )
 
             with mock.patch(
@@ -5055,11 +5109,18 @@ class VirtualSpreadTests(unittest.TestCase):
                     ),
                 ),
             )
+            source_commit, source_commit_stage = (
+                _publication_source_commit_artifacts(output)
+            )
+            self.assertEqual(
+                source_commit_stage,
+                source_commit.with_name(f".{source_commit.name}.tmp"),
+            )
 
     def test_recovery_preserves_orphaned_deterministic_staging(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for index in range(3):
+            for index in range(4):
                 with self.subTest(index=index):
                     case_root = root / str(index)
                     case_root.mkdir()
@@ -5067,7 +5128,11 @@ class VirtualSpreadTests(unittest.TestCase):
                     manifest = case_root / "spread.pdf.json"
                     output.write_bytes(b"stable-pdf")
                     manifest.write_bytes(b"stable-manifest")
-                    stage = _publication_staging_artifacts(output)[index]
+                    stages = (
+                        *_publication_staging_artifacts(output),
+                        _publication_source_commit_artifacts(output)[1],
+                    )
+                    stage = stages[index]
                     stage.write_bytes(b"orphaned-stage")
 
                     with self.assertRaisesRegex(
@@ -5118,6 +5183,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     "newManifestSha256": manifest_hash,
                 },
             )
+            authorize_publication_without_source(output, manifest)
             marker_stage.write_bytes(marker.read_bytes())
 
             self.assertEqual(
@@ -5166,6 +5232,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     "newManifestSha256": manifest_hash,
                 },
             )
+            authorize_publication_without_source(output, manifest)
 
             with self.assertRaisesRegex(
                 VirtualSpreadError,
@@ -6346,6 +6413,287 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertEqual(manifest.read_bytes(), b"old-manifest")
             self.assertTrue(marker.is_file())
 
+    def test_recovery_rolls_back_complete_pair_without_source_commit(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+                source_validation_required=True,
+            )
+            move_prepared_pair(
+                transaction,
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+
+            self.assertEqual(
+                _recover_pair_publication(output, manifest),
+                "rolled_back",
+            )
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertFalse(
+                _publication_source_commit_artifacts(output)[0].exists()
+            )
+
+    def test_recovery_commits_only_after_durable_source_validation(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            source.write_bytes(b"stable-source")
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+            source_identity = _identity(source.stat())
+            with source.open("rb") as stream:
+                source_hash = _sha256_open_file(stream)
+            evidence = PublicationSourceEvidence(
+                source,
+                source_identity,
+                source_hash,
+            )
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+                source_validation_required=True,
+            )
+            move_prepared_pair(
+                transaction,
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            _require_source_snapshot(source, source_identity, source_hash)
+            _write_source_commit_record(output, transaction, evidence)
+
+            self.assertEqual(
+                _recover_pair_publication(output, manifest),
+                "committed",
+            )
+            self.assertEqual(output.read_bytes(), b"new-pdf")
+            self.assertEqual(manifest.read_bytes(), b"new-manifest")
+
+    def test_recovery_revalidates_durable_source_commit_before_commit(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            replacement = root / "replacement.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            source.write_bytes(b"stable-source")
+            replacement.write_bytes(b"changed-source")
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+            source_identity = _identity(source.stat())
+            with source.open("rb") as stream:
+                source_hash = _sha256_open_file(stream)
+            evidence = PublicationSourceEvidence(
+                source,
+                source_identity,
+                source_hash,
+            )
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+                source_validation_required=True,
+            )
+            move_prepared_pair(
+                transaction,
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            _write_source_commit_record(output, transaction, evidence)
+            os.replace(replacement, source)
+
+            self.assertEqual(
+                _recover_pair_publication(output, manifest),
+                "rolled_back",
+            )
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+
+    def test_orphaned_source_commit_finishes_committed_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            move_prepared_pair(
+                transaction,
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            for backup_key in (
+                "outputBackupPath",
+                "manifestBackupPath",
+            ):
+                backup = Path(transaction[backup_key])
+                _durably_remove(
+                    backup,
+                    expected_identity=_identity(backup.stat()),
+                )
+            _durably_remove(
+                Path(transaction["markerPath"]),
+                expected_identity=transaction["_markerIdentity"],
+            )
+
+            self.assertEqual(
+                _recover_pair_publication(output, manifest),
+                "committed",
+            )
+            self.assertEqual(output.read_bytes(), b"new-pdf")
+            self.assertEqual(manifest.read_bytes(), b"new-manifest")
+            self.assertFalse(
+                _publication_source_commit_artifacts(output)[0].exists()
+            )
+
+    def test_source_commit_record_is_bound_to_publication_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            move_prepared_pair(
+                transaction,
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            source_commit = _publication_source_commit_artifacts(output)[0]
+            record = json.loads(source_commit.read_text(encoding="utf-8"))
+            record["publicationMarkerSha256"] = "f" * 64
+            source_commit.write_text(
+                json.dumps(record, sort_keys=True),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot recover invalid source-commit record",
+            ):
+                _recover_pair_publication(output, manifest)
+
+            self.assertEqual(output.read_bytes(), b"new-pdf")
+            self.assertEqual(manifest.read_bytes(), b"new-manifest")
+            self.assertTrue(Path(transaction["markerPath"]).exists())
+            self.assertTrue(source_commit.exists())
+
+    def test_orphaned_source_commit_requires_matching_pair(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            move_prepared_pair(
+                transaction,
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            for backup_key in (
+                "outputBackupPath",
+                "manifestBackupPath",
+            ):
+                backup = Path(transaction[backup_key])
+                _durably_remove(
+                    backup,
+                    expected_identity=_identity(backup.stat()),
+                )
+            _durably_remove(
+                Path(transaction["markerPath"]),
+                expected_identity=transaction["_markerIdentity"],
+            )
+            output.write_bytes(b"unrelated-output")
+            source_commit = _publication_source_commit_artifacts(output)[0]
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot recover invalid orphaned source-commit record",
+            ):
+                _recover_pair_publication(output, manifest)
+
+            self.assertEqual(output.read_bytes(), b"unrelated-output")
+            self.assertEqual(manifest.read_bytes(), b"new-manifest")
+            self.assertTrue(source_commit.exists())
+
     def test_recovery_finishes_cleanup_after_complete_publication(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -6437,7 +6785,12 @@ class VirtualSpreadTests(unittest.TestCase):
 
             self.assertEqual(
                 removed,
-                [output_backup, manifest_backup, marker],
+                [
+                    output_backup,
+                    manifest_backup,
+                    marker,
+                    _publication_source_commit_artifacts(output)[0],
+                ],
             )
 
     def test_cleanup_never_deletes_a_replaced_backup(self) -> None:
@@ -6539,6 +6892,7 @@ class VirtualSpreadTests(unittest.TestCase):
                             "newManifestSha256": manifest_hash,
                         },
                     )
+                    authorize_publication_without_source(output, manifest)
                     if target_kind == "stage":
                         output_stage.write_bytes(output.read_bytes())
                         target = output_stage
@@ -6671,6 +7025,7 @@ class VirtualSpreadTests(unittest.TestCase):
                     "newManifestSha256": manifest_hash,
                 },
             )
+            authorize_publication_without_source(output, manifest)
 
             with self.assertRaisesRegex(
                 VirtualSpreadError,

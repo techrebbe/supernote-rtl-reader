@@ -168,10 +168,19 @@ authorized before generation is rechecked at the transaction boundary; a target
 that appears, disappears, or changes meanwhile is preserved and rejected. Final
 publication also reopens and hashes the canonical source immediately before
 transaction preparation and again after the new PDF/sidecar pair has moved but
-before rollback evidence is retired. If the source path changed during that
-window, commit classification is disabled and the old pair is restored (or the
-new pair is removed when no old pair existed). Publication and backup
-restoration use atomic
+before rollback evidence is retired. A matching PDF/sidecar pair remains
+rollback-only until that second check publishes a separate, fsynced
+source-commit record. The record is bound to the transaction-marker hash, both
+new canonical hashes, and the source path, identity, size, timestamps, and
+SHA-256. Crash recovery revalidates that persisted source snapshot before it
+may classify the pair as committed. A crash before the record, a changed source,
+or a record that does not exactly match its marker therefore restores the old
+pair (or removes a first-published pair). Cleanup retires the marker before the
+source-commit record only for a committed transaction; an orphaned final record
+can finish cleanup solely after it authenticates both canonical files. This
+closes the process-death interval between the final source check and ordinary
+cleanup without making an incomplete matching pair authoritative. Publication
+and backup restoration use atomic
 `renameat2(RENAME_NOREPLACE)` moves on POSIX, so an incumbent destination is
 never overwritten and no link-then-path-unlink cleanup can delete a recreated
 source. The moved entry is checked against the authenticated source identity.
@@ -217,9 +226,10 @@ either previous file is moved. POSIX builds
 sync every affected parent directory; Windows builds use
 `MoveFileExW(MOVEFILE_WRITE_THROUGH)` for the marker, backup, publication,
 rollback, and retirement renames. If the process or machine is interrupted, the
-next run either recognizes the fully published pair by both staged hashes and
-finishes cleanup, or restores the previous PDF and manifest from the recorded
-backups. Publication marker v2 records the prior pair's SHA-256 values; recovery
+next run recognizes the fully published pair only when both staged hashes and
+the bound source-commit record authenticate it; otherwise it restores the
+previous PDF and manifest from the recorded backups. Publication marker v2
+records the prior pair's SHA-256 values; recovery
 reads, hashes, and parses that marker through one descriptor-bound snapshot,
 authenticates each backup before restoring it, and preserves the marker plus
 evidence if any backup was altered. Before every retirement for a committed,
@@ -321,6 +331,13 @@ declared schema can reach
 legacy recovery classification; duplicate JSON keys or additional fields are
 structurally ambiguous and always fail closed with the marker and canonical
 evidence preserved.
+
+Pull-request CI builds and verifies the companion APK with a short-lived
+ephemeral certificate and never reads the long-lived upgrade signer. The
+upgrade-compatible APK is rebuilt only by the successful trusted `main` push
+job, which runs in the `virtual-spread-release` GitHub environment. That
+environment accepts deployments only from `main` and is the sole location of
+`VIRTUAL_SPREAD_APK_KEYSTORE_BASE64`; no repository-wide duplicate is retained.
 
 ## Nomad hardware result: GO
 

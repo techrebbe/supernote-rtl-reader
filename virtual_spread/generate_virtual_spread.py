@@ -3642,37 +3642,15 @@ def _durable_replace(
         except VirtualSpreadError as identity_error:
             if replace_existing:
                 raise
-            # A non-cooperating writer can replace the checked source pathname
-            # immediately before a no-replace rename. The kernel then moves that
-            # foreign entry, and the identity check above detects the substitution
-            # only after the namespace mutation. Restore the mismatched entry to
-            # its original source name before failing so it is never left under a
-            # canonical output, backup, marker, or retirement name.
-            try:
-                namespace = _publication_namespace(ownership_guard)
-                if namespace is not None:
-                    namespace.replace(
-                        target, source, replace_existing=False
-                    )
-                else:
-                    _validate_publication_ownership(ownership_guard)
-                    if os.name == "nt":
-                        _windows_move_file_ex(
-                            target,
-                            source,
-                            _windows_move_flags(False),
-                        )
-                    else:
-                        _posix_rename_noreplace(target, source)
-                        _fsync_parent_directories(target, source)
-            except BaseException as restore_error:
-                raise VirtualSpreadError(
-                    "Publication move target identity changed and the "
-                    f"mismatched entry could not be restored: {target}"
-                ) from restore_error
+            # The post-move mismatch is inherently ambiguous: a writer may
+            # have substituted the source before rename, or it may have
+            # replaced the destination after rename. Moving the target back
+            # could therefore relocate a writer's newly created destination.
+            # Preserve the ambiguous target exactly where it is and leave the
+            # transaction marker/evidence for fail-closed recovery.
             raise VirtualSpreadError(
-                "Publication move target identity changed; mismatched entry "
-                f"restored to source: {source}"
+                "Publication move target identity changed; ambiguous target "
+                f"preserved: {target}"
             ) from identity_error
     return _require_publication_path_identity(
         target,

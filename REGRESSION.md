@@ -1527,7 +1527,7 @@ suites, hook-scope validation, and the signed/verified v0.0.24
 A fresh clean exact-head Ultra review and focused hardware validation remain
 release gates; PR #16 stays draft.
 
-## Review pass 64 source restoration and stale-action cancellation - LOCAL PASS
+## Review pass 64 source restoration and stale-action cancellation - SUPERSEDED
 
 The next exact-head Ultra review found three remaining cross-callback races.
 After a POSIX no-replace move, publication now verifies the moved inode and, if
@@ -1535,6 +1535,11 @@ a non-cooperating writer substituted the checked source immediately before the
 syscall, atomically restores that foreign entry to its original source name
 before failing closed. It can no longer leave an unauthenticated replacement
 under a canonical output, backup, marker, or retirement name.
+
+The following exact-head review showed that the restoration step could not
+distinguish that source-side race from a destination replacement after the
+move. Review pass 65 therefore supersedes only this restoration mechanism; the
+stale/superseded lookup protections below remain current.
 
 Android manifest lookups from an obsolete native view model, or whose verifier
 ownership was superseded between observation and scheduling, are explicitly
@@ -1553,6 +1558,38 @@ navigation/manifest/cache assertions, 15 cross-language authority assertions,
 hook-scope validation, and the signed/verified v0.0.24 (`versionCode=24`) APK
 build (SHA-256
 `77c5e3bf2b22d25e5277182e8d4c0c4e7f2cc4d9f89e2e7a9b083beb2c4739b8`).
+A fresh clean exact-head Ultra review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
+## Review pass 65 ambiguous-target preservation and action supersession - LOCAL PASS
+
+The next exact-head Ultra review found that reversing a mismatched POSIX move
+could relocate a non-cooperating writer's newly created destination. Because a
+post-move mismatch cannot distinguish a source replacement before the move from
+a destination replacement afterward, publication now preserves the ambiguous
+destination in place, leaves any existing transaction evidence intact, and
+fails closed. It never performs a destructive reverse move based on that
+ambiguity.
+
+The same review found two remaining queued-link ordering gaps. Every nonzero
+manual turn now clears any older cold-verification link before manifest lookup,
+including turns that must then remain blocked. A newly verified internal or
+external link also clears an older queued invocation before capture or native
+passthrough. A delayed verifier therefore cannot replay an older tap over either
+newer form of user intent.
+
+Deterministic POSIX regressions cover both a source substitution immediately
+before `RENAME_NOREPLACE` and a destination replacement immediately afterward;
+both preserve the ambiguous destination and fail closed. Structural Android
+regressions pin queued-link cancellation before every pending/blocked turn
+return and before both verified-link branches. Local validation passes 132
+generator tests on Windows (12 expected platform/filesystem or privilege skips)
+and the same 132 on Linux (two Windows-specific skips), 141 focused
+navigation/manifest/cache assertions, 15 cross-language authority assertions,
+8,752 exhaustive navigation assertions, both native invariant suites,
+hook-scope validation, syntax checks, and the signed/verified v0.0.24
+(`versionCode=24`) APK build (SHA-256
+`1702b0054afe2a7cf918f76be4fb77513e8ab0178f38d3012274d03ef0474971`).
 A fresh clean exact-head Ultra review and focused hardware validation remain
 release gates; PR #16 stays draft.
 

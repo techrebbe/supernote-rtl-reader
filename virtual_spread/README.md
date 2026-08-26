@@ -157,10 +157,13 @@ publication and backup restoration use atomic
 `renameat2(RENAME_NOREPLACE)` moves on POSIX, so an incumbent destination is
 never overwritten and no link-then-path-unlink cleanup can delete a recreated
 source. The moved entry is checked against the authenticated source identity.
-If a non-cooperating writer replaced the source immediately before the syscall,
-the mismatched entry is atomically restored to its original source name and the
-transaction fails closed. A host lacking the no-replace primitive fails closed
-rather than falling back to a lossy emulation.
+If that post-move identity is wrong, the race is inherently ambiguous: a
+non-cooperating writer may have replaced either the source before the move or
+the destination afterward. The generator preserves the destination exactly
+where it is and fails closed. Any existing transaction evidence remains intact,
+and it never moves a potentially writer-owned destination back to the source. A host lacking
+the no-replace primitive fails closed rather than falling back to a lossy
+emulation.
 Forced-regeneration layout policy is derived from those same captured target
 snapshots, so a target that appears after an earlier existence observation still
 requires explicit cover and geometry choices. Recovery also binds every deletion
@@ -244,8 +247,10 @@ queued once, and replayed only after the same document and source page acquire
 verified authority. It is bound to a unique verifier generation, the exact native
 MuPDF document object, and all three embedded authorities rather than merely a
 reusable path snapshot. The queued invocation is discarded after a document/page
-change, verification rejection, native-document replacement, or its bounded freshness window. If a generated
-PDF is missing its sidecar—or the native authority metadata cannot be inspected—
+change, verification rejection, native-document replacement, a newer manual
+turn (including one blocked during verification), a newer already-verified
+link, or its bounded freshness window. If a generated PDF is missing its
+sidecar—or the native authority metadata cannot be inspected—
 navigation remains blocked; an ordinary PDF whose native document explicitly has
 no virtual-spread authority remains fully native.
 Delayed callbacks from an older native view model cannot reclaim ownership. That verifier

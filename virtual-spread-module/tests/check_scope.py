@@ -417,15 +417,40 @@ turn_end = hook.find("private static void handlePageLoaded(", turn_start)
 if turn_start < 0 or turn_end < 0:
     raise SystemExit("missing native turn handler")
 turn_handler = hook[turn_start:turn_end]
+turn_lookup = turn_handler.find("ManifestLookup lookup = manifestLookupFor(viewModel)")
 state_lookup = turn_handler.find("ReaderState state = stateFor(viewModel, manifest)")
-queued_clear = turn_handler.find("clearQueuedLinkInvocation(state)", state_lookup)
+queued_clear = turn_handler.find("clearQueuedLinkInvocation(viewModel)")
 pending_clear = turn_handler.find("clearPendingLink(state)", state_lookup)
 orientation_branch = turn_handler.find("if (!isPortrait(activity))", state_lookup)
 if not (
-    0 <= state_lookup < queued_clear < pending_clear < orientation_branch
+    0 <= queued_clear < turn_lookup < state_lookup < pending_clear
+    < orientation_branch
 ):
     raise SystemExit(
-        "manual navigation must discard an older queued link before routing"
+        "manual navigation must discard an older queued link before lookup "
+        "can return pending or blocked"
+    )
+
+link_start = hook.find("private static void handleLinkTarget(")
+link_end = hook.find("private static VirtualSpreadNavigation.LinkRouting", link_start)
+if link_start < 0 or link_end < 0:
+    raise SystemExit("missing authenticated link handler")
+link_handler = hook[link_start:link_end]
+verified_branch = link_handler.find("if (lookup.manifest != null)")
+verified_clear = link_handler.find(
+    "clearQueuedLinkInvocation(viewModel)", verified_branch
+)
+external_branch = link_handler.find(
+    "if (routing == VirtualSpreadNavigation.LinkRouting.EXTERNAL)",
+    verified_branch,
+)
+capture_branch = link_handler.find("if (!captureLinkTarget(", verified_branch)
+if not (
+    0 <= verified_branch < verified_clear < external_branch < capture_branch
+):
+    raise SystemExit(
+        "a newly verified link must discard an older queued invocation before "
+        "external passthrough or internal capture"
     )
 
 lookup_positions = (
@@ -946,8 +971,8 @@ for required in (
     "def _posix_rename_noreplace(",
     "RENAME_NOREPLACE = 1",
     "renameat2(RENAME_NOREPLACE)",
-    "mismatched entry could not be restored",
-    "restored to source",
+    "The post-move mismatch is inherently ambiguous",
+    "Preserve the ambiguous target exactly where it is",
     "def _publication_paths_share_inode(",
     "Interrupted publication target",
     "def _temporary_neighbor(",
@@ -1105,6 +1130,8 @@ for required in (
     "test_unguarded_marker_publication_is_atomically_exclusive",
     "test_unguarded_posix_no_replace_uses_atomic_rename",
     "test_posix_no_replace_never_unlinks_recreated_source",
+    "test_posix_no_replace_preserves_ambiguous_target_after_source_swap",
+    "test_posix_no_replace_never_moves_a_replaced_destination_back",
     "test_recovery_accepts_interrupted_posix_backup_hard_link",
     "test_committed_cleanup_revalidates_pair_before_backup_retirement",
     "test_runtime_float_link_rect_is_rejected",

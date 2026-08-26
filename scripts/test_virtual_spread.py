@@ -5040,7 +5040,9 @@ class VirtualSpreadTests(unittest.TestCase):
         os.name == "nt",
         "POSIX atomic no-replace rename is unavailable on Windows",
     )
-    def test_posix_no_replace_restores_source_replaced_before_rename(self) -> None:
+    def test_posix_no_replace_preserves_ambiguous_target_after_source_swap(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             staged = root / "staged"
@@ -5069,7 +5071,7 @@ class VirtualSpreadTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(
                     VirtualSpreadError,
-                    "mismatched entry restored to source",
+                    "ambiguous target preserved",
                 ):
                     _durable_replace(
                         staged,
@@ -5079,8 +5081,55 @@ class VirtualSpreadTests(unittest.TestCase):
                     )
 
             self.assertTrue(replaced)
-            self.assertEqual(staged.read_bytes(), b"foreign-stage")
-            self.assertFalse(published.exists())
+            self.assertFalse(staged.exists())
+            self.assertEqual(published.read_bytes(), b"foreign-stage")
+
+    @unittest.skipIf(
+        os.name == "nt",
+        "POSIX atomic no-replace rename is unavailable on Windows",
+    )
+    def test_posix_no_replace_never_moves_a_replaced_destination_back(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            staged = root / "staged"
+            published = root / "published"
+            staged.write_bytes(b"authenticated-stage")
+            expected_identity = _identity(staged.stat())
+            real_rename = _posix_rename_noreplace
+            replaced = False
+
+            def rename_then_replace_target(
+                source: Path | str,
+                target: Path | str,
+                **kwargs: object,
+            ) -> None:
+                nonlocal replaced
+                real_rename(source, target, **kwargs)  # type: ignore[arg-type]
+                replacement = root / "non-cooperating-destination"
+                replacement.write_bytes(b"foreign-destination")
+                os.replace(replacement, published)
+                replaced = True
+
+            with mock.patch(
+                "generate_virtual_spread._posix_rename_noreplace",
+                side_effect=rename_then_replace_target,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "ambiguous target preserved",
+                ):
+                    _durable_replace(
+                        staged,
+                        published,
+                        replace_existing=False,
+                        expected_source_identity=expected_identity,
+                    )
+
+            self.assertTrue(replaced)
+            self.assertFalse(staged.exists())
+            self.assertEqual(published.read_bytes(), b"foreign-destination")
 
     @unittest.skipIf(
         os.name == "nt",

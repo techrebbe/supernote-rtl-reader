@@ -676,6 +676,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             return;
         }
         if (lookup.manifest != null) {
+            // Any newly authenticated link action supersedes an invocation
+            // queued by an older cold-verification callback. Clear it before
+            // either native external handling or internal capture can return.
+            clearQueuedLinkInvocation(viewModel);
             if (routing == VirtualSpreadNavigation.LinkRouting.EXTERNAL) {
                 // The accepted PDF/sidecar snapshot authenticates the URI
                 // record. It changes no page or half, so keep native handling.
@@ -1165,6 +1169,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             return;
         }
         Object viewModel = param.thisObject;
+        // A manual turn is newer user intent even while manifest authority is
+        // still pending or blocked. Discard an older queued link before any
+        // fail-closed return so a delayed verifier cannot replay it afterward.
+        clearQueuedLinkInvocation(viewModel);
         ManifestLookup lookup = manifestLookupFor(viewModel);
         Manifest manifest = lookup.manifest;
         if (manifest == null && lookup.navigationBlocked()) {
@@ -1183,7 +1191,6 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
 
         int currentPage = intField(viewModel, "currentPage", -1);
         ReaderState state = stateFor(viewModel, manifest);
-        clearQueuedLinkInvocation(state);
         clearPendingLink(state);
         if (!isPortrait(activity)) {
             int adjusted = VirtualSpreadNavigation.reverseLandscapeOffset(

@@ -157,17 +157,23 @@ publication and backup restoration use no-replace moves, closing the last
 check-to-move overwrite window.
 Forced-regeneration layout policy is derived from those same captured target
 snapshots, so a target that appears after an earlier existence observation still
-requires explicit cover and geometry choices. Recovery also binds deletion of a
-newly published canonical target to both its authenticated digest and verified
-filesystem identity; a same-content pathname replacement is preserved.
+requires explicit cover and geometry choices. Recovery also binds every deletion
+to both its authenticated digest and exact filesystem identity. The marker,
+stages, and backups are authenticated before cleanup begins, then each exact
+identity is carried through an unguessable retirement name before removal. A
+same-content pathname replacement is preserved. POSIX identity checks include
+ctime so an in-place, same-size mutation cannot hide behind a restored mtime;
+the generator permits only the ctime transition caused by its own
+hard-link/unlink namespace move.
 The PDF and manifest are staged before publication as one recoverable pair.
 Their output-derived temporary names are deterministic, so a process death
 cannot leave an unbounded collection of randomly named files. Before a marker
 exists, any occupied staged name is preserved and generation fails closed for
 manual recovery. After a valid marker exists, recovery removes a remaining
 stage only after its SHA-256 matches that marker's authenticated transaction;
-a mismatched stage is preserved. Likewise, an already occupied `.retired`
-name is never treated as disposable scratch data: publication and recovery
+a mismatched stage is preserved. Likewise, an already occupied legacy or
+tokenized `.retired...` name is never treated as disposable scratch data:
+publication and recovery
 stop without changing it. A transaction marker is durably published before
 either previous file is moved. POSIX builds
 sync every affected parent directory; Windows builds use
@@ -203,7 +209,9 @@ geometry. Native module v0.0.24 authenticates each internal link's target-view
 policy and the exact source snapshot. It rejects malformed UTF-8 bytes before
 decoding, non-integral manifest page indices or output sizes, numeric strings or
 non-finite values in spread/link geometry, and malformed or duplicate-key
-manifest JSON at any nesting level,
+manifest JSON at any nesting level, spread dimensions outside PDF's
+3-to-14,400-unit page bounds, duplicate, concave, or self-intersecting link
+quadrilaterals,
 transformed URI `/IsMap true` actions, a source CropBox outside its MediaBox, and
 link geometry outside the effective source CropBox. It preserves an omitted PDF
 link border at its correct transformed default width. Link-authority v2 records

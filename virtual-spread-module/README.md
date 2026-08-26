@@ -35,9 +35,12 @@ exact JSON integer tokens for every consumed page count,
 page index, and the persisted nonnegative output byte size. Every spread
 dimension, gutter, and link rectangle coordinate must also be a raw finite JSON
 number; numeric strings, fractional integer fields, and non-finite values fail
-closed. Spread coordinates may be scaled, but their width and height must retain
+closed. Spread dimensions must also remain within PDF's 3-to-14,400-unit page
+bounds. Spread coordinates may be scaled, but their width and height must retain
 the Nomad's 4:3 landscape aspect; the generator and runtime independently reject
-other ratios. Before Android's permissive `JSONObject` parser runs, a strict bounded
+other ratios. Link `/QuadPoints` must form four distinct vertices in one strict
+convex Z-order quadrilateral; duplicate, concave, and bow-tie regions fail
+closed. Before Android's permissive `JSONObject` parser runs, a strict bounded
 scanner rejects malformed JSON and duplicate object names at every nesting level,
 including names that become equal after JSON escape decoding.
 Canonical link-authority encoding also rejects unpaired UTF-16 surrogates in URI
@@ -160,10 +163,14 @@ late target is preserved rather than overwritten.
 Forced-regeneration layout policy uses those same captured target snapshots, and
 recovery removes a newly published canonical target only while both its verified
 digest and filesystem identity still match.
+Transaction cleanup authenticates the complete set of marker, stage, and backup
+artifacts before deleting any of them, then carries each exact identity through
+an unguessable retirement name. POSIX ctime participates in identity checks, so
+an in-place same-size mutation cannot be hidden by restoring mtime.
 Marker-free remnants are preserved and rejected for manual recovery; once a
 valid marker exists, a staged remnant is removed only when its digest matches
-the authenticated transaction. A pre-existing `.retired` path is never deleted
-merely because of its filename. The sidecar's published spelling is always the
+the authenticated transaction. A pre-existing legacy or tokenized `.retired...`
+path is never deleted merely because of its filename. The sidecar's published spelling is always the
 exact output-derived `<PDF filename>.json`, including case.
 
 For a matching document it:

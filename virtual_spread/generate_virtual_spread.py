@@ -9,6 +9,7 @@ import hashlib
 import json
 import math
 import os
+import secrets
 import stat
 import struct
 import sys
@@ -48,6 +49,9 @@ DEFAULT_COVER_SEPARATE = True
 DEFAULT_SPREAD_WIDTH = 864.0
 DEFAULT_SPREAD_HEIGHT = 648.0
 DEFAULT_GUTTER = 0.0
+PDF_MIN_PAGE_DIMENSION = 3.0
+PDF_MAX_PAGE_DIMENSION = 14400.0
+RETIREMENT_TOKEN_BYTES = 16
 SUPPORTED_ANNOTATION_FLAGS_MASK = 0x03FF
 SUPPORTED_LINK_ANNOTATION_KEYS = frozenset({
     "/A",
@@ -206,6 +210,26 @@ def _same_open_file(
         and path_identity.inode == open_identity.inode
         and path_identity.size == open_identity.size
         and path_identity.modified_ns == open_identity.modified_ns
+        # Windows reports path and handle ctime with different precision and
+        # may update it merely by opening the file. POSIX ctime is stable for
+        # reads and is the required in-place mutation signal.
+        and (
+            os.name == "nt"
+            or path_identity.changed_ns == open_identity.changed_ns
+        )
+    )
+
+
+def _same_file_after_namespace_move(
+    expected: SourceIdentity,
+    actual: SourceIdentity,
+) -> bool:
+    """Compare an inode after our own POSIX hard-link/unlink changed ctime."""
+    return (
+        expected.device == actual.device
+        and expected.inode == actual.inode
+        and expected.size == actual.size
+        and expected.modified_ns == actual.modified_ns
     )
 
 
@@ -347,6 +371,15 @@ def _require_runtime_float_geometry(
     if not math.isfinite(narrowed_slot) or narrowed_slot <= 0.0:
         raise VirtualSpreadError(
             "Spread geometry is not representable by Android runtime floats"
+        )
+    if not (
+        PDF_MIN_PAGE_DIMENSION <= spread_width <= PDF_MAX_PAGE_DIMENSION
+        and PDF_MIN_PAGE_DIMENSION <= spread_height <= PDF_MAX_PAGE_DIMENSION
+    ):
+        raise VirtualSpreadError(
+            "Spread dimensions must remain within the PDF page-size bounds "
+            f"of {PDF_MIN_PAGE_DIMENSION:g} to {PDF_MAX_PAGE_DIMENSION:g} "
+            "default user-space units"
         )
     _require_nomad_spread_aspect(spread_width, spread_height)
     return slot_width
@@ -761,15 +794,27 @@ def _require_nondegenerate_quadrilateral(
         (Fraction.from_float(x), Fraction.from_float(y))
         for x, y in zip(xs, ys)
     ]
-    for first in range(2):
-        for second in range(first + 1, 3):
-            for third in range(second + 1, 4):
-                x1, y1 = points[first]
-                x2, y2 = points[second]
-                x3, y3 = points[third]
-                if (x2 - x1) * (y3 - y1) != (y2 - y1) * (x3 - x1):
-                    return
-    raise VirtualSpreadError(f"Invalid {label} area")
+    if len(set(points)) != 4:
+        raise VirtualSpreadError(f"Invalid {label} area")
+
+    # PDF /QuadPoints use Z order: first edge, opposite edge. Traverse the
+    # actual perimeter as 0 -> 1 -> 3 -> 2 and require one strictly convex,
+    # non-self-intersecting region. This rejects duplicate, triangular,
+    # concave, and bow-tie activation geometry while allowing rotation/skew.
+    perimeter = (points[0], points[1], points[3], points[2])
+    cross_products: list[Fraction] = []
+    for index, current in enumerate(perimeter):
+        following = perimeter[(index + 1) % 4]
+        after = perimeter[(index + 2) % 4]
+        cross_products.append(
+            (following[0] - current[0]) * (after[1] - following[1])
+            - (following[1] - current[1]) * (after[0] - following[0])
+        )
+    if any(value == 0 for value in cross_products) or not (
+        all(value > 0 for value in cross_products)
+        or all(value < 0 for value in cross_products)
+    ):
+        raise VirtualSpreadError(f"Invalid {label} area")
 
 
 def _layout_for_page(
@@ -2379,9 +2424,10 @@ def _close_staged_artifact(
             else:
                 cleanup_error = error
         else:
-            _publication_unlink(
+            _durably_remove(
                 artifact.path,
                 artifact.ownership_guard,
+                expected_identity=artifact.retained_identity,
                 missing_ok=missing_ok,
             )
     finally:
@@ -2605,7 +2651,9 @@ def _publish_pair(
             "Published output",
             ownership_guard,
         )
-        _finish_publication_transaction(transaction, ownership_guard)
+        _finish_publication_transaction(
+            transaction, ownership_guard, outcome="committed"
+        )
     except BaseException as publication_error:
         try:
             recovery = _recover_pair_publication(
@@ -3491,7 +3539,7 @@ def _durable_replace(
     replace_existing: bool = True,
     ownership_guard: PublicationOwnershipGuard | None = None,
     expected_source_identity: SourceIdentity | None = None,
-) -> None:
+) -> SourceIdentity:
     source = Path(source)
     target = Path(target)
     if expected_source_identity is not None:
@@ -3528,12 +3576,27 @@ def _durable_replace(
             os.replace(source, target)
             _fsync_parent_directories(source, target)
     if expected_source_identity is not None:
-        _require_publication_path_identity(
+        return _require_publication_path_identity(
             target,
             expected_source_identity,
             "Publication move target",
             ownership_guard,
+            allow_namespace_ctime_change=(
+                os.name != "nt" and not replace_existing
+            ),
         )
+    return _require_publication_path_identity(
+        target,
+        _identity(
+            (
+                _publication_namespace(ownership_guard).lstat(target)
+                if _publication_namespace(ownership_guard) is not None
+                else _lexical_absolute(target).lstat()
+            )
+        ),
+        "Publication move target",
+        ownership_guard,
+    )
 
 
 def _require_publication_path_identity(
@@ -3541,6 +3604,8 @@ def _require_publication_path_identity(
     expected: SourceIdentity,
     label: str,
     ownership_guard: PublicationOwnershipGuard | None,
+    *,
+    allow_namespace_ctime_change: bool = False,
 ) -> SourceIdentity:
     try:
         namespace = _publication_namespace(ownership_guard)
@@ -3554,7 +3619,11 @@ def _require_publication_path_identity(
     if not stat.S_ISREG(entry.st_mode):
         raise VirtualSpreadError(f"{label} must be a regular file: {path}")
     actual = _identity(entry)
-    if not _same_open_file(expected, actual):
+    matches = (
+        _same_file_after_namespace_move(expected, actual)
+        if allow_namespace_ctime_change else _same_open_file(expected, actual)
+    )
+    if not matches:
         raise VirtualSpreadError(f"{label} identity changed: {path}")
     return actual
 
@@ -3583,22 +3652,62 @@ def _fsync_parent_directories(*paths: Path) -> None:
             os.close(descriptor)
 
 
+def _retired_publication_artifacts(
+    path: Path,
+    ownership_guard: PublicationOwnershipGuard | None = None,
+) -> tuple[Path, ...]:
+    """Return legacy and unguessable retirement names for one artifact."""
+    path = _lexical_absolute(path)
+    namespace = _publication_namespace(ownership_guard)
+    try:
+        if namespace is not None:
+            namespace()
+            if namespace.directory_descriptor is not None:
+                names = os.listdir(namespace.directory_descriptor)
+            else:
+                names = os.listdir(namespace.directory_path)
+        else:
+            _validate_publication_ownership(ownership_guard)
+            names = os.listdir(path.parent)
+    except OSError as error:
+        raise VirtualSpreadError(
+            f"Cannot inspect retired publication artifacts for: {path}"
+        ) from error
+    legacy_name = path.name + ".retired"
+    unique_prefix = legacy_name + "."
+    return tuple(
+        path.with_name(name)
+        for name in sorted(names)
+        if name == legacy_name or name.startswith(unique_prefix)
+    )
+
+
 def _durably_remove(
     path: Path,
     ownership_guard: PublicationOwnershipGuard | None = None,
     *,
     expected_identity: SourceIdentity | None = None,
+    missing_ok: bool = False,
 ) -> None:
-    retired = path.with_name(path.name + ".retired")
-    if _require_regular_publication_target(
-        retired,
-        "Retired publication artifact",
-        ownership_guard,
-    ):
+    existing_retired = _retired_publication_artifacts(path, ownership_guard)
+    if existing_retired:
         raise VirtualSpreadError(
             "Retired publication artifact requires manual recovery: "
-            f"{retired}"
+            + ", ".join(str(item) for item in existing_retired)
         )
+    if not _require_regular_publication_target(
+        path, "Publication removal target", ownership_guard
+    ):
+        if missing_ok:
+            return
+        raise VirtualSpreadError(f"Publication removal target disappeared: {path}")
+    if expected_identity is None:
+        raise VirtualSpreadError(
+            f"Publication removal requires authenticated identity: {path}"
+        )
+    retired = path.with_name(
+        path.name + ".retired." + secrets.token_hex(RETIREMENT_TOKEN_BYTES)
+    )
     try:
         _durable_replace(
             path,
@@ -3607,15 +3716,20 @@ def _durably_remove(
             ownership_guard=ownership_guard,
             expected_source_identity=expected_identity,
         )
-    except FileNotFoundError:
-        return
-    namespace = _publication_namespace(ownership_guard)
-    if namespace is not None:
-        namespace.unlink(retired, missing_ok=True)
-    else:
-        _validate_publication_ownership(ownership_guard)
-        retired.unlink(missing_ok=True)
-        _fsync_parent_directories(retired)
+    except FileNotFoundError as error:
+        if missing_ok:
+            return
+        raise VirtualSpreadError(
+            f"Publication removal target disappeared: {path}"
+        ) from error
+    retired_identity = _require_publication_path_identity(
+        retired,
+        expected_identity,
+        "Retired publication artifact",
+        ownership_guard,
+        allow_namespace_ctime_change=(os.name != "nt"),
+    )
+    _publication_unlink(retired, ownership_guard, missing_ok=False)
 
 
 def _reject_retired_publication_artifacts(
@@ -3635,15 +3749,11 @@ def _reject_retired_publication_artifacts(
         manifest_path,
         *staging,
     ):
-        retired = active.with_name(active.name + ".retired")
-        if _require_regular_publication_target(
-            retired,
-            "Retired publication artifact",
-            ownership_guard,
-        ):
+        retired = _retired_publication_artifacts(active, ownership_guard)
+        if retired:
             raise VirtualSpreadError(
                 "Retired publication artifact requires manual recovery: "
-                f"{retired}"
+                + ", ".join(str(item) for item in retired)
             )
 
 
@@ -3758,6 +3868,12 @@ def _validated_publication_transaction(
     manifest_backup: Path,
     ownership_guard: PublicationOwnershipGuard | None = None,
 ) -> dict[str, Any]:
+    marker_identity, marker_hash = _publication_file_evidence(
+        marker_path,
+        "Publication marker",
+        ownership_guard,
+        maximum_bytes=MAX_MANIFEST_BYTES,
+    )
     marker_flags = os.O_RDONLY
     marker_flags |= getattr(os, "O_BINARY", 0)
     marker_flags |= getattr(os, "O_NOINHERIT", 0)
@@ -3770,6 +3886,14 @@ def _validated_publication_transaction(
             stream,
             object_pairs_hook=_publication_marker_object,
         )
+    _publication_file_evidence(
+        marker_path,
+        "Publication marker",
+        ownership_guard,
+        maximum_bytes=MAX_MANIFEST_BYTES,
+        expected_identity=marker_identity,
+        expected_hash=marker_hash,
+    )
     expected_paths = {
         "outputPath": output_path,
         "manifestPath": manifest_path,
@@ -3810,22 +3934,23 @@ def _validated_publication_transaction(
     for key in ("newOutputSha256", "newManifestSha256"):
         if not _valid_sha256(transaction.get(key)):
             raise VirtualSpreadError("Invalid virtual-spread publication marker")
-    if schema == LEGACY_PUBLICATION_SCHEMA:
-        return transaction
-    for had_key, old_hash_key in (
-        ("hadOutput", "oldOutputSha256"),
-        ("hadManifest", "oldManifestSha256"),
-    ):
-        old_hash = transaction.get(old_hash_key)
-        if transaction[had_key]:
-            if not _valid_sha256(old_hash):
+    if schema != LEGACY_PUBLICATION_SCHEMA:
+        for had_key, old_hash_key in (
+            ("hadOutput", "oldOutputSha256"),
+            ("hadManifest", "oldManifestSha256"),
+        ):
+            old_hash = transaction.get(old_hash_key)
+            if transaction[had_key]:
+                if not _valid_sha256(old_hash):
+                    raise VirtualSpreadError(
+                        "Invalid virtual-spread publication marker"
+                    )
+            elif old_hash is not None:
                 raise VirtualSpreadError(
                     "Invalid virtual-spread publication marker"
                 )
-        elif old_hash is not None:
-            raise VirtualSpreadError(
-                "Invalid virtual-spread publication marker"
-            )
+    transaction["_markerIdentity"] = marker_identity
+    transaction["_markerSha256"] = marker_hash
     return transaction
 
 
@@ -3869,34 +3994,38 @@ def _legacy_publication_is_pre_mutation(
 def _finish_publication_transaction(
     transaction: dict[str, Any],
     ownership_guard: PublicationOwnershipGuard | None = None,
+    *,
+    outcome: str,
 ) -> None:
+    if outcome not in {"committed", "rolled_back", "discarded"}:
+        raise VirtualSpreadError("Invalid publication cleanup outcome")
     marker_path = Path(transaction["markerPath"])
     output_path = Path(transaction["outputPath"])
     output_backup = Path(transaction["outputBackupPath"])
     manifest_backup = Path(transaction["manifestBackupPath"])
-    artifacts = (
-        (output_backup, "Output backup"),
-        (manifest_backup, "Manifest backup"),
-        (marker_path, "Publication marker"),
-    )
-    for path, label in artifacts:
-        _require_regular_publication_target(
-            path, label, ownership_guard
-        )
+    marker_identity = transaction.get("_markerIdentity")
+    marker_hash = transaction.get("_markerSha256")
+    if not isinstance(marker_identity, SourceIdentity) or not _valid_sha256(
+        marker_hash
+    ):
+        raise VirtualSpreadError("Missing authenticated publication marker evidence")
+
+    cleanup: list[tuple[Path, SourceIdentity]] = []
     output_stage, manifest_stage, marker_stage = (
         _publication_staging_artifacts(output_path)
     )
-    staged_artifacts: list[Path] = []
-    for path, expected_hash, label in (
+    for path, expected_hash, label, evidence in (
         (
             output_stage,
             transaction["newOutputSha256"],
             "Staged output",
+            _publication_output_evidence,
         ),
         (
             manifest_stage,
             transaction["newManifestSha256"],
             "Staged manifest",
+            _publication_manifest_evidence,
         ),
     ):
         if _require_regular_publication_target(
@@ -3904,32 +4033,82 @@ def _finish_publication_transaction(
             label,
             ownership_guard,
         ):
-            _require_publication_file_hash(
+            identity, _ = evidence(
                 path,
-                expected_hash,
                 label,
                 ownership_guard,
+                expected_hash=expected_hash,
             )
-            staged_artifacts.append(path)
+            cleanup.append((path, identity))
     if _require_regular_publication_target(
         marker_stage,
         "Staged publication marker",
         ownership_guard,
     ):
-        marker_hash = _publication_sha256(marker_path, ownership_guard)
-        _require_publication_file_hash(
+        staged_marker_identity, _ = _publication_file_evidence(
             marker_stage,
-            marker_hash,
             "Staged publication marker",
             ownership_guard,
+            maximum_bytes=MAX_MANIFEST_BYTES,
+            expected_hash=marker_hash,
         )
-        staged_artifacts.append(marker_stage)
-    # Authenticate every deterministic stage before deleting any of them.
-    # A mismatch preserves the complete namespace for manual recovery.
-    for path in staged_artifacts:
-        _durably_remove(path, ownership_guard)
-    for path, _ in artifacts:
-        _durably_remove(path, ownership_guard)
+        cleanup.append((marker_stage, staged_marker_identity))
+
+    for path, had_original, old_hash, label, evidence in (
+        (
+            output_backup,
+            transaction["hadOutput"],
+            transaction.get("oldOutputSha256"),
+            "Output backup",
+            _publication_output_evidence,
+        ),
+        (
+            manifest_backup,
+            transaction["hadManifest"],
+            transaction.get("oldManifestSha256"),
+            "Manifest backup",
+            _publication_manifest_evidence,
+        ),
+    ):
+        exists = _require_regular_publication_target(
+            path, label, ownership_guard
+        )
+        backup_is_authorized = outcome == "committed" and had_original
+        if exists and not backup_is_authorized:
+            raise VirtualSpreadError(
+                f"Unexpected publication backup during {outcome} cleanup: {path}"
+            )
+        if exists:
+            if not _valid_sha256(old_hash):
+                raise VirtualSpreadError(
+                    f"Missing authenticated publication backup hash: {path}"
+                )
+            identity, _ = evidence(
+                path,
+                label,
+                ownership_guard,
+                expected_hash=old_hash,
+            )
+            cleanup.append((path, identity))
+
+    current_marker_identity, _ = _publication_file_evidence(
+        marker_path,
+        "Publication marker",
+        ownership_guard,
+        maximum_bytes=MAX_MANIFEST_BYTES,
+        expected_identity=marker_identity,
+        expected_hash=marker_hash,
+    )
+    cleanup.append((marker_path, current_marker_identity))
+
+    # Authenticate the entire cleanup set before deleting any entry. Every
+    # removal then carries the exact captured identity through retirement.
+    for path, identity in cleanup:
+        _durably_remove(
+            path,
+            ownership_guard,
+            expected_identity=identity,
+        )
 
 
 def _recover_pair_publication(
@@ -4021,38 +4200,6 @@ def _recover_pair_publication(
         UnicodeError,
         VirtualSpreadError,
     ) as error:
-        current_output_backup_exists = _require_regular_publication_target(
-            output_backup,
-            "Output backup",
-            ownership_guard,
-        )
-        current_manifest_backup_exists = _require_regular_publication_target(
-            manifest_backup,
-            "Manifest backup",
-            ownership_guard,
-        )
-        current_output_exists, current_manifest_exists = (
-            _require_regular_publication_targets(
-                output_path,
-                manifest_path,
-                ownership_guard,
-            )
-        )
-        if (
-            not current_output_backup_exists
-            and not current_manifest_backup_exists
-            and not current_output_exists
-            and not current_manifest_exists
-            and not any(staged_exists)
-        ):
-            marker_still_exists = _require_regular_publication_target(
-                marker_path,
-                "Publication marker",
-                ownership_guard,
-            )
-            if marker_still_exists:
-                _durably_remove(marker_path, ownership_guard)
-            return "discarded"
         raise VirtualSpreadError(
             "Cannot recover invalid virtual-spread publication marker"
         ) from error
@@ -4081,7 +4228,9 @@ def _recover_pair_publication(
             raise VirtualSpreadError(
                 "Cannot recover obsolete virtual-spread publication marker"
             )
-        _finish_publication_transaction(transaction, ownership_guard)
+        _finish_publication_transaction(
+            transaction, ownership_guard, outcome="discarded"
+        )
         return "discarded"
     output_is_new = _publication_output_matches_sha256(
         output_path,
@@ -4094,7 +4243,9 @@ def _recover_pair_publication(
         ownership_guard,
     )
     if output_is_new and manifest_is_new:
-        _finish_publication_transaction(transaction, ownership_guard)
+        _finish_publication_transaction(
+            transaction, ownership_guard, outcome="committed"
+        )
         return "committed"
 
     errors: list[str] = []
@@ -4241,7 +4392,9 @@ def _recover_pair_publication(
         raise VirtualSpreadError(
             "Virtual-spread recovery was incomplete: " + "; ".join(errors)
         )
-    _finish_publication_transaction(transaction, ownership_guard)
+    _finish_publication_transaction(
+        transaction, ownership_guard, outcome="rolled_back"
+    )
     return "rolled_back"
 
 
@@ -4340,10 +4493,18 @@ def _prepare_publication_transaction(
     marker_record = dict(transaction)
     marker_record.pop("markerPath")
     _write_publication_marker(marker_path, marker_record, ownership_guard)
+    marker_identity, marker_hash = _publication_file_evidence(
+        marker_path,
+        "Publication marker",
+        ownership_guard,
+        maximum_bytes=MAX_MANIFEST_BYTES,
+    )
     transaction["_newOutputIdentity"] = new_output_identity
     transaction["_newManifestIdentity"] = new_manifest_identity
     transaction["_oldOutputIdentity"] = expected_output_state.identity
     transaction["_oldManifestIdentity"] = expected_manifest_state.identity
+    transaction["_markerIdentity"] = marker_identity
+    transaction["_markerSha256"] = marker_hash
     return transaction
 
 

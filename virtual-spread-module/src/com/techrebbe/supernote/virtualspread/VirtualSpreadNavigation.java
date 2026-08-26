@@ -694,6 +694,16 @@ public final class VirtualSpreadNavigation {
             && ageMillis <= maximumAgeMillis;
     }
 
+    /** A stale verifier must never consume a link owned by a newer snapshot. */
+    public static boolean queuedLinkBelongsToVerification(
+        long queuedGeneration,
+        long activationGeneration
+    ) {
+        return queuedGeneration > 0L
+            && activationGeneration > 0L
+            && queuedGeneration == activationGeneration;
+    }
+
     /** Preserve an authenticated explicit native viewport in portrait. */
     public static boolean shouldPreservePortraitLinkViewport(
         boolean internalLinkTarget,

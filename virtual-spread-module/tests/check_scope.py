@@ -180,6 +180,8 @@ for required in (
     "state.queuedLinkNativeSourceAuthority = nativeSourceAuthority",
     "state.queuedLinkNativeLayoutAuthority = nativeLayoutAuthority",
     "state.queuedLinkNativeLinkAuthority = nativeLinkAuthority",
+    "queuedLinkBelongsToVerification(",
+    'link_jump_replay_deferred reason=verification_generation',
     "currentNativeDocument == queuedNativeDocument",
     "queuedNativeSourceAuthority.equals(nativePdfMetadata(",
     "queuedVerificationGeneration == verificationGeneration",
@@ -823,6 +825,9 @@ for required in (
     'copied_action[NameObject("/IsMap")] = BooleanObject(',
     "def _require_supported_document_catalog(",
     "def _require_runtime_float_geometry(",
+    "PDF_MIN_PAGE_DIMENSION = 3.0",
+    "PDF_MAX_PAGE_DIMENSION = 14400.0",
+    "Spread dimensions must remain within the PDF page-size bounds",
     "NOMAD_LANDSCAPE_ASPECT = 4.0 / 3.0",
     "def _require_nomad_spread_aspect(",
     "_require_nomad_spread_aspect(spread_width, spread_height)",
@@ -849,7 +854,7 @@ for required in (
     'manifest_path.with_name(f".{manifest_path.name}.tmp")',
     "active_staged_paths: tuple[Path, ...] = ()",
     "Orphaned virtual-spread staged artifact requires recovery",
-    "Authenticate every deterministic stage before deleting any of them.",
+    "Authenticate the entire cleanup set before deleting any entry.",
     "return expected",
     "def _require_source_outside_publication_namespace(",
     "_require_source_outside_publication_namespace(\n",
@@ -867,6 +872,8 @@ for required in (
     "_require_rectangle_contained(\n            raw_crop_box,",
     "_require_rectangle_contained(\n            crop_box,",
     "def _require_nondegenerate_quadrilateral(",
+    "if len(set(points)) != 4:",
+    "perimeter = (points[0], points[1], points[3], points[2])",
     'mode in {"/FitB", "/FitH", "/FitBH", "/FitV", "/FitBV"}',
     'NameObject("/FitR")',
     '"targetView": (',
@@ -877,6 +884,8 @@ for required in (
     "replace_authorized=force",
     'transaction["_oldOutputIdentity"] = expected_output_state.identity',
     'transaction["_oldManifestIdentity"] = expected_manifest_state.identity',
+    'transaction["_markerIdentity"] = marker_identity',
+    'transaction["_markerSha256"] = marker_hash',
     "lexical_output = _require_unaliased_output_path(output_path)",
     "lexical_manifest = _require_runtime_manifest_path(",
     "with _publication_lock(lexical_output) as ownership_guard:",
@@ -943,9 +952,13 @@ for required in (
     "                    ownership_guard=ownership_guard,\n"
     "                    expected_source_identity=backup_identity",
     "replace_existing=False",
-    "artifacts = (",
-    "for path, _ in artifacts:",
-    "_durably_remove(path, ownership_guard)",
+    "def _retired_publication_artifacts(",
+    "secrets.token_hex(RETIREMENT_TOKEN_BYTES)",
+    "Publication removal requires authenticated identity",
+    "expected_identity=identity",
+    "outcome not in {\"committed\", \"rolled_back\", \"discarded\"}",
+    "current_marker_identity, _ = _publication_file_evidence(",
+    "path_identity.changed_ns == open_identity.changed_ns",
     "                    expected_identity=final_identity,\n"
     "                )",
     '"layoutAuthoritySha256": layout_authority_hash',
@@ -975,6 +988,8 @@ for required in (
     "test_fitr_viewport_must_stay_inside_target_half",
     "test_fit_source_page_uses_authenticated_runtime_reset",
     "test_non_nomad_spread_aspect_is_rejected",
+    "test_pdf_page_dimension_bounds_are_enforced",
+    "test_posix_identity_comparison_includes_ctime",
     "test_recovery_preserves_unexpected_target_in_front_of_backup",
     "test_staged_tamper_before_move_preserves_original_pair",
     "test_retained_staging_inode_prevents_source_hardlink_write",
@@ -1026,6 +1041,11 @@ for required in (
     "test_cli_reports_output_derived_manifest_spelling",
     "test_forced_replacement_requires_all_layout_options",
     "test_recovery_rejects_unauthenticated_retired_artifacts",
+    "test_cleanup_carries_identity_for_every_removed_artifact",
+    "test_cleanup_never_deletes_a_replaced_backup",
+    "test_cleanup_never_deletes_replaced_stage_or_marker",
+    "test_cleanup_rejects_backup_for_absent_original",
+    "test_unique_retirement_preserves_a_replaced_entry",
     "test_publication_staging_paths_are_deterministic",
     "test_recovery_preserves_orphaned_deterministic_staging",
     "test_recovery_removes_authenticated_deterministic_staging",
@@ -1052,7 +1072,8 @@ backup_move = generator.find(
 published_manifest_hash = generator.find('"Published manifest"')
 published_output_hash = generator.find('"Published output"')
 finish_transaction = generator.find(
-    "_finish_publication_transaction(transaction, ownership_guard)"
+    "_finish_publication_transaction(\n"
+    "            transaction, ownership_guard, outcome=\"committed\""
 )
 if not (
     0 <= preflight_output_hash < backup_move

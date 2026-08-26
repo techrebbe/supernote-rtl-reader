@@ -1465,6 +1465,36 @@ invariant suites, hook-scope validation, and the signed/verified v0.0.24
 A clean follow-up exact-head Ultra review and focused hardware validation remain
 release gates; PR #16 stays draft.
 
+## Review pass 62 authenticated cleanup, strict geometry, and verifier ownership - LOCAL PASS
+
+The follow-up exact-head Ultra review identified six remaining fail-closed
+boundaries. Publication cleanup now authenticates the complete marker, stage,
+and backup set before deleting anything and carries each captured filesystem
+identity through an unguessable retirement name. A stage, backup, marker, or
+retirement entry replaced during cleanup is preserved rather than deleted.
+POSIX source identity now includes ctime, closing an in-place same-size mutation
+that restores mtime; only the ctime transition caused by the generator's own
+hard-link/unlink namespace move is accepted.
+
+The Android hook now verifies that a deferred link belongs to the exact verifier
+generation before reading or clearing it, so a stale activation cannot consume
+a newer queued link. Generator spread dimensions are bounded to PDF's
+3-to-14,400-unit page range. Link `/QuadPoints` must contain four distinct
+vertices forming one strict convex quadrilateral in PDF Z order; duplicate,
+concave, and self-intersecting regions fail closed before publication.
+
+Deterministic regressions cover replaced stages, backups, markers, and retirement
+entries; unauthorized backup state; POSIX ctime mutation; stale verifier
+generation; page-size limits; and malformed quadrilaterals. Local automated
+validation passes 127 generator tests on Windows (eight expected
+platform/filesystem or privilege skips), 138 focused navigation/manifest/cache
+assertions, 15 cross-language authority assertions, 8,752 exhaustive navigation
+assertions, both native invariant suites, hook-scope validation, and the
+signed/verified v0.0.24 (`versionCode=24`) APK build (SHA-256
+`3c67cab40653367cf83b4ef2ece8c21b01ce0247d80d40e796c558a518e876c2`).
+A fresh clean exact-head Ultra review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
 ## Failure capture
 
 Before reproducing a failure:

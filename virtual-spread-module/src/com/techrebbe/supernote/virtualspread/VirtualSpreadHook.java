@@ -884,6 +884,15 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             if (state == null || state.queuedLinkArguments == null) {
                 return VirtualSpreadNavigation.LinkRouting.NON_LINK;
             }
+            if (!VirtualSpreadNavigation.queuedLinkBelongsToVerification(
+                    state.queuedLinkVerificationGeneration,
+                    verificationGeneration
+                )) {
+                log("link_jump_replay_deferred reason=verification_generation"
+                    + " queued=" + state.queuedLinkVerificationGeneration
+                    + " activation=" + verificationGeneration);
+                return VirtualSpreadNavigation.LinkRouting.BLOCKED;
+            }
             arguments = state.queuedLinkArguments;
             documentPath = state.queuedLinkDocumentPath;
             snapshotId = state.queuedLinkSnapshotId;

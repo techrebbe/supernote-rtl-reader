@@ -53,6 +53,8 @@ from generate_virtual_spread import (  # noqa: E402
     _layout_for_page,
     _lexical_absolute,
     _require_runtime_float_rect,
+    _require_runtime_float_geometry,
+    _same_open_file,
     _transform_quad_points,
     _publish_pair,
     _require_unaliased_output_path,
@@ -2551,6 +2553,18 @@ class VirtualSpreadTests(unittest.TestCase):
                 FloatObject(value)
                 for value in (0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0)
             ),
+            tuple(
+                FloatObject(value)
+                for value in (0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0)
+            ),
+            tuple(
+                FloatObject(value)
+                for value in (0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0)
+            ),
+            tuple(
+                FloatObject(value)
+                for value in (0.0, 1.0, 2.0, 1.0, 0.0, 0.0, 1.0, 0.5)
+            ),
         )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -3430,6 +3444,75 @@ class VirtualSpreadTests(unittest.TestCase):
                 manifest["output"]["spreadSize"],
                 [1728.0, 1296.0],
             )
+
+    def test_pdf_page_dimension_bounds_are_enforced(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            create_odd_page_fixture(source)
+            for index, (width, height) in enumerate((
+                (20000.0, 15000.0),
+                (3.9, 2.925),
+            )):
+                with self.subTest(width=width, height=height):
+                    output = root / f"bounded-{index}.pdf"
+                    manifest = root / f"bounded-{index}.pdf.json"
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "PDF page-size bounds",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest,
+                            spread_width=width,
+                            spread_height=height,
+                        )
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest.exists())
+
+        self.assertAlmostEqual(
+            _require_runtime_float_geometry(4.0, 3.0, 0.0),
+            2.0,
+        )
+        self.assertAlmostEqual(
+            _require_runtime_float_geometry(14400.0, 10800.0, 0.0),
+            7200.0,
+        )
+
+    def test_posix_identity_comparison_includes_ctime(self) -> None:
+        stable = SourceIdentity(1, 2, 3, 4, 5)
+        changed = SourceIdentity(1, 2, 3, 4, 6)
+        with mock.patch("generate_virtual_spread.os.name", "posix"):
+            self.assertTrue(_same_open_file(stable, stable))
+            self.assertFalse(_same_open_file(stable, changed))
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            target = root / "target"
+            source.write_bytes(b"stable")
+            actual = _identity(source.stat())
+            stale = SourceIdentity(
+                actual.device,
+                actual.inode,
+                actual.size,
+                actual.modified_ns,
+                actual.changed_ns - 1,
+            )
+            with mock.patch("generate_virtual_spread.os.name", "posix"):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Publication move source identity changed",
+                ):
+                    _durable_replace(
+                        source,
+                        target,
+                        replace_existing=False,
+                        expected_source_identity=stale,
+                    )
+            self.assertEqual(source.read_bytes(), b"stable")
+            self.assertFalse(target.exists())
 
     def test_runtime_float_spread_geometry_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -5698,6 +5781,291 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertFalse(marker.exists())
             self.assertFalse(output_backup.exists())
             self.assertFalse(manifest_backup.exists())
+
+    def test_cleanup_carries_identity_for_every_removed_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            output_backup = Path(transaction["outputBackupPath"])
+            manifest_backup = Path(transaction["manifestBackupPath"])
+            marker = Path(transaction["markerPath"])
+            _durable_replace(output, output_backup)
+            _durable_replace(manifest, manifest_backup)
+            _durable_replace(temporary_manifest, manifest)
+            _durable_replace(temporary_output, output)
+
+            real_remove = _durably_remove
+            removed: list[Path] = []
+
+            def require_bound_remove(
+                path: Path,
+                ownership_guard: object = None,
+                *,
+                expected_identity: object = None,
+                missing_ok: bool = False,
+            ) -> None:
+                self.assertIsInstance(expected_identity, SourceIdentity)
+                removed.append(Path(path))
+                real_remove(
+                    path,
+                    ownership_guard,  # type: ignore[arg-type]
+                    expected_identity=expected_identity,  # type: ignore[arg-type]
+                    missing_ok=missing_ok,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._durably_remove",
+                side_effect=require_bound_remove,
+            ):
+                self.assertEqual(
+                    _recover_pair_publication(output, manifest),
+                    "committed",
+                )
+
+            self.assertEqual(
+                removed,
+                [output_backup, manifest_backup, marker],
+            )
+
+    def test_cleanup_never_deletes_a_replaced_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            output_backup = Path(transaction["outputBackupPath"])
+            marker = Path(transaction["markerPath"])
+            _durable_replace(output, output_backup)
+            _durable_replace(
+                manifest, Path(transaction["manifestBackupPath"])
+            )
+            _durable_replace(temporary_manifest, manifest)
+            _durable_replace(temporary_output, output)
+
+            real_remove = _durably_remove
+            replaced = False
+
+            def replace_before_remove(
+                path: Path,
+                ownership_guard: object = None,
+                *,
+                expected_identity: object = None,
+                missing_ok: bool = False,
+            ) -> None:
+                nonlocal replaced
+                if Path(path) == output_backup and not replaced:
+                    replacement = root / "unrelated-backup-replacement"
+                    replacement.write_bytes(b"unrelated")
+                    os.replace(replacement, output_backup)
+                    replaced = True
+                real_remove(
+                    path,
+                    ownership_guard,  # type: ignore[arg-type]
+                    expected_identity=expected_identity,  # type: ignore[arg-type]
+                    missing_ok=missing_ok,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._durably_remove",
+                side_effect=replace_before_remove,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "identity changed",
+                ):
+                    _recover_pair_publication(output, manifest)
+
+            self.assertTrue(replaced)
+            self.assertEqual(output_backup.read_bytes(), b"unrelated")
+            self.assertTrue(marker.exists())
+
+    def test_cleanup_never_deletes_replaced_stage_or_marker(self) -> None:
+        for target_kind in ("stage", "marker"):
+            with self.subTest(target_kind=target_kind):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    output = root / "spread.pdf"
+                    manifest = root / "spread.pdf.json"
+                    output.write_bytes(b"new-pdf")
+                    manifest.write_bytes(b"new-manifest")
+                    output_stage, _, _ = _publication_staging_artifacts(output)
+                    marker, output_backup, manifest_backup = (
+                        _publication_artifacts(output)
+                    )
+                    with output.open("rb") as stream:
+                        output_hash = _sha256_open_file(stream)
+                    with manifest.open("rb") as stream:
+                        manifest_hash = _sha256_open_file(stream)
+                    _write_publication_marker(
+                        marker,
+                        {
+                            "schema": (
+                                "techrebbe.supernote."
+                                "virtual-spread-publication/v2"
+                            ),
+                            "outputPath": str(output),
+                            "manifestPath": str(manifest),
+                            "outputBackupPath": str(output_backup),
+                            "manifestBackupPath": str(manifest_backup),
+                            "hadOutput": False,
+                            "hadManifest": False,
+                            "oldOutputSha256": None,
+                            "oldManifestSha256": None,
+                            "newOutputSha256": output_hash,
+                            "newManifestSha256": manifest_hash,
+                        },
+                    )
+                    if target_kind == "stage":
+                        output_stage.write_bytes(output.read_bytes())
+                        target = output_stage
+                    else:
+                        target = marker
+
+                    real_remove = _durably_remove
+                    replaced = False
+
+                    def replace_before_remove(
+                        path: Path,
+                        ownership_guard: object = None,
+                        *,
+                        expected_identity: object = None,
+                        missing_ok: bool = False,
+                    ) -> None:
+                        nonlocal replaced
+                        if Path(path) == target and not replaced:
+                            replacement = root / "unrelated-cleanup-replacement"
+                            replacement.write_bytes(b"unrelated")
+                            os.replace(replacement, target)
+                            replaced = True
+                        real_remove(
+                            path,
+                            ownership_guard,  # type: ignore[arg-type]
+                            expected_identity=expected_identity,  # type: ignore[arg-type]
+                            missing_ok=missing_ok,
+                        )
+
+                    with mock.patch(
+                        "generate_virtual_spread._durably_remove",
+                        side_effect=replace_before_remove,
+                    ):
+                        with self.assertRaisesRegex(
+                            VirtualSpreadError,
+                            "identity changed",
+                        ):
+                            _recover_pair_publication(output, manifest)
+
+                    self.assertTrue(replaced)
+                    self.assertEqual(target.read_bytes(), b"unrelated")
+                    self.assertEqual(output.read_bytes(), b"new-pdf")
+                    self.assertEqual(manifest.read_bytes(), b"new-manifest")
+
+    def test_cleanup_rejects_backup_for_absent_original(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            output.write_bytes(b"new-pdf")
+            manifest.write_bytes(b"new-manifest")
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            output_backup.write_bytes(b"unrelated-backup")
+            with output.open("rb") as stream:
+                output_hash = _sha256_open_file(stream)
+            with manifest.open("rb") as stream:
+                manifest_hash = _sha256_open_file(stream)
+            _write_publication_marker(
+                marker,
+                {
+                    "schema": (
+                        "techrebbe.supernote.virtual-spread-publication/v2"
+                    ),
+                    "outputPath": str(output),
+                    "manifestPath": str(manifest),
+                    "outputBackupPath": str(output_backup),
+                    "manifestBackupPath": str(manifest_backup),
+                    "hadOutput": False,
+                    "hadManifest": False,
+                    "oldOutputSha256": None,
+                    "oldManifestSha256": None,
+                    "newOutputSha256": output_hash,
+                    "newManifestSha256": manifest_hash,
+                },
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Unexpected publication backup",
+            ):
+                _recover_pair_publication(output, manifest)
+
+            self.assertEqual(output_backup.read_bytes(), b"unrelated-backup")
+            self.assertTrue(marker.exists())
+
+    def test_unique_retirement_preserves_a_replaced_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "cleanup-target"
+            target.write_bytes(b"authorized")
+            expected = _identity(target.stat())
+            real_replace = _durable_replace
+            replacement_path: Path | None = None
+
+            def replace_retired_after_move(
+                source: Path,
+                destination: Path,
+                **kwargs: object,
+            ) -> object:
+                nonlocal replacement_path
+                result = real_replace(source, destination, **kwargs)
+                if Path(source) == target:
+                    replacement = root / "unrelated-retired-replacement"
+                    replacement.write_bytes(b"unrelated")
+                    os.replace(replacement, destination)
+                    replacement_path = Path(destination)
+                return result
+
+            with mock.patch(
+                "generate_virtual_spread._durable_replace",
+                side_effect=replace_retired_after_move,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Retired publication artifact identity changed",
+                ):
+                    _durably_remove(target, expected_identity=expected)
+
+            self.assertIsNotNone(replacement_path)
+            assert replacement_path is not None
+            self.assertRegex(
+                replacement_path.name,
+                r"^cleanup-target\.retired\.[0-9a-f]{32}$",
+            )
+            self.assertEqual(replacement_path.read_bytes(), b"unrelated")
 
 
 

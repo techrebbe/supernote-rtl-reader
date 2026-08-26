@@ -207,6 +207,21 @@ public final class VirtualSpreadNavigationTest {
             )
         );
         assertBoolean(
+            "queued link belongs to its verifier generation",
+            true,
+            VirtualSpreadNavigation.queuedLinkBelongsToVerification(9L, 9L)
+        );
+        assertBoolean(
+            "stale verifier cannot consume a newer queued link",
+            false,
+            VirtualSpreadNavigation.queuedLinkBelongsToVerification(10L, 9L)
+        );
+        assertBoolean(
+            "unowned verifier generation cannot consume a queued link",
+            false,
+            VirtualSpreadNavigation.queuedLinkBelongsToVerification(0L, 0L)
+        );
+        assertBoolean(
             "explicit portrait link viewport is preserved",
             true,
             VirtualSpreadNavigation.shouldPreservePortraitLinkViewport(

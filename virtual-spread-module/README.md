@@ -19,8 +19,9 @@ It activates only when all of these are true:
   native MuPDF `Document` match the authenticated manifest; and
 - the known Supernote document firmware fingerprint and APK size match.
 
-The activity, view-model, page-bar, link-target, and link-history hooks form one
-required capability set. The module keeps virtual-spread behavior disabled
+The activity, view-model, page-bar, link-target, link-history action, and
+page-bound native-save acknowledgement hooks form one required capability set.
+The module keeps virtual-spread behavior disabled
 until every hook installs successfully; if any required hook is unavailable,
 already installed callbacks remain native pass-through for that process rather
 than leaving a partially active navigation layer.
@@ -87,20 +88,28 @@ an unknown anchor, or a neighboring-half spill fails closed. An underlined
 `/BS /U` link also fails closed when page rotation would move its underline to
 a different edge after composition.
 
-The manifest cache is content-authoritative but uses an identity-based fast
-path: every lookup captures both PDF and sidecar device, inode, size,
-modification time, and change time, and reuses only a snapshot previously
-verified with those exact identities. Generator and runtime share an 8 MiB
+The manifest cache is content-authoritative. UI callbacks do no pathname
+canonicalization, existence checks, stats, or opens. A single background worker
+opens both files with no-follow/nonblocking semantics, requires regular-file
+descriptors, and binds the accepted snapshot to PDF and sidecar device, inode,
+size, modification time, and change time. The UI fast path reuses that result
+only for the exact native MuPDF document object whose embedded authorities were
+validated. A recurring worker-only freshness check revalidates both pathname
+identities; a changed, unavailable, or expired generation invalidates the cached
+authority and fails closed until a complete verification succeeds. Reopening or
+replacing the native document likewise forces worker verification.
+Generator and runtime share an 8 MiB
 sidecar ceiling; the generator rejects an oversized manifest before publishing
 it, while the runtime independently fails closed if that invariant is violated.
-An unchanged oversized sidecar is recorded as a stable negative cache entry, so
-an ordinary PDF returns to native behavior and a generated PDF remains blocked
-without repeatedly scheduling the same doomed verification. Stable malformed
+Missing files, oversized sidecars, descriptor errors, and other availability
+failures are never cached as permanent rejection evidence; they retry after a
+short cooldown when a later reader action demands authority, without an
+autonomous polling loop. Stable malformed
 JSON and canonical-string failures are likewise published as negative entries,
 but only after the verifier rechecks the exact PDF/sidecar descriptors, path
 identities, and sidecar digest. A malformed unchanged sidecar therefore cannot
-force repeated full-PDF hashing, while a replaced snapshot cannot inherit the
-older rejection.
+force repeated full-PDF hashing or recurring negative-cache freshness work,
+while a replaced snapshot cannot inherit the older rejection.
 On a cache miss or identity change, the module fails closed while a single
 background worker opens the PDF and sidecar, hashes the sidecar bytes, parses
 them, and performs the full PDF SHA-256 check. Its queue retains only the latest
@@ -142,8 +151,10 @@ perform the full-file hash.
 
 Supernote shares `showLinkJumpView` between link activation and native
 annotation/digest menus. A callback without a `SuperNoteLink` therefore bypasses
-the companion completely. Authenticated external URI links likewise remain in
-Supernote's native handler. Only internal page links require the companion to
+the companion completely. An external URI remains in Supernote's native handler
+only after its current output page, exact URI, and activation rectangle match an
+authenticated manifest record; unmatched or ambiguous URI callbacks are consumed.
+Only internal page links require the companion to
 capture and restore an authenticated destination half; missing, malformed,
 unmatched, or ambiguous internal targets are consumed.
 
@@ -226,7 +237,10 @@ For a matching document it:
   Back after several link jumps validates the newest native destination before
   restoring the oldest recorded source half; unresolved history authority and
   unmatched or ambiguous internal link targets are consumed rather than being
-  allowed to navigate without an authenticated half mapping; and
+  allowed to navigate without an authenticated half mapping; the native
+  history getter, list mutation, same-document load, and external-document
+  branch are serialized as one action so preflight cannot race a destructive
+  firmware history update; and
 - reruns Supernote's own orientation refresh after a configuration transition,
   so its native split mode, toolbar, handwriting state, and bitmap all move to
   the new orientation together.
@@ -238,17 +252,25 @@ GitHub CI runs this module's complete host-side suite and then invokes the same
 cross-platform build used locally, compiling the Android hook and producing,
 signing, and verifying the companion APK. The build fails before signing if
 payload injection fails or if `classes.dex`, `assets/xposed_init`, or the LSPosed
-scope entry is absent from the assembled archive. Repository CI restores the
-maintainer's stable debug keystore from the
-`VIRTUAL_SPREAD_APK_KEYSTORE_BASE64` secret before building, so every uploaded
-artifact has the same Android signing identity and can upgrade the preceding
-build. When that secret is unavailable (for example, on an untrusted fork), CI
-still builds and verifies with an ephemeral key but deliberately does not upload
-that non-upgradeable APK.
+scope entry is absent from the assembled archive. Pull-request CI uses a two-day
+ephemeral signer and never receives the stable credential. After the complete
+test job passes on a trusted `main` push, a fresh no-Python/no-package runner
+checks out that exact commit and assembles the aligned APK without a signing
+credential. A separate sign-only runner verifies that clean artifact's digest
+before the protected `virtual-spread-release` environment exposes its sole
+`VIRTUAL_SPREAD_APK_KEYSTORE_BASE64` secret to one step. That step decodes the
+keystore to a randomized temporary path, removes the credential from the
+environment, signs only the clean aligned APK, verifies the pinned certificate
+SHA-256, and deletes the keystore before the pinned artifact-upload action runs.
+No checkout, Python package, test, or project build script executes in the
+credential-bearing job. Every published artifact therefore retains the Android
+identity needed to upgrade the preceding build without allowing a
+dependency-bearing test process to choose what receives that identity.
 
 ## Build and test
 
 ```powershell
+python -m pip install -r ..\virtual_spread\requirements.txt
 .\test.ps1
 .\build.ps1
 ```

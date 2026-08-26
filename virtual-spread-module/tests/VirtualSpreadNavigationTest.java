@@ -9,6 +9,7 @@ import com.techrebbe.supernote.virtualspread.VirtualSpreadNavigation.LinkVisit;
 import com.techrebbe.supernote.virtualspread.VirtualSpreadNavigation.PageBarState;
 import com.techrebbe.supernote.virtualspread.VirtualSpreadNavigation.Plan;
 import com.techrebbe.supernote.virtualspread.VirtualSpreadNavigation.Spread;
+import com.techrebbe.supernote.virtualspread.VirtualSpreadNavigation.UriTarget;
 
 import java.nio.charset.StandardCharsets;
 
@@ -165,6 +166,41 @@ public final class VirtualSpreadNavigationTest {
             )
         );
         assertBoolean(
+            "clean page needs no save callback",
+            true,
+            VirtualSpreadNavigation.saveAcknowledgementMatches(
+                false, false, false, false, -1, -1, false
+            )
+        );
+        assertBoolean(
+            "dirty page requires matching successful native save callback",
+            true,
+            VirtualSpreadNavigation.saveAcknowledgementMatches(
+                true, true, true, true, 17, 17, true
+            )
+        );
+        assertBoolean(
+            "normal saveTrails return without callback fails closed",
+            false,
+            VirtualSpreadNavigation.saveAcknowledgementMatches(
+                true, false, false, false, 17, -1, false
+            )
+        );
+        assertBoolean(
+            "failed native save callback fails closed",
+            false,
+            VirtualSpreadNavigation.saveAcknowledgementMatches(
+                true, true, false, true, 17, 17, true
+            )
+        );
+        assertBoolean(
+            "save callback for another page fails closed",
+            false,
+            VirtualSpreadNavigation.saveAcknowledgementMatches(
+                true, true, true, true, 17, 18, true
+            )
+        );
+        assertBoolean(
             "pending link replays on its original page",
             true,
             VirtualSpreadNavigation.pendingLinkReplayIsCurrent(
@@ -309,6 +345,21 @@ public final class VirtualSpreadNavigationTest {
             cache.remove("a", cacheA)
         );
         assertEquals("conditional removal updates cache size", 1, cache.size());
+        assertBoolean(
+            "conditional cache replacement rejects stale value",
+            false,
+            cache.replace("c", cacheA, cacheB)
+        );
+        assertBoolean(
+            "conditional cache replacement accepts exact value",
+            true,
+            cache.replace("c", cacheC, cacheB)
+        );
+        assertBoolean(
+            "conditional cache replacement publishes replacement",
+            true,
+            cache.get("c") == cacheB
+        );
         boolean rejectedZeroCapacity = false;
         try {
             new BoundedCache<String, Object>(0);
@@ -590,6 +641,88 @@ public final class VirtualSpreadNavigationTest {
                 648.0f,
                 0.5f
             )
+        );
+        UriTarget[] uriTargets = new UriTarget[] {
+            new UriTarget(
+                1,
+                Half.RIGHT,
+                "https://example.test/chapter",
+                486.0f,
+                60.0f,
+                810.0f,
+                102.0f
+            )
+        };
+        assertBoolean(
+            "authenticated external URI and bounds match",
+            true,
+            VirtualSpreadNavigation.matchUriLink(
+                uriTargets,
+                1,
+                "https://example.test/chapter",
+                486.0f,
+                546.0f,
+                810.0f,
+                588.0f,
+                648.0f,
+                0.5f
+            ) != null
+        );
+        assertBoolean(
+            "external URI callback with another URL fails closed",
+            true,
+            VirtualSpreadNavigation.matchUriLink(
+                uriTargets,
+                1,
+                "https://attacker.invalid/",
+                486.0f,
+                546.0f,
+                810.0f,
+                588.0f,
+                648.0f,
+                0.5f
+            ) == null
+        );
+        assertBoolean(
+            "external URI callback with unauthenticated bounds fails closed",
+            true,
+            VirtualSpreadNavigation.matchUriLink(
+                uriTargets,
+                1,
+                "https://example.test/chapter",
+                480.0f,
+                546.0f,
+                810.0f,
+                588.0f,
+                648.0f,
+                0.5f
+            ) == null
+        );
+        assertBoolean(
+            "ambiguous external URI halves fail closed",
+            true,
+            VirtualSpreadNavigation.matchUriLink(
+                new UriTarget[] {
+                    uriTargets[0],
+                    new UriTarget(
+                        1,
+                        Half.LEFT,
+                        "https://example.test/chapter",
+                        486.25f,
+                        60.25f,
+                        810.25f,
+                        102.25f
+                    )
+                },
+                1,
+                "https://example.test/chapter",
+                486.0f,
+                546.0f,
+                810.0f,
+                588.0f,
+                648.0f,
+                0.5f
+            ) == null
         );
         LinkTarget[] observedFixtureTarget = new LinkTarget[] {
             new LinkTarget(
@@ -1140,6 +1273,14 @@ public final class VirtualSpreadNavigationTest {
         history.record(3, Half.LEFT, 1);
         assertEquals("history records two visits", 2, history.size());
         assertVisit(
+            "Back preflight validates without consuming",
+            history.peekBack(3, 1, 1),
+            3,
+            Half.LEFT,
+            1
+        );
+        assertEquals("Back preflight preserves visits", 2, history.size());
+        assertVisit(
             "Back restores latest link source",
             history.takeBack(3, 1, 1),
             3,
@@ -1169,6 +1310,18 @@ public final class VirtualSpreadNavigationTest {
         history.record(1, Half.RIGHT, 3);
         history.record(3, Half.LEFT, 5);
         assertVisit(
+            "Original Back preflight validates without consuming",
+            history.peekOriginal(1, 3, 5),
+            1,
+            Half.RIGHT,
+            3
+        );
+        assertEquals(
+            "Original Back preflight preserves complete history",
+            2,
+            history.size()
+        );
+        assertVisit(
             "direct Original Back validates newest destination",
             history.takeOriginal(1, 3, 5),
             1,
@@ -1182,6 +1335,18 @@ public final class VirtualSpreadNavigationTest {
         );
 
         history.record(1, Half.RIGHT, 3);
+        assertVisit(
+            "mismatched Back preflight is non-mutating",
+            history.peekBack(2, 3, 3),
+            -1,
+            null,
+            -1
+        );
+        assertEquals(
+            "mismatched Back preflight preserves mirror",
+            1,
+            history.size()
+        );
         assertVisit(
             "stale current page clears native history",
             history.takeBack(1, 3, 2),

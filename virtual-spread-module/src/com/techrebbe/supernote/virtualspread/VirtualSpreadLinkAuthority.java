@@ -1,8 +1,11 @@
 package com.techrebbe.supernote.virtualspread;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.ByteBuffer;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.RandomAccessFile;
+import java.nio.channels.FileChannel;
 import java.security.MessageDigest;
 
 /** Pure canonicalization shared by runtime validation and host-side tests. */
@@ -144,6 +147,17 @@ public final class VirtualSpreadLinkAuthority {
         }
     }
 
+    public static String readPdfSourceDigest(
+        FileInputStream input
+    ) throws Exception {
+        return readPdfMarker(
+            input,
+            SOURCE_PDF_MARKER,
+            LAYOUT_PDF_MARKER,
+            false
+        );
+    }
+
     public static String readPdfDigest(File pdf) throws Exception {
         RandomAccessFile input = new RandomAccessFile(pdf, "r");
         try {
@@ -187,6 +201,10 @@ public final class VirtualSpreadLinkAuthority {
         }
     }
 
+    public static String readPdfDigest(FileInputStream input) throws Exception {
+        return readPdfMarker(input, PDF_MARKER, null, true);
+    }
+
     public static String readPdfLayoutDigest(File pdf) throws Exception {
         RandomAccessFile input = new RandomAccessFile(pdf, "r");
         try {
@@ -228,6 +246,72 @@ public final class VirtualSpreadLinkAuthority {
             return isSha256(digest) ? digest.toLowerCase() : null;
         } finally {
             input.seek(originalPosition);
+        }
+    }
+
+    public static String readPdfLayoutDigest(
+        FileInputStream input
+    ) throws Exception {
+        return readPdfMarker(
+            input,
+            LAYOUT_PDF_MARKER,
+            PDF_MARKER,
+            false
+        );
+    }
+
+    private static String readPdfMarker(
+        FileInputStream input,
+        String markerText,
+        String followingMarker,
+        boolean immediatelyBeforeStartxref
+    ) throws Exception {
+        FileChannel channel = input.getChannel();
+        long originalPosition = channel.position();
+        try {
+            long length = channel.size();
+            int count = (int) Math.min(length, 4096L);
+            if (count <= markerText.length() + 65) {
+                return null;
+            }
+            ByteBuffer buffer = ByteBuffer.allocate(count);
+            channel.position(length - count);
+            while (buffer.hasRemaining()) {
+                if (channel.read(buffer) < 0) {
+                    return null;
+                }
+            }
+            String tail = new String(
+                buffer.array(),
+                StandardCharsets.ISO_8859_1
+            );
+            int startxref = tail.lastIndexOf("startxref");
+            if (startxref < 0) {
+                return null;
+            }
+            int marker = tail.lastIndexOf(markerText, startxref);
+            if (marker < 0) {
+                return null;
+            }
+            int digestStart = marker + markerText.length();
+            int digestEnd = digestStart + 64;
+            if (digestEnd >= tail.length()
+                || tail.charAt(digestEnd) != '\n') {
+                return null;
+            }
+            int next = digestEnd + 1;
+            if (immediatelyBeforeStartxref) {
+                if (next != startxref) {
+                    return null;
+                }
+            } else if (followingMarker == null
+                || !tail.startsWith(followingMarker, next)) {
+                return null;
+            }
+            String digest = tail.substring(digestStart, digestEnd);
+            return isSha256(digest) ? digest.toLowerCase() : null;
+        } finally {
+            channel.position(originalPosition);
         }
     }
 

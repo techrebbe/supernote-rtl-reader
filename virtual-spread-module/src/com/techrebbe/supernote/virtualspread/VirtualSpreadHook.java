@@ -7,17 +7,22 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.SystemClock;
 import android.system.Os;
+import android.system.OsConstants;
 import android.system.StructStat;
 import android.util.Log;
 
 import java.io.File;
 import java.io.FileDescriptor;
 import java.io.FileInputStream;
-import java.io.RandomAccessFile;
 import java.lang.ref.WeakReference;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.nio.channels.FileChannel;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -25,6 +30,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantLock;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -51,6 +57,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         "com.ratta.supernote.supernotetoolbarlib.PageBarView";
     private static final String TARGET_BACK_LINK =
         "com.supernote.document.utils.BackLinkUtils";
+    private static final String TARGET_BACK_LISTENER =
+        "com.supernote.document.document.DocumentActivity$7";
+    private static final String TARGET_SUPER_NOTE =
+        "com.example.libsupernote.SuperNoteNote";
     private static final String TARGET_FINGERPRINT =
         "Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys";
     private static final String TARGET_DOCUMENT_APK =
@@ -63,6 +73,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final long MAX_MANIFEST_BYTES = 8L * 1024L * 1024L;
     private static final int MAX_CACHED_MANIFESTS = 4;
     private static final long PENDING_LINK_MAX_AGE_MS = 60000L;
+    private static final long MANIFEST_FRESHNESS_INTERVAL_MS = 2000L;
+    private static final long MAX_MANIFEST_FRESHNESS_AGE_MS = 15000L;
+    private static final long MANIFEST_RETRY_BACKOFF_MS = 250L;
 
     private static volatile WeakReference<Activity> activeActivity =
         new WeakReference<>(null);
@@ -75,6 +88,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         MAX_CACHED_MANIFESTS
     );
     private static final Map<String, VerificationOwner> VERIFYING =
+        new ConcurrentHashMap<>();
+    private static final Map<String, CachedManifest> FRESHNESS_CHECKING =
+        new ConcurrentHashMap<>();
+    private static final Map<String, Long> VERIFICATION_RETRY_AFTER =
         new ConcurrentHashMap<>();
     private static final AtomicLong VERIFICATION_GENERATION = new AtomicLong();
     private static volatile boolean hooksReady;
@@ -92,6 +109,15 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         new ThreadLocal<>();
     private static final ThreadLocal<Boolean> REPLAYING_LINK =
         new ThreadLocal<>();
+    private static final ThreadLocal<SaveObservation> SAVE_OBSERVATION =
+        new ThreadLocal<>();
+    private static final ThreadLocal<HistoryActionContext> HISTORY_ACTION =
+        new ThreadLocal<>();
+    private static final ReentrantLock HISTORY_SERIALIZATION =
+        new ReentrantLock(true);
+    private static final ThreadLocal<Integer> HISTORY_ACTION_LOCK_DEPTH =
+        new ThreadLocal<>();
+    private static volatile Class<?> backLinkClass;
 
     private static final class Manifest {
         final String key;
@@ -103,6 +129,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         final VirtualSpreadNavigation.Spread[] spreads;
         final float pageHeight;
         final VirtualSpreadNavigation.LinkTarget[] links;
+        final VirtualSpreadNavigation.UriTarget[] uriLinks;
 
         Manifest(
             String key,
@@ -113,7 +140,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             int pageCount,
             VirtualSpreadNavigation.Spread[] spreads,
             float pageHeight,
-            VirtualSpreadNavigation.LinkTarget[] links
+            VirtualSpreadNavigation.LinkTarget[] links,
+            VirtualSpreadNavigation.UriTarget[] uriLinks
         ) {
             this.key = key;
             this.revision = revision;
@@ -124,6 +152,57 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             this.spreads = spreads;
             this.pageHeight = pageHeight;
             this.links = links;
+            this.uriLinks = uriLinks;
+        }
+    }
+
+    private static final class SaveObservation {
+        final Object expectedNote;
+        final int expectedPage;
+        final String expectedMarkPath;
+        boolean callbackObserved;
+        boolean callbackSucceeded;
+        boolean sameNote;
+        int observedPage = -1;
+        boolean sameMarkPath;
+
+        SaveObservation(
+            Object expectedNote,
+            int expectedPage,
+            String expectedMarkPath
+        ) {
+            this.expectedNote = expectedNote;
+            this.expectedPage = expectedPage;
+            this.expectedMarkPath = expectedMarkPath;
+        }
+
+        boolean accepted() {
+            return VirtualSpreadNavigation.saveAcknowledgementMatches(
+                true,
+                callbackObserved,
+                callbackSucceeded,
+                sameNote,
+                expectedPage,
+                observedPage,
+                sameMarkPath
+            );
+        }
+    }
+
+    private static final class HistoryActionContext {
+        final Object expectedBackInfo;
+        final Object viewModel;
+        final Manifest manifest;
+        boolean pageLoadAuthorized;
+
+        HistoryActionContext(
+            Object expectedBackInfo,
+            Object viewModel,
+            Manifest manifest
+        ) {
+            this.expectedBackInfo = expectedBackInfo;
+            this.viewModel = viewModel;
+            this.manifest = manifest;
         }
     }
 
@@ -222,8 +301,14 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             this.changedNanos = changedNanos;
         }
 
-        static FileIdentity capture(File file) throws Exception {
-            return fromStat(Os.stat(file.getPath()));
+        static FileIdentity captureRegularPath(File file) throws Exception {
+            StructStat stat = Os.lstat(file.getPath());
+            if (!OsConstants.S_ISREG(stat.st_mode)) {
+                throw new IllegalArgumentException(
+                    "manifest input is not a regular file"
+                );
+            }
+            return fromStat(stat);
         }
 
         static FileIdentity capture(FileDescriptor descriptor) throws Exception {
@@ -267,36 +352,58 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         final FileIdentity sidecarIdentity;
         final String sidecarDigest;
         final Manifest manifest;
+        final Object nativeDocument;
+        final String snapshotId;
+        final long verifiedAtElapsed;
 
         CachedManifest(
             FileIdentity pdfIdentity,
             FileIdentity sidecarIdentity,
             String sidecarDigest,
-            Manifest manifest
+            Manifest manifest,
+            Object nativeDocument,
+            String snapshotId,
+            long verifiedAtElapsed
         ) {
             this.pdfIdentity = pdfIdentity;
             this.sidecarIdentity = sidecarIdentity;
             this.sidecarDigest = sidecarDigest;
             this.manifest = manifest;
-        }
-
-        boolean matches(FileIdentity pdf, FileIdentity sidecar) {
-            return pdfIdentity.matches(pdf)
-                && sidecarIdentity.matches(sidecar);
+            this.nativeDocument = nativeDocument;
+            this.snapshotId = snapshotId;
+            this.verifiedAtElapsed = verifiedAtElapsed;
         }
 
         String snapshotId() {
-            return pdfIdentity.token() + ":" + sidecarIdentity.token();
+            return snapshotId;
+        }
+
+        CachedManifest refreshed(long now) {
+            return new CachedManifest(
+                pdfIdentity,
+                sidecarIdentity,
+                sidecarDigest,
+                manifest,
+                nativeDocument,
+                snapshotId,
+                now
+            );
         }
     }
 
     private static final class VerificationOwner {
         final String snapshotId;
         final long generation;
+        final Object nativeDocument;
 
-        VerificationOwner(String snapshotId, long generation) {
+        VerificationOwner(
+            String snapshotId,
+            long generation,
+            Object nativeDocument
+        ) {
             this.snapshotId = snapshotId;
             this.generation = generation;
+            this.nativeDocument = nativeDocument;
         }
     }
 
@@ -304,23 +411,17 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         final File pdf;
         final File sidecar;
         final String key;
-        final FileIdentity pdfBefore;
-        final FileIdentity sidecarBefore;
         final VerificationOwner owner;
 
         ManifestVerificationTask(
             File pdf,
             File sidecar,
             String key,
-            FileIdentity pdfBefore,
-            FileIdentity sidecarBefore,
             VerificationOwner owner
         ) {
             this.pdf = pdf;
             this.sidecar = sidecar;
             this.key = key;
-            this.pdfBefore = pdfBefore;
-            this.sidecarBefore = sidecarBefore;
             this.owner = owner;
         }
 
@@ -330,8 +431,6 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 pdf,
                 sidecar,
                 key,
-                pdfBefore,
-                sidecarBefore,
                 owner
             );
         }
@@ -339,6 +438,35 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         void cancelBeforeRun() {
             VERIFYING.remove(key, owner);
             log("manifest_verification_superseded path=" + key);
+        }
+    }
+
+    private static final class ManifestFreshnessTask implements Runnable {
+        final File pdf;
+        final File sidecar;
+        final String key;
+        final CachedManifest expected;
+
+        ManifestFreshnessTask(
+            File pdf,
+            File sidecar,
+            String key,
+            CachedManifest expected
+        ) {
+            this.pdf = pdf;
+            this.sidecar = sidecar;
+            this.key = key;
+            this.expected = expected;
+        }
+
+        @Override
+        public void run() {
+            verifyManifestFreshness(pdf, sidecar, key, expected);
+        }
+
+        void cancelBeforeRun() {
+            FRESHNESS_CHECKING.remove(key, expected);
+            log("manifest_freshness_superseded path=" + key);
         }
     }
 
@@ -408,6 +536,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             hookPageBar(loadPackageParam.classLoader);
             hookLinkTarget(loadPackageParam.classLoader);
             hookLinkHistory(loadPackageParam.classLoader);
+            hookLinkHistoryActions(loadPackageParam.classLoader);
+            hookNativeSaveAcknowledgement(loadPackageParam.classLoader);
         } catch (Throwable throwable) {
             hooksReady = false;
             logFailure("disabled reason=required_hook_failed", throwable);
@@ -535,6 +665,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     }
 
     private static void hookLinkHistory(ClassLoader classLoader) {
+        backLinkClass = XposedHelpers.findClass(
+            TARGET_BACK_LINK,
+            classLoader
+        );
+        hookBackLinkSerialization();
         XposedHelpers.findAndHookMethod(
             TARGET_BACK_LINK,
             classLoader,
@@ -559,6 +694,308 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         );
     }
 
+    private static void hookBackLinkSerialization() {
+        int hooked = 0;
+        for (Method method : backLinkClass.getDeclaredMethods()) {
+            int modifiers = method.getModifiers();
+            if (!Modifier.isStatic(modifiers)
+                || Modifier.isAbstract(modifiers)
+                || Modifier.isNative(modifiers)) {
+                continue;
+            }
+            XposedBridge.hookMethod(method, new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    HISTORY_SERIALIZATION.lock();
+                }
+
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    HISTORY_SERIALIZATION.unlock();
+                }
+            });
+            hooked++;
+        }
+        if (hooked == 0) {
+            throw new IllegalStateException(
+                "BackLinkUtils serialization hooks are unavailable"
+            );
+        }
+        log("link_history_serialization_ready methods=" + hooked);
+    }
+
+    private static void hookLinkHistoryActions(ClassLoader classLoader) {
+        XposedHelpers.findAndHookMethod(
+            TARGET_BACK_LISTENER,
+            classLoader,
+            "onBackClick",
+            historyActionGuard(false)
+        );
+        XposedHelpers.findAndHookMethod(
+            TARGET_BACK_LISTENER,
+            classLoader,
+            "onOriginalBackClick",
+            historyActionGuard(true)
+        );
+
+        // This is a defensive second boundary for a native history list that
+        // changes between our non-mutating preflight and the firmware getter.
+        // The ordinary loadPage path is untouched when no history action is
+        // active, and external-document Back never calls this overload.
+        XposedHelpers.findAndHookMethod(
+            TARGET_VIEW_MODEL,
+            classLoader,
+            "loadPage",
+            int.class,
+            new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    HistoryActionContext context = HISTORY_ACTION.get();
+                    if (context != null && !context.pageLoadAuthorized) {
+                        param.setResult(null);
+                        log("link_history_page_load_blocked "
+                            + "reason=preflight_changed");
+                    }
+                }
+            }
+        );
+    }
+
+    private static XC_MethodHook historyActionGuard(
+        final boolean original
+    ) {
+        return new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam param) {
+                lockHistoryAction();
+                try {
+                    HISTORY_ACTION.remove();
+                    Activity activity = (Activity) objectField(
+                        param.thisObject,
+                        "this$0"
+                    );
+                    Object viewModel = objectField(
+                        activity,
+                        "documentViewModel"
+                    );
+                    // A concrete Back action supersedes every older queued
+                    // link. HISTORY_SERIALIZATION remains held until the
+                    // listener returns, so its getter, list mutation, and
+                    // same/external-document branch are one native transaction.
+                    clearQueuedLinkInvocation(viewModel);
+                    ManifestLookup lookup = manifestLookupFor(viewModel);
+                    if (lookup.navigationBlocked()) {
+                        blockHistoryAction(
+                            param,
+                            lookup.navigationBlockReason(),
+                            original
+                        );
+                        return;
+                    }
+                    Manifest manifest = lookup.manifest;
+                    if (manifest == null) {
+                        return;
+                    }
+                    Object backInfo = peekNativeBackInfo(original);
+                    if (backInfo == null) {
+                        blockHistoryAction(
+                            param,
+                            "native_history_unavailable",
+                            original
+                        );
+                        return;
+                    }
+                    String sourcePath = stringMethod(
+                        backInfo,
+                        "getFromUrl"
+                    );
+                    if (sourcePath != null
+                        && !sameCanonicalPath(manifest.key, sourcePath)) {
+                        // A Back target in another document stays wholly
+                        // native, but remains inside the same serialized action.
+                        log("link_history_action_native_external original="
+                            + original);
+                        return;
+                    }
+                    if (!preflightSameDocumentHistory(
+                            viewModel,
+                            manifest,
+                            backInfo,
+                            original
+                        )) {
+                        blockHistoryAction(
+                            param,
+                            "unresolved_same_document_history",
+                            original
+                        );
+                        return;
+                    }
+                    // Bind this already-authenticated manifest for the
+                    // duration of the one synchronous native action. The
+                    // firmware getter mutates its history list, so capture
+                    // must not perform a second lookup that could cross a
+                    // freshness-lease boundary after the native history entry
+                    // has already been consumed.
+                    HISTORY_ACTION.set(new HistoryActionContext(
+                        backInfo,
+                        viewModel,
+                        manifest
+                    ));
+                } catch (Throwable throwable) {
+                    blockHistoryAction(param, "guard_failed", original);
+                    unlockHistoryAction();
+                    logFailure("link_history_action_guard_failed", throwable);
+                }
+            }
+
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) {
+                try {
+                    HISTORY_ACTION.remove();
+                } finally {
+                    unlockHistoryAction();
+                }
+            }
+        };
+    }
+
+    private static void lockHistoryAction() {
+        HISTORY_SERIALIZATION.lock();
+        Integer depth = HISTORY_ACTION_LOCK_DEPTH.get();
+        HISTORY_ACTION_LOCK_DEPTH.set(Integer.valueOf(
+            depth == null ? 1 : depth.intValue() + 1
+        ));
+    }
+
+    private static void unlockHistoryAction() {
+        Integer depth = HISTORY_ACTION_LOCK_DEPTH.get();
+        if (depth == null || depth.intValue() <= 0) {
+            return;
+        }
+        if (depth.intValue() == 1) {
+            HISTORY_ACTION_LOCK_DEPTH.remove();
+        } else {
+            HISTORY_ACTION_LOCK_DEPTH.set(Integer.valueOf(
+                depth.intValue() - 1
+            ));
+        }
+        HISTORY_SERIALIZATION.unlock();
+    }
+
+    private static void blockHistoryAction(
+        XC_MethodHook.MethodHookParam param,
+        String reason,
+        boolean original
+    ) {
+        // Block at the void action boundary. Never replace the firmware
+        // getter's non-null BackLinkInfo with null: its caller dereferences it.
+        param.setResult(null);
+        HISTORY_ACTION.remove();
+        log("link_history_action_blocked reason=" + reason
+            + " original=" + original);
+    }
+
+    private static Object peekNativeBackInfo(boolean original) {
+        try {
+            Object value = XposedHelpers.getStaticObjectField(
+                backLinkClass,
+                "backList"
+            );
+            if (!(value instanceof List)) {
+                return null;
+            }
+            List<?> backList = (List<?>) value;
+            if (backList.isEmpty()) {
+                return null;
+            }
+            return original
+                ? backList.get(backList.size() - 1)
+                : backList.get(0);
+        } catch (Throwable throwable) {
+            logFailure("link_history_preflight_failed", throwable);
+            return null;
+        }
+    }
+
+    private static boolean preflightSameDocumentHistory(
+        Object viewModel,
+        Manifest manifest,
+        Object backInfo,
+        boolean original
+    ) {
+        try {
+            int sourcePage = intMethod(backInfo, "getFromPage", -1);
+            int targetPage = intMethod(backInfo, "getToPage", -1);
+            String sourcePath = stringMethod(backInfo, "getFromUrl");
+            String targetPath = stringMethod(backInfo, "getToUrl");
+            int currentPage = intField(viewModel, "currentPage", -1);
+            if (sourcePage < 0 || sourcePage >= manifest.pageCount
+                || targetPage < 0 || targetPage >= manifest.pageCount
+                || currentPage < 0 || currentPage >= manifest.pageCount
+                || (!original && currentPage != targetPage)
+                || !sameCanonicalPath(manifest.key, sourcePath)
+                || !sameCanonicalPath(manifest.key, targetPath)) {
+                return false;
+            }
+            ReaderState state = stateFor(viewModel, manifest);
+            boolean hasRuntimeHistory = state.linkHistory.size() > 0;
+            VirtualSpreadNavigation.LinkVisit visit = original
+                ? state.linkHistory.peekOriginal(
+                    sourcePage, targetPage, currentPage
+                )
+                : state.linkHistory.peekBack(
+                    sourcePage, targetPage, currentPage
+                );
+            if (hasRuntimeHistory) {
+                return visit != null;
+            }
+            return VirtualSpreadNavigation.inferLinkSourceHalf(
+                manifest.links,
+                sourcePage,
+                targetPage
+            ) != null;
+        } catch (Throwable throwable) {
+            logFailure("link_history_preflight_failed", throwable);
+            return false;
+        }
+    }
+
+    private static void hookNativeSaveAcknowledgement(
+        ClassLoader classLoader
+    ) {
+        XposedHelpers.findAndHookMethod(
+            TARGET_SUPER_NOTE,
+            classLoader,
+            "saveMarkData",
+            String.class,
+            String.class,
+            int.class,
+            boolean.class,
+            new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    SaveObservation observation = SAVE_OBSERVATION.get();
+                    if (observation == null) {
+                        return;
+                    }
+                    observation.callbackObserved = true;
+                    observation.callbackSucceeded = Boolean.TRUE.equals(
+                        param.getResult()
+                    );
+                    observation.sameNote = param.thisObject
+                        == observation.expectedNote;
+                    observation.observedPage = param.args[2] instanceof Integer
+                        ? ((Integer) param.args[2]).intValue() : -1;
+                    observation.sameMarkPath = sameText(
+                        observation.expectedMarkPath,
+                        param.args[0] instanceof String
+                            ? (String) param.args[0] : null
+                    );
+                }
+            }
+        );
+    }
+
     private static void captureHistoryReturn(
         XC_MethodHook.MethodHookParam param,
         boolean original
@@ -567,23 +1004,24 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         if (backInfo == null) {
             return;
         }
-        Activity activity = activeActivity.get();
-        Object viewModel = objectField(activity, "documentViewModel");
-        // Every concrete Back/Original Back action is newer than a link tap
-        // queued during cold verification. Invalidate that older intent even
-        // when the accepted manifest has already entered MANIFESTS but its
-        // main-thread activation callback has not run yet.
-        clearQueuedLinkInvocation(viewModel);
-        ManifestLookup lookup = manifestLookupFor(viewModel);
-        Manifest manifest = lookup.manifest;
-        if (manifest == null) {
-            if (lookup.navigationBlocked()) {
-                param.setResult(null);
-                log("link_history_blocked reason="
-                    + lookup.navigationBlockReason());
-            }
+        HistoryActionContext action = HISTORY_ACTION.get();
+        if (action == null) {
             return;
         }
+        if (action.expectedBackInfo != backInfo) {
+            log("link_history_unmatched reason=preflight_changed");
+            return;
+        }
+        Activity activity = activeActivity.get();
+        if (activity == null || objectField(
+                activity,
+                "documentViewModel"
+            ) != action.viewModel) {
+            log("link_history_unmatched reason=view_model_changed");
+            return;
+        }
+        Object viewModel = action.viewModel;
+        Manifest manifest = action.manifest;
         try {
             int sourcePage = intMethod(backInfo, "getFromPage", -1);
             int targetPage = intMethod(backInfo, "getToPage", -1);
@@ -600,7 +1038,6 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     + " source=" + sourcePage
                     + " target=" + targetPage
                     + " current=" + currentPage);
-                param.setResult(null);
                 return;
             }
 
@@ -620,7 +1057,6 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     + " target=" + targetPage
                     + " current=" + currentPage
                     + " origin=runtime");
-                param.setResult(null);
                 return;
             }
             VirtualSpreadNavigation.Half sourceHalf = visit == null
@@ -635,20 +1071,21 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 log("link_history_unmatched original=" + original
                     + " source=" + sourcePage
                     + " target=" + targetPage);
-                param.setResult(null);
                 return;
             }
             clearPendingLink(state);
             state.pendingHistoryPage = sourcePage;
             state.pendingHistoryHalf = sourceHalf;
             state.pendingHistoryAt = System.currentTimeMillis();
+            if (action != null) {
+                action.pageLoadAuthorized = true;
+            }
             log("link_history_captured original=" + original
                 + " source=" + sourcePage
                 + " target=" + targetPage
                 + " half=" + sourceHalf
                 + " origin=" + (visit == null ? "manifest" : "runtime"));
         } catch (Throwable throwable) {
-            param.setResult(null);
             logFailure("link_history_capture_failed", throwable);
         }
     }
@@ -690,9 +1127,16 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             // either native external handling or internal capture can return.
             clearQueuedLinkInvocation(viewModel);
             if (routing == VirtualSpreadNavigation.LinkRouting.EXTERNAL) {
-                // The accepted PDF/sidecar snapshot authenticates the URI
-                // record. It changes no page or half, so keep native handling.
-                log("link_jump_passthrough kind=external authority=verified");
+                if (!authenticatedExternalLink(
+                        viewModel,
+                        lookup.manifest,
+                        superNoteLink
+                    )) {
+                    param.setResult(null);
+                    log("link_jump_blocked reason=unmatched_authenticated_uri");
+                    return;
+                }
+                log("link_jump_passthrough kind=external authority=matched");
                 return;
             }
             if (!captureLinkTarget(
@@ -820,6 +1264,50 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
     }
 
+    private static boolean authenticatedExternalLink(
+        Object viewModel,
+        Manifest manifest,
+        Object superNoteLink
+    ) {
+        if (manifest == null || superNoteLink == null) {
+            return false;
+        }
+        try {
+            String uri = stringMethod(superNoteLink, "getUrl");
+            Object nativeLink = XposedHelpers.callMethod(
+                superNoteLink,
+                "getLink"
+            );
+            Object bounds = nativeLink == null ? null
+                : XposedHelpers.callMethod(nativeLink, "getBounds");
+            if (uri == null || bounds == null) {
+                return false;
+            }
+            int sourcePage = intField(viewModel, "currentPage", -1);
+            VirtualSpreadNavigation.UriTarget matched =
+                VirtualSpreadNavigation.matchUriLink(
+                    manifest.uriLinks,
+                    sourcePage,
+                    uri,
+                    floatField(bounds, "x0", Float.NaN),
+                    floatField(bounds, "y0", Float.NaN),
+                    floatField(bounds, "x1", Float.NaN),
+                    floatField(bounds, "y1", Float.NaN),
+                    manifest.pageHeight,
+                    2.0f
+                );
+            if (matched == null) {
+                log("uri_link_unmatched source=" + sourcePage
+                    + " uri=" + uri);
+                return false;
+            }
+            return true;
+        } catch (Throwable throwable) {
+            logFailure("uri_link_match_failed", throwable);
+            return false;
+        }
+    }
+
     private static void queueLinkInvocation(
         Object viewModel,
         Object[] arguments,
@@ -878,33 +1366,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             + " kind=" + routing);
     }
 
-    private static String verifiedSnapshotId(Manifest manifest) {
-        if (manifest == null) {
-            return null;
-        }
-        try {
-            CachedManifest cached = MANIFESTS.get(manifest.key);
-            if (cached == null || cached.manifest != manifest) {
-                return null;
-            }
-            File pdf = new File(manifest.key);
-            File sidecar = new File(manifest.key + ".json");
-            FileIdentity pdfIdentity = FileIdentity.capture(pdf);
-            FileIdentity sidecarIdentity = FileIdentity.capture(sidecar);
-            return cached.matches(pdfIdentity, sidecarIdentity)
-                ? cached.snapshotId()
-                : null;
-        } catch (Throwable throwable) {
-            logFailure("link_snapshot_recheck_failed", throwable);
-            return null;
-        }
-    }
-
     private static VirtualSpreadNavigation.LinkRouting replayQueuedLink(
         Activity activity,
         Object viewModel,
         Manifest manifest,
-        long verificationGeneration
+        VerificationOwner verificationOwner
     ) {
         Object[] arguments;
         String documentPath;
@@ -926,11 +1392,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             }
             if (!VirtualSpreadNavigation.queuedLinkBelongsToVerification(
                     state.queuedLinkVerificationGeneration,
-                    verificationGeneration
+                    verificationOwner.generation
                 )) {
                 log("link_jump_replay_deferred reason=verification_generation"
                     + " queued=" + state.queuedLinkVerificationGeneration
-                    + " activation=" + verificationGeneration);
+                    + " activation=" + verificationOwner.generation);
                 return VirtualSpreadNavigation.LinkRouting.BLOCKED;
             }
             arguments = state.queuedLinkArguments;
@@ -953,7 +1419,6 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
         long age = System.currentTimeMillis() - queuedAt;
         int currentPage = intField(viewModel, "currentPage", -1);
-        String verifiedSnapshotId = verifiedSnapshotId(manifest);
         Object currentNativeDocument = nativePdfDocument(viewModel);
         boolean sameNativeDocument = currentNativeDocument != null
             && currentNativeDocument == queuedNativeDocument
@@ -975,10 +1440,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         if (!VirtualSpreadNavigation.pendingLinkReplayIsCurrent(
                 sameCanonicalPath(manifest.key, documentPath),
                 snapshotId != null
-                    && snapshotId.equals(verifiedSnapshotId),
+                    && snapshotId.equals(verificationOwner.snapshotId),
                 sameNativeDocument
-                    && verificationGeneration > 0L
-                    && queuedVerificationGeneration == verificationGeneration,
+                    && verificationOwner.generation > 0L
+                    && queuedVerificationGeneration
+                        == verificationOwner.generation,
                 queuedPageLoadGeneration >= 0L
                     && queuedPageLoadGeneration == currentPageLoadGeneration,
                 sourcePage,
@@ -1010,6 +1476,15 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     targetPage
                 )) {
                 log("link_jump_discarded reason=unmatched_authenticated_link");
+                return VirtualSpreadNavigation.LinkRouting.BLOCKED;
+            }
+            if (currentRouting == VirtualSpreadNavigation.LinkRouting.EXTERNAL
+                && !authenticatedExternalLink(
+                    viewModel,
+                    manifest,
+                    arguments[1]
+                )) {
+                log("link_jump_discarded reason=unmatched_authenticated_uri");
                 return VirtualSpreadNavigation.LinkRouting.BLOCKED;
             }
             REPLAYING_LINK.set(Boolean.TRUE);
@@ -1614,24 +2089,73 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     }
 
     private static boolean saveNativeTrails(Activity activity) {
+        Object presenter = null;
         try {
-            Object presenter = XposedHelpers.getObjectField(
+            presenter = XposedHelpers.getObjectField(
                 activity,
                 "handWritePresenter"
             );
             if (presenter == null) {
                 return false;
             }
+            boolean hadTrails = XposedHelpers.getBooleanField(
+                presenter,
+                "hasTrails"
+            );
+            if (!hadTrails) {
+                return true;
+            }
+            Object note = objectField(presenter, "superNoteNote");
+            int expectedPage = intField(presenter, "currentPage", -1);
+            Object markPathValue = objectField(presenter, "markPath");
+            String markPath = markPathValue instanceof String
+                ? (String) markPathValue : null;
+            if (note == null || expectedPage <= 0 || markPath == null) {
+                log("native_save_rejected reason=missing_page_identity");
+                return false;
+            }
+            SaveObservation observation = new SaveObservation(
+                note,
+                expectedPage,
+                markPath
+            );
+            SAVE_OBSERVATION.set(observation);
             XposedHelpers.callMethod(
                 presenter,
                 "saveTrails",
                 Boolean.FALSE,
                 Boolean.FALSE
             );
+            if (!observation.accepted()) {
+                // saveTrails clears hasTrails even when native saveMarkData
+                // reports failure. Restore dirty state so the user's ink is
+                // not silently discarded by a later page load.
+                XposedHelpers.setBooleanField(presenter, "hasTrails", true);
+                log("native_save_rejected reason=missing_or_failed_ack"
+                    + " expected_page=" + expectedPage
+                    + " observed_page=" + observation.observedPage
+                    + " callback=" + observation.callbackObserved
+                    + " success=" + observation.callbackSucceeded);
+                return false;
+            }
+            log("native_save_acknowledged page=" + expectedPage);
             return true;
         } catch (Throwable throwable) {
+            if (presenter != null) {
+                try {
+                    XposedHelpers.setBooleanField(
+                        presenter,
+                        "hasTrails",
+                        true
+                    );
+                } catch (Throwable ignored) {
+                    // Preserve the original failure as the useful diagnostic.
+                }
+            }
             logFailure("native_save_failed", throwable);
             return false;
+        } finally {
+            SAVE_OBSERVATION.remove();
         }
     }
 
@@ -2004,24 +2528,48 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 observeDocumentKey(null);
                 return unavailable;
             }
-            File pdf = new File(uri.getPath());
+            String key = lexicalAbsolutePath(uri.getPath());
+            File pdf = new File(key);
             File sidecar = new File(pdf.getPath() + ".json");
-            String key = pdf.getCanonicalPath();
             observeDocumentKey(key);
             bindReaderStateToDocument(viewModel, key);
-            if (!pdf.isFile() || !sidecar.isFile()) {
-                cancelManifestVerificationForKey(key);
-                return unavailableManifestLookup(
-                    viewModel,
-                    "required_pair_unavailable",
-                    key
-                );
+            Object nativeDocument = nativePdfDocument(viewModel);
+            Boolean nativeAuthority = nativeSnapshotClaimsVirtualSpread(
+                viewModel
+            );
+            if (Boolean.FALSE.equals(nativeAuthority)) {
+                // The live MuPDF object definitively has no virtual-spread
+                // authority. Do not probe storage or consume the first native
+                // turn/link/Back action of an ordinary PDF.
+                MANIFESTS.remove(key);
+                VERIFICATION_RETRY_AFTER.remove(key);
+                return new ManifestLookup(null, false, false, null);
             }
-            FileIdentity pdfIdentity = FileIdentity.capture(pdf);
-            FileIdentity sidecarIdentity = FileIdentity.capture(sidecar);
             CachedManifest cached = MANIFESTS.get(key);
-            if (cached != null
-                && cached.matches(pdfIdentity, sidecarIdentity)) {
+            if (cached != null && cached.nativeDocument == nativeDocument) {
+                long freshnessAge = SystemClock.elapsedRealtime()
+                    - cached.verifiedAtElapsed;
+                if (freshnessAge < 0L
+                    || freshnessAge > MAX_MANIFEST_FRESHNESS_AGE_MS) {
+                    MANIFESTS.remove(key, cached);
+                    scheduleManifestStateInvalidation(
+                        key,
+                        cached.snapshotId(),
+                        "freshness_lease_expired"
+                    );
+                    cached = null;
+                    log("manifest_cache_expired path=" + key);
+                } else if (freshnessAge
+                        >= MANIFEST_FRESHNESS_INTERVAL_MS) {
+                    scheduleManifestFreshness(
+                        pdf,
+                        sidecar,
+                        key,
+                        cached
+                    );
+                }
+            }
+            if (cached != null && cached.nativeDocument == nativeDocument) {
                 if (cached.manifest == null) {
                     return rejectedManifestLookup(
                         viewModel,
@@ -2047,41 +2595,34 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             if (cached != null) {
                 MANIFESTS.remove(key, cached);
             }
-            if (sidecarIdentity.size < 0L
-                || sidecarIdentity.size > MAX_MANIFEST_BYTES) {
-                cancelManifestVerificationForKey(key);
-                CachedManifest rejected = new CachedManifest(
-                    pdfIdentity,
-                    sidecarIdentity,
-                    "",
-                    null
-                );
-                MANIFESTS.put(key, rejected);
-                clearQueuedLinkInvocation(viewModel);
-                log("manifest_rejected reason=manifest_too_large path=" + key);
-                return rejectedManifestLookup(
-                    viewModel,
-                    key,
-                    rejected,
-                    "manifest_too_large"
+            Long retryAfter = VERIFICATION_RETRY_AFTER.get(key);
+            long now = SystemClock.elapsedRealtime();
+            if (retryAfter != null && retryAfter.longValue() > now) {
+                return new ManifestLookup(
+                    null,
+                    true,
+                    false,
+                    "retry:" + retryAfter + ":" + key,
+                    0L,
+                    "manifest_retry_backoff"
                 );
             }
-            String requestedSnapshotId = pdfIdentity.token()
-                + ":" + sidecarIdentity.token();
-            discardQueuedLinkForDifferentSnapshot(
-                viewModel,
-                key,
-                requestedSnapshotId
-            );
+            if (retryAfter != null) {
+                VERIFICATION_RETRY_AFTER.remove(key, retryAfter);
+            }
             VerificationOwner verificationOwner = scheduleManifestVerification(
                     pdf,
                     sidecar,
                     key,
-                    pdfIdentity,
-                    sidecarIdentity
+                    nativeDocument
                 );
             boolean verificationPending = verificationOwner != null;
             if (verificationPending) {
+                discardQueuedLinkForDifferentSnapshot(
+                    viewModel,
+                    key,
+                    verificationOwner.snapshotId
+                );
                 log("manifest_verification_pending path=" + key);
             } else {
                 return supersededManifestLookup(
@@ -2144,22 +2685,205 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
     }
 
-    private static void cancelManifestVerificationForKey(String key) {
-        synchronized (MANIFEST_VERIFIER_LOCK) {
-            if (sameDocumentKey(key, observedDocumentKey)) {
-                cancelManifestVerificationLocked();
-            }
-        }
-    }
-
     private static void cancelManifestVerificationLocked() {
         VERIFYING.clear();
+        FRESHNESS_CHECKING.clear();
+        VERIFICATION_RETRY_AFTER.clear();
         Runnable stale;
         while ((stale = MANIFEST_VERIFIER.getQueue().poll()) != null) {
             if (stale instanceof ManifestVerificationTask) {
                 ((ManifestVerificationTask) stale).cancelBeforeRun();
+            } else if (stale instanceof ManifestFreshnessTask) {
+                ((ManifestFreshnessTask) stale).cancelBeforeRun();
             }
         }
+    }
+
+    private static void scheduleManifestFreshnessWakeup(
+        final String key,
+        final CachedManifest expected
+    ) {
+        final Activity owner = activeActivity.get();
+        if (owner == null) {
+            return;
+        }
+        new Handler(owner.getMainLooper()).postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                Activity activity = activeActivity.get();
+                if (activity != owner || owner.isFinishing()
+                    || owner.isDestroyed()
+                    || !sameDocumentKey(key, observedDocumentKey)
+                    || MANIFESTS.get(key) != expected) {
+                    return;
+                }
+                Object viewModel = objectField(
+                    owner,
+                    "documentViewModel"
+                );
+                if (nativePdfDocument(viewModel)
+                    != expected.nativeDocument) {
+                    return;
+                }
+                File pdf = new File(key);
+                scheduleManifestFreshness(
+                    pdf,
+                    new File(key + ".json"),
+                    key,
+                    expected
+                );
+            }
+        }, MANIFEST_FRESHNESS_INTERVAL_MS);
+    }
+
+    private static void scheduleManifestFreshness(
+        File pdf,
+        File sidecar,
+        String key,
+        CachedManifest expected
+    ) {
+        if (expected == null || expected.pdfIdentity == null
+            || expected.sidecarIdentity == null
+            || FRESHNESS_CHECKING.putIfAbsent(key, expected) != null) {
+            return;
+        }
+        try {
+            MANIFEST_VERIFIER.execute(new ManifestFreshnessTask(
+                pdf,
+                sidecar,
+                key,
+                expected
+            ));
+        } catch (RuntimeException exception) {
+            FRESHNESS_CHECKING.remove(key, expected);
+            logFailure("manifest_freshness_schedule_failed", exception);
+        }
+    }
+
+    private static void verifyManifestFreshness(
+        File pdf,
+        File sidecar,
+        String key,
+        CachedManifest expected
+    ) {
+        boolean invalidated = false;
+        try {
+            if (MANIFESTS.get(key) != expected
+                || !sameDocumentKey(key, observedDocumentKey)) {
+                return;
+            }
+            if (!key.equals(pdf.getCanonicalPath())
+                || !(key + ".json").equals(sidecar.getCanonicalPath())) {
+                throw new IllegalArgumentException(
+                    "manifest paths must not use aliases"
+                );
+            }
+            FileIdentity pdfCurrent = FileIdentity.captureRegularPath(pdf);
+            FileIdentity sidecarCurrent =
+                FileIdentity.captureRegularPath(sidecar);
+            if (!expected.pdfIdentity.matches(pdfCurrent)
+                || !expected.sidecarIdentity.matches(sidecarCurrent)) {
+                throw new IllegalStateException(
+                    "manifest filesystem generation changed"
+                );
+            }
+            CachedManifest refreshed = expected.refreshed(
+                SystemClock.elapsedRealtime()
+            );
+            if (MANIFESTS.replace(key, expected, refreshed)) {
+                log("manifest_freshness_accepted path=" + key
+                    + " snapshot=" + expected.snapshotId());
+                if (refreshed.manifest != null) {
+                    scheduleManifestFreshnessWakeup(key, refreshed);
+                }
+            }
+        } catch (Throwable throwable) {
+            invalidated = MANIFESTS.remove(key, expected);
+            if (invalidated) {
+                scheduleManifestStateInvalidation(
+                    key,
+                    expected.snapshotId(),
+                    "filesystem_generation_changed"
+                );
+                deferManifestRetry(key);
+                logFailure("manifest_freshness_failed path=" + key, throwable);
+            }
+        } finally {
+            FRESHNESS_CHECKING.remove(key, expected);
+        }
+    }
+
+    private static void scheduleManifestStateInvalidation(
+        final String key,
+        final String snapshotId,
+        final String reason
+    ) {
+        final Activity owner = activeActivity.get();
+        if (owner == null) {
+            return;
+        }
+        new Handler(owner.getMainLooper()).post(new Runnable() {
+            @Override
+            public void run() {
+                if (activeActivity.get() != owner) {
+                    return;
+                }
+                Object viewModel = objectField(
+                    owner,
+                    "documentViewModel"
+                );
+                synchronized (STATES) {
+                    ReaderState state = STATES.get(viewModel);
+                    if (state == null
+                        || !sameDocumentKey(key, state.documentKey)) {
+                        return;
+                    }
+                    state.manifestKey = null;
+                    state.manifestRevision = null;
+                    state.nativeSnapshotDocument = null;
+                    state.nativeSnapshotRevision = null;
+                    state.nativeSnapshotAccepted = false;
+                    clearManifestTransientState(state, true);
+                }
+                log("manifest_state_invalidated reason=" + reason
+                    + " snapshot=" + snapshotId
+                    + " path=" + key);
+            }
+        });
+    }
+
+    private static void deferManifestRetry(
+        final String key
+    ) {
+        final long retryAt = SystemClock.elapsedRealtime()
+            + MANIFEST_RETRY_BACKOFF_MS;
+        final Activity owner = activeActivity.get();
+        if (owner == null) {
+            return;
+        }
+        final Long retryToken = Long.valueOf(retryAt);
+        VERIFICATION_RETRY_AFTER.put(key, retryToken);
+        new Handler(owner.getMainLooper()).postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                // Always retire this exact token first. Lifecycle or document
+                // changes must not strand a path in the retry map. Retrying is
+                // deliberately demand-driven: a later real reader action may
+                // schedule verification after this short cooldown, while a
+                // stable missing/denied sidecar cannot create an autonomous
+                // verifier/logging loop.
+                if (!VERIFICATION_RETRY_AFTER.remove(key, retryToken)) {
+                    return;
+                }
+                if (activeActivity.get() != owner
+                    || owner.isFinishing()
+                    || owner.isDestroyed()
+                    || !sameDocumentKey(key, observedDocumentKey)) {
+                    return;
+                }
+                log("manifest_retry_ready path=" + key);
+            }
+        }, MANIFEST_RETRY_BACKOFF_MS);
     }
 
     /**
@@ -2172,26 +2896,26 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         final File pdf,
         final File sidecar,
         final String key,
-        final FileIdentity pdfBefore,
-        final FileIdentity sidecarBefore
+        final Object nativeDocument
     ) {
-        final String snapshotId = pdfBefore.token()
-            + ":" + sidecarBefore.token();
         synchronized (MANIFEST_VERIFIER_LOCK) {
             if (!key.equals(observedDocumentKey)) {
                 return null;
             }
             VerificationOwner existing = VERIFYING.get(key);
-            if (existing != null && snapshotId.equals(existing.snapshotId)) {
+            if (existing != null
+                && existing.nativeDocument == nativeDocument) {
                 return existing;
             }
             // Only the document most recently requested by the native reader
             // may remain current. Invalidate an active older verification and
             // retain at most one pending task behind it.
             cancelManifestVerificationLocked();
+            long generation = VERIFICATION_GENERATION.incrementAndGet();
             VerificationOwner owner = new VerificationOwner(
-                snapshotId,
-                VERIFICATION_GENERATION.incrementAndGet()
+                "request:" + generation + ":" + key,
+                generation,
+                nativeDocument
             );
             VERIFYING.put(key, owner);
             try {
@@ -2199,8 +2923,6 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     pdf,
                     sidecar,
                     key,
-                    pdfBefore,
-                    sidecarBefore,
                     owner
                 ));
                 return owner;
@@ -2224,17 +2946,33 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         File pdf,
         File sidecar,
         String key,
-        FileIdentity pdfBefore,
-        FileIdentity sidecarBefore,
         VerificationOwner owner
     ) {
         try {
-            if (VERIFYING.get(key) != owner) {
-                return;
+            requireCurrentVerification(key, owner);
+            if (!key.equals(pdf.getCanonicalPath())
+                || !(key + ".json").equals(sidecar.getCanonicalPath())) {
+                throw new IllegalArgumentException(
+                    "manifest paths must not use aliases"
+                );
+            }
+            FileIdentity pdfBefore = FileIdentity.captureRegularPath(pdf);
+            FileIdentity sidecarBefore = FileIdentity.captureRegularPath(
+                sidecar
+            );
+            if (sidecarBefore.size < 0L
+                || sidecarBefore.size > MAX_MANIFEST_BYTES) {
+                throw new IllegalArgumentException("manifest is too large");
             }
             try (
-                RandomAccessFile pdfInput = new RandomAccessFile(pdf, "r");
-                FileInputStream sidecarInput = new FileInputStream(sidecar)
+                FileInputStream pdfInput = openRegularFile(
+                    pdf,
+                    pdfBefore
+                );
+                FileInputStream sidecarInput = openRegularFile(
+                    sidecar,
+                    sidecarBefore
+                )
             ) {
                 FileIdentity pdfOpened = FileIdentity.capture(pdfInput.getFD());
                 FileIdentity sidecarOpened = FileIdentity.capture(
@@ -2292,13 +3030,18 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 FileIdentity sidecarAfter = FileIdentity.capture(
                     sidecarInput.getFD()
                 );
-                FileIdentity pdfPathAfter = FileIdentity.capture(pdf);
-                FileIdentity sidecarPathAfter = FileIdentity.capture(sidecar);
+                FileIdentity pdfPathAfter = FileIdentity.captureRegularPath(
+                    pdf
+                );
+                FileIdentity sidecarPathAfter =
+                    FileIdentity.captureRegularPath(sidecar);
                 if (!pdfOpened.matches(pdfAfter)
                     || !sidecarOpened.matches(sidecarAfter)
                     || !pdfAfter.matches(pdfPathAfter)
                     || !sidecarAfter.matches(sidecarPathAfter)
-                    || !sidecarDigest.equals(currentSidecarDigest)) {
+                    || !sidecarDigest.equals(currentSidecarDigest)
+                    || !key.equals(pdf.getCanonicalPath())
+                    || !(key + ".json").equals(sidecar.getCanonicalPath())) {
                     if (VERIFYING.get(key) == owner) {
                         MANIFESTS.remove(key);
                     }
@@ -2316,7 +3059,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                         pdfAfter,
                         sidecarAfter,
                         sidecarDigest,
-                        parsed
+                        parsed,
+                        owner.nativeDocument,
+                        pdfAfter.token() + ":" + sidecarAfter.token(),
+                        SystemClock.elapsedRealtime()
                     );
                     MANIFESTS.put(key, published);
                     if (VERIFYING.get(key) != owner) {
@@ -2331,8 +3077,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                         );
                     }
                     if (parsed != null) {
+                        VERIFICATION_RETRY_AFTER.remove(key);
                         log("manifest_accepted path=" + key
                             + " pages=" + parsed.pageCount);
+                        scheduleManifestFreshnessWakeup(key, published);
                         scheduleManifestActivation(
                             key,
                             parsed.revision,
@@ -2347,9 +3095,15 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     }
                 }
             }
+        } catch (ManifestVerificationSuperseded superseded) {
+            log("manifest_verification_superseded path=" + key);
         } catch (Throwable throwable) {
             if (VERIFYING.get(key) == owner) {
+                // Availability and I/O failures are not authenticated
+                // negative evidence. Leave them retryable instead of pinning
+                // the native document to a synthetic rejected snapshot.
                 MANIFESTS.remove(key);
+                deferManifestRetry(key);
                 scheduleQueuedLinkDiscard(
                     key,
                     owner,
@@ -2359,6 +3113,42 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             }
         } finally {
             VERIFYING.remove(key, owner);
+        }
+    }
+
+    private static FileInputStream openRegularFile(
+        File file,
+        FileIdentity expected
+    ) throws Exception {
+        FileDescriptor descriptor = null;
+        try {
+            descriptor = Os.open(
+                file.getPath(),
+                OsConstants.O_RDONLY
+                    | OsConstants.O_CLOEXEC
+                    | OsConstants.O_NOFOLLOW
+                    | OsConstants.O_NONBLOCK,
+                0
+            );
+            StructStat opened = Os.fstat(descriptor);
+            if (!OsConstants.S_ISREG(opened.st_mode)) {
+                throw new IllegalArgumentException(
+                    "manifest input is not a regular file"
+                );
+            }
+            FileIdentity openedIdentity = FileIdentity.fromStat(opened);
+            if (expected == null || !expected.matches(openedIdentity)) {
+                throw new IllegalStateException(
+                    "manifest input changed before opening"
+                );
+            }
+            FileInputStream stream = new FileInputStream(descriptor);
+            descriptor = null;
+            return stream;
+        } finally {
+            if (descriptor != null) {
+                Os.close(descriptor);
+            }
         }
     }
 
@@ -2395,7 +3185,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                         owner,
                         viewModel,
                         current,
-                        verificationOwner.generation
+                        verificationOwner
                     );
                 if (VirtualSpreadNavigation
                     .replayRequiresImmediateInitialization(replayedRouting)) {
@@ -2591,7 +3381,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     }
 
     private static Manifest parseManifest(
-        RandomAccessFile pdfInput,
+        FileInputStream pdfInput,
         long pdfLength,
         String sidecarJson,
         String key,
@@ -2785,6 +3575,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
         ArrayList<VirtualSpreadNavigation.LinkTarget> links =
             new ArrayList<>();
+        ArrayList<VirtualSpreadNavigation.UriTarget> uriLinks =
+            new ArrayList<>();
         ArrayList<String> linkAuthorityRecords = new ArrayList<>();
         for (int index = 0; index < linksJson.length(); index++) {
             requireCurrentVerification(key, owner);
@@ -2854,6 +3646,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     log("manifest_rejected reason=link_record index=" + index);
                     return null;
                 }
+                String targetUri = (String) link.opt("uri");
                 linkAuthorityRecords.add(VirtualSpreadLinkAuthority.uri(
                     sourceSourcePage,
                     sourceSide,
@@ -2862,7 +3655,18 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     y0,
                     x1,
                     y1,
-                    (String) link.opt("uri")
+                    targetUri
+                ));
+                uriLinks.add(new VirtualSpreadNavigation.UriTarget(
+                    sourceOutputPage,
+                    "left".equals(sourceSide)
+                        ? VirtualSpreadNavigation.Half.LEFT
+                        : VirtualSpreadNavigation.Half.RIGHT,
+                    targetUri,
+                    (float) x0,
+                    (float) y0,
+                    (float) x1,
+                    (float) y1
                 ));
                 continue;
             }
@@ -2954,7 +3758,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             pageCount,
             spreads,
             (float) pageHeight,
-            links.toArray(new VirtualSpreadNavigation.LinkTarget[links.size()])
+            links.toArray(new VirtualSpreadNavigation.LinkTarget[links.size()]),
+            uriLinks.toArray(
+                new VirtualSpreadNavigation.UriTarget[uriLinks.size()]
+            )
         );
     }
 
@@ -2996,27 +3803,38 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     }
 
     private static String sha256File(
-        RandomAccessFile input,
+        FileInputStream input,
         String key,
         VerificationOwner owner
     ) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        long originalPosition = input.getFilePointer();
+        FileChannel channel = input.getChannel();
+        long originalPosition = channel.position();
+        long expectedSize = channel.size();
         try {
-            input.seek(0L);
+            channel.position(0L);
             byte[] buffer = new byte[64 * 1024];
-            while (true) {
+            long remaining = expectedSize;
+            while (remaining > 0L) {
                 requireCurrentVerification(key, owner);
-                int count = input.read(buffer);
+                int count = input.read(
+                    buffer,
+                    0,
+                    (int) Math.min((long) buffer.length, remaining)
+                );
                 if (count < 0) {
-                    break;
+                    throw new IllegalStateException("short PDF read");
                 }
                 if (count > 0) {
                     digest.update(buffer, 0, count);
+                    remaining -= count;
                 }
             }
+            if (input.read() >= 0) {
+                throw new IllegalStateException("long PDF read");
+            }
         } finally {
-            input.seek(originalPosition);
+            channel.position(originalPosition);
         }
         return toHex(digest.digest());
     }
@@ -3121,10 +3939,27 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             return false;
         }
         try {
-            return expected.equals(new File(candidate).getCanonicalPath());
+            // Reader callbacks may run on the UI thread. Keep comparison
+            // lexical here; the verifier separately rejects aliases and
+            // symlinks after opening exact descriptors on its worker.
+            return lexicalAbsolutePath(expected).equals(
+                lexicalAbsolutePath(candidate)
+            );
         } catch (Throwable throwable) {
             return false;
         }
+    }
+
+    private static String lexicalAbsolutePath(String path) {
+        return new File(path)
+            .getAbsoluteFile()
+            .toPath()
+            .normalize()
+            .toString();
+    }
+
+    private static boolean sameText(String first, String second) {
+        return first == null ? second == null : first.equals(second);
     }
 
     private static void log(String message) {

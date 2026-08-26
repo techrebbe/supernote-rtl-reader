@@ -1,5 +1,9 @@
 from pathlib import Path
 
+import re
+
+import yaml
+
 
 root = Path(__file__).resolve().parents[1]
 hook = (root / "src/com/techrebbe/supernote/virtualspread/VirtualSpreadHook.java").read_text(
@@ -82,6 +86,10 @@ expected_hooks = {
     '"showLinkJumpView"',
     '"getFirstBack"',
     '"getLastBack"',
+    '"onBackClick"',
+    '"onOriginalBackClick"',
+    '"saveMarkData"',
+    '"loadPage"',
 }
 for expected in expected_hooks:
     if expected not in hook:
@@ -103,6 +111,8 @@ required_hook_order = (
     "hookPageBar(loadPackageParam.classLoader);",
     "hookLinkTarget(loadPackageParam.classLoader);",
     "hookLinkHistory(loadPackageParam.classLoader);",
+    "hookLinkHistoryActions(loadPackageParam.classLoader);",
+    "hookNativeSaveAcknowledgement(loadPackageParam.classLoader);",
     'logFailure("disabled reason=required_hook_failed", throwable);',
     "return;",
     "hooksReady = true;",
@@ -136,27 +146,6 @@ for required in (
             + required
         )
 
-oversized_rejection = lookup.find(
-    "sidecarIdentity.size > MAX_MANIFEST_BYTES"
-)
-oversized_cancel = lookup.find(
-    "cancelManifestVerificationForKey(key)", oversized_rejection
-)
-oversized_cache = lookup.find("MANIFESTS.put(key, rejected)", oversized_cancel)
-oversized_clear = lookup.find(
-    "clearQueuedLinkInvocation(viewModel)", oversized_cache
-)
-oversized_return = lookup.find(
-    "return rejectedManifestLookup(", oversized_clear
-)
-if not (
-    0 <= oversized_rejection < oversized_cancel < oversized_cache
-    < oversized_clear < oversized_return
-):
-    raise SystemExit(
-        "an unchanged oversized sidecar must publish one stable negative "
-        "cache entry instead of rescheduling verification forever"
-    )
 for required in (
     "private static ManifestLookup rejectedManifestLookup(",
     'manifest_rejected_cached reason=',
@@ -167,15 +156,15 @@ for required in (
         )
 
 history_start = hook.find("private static void captureHistoryReturn")
-history_end = hook.find("private static boolean captureLinkTarget", history_start)
+history_end = hook.find("private static void handleLinkTarget", history_start)
 if history_start < 0 or history_end < 0:
     raise SystemExit("missing native-link history return handling")
 history_return = hook[history_start:history_end]
 for required in (
-    "ManifestLookup lookup = manifestLookupFor(viewModel)",
-    "if (lookup.navigationBlocked())",
-    'link_history_blocked reason=',
-    "param.setResult(null)",
+    "if (action == null)",
+    "if (action.expectedBackInfo != backInfo)",
+    "Object viewModel = action.viewModel",
+    "Manifest manifest = action.manifest",
     "currentPage < 0 || currentPage >= manifest.pageCount",
     "(!original && currentPage != targetPage)",
     "boolean hadRuntimeHistory = state.linkHistory.size() > 0",
@@ -190,22 +179,119 @@ for required in (
             f"native-link history return is missing fail-closed guard: {required}"
         )
 
-history_view_model = history_return.find(
-    'Object viewModel = objectField(activity, "documentViewModel")'
-)
-history_queued_clear = history_return.find(
-    "clearQueuedLinkInvocation(viewModel)", history_view_model
-)
-history_manifest_lookup = history_return.find(
-    "ManifestLookup lookup = manifestLookupFor(viewModel)", history_view_model
-)
-if not (
-    0 <= history_view_model < history_queued_clear < history_manifest_lookup
-):
+if "param.setResult(null)" in history_return:
     raise SystemExit(
-        "every Back/Original Back action must discard an older queued link "
-        "before consulting the asynchronously activated manifest"
+        "BackLinkUtils getters must retain the firmware's non-null result"
     )
+if "manifestLookupFor(" in history_return:
+    raise SystemExit(
+        "history capture must retain its preflight manifest after native mutation"
+    )
+history_action_start = hook.find("private static void hookLinkHistoryActions")
+history_action_end = hook.find(
+    "private static void hookNativeSaveAcknowledgement",
+    history_action_start,
+)
+if history_action_start < 0 or history_action_end < 0:
+    raise SystemExit("missing safe Back/Original Back action guards")
+history_actions = hook[history_action_start:history_action_end]
+for required in (
+    '"onBackClick"',
+    '"onOriginalBackClick"',
+    "clearQueuedLinkInvocation(viewModel)",
+    "lockHistoryAction()",
+    "ManifestLookup lookup = manifestLookupFor(viewModel)",
+    "if (lookup.navigationBlocked())",
+    "param.setResult(null)",
+    'link_history_action_blocked reason=',
+    "Object backInfo = peekNativeBackInfo(original)",
+    "preflightSameDocumentHistory(",
+    "state.linkHistory.peekOriginal(",
+    "state.linkHistory.peekBack(",
+    '"unresolved_same_document_history"',
+    "HISTORY_ACTION.set(new HistoryActionContext(",
+    "backInfo,\n                        viewModel,\n                        manifest",
+    '"loadPage",\n            int.class',
+    "if (context != null && !context.pageLoadAuthorized)",
+    'link_history_page_load_blocked ',
+    "finally {\n                    unlockHistoryAction()",
+):
+    if required not in history_actions:
+        raise SystemExit("history action guard is missing: " + required)
+
+for required in (
+    "private static final ReentrantLock HISTORY_SERIALIZATION",
+    "private static void hookBackLinkSerialization()",
+    "backLinkClass.getDeclaredMethods()",
+    "Modifier.isStatic(modifiers)",
+    "Modifier.isAbstract(modifiers)",
+    "Modifier.isNative(modifiers)",
+    "XposedBridge.hookMethod(method, new XC_MethodHook()",
+    "HISTORY_SERIALIZATION.lock()",
+    "HISTORY_SERIALIZATION.unlock()",
+    'link_history_serialization_ready methods=',
+):
+    if required not in hook:
+        raise SystemExit("native Back transaction is not serialized: " + required)
+lock_index = history_actions.find("lockHistoryAction()")
+external_index = history_actions.find(
+    'link_history_action_native_external original='
+)
+unlock_index = history_actions.find("unlockHistoryAction()", external_index)
+if not (0 <= lock_index < external_index < unlock_index):
+    raise SystemExit("external native Back must remain inside serialization")
+
+save_hook_start = hook.find("private static void hookNativeSaveAcknowledgement")
+save_hook_end = hook.find("private static void captureHistoryReturn", save_hook_start)
+if save_hook_start < 0 or save_hook_end < 0:
+    raise SystemExit("missing native save acknowledgement hook")
+save_hook = hook[save_hook_start:save_hook_end]
+for required in (
+    '"saveMarkData"',
+    "String.class,\n            String.class,\n            int.class,\n            boolean.class",
+    "SaveObservation observation = SAVE_OBSERVATION.get()",
+    "observation.callbackObserved = true",
+    "Boolean.TRUE.equals(\n                        param.getResult()",
+    "param.thisObject\n                        == observation.expectedNote",
+    "observation.observedPage = param.args[2]",
+    "observation.sameMarkPath = sameText(",
+):
+    if required not in save_hook:
+        raise SystemExit("native save acknowledgement hook is incomplete: " + required)
+
+save_method_start = hook.find("private static boolean saveNativeTrails")
+save_method_end = hook.find("private static void clearPendingLink", save_method_start)
+if save_method_start < 0 or save_method_end < 0:
+    raise SystemExit("missing native trail save gate")
+save_method = hook[save_method_start:save_method_end]
+for required in (
+    'getBooleanField(\n                presenter,\n                "hasTrails"',
+    "if (!hadTrails)",
+    'objectField(presenter, "superNoteNote")',
+    'intField(presenter, "currentPage", -1)',
+    'objectField(presenter, "markPath")',
+    "SAVE_OBSERVATION.set(observation)",
+    '"saveTrails",\n                Boolean.FALSE,\n                Boolean.FALSE',
+    "if (!observation.accepted())",
+    'setBooleanField(presenter, "hasTrails", true)',
+    'native_save_rejected reason=missing_or_failed_ack',
+    'native_save_acknowledged page=',
+    "SAVE_OBSERVATION.remove()",
+):
+    if required not in save_method:
+        raise SystemExit("native trail save gate is incomplete: " + required)
+save_observation_index = save_method.find("SAVE_OBSERVATION.set(observation)")
+save_call_index = save_method.find('"saveTrails"', save_observation_index)
+save_ack_index = save_method.find("if (!observation.accepted())", save_call_index)
+save_success_log_index = save_method.find(
+    'log("native_save_acknowledged page="', save_ack_index
+)
+save_success_index = save_method.find("return true;", save_success_log_index)
+if not (
+    0 <= save_observation_index < save_call_index < save_ack_index
+    < save_success_log_index < save_success_index
+):
+    raise SystemExit("dirty trail saves can succeed before native acknowledgement")
 
 link_hook_start = hook.find("private static void handleLinkTarget")
 link_hook_end = hook.find("private static void hookViewModel", link_hook_start)
@@ -218,7 +304,9 @@ for required in (
     "classifyLinkInvocation(superNoteLink, targetPage)",
     "routing == VirtualSpreadNavigation.LinkRouting.NON_LINK",
     "routing == VirtualSpreadNavigation.LinkRouting.EXTERNAL",
-    'link_jump_passthrough kind=external authority=verified',
+    "authenticatedExternalLink(",
+    'link_jump_passthrough kind=external authority=matched',
+    'link_jump_blocked reason=unmatched_authenticated_uri',
     "ManifestLookup lookup = manifestLookupFor(viewModel)",
     "if (lookup.verificationPending)",
     "lookup.snapshotId,\n                lookup.verificationGeneration,\n                routing",
@@ -236,14 +324,16 @@ for required in (
     'link_jump_replay_deferred reason=verification_generation',
     "currentNativeDocument == queuedNativeDocument",
     "queuedNativeSourceAuthority.equals(nativePdfMetadata(",
-    "queuedVerificationGeneration == verificationGeneration",
+    "queuedVerificationGeneration\n                        == verificationOwner.generation",
     "queuedPageLoadGeneration == currentPageLoadGeneration",
     "pendingLinkReplayIsCurrent(",
     "sameCanonicalPath(manifest.key, documentPath)",
-    "snapshotId.equals(verifiedSnapshotId)",
+    "snapshotId.equals(verificationOwner.snapshotId)",
     "currentRouting != queuedRouting",
     "currentRouting == VirtualSpreadNavigation.LinkRouting.INTERNAL",
     "if (!captureLinkTarget(",
+    "currentRouting == VirtualSpreadNavigation.LinkRouting.EXTERNAL",
+    'link_jump_discarded reason=unmatched_authenticated_uri',
     'link_jump_blocked reason=unmatched_authenticated_link',
     "XposedHelpers.callMethod(activity, \"showLinkJumpView\", arguments)",
     "REPLAYING_LINK.set(Boolean.TRUE)",
@@ -426,7 +516,7 @@ if "state.pageLoadGeneration = 0L" in reader_state:
 
 lookup_start = hook.find("private static Manifest manifestFor")
 lookup_end = hook.find(
-    "private static VerificationOwner scheduleManifestVerification",
+    "private static void discardQueuedLinkForDifferentSnapshot",
     lookup_start,
 )
 if lookup_start < 0 or lookup_end < 0:
@@ -437,14 +527,18 @@ for required in (
     'objectField(activity, "documentViewModel") != viewModel',
     'manifest_lookup_skipped reason=stale_view_model',
     "observeDocumentKey(null)",
-    "String key = pdf.getCanonicalPath()",
+    "String key = lexicalAbsolutePath(uri.getPath())",
     "observeDocumentKey(key)",
     "bindReaderStateToDocument(viewModel, key)",
     "bindReaderStateToDocument(viewModel, null)",
-    "cancelManifestVerificationForKey(key)",
-    "FileIdentity pdfIdentity = FileIdentity.capture(pdf)",
-    "FileIdentity sidecarIdentity = FileIdentity.capture(sidecar)",
-    "cached.matches(pdfIdentity, sidecarIdentity)",
+    "Object nativeDocument = nativePdfDocument(viewModel)",
+    "Boolean nativeAuthority = nativeSnapshotClaimsVirtualSpread(",
+    "if (Boolean.FALSE.equals(nativeAuthority))",
+    "return new ManifestLookup(null, false, false, null)",
+    "cached.nativeDocument == nativeDocument",
+    "cached.verifiedAtElapsed",
+    "MAX_MANIFEST_FRESHNESS_AGE_MS",
+    "scheduleManifestFreshness(",
     "if (cached.manifest == null)",
     "nativeSnapshotClaimsVirtualSpread(viewModel)",
     "generatedDocumentBlocked",
@@ -455,20 +549,31 @@ for required in (
     "VerificationOwner verificationOwner = scheduleManifestVerification(",
     "boolean verificationPending = verificationOwner != null",
     "discardQueuedLinkForDifferentSnapshot(",
-    "cached.snapshotId()",
+    "verificationOwner.snapshotId",
     "manifest_verification_pending",
     "Fail closed until the background verifier publishes",
-    '"required_pair_unavailable"',
     '"lookup_failed"',
     'observeDocumentKey(null);\n            logFailure("manifest_read_failed"',
     'return supersededManifestLookup("stale_view_model")',
     '"manifest_verification_superseded"',
+    '"manifest_retry_backoff"',
 ):
     if required not in manifest_lookup:
         raise SystemExit(f"manifest lookup is missing fail-closed guard: {required}")
 if '"native_snapshot_mismatch"' not in hook:
     raise SystemExit("native snapshot mismatch is missing its blocked-turn reason")
-for forbidden in ("parseManifest(", "readBytes(", "sha256(", "sha256File("):
+for forbidden in (
+    "parseManifest(",
+    "readBytes(",
+    "sha256(",
+    "sha256File(",
+    "getCanonicalPath(",
+    ".isFile()",
+    "FileIdentity.capture(",
+    "FileIdentity.captureRegularPath(",
+    "Os.stat(",
+    "Os.lstat(",
+):
     if forbidden in manifest_lookup:
         raise SystemExit(
             f"manifest lookup performs expensive verification on a UI callback: {forbidden}"
@@ -552,11 +657,9 @@ if not (
     )
 
 lookup_positions = (
-    manifest_lookup.find("String key = pdf.getCanonicalPath()"),
+    manifest_lookup.find("String key = lexicalAbsolutePath(uri.getPath())"),
     manifest_lookup.find("observeDocumentKey(key)"),
     manifest_lookup.find("bindReaderStateToDocument(viewModel, key)"),
-    manifest_lookup.find("if (!pdf.isFile() || !sidecar.isFile())"),
-    manifest_lookup.find("cancelManifestVerificationForKey(key)"),
     manifest_lookup.find("CachedManifest cached = MANIFESTS.get(key)"),
 )
 if min(lookup_positions) < 0 or tuple(sorted(lookup_positions)) != (
@@ -610,13 +713,18 @@ manifest_verification = hook[verification_start:verification_end]
 for required in (
     "MANIFEST_VERIFIER.execute",
     "VERIFYING.put(key, owner)",
-    "snapshotId.equals(existing.snapshotId)",
+    "existing.nativeDocument == nativeDocument",
     "VERIFYING.get(key) == owner",
     "VERIFYING.get(key) != owner",
     "VERIFYING.remove(key, owner)",
     "VERIFICATION_GENERATION.incrementAndGet()",
-    'RandomAccessFile pdfInput = new RandomAccessFile(pdf, "r")',
-    "FileInputStream sidecarInput = new FileInputStream(sidecar)",
+    "FileIdentity.captureRegularPath(pdf)",
+    "FileIdentity.captureRegularPath(\n                sidecar",
+    "FileInputStream pdfInput = openRegularFile(",
+    "FileInputStream sidecarInput = openRegularFile(",
+    "OsConstants.O_NOFOLLOW",
+    "OsConstants.O_NONBLOCK",
+    "OsConstants.S_ISREG(opened.st_mode)",
     "FileIdentity pdfOpened = FileIdentity.capture(pdfInput.getFD())",
     "FileIdentity sidecarOpened = FileIdentity.capture(",
     "!pdfBefore.matches(pdfOpened)",
@@ -633,14 +741,16 @@ for required in (
     "pdfInput,",
     "FileIdentity pdfAfter = FileIdentity.capture(pdfInput.getFD())",
     "FileIdentity sidecarAfter = FileIdentity.capture(",
-    "FileIdentity pdfPathAfter = FileIdentity.capture(pdf)",
-    "FileIdentity sidecarPathAfter = FileIdentity.capture(sidecar)",
+    "FileIdentity pdfPathAfter = FileIdentity.captureRegularPath(",
+    "FileIdentity.captureRegularPath(sidecar)",
     "pdfOpened.matches(pdfAfter)",
     "sidecarOpened.matches(sidecarAfter)",
     "pdfAfter.matches(pdfPathAfter)",
     "sidecarAfter.matches(sidecarPathAfter)",
     "sidecarDigest.equals(currentSidecarDigest)",
     "MANIFESTS.put(key, published)",
+    "owner.nativeDocument",
+    "pdfAfter.token() + \":\" + sidecarAfter.token()",
     'manifest_rejected reason=deterministic_parse path=',
     "scheduleManifestActivation(\n                            key,",
     '"manifest_rejected"',
@@ -652,10 +762,61 @@ for required in (
     "new Handler(owner.getMainLooper()).post",
     "handlePageLoaded(viewModel)",
     '"manifest_verified"',
+    "FRESHNESS_CHECKING.putIfAbsent(key, expected)",
+    "private static void verifyManifestFreshness(",
+    "new ManifestFreshnessTask(",
+    "expected.pdfIdentity.matches(pdfCurrent)",
+    "expected.sidecarIdentity.matches(sidecarCurrent)",
+    "MANIFESTS.replace(key, expected, refreshed)",
+    "if (refreshed.manifest != null)",
+    "scheduleManifestFreshnessWakeup(key, refreshed)",
+    "scheduleManifestStateInvalidation(",
+    "VERIFICATION_RETRY_AFTER.put(key, retryToken)",
+    "VERIFICATION_RETRY_AFTER.remove(key, retryToken)",
+    'log("manifest_retry_ready path=" + key)',
+    "deferManifestRetry(key)",
 ):
     if required not in manifest_verification:
         raise SystemExit(
             f"background manifest verification is missing guard: {required}"
+        )
+
+verification_method_start = manifest_verification.find(
+    "private static void verifyManifestSnapshot("
+)
+verification_method_end = manifest_verification.find(
+    "private static FileInputStream openRegularFile(",
+    verification_method_start,
+)
+if verification_method_start < 0 or verification_method_end < 0:
+    raise SystemExit("missing bounded manifest-verification method")
+verification_method = manifest_verification[
+    verification_method_start:verification_method_end
+]
+verification_catch = verification_method.find(
+    "} catch (Throwable throwable) {",
+    verification_method.find("} catch (ManifestVerificationSuperseded"),
+)
+verification_finally = verification_method.find(
+    "} finally {", verification_catch
+)
+if verification_catch < 0 or verification_finally < 0:
+    raise SystemExit("missing transient manifest-verification failure path")
+transient_failure = verification_method[
+    verification_catch:verification_finally
+]
+if "new CachedManifest(" in transient_failure:
+    raise SystemExit(
+        "transient manifest failures must not become permanent cache entries"
+    )
+for required in (
+    "MANIFESTS.remove(key)",
+    "deferManifestRetry(key)",
+    '"verification_failed"',
+):
+    if required not in transient_failure:
+        raise SystemExit(
+            "transient manifest failure is not retryable: " + required
         )
 
 for required in (
@@ -664,10 +825,12 @@ for required in (
     "private static volatile String observedDocumentKey",
     "observedDocumentKey = key",
     "cancelManifestVerificationLocked()",
-    "cancelManifestVerificationForKey(key)",
     "VERIFYING.clear()",
+    "FRESHNESS_CHECKING.clear()",
+    "VERIFICATION_RETRY_AFTER.clear()",
     "MANIFEST_VERIFIER.getQueue().poll()",
     "((ManifestVerificationTask) stale).cancelBeforeRun()",
+    "((ManifestFreshnessTask) stale).cancelBeforeRun()",
     "new ManifestVerificationTask(",
     "requireCurrentVerification(key, owner)",
     "sha256File(pdfInput, key, owner)",
@@ -681,7 +844,7 @@ if "Executors.newSingleThreadExecutor()" in hook:
 
 observer_start = hook.find("private static void observeDocumentKey")
 observer_end = hook.find(
-    "private static void cancelManifestVerificationForKey", observer_start
+    "private static void cancelManifestVerificationLocked", observer_start
 )
 cancellation_start = hook.find(
     "private static void cancelManifestVerificationLocked"
@@ -718,6 +881,23 @@ if min(cancellation_positions) < 0 or tuple(
         "verification cancellation must invalidate, drain, then cancel"
     )
 
+retry_start = hook.find("private static void deferManifestRetry(")
+retry_end = hook.find(
+    "private static VerificationOwner scheduleManifestVerification(",
+    retry_start,
+)
+if retry_start < 0 or retry_end < 0:
+    raise SystemExit("missing demand-driven manifest retry cooldown")
+retry_method = hook[retry_start:retry_end]
+remove_index = retry_method.find(
+    "VERIFICATION_RETRY_AFTER.remove(key, retryToken)"
+)
+lifecycle_index = retry_method.find("if (activeActivity.get() != owner")
+if not (0 <= remove_index < lifecycle_index):
+    raise SystemExit("manifest retry token must retire before lifecycle checks")
+if "manifestLookupFor(" in retry_method:
+    raise SystemExit("manifest retry cooldown must not create an automatic loop")
+
 scheduler_start = hook.find(
     "private static VerificationOwner scheduleManifestVerification"
 )
@@ -748,6 +928,8 @@ snapshot_guards = (
     "pdfAfter.matches(pdfPathAfter)",
     "sidecarAfter.matches(sidecarPathAfter)",
     "sidecarDigest.equals(currentSidecarDigest)",
+    "key.equals(pdf.getCanonicalPath())",
+    '(key + ".json").equals(sidecar.getCanonicalPath())',
 )
 snapshot_guard_positions = [
     manifest_verification.find(guard) for guard in snapshot_guards
@@ -788,8 +970,8 @@ if not (0 <= utf8_decode < manifest_parse):
     raise SystemExit("strict UTF-8 decoding must precede manifest parsing")
 
 for required in (
-    "FileIdentity sidecarIdentity = FileIdentity.capture(sidecar)",
-    "cached.matches(pdfIdentity, sidecarIdentity)",
+    "FileIdentity sidecarBefore = FileIdentity.captureRegularPath(",
+    "FileInputStream sidecarInput = openRegularFile(",
     "String sidecarDigest = sha256(sidecarData)",
     'output.optString("sha256", "")',
     "sha256File(pdfInput, key, owner)",
@@ -830,6 +1012,9 @@ for required in (
     "VirtualSpreadLinkAuthority.layout(",
     "VirtualSpreadLinkAuthority.layoutDigest(",
     "VirtualSpreadLinkAuthority.uri(",
+    "ArrayList<VirtualSpreadNavigation.UriTarget> uriLinks",
+    "uriLinks.add(new VirtualSpreadNavigation.UriTarget(",
+    "uriLinks.toArray(",
     "VirtualSpreadLinkAuthority.internal(",
     "VirtualSpreadLinkAuthority.digest(",
     'manifest_rejected reason=link_authority_records',
@@ -892,6 +1077,13 @@ if 'android:versionName="0.0.24"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
 if 'private static final String VERSION = "0.0.24"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
+if (
+    'android:name="xposedscope"' not in manifest
+    or 'android:value="com.supernote.document"' not in manifest
+):
+    raise SystemExit("legacy LSPosed scope metadata is missing")
+if "RandomAccessFile" in hook:
+    raise SystemExit("runtime verification must not reopen paths with RandomAccessFile")
 
 build_script = (root / "build.ps1").read_text(encoding="utf-8")
 payload_update = build_script.find("& jar uf $unsignedApk")
@@ -910,6 +1102,21 @@ for required in (
 ):
     if required not in build_script[payload_update:zipalign]:
         raise SystemExit(f"APK payload verification is missing: {required}")
+for required in (
+    "[switch]$SkipTests",
+    "[switch]$AlignedOnly",
+    "if ($SkipTests -and -not $AlignedOnly)",
+    "if (-not $SkipTests)",
+):
+    if required not in build_script:
+        raise SystemExit(f"clean release assembly guard is missing: {required}")
+aligned_return = build_script.find("if ($AlignedOnly) {", zipalign)
+signing = build_script.find("& $apksigner sign", aligned_return)
+if not (
+    0 <= zipalign < aligned_return < signing
+    and "return" in build_script[aligned_return:signing]
+):
+    raise SystemExit("aligned-only assembly must return before signing")
 for required in (
     "MAX_CACHED_MANIFESTS = 4",
     "VirtualSpreadNavigation.BoundedCache<",
@@ -954,37 +1161,218 @@ if (
         "CI must build and verify the virtual-spread companion APK with "
         "the selected signing key"
     )
-release_start = workflow.find("\n  virtual-spread-release-apk:")
-next_job = workflow.find("\n  build:", release_start)
-if release_start < 0 or next_job < 0:
-    raise SystemExit(
-        "CI must isolate the protected companion APK release job"
-    )
-test_job = workflow[:release_start]
-release_job = workflow[release_start:next_job]
-if "VIRTUAL_SPREAD_APK_KEYSTORE_BASE64" in test_job:
-    raise SystemExit(
-        "pull-request-controlled CI must not access the stable signer"
-    )
-if workflow.count("VIRTUAL_SPREAD_APK_KEYSTORE_BASE64") != 1:
-    raise SystemExit(
-        "stable signer must appear only in the protected release job"
-    )
-for required in (
-    "Prepare ephemeral companion signing key",
-    "-validity 2",
+parsed_workflow = yaml.safe_load(workflow)
+if not isinstance(parsed_workflow, dict):
+    raise SystemExit("workflow YAML must decode to an object")
+if parsed_workflow.get("permissions") != {"contents": "read"}:
+    raise SystemExit("workflow token permissions must be explicitly read-only")
+jobs = parsed_workflow.get("jobs")
+if not isinstance(jobs, dict):
+    raise SystemExit("workflow jobs must decode to an object")
+test_job = jobs.get("virtual-spread-tests")
+assembly_job = jobs.get("virtual-spread-release-assembly")
+release_job = jobs.get("virtual-spread-release-apk")
+if any(
+    not isinstance(job, dict)
+    for job in (test_job, assembly_job, release_job)
 ):
-    if required not in test_job:
-        raise SystemExit(f"ephemeral CI signer is missing: {required}")
-for required in (
-    "if: github.event_name == 'push' && github.ref == 'refs/heads/main'",
-    "needs: virtual-spread-tests",
-    "environment: virtual-spread-release",
-    "VIRTUAL_SPREAD_APK_KEYSTORE_BASE64",
-    "Upload upgrade-compatible companion APK",
+    raise SystemExit(
+        "workflow must contain test, clean assembly, and release jobs"
+    )
+assert isinstance(assembly_job, dict)
+if release_job.get("if") != (
+    "github.event_name == 'push' && github.ref == 'refs/heads/main'"
 ):
-    if required not in release_job:
-        raise SystemExit(f"protected CI signer is missing: {required}")
+    raise SystemExit("protected release job is not restricted to main pushes")
+if assembly_job.get("if") != (
+    "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+) or assembly_job.get("needs") != "virtual-spread-tests":
+    raise SystemExit("clean assembly must follow tests on trusted main only")
+if release_job.get("needs") != "virtual-spread-release-assembly":
+    raise SystemExit("protected release job must depend on clean assembly")
+if release_job.get("environment") != "virtual-spread-release":
+    raise SystemExit("protected release job must use its signing environment")
+test_steps = test_job.get("steps")
+assembly_steps = assembly_job.get("steps")
+release_steps = release_job.get("steps")
+if any(
+    not isinstance(steps, list)
+    for steps in (test_steps, assembly_steps, release_steps)
+):
+    raise SystemExit("workflow job steps must be lists")
+assert isinstance(assembly_steps, list)
+
+
+def require_named_step(steps: list[object], name: str) -> dict[str, object]:
+    matches = [
+        step
+        for step in steps
+        if isinstance(step, dict) and step.get("name") == name
+    ]
+    if len(matches) != 1:
+        raise SystemExit(f"workflow must contain one step named {name!r}")
+    return matches[0]
+
+
+all_steps: list[dict[str, object]] = []
+for job_name, job in jobs.items():
+    if not isinstance(job, dict) or not isinstance(job.get("steps"), list):
+        raise SystemExit(f"workflow job has invalid steps: {job_name}")
+    for step in job["steps"]:
+        if not isinstance(step, dict):
+            raise SystemExit(f"workflow job has a non-object step: {job_name}")
+        all_steps.append(step)
+        uses = step.get("uses")
+        if uses is not None and (
+            not isinstance(uses, str)
+            or re.fullmatch(r"[^/@]+/[^@]+@[0-9a-f]{40}", uses) is None
+        ):
+            raise SystemExit(f"workflow action is not commit-pinned: {uses}")
+        if isinstance(uses, str) and uses.startswith("actions/checkout@"):
+            settings = step.get("with")
+            if not isinstance(settings, dict) or settings.get(
+                "persist-credentials"
+            ) is not False:
+                raise SystemExit("workflow checkout must not persist credentials")
+
+ephemeral_step = require_named_step(
+    test_steps, "Prepare ephemeral companion signing key"
+)
+ephemeral_run = str(ephemeral_step.get("run", ""))
+if (
+    ephemeral_step.get("id") != "companion-signing"
+    or "-validity 2" not in ephemeral_run
+    or 'echo "sha256=$fingerprint" >> "$GITHUB_OUTPUT"' not in ephemeral_run
+):
+    raise SystemExit("pull-request CI must identify its two-day ephemeral signer")
+test_build_step = require_named_step(
+    test_steps, "Build and verify virtual-spread companion APK"
+)
+test_build_run = str(test_build_step.get("run", ""))
+test_build_env = test_build_step.get("env")
+if (
+    "-ExpectedSignerSha256 $env:EXPECTED_SIGNER_SHA256"
+    not in test_build_run
+    or not isinstance(test_build_env, dict)
+    or "steps.companion-signing.outputs.sha256"
+    not in str(test_build_env.get("EXPECTED_SIGNER_SHA256", ""))
+):
+    raise SystemExit("pull-request CI must verify its selected APK certificate")
+mismatch_step = require_named_step(
+    test_steps, "Reject mismatched virtual-spread companion signer"
+)
+if (
+    "-ExpectedSignerSha256 ('0' * 64)"
+    not in str(mismatch_step.get("run", ""))
+    or "certificate does not match the expected release signer"
+    not in str(mismatch_step.get("run", ""))
+):
+    raise SystemExit("pull-request CI must reject a mismatched APK certificate")
+prepare_input = require_named_step(
+    assembly_steps, "Prepare clean aligned APK evidence"
+)
+upload_input = require_named_step(
+    assembly_steps, "Upload clean aligned APK for protected signing"
+)
+assembly_build = require_named_step(
+    assembly_steps,
+    "Assemble aligned APK without Python or signing credentials",
+)
+if (
+    "-SkipTests -AlignedOnly" not in str(assembly_build.get("run", ""))
+    or "virtual-spread-aligned.apk.sha256"
+    not in str(prepare_input.get("run", ""))
+    or upload_input.get("uses")
+    != "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
+    or "virtual-spread-release-input-${{ github.sha }}"
+    not in str(upload_input.get("with", {}))
+):
+    raise SystemExit("clean no-Python assembly must publish release input")
+assembly_text = str(assembly_job)
+if any(
+    forbidden in assembly_text
+    for forbidden in (
+        "actions/setup-python@",
+        "pip install",
+        "VIRTUAL_SPREAD_APK_KEYSTORE_BASE64",
+    )
+):
+    raise SystemExit(
+        "clean assembly must not load Python packages or signing secrets"
+    )
+release_text = str(release_job)
+if any(
+    forbidden in release_text
+    for forbidden in (
+        "actions/checkout@",
+        "actions/setup-python@",
+        "pip install",
+        "build.ps1",
+    )
+):
+    raise SystemExit(
+        "protected signer job must not checkout or execute project code"
+    )
+download_input = require_named_step(
+    release_steps, "Download tested aligned APK"
+)
+verify_input = require_named_step(
+    release_steps, "Verify tested aligned APK digest"
+)
+if (
+    download_input.get("uses")
+    != "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093"
+    or "virtual-spread-release-input-${{ github.sha }}"
+    not in str(download_input.get("with", {}))
+    or "sha256sum --check --strict"
+    not in str(verify_input.get("run", ""))
+):
+    raise SystemExit(
+        "protected signer must verify the tested aligned APK artifact"
+    )
+secret_reference = "secrets.VIRTUAL_SPREAD_APK_KEYSTORE_BASE64"
+if secret_reference in str(test_job):
+    raise SystemExit("pull-request-controlled CI can access the stable signer")
+signer_step = require_named_step(
+    release_steps, "Sign, verify, and remove protected signing key"
+)
+signer_env = signer_step.get("env")
+signer_run = signer_step.get("run")
+if not isinstance(signer_env, dict) or secret_reference not in str(
+    signer_env.get("KEYSTORE_BASE64", "")
+):
+    raise SystemExit("stable signer secret must be scoped to the signing step")
+if not isinstance(signer_run, str) or any(
+    marker not in signer_run
+    for marker in (
+        "try {",
+        "finally {",
+        "$env:KEYSTORE_BASE64 = $null",
+        "[Array]::Clear($bytes, 0, $bytes.Length)",
+        "[Guid]::NewGuid().ToString('N')",
+        "Remove-Item -LiteralPath $stablePath -Force",
+        "& $apksigner sign",
+        "virtual-spread-aligned.apk",
+        "Expected exactly one APK signer certificate",
+        "APK signer certificate does not match the expected release signer",
+    )
+):
+    raise SystemExit("protected signer must be verified and deleted in one step")
+if not (
+    signer_run.find("$env:KEYSTORE_BASE64 = $null")
+    < signer_run.find("& $apksigner sign")
+):
+    raise SystemExit("stable credential must leave environment before signing")
+if [step for step in all_steps if secret_reference in str(step)] != [signer_step]:
+    raise SystemExit("stable signer must appear only in its protected step")
+upload_step = require_named_step(
+    release_steps, "Upload upgrade-compatible companion APK"
+)
+if upload_step.get("uses") != (
+    "actions/upload-artifact@"
+    "ea165f8d65b6e75b540449e92b4886f43607fa02"
+):
+    raise SystemExit("protected APK upload action must remain commit-pinned")
 
 generator = (root.parent / "virtual_spread/generate_virtual_spread.py").read_text(
     encoding="utf-8"
@@ -1116,6 +1504,7 @@ for required in (
     "def _publication_lock_path(output_path: Path)",
     "manifest_path = _runtime_manifest_path(output_path)",
     "getattr(os, \"O_NOFOLLOW\", 0)",
+    "getattr(os, \"O_NONBLOCK\", 0)",
     "lock_path, descriptor, directory_descriptor",
     "def _acquire_publication_directory_lock(",
     "_require_open_directory_identity(lock_path.parent, descriptor)",
@@ -1149,6 +1538,11 @@ for required in (
     "PdfReader(verification_stream, strict=True)",
     "with tempfile.TemporaryFile(",
     "_publication_sha256(path, ownership_guard)",
+    "opened_before_stat = os.fstat(stream.fileno())",
+    "if not stat.S_ISREG(opened_before_stat.st_mode)",
+    "_sha256_open_file_exact(\n            stream,\n            opened_before.size,",
+    "opened_after = _identity(os.fstat(stream.fileno()))",
+    "opened_before != opened_after",
     "_require_regular_publication_targets(\n"
     "        output_path, manifest_path, ownership_guard",
     '"Staged output"',

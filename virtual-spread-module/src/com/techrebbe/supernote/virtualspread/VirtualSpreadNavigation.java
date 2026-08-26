@@ -69,6 +69,20 @@ public final class VirtualSpreadNavigation {
             return false;
         }
 
+        public synchronized boolean replace(
+            K key,
+            V expected,
+            V replacement
+        ) {
+            Objects.requireNonNull(replacement, "replacement");
+            V current = values.get(key);
+            if (!Objects.equals(current, expected)) {
+                return false;
+            }
+            values.put(key, replacement);
+            return true;
+        }
+
         public synchronized int size() {
             return values.size();
         }
@@ -224,6 +238,35 @@ public final class VirtualSpreadNavigation {
         }
     }
 
+    /** Authenticated manifest record for one external URI link. */
+    public static final class UriTarget {
+        public final int sourcePage;
+        public final Half sourceHalf;
+        public final String uri;
+        public final float x0;
+        public final float y0;
+        public final float x1;
+        public final float y1;
+
+        public UriTarget(
+            int sourcePage,
+            Half sourceHalf,
+            String uri,
+            float x0,
+            float y0,
+            float x1,
+            float y1
+        ) {
+            this.sourcePage = sourcePage;
+            this.sourceHalf = sourceHalf;
+            this.uri = uri;
+            this.x0 = x0;
+            this.y0 = y0;
+            this.x1 = x1;
+            this.y1 = y1;
+        }
+    }
+
     /** One successful native internal-link traversal. */
     public static final class LinkVisit {
         public final int sourcePage;
@@ -268,14 +311,29 @@ public final class VirtualSpreadNavigation {
             int targetPage,
             int currentPage
         ) {
-            LinkVisit candidate = visits.peekFirst();
-            if (candidate == null
-                || candidate.targetPage != currentPage
-                || !matches(candidate, sourcePage, targetPage)) {
+            LinkVisit candidate = peekBack(
+                sourcePage,
+                targetPage,
+                currentPage
+            );
+            if (candidate == null) {
                 visits.clear();
                 return null;
             }
             return visits.removeFirst();
+        }
+
+        /** Validate Back without consuming the mirrored native visit. */
+        public LinkVisit peekBack(
+            int sourcePage,
+            int targetPage,
+            int currentPage
+        ) {
+            LinkVisit candidate = visits.peekFirst();
+            return candidate != null
+                && candidate.targetPage == currentPage
+                && matches(candidate, sourcePage, targetPage)
+                ? candidate : null;
         }
 
         public LinkVisit takeOriginal(
@@ -283,9 +341,23 @@ public final class VirtualSpreadNavigation {
             int targetPage,
             int currentPage
         ) {
+            LinkVisit candidate = peekOriginal(
+                sourcePage,
+                targetPage,
+                currentPage
+            );
+            visits.clear();
+            return candidate;
+        }
+
+        /** Validate Original Back without consuming the mirrored history. */
+        public LinkVisit peekOriginal(
+            int sourcePage,
+            int targetPage,
+            int currentPage
+        ) {
             LinkVisit newest = visits.peekFirst();
             LinkVisit candidate = visits.peekLast();
-            visits.clear();
             return newest != null
                 && newest.targetPage == currentPage
                 && matches(candidate, sourcePage, targetPage)
@@ -708,6 +780,26 @@ public final class VirtualSpreadNavigation {
             && queuedGeneration == activationGeneration;
     }
 
+    /** Require an observable page-bound native persistence acknowledgement. */
+    public static boolean saveAcknowledgementMatches(
+        boolean hadTrails,
+        boolean callbackObserved,
+        boolean callbackSucceeded,
+        boolean sameNote,
+        int expectedPage,
+        int observedPage,
+        boolean sameMarkPath
+    ) {
+        return !hadTrails || (
+            callbackObserved
+                && callbackSucceeded
+                && sameNote
+                && expectedPage > 0
+                && observedPage == expectedPage
+                && sameMarkPath
+        );
+    }
+
     /** Preserve an authenticated explicit native viewport in portrait. */
     public static boolean shouldPreservePortraitLinkViewport(
         boolean internalLinkTarget,
@@ -930,6 +1022,55 @@ public final class VirtualSpreadNavigation {
                     || matched.sourceHalf != target.sourceHalf
                     || matched.resetLandscapeFit
                         != target.resetLandscapeFit)) {
+                return null;
+            }
+            matched = target;
+        }
+        return matched;
+    }
+
+    /** Match an external callback to the exact authenticated URI record. */
+    public static UriTarget matchUriLink(
+        UriTarget[] targets,
+        int sourcePage,
+        String uri,
+        float x0,
+        float y0,
+        float x1,
+        float y1,
+        float pageHeight,
+        float tolerance
+    ) {
+        if (targets == null || uri == null
+            || !finite(tolerance) || tolerance < 0.0f
+            || !finite(pageHeight) || pageHeight <= 0.0f
+            || !finite(x0) || !finite(y0)
+            || !finite(x1) || !finite(y1)
+            || x0 >= x1 || y0 >= y1) {
+            return null;
+        }
+        UriTarget matched = null;
+        for (UriTarget target : targets) {
+            if (target == null
+                || target.sourcePage != sourcePage
+                || !uri.equals(target.uri)
+                || target.sourceHalf == null
+                || !finite(target.x0) || !finite(target.y0)
+                || !finite(target.x1) || !finite(target.y1)
+                || target.x0 >= target.x1 || target.y0 >= target.y1) {
+                continue;
+            }
+            float expectedNativeY0 = pageHeight - target.y1;
+            float expectedNativeY1 = pageHeight - target.y0;
+            if (!finite(expectedNativeY0) || !finite(expectedNativeY1)
+                || expectedNativeY0 >= expectedNativeY1
+                || Math.abs(target.x0 - x0) > tolerance
+                || Math.abs(expectedNativeY0 - y0) > tolerance
+                || Math.abs(target.x1 - x1) > tolerance
+                || Math.abs(expectedNativeY1 - y1) > tolerance) {
+                continue;
+            }
+            if (matched != null && matched.sourceHalf != target.sourceHalf) {
                 return null;
             }
             matched = target;

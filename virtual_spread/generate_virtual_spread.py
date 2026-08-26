@@ -202,11 +202,24 @@ def _sha256_open_file(stream: BinaryIO) -> str:
     return digest.hexdigest()
 
 
-def sha256_file(path: Path) -> str:
+def _sha256_open_file_exact(
+    stream: BinaryIO,
+    expected_size: int,
+    label: str,
+) -> str:
+    """Hash exactly one captured regular-file extent and reject growth."""
     digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
+    stream.seek(0)
+    remaining = expected_size
+    while remaining:
+        chunk = stream.read(min(1024 * 1024, remaining))
+        if not chunk:
+            raise VirtualSpreadError(f"{label} became shorter while reading")
+        digest.update(chunk)
+        remaining -= len(chunk)
+    if stream.read(1):
+        raise VirtualSpreadError(f"{label} grew while reading")
+    stream.seek(0)
     return digest.hexdigest()
 
 
@@ -252,29 +265,93 @@ def _same_file_after_namespace_move(
     )
 
 
+@contextmanager
+def _open_regular_source(
+    source_path: Path,
+    label: str,
+) -> Iterator[tuple[BinaryIO, SourceIdentity, SourceIdentity]]:
+    """Open a source without following aliases or blocking on special files."""
+    descriptor = -1
+    try:
+        path_stat = source_path.lstat()
+        if not stat.S_ISREG(path_stat.st_mode):
+            raise VirtualSpreadError(f"{label} must be a regular file")
+        path_identity = _identity(path_stat)
+        flags = os.O_RDONLY
+        flags |= getattr(os, "O_BINARY", 0)
+        flags |= getattr(os, "O_NOINHERIT", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        flags |= getattr(os, "O_NONBLOCK", 0)
+        descriptor = os.open(_lexical_absolute(source_path), flags)
+        stream = os.fdopen(descriptor, "rb", buffering=0)
+        descriptor = -1
+        with stream:
+            opened_stat = os.fstat(stream.fileno())
+            if not stat.S_ISREG(opened_stat.st_mode):
+                raise VirtualSpreadError(f"{label} must be a regular file")
+            opened_identity = _identity(opened_stat)
+            if not _same_open_file(path_identity, opened_identity):
+                raise VirtualSpreadError(f"{label} changed before opening")
+            yield stream, path_identity, opened_identity
+    except VirtualSpreadError:
+        raise
+    except OSError as error:
+        raise VirtualSpreadError(f"Cannot open {label}: {source_path}") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _copy_source_exact(
+    source: BinaryIO,
+    snapshot_stream: BinaryIO,
+    expected_size: int,
+) -> str:
+    digest = hashlib.sha256()
+    remaining = expected_size
+    while remaining:
+        chunk = source.read(min(1024 * 1024, remaining))
+        if not chunk:
+            raise VirtualSpreadError(
+                "Source PDF became shorter while snapshotting"
+            )
+        snapshot_stream.write(chunk)
+        digest.update(chunk)
+        remaining -= len(chunk)
+    if source.read(1):
+        raise VirtualSpreadError("Source PDF grew while snapshotting")
+    return digest.hexdigest()
+
+
 def _snapshot_source(
     source_path: Path,
     snapshot_stream: BinaryIO,
 ) -> tuple[SourceIdentity, str]:
-    digest = hashlib.sha256()
     try:
-        path_before = _identity(source_path.stat())
         snapshot_stream.seek(0)
         snapshot_stream.truncate()
-        with source_path.open("rb") as source:
-            opened_before = _identity(os.fstat(source.fileno()))
-            if not _same_open_file(path_before, opened_before):
-                raise VirtualSpreadError(
-                    "Source PDF changed before snapshot creation"
-                )
-            for chunk in iter(lambda: source.read(1024 * 1024), b""):
-                snapshot_stream.write(chunk)
-                digest.update(chunk)
+        with _open_regular_source(
+            source_path, "Source PDF"
+        ) as (source, path_before, opened_before):
+            snapshot_hash = _copy_source_exact(
+                source,
+                snapshot_stream,
+                path_before.size,
+            )
             snapshot_stream.flush()
             os.fsync(snapshot_stream.fileno())
-            verified_source_hash = _sha256_open_file(source)
+            verified_source_hash = _sha256_open_file_exact(
+                source,
+                path_before.size,
+                "Source PDF",
+            )
             opened_after = _identity(os.fstat(source.fileno()))
-        path_after = _identity(source_path.stat())
+        path_after_stat = source_path.lstat()
+        if not stat.S_ISREG(path_after_stat.st_mode):
+            raise VirtualSpreadError("Source PDF changed while snapshotting")
+        path_after = _identity(path_after_stat)
+    except VirtualSpreadError:
+        raise
     except OSError as error:
         raise VirtualSpreadError(
             f"Cannot create a stable source snapshot: {source_path}"
@@ -284,7 +361,6 @@ def _snapshot_source(
         or path_before != path_after
     ):
         raise VirtualSpreadError("Source PDF changed while snapshotting")
-    snapshot_hash = digest.hexdigest()
     if verified_source_hash != snapshot_hash:
         raise VirtualSpreadError("Source PDF content changed while snapshotting")
     snapshot_stream.seek(0)
@@ -297,16 +373,26 @@ def _require_source_snapshot(
     expected_hash: str,
 ) -> None:
     try:
-        path_before = _identity(source_path.stat())
-        with source_path.open("rb") as source:
-            opened_before = _identity(os.fstat(source.fileno()))
-            if not _same_open_file(path_before, opened_before):
+        with _open_regular_source(
+            source_path, "Source PDF"
+        ) as (source, path_before, opened_before):
+            try:
+                current_hash = _sha256_open_file_exact(
+                    source,
+                    expected.size,
+                    "Source PDF",
+                )
+            except VirtualSpreadError as error:
                 raise VirtualSpreadError(
                     "Source PDF changed before publication"
-                )
-            current_hash = _sha256_open_file(source)
+                ) from error
             opened_after = _identity(os.fstat(source.fileno()))
-        path_after = _identity(source_path.stat())
+        path_after_stat = source_path.lstat()
+        if not stat.S_ISREG(path_after_stat.st_mode):
+            raise VirtualSpreadError("Source PDF changed before publication")
+        path_after = _identity(path_after_stat)
+    except VirtualSpreadError:
+        raise
     except OSError as error:
         raise VirtualSpreadError(
             "Source PDF disappeared before publication"
@@ -3248,6 +3334,16 @@ def _publication_open_file(
     ownership_guard: PublicationOwnershipGuard | None,
     mode: int = 0o666,
 ) -> int:
+    access_mode_mask = getattr(
+        os,
+        "O_ACCMODE",
+        os.O_WRONLY | os.O_RDWR,
+    )
+    if (flags & access_mode_mask) == os.O_RDONLY:
+        # A checked regular path can be replaced by a FIFO/device immediately
+        # before open. Nonblocking open lets descriptor validation reject that
+        # race instead of hanging publication recovery indefinitely.
+        flags |= getattr(os, "O_NONBLOCK", 0)
     namespace = _publication_namespace(ownership_guard)
     if namespace is not None:
         return namespace.open_file(path, flags, mode)
@@ -3265,7 +3361,37 @@ def _publication_sha256(
     flags |= getattr(os, "O_NOFOLLOW", 0)
     descriptor = _publication_open_file(path, flags, ownership_guard)
     with os.fdopen(descriptor, "rb", buffering=0) as stream:
-        return _sha256_open_file(stream)
+        opened_before_stat = os.fstat(stream.fileno())
+        if not stat.S_ISREG(opened_before_stat.st_mode):
+            raise VirtualSpreadError(
+                f"Publication file must be a regular file: {path}"
+            )
+        opened_before = _identity(opened_before_stat)
+        actual_hash = _sha256_open_file_exact(
+            stream,
+            opened_before.size,
+            "Publication file",
+        )
+        opened_after = _identity(os.fstat(stream.fileno()))
+        namespace = _publication_namespace(ownership_guard)
+        path_entry = (
+            namespace.lstat(path)
+            if namespace is not None
+            else _lexical_absolute(path).lstat()
+        )
+        if not stat.S_ISREG(path_entry.st_mode):
+            raise VirtualSpreadError(
+                f"Publication file must be a regular file: {path}"
+            )
+        path_identity = _identity(path_entry)
+    if opened_before != opened_after or not _same_open_file(
+        path_identity,
+        opened_after,
+    ):
+        raise VirtualSpreadError(
+            f"Publication file changed while it was being verified: {path}"
+        )
+    return actual_hash
 
 
 def _publication_file_evidence(
@@ -3298,7 +3424,11 @@ def _publication_file_evidence(
                     f"{label} exceeds the runtime limit of "
                     f"{maximum_bytes} bytes"
                 )
-            actual_hash = _sha256_open_file(stream)
+            actual_hash = _sha256_open_file_exact(
+                stream,
+                opened_before.size,
+                label,
+            )
             opened_after = _identity(os.fstat(stream.fileno()))
             namespace = _publication_namespace(ownership_guard)
             path_entry = (

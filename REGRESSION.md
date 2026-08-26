@@ -1823,6 +1823,47 @@ upgrade-compatible signer and has SHA-256
 A fresh clean exact-head Ultra review and focused hardware validation remain
 release gates; PR #16 stays draft.
 
+## Review pass 73 exact-head authority closure - LOCAL PASS
+
+The final integrated Ultra review closed the remaining authority and release
+races. Ordinary PDFs now bypass Virtual Spread immediately when native MuPDF
+definitively reports no embedded representation metadata. Manifest verification
+uses bounded descriptor-authoritative background work, a short freshness lease,
+and demand-driven retry without a permanent transient-failure cache or an
+autonomous polling loop. A successful cached refresh schedules further work only
+for an authenticated Virtual Spread manifest.
+
+Back and Original Back now bind one exact preflight manifest/view-model snapshot
+to the full history-return action. All concrete `BackLinkUtils` history methods
+and both listeners share one fair lock, so no competing native history operation
+can consume or replace the trail between preflight, the destructive getter, and
+the resulting page load or external intent. Saving trails is accepted only after
+the exact `saveMarkData` callback acknowledges completion.
+
+Generator publication hashes the exact regular descriptor snapshot and rejects
+growth, nonregular files, aliases, and pathname substitution without waiting for
+EOF. The trusted release path is split into dependency-bearing tests, a fresh
+clean assembly job with no signing secret, and a protected sign-only job with no
+checkout or project scripts. The protected job verifies the assembly digest,
+pins the expected certificate, deletes the decoded key, and publishes only the
+stable signed APK. An unsafe `-SkipTests` invocation is rejected unless it is the
+explicit aligned-only clean-assembly mode.
+
+Deterministic regressions cover ordinary-PDF bypass, transient and stable
+manifest failures, stale async verification, demand-only retry, exact Back
+snapshot and lock authority, callback-acknowledged saves, descriptor growth and
+FIFO/nonblocking publication, and the three-stage signing boundary. Exact-head
+validation passes 154 generator tests on Windows (14 expected platform,
+filesystem, or privilege skips) and 154 on Linux (two Windows-specific skips),
+160 focused navigation/manifest/cache assertions, 15 cross-language authority
+assertions, 8,752 exhaustive navigation assertions, both native invariant
+suites, hook-scope validation, workflow checks, and clean aligned assembly. The
+final release-equivalent v0.0.24 (`versionCode=24`) APK verifies with the pinned
+upgrade-compatible certificate and has SHA-256
+`119b7fec18ee1939e836eec66a10905283887478916f36f4dfbd79434985e97f`.
+The clean exact-head Ultra review reports no actionable findings. Focused
+hardware validation remains the release gate; PR #16 stays draft.
+
 ## Failure capture
 
 Before reproducing a failure:

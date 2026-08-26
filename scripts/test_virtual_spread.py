@@ -61,9 +61,11 @@ from generate_virtual_spread import (  # noqa: E402
     _publish_pair,
     _require_unaliased_output_path,
     _publication_artifacts,
+    _publication_file_evidence,
     _publication_lock,
     _publication_path_matches,
     _publication_reserved_paths,
+    _publication_sha256,
     _publication_source_commit_artifacts,
     _publication_staging_artifacts,
     _publication_target_state,
@@ -81,6 +83,7 @@ from generate_virtual_spread import (  # noqa: E402
     _retired_publication_artifacts,
     _transformed_internal_destination,
     _sha256_open_file,
+    _sha256_open_file_exact,
     _temporary_neighbor,
     _windows_move_flags,
     _write_json,
@@ -1626,23 +1629,31 @@ class VirtualSpreadTests(unittest.TestCase):
             manifest_path = root / "spread.pdf.json"
             create_odd_page_fixture(source)
             stable = _identity(source.stat())
-            real_hash = _sha256_open_file
+            real_hash = _sha256_open_file_exact
             changed = False
 
-            def mutate_then_hash(stream: object) -> str:
+            def mutate_then_hash(
+                stream: object,
+                expected_size: int,
+                label: str,
+            ) -> str:
                 nonlocal changed
                 if not changed:
                     contents = bytearray(source.read_bytes())
                     contents[len(contents) // 2] ^= 1
                     source.write_bytes(contents)
                     changed = True
-                return real_hash(stream)  # type: ignore[arg-type]
+                return real_hash(
+                    stream,  # type: ignore[arg-type]
+                    expected_size,
+                    label,
+                )
 
             with mock.patch(
                 "generate_virtual_spread._identity",
                 return_value=stable,
             ), mock.patch(
-                "generate_virtual_spread._sha256_open_file",
+                "generate_virtual_spread._sha256_open_file_exact",
                 side_effect=mutate_then_hash,
             ):
                 with self.assertRaisesRegex(
@@ -1671,8 +1682,20 @@ class VirtualSpreadTests(unittest.TestCase):
             manifest_path = root / "spread.pdf.json"
             create_odd_page_fixture(source)
             stable = _identity(source.stat())
+            real_identity = _identity
             changed_contents = bytearray(source.read_bytes())
             changed_contents[len(changed_contents) // 2] ^= 1
+
+            def stable_source_identity(
+                value: os.stat_result,
+            ) -> SourceIdentity:
+                actual = real_identity(value)
+                if (
+                    actual.device == stable.device
+                    and actual.inode == stable.inode
+                ):
+                    return stable
+                return actual
 
             def write_then_mutate(
                 path: Path,
@@ -1690,7 +1713,7 @@ class VirtualSpreadTests(unittest.TestCase):
 
             with mock.patch(
                 "generate_virtual_spread._identity",
-                return_value=stable,
+                side_effect=stable_source_identity,
             ), mock.patch(
                 "generate_virtual_spread._write_json",
                 side_effect=write_then_mutate,
@@ -1801,6 +1824,112 @@ class VirtualSpreadTests(unittest.TestCase):
                     Path("output.pdf"),
                     Path("output.pdf.json"),
                 )
+
+    @unittest.skipUnless(
+        os.name != "nt" and hasattr(os, "mkfifo"),
+        "FIFO safety is exercised on POSIX hosts",
+    )
+    def test_source_fifo_is_rejected_before_open(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.pdf"
+            os.mkfifo(source)
+            placeholder = SourceIdentity(0, 0, 0, 0, 0)
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Source PDF must be a regular file",
+            ):
+                _require_source_snapshot(source, placeholder, "0" * 64)
+
+    @unittest.skipUnless(
+        os.name != "nt" and hasattr(os, "mkfifo"),
+        "FIFO descriptor safety is exercised on POSIX hosts",
+    )
+    def test_publication_sha256_rejects_nonblocking_fifo_descriptor(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "publication-candidate"
+            os.mkfifo(target)
+            descriptor = os.open(
+                target,
+                os.O_RDONLY | getattr(os, "O_NONBLOCK", 0),
+            )
+            with mock.patch(
+                "generate_virtual_spread._publication_open_file",
+                return_value=descriptor,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Publication file must be a regular file",
+                ):
+                    _publication_sha256(target, None)
+
+    def test_readonly_publication_open_is_always_nonblocking(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "candidate"
+            target.write_bytes(b"candidate")
+            real_open = os.open
+            observed_flags: list[int] = []
+
+            def recording_open(
+                path: object,
+                flags: int,
+                mode: int = 0o666,
+                *,
+                dir_fd: int | None = None,
+            ) -> int:
+                observed_flags.append(flags)
+                if dir_fd is None:
+                    return real_open(path, flags, mode)
+                return real_open(path, flags, mode, dir_fd=dir_fd)
+
+            with mock.patch(
+                "generate_virtual_spread.os.open",
+                side_effect=recording_open,
+            ):
+                _publication_file_evidence(
+                    target,
+                    "Publication candidate",
+                    None,
+                )
+
+            self.assertTrue(observed_flags)
+            nonblock = getattr(os, "O_NONBLOCK", 0)
+            if nonblock:
+                self.assertTrue(all(flags & nonblock for flags in observed_flags))
+
+    def test_publication_evidence_rejects_growth_without_eof_hash(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "candidate"
+            target.write_bytes(b"captured")
+            exact_hash = _sha256_open_file_exact
+
+            def grow_then_hash(
+                stream: object,
+                expected_size: int,
+                label: str,
+            ) -> str:
+                with target.open("ab") as writer:
+                    writer.write(b"-growth")
+                    writer.flush()
+                    os.fsync(writer.fileno())
+                return exact_hash(stream, expected_size, label)
+
+            with mock.patch(
+                "generate_virtual_spread._sha256_open_file_exact",
+                side_effect=grow_then_hash,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "grew while reading",
+                ):
+                    _publication_file_evidence(
+                        target,
+                        "Publication candidate",
+                        None,
+                    )
 
     @unittest.skipUnless(
         os.name == "nt",

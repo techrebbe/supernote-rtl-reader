@@ -1593,6 +1593,33 @@ hook-scope validation, syntax checks, and the signed/verified v0.0.24
 A fresh clean exact-head Ultra review and focused hardware validation remain
 release gates; PR #16 stays draft.
 
+## Review pass 66 exact link semantics and blocked-action supersession - LOCAL PASS
+
+The next exact-head Ultra review found four remaining link-authority gaps. URI
+actions now require an absolute URI; relative references depend on a catalog
+base URI that the generated representation does not carry, so copying them
+unchanged could resolve against a different output directory. A link carrying
+the annotation `/NoRotate` flag on a rotated source page also fails closed. The
+generator bakes source rotation into an unrotated spread, where preserving that
+flag would change the annotation's display semantics.
+
+On Android, an uninspectable current link and Back or Original Back while
+manifest authority is blocked now each clear any invocation left queued by an
+older cold-verification callback before returning. A delayed verifier therefore
+cannot replay stale navigation over either newer user action.
+
+Deterministic regressions cover relative URI rejection, rotated-page
+`/NoRotate` rejection, and the ordering of both queued-link cancellation paths.
+Local validation passes 134 generator tests on Windows (12 expected
+platform/filesystem or privilege skips) and the same 134 on Linux (two
+Windows-specific skips), 141 focused navigation/manifest/cache assertions, 15
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, syntax checks, and the
+signed/verified v0.0.24 (`versionCode=24`) APK build (SHA-256
+`7cd1087c6ad44b6bd9dd359303191d0621a9810233a61e04ab3d7236cc05b1fa`).
+A fresh clean exact-head Ultra review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
 ## Failure capture
 
 Before reproducing a failure:

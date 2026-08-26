@@ -2672,6 +2672,36 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertIsInstance(copied.raw_get("/F"), NumberObject)
             self.assertEqual(int(copied["/F"]), 34)
 
+    def test_no_rotate_link_on_rotated_page_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "no-rotate-source.pdf"
+            output = root / "no-rotate-spread.pdf"
+            manifest_path = root / "no-rotate-spread.pdf.json"
+            create_rotated_link_fixture(source, rotation=90)
+            set_link_annotation_value(
+                source,
+                source_page_index=0,
+                annotation_index=0,
+                key="/F",
+                value=NumberObject(0x10),
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot preserve NoRotate link annotation flag",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    direction="rtl",
+                    cover_separate=True,
+                )
+
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+
     def test_malformed_link_annotation_flags_fail_closed(self) -> None:
         malformed_type = DictionaryObject(
             {NameObject("/F"): FloatObject(2.0)}
@@ -3212,6 +3242,34 @@ class VirtualSpreadTests(unittest.TestCase):
                 build_virtual_spread(
                     source, output, manifest_path, direction="rtl"
                 )
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+
+    def test_relative_uri_action_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "relative-uri-source.pdf"
+            output = root / "relative-uri-spread.pdf"
+            manifest_path = root / "relative-uri-spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_action(
+                source,
+                1,
+                0,
+                DictionaryObject({
+                    NameObject("/S"): NameObject("/URI"),
+                    NameObject("/URI"): TextStringObject("help/index.html"),
+                }),
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "URI link /URI must be an absolute URI",
+            ):
+                build_virtual_spread(
+                    source, output, manifest_path, direction="rtl"
+                )
+
             self.assertFalse(output.exists())
             self.assertFalse(manifest_path.exists())
 

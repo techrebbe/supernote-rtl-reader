@@ -26,9 +26,13 @@ regions are transformed point-for-point rather than widened to their bounding
 rectangle. Standard annotation `/F` flags, visible `/Border` and `/BS` styling,
 border color, and `/H` activation highlight mode are validated and preserved;
 border dimensions and dash patterns follow the source-to-spread scale and page
-rotation. Underlined `/BS /U` links fail closed when page rotation would move
-the underline to a different physical edge. URI actions retain a Boolean
-`/IsMap`. Chained actions, custom
+rotation. A `/NoRotate` annotation flag on a rotated source page fails closed
+because source rotation is baked into an unrotated virtual spread; copying that
+flag would change its meaning. Underlined `/BS /U` links likewise fail closed
+when page rotation would move the underline to a different physical edge. URI
+actions retain a Boolean `/IsMap`, but the URI must be absolute. A relative URI
+depends on document-catalog base state that this representation does not
+preserve and therefore fails closed. Chained actions, custom
 appearances, optional-content visibility, additional actions, and every other
 unimplemented link semantic fail closed rather than being silently discarded.
 Link `/Rect` arrays require four finite PDF number objects in increasing

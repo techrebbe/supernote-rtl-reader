@@ -572,6 +572,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         Manifest manifest = lookup.manifest;
         if (manifest == null) {
             if (lookup.navigationBlocked()) {
+                // A newer Back/Original Back action supersedes any link
+                // invocation left queued by an older cold verification.
+                clearQueuedLinkInvocation(viewModel);
                 param.setResult(null);
                 log("link_history_blocked reason="
                     + lookup.navigationBlockReason());
@@ -671,6 +674,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             return;
         }
         if (routing == VirtualSpreadNavigation.LinkRouting.BLOCKED) {
+            // An uninspectable current link must not allow an older queued
+            // link to replay after manifest verification completes.
+            clearQueuedLinkInvocation(viewModel);
             param.setResult(null);
             log("link_jump_blocked reason=uninspectable_link_kind");
             return;

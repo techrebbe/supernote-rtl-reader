@@ -50,10 +50,11 @@ If a generated PDF is present but its required sidecar is missing or cannot be
 inspected, navigation fails closed based on the authority embedded in the native
 open document. A PDF whose native metadata explicitly contains no virtual-spread
 authority remains an ordinary native document.
-The generator rejects transformed URI `/IsMap true` actions, a source CropBox
-that extends beyond its MediaBox, and any link rectangle or quadrilateral outside
-the source page's effective CropBox. It materializes the PDF default link border
-at the transformed width. Replacing a PDF and sidecar at their existing paths can
+The generator rejects transformed URI `/IsMap true` actions, relative URI
+actions, a `/NoRotate` link annotation on a rotated source page, a source
+CropBox that extends beyond its MediaBox, and any link rectangle or quadrilateral
+outside the source page's effective CropBox. It materializes the PDF default
+link border at the transformed width. Replacing a PDF and sidecar at their existing paths can
 never apply replacement mappings to an older native document that remains open
 in memory. Older generated pairs fail closed; regenerate the PDF/sidecar pair
 before using it with this module.
@@ -109,8 +110,9 @@ filesystem snapshot, unique verifier generation, native MuPDF document object,
 embedded source/layout/link authorities, source page, and external/internal
 routing classification are still current and the request is fresh; same-path
 replacement, document/page changes, a newer manual turn (even while authority
-remains pending or blocked), a newer already-verified link, routing changes,
-and failed or rejected verification discard it. External replay immediately
+remains pending or blocked), a newer already-verified link, a newer
+uninspectable/blocked link, Back or Original Back while authority is blocked,
+routing changes, and failed or rejected verification discard it. External replay immediately
 initializes the verified current spread,
 while an internal replay waits for its native page-load callback. Reusing one
 native view model for another document clears all page, half, link-history,

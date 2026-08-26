@@ -10,6 +10,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import secrets
 import stat
 import struct
@@ -56,6 +57,8 @@ PDF_MIN_PAGE_DIMENSION = 3.0
 PDF_MAX_PAGE_DIMENSION = 14400.0
 RETIREMENT_TOKEN_BYTES = 16
 SUPPORTED_ANNOTATION_FLAGS_MASK = 0x03FF
+ANNOTATION_FLAG_NO_ROTATE = 0x0010
+ABSOLUTE_URI_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 SUPPORTED_LINK_ANNOTATION_KEYS = frozenset({
     "/A",
     "/BS",
@@ -1020,7 +1023,10 @@ def _require_link_geometry_inside_source_crop(
             )
 
 
-def _link_annotation_flags(annotation: DictionaryObject) -> NumberObject | None:
+def _link_annotation_flags(
+    annotation: DictionaryObject,
+    source_rotation: int = 0,
+) -> NumberObject | None:
     if "/F" not in annotation:
         return None
     flags_object = annotation.raw_get("/F")
@@ -1031,6 +1037,15 @@ def _link_annotation_flags(annotation: DictionaryObject) -> NumberObject | None:
     flags = int(flags_object)
     if flags < 0 or flags & ~SUPPORTED_ANNOTATION_FLAGS_MASK:
         raise VirtualSpreadError("Unsupported link annotation /F flags")
+    normalized_rotation = source_rotation % 360
+    if normalized_rotation not in {0, 90, 180, 270}:
+        raise VirtualSpreadError(
+            f"Unsupported source page rotation: {normalized_rotation}"
+        )
+    if flags & ANNOTATION_FLAG_NO_ROTATE and normalized_rotation != 0:
+        raise VirtualSpreadError(
+            "Cannot preserve NoRotate link annotation flag through page rotation"
+        )
     return NumberObject(flags)
 
 
@@ -2145,7 +2160,10 @@ def _copy_link_annotation(
         original,
         [float(value) for value in mapping["sourceBox"]],
     )
-    annotation_flags = _link_annotation_flags(original)
+    source_rotation = int(
+        reader.pages[source_page_index].get("/Rotate", 0) or 0
+    ) % 360
+    annotation_flags = _link_annotation_flags(original, source_rotation)
     copied = DictionaryObject(
         {
             NameObject("/Type"): NameObject("/Annot"),
@@ -2206,6 +2224,10 @@ def _copy_link_annotation(
             if not isinstance(uri_object, TextStringObject):
                 raise VirtualSpreadError("Invalid URI link /URI string")
             uri = str(uri_object)
+            if ABSOLUTE_URI_PATTERN.match(uri) is None:
+                raise VirtualSpreadError(
+                    "URI link /URI must be an absolute URI"
+                )
             copied_action = DictionaryObject({
                 NameObject("/S"): NameObject("/URI"),
                 NameObject("/URI"): TextStringObject(uri),

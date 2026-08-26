@@ -160,6 +160,25 @@ for required in (
             f"native-link history return is missing fail-closed guard: {required}"
         )
 
+history_manifest_missing = history_return.find("if (manifest == null)")
+history_blocked = history_return.find(
+    "if (lookup.navigationBlocked())", history_manifest_missing
+)
+history_missing_end = history_return.find("try {", history_blocked)
+history_blocked_branch = history_return[history_blocked:history_missing_end]
+history_queued_clear = history_blocked_branch.find(
+    "clearQueuedLinkInvocation(viewModel)"
+)
+history_result_block = history_blocked_branch.find("param.setResult(null)")
+if not (
+    0 <= history_manifest_missing < history_blocked < history_missing_end
+    and 0 <= history_queued_clear < history_result_block
+):
+    raise SystemExit(
+        "a blocked Back/Original Back action must discard an older queued "
+        "link before returning"
+    )
+
 link_hook_start = hook.find("private static void handleLinkTarget")
 link_hook_end = hook.find("private static void hookViewModel", link_hook_start)
 if link_hook_start < 0 or link_hook_end < 0:
@@ -436,6 +455,25 @@ link_end = hook.find("private static VirtualSpreadNavigation.LinkRouting", link_
 if link_start < 0 or link_end < 0:
     raise SystemExit("missing authenticated link handler")
 link_handler = hook[link_start:link_end]
+blocked_branch = link_handler.find(
+    "if (routing == VirtualSpreadNavigation.LinkRouting.BLOCKED)"
+)
+blocked_branch_end = link_handler.find(
+    "if (lookup.manifest != null)", blocked_branch
+)
+blocked_handler = link_handler[blocked_branch:blocked_branch_end]
+blocked_queued_clear = blocked_handler.find(
+    "clearQueuedLinkInvocation(viewModel)"
+)
+blocked_result = blocked_handler.find("param.setResult(null)")
+if not (
+    0 <= blocked_branch < blocked_branch_end
+    and 0 <= blocked_queued_clear < blocked_result
+):
+    raise SystemExit(
+        "an uninspectable current link must discard an older queued link "
+        "before returning"
+    )
 verified_branch = link_handler.find("if (lookup.manifest != null)")
 verified_clear = link_handler.find(
     "clearQueuedLinkInvocation(viewModel)", verified_branch
@@ -1080,6 +1118,7 @@ for required in (
     "test_malformed_link_quad_points_fail_closed",
     "test_ltr_generation_is_rejected_before_publication",
     "test_link_annotation_flags_are_preserved",
+    "test_no_rotate_link_on_rotated_page_fails_closed",
     "test_malformed_link_annotation_flags_fail_closed",
     "test_link_rect_requires_finite_pdf_numbers",
     "test_visible_link_border_and_highlight_are_preserved",
@@ -1090,6 +1129,7 @@ for required in (
     "test_crop_box_must_be_contained_by_media_box",
     "test_uri_action_is_map_false_is_preserved",
     "test_uri_action_is_map_true_fails_closed",
+    "test_relative_uri_action_fails_closed",
     "test_uri_action_operands_and_chains_fail_closed",
     "test_unsupported_link_semantics_fail_closed",
     "test_document_outlines_fail_closed_before_publication",

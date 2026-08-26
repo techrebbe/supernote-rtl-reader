@@ -1864,7 +1864,7 @@ upgrade-compatible certificate and has SHA-256
 The clean exact-head Ultra review reports no actionable findings. Focused
 hardware validation remains the release gate; PR #16 stays draft.
 
-## v0.0.24-r1 focused Nomad gate - HARDWARE PASS
+## v0.0.24-r1 focused Nomad gate - SUPERSEDED HARDWARE PASS
 
 The complete v0.0.24 gate passed on the Nomad on 2026-08-26 with isolated
 schema-v2 fixtures. Cold activation, cover and non-cover RTL parity, same-path
@@ -1878,9 +1878,11 @@ link under a newly scheduled verifier owner logged exactly one queue and one
 replay, then opened page 7 only after authenticated activation. An earlier
 retry-backoff invocation exposed a firmware crash because the hooked
 `showLinkJumpView(...)` primitive-boolean result had been replaced with null.
-The module now returns `Boolean.FALSE` on every blocked link path; the exact
+The r1 module returned `Boolean.FALSE` on every blocked link path; the exact
 race then produced no fatal or `Boolean.booleanValue()` log and the document
-reader remained usable.
+reader remained usable. Subsequent exact-firmware review proved that false lets
+the single-tap listener fall through into its page-turn branch. r1 is therefore
+superseded despite that focused race appearing correct.
 
 MuPDF's absent metadata values were also observed as empty strings on hardware.
 The native authority classifier now treats null and trimmed-empty strings as
@@ -1899,6 +1901,39 @@ Final local validation passes 154 generator tests (14 expected Windows skips),
 8,752 exhaustive navigation assertions, both native invariant suites,
 hook-scope validation, and the signed APK build. PR #16 remains draft until
 fresh exact-head CI and review complete.
+
+## v0.0.24-r2 mixed-menu authority and blocked-tap consumption - LOCAL PASS / HARDWARE PENDING
+
+Exact-firmware review found that `showLinkJumpView(...)` returns true whenever
+native firmware handles a tap; false means unhandled and falls through to page
+turning. Every blocked pure-link path now returns `Boolean.TRUE`, preventing both
+null unboxing and page-turn leakage.
+
+The review also established that a non-null link is not always immediate
+navigation. When a link overlaps a digest or annotation, firmware first opens a
+combined native menu. r2 leaves that menu and all non-Link actions native, then
+authenticates only the later `jumpLink(...)` callback if Link is actually chosen.
+The short-lived candidate and any cold direct-jump replay are bound to the exact
+document, native MuPDF object and embedded authorities, source page, generation,
+arguments, and age. Annotation/digest-only activity cancels an older queued link.
+
+The integrated exact-head review also hardened every publish/activation and
+freshness-invalidation interleaving. Posted activation is bound to the exact
+verification owner and native MuPDF object; passive UI binding preserves only
+same-verification deferred intent; real native page loads invalidate deferred
+intent while explicit synthetic activation may preserve an open mixed menu; and
+pre-removal freshness tokens cannot erase a newer turn, link, history action,
+queue, or menu candidate.
+
+Deterministic checks pin pure-versus-mixed classification, TRUE tap consumption,
+annotation-only supersession, exact direct-jump arguments, candidate invalidation,
+dual replay dispatch, and the concurrency state machine. Local validation passes
+196 focused navigation
+assertions, 15 authority assertions, 8,752 exhaustive assertions, hook-scope
+validation, both native invariant suites, and signed compilation as
+v0.0.24-r2 (`versionCode=26`). The upgrade-compatible APK SHA-256 is
+`709f258ebb1f201febce0768c114da4ed1dff9f3ab78f7fb212aae002a53231f`.
+The fresh r2 hardware matrix remains pending and the PR stays draft.
 
 ## Failure capture
 

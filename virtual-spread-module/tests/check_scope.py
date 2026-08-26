@@ -84,6 +84,7 @@ expected_hooks = {
     '"onPageLoadedPart2"',
     '"setPageInfo"',
     '"showLinkJumpView"',
+    '"jumpLink"',
     '"getFirstBack"',
     '"getLastBack"',
     '"onBackClick"',
@@ -293,7 +294,7 @@ if not (
 ):
     raise SystemExit("dirty trail saves can succeed before native acknowledgement")
 
-link_hook_start = hook.find("private static void handleLinkTarget")
+link_hook_start = hook.find("private static void hookLinkTarget")
 link_hook_end = hook.find("private static void hookViewModel", link_hook_start)
 if link_hook_start < 0 or link_hook_end < 0:
     raise SystemExit("missing deferred native-link handling")
@@ -302,6 +303,17 @@ for required in (
     "if (superNoteLink == null)",
     "lookup.manifest == null && !lookup.navigationBlocked()",
     "classifyLinkInvocation(superNoteLink, targetPage)",
+    "VirtualSpreadNavigation.isImmediateLinkInvocation(",
+    "rememberMixedLinkCandidate(",
+    "private static void handleMixedLinkJump(",
+    "PURE_LINK_DISPATCH.set(Boolean.TRUE)",
+    "!Boolean.TRUE.equals(PURE_LINK_DISPATCH.get())",
+    "state.mixedLinkCandidate = new MixedLinkCandidate(",
+    "state.mixedLinkCandidate = null",
+    'mixed_link_jump_blocked reason=missing_menu_context',
+    "queuedDirectJump ? \"jumpLink\" : \"showLinkJumpView\"",
+    "directJumpArgumentsMatchLink(",
+    'link_jump_discarded reason=direct_arguments_changed',
     "routing == VirtualSpreadNavigation.LinkRouting.NON_LINK",
     "routing == VirtualSpreadNavigation.LinkRouting.EXTERNAL",
     "authenticatedExternalLink(",
@@ -310,7 +322,7 @@ for required in (
     "ManifestLookup lookup = manifestLookupFor(viewModel)",
     "if (lookup.verificationPending)",
     "lookup.snapshotId,\n                lookup.verificationGeneration,\n                routing",
-    "param.setResult(Boolean.FALSE)",
+    "param.setResult(Boolean.TRUE)",
     "state.queuedLinkArguments = arguments.clone()",
     "state.queuedLinkSnapshotId = snapshotId",
     "state.queuedLinkVerificationGeneration = verificationGeneration",
@@ -335,7 +347,6 @@ for required in (
     "currentRouting == VirtualSpreadNavigation.LinkRouting.EXTERNAL",
     'link_jump_discarded reason=unmatched_authenticated_uri',
     'link_jump_blocked reason=unmatched_authenticated_link',
-    "XposedHelpers.callMethod(activity, \"showLinkJumpView\", arguments)",
     "REPLAYING_LINK.set(Boolean.TRUE)",
     "REPLAYING_LINK.remove()",
 ):
@@ -343,6 +354,10 @@ for required in (
         raise SystemExit(
             f"pending native link is missing authority guard: {required}"
         )
+if "withPageLoadGeneration(state.pageLoadGeneration)" not in hook:
+    raise SystemExit(
+        "mixed native-link menu must survive verification-only state binding"
+    )
 
 refresh_start = hook.find("private static void scheduleConfigurationRefresh")
 refresh_end = hook.find("private static boolean focusHalf", refresh_start)
@@ -419,14 +434,38 @@ page_load_state = page_loaded.find("state = readerStateLocked(viewModel)")
 page_load_generation = page_loaded.find(
     "state.pageLoadGeneration++", page_load_state
 )
+page_load_intent_policy = page_loaded.find(
+    "pageLoadPreservesDeferredLinkIntent(", page_load_generation
+)
+page_load_queue_clear = page_loaded.find(
+    "clearQueuedLinkInvocation(state)", page_load_intent_policy
+)
+page_load_candidate_clear = page_loaded.find(
+    "state.mixedLinkCandidate = null", page_load_queue_clear
+)
 page_load_manifest = page_loaded.find(
     "Manifest manifest = manifestFor(viewModel)", page_load_state
 )
 if not (
-    0 <= page_load_state < page_load_generation < page_load_manifest
+    0 <= page_load_state < page_load_generation < page_load_intent_policy
+    < page_load_queue_clear < page_load_candidate_clear < page_load_manifest
 ):
     raise SystemExit(
-        "every native page load must supersede deferred work before manifest lookup"
+        "real native page loads must invalidate deferred link intent before "
+        "the first published-manifest binding"
+    )
+if (
+    "private static void handleManifestActivationInitialization("
+        not in page_loaded
+    or "handlePageLoaded(viewModel, true)" not in page_loaded
+    or "handlePageLoaded(viewModel, false)" not in page_loaded
+    or "pageLoadPreservesDeferredLinkIntent(" not in page_loaded
+    or "clearQueuedLinkInvocation(state)" not in page_loaded
+    or "state.mixedLinkCandidate = null" not in page_loaded
+):
+    raise SystemExit(
+        "synthetic manifest initialization must rebind a mixed menu while "
+        "real native page loads invalidate it"
     )
 for required in (
     "shouldPreservePortraitLinkViewport(",
@@ -490,6 +529,8 @@ if "String documentKey;" not in hook:
 for required in (
     "manifest.revision.equals(state.manifestRevision)",
     "state.manifestRevision = manifest.revision",
+    "state.manifestVerificationGeneration",
+    "verificationGeneration",
     "private static void clearManifestTransientState(",
     "private static void bindReaderStateToDocument(",
     "state.nativeSnapshotDocument = null",
@@ -504,6 +545,10 @@ for required in (
     "clearQueuedLinkInvocation(state)",
     "state.linkHistory.clear()",
     "state.pageLoadGeneration++",
+    "queuedLinkSurvivesVerificationBinding(",
+    "state.queuedLinkPageLoadGeneration = state.pageLoadGeneration",
+    "retainedMixedLink",
+    ".withPageLoadGeneration(state.pageLoadGeneration)",
 ):
     if required not in reader_state:
         raise SystemExit(
@@ -585,8 +630,10 @@ if turn_start < 0 or turn_end < 0:
     raise SystemExit("missing native turn handler")
 turn_handler = hook[turn_start:turn_end]
 turn_lookup = turn_handler.find("ManifestLookup lookup = manifestLookupFor(viewModel)")
+turn_intent = turn_handler.find("noteReaderIntent(viewModel)", turn_lookup)
 state_lookup = turn_handler.find("ReaderState state = stateFor(viewModel, manifest)")
 queued_clear = turn_handler.find("clearQueuedLinkInvocation(viewModel)")
+candidate_clear = turn_handler.find("clearMixedLinkCandidate(viewModel)")
 pending_clear = turn_handler.find("clearPendingLink(state)", state_lookup)
 activity_null = turn_handler.find("if (activity == null)", turn_lookup)
 activity_block = turn_handler.find("param.setResult(null)", activity_null)
@@ -603,23 +650,40 @@ orientation_branch = turn_handler.find(
     "if (orientation == Configuration.ORIENTATION_LANDSCAPE)", state_lookup
 )
 if not (
-    0 <= queued_clear < turn_lookup < activity_null < activity_block
+    0 <= queued_clear < candidate_clear < turn_lookup < turn_intent
+    < activity_null < activity_block
     < orientation_read < orientation_unknown < orientation_unknown_block
     < state_lookup < pending_clear
     < orientation_branch
 ):
     raise SystemExit(
-        "manual navigation must discard older intent and fail closed until "
-        "activity/orientation authority is available"
+        "manual navigation must discard older queued and mixed-menu intent "
+        "and fail closed until activity/orientation authority is available"
     )
 if "turn_passthrough reason=no_activity" in turn_handler:
     raise SystemExit("verified turns must not pass through without an activity")
 
 link_start = hook.find("private static void handleLinkTarget(")
-link_end = hook.find("private static VirtualSpreadNavigation.LinkRouting", link_start)
+link_end = hook.find("private static boolean immediateLinkArguments", link_start)
 if link_start < 0 or link_end < 0:
     raise SystemExit("missing authenticated link handler")
 link_handler = hook[link_start:link_end]
+null_link_branch = link_handler.find("if (superNoteLink == null)")
+null_link_return = link_handler.find("return;", null_link_branch)
+null_link_queued_clear = link_handler.find(
+    "clearQueuedLinkInvocation(viewModel)", null_link_branch
+)
+null_link_candidate_clear = link_handler.find(
+    "clearMixedLinkCandidate(viewModel)", null_link_branch
+)
+if not (
+    0 <= null_link_branch < null_link_queued_clear
+    < null_link_candidate_clear < null_link_return
+):
+    raise SystemExit(
+        "a newer annotation/digest-only action must cancel older queued and "
+        "mixed link intent before remaining native"
+    )
 blocked_branch = link_handler.find(
     "if (routing == VirtualSpreadNavigation.LinkRouting.BLOCKED)"
 )
@@ -630,7 +694,7 @@ blocked_handler = link_handler[blocked_branch:blocked_branch_end]
 blocked_queued_clear = blocked_handler.find(
     "clearQueuedLinkInvocation(viewModel)"
 )
-blocked_result = blocked_handler.find("param.setResult(Boolean.FALSE)")
+blocked_result = blocked_handler.find("param.setResult(Boolean.TRUE)")
 if not (
     0 <= blocked_branch < blocked_branch_end
     and 0 <= blocked_queued_clear < blocked_result
@@ -641,8 +705,13 @@ if not (
     )
 if "param.setResult(null)" in link_handler:
     raise SystemExit(
-        "blocked showLinkJumpView calls must return primitive boolean false, "
+        "blocked showLinkJumpView calls must return primitive boolean true, "
         "not a null result that crashes the firmware caller during unboxing"
+    )
+if "param.setResult(Boolean.FALSE)" in link_handler:
+    raise SystemExit(
+        "blocked showLinkJumpView calls must consume the tap; false falls "
+        "through into the firmware page-turn branch"
     )
 verified_branch = link_handler.find("if (lookup.manifest != null)")
 verified_clear = link_handler.find(
@@ -766,6 +835,7 @@ for required in (
     "sidecarAfter.matches(sidecarPathAfter)",
     "sidecarDigest.equals(currentSidecarDigest)",
     "MANIFESTS.put(key, published)",
+    "LATEST_VERIFICATION_OWNER.put(key, owner)",
     "owner.nativeDocument",
     "pdfAfter.token() + \":\" + sidecarAfter.token()",
     'manifest_rejected reason=deterministic_parse path=',
@@ -775,9 +845,13 @@ for required in (
     '"snapshot_changed_during_read"',
     "VirtualSpreadNavigation.LinkRouting replayedRouting =",
     "replayQueuedLink(\n                        owner,",
+    "manifestActivationBelongsToVerification(",
+    'manifest_activation_superseded path=',
     "replayRequiresImmediateInitialization(replayedRouting)",
+    "manifestActivationRequiresInitialization(\n                        viewModel,",
+    'manifest_activation_deferred reason=',
     "new Handler(owner.getMainLooper()).post",
-    "handlePageLoaded(viewModel)",
+    "handleManifestActivationInitialization(viewModel)",
     '"manifest_verified"',
     "FRESHNESS_CHECKING.putIfAbsent(key, expected)",
     "private static void verifyManifestFreshness(",
@@ -788,6 +862,8 @@ for required in (
     "if (refreshed.manifest != null)",
     "scheduleManifestFreshnessWakeup(key, refreshed)",
     "scheduleManifestStateInvalidation(",
+    "manifestInvalidationMayClear(",
+    'manifest_state_invalidation_superseded reason=',
     "VERIFICATION_RETRY_AFTER.put(key, retryToken)",
     "VERIFICATION_RETRY_AFTER.remove(key, retryToken)",
     'log("manifest_retry_ready path=" + key)',
@@ -797,6 +873,51 @@ for required in (
         raise SystemExit(
             f"background manifest verification is missing guard: {required}"
         )
+
+freshness_schedule_start = manifest_verification.find(
+    "private static void scheduleManifestFreshness("
+)
+freshness_start = manifest_verification.find(
+    "private static void verifyManifestFreshness("
+)
+freshness_end = manifest_verification.find(
+    "private static void scheduleManifestStateInvalidation(",
+    freshness_start,
+)
+if (
+    freshness_schedule_start < 0
+    or freshness_start < 0
+    or freshness_end < 0
+):
+    raise SystemExit("missing freshness-verification invalidation boundary")
+freshness_schedule = manifest_verification[
+    freshness_schedule_start:freshness_start
+]
+freshness_method = manifest_verification[freshness_start:freshness_end]
+invalidation_token = freshness_schedule.find(
+    "captureManifestInvalidationToken("
+)
+freshness_task = freshness_schedule.find(
+    "new ManifestFreshnessTask("
+)
+cache_remove = freshness_method.find("MANIFESTS.remove(key, expected)")
+invalidation_schedule = freshness_method.find(
+    "scheduleManifestStateInvalidation(", cache_remove
+)
+if not (
+    0 <= invalidation_token < freshness_task
+    and 0 <= cache_remove < invalidation_schedule
+    and "invalidationToken" in freshness_method
+):
+    raise SystemExit(
+        "freshness invalidation must capture the old intent token before "
+        "worker dispatch and carry it across cache removal"
+    )
+if hook.count("noteReaderIntent(state)") < 4:
+    raise SystemExit(
+        "turn, link, history, queue, and mixed-menu intent must invalidate "
+        "older worker tokens"
+    )
 
 verification_method_start = manifest_verification.find(
     "private static void verifyManifestSnapshot("
@@ -1088,11 +1209,11 @@ if not (0 <= duplicate_guard < json_parse):
     )
 
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
-if 'android:versionCode="25"' not in manifest:
+if 'android:versionCode="26"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version code")
-if 'android:versionName="0.0.24-r1"' not in manifest:
+if 'android:versionName="0.0.24-r2"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
-if 'private static final String VERSION = "0.0.24-r1"' not in hook:
+if 'private static final String VERSION = "0.0.24-r2"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
 if (
     'android:name="xposedscope"' not in manifest

@@ -69,7 +69,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final String SCHEMA =
         "techrebbe.supernote.virtual-spread/v2";
     private static final String TAG = "SN_VIRTUAL_SPREAD";
-    private static final String VERSION = "0.0.24-r1";
+    private static final String VERSION = "0.0.24-r2";
     private static final long MAX_MANIFEST_BYTES = 8L * 1024L * 1024L;
     private static final int MAX_CACHED_MANIFESTS = 4;
     private static final long PENDING_LINK_MAX_AGE_MS = 60000L;
@@ -89,6 +89,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     );
     private static final Map<String, VerificationOwner> VERIFYING =
         new ConcurrentHashMap<>();
+    private static final Map<String, VerificationOwner>
+        LATEST_VERIFICATION_OWNER = new ConcurrentHashMap<>();
     private static final Map<String, CachedManifest> FRESHNESS_CHECKING =
         new ConcurrentHashMap<>();
     private static final Map<String, Long> VERIFICATION_RETRY_AFTER =
@@ -108,6 +110,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final ThreadLocal<int[]> PAGE_BAR_VALUES =
         new ThreadLocal<>();
     private static final ThreadLocal<Boolean> REPLAYING_LINK =
+        new ThreadLocal<>();
+    private static final ThreadLocal<Boolean> PURE_LINK_DISPATCH =
         new ThreadLocal<>();
     private static final ThreadLocal<SaveObservation> SAVE_OBSERVATION =
         new ThreadLocal<>();
@@ -277,6 +281,72 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
     }
 
+    /**
+     * The exact firmware opens a native action menu when a PDF link overlaps
+     * a digest or annotation. Retain the link identity without claiming that
+     * navigation occurred; the later jumpLink call is the user's actual Link
+     * choice and is authenticated against this short-lived context.
+     */
+    private static final class MixedLinkCandidate {
+        final String documentPath;
+        final Object nativeDocument;
+        final String nativeSourceAuthority;
+        final String nativeLayoutAuthority;
+        final String nativeLinkAuthority;
+        final Object link;
+        final int sourcePage;
+        final int targetPage;
+        final String uri;
+        final Boolean external;
+        final long pageLoadGeneration;
+        final long createdAt;
+
+        MixedLinkCandidate(
+            String documentPath,
+            Object nativeDocument,
+            String nativeSourceAuthority,
+            String nativeLayoutAuthority,
+            String nativeLinkAuthority,
+            Object link,
+            int sourcePage,
+            int targetPage,
+            String uri,
+            Boolean external,
+            long pageLoadGeneration,
+            long createdAt
+        ) {
+            this.documentPath = documentPath;
+            this.nativeDocument = nativeDocument;
+            this.nativeSourceAuthority = nativeSourceAuthority;
+            this.nativeLayoutAuthority = nativeLayoutAuthority;
+            this.nativeLinkAuthority = nativeLinkAuthority;
+            this.link = link;
+            this.sourcePage = sourcePage;
+            this.targetPage = targetPage;
+            this.uri = uri;
+            this.external = external;
+            this.pageLoadGeneration = pageLoadGeneration;
+            this.createdAt = createdAt;
+        }
+
+        MixedLinkCandidate withPageLoadGeneration(long generation) {
+            return new MixedLinkCandidate(
+                documentPath,
+                nativeDocument,
+                nativeSourceAuthority,
+                nativeLayoutAuthority,
+                nativeLinkAuthority,
+                link,
+                sourcePage,
+                targetPage,
+                uri,
+                external,
+                generation,
+                createdAt
+            );
+        }
+    }
+
     private static final class FileIdentity {
         final long device;
         final long inode;
@@ -354,6 +424,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         final Manifest manifest;
         final Object nativeDocument;
         final String snapshotId;
+        final long verificationGeneration;
         final long verifiedAtElapsed;
 
         CachedManifest(
@@ -363,6 +434,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             Manifest manifest,
             Object nativeDocument,
             String snapshotId,
+            long verificationGeneration,
             long verifiedAtElapsed
         ) {
             this.pdfIdentity = pdfIdentity;
@@ -371,6 +443,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             this.manifest = manifest;
             this.nativeDocument = nativeDocument;
             this.snapshotId = snapshotId;
+            this.verificationGeneration = verificationGeneration;
             this.verifiedAtElapsed = verifiedAtElapsed;
         }
 
@@ -386,6 +459,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 manifest,
                 nativeDocument,
                 snapshotId,
+                verificationGeneration,
                 now
             );
         }
@@ -446,22 +520,31 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         final File sidecar;
         final String key;
         final CachedManifest expected;
+        final ManifestInvalidationToken invalidationToken;
 
         ManifestFreshnessTask(
             File pdf,
             File sidecar,
             String key,
-            CachedManifest expected
+            CachedManifest expected,
+            ManifestInvalidationToken invalidationToken
         ) {
             this.pdf = pdf;
             this.sidecar = sidecar;
             this.key = key;
             this.expected = expected;
+            this.invalidationToken = invalidationToken;
         }
 
         @Override
         public void run() {
-            verifyManifestFreshness(pdf, sidecar, key, expected);
+            verifyManifestFreshness(
+                pdf,
+                sidecar,
+                key,
+                expected,
+                invalidationToken
+            );
         }
 
         void cancelBeforeRun() {
@@ -475,6 +558,22 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         private static final long serialVersionUID = 1L;
     }
 
+    private static final class ManifestInvalidationToken {
+        final Activity owner;
+        final Object viewModel;
+        final long intentGeneration;
+
+        ManifestInvalidationToken(
+            Activity owner,
+            Object viewModel,
+            long intentGeneration
+        ) {
+            this.owner = owner;
+            this.viewModel = viewModel;
+            this.intentGeneration = intentGeneration;
+        }
+    }
+
     private static final class ReaderState {
         Object nativeSnapshotDocument;
         String nativeSnapshotRevision;
@@ -482,6 +581,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         String documentKey;
         String manifestKey;
         String manifestRevision;
+        long manifestVerificationGeneration;
+        long intentGeneration;
         int lastPage = -1;
         int pendingPage = -1;
         VirtualSpreadNavigation.Half half =
@@ -503,8 +604,12 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         String queuedLinkNativeSourceAuthority;
         String queuedLinkNativeLayoutAuthority;
         String queuedLinkNativeLinkAuthority;
+        Object queuedLinkObject;
+        int queuedLinkTargetPage = -1;
+        boolean queuedLinkDirectJump;
         int queuedLinkSourcePage = -1;
         long queuedLinkAt;
+        MixedLinkCandidate mixedLinkCandidate;
         int preservedLinkViewportPage = -1;
         VirtualSpreadNavigation.Half preservedLinkViewportHalf;
         int pendingHistoryPage = -1;
@@ -657,7 +762,32 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
                     if (!Boolean.TRUE.equals(REPLAYING_LINK.get())) {
+                        if (immediateLinkArguments(param.args)) {
+                            PURE_LINK_DISPATCH.set(Boolean.TRUE);
+                        }
                         handleLinkTarget(param);
+                    }
+                }
+
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    PURE_LINK_DISPATCH.remove();
+                }
+            }
+        );
+        XposedHelpers.findAndHookMethod(
+            TARGET_ACTIVITY,
+            classLoader,
+            "jumpLink",
+            int.class,
+            String.class,
+            boolean.class,
+            new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    if (!Boolean.TRUE.equals(REPLAYING_LINK.get())
+                        && !Boolean.TRUE.equals(PURE_LINK_DISPATCH.get())) {
+                        handleMixedLinkJump(param);
                     }
                 }
             }
@@ -1077,6 +1207,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             state.pendingHistoryPage = sourcePage;
             state.pendingHistoryHalf = sourceHalf;
             state.pendingHistoryAt = System.currentTimeMillis();
+            noteReaderIntent(state);
             if (action != null) {
                 action.pageLoadAuthorized = true;
             }
@@ -1098,9 +1229,26 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         Object superNoteLink = param.args[1];
         if (superNoteLink == null) {
             // showLinkJumpView is also Supernote's annotation/digest menu
-            // callback. It is not document navigation and must stay native.
+            // callback. It is not document navigation and must stay native,
+            // but this newer action supersedes an older cold-link replay.
+            clearQueuedLinkInvocation(viewModel);
+            clearMixedLinkCandidate(viewModel);
             return;
         }
+        boolean immediate = immediateLinkArguments(param.args);
+        if (!immediate) {
+            // A mixed hit opens DocumentLinkJumpView2. Highlight, underline,
+            // digest, copy, and delete actions must remain completely native.
+            // Merely showing that menu is not a link traversal; retain only a
+            // short-lived candidate for the later jumpLink callback.
+            rememberMixedLinkCandidate(
+                viewModel,
+                superNoteLink,
+                ((Integer) param.args[2]).intValue()
+            );
+            return;
+        }
+        clearMixedLinkCandidate(viewModel);
         ManifestLookup lookup = manifestLookupFor(viewModel);
         if (lookup.manifest == null && !lookup.navigationBlocked()) {
             // An ordinary PDF with explicit native non-spread authority must
@@ -1117,10 +1265,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             // An uninspectable current link must not allow an older queued
             // link to replay after manifest verification completes. The
             // firmware method returns primitive boolean, so every blocked
-            // invocation must supply Boolean.FALSE rather than null; its
-            // caller immediately unboxes the result.
+            // invocation must return a non-null value. TRUE also consumes the
+            // tap in DocumentActivity$2; FALSE would fall through and turn a
+            // page even though link navigation was blocked.
             clearQueuedLinkInvocation(viewModel);
-            param.setResult(Boolean.FALSE);
+            param.setResult(Boolean.TRUE);
             log("link_jump_blocked reason=uninspectable_link_kind");
             return;
         }
@@ -1135,7 +1284,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                         lookup.manifest,
                         superNoteLink
                     )) {
-                    param.setResult(Boolean.FALSE);
+                    param.setResult(Boolean.TRUE);
                     log("link_jump_blocked reason=unmatched_authenticated_uri");
                     return;
                 }
@@ -1148,7 +1297,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 superNoteLink,
                 targetPage
             )) {
-                param.setResult(Boolean.FALSE);
+                param.setResult(Boolean.TRUE);
                 log("link_jump_blocked reason=unmatched_authenticated_link");
             }
             return;
@@ -1157,20 +1306,242 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             queueLinkInvocation(
                 viewModel,
                 param.args,
+                superNoteLink,
+                targetPage,
+                false,
                 lookup.snapshotId,
                 lookup.verificationGeneration,
                 routing
             );
-            param.setResult(Boolean.FALSE);
+            param.setResult(Boolean.TRUE);
             log("link_jump_blocked reason=manifest_verification_pending");
             return;
         }
         if (lookup.navigationBlocked()) {
             clearQueuedLinkInvocation(viewModel);
-            param.setResult(Boolean.FALSE);
+            param.setResult(Boolean.TRUE);
             log("link_jump_blocked reason="
                 + lookup.navigationBlockReason());
         }
+    }
+
+    private static boolean immediateLinkArguments(Object[] arguments) {
+        return arguments != null
+            && arguments.length == 6
+            && VirtualSpreadNavigation.isImmediateLinkInvocation(
+                arguments[1] != null,
+                arguments[3] != null,
+                arguments[4] != null
+            );
+    }
+
+    private static void rememberMixedLinkCandidate(
+        Object viewModel,
+        Object superNoteLink,
+        int targetPage
+    ) {
+        ManifestLookup lookup = manifestLookupFor(viewModel);
+        if (lookup.manifest == null && !lookup.navigationBlocked()) {
+            clearMixedLinkCandidate(viewModel);
+            return;
+        }
+        // Opening a new native action menu supersedes any older cold-start
+        // navigation replay. The menu itself remains visible and native.
+        clearQueuedLinkInvocation(viewModel);
+        Object nativeDocument = nativePdfDocument(viewModel);
+        Boolean external = null;
+        try {
+            Object value = XposedHelpers.callMethod(
+                superNoteLink,
+                "isExternal"
+            );
+            if (value instanceof Boolean) {
+                external = (Boolean) value;
+            }
+        } catch (Throwable throwable) {
+            logFailure("mixed_link_kind_inspection_failed", throwable);
+        }
+        String documentPath = documentPath(viewModel);
+        String uri = stringMethod(superNoteLink, "getUrl");
+        int sourcePage = intField(viewModel, "currentPage", -1);
+        synchronized (STATES) {
+            ReaderState state = readerStateLocked(viewModel);
+            state.mixedLinkCandidate = new MixedLinkCandidate(
+                documentPath,
+                nativeDocument,
+                nativePdfMetadata(
+                    nativeDocument,
+                    "SNVirtualSpreadSourceSHA256"
+                ),
+                nativePdfMetadata(
+                    nativeDocument,
+                    "SNVirtualSpreadLayoutSHA256"
+                ),
+                nativePdfMetadata(
+                    nativeDocument,
+                    "SNVirtualSpreadLinksSHA256"
+                ),
+                superNoteLink,
+                sourcePage,
+                targetPage,
+                uri,
+                external,
+                state.pageLoadGeneration,
+                System.currentTimeMillis()
+            );
+            noteReaderIntent(state);
+        }
+        log("mixed_link_menu_observed source=" + sourcePage
+            + " target=" + targetPage);
+    }
+
+    private static void handleMixedLinkJump(
+        XC_MethodHook.MethodHookParam param
+    ) {
+        Activity activity = (Activity) param.thisObject;
+        Object viewModel = objectField(activity, "documentViewModel");
+        ManifestLookup lookup = manifestLookupFor(viewModel);
+        if (lookup.manifest == null && !lookup.navigationBlocked()) {
+            clearMixedLinkCandidate(viewModel);
+            return;
+        }
+        MixedLinkCandidate candidate;
+        long currentPageLoadGeneration;
+        synchronized (STATES) {
+            ReaderState state = STATES.get(viewModel);
+            candidate = state == null ? null : state.mixedLinkCandidate;
+            currentPageLoadGeneration = state == null
+                ? -1L : state.pageLoadGeneration;
+            if (state != null) {
+                state.mixedLinkCandidate = null;
+            }
+        }
+        if (candidate == null) {
+            // Pure-link calls are explicitly marked by the surrounding
+            // showLinkJumpView hook. On a generated document, every other
+            // direct jumpLink call must have a fresh mixed-menu candidate.
+            param.setResult(null);
+            log("mixed_link_jump_blocked reason=missing_menu_context");
+            return;
+        }
+        int targetPage = param.args[0] instanceof Integer
+            ? ((Integer) param.args[0]).intValue() : -1;
+        String uri = param.args[1] instanceof String
+            ? (String) param.args[1] : null;
+        Boolean external = param.args[2] instanceof Boolean
+            ? (Boolean) param.args[2] : null;
+        Object currentNativeDocument = nativePdfDocument(viewModel);
+        long age = System.currentTimeMillis() - candidate.createdAt;
+        boolean current = currentPageLoadGeneration >= 0L
+            && candidate.link != null
+            && targetPage == candidate.targetPage
+            && sameText(uri, candidate.uri)
+            && external != null
+            && external.equals(candidate.external)
+            && candidate.sourcePage >= 0
+            && candidate.sourcePage == intField(viewModel, "currentPage", -1)
+            && candidate.pageLoadGeneration == currentPageLoadGeneration
+            && sameCanonicalPath(
+                candidate.documentPath,
+                documentPath(viewModel)
+            )
+            && currentNativeDocument != null
+            && currentNativeDocument == candidate.nativeDocument
+            && sameText(
+                candidate.nativeSourceAuthority,
+                nativePdfMetadata(
+                    currentNativeDocument,
+                    "SNVirtualSpreadSourceSHA256"
+                )
+            )
+            && sameText(
+                candidate.nativeLayoutAuthority,
+                nativePdfMetadata(
+                    currentNativeDocument,
+                    "SNVirtualSpreadLayoutSHA256"
+                )
+            )
+            && sameText(
+                candidate.nativeLinkAuthority,
+                nativePdfMetadata(
+                    currentNativeDocument,
+                    "SNVirtualSpreadLinksSHA256"
+                )
+            )
+            && age >= 0L
+            && age <= PENDING_LINK_MAX_AGE_MS;
+        if (!current) {
+            clearQueuedLinkInvocation(viewModel);
+            param.setResult(null);
+            log("mixed_link_jump_blocked reason=stale_or_invalid_context");
+            return;
+        }
+        VirtualSpreadNavigation.LinkRouting routing =
+            classifyLinkInvocation(candidate.link, targetPage);
+        if (routing == VirtualSpreadNavigation.LinkRouting.BLOCKED
+            || routing == VirtualSpreadNavigation.LinkRouting.NON_LINK) {
+            clearQueuedLinkInvocation(viewModel);
+            param.setResult(null);
+            log("mixed_link_jump_blocked reason=uninspectable_link_kind");
+            return;
+        }
+        if (lookup.manifest != null) {
+            clearQueuedLinkInvocation(viewModel);
+            if (routing == VirtualSpreadNavigation.LinkRouting.EXTERNAL) {
+                if (!authenticatedExternalLink(
+                        viewModel,
+                        lookup.manifest,
+                        candidate.link
+                    )) {
+                    param.setResult(null);
+                    log("mixed_link_jump_blocked reason="
+                        + "unmatched_authenticated_uri");
+                    return;
+                }
+                log("mixed_link_jump_passthrough kind=external"
+                    + " authority=matched");
+                return;
+            }
+            if (!captureLinkTarget(
+                    viewModel,
+                    lookup.manifest,
+                    candidate.link,
+                    targetPage
+                )) {
+                param.setResult(null);
+                log("mixed_link_jump_blocked reason="
+                    + "unmatched_authenticated_link");
+            }
+            return;
+        }
+        if (lookup.verificationPending) {
+            queueLinkInvocation(
+                viewModel,
+                param.args,
+                candidate.link,
+                targetPage,
+                true,
+                lookup.snapshotId,
+                lookup.verificationGeneration,
+                routing
+            );
+            param.setResult(null);
+            log("mixed_link_jump_blocked reason="
+                + "manifest_verification_pending");
+            return;
+        }
+        if (lookup.navigationBlocked()) {
+            clearQueuedLinkInvocation(viewModel);
+            param.setResult(null);
+            log("mixed_link_jump_blocked reason="
+                + lookup.navigationBlockReason());
+        }
+    }
+
+    private static String documentPath(Object viewModel) {
+        Uri uri = viewModel == null ? null
+            : (Uri) objectField(viewModel, "uri");
+        return uri == null ? null : uri.getPath();
     }
 
     private static VirtualSpreadNavigation.LinkRouting classifyLinkInvocation(
@@ -1253,6 +1624,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             state.pendingLinkResetLandscapeFit =
                 matched.resetLandscapeFit;
             state.pendingLinkAt = System.currentTimeMillis();
+            noteReaderIntent(state);
             log("link_target_captured source=" + sourcePage
                 + " source_half=" + sourceHalf
                 + " target=" + targetPage
@@ -1314,22 +1686,26 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static void queueLinkInvocation(
         Object viewModel,
         Object[] arguments,
+        Object linkObject,
+        int targetPage,
+        boolean directJump,
         String snapshotId,
         long verificationGeneration,
         VirtualSpreadNavigation.LinkRouting routing
     ) {
         if (viewModel == null || arguments == null || arguments.length < 3
-            || arguments[1] == null || !(arguments[2] instanceof Integer)
+            || linkObject == null
             || snapshotId == null
             || verificationGeneration <= 0L
             || (routing != VirtualSpreadNavigation.LinkRouting.EXTERNAL
-                && routing != VirtualSpreadNavigation.LinkRouting.INTERNAL)) {
+                && routing != VirtualSpreadNavigation.LinkRouting.INTERNAL)
+            || (routing == VirtualSpreadNavigation.LinkRouting.INTERNAL
+                && targetPage < 0)) {
             clearQueuedLinkInvocation(viewModel);
             log("link_jump_not_queued reason=invalid_invocation");
             return;
         }
-        Uri uri = (Uri) objectField(viewModel, "uri");
-        String documentPath = uri == null ? null : uri.getPath();
+        String documentPath = documentPath(viewModel);
         int sourcePage = intField(viewModel, "currentPage", -1);
         Object nativeDocument = nativePdfDocument(viewModel);
         String nativeSourceAuthority = nativePdfMetadata(
@@ -1361,11 +1737,16 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             state.queuedLinkNativeSourceAuthority = nativeSourceAuthority;
             state.queuedLinkNativeLayoutAuthority = nativeLayoutAuthority;
             state.queuedLinkNativeLinkAuthority = nativeLinkAuthority;
+            state.queuedLinkObject = linkObject;
+            state.queuedLinkTargetPage = targetPage;
+            state.queuedLinkDirectJump = directJump;
             state.queuedLinkSourcePage = sourcePage;
             state.queuedLinkAt = System.currentTimeMillis();
+            noteReaderIntent(state);
         }
         log("link_jump_queued source=" + sourcePage
-            + " target=" + arguments[2]
+            + " target=" + targetPage
+            + " dispatch=" + (directJump ? "jumpLink" : "showLinkJumpView")
             + " kind=" + routing);
     }
 
@@ -1388,6 +1769,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         String queuedNativeSourceAuthority;
         String queuedNativeLayoutAuthority;
         String queuedNativeLinkAuthority;
+        Object queuedLinkObject;
+        int queuedTargetPage;
+        boolean queuedDirectJump;
         synchronized (STATES) {
             ReaderState state = STATES.get(viewModel);
             if (state == null || state.queuedLinkArguments == null) {
@@ -1418,6 +1802,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             queuedNativeLayoutAuthority =
                 state.queuedLinkNativeLayoutAuthority;
             queuedNativeLinkAuthority = state.queuedLinkNativeLinkAuthority;
+            queuedLinkObject = state.queuedLinkObject;
+            queuedTargetPage = state.queuedLinkTargetPage;
+            queuedDirectJump = state.queuedLinkDirectJump;
             clearQueuedLinkInvocation(state);
         }
         long age = System.currentTimeMillis() - queuedAt;
@@ -1454,16 +1841,19 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 currentPage,
                 age,
                 PENDING_LINK_MAX_AGE_MS
-            ) || arguments.length < 3
-            || arguments[1] == null
-            || !(arguments[2] instanceof Integer)) {
+            ) || queuedLinkObject == null
+            || !queuedReplayArgumentsAreValid(
+                arguments,
+                queuedLinkObject,
+                queuedTargetPage,
+                queuedDirectJump
+            )) {
             log("link_jump_discarded reason=stale_or_invalid");
             return VirtualSpreadNavigation.LinkRouting.BLOCKED;
         }
         try {
-            int targetPage = ((Integer) arguments[2]).intValue();
             VirtualSpreadNavigation.LinkRouting currentRouting =
-                classifyLinkInvocation(arguments[1], targetPage);
+                classifyLinkInvocation(queuedLinkObject, queuedTargetPage);
             if (queuedRouting == null || currentRouting != queuedRouting
                 || (currentRouting != VirtualSpreadNavigation.LinkRouting.EXTERNAL
                     && currentRouting
@@ -1471,12 +1861,20 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 log("link_jump_discarded reason=link_kind_changed");
                 return VirtualSpreadNavigation.LinkRouting.BLOCKED;
             }
+            if (queuedDirectJump && !directJumpArgumentsMatchLink(
+                    arguments,
+                    queuedLinkObject,
+                    currentRouting
+                )) {
+                log("link_jump_discarded reason=direct_arguments_changed");
+                return VirtualSpreadNavigation.LinkRouting.BLOCKED;
+            }
             if (currentRouting == VirtualSpreadNavigation.LinkRouting.INTERNAL
                 && !captureLinkTarget(
                     viewModel,
                     manifest,
-                    arguments[1],
-                    targetPage
+                    queuedLinkObject,
+                    queuedTargetPage
                 )) {
                 log("link_jump_discarded reason=unmatched_authenticated_link");
                 return VirtualSpreadNavigation.LinkRouting.BLOCKED;
@@ -1485,15 +1883,21 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 && !authenticatedExternalLink(
                     viewModel,
                     manifest,
-                    arguments[1]
+                    queuedLinkObject
                 )) {
                 log("link_jump_discarded reason=unmatched_authenticated_uri");
                 return VirtualSpreadNavigation.LinkRouting.BLOCKED;
             }
             REPLAYING_LINK.set(Boolean.TRUE);
-            XposedHelpers.callMethod(activity, "showLinkJumpView", arguments);
+            XposedHelpers.callMethod(
+                activity,
+                queuedDirectJump ? "jumpLink" : "showLinkJumpView",
+                arguments
+            );
             log("link_jump_replayed source=" + sourcePage
-                + " target=" + arguments[2]
+                + " target=" + queuedTargetPage
+                + " dispatch="
+                + (queuedDirectJump ? "jumpLink" : "showLinkJumpView")
                 + " kind=" + currentRouting);
             return currentRouting;
         } catch (Throwable throwable) {
@@ -1503,6 +1907,50 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         } finally {
             REPLAYING_LINK.remove();
         }
+    }
+
+    private static boolean queuedReplayArgumentsAreValid(
+        Object[] arguments,
+        Object linkObject,
+        int targetPage,
+        boolean directJump
+    ) {
+        if (arguments == null) {
+            return false;
+        }
+        if (directJump) {
+            return arguments.length == 3
+                && arguments[0] instanceof Integer
+                && ((Integer) arguments[0]).intValue() == targetPage
+                && arguments[2] instanceof Boolean;
+        }
+        return arguments.length == 6
+            && arguments[1] == linkObject
+            && arguments[2] instanceof Integer
+            && ((Integer) arguments[2]).intValue() == targetPage;
+    }
+
+    private static boolean directJumpArgumentsMatchLink(
+        Object[] arguments,
+        Object linkObject,
+        VirtualSpreadNavigation.LinkRouting routing
+    ) {
+        if (arguments == null || arguments.length != 3
+            || !(arguments[2] instanceof Boolean)) {
+            return false;
+        }
+        boolean expectedExternal = routing
+            == VirtualSpreadNavigation.LinkRouting.EXTERNAL;
+        if (((Boolean) arguments[2]).booleanValue() != expectedExternal) {
+            return false;
+        }
+        if (arguments[1] != null && !(arguments[1] instanceof String)) {
+            return false;
+        }
+        return sameText(
+            (String) arguments[1],
+            stringMethod(linkObject, "getUrl")
+        );
     }
 
     private static void hookViewModel(ClassLoader classLoader) {
@@ -1664,10 +2112,16 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
         Object viewModel = param.thisObject;
         // A manual turn is newer user intent even while manifest authority is
-        // still pending or blocked. Discard an older queued link before any
-        // fail-closed return so a delayed verifier cannot replay it afterward.
+        // still pending or blocked. Discard older queued and mixed-menu link
+        // intent before any fail-closed return. This also covers portrait
+        // same-spread half changes, which do not advance pageLoadGeneration.
         clearQueuedLinkInvocation(viewModel);
+        clearMixedLinkCandidate(viewModel);
         ManifestLookup lookup = manifestLookupFor(viewModel);
+        // A lookup may schedule freshness and capture its invalidation token.
+        // Claim this turn only afterward, before any return or state mutation,
+        // so that worker invalidation cannot erase the turn it just observed.
+        noteReaderIntent(viewModel);
         Manifest manifest = lookup.manifest;
         if (manifest == null && lookup.navigationBlocked()) {
             param.setResult(null);
@@ -1779,10 +2233,34 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     }
 
     private static void handlePageLoaded(Object viewModel) {
+        handlePageLoaded(viewModel, false);
+    }
+
+    private static void handleManifestActivationInitialization(
+        Object viewModel
+    ) {
+        handlePageLoaded(viewModel, true);
+    }
+
+    private static void handlePageLoaded(
+        Object viewModel,
+        boolean manifestActivationInitialization
+    ) {
         ReaderState state;
         synchronized (STATES) {
             state = readerStateLocked(viewModel);
             state.pageLoadGeneration++;
+            boolean preserveDeferredLinkIntent = VirtualSpreadNavigation
+                .pageLoadPreservesDeferredLinkIntent(
+                    manifestActivationInitialization
+                );
+            if (!preserveDeferredLinkIntent) {
+                clearQueuedLinkInvocation(state);
+                state.mixedLinkCandidate = null;
+            } else if (state.mixedLinkCandidate != null) {
+                state.mixedLinkCandidate = state.mixedLinkCandidate
+                    .withPageLoadGeneration(state.pageLoadGeneration);
+            }
         }
         Manifest manifest = manifestFor(viewModel);
         if (manifest == null) {
@@ -2194,8 +2672,38 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         state.queuedLinkNativeSourceAuthority = null;
         state.queuedLinkNativeLayoutAuthority = null;
         state.queuedLinkNativeLinkAuthority = null;
+        state.queuedLinkObject = null;
+        state.queuedLinkTargetPage = -1;
+        state.queuedLinkDirectJump = false;
         state.queuedLinkSourcePage = -1;
         state.queuedLinkAt = 0L;
+    }
+
+    private static void clearMixedLinkCandidate(Object viewModel) {
+        if (viewModel == null) {
+            return;
+        }
+        synchronized (STATES) {
+            ReaderState state = STATES.get(viewModel);
+            if (state != null) {
+                state.mixedLinkCandidate = null;
+            }
+        }
+    }
+
+    private static void noteReaderIntent(Object viewModel) {
+        if (viewModel == null) {
+            return;
+        }
+        synchronized (STATES) {
+            noteReaderIntent(readerStateLocked(viewModel));
+        }
+    }
+
+    private static void noteReaderIntent(ReaderState state) {
+        synchronized (STATES) {
+            state.intentGeneration++;
+        }
     }
 
     private static void clearPendingHistory(ReaderState state) {
@@ -2375,13 +2883,26 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         Manifest manifest
     ) {
         bindReaderStateToDocument(viewModel, manifest.key);
+        CachedManifest cached = MANIFESTS.get(manifest.key);
+        long verificationGeneration = cached != null
+            && cached.manifest == manifest
+            && cached.nativeDocument == nativePdfDocument(viewModel)
+                ? cached.verificationGeneration : 0L;
         synchronized (STATES) {
             ReaderState state = readerStateLocked(viewModel);
             if (!manifest.key.equals(state.manifestKey)
-                || !manifest.revision.equals(state.manifestRevision)) {
+                || !manifest.revision.equals(state.manifestRevision)
+                || state.manifestVerificationGeneration
+                    != verificationGeneration) {
                 state.manifestKey = manifest.key;
                 state.manifestRevision = manifest.revision;
-                clearManifestTransientState(state, false);
+                state.manifestVerificationGeneration =
+                    verificationGeneration;
+                clearManifestTransientState(
+                    state,
+                    false,
+                    verificationGeneration
+                );
             }
             return state;
         }
@@ -2389,12 +2910,23 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
 
     private static void clearManifestTransientState(
         ReaderState state,
-        boolean clearQueuedLink
+        boolean clearQueuedLink,
+        long bindingVerificationGeneration
     ) {
+        MixedLinkCandidate retainedMixedLink = clearQueuedLink
+            ? null : state.mixedLinkCandidate;
+        boolean rebindQueuedLink = !clearQueuedLink
+            && state.queuedLinkArguments != null
+            && VirtualSpreadNavigation
+                .queuedLinkSurvivesVerificationBinding(
+                    state.queuedLinkVerificationGeneration,
+                    bindingVerificationGeneration
+                );
         state.lastPage = -1;
         state.pendingPage = -1;
         state.pendingHalf = null;
         clearPendingLink(state);
+        state.mixedLinkCandidate = null;
         clearPendingHistory(state);
         clearPreservedLinkViewport(state);
         if (clearQueuedLink) {
@@ -2405,6 +2937,17 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         // Never reset this counter: delayed work compares it to reject stale
         // callbacks, so reusing an earlier value would create an ABA window.
         state.pageLoadGeneration++;
+        if (rebindQueuedLink) {
+            state.queuedLinkPageLoadGeneration = state.pageLoadGeneration;
+        }
+        if (retainedMixedLink != null) {
+            // Verification activation resets manifest-scoped state without a
+            // native page change. Preserve the already-visible native menu,
+            // but bind it to the new generation; all document/page/native-PDF
+            // identity checks still run when Link is actually chosen.
+            state.mixedLinkCandidate = retainedMixedLink
+                .withPageLoadGeneration(state.pageLoadGeneration);
+        }
     }
 
     private static void bindReaderStateToDocument(
@@ -2423,10 +2966,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             state.documentKey = key;
             state.manifestKey = null;
             state.manifestRevision = null;
+            state.manifestVerificationGeneration = 0L;
             state.nativeSnapshotDocument = null;
             state.nativeSnapshotRevision = null;
             state.nativeSnapshotAccepted = false;
-            clearManifestTransientState(state, true);
+            clearManifestTransientState(state, true, 0L);
             log("reader_state_document_changed from=" + previous
                 + " to=" + key);
         }
@@ -2556,10 +3100,16 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     - cached.verifiedAtElapsed;
                 if (freshnessAge < 0L
                     || freshnessAge > MAX_MANIFEST_FRESHNESS_AGE_MS) {
-                    MANIFESTS.remove(key, cached);
-                    scheduleManifestStateInvalidation(
+                    if (!MANIFESTS.remove(key, cached)) {
+                        return supersededManifestLookup(
+                            "manifest_cache_changed"
+                        );
+                    }
+                    invalidateManifestState(
+                        viewModel,
                         key,
-                        cached.snapshotId(),
+                        cached,
+                        -1L,
                         "freshness_lease_expired"
                     );
                     cached = null;
@@ -2692,6 +3242,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
 
     private static void cancelManifestVerificationLocked() {
         VERIFYING.clear();
+        LATEST_VERIFICATION_OWNER.clear();
         FRESHNESS_CHECKING.clear();
         VERIFICATION_RETRY_AFTER.clear();
         Runnable stale;
@@ -2752,12 +3303,15 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             || FRESHNESS_CHECKING.putIfAbsent(key, expected) != null) {
             return;
         }
+        ManifestInvalidationToken invalidationToken =
+            captureManifestInvalidationToken(key, expected);
         try {
             MANIFEST_VERIFIER.execute(new ManifestFreshnessTask(
                 pdf,
                 sidecar,
                 key,
-                expected
+                expected,
+                invalidationToken
             ));
         } catch (RuntimeException exception) {
             FRESHNESS_CHECKING.remove(key, expected);
@@ -2769,7 +3323,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         File pdf,
         File sidecar,
         String key,
-        CachedManifest expected
+        CachedManifest expected,
+        ManifestInvalidationToken invalidationToken
     ) {
         boolean invalidated = false;
         try {
@@ -2807,7 +3362,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             if (invalidated) {
                 scheduleManifestStateInvalidation(
                     key,
-                    expected.snapshotId(),
+                    expected,
+                    invalidationToken,
                     "filesystem_generation_changed"
                 );
                 deferManifestRetry(key);
@@ -2820,41 +3376,105 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
 
     private static void scheduleManifestStateInvalidation(
         final String key,
-        final String snapshotId,
+        final CachedManifest expected,
+        final ManifestInvalidationToken token,
         final String reason
     ) {
-        final Activity owner = activeActivity.get();
-        if (owner == null) {
+        if (token == null || expected == null) {
             return;
         }
-        new Handler(owner.getMainLooper()).post(new Runnable() {
+        new Handler(token.owner.getMainLooper()).post(new Runnable() {
             @Override
             public void run() {
-                if (activeActivity.get() != owner) {
+                if (activeActivity.get() != token.owner) {
                     return;
                 }
                 Object viewModel = objectField(
-                    owner,
+                    token.owner,
                     "documentViewModel"
                 );
-                synchronized (STATES) {
-                    ReaderState state = STATES.get(viewModel);
-                    if (state == null
-                        || !sameDocumentKey(key, state.documentKey)) {
-                        return;
-                    }
-                    state.manifestKey = null;
-                    state.manifestRevision = null;
-                    state.nativeSnapshotDocument = null;
-                    state.nativeSnapshotRevision = null;
-                    state.nativeSnapshotAccepted = false;
-                    clearManifestTransientState(state, true);
+                if (viewModel != token.viewModel) {
+                    return;
                 }
-                log("manifest_state_invalidated reason=" + reason
-                    + " snapshot=" + snapshotId
-                    + " path=" + key);
+                invalidateManifestState(
+                    viewModel,
+                    key,
+                    expected,
+                    token.intentGeneration,
+                    reason
+                );
             }
         });
+    }
+
+    private static ManifestInvalidationToken
+        captureManifestInvalidationToken(
+            String key,
+            CachedManifest expected
+        ) {
+        Activity owner = activeActivity.get();
+        if (owner == null || expected == null) {
+            return null;
+        }
+        Object viewModel = objectField(owner, "documentViewModel");
+        synchronized (STATES) {
+            ReaderState state = STATES.get(viewModel);
+            if (state == null
+                || !VirtualSpreadNavigation.manifestInvalidationMayClear(
+                    sameDocumentKey(key, state.documentKey),
+                    state.nativeSnapshotDocument == expected.nativeDocument,
+                    state.manifestVerificationGeneration,
+                    expected.verificationGeneration,
+                    state.intentGeneration,
+                    -1L
+                )) {
+                return null;
+            }
+            return new ManifestInvalidationToken(
+                owner,
+                viewModel,
+                state.intentGeneration
+            );
+        }
+    }
+
+    private static boolean invalidateManifestState(
+        Object viewModel,
+        String key,
+        CachedManifest expected,
+        long expectedIntentGeneration,
+        String reason
+    ) {
+        synchronized (STATES) {
+            ReaderState state = STATES.get(viewModel);
+            if (state == null
+                || expected == null
+                || !VirtualSpreadNavigation.manifestInvalidationMayClear(
+                    sameDocumentKey(key, state.documentKey),
+                    state.nativeSnapshotDocument == expected.nativeDocument,
+                    state.manifestVerificationGeneration,
+                    expected.verificationGeneration,
+                    state.intentGeneration,
+                    expectedIntentGeneration
+                )) {
+                log("manifest_state_invalidation_superseded reason=" + reason
+                    + " snapshot="
+                    + (expected == null ? "none" : expected.snapshotId())
+                    + " path=" + key);
+                return false;
+            }
+            state.manifestKey = null;
+            state.manifestRevision = null;
+            state.manifestVerificationGeneration = 0L;
+            state.nativeSnapshotDocument = null;
+            state.nativeSnapshotRevision = null;
+            state.nativeSnapshotAccepted = false;
+            clearManifestTransientState(state, true, 0L);
+        }
+        log("manifest_state_invalidated reason=" + reason
+            + " snapshot=" + expected.snapshotId()
+            + " path=" + key);
+        return true;
     }
 
     private static void deferManifestRetry(
@@ -2923,6 +3543,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 nativeDocument
             );
             VERIFYING.put(key, owner);
+            LATEST_VERIFICATION_OWNER.put(key, owner);
             try {
                 MANIFEST_VERIFIER.execute(new ManifestVerificationTask(
                     pdf,
@@ -2933,6 +3554,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 return owner;
             } catch (RuntimeException exception) {
                 VERIFYING.remove(key, owner);
+                LATEST_VERIFICATION_OWNER.remove(key, owner);
                 throw exception;
             }
         }
@@ -3067,6 +3689,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                         parsed,
                         owner.nativeDocument,
                         pdfAfter.token() + ":" + sidecarAfter.token(),
+                        owner.generation,
                         SystemClock.elapsedRealtime()
                     );
                     MANIFESTS.put(key, published);
@@ -3185,6 +3808,22 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     || !revision.equals(current.revision)) {
                     return;
                 }
+                VerificationOwner latestOwner =
+                    LATEST_VERIFICATION_OWNER.get(key);
+                if (!VirtualSpreadNavigation
+                    .manifestActivationBelongsToVerification(
+                        latestOwner == null ? 0L : latestOwner.generation,
+                        verificationOwner.generation,
+                        latestOwner == verificationOwner
+                            && latestOwner.nativeDocument
+                                == verificationOwner.nativeDocument
+                            && nativePdfDocument(viewModel)
+                                == verificationOwner.nativeDocument
+                    )) {
+                    log("manifest_activation_superseded path=" + key
+                        + " generation=" + verificationOwner.generation);
+                    return;
+                }
                 VirtualSpreadNavigation.LinkRouting replayedRouting =
                     replayQueuedLink(
                         owner,
@@ -3192,14 +3831,30 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                         current,
                         verificationOwner
                     );
+                boolean requiresInitialization =
+                    manifestActivationRequiresInitialization(
+                        viewModel,
+                        current,
+                        verificationOwner.generation
+                    );
                 if (VirtualSpreadNavigation
-                    .replayRequiresImmediateInitialization(replayedRouting)) {
-                    handlePageLoaded(viewModel);
+                        .replayRequiresImmediateInitialization(replayedRouting)
+                    && requiresInitialization) {
+                    handleManifestActivationInitialization(viewModel);
                     scheduleConfigurationRefresh(
                         owner,
                         viewModel,
                         "manifest_verified"
                     );
+                } else if (replayedRouting
+                        != VirtualSpreadNavigation.LinkRouting.INTERNAL
+                    && !requiresInitialization) {
+                    // MANIFESTS is published before this main-thread task is
+                    // posted. A newer turn, link, or link-history action can
+                    // bind the manifest and begin native loading first. Never
+                    // synthesize page-loaded over that newer state.
+                    log("manifest_activation_deferred reason="
+                        + "newer_reader_state path=" + key);
                 }
                 if (replayedRouting
                         == VirtualSpreadNavigation.LinkRouting.EXTERNAL
@@ -3214,6 +3869,34 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     + " revision=" + revision);
             }
         });
+    }
+
+    private static boolean manifestActivationRequiresInitialization(
+        Object viewModel,
+        Manifest manifest,
+        long activationVerificationGeneration
+    ) {
+        synchronized (STATES) {
+            ReaderState state = STATES.get(viewModel);
+            boolean sameManifestKeyAndRevision = state != null
+                && manifest != null
+                && manifest.key.equals(state.manifestKey)
+                && manifest.revision.equals(state.manifestRevision);
+            return VirtualSpreadNavigation
+                .manifestActivationRequiresInitialization(
+                    sameManifestKeyAndRevision,
+                    state == null ? 0L
+                        : state.manifestVerificationGeneration,
+                    activationVerificationGeneration,
+                    state == null ? -1 : state.lastPage,
+                    state == null ? -1 : state.pendingPage,
+                    state != null && state.pendingHalf != null,
+                    state == null ? -1 : state.pendingLinkPage,
+                    state != null && state.pendingLinkHalf != null,
+                    state == null ? -1 : state.pendingHistoryPage,
+                    state != null && state.pendingHistoryHalf != null
+                );
+        }
     }
 
     private static void scheduleQueuedLinkDiscard(

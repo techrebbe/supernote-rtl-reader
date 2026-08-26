@@ -154,7 +154,7 @@ link fixture. The companion suite passes 55 focused navigation assertions, 10
 cross-language authority assertions, 8,752 exhaustive assertions, and the hook-
 scope guard.
 
-## v0.0.24-r1 native-open snapshot binding and portrait viewport - PASS
+## v0.0.24-r1 native-open snapshot binding and portrait viewport - SUPERSEDED HARDWARE PASS
 
 Review passes 40-61 bind the authenticated sidecar to the actual PDF object
 retained inside Supernote's native reader and harden all transformed link,
@@ -233,14 +233,52 @@ Hardware confirmed all release gates:
 8. A native pen stroke on page 2 survived a page round trip and remained
    correctly positioned.
 
-The gate exposed two firmware-boundary details that v0.0.24-r1 now covers.
+The gate exposed two firmware-boundary details that v0.0.24-r1 covered.
 MuPDF returns an empty string, rather than null, for an absent document-info
 key; blank metadata is therefore treated as absent while nonblank or
 unexpectedly typed metadata remains fail-closed. Supernote's
-`showLinkJumpView(...)` returns primitive `boolean`; blocked link invocations
-now return `Boolean.FALSE` rather than null. Reproducing an identical-sidecar
-generation change confirmed zero `Boolean.booleanValue()` crashes, followed by
-the authenticated single queued replay described above.
+`showLinkJumpView(...)` returns primitive `boolean`. The r1 artifact returned
+`Boolean.FALSE` rather than null; reproducing an identical-sidecar generation
+change confirmed zero `Boolean.booleanValue()` crashes, followed by the
+authenticated single queued replay described above. A later exact-firmware
+review proved that false is not a sufficient final contract: the tap listener
+falls through into native page-turn handling. r1 is therefore superseded even
+though its focused race did not visibly trigger that fallthrough.
+
+## v0.0.24-r2 link-menu and blocked-tap correction - HARDWARE PENDING
+
+r2 returns `Boolean.TRUE` for every blocked `showLinkJumpView(...)` path. This
+both satisfies primitive unboxing and consumes the tap, so rejected, unmatched,
+or cold-verification links cannot leak into the native page-turn branch.
+
+The exact firmware also opens `DocumentLinkJumpView2` when a link overlaps a
+digest or annotation. r2 leaves that entire menu native and records no traversal
+until the user actually chooses Link. The later `jumpLink(...)` callback must
+match the short-lived menu link, source page, native MuPDF object, embedded
+authorities, page-load generation, URI/external flag, and age. Cold verification
+queues and replays the actual jump rather than reopening the menu. A newer
+annotation/digest-only action cancels any older queued link.
+
+Exact-head review also bound posted activation to the exact verifier/native
+document and made freshness invalidation carry a pre-worker intent token.
+Passive verification-only UI binding preserves same-verification deferred
+intent, real native page loads invalidate it, and only explicit synthetic
+activation may preserve and rebind an open mixed menu. These invariants prevent
+delayed callbacks from consuming or resurrecting newer turns, links, Back
+history, queues, or menu candidates.
+
+Local automated validation passes 196 focused navigation assertions, 15
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+the hook-scope guard, both native invariant suites, and signed compilation as
+v0.0.24-r2 (`versionCode=26`). The upgrade-compatible APK SHA-256 is
+`709f258ebb1f201febce0768c114da4ed1dff9f3ab78f7fb212aae002a53231f`.
+Fresh hardware evidence is still required for:
+
+1. blocked pure-link taps remaining on the same page with no fallthrough turn;
+2. a mixed link/annotation menu's non-Link actions remaining native;
+3. choosing Link from that menu navigating once to the authenticated target;
+4. cold direct-jump queue/replay without reopening the menu; and
+5. ordinary PDF pass-through plus missing-sidecar fail-closed behavior.
 
 ## Decision
 

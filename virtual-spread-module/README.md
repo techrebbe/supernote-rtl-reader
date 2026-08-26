@@ -52,12 +52,12 @@ inspected, navigation fails closed based on the authority embedded in the native
 open document. A PDF whose native metadata explicitly contains no virtual-spread
 authority remains an ordinary native document.
 On the tested Nomad, MuPDF represented an absent document-information value as
-a blank string rather than null. v0.0.24-r1 treats that observed form as absent
+a blank string rather than null. v0.0.24-r2 treats that observed form as absent
 and also handles null defensively; focused tests cover both. Nonblank strings and
 unexpected non-string values still claim generated-document authority and fail
-closed. Blocked `showLinkJumpView(...)` calls return primitive boolean false,
-matching the firmware signature and preventing a null-unboxing crash while
-verification is pending.
+closed. Blocked `showLinkJumpView(...)` calls return primitive boolean true:
+the non-null result matches the firmware signature, prevents an unboxing crash,
+and consumes the tap instead of falling through into the native page-turn branch.
 The generator rejects transformed URI `/IsMap true` actions, relative URI
 actions, a `/NoRotate` link annotation on a rotated source page, a `/NoZoom`
 link annotation on a scaled source page, a source
@@ -148,7 +148,14 @@ while an internal replay waits for its native page-load callback. Reusing one
 native view model for another document clears all page, half, link-history,
 viewport, queued-link, and native-snapshot state. Delayed callback generations
 remain monotonic across document and manifest changes, preventing an older task
-from matching a newly reset counter. The verifier publishes the result only if both the PDF identity and
+from matching a newly reset counter. Posted activation additionally requires the
+exact latest verifier generation and native MuPDF document. Freshness workers
+carry a token captured before dispatch/removal, so they cannot clear a newer
+turn, link, history action, queue, or mixed-menu candidate. Passive UI callbacks
+may rebind only deferred intent owned by the same verification; real native page
+loads invalidate it, while explicit synthetic activation can preserve an open
+mixed menu without making stale intent current again. The verifier publishes the
+result only if both the PDF identity and
 sidecar digest are still unchanged. Before any
 navigation behavior activates, the main-thread callback
 also compares the authenticated authorities with metadata read from the exact
@@ -156,9 +163,16 @@ native MuPDF `Document` instance. A mismatch fails closed until Supernote
 reopens the replacement document. Page-bar and page-turn callbacks never
 perform the full-file hash.
 
-Supernote shares `showLinkJumpView` between link activation and native
-annotation/digest menus. A callback without a `SuperNoteLink` therefore bypasses
-the companion completely. An external URI remains in Supernote's native handler
+Supernote shares `showLinkJumpView` between immediate link activation and native
+annotation/digest action menus. A callback without a `SuperNoteLink` remains
+native and cancels any older queued link intent. A hit containing both a link and
+annotation/digest content also leaves the complete menu native; showing that menu
+does not claim navigation. Only a later `jumpLink` callback caused by choosing
+the menu's Link action enters the authenticated routing path. Its link object,
+source page, native document, embedded authorities, menu age, and page-load
+generation must still match. A cold-verification Link choice is queued as the
+actual `jumpLink` operation rather than replaying the menu; all other menu actions
+remain untouched. An external URI remains in Supernote's native handler
 only after its current output page, exact URI, and activation rectangle match an
 authenticated manifest record; unmatched or ambiguous URI callbacks are consumed.
 Only internal page links require the companion to

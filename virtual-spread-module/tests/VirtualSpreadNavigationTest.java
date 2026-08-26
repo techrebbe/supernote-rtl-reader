@@ -138,6 +138,34 @@ public final class VirtualSpreadNavigationTest {
             )
         );
         assertBoolean(
+            "pure link hit navigates immediately",
+            true,
+            VirtualSpreadNavigation.isImmediateLinkInvocation(
+                true, false, false
+            )
+        );
+        assertBoolean(
+            "link plus digest remains a native action menu",
+            false,
+            VirtualSpreadNavigation.isImmediateLinkInvocation(
+                true, true, false
+            )
+        );
+        assertBoolean(
+            "link plus annotation remains a native action menu",
+            false,
+            VirtualSpreadNavigation.isImmediateLinkInvocation(
+                true, false, true
+            )
+        );
+        assertBoolean(
+            "annotation-only hit is not link navigation",
+            false,
+            VirtualSpreadNavigation.isImmediateLinkInvocation(
+                false, false, true
+            )
+        );
+        assertBoolean(
             "external replay initializes the verified spread immediately",
             true,
             VirtualSpreadNavigation.replayRequiresImmediateInitialization(
@@ -164,6 +192,189 @@ public final class VirtualSpreadNavigationTest {
             VirtualSpreadNavigation.replayRequiresImmediateInitialization(
                 LinkRouting.INTERNAL
             )
+        );
+        assertBoolean(
+            "unbound manifest activation initializes the current spread",
+            true,
+            VirtualSpreadNavigation.manifestActivationRequiresInitialization(
+                false, 8L, 8L, -1, -1, false, -1, false, -1, false
+            )
+        );
+        assertBoolean(
+            "fresh bound manifest activation initializes the current spread",
+            true,
+            VirtualSpreadNavigation.manifestActivationRequiresInitialization(
+                true, 8L, 8L, -1, -1, false, -1, false, -1, false
+            )
+        );
+        assertBoolean(
+            "same key and revision from an older generation reinitializes",
+            true,
+            VirtualSpreadNavigation.manifestActivationRequiresInitialization(
+                true, 7L, 8L, 3, -1, false, -1, false, -1, false
+            )
+        );
+        assertBoolean(
+            "initialized page wins the publish-to-activation race",
+            false,
+            VirtualSpreadNavigation.manifestActivationRequiresInitialization(
+                true, 8L, 8L, 3, -1, false, -1, false, -1, false
+            )
+        );
+        assertBoolean(
+            "pending manual page wins the publish-to-activation race",
+            false,
+            VirtualSpreadNavigation.manifestActivationRequiresInitialization(
+                true, 8L, 8L, -1, 3, true, -1, false, -1, false
+            )
+        );
+        assertBoolean(
+            "partial manual pending state fails closed",
+            false,
+            VirtualSpreadNavigation.manifestActivationRequiresInitialization(
+                true, 8L, 8L, -1, -1, true, -1, false, -1, false
+            )
+        );
+        assertBoolean(
+            "pending internal link wins the publish-to-activation race",
+            false,
+            VirtualSpreadNavigation.manifestActivationRequiresInitialization(
+                true, 8L, 8L, -1, -1, false, 3, true, -1, false
+            )
+        );
+        assertBoolean(
+            "partial link pending state fails closed",
+            false,
+            VirtualSpreadNavigation.manifestActivationRequiresInitialization(
+                true, 8L, 8L, -1, -1, false, -1, true, -1, false
+            )
+        );
+        assertBoolean(
+            "pending link-history load wins the publish-to-activation race",
+            false,
+            VirtualSpreadNavigation.manifestActivationRequiresInitialization(
+                true, 8L, 8L, -1, -1, false, -1, false, 3, true
+            )
+        );
+        assertBoolean(
+            "partial link-history pending state fails closed",
+            false,
+            VirtualSpreadNavigation.manifestActivationRequiresInitialization(
+                true, 8L, 8L, -1, -1, false, -1, false, -1, true
+            )
+        );
+        assertBoolean(
+            "exact verification owner may activate",
+            true,
+            VirtualSpreadNavigation.manifestActivationBelongsToVerification(
+                8L, 8L, true
+            )
+        );
+        assertBoolean(
+            "older same-revision verification may not activate",
+            false,
+            VirtualSpreadNavigation.manifestActivationBelongsToVerification(
+                9L, 8L, true
+            )
+        );
+        assertBoolean(
+            "same generation on another native document may not activate",
+            false,
+            VirtualSpreadNavigation.manifestActivationBelongsToVerification(
+                8L, 8L, false
+            )
+        );
+        assertBoolean(
+            "missing latest verification owner may not activate",
+            false,
+            VirtualSpreadNavigation.manifestActivationBelongsToVerification(
+                0L, 8L, true
+            )
+        );
+        assertBoolean(
+            "synchronous lease expiry clears its exact bound state",
+            true,
+            VirtualSpreadNavigation.manifestInvalidationMayClear(
+                true, true, 8L, 8L, 12L, -1L
+            )
+        );
+        assertBoolean(
+            "new queued link survives an older posted invalidation",
+            false,
+            VirtualSpreadNavigation.manifestInvalidationMayClear(
+                true, true, 8L, 8L, 13L, 12L
+            )
+        );
+        assertBoolean(
+            "new mixed-menu candidate survives an older posted invalidation",
+            false,
+            VirtualSpreadNavigation.manifestInvalidationMayClear(
+                true, true, 8L, 8L, 23L, 22L
+            )
+        );
+        assertBoolean(
+            "pre-removal token rejects intent created after cache removal",
+            false,
+            VirtualSpreadNavigation.manifestInvalidationMayClear(
+                true, true, 8L, 8L, 31L, 30L
+            )
+        );
+        assertBoolean(
+            "freshness token cannot clear a later same-spread turn",
+            false,
+            VirtualSpreadNavigation.manifestInvalidationMayClear(
+                true, true, 8L, 8L, 41L, 40L
+            )
+        );
+        assertBoolean(
+            "freshness token cannot clear a later cross-page turn",
+            false,
+            VirtualSpreadNavigation.manifestInvalidationMayClear(
+                true, true, 8L, 8L, 51L, 50L
+            )
+        );
+        assertBoolean(
+            "new verification state survives an older invalidation",
+            false,
+            VirtualSpreadNavigation.manifestInvalidationMayClear(
+                true, true, 9L, 8L, 12L, 12L
+            )
+        );
+        assertBoolean(
+            "new native document survives an older invalidation",
+            false,
+            VirtualSpreadNavigation.manifestInvalidationMayClear(
+                true, false, 8L, 8L, 12L, 12L
+            )
+        );
+        assertBoolean(
+            "passive state binding retains its verification queue",
+            true,
+            VirtualSpreadNavigation.queuedLinkSurvivesVerificationBinding(
+                8L, 8L
+            )
+        );
+        assertBoolean(
+            "passive state binding rejects an older verification queue",
+            false,
+            VirtualSpreadNavigation.queuedLinkSurvivesVerificationBinding(
+                7L, 8L
+            )
+        );
+        assertBoolean(
+            "synthetic manifest initialization preserves deferred link intent",
+            true,
+            VirtualSpreadNavigation.pageLoadPreservesDeferredLinkIntent(true)
+        );
+        assertBoolean(
+            "real native page load invalidates queued link intent",
+            false,
+            VirtualSpreadNavigation.pageLoadPreservesDeferredLinkIntent(false)
+        );
+        assertBoolean(
+            "real native page load invalidates a mixed-menu candidate",
+            false,
+            VirtualSpreadNavigation.pageLoadPreservesDeferredLinkIntent(false)
         );
         assertBoolean(
             "clean page needs no save callback",

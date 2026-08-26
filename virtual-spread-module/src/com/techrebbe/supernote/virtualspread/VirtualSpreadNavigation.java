@@ -739,6 +739,19 @@ public final class VirtualSpreadNavigation {
     }
 
     /**
+     * Mirrors the exact firmware's immediate-link branch. A link that shares
+     * the hit with a digest or annotation opens a native action menu first;
+     * navigation has not been selected at that point.
+     */
+    public static boolean isImmediateLinkInvocation(
+        boolean hasLink,
+        boolean hasDigest,
+        boolean hasAnnotationContent
+    ) {
+        return hasLink && !hasDigest && !hasAnnotationContent;
+    }
+
+    /**
      * An internal replay owns a subsequent native page-load callback. Every
      * other outcome must initialize the verified current spread immediately.
      */
@@ -746,6 +759,88 @@ public final class VirtualSpreadNavigation {
         LinkRouting routing
     ) {
         return routing != LinkRouting.INTERNAL;
+    }
+
+    /**
+     * A posted manifest activation may run after a newer UI callback has
+     * already bound the published manifest and either initialized the current
+     * page or started an authenticated turn, link, or link-history load. In
+     * that case a synthetic page-loaded callback would clear the newer state.
+     */
+    public static boolean manifestActivationRequiresInitialization(
+        boolean sameManifestKeyAndRevision,
+        long boundVerificationGeneration,
+        long activationVerificationGeneration,
+        int lastPage,
+        int pendingPage,
+        boolean hasPendingHalf,
+        int pendingLinkPage,
+        boolean hasPendingLinkHalf,
+        int pendingHistoryPage,
+        boolean hasPendingHistoryHalf
+    ) {
+        if (!sameManifestKeyAndRevision
+            || boundVerificationGeneration <= 0L
+            || boundVerificationGeneration
+                != activationVerificationGeneration) {
+            return true;
+        }
+        return lastPage < 0
+            && pendingPage < 0
+            && !hasPendingHalf
+            && pendingLinkPage < 0
+            && !hasPendingLinkHalf
+            && pendingHistoryPage < 0
+            && !hasPendingHistoryHalf;
+    }
+
+    /** A stale posted activation must never initialize a newer verification. */
+    public static boolean manifestActivationBelongsToVerification(
+        long latestGeneration,
+        long activationGeneration,
+        boolean sameNativeDocument
+    ) {
+        return latestGeneration > 0L
+            && activationGeneration > 0L
+            && latestGeneration == activationGeneration
+            && sameNativeDocument;
+    }
+
+    /**
+     * A posted cache invalidation may clear only the state and intent that
+     * belonged to the removed verification snapshot.
+     */
+    public static boolean manifestInvalidationMayClear(
+        boolean sameDocument,
+        boolean sameNativeDocument,
+        long boundVerificationGeneration,
+        long invalidatedVerificationGeneration,
+        long currentIntentGeneration,
+        long expectedIntentGeneration
+    ) {
+        return sameDocument
+            && sameNativeDocument
+            && boundVerificationGeneration > 0L
+            && boundVerificationGeneration
+                == invalidatedVerificationGeneration
+            && (expectedIntentGeneration < 0L
+                || currentIntentGeneration == expectedIntentGeneration);
+    }
+
+    /** Verification-only rebinding must retain only its own queued action. */
+    public static boolean queuedLinkSurvivesVerificationBinding(
+        long queuedVerificationGeneration,
+        long bindingVerificationGeneration
+    ) {
+        return queuedVerificationGeneration > 0L
+            && queuedVerificationGeneration == bindingVerificationGeneration;
+    }
+
+    /** Only synthetic activation preserves deferred link/menu intent. */
+    public static boolean pageLoadPreservesDeferredLinkIntent(
+        boolean manifestActivationInitialization
+    ) {
+        return manifestActivationInitialization;
     }
 
     /** Replay a deferred native link only in its original document/page window. */

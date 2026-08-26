@@ -15,6 +15,8 @@ import java.util.Objects;
 public final class VirtualSpreadNavigation {
     private static final double NOMAD_LANDSCAPE_ASPECT = 4.0 / 3.0;
     private static final double NOMAD_ASPECT_TOLERANCE = 1e-9;
+    private static final double PDF_MIN_PAGE_DIMENSION = 3.0;
+    private static final double PDF_MAX_PAGE_DIMENSION = 14400.0;
 
     /** Small synchronized access-order cache for process-lifetime metadata. */
     public static final class BoundedCache<K, V> {
@@ -735,14 +737,18 @@ public final class VirtualSpreadNavigation {
             && expected.equalsIgnoreCase(actual);
     }
 
-    /** True only when the persisted double geometry survives Android floats. */
+    /** True only for bounded PDF geometry that survives Android floats. */
     public static boolean runtimeGeometryIsRepresentable(
         double pageWidth,
         double pageHeight,
         double gutter
     ) {
         if (!finite(pageWidth) || !finite(pageHeight) || !finite(gutter)
-            || pageWidth <= 0.0 || pageHeight <= 0.0 || gutter < 0.0) {
+            || pageWidth < PDF_MIN_PAGE_DIMENSION
+            || pageWidth > PDF_MAX_PAGE_DIMENSION
+            || pageHeight < PDF_MIN_PAGE_DIMENSION
+            || pageHeight > PDF_MAX_PAGE_DIMENSION
+            || gutter < 0.0) {
             return false;
         }
         double slotWidth = (pageWidth - gutter) / 2.0;

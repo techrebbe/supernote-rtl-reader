@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import errno
 import hashlib
 import json
 import math
@@ -44,6 +45,8 @@ LEGACY_PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v1"
 MOVEFILE_REPLACE_EXISTING = 0x00000001
 MOVEFILE_WRITE_THROUGH = 0x00000008
 WINDOWS_ALREADY_EXISTS = {80, 183}
+AT_FDCWD = -100
+RENAME_NOREPLACE = 1
 MAX_MANIFEST_BYTES = 8 * 1024 * 1024
 DEFAULT_COVER_SEPARATE = True
 DEFAULT_SPREAD_WIDTH = 864.0
@@ -224,7 +227,7 @@ def _same_file_after_namespace_move(
     expected: SourceIdentity,
     actual: SourceIdentity,
 ) -> bool:
-    """Compare an inode after our own POSIX hard-link/unlink changed ctime."""
+    """Compare an inode after our own POSIX namespace move changed ctime."""
     return (
         expected.device == actual.device
         and expected.inode == actual.inode
@@ -2608,7 +2611,7 @@ def _publish_pair(
             ownership_guard,
         )
         _validate_publication_ownership(ownership_guard)
-        _durable_replace(
+        published_manifest_identity = _durable_replace(
             temporary_manifest,
             manifest_path,
             replace_existing=False,
@@ -2630,7 +2633,7 @@ def _publish_pair(
             ownership_guard,
         )
         _validate_publication_ownership(ownership_guard)
-        _durable_replace(
+        published_output_identity = _durable_replace(
             temporary_output,
             output_path,
             replace_existing=False,
@@ -2652,7 +2655,11 @@ def _publish_pair(
             ownership_guard,
         )
         _finish_publication_transaction(
-            transaction, ownership_guard, outcome="committed"
+            transaction,
+            ownership_guard,
+            outcome="committed",
+            committed_output_identity=published_output_identity,
+            committed_manifest_identity=published_manifest_identity,
         )
     except BaseException as publication_error:
         try:
@@ -3079,15 +3086,12 @@ class _PublicationNamespace:
             )
             self.fsync()
             return
-        os.link(
+        _posix_rename_noreplace(
             source_name,
             target_name,
-            src_dir_fd=self.directory_descriptor,
-            dst_dir_fd=self.directory_descriptor,
-            follow_symlinks=False,
+            source_dir_fd=self.directory_descriptor,
+            target_dir_fd=self.directory_descriptor,
         )
-        self.fsync()
-        os.unlink(source_name, dir_fd=self.directory_descriptor)
         self.fsync()
 
     def unlink(self, path: Path, *, missing_ok: bool) -> None:
@@ -3532,6 +3536,59 @@ def _windows_move_file_ex(source: Path, target: Path, flags: int) -> None:
     raise ctypes.WinError(error_code)
 
 
+def _posix_rename_noreplace(
+    source: Path | str,
+    target: Path | str,
+    *,
+    source_dir_fd: int | None = None,
+    target_dir_fd: int | None = None,
+) -> None:
+    """Atomically move one POSIX entry only when the target is absent."""
+    if os.name == "nt":
+        raise VirtualSpreadError("POSIX no-replace rename is unavailable")
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        renameat2 = libc.renameat2
+    except (AttributeError, OSError) as error:
+        raise VirtualSpreadError(
+            "Atomic POSIX no-replace rename is unavailable"
+        ) from error
+    renameat2.argtypes = [
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    ]
+    renameat2.restype = ctypes.c_int
+    source_fd = AT_FDCWD if source_dir_fd is None else source_dir_fd
+    target_fd = AT_FDCWD if target_dir_fd is None else target_dir_fd
+    if renameat2(
+        source_fd,
+        os.fsencode(os.fspath(source)),
+        target_fd,
+        os.fsencode(os.fspath(target)),
+        RENAME_NOREPLACE,
+    ) == 0:
+        return
+    error_code = ctypes.get_errno()
+    if error_code == errno.EEXIST:
+        raise FileExistsError(
+            error_code,
+            f"Publication target already exists: {target}",
+            os.fspath(target),
+        )
+    if error_code in {
+        errno.ENOSYS,
+        errno.EINVAL,
+        getattr(errno, "EOPNOTSUPP", errno.ENOSYS),
+    }:
+        raise VirtualSpreadError(
+            "Atomic POSIX no-replace rename is unavailable"
+        ) from OSError(error_code, os.strerror(error_code))
+    raise OSError(error_code, os.strerror(error_code), os.fspath(source))
+
+
 def _durable_replace(
     source: Path,
     target: Path,
@@ -3563,14 +3620,10 @@ def _durable_replace(
                 _windows_move_flags(replace_existing),
             )
         elif not replace_existing:
-            # POSIX os.replace() always permits replacement. Publish a hard link
-            # instead so the kernel performs the existence check and insertion as
-            # one namespace operation, even for test/helper callers that do not
-            # hold a PublicationOwnershipGuard. The staged and final paths are
-            # siblings, so they necessarily share a filesystem.
-            os.link(source, target, follow_symlinks=False)
-            _fsync_parent_directories(source, target)
-            os.unlink(source)
+            # renameat2(RENAME_NOREPLACE) performs the existence check and move
+            # atomically. A hard-link followed by path-only unlink could delete a
+            # non-cooperating writer's replacement of the source entry.
+            _posix_rename_noreplace(source, target)
             _fsync_parent_directories(source, target)
         else:
             os.replace(source, target)
@@ -3860,6 +3913,76 @@ def _publication_path_matches(actual: Any, expected: Path) -> bool:
     )
 
 
+def _read_publication_marker(
+    marker_path: Path,
+    ownership_guard: PublicationOwnershipGuard | None,
+) -> tuple[Any, SourceIdentity, str]:
+    """Parse and authenticate a marker through one descriptor-bound snapshot."""
+    if not _require_regular_publication_target(
+        marker_path, "Publication marker", ownership_guard
+    ):
+        raise VirtualSpreadError(
+            f"Publication marker disappeared: {marker_path}"
+        )
+    marker_flags = os.O_RDONLY
+    marker_flags |= getattr(os, "O_BINARY", 0)
+    marker_flags |= getattr(os, "O_NOINHERIT", 0)
+    marker_flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = _publication_open_file(
+            marker_path, marker_flags, ownership_guard
+        )
+        with os.fdopen(descriptor, "rb", buffering=0) as stream:
+            opened_before_stat = os.fstat(stream.fileno())
+            if not stat.S_ISREG(opened_before_stat.st_mode):
+                raise VirtualSpreadError(
+                    f"Publication marker must be a regular file: {marker_path}"
+                )
+            opened_before = _identity(opened_before_stat)
+            if opened_before.size > MAX_MANIFEST_BYTES:
+                raise VirtualSpreadError(
+                    "Publication marker exceeds the runtime limit of "
+                    f"{MAX_MANIFEST_BYTES} bytes"
+                )
+            marker_bytes = stream.read(MAX_MANIFEST_BYTES + 1)
+            if len(marker_bytes) > MAX_MANIFEST_BYTES:
+                raise VirtualSpreadError(
+                    "Publication marker exceeds the runtime limit of "
+                    f"{MAX_MANIFEST_BYTES} bytes"
+                )
+            opened_after = _identity(os.fstat(stream.fileno()))
+            namespace = _publication_namespace(ownership_guard)
+            path_entry = (
+                namespace.lstat(marker_path)
+                if namespace is not None
+                else _lexical_absolute(marker_path).lstat()
+            )
+            if not stat.S_ISREG(path_entry.st_mode):
+                raise VirtualSpreadError(
+                    f"Publication marker must be a regular file: {marker_path}"
+                )
+            path_identity = _identity(path_entry)
+    except VirtualSpreadError:
+        raise
+    except OSError as error:
+        raise VirtualSpreadError(
+            f"Cannot verify Publication marker: {marker_path}"
+        ) from error
+
+    if opened_before != opened_after or not _same_open_file(
+        path_identity, opened_after
+    ):
+        raise VirtualSpreadError(
+            f"Publication marker changed while it was being verified: {marker_path}"
+        )
+    marker_hash = hashlib.sha256(marker_bytes).hexdigest()
+    transaction = json.loads(
+        marker_bytes.decode("utf-8"),
+        object_pairs_hook=_publication_marker_object,
+    )
+    return transaction, opened_before, marker_hash
+
+
 def _validated_publication_transaction(
     marker_path: Path,
     output_path: Path,
@@ -3868,31 +3991,8 @@ def _validated_publication_transaction(
     manifest_backup: Path,
     ownership_guard: PublicationOwnershipGuard | None = None,
 ) -> dict[str, Any]:
-    marker_identity, marker_hash = _publication_file_evidence(
-        marker_path,
-        "Publication marker",
-        ownership_guard,
-        maximum_bytes=MAX_MANIFEST_BYTES,
-    )
-    marker_flags = os.O_RDONLY
-    marker_flags |= getattr(os, "O_BINARY", 0)
-    marker_flags |= getattr(os, "O_NOINHERIT", 0)
-    marker_flags |= getattr(os, "O_NOFOLLOW", 0)
-    descriptor = _publication_open_file(
-        marker_path, marker_flags, ownership_guard
-    )
-    with os.fdopen(descriptor, "r", encoding="utf-8") as stream:
-        transaction = json.load(
-            stream,
-            object_pairs_hook=_publication_marker_object,
-        )
-    _publication_file_evidence(
-        marker_path,
-        "Publication marker",
-        ownership_guard,
-        maximum_bytes=MAX_MANIFEST_BYTES,
-        expected_identity=marker_identity,
-        expected_hash=marker_hash,
+    transaction, marker_identity, marker_hash = _read_publication_marker(
+        marker_path, ownership_guard
     )
     expected_paths = {
         "outputPath": output_path,
@@ -3996,11 +4096,14 @@ def _finish_publication_transaction(
     ownership_guard: PublicationOwnershipGuard | None = None,
     *,
     outcome: str,
+    committed_output_identity: SourceIdentity | None = None,
+    committed_manifest_identity: SourceIdentity | None = None,
 ) -> None:
     if outcome not in {"committed", "rolled_back", "discarded"}:
         raise VirtualSpreadError("Invalid publication cleanup outcome")
     marker_path = Path(transaction["markerPath"])
     output_path = Path(transaction["outputPath"])
+    manifest_path = Path(transaction["manifestPath"])
     output_backup = Path(transaction["outputBackupPath"])
     manifest_backup = Path(transaction["manifestBackupPath"])
     marker_identity = transaction.get("_markerIdentity")
@@ -4009,6 +4112,31 @@ def _finish_publication_transaction(
         marker_hash
     ):
         raise VirtualSpreadError("Missing authenticated publication marker evidence")
+    if outcome == "committed" and (
+        not isinstance(committed_output_identity, SourceIdentity)
+        or not isinstance(committed_manifest_identity, SourceIdentity)
+    ):
+        raise VirtualSpreadError("Missing authenticated committed-pair evidence")
+
+    def require_committed_pair() -> None:
+        if outcome != "committed":
+            return
+        assert isinstance(committed_output_identity, SourceIdentity)
+        assert isinstance(committed_manifest_identity, SourceIdentity)
+        _publication_output_evidence(
+            output_path,
+            "Committed output",
+            ownership_guard,
+            expected_identity=committed_output_identity,
+            expected_hash=transaction["newOutputSha256"],
+        )
+        _publication_manifest_evidence(
+            manifest_path,
+            "Committed manifest",
+            ownership_guard,
+            expected_identity=committed_manifest_identity,
+            expected_hash=transaction["newManifestSha256"],
+        )
 
     cleanup: list[tuple[Path, SourceIdentity]] = []
     output_stage, manifest_stage, marker_stage = (
@@ -4102,8 +4230,11 @@ def _finish_publication_transaction(
     cleanup.append((marker_path, current_marker_identity))
 
     # Authenticate the entire cleanup set before deleting any entry. Every
-    # removal then carries the exact captured identity through retirement.
+    # removal then carries the exact captured identity through retirement. A
+    # committed pair is revalidated immediately before every retirement so a
+    # pathname replacement cannot consume rollback evidence under stale proof.
     for path, identity in cleanup:
+        require_committed_pair()
         _durably_remove(
             path,
             ownership_guard,
@@ -4232,19 +4363,34 @@ def _recover_pair_publication(
             transaction, ownership_guard, outcome="discarded"
         )
         return "discarded"
-    output_is_new = _publication_output_matches_sha256(
-        output_path,
-        transaction["newOutputSha256"],
-        ownership_guard,
-    )
-    manifest_is_new = _publication_manifest_matches_sha256(
-        manifest_path,
-        transaction["newManifestSha256"],
-        ownership_guard,
-    )
-    if output_is_new and manifest_is_new:
+    try:
+        committed_output_identity, _ = _publication_output_evidence(
+            output_path,
+            "Published output",
+            ownership_guard,
+            expected_hash=transaction["newOutputSha256"],
+        )
+    except (OSError, VirtualSpreadError):
+        committed_output_identity = None
+    try:
+        committed_manifest_identity, _ = _publication_manifest_evidence(
+            manifest_path,
+            "Published manifest",
+            ownership_guard,
+            expected_hash=transaction["newManifestSha256"],
+        )
+    except (OSError, VirtualSpreadError):
+        committed_manifest_identity = None
+    if (
+        committed_output_identity is not None
+        and committed_manifest_identity is not None
+    ):
         _finish_publication_transaction(
-            transaction, ownership_guard, outcome="committed"
+            transaction,
+            ownership_guard,
+            outcome="committed",
+            committed_output_identity=committed_output_identity,
+            committed_manifest_identity=committed_manifest_identity,
         )
         return "committed"
 
@@ -4324,12 +4470,19 @@ def _recover_pair_publication(
                             ownership_guard,
                             expected_identity=backup_identity,
                         )
-                        _require_publication_path_identity(
+                        restored_identity, _ = _publication_file_evidence(
                             final_path,
-                            final_identity,
                             "Restored publication target",
                             ownership_guard,
+                            expected_hash=old_hash,
                         )
+                        if not _same_file_after_namespace_move(
+                            final_identity, restored_identity
+                        ):
+                            raise VirtualSpreadError(
+                                "Restored publication target identity changed: "
+                                f"{final_path}"
+                            )
                         continue
                     else:
                         final_identity, _ = _publication_file_evidence(

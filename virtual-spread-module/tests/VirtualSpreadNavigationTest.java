@@ -368,6 +368,27 @@ public final class VirtualSpreadNavigationTest {
             )
         );
         assertBoolean(
+            "oversized PDF page geometry fails closed",
+            false,
+            VirtualSpreadNavigation.runtimeGeometryIsRepresentable(
+                20000.0, 15000.0, 0.0
+            )
+        );
+        assertBoolean(
+            "undersized PDF page geometry fails closed",
+            false,
+            VirtualSpreadNavigation.runtimeGeometryIsRepresentable(
+                3.9, 2.925, 0.0
+            )
+        );
+        assertBoolean(
+            "maximum PDF page geometry is accepted",
+            true,
+            VirtualSpreadNavigation.runtimeGeometryIsRepresentable(
+                14400.0, 10800.0, 0.0
+            )
+        );
+        assertBoolean(
             "underflowing runtime geometry fails closed",
             false,
             VirtualSpreadNavigation.runtimeGeometryIsRepresentable(

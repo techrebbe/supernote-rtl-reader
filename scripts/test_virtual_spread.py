@@ -45,6 +45,7 @@ from generate_virtual_spread import (  # noqa: E402
     _destination_uniform_scale,
     _durably_remove,
     _durable_replace,
+    _finish_publication_transaction,
     _filesystem_paths_collide,
     _identity,
     _layout_authority_sha256,
@@ -68,6 +69,8 @@ from generate_virtual_spread import (  # noqa: E402
     _transform_link_border,
     _transform_link_border_style,
     _publication_lock_path,
+    _publication_open_file,
+    _posix_rename_noreplace,
     _prepare_publication_transaction,
     _recover_pair_publication,
     _require_distinct_publication_paths,
@@ -78,6 +81,7 @@ from generate_virtual_spread import (  # noqa: E402
     _windows_move_flags,
     _write_json,
     _write_publication_marker,
+    _validated_publication_transaction,
     build_pairs,
     build_virtual_spread,
     main,
@@ -3883,11 +3887,15 @@ class VirtualSpreadTests(unittest.TestCase):
                     "generate_virtual_spread.os.replace",
                     side_effect=exchange_then_replace,
                 ):
-                    _durable_replace(
-                        staged,
-                        output,
-                        ownership_guard=ownership_guard,
-                    )
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "Publication lock directory must remain one unaliased",
+                    ):
+                        _durable_replace(
+                            staged,
+                            output,
+                            ownership_guard=ownership_guard,
+                        )
 
             self.assertTrue(exchanged)
             self.assertEqual(
@@ -4899,7 +4907,75 @@ class VirtualSpreadTests(unittest.TestCase):
                 [],
             )
 
-    def test_unguarded_posix_no_replace_uses_atomic_link(self) -> None:
+    def test_marker_parse_is_bound_to_authenticated_handle(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            original = {
+                "schema": "techrebbe.supernote.virtual-spread-publication/v2",
+                "outputPath": str(output),
+                "manifestPath": str(manifest),
+                "outputBackupPath": str(output_backup),
+                "manifestBackupPath": str(manifest_backup),
+                "hadOutput": False,
+                "hadManifest": False,
+                "oldOutputSha256": None,
+                "oldManifestSha256": None,
+                "newOutputSha256": "0" * 64,
+                "newManifestSha256": "1" * 64,
+            }
+            forged = dict(original)
+            forged["hadOutput"] = True
+            forged["oldOutputSha256"] = "2" * 64
+            _write_publication_marker(marker, original)
+            forged_path = root / "forged-marker"
+            forged_path.write_text(
+                json.dumps(forged, sort_keys=True), encoding="utf-8"
+            )
+            real_open = _publication_open_file
+
+            def open_forged_marker(
+                path: Path,
+                flags: int,
+                ownership_guard: object = None,
+                mode: int = 0o666,
+            ) -> int:
+                selected = forged_path if Path(path) == marker else Path(path)
+                return real_open(
+                    selected,
+                    flags,
+                    ownership_guard,  # type: ignore[arg-type]
+                    mode,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._publication_open_file",
+                side_effect=open_forged_marker,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Publication marker changed while it was being verified",
+                ):
+                    _validated_publication_transaction(
+                        marker,
+                        output,
+                        manifest,
+                        output_backup,
+                        manifest_backup,
+                    )
+
+            self.assertEqual(json.loads(marker.read_text("utf-8")), original)
+            self.assertTrue(forged_path.is_file())
+
+    @unittest.skipIf(
+        os.name == "nt",
+        "POSIX atomic no-replace rename is unavailable on Windows",
+    )
+    def test_unguarded_posix_no_replace_uses_atomic_rename(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             staged = root / "staged-marker"
@@ -4907,23 +4983,58 @@ class VirtualSpreadTests(unittest.TestCase):
             staged.write_bytes(b"staged")
             incumbent.write_bytes(b"incumbent")
 
-            # Exercise the POSIX branch on every CI host. The existence probe
-            # recreates the pre-fix race; the kernel-level link must still
-            # reject the occupied destination without changing either file.
-            with mock.patch("generate_virtual_spread.os.name", "posix"):
-                with mock.patch(
-                    "generate_virtual_spread._fsync_parent_directories"
-                ):
-                    with mock.patch.object(Path, "exists", return_value=False):
-                        with self.assertRaises(FileExistsError):
-                            _durable_replace(
-                                staged,
-                                incumbent,
-                                replace_existing=False,
-                            )
+            # The kernel must reject the occupied destination without changing
+            # either file; there is no check-then-rename existence probe.
+            with mock.patch.object(Path, "exists", return_value=False):
+                with self.assertRaises(FileExistsError):
+                    _durable_replace(
+                        staged,
+                        incumbent,
+                        replace_existing=False,
+                    )
 
             self.assertEqual(staged.read_bytes(), b"staged")
             self.assertEqual(incumbent.read_bytes(), b"incumbent")
+
+    @unittest.skipIf(
+        os.name == "nt",
+        "POSIX atomic no-replace rename is unavailable on Windows",
+    )
+    def test_posix_no_replace_never_unlinks_recreated_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            staged = root / "staged"
+            published = root / "published"
+            staged.write_bytes(b"authenticated-stage")
+            expected_identity = _identity(staged.stat())
+            real_rename = _posix_rename_noreplace
+            recreated = False
+
+            def rename_then_recreate(
+                source: Path | str,
+                target: Path | str,
+                **kwargs: object,
+            ) -> None:
+                nonlocal recreated
+                real_rename(source, target, **kwargs)  # type: ignore[arg-type]
+                staged.write_bytes(b"non-cooperating-writer")
+                recreated = True
+
+            with mock.patch(
+                "generate_virtual_spread._posix_rename_noreplace",
+                side_effect=rename_then_recreate,
+            ):
+                published_identity = _durable_replace(
+                    staged,
+                    published,
+                    replace_existing=False,
+                    expected_source_identity=expected_identity,
+                )
+
+            self.assertTrue(recreated)
+            self.assertEqual(published.read_bytes(), b"authenticated-stage")
+            self.assertEqual(staged.read_bytes(), b"non-cooperating-writer")
+            self.assertEqual(published_identity, _identity(published.stat()))
 
     @unittest.skipIf(
         os.name == "nt",
@@ -5982,6 +6093,61 @@ class VirtualSpreadTests(unittest.TestCase):
                     self.assertEqual(target.read_bytes(), b"unrelated")
                     self.assertEqual(output.read_bytes(), b"new-pdf")
                     self.assertEqual(manifest.read_bytes(), b"new-manifest")
+
+    def test_committed_cleanup_revalidates_pair_before_backup_retirement(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / "new-output"
+            temporary_manifest = root / "new-manifest"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            marker = Path(transaction["markerPath"])
+            output_backup = Path(transaction["outputBackupPath"])
+            manifest_backup = Path(transaction["manifestBackupPath"])
+            _durable_replace(output, output_backup)
+            _durable_replace(manifest, manifest_backup)
+            _durable_replace(temporary_manifest, manifest)
+            _durable_replace(temporary_output, output)
+            real_finish = _finish_publication_transaction
+            replaced = False
+
+            def replace_before_finish(*args: object, **kwargs: object) -> None:
+                nonlocal replaced
+                if not replaced:
+                    replacement = root / "unrelated-output"
+                    replacement.write_bytes(b"new-pdf")
+                    os.replace(replacement, output)
+                    replaced = True
+                real_finish(*args, **kwargs)  # type: ignore[arg-type]
+
+            with mock.patch(
+                "generate_virtual_spread._finish_publication_transaction",
+                side_effect=replace_before_finish,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Committed output identity changed",
+                ):
+                    _recover_pair_publication(output, manifest)
+
+            self.assertTrue(replaced)
+            self.assertEqual(output.read_bytes(), b"new-pdf")
+            self.assertEqual(manifest.read_bytes(), b"new-manifest")
+            self.assertEqual(output_backup.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest_backup.read_bytes(), b"old-manifest")
+            self.assertTrue(marker.is_file())
 
     def test_cleanup_rejects_backup_for_absent_original(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

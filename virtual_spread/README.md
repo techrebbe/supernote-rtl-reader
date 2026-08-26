@@ -153,8 +153,10 @@ into a source hard link. Windows releases that handle only after recording the
 same identity required by the subsequent move. The exact output and sidecar state
 authorized before generation is rechecked at the transaction boundary; a target
 that appears, disappears, or changes meanwhile is preserved and rejected. Final
-publication and backup restoration use no-replace moves, closing the last
-check-to-move overwrite window.
+publication and backup restoration use atomic
+`renameat2(RENAME_NOREPLACE)` moves on POSIX, closing the last check-to-move
+overwrite window without a link-then-path-unlink race. A host lacking that
+primitive fails closed rather than falling back to a lossy emulation.
 Forced-regeneration layout policy is derived from those same captured target
 snapshots, so a target that appears after an earlier existence observation still
 requires explicit cover and geometry choices. Recovery also binds every deletion
@@ -164,7 +166,8 @@ identity is carried through an unguessable retirement name before removal. A
 same-content pathname replacement is preserved. POSIX identity checks include
 ctime so an in-place, same-size mutation cannot hide behind a restored mtime;
 the generator permits only the ctime transition caused by its own
-hard-link/unlink namespace move.
+atomic namespace move. The returned post-move identity becomes authoritative
+for every subsequent publication check.
 The PDF and manifest are staged before publication as one recoverable pair.
 Their output-derived temporary names are deterministic, so a process death
 cannot leave an unbounded collection of randomly named files. Before a marker
@@ -182,8 +185,11 @@ rollback, and retirement renames. If the process or machine is interrupted, the
 next run either recognizes the fully published pair by both staged hashes and
 finishes cleanup, or restores the previous PDF and manifest from the recorded
 backups. Publication marker v2 records the prior pair's SHA-256 values; recovery
-authenticates each backup before restoring it and preserves the marker plus
-evidence if any backup was altered. A canonical target found in front of a valid
+reads, hashes, and parses that marker through one descriptor-bound snapshot,
+authenticates each backup before restoring it, and preserves the marker plus
+evidence if any backup was altered. Before retiring any rollback evidence for a
+committed transaction, it revalidates both canonical path identities and hashes.
+A canonical target found in front of a valid
 backup is overwritten only when it still matches the transaction's staged hash;
 an unrelated or concurrently replaced target is preserved and recovery fails
 closed. An interrupted v1 transaction containing
@@ -269,8 +275,9 @@ discarding a marker only when every previously existing artifact remains present
 and does not match the staged digest, while every previously absent artifact is
 still absent. A complete or partial new publication, any backup, and every other
 ambiguous legacy state remain fail-closed with all evidence preserved. Unknown or
-malformed markers are discarded only when neither canonical artifact nor backup
-exists. Only a marker with the exact field set for its declared schema can reach
+malformed markers always fail closed for manual recovery, even when no canonical
+artifact or backup is present. Only a marker with the exact field set for its
+declared schema can reach
 legacy recovery classification; duplicate JSON keys or additional fields are
 structurally ambiguous and always fail closed with the marker and canonical
 evidence preserved.

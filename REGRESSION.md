@@ -1495,6 +1495,38 @@ signed/verified v0.0.24 (`versionCode=24`) APK build (SHA-256
 A fresh clean exact-head Ultra review and focused hardware validation remain
 release gates; PR #16 stays draft.
 
+## Review pass 63 atomic publication and cross-layer geometry - LOCAL PASS
+
+The exact-head Ultra review found six additional release-boundary defects. POSIX
+publication now uses `renameat2(RENAME_NOREPLACE)` rather than a hard-link plus
+path-only unlink, so a non-cooperating writer cannot have its replacement source
+entry deleted. The post-rename identity is retained for every subsequent check,
+and recovery accepts only the authenticated ctime transition on the surviving
+link from a legacy link-before-unlink crash state.
+
+Publication-marker bytes are now read, hashed, and parsed through one
+descriptor-bound snapshot. Committed recovery captures both canonical
+identities and revalidates the complete pair immediately before every retirement
+of stage, backup, or marker evidence. A same-content pathname replacement thus
+fails closed while retaining the prior backups and transaction marker. The
+Android companion independently enforces the generator's exact 3-to-14,400-unit
+PDF page-dimension limits. The POSIX parent-exchange regression also now asserts
+the intended post-syscall fail-closed result while proving the descriptor-bound
+mutation remains confined to the originally locked directory.
+
+Deterministic regressions cover descriptor-swapped marker parsing, a recreated
+source after atomic rename, committed-pair replacement before cleanup, the
+legacy hard-link crash state, and runtime page-size boundaries. Local validation
+passes 130 generator tests on Windows (10 expected platform/filesystem or
+privilege skips) and the same 130 on Linux (two Windows-specific skips), 141
+focused navigation/manifest/cache assertions, 15 cross-language authority
+assertions, 8,752 exhaustive navigation assertions, both native invariant
+suites, hook-scope validation, and the signed/verified v0.0.24
+(`versionCode=24`) APK build (SHA-256
+`febb7b00de9ad41def5c83c41653d1473d5b1f51b44b2a64ea205516694e20a3`).
+A fresh clean exact-head Ultra review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
 ## Failure capture
 
 Before reproducing a failure:

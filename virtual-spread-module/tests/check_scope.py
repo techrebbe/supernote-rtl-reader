@@ -9,6 +9,10 @@ link_authority = (
     root
     / "src/com/techrebbe/supernote/virtualspread/VirtualSpreadLinkAuthority.java"
 ).read_text(encoding="utf-8")
+navigation = (
+    root
+    / "src/com/techrebbe/supernote/virtualspread/VirtualSpreadNavigation.java"
+).read_text(encoding="utf-8")
 
 for required in (
     "sha256(strictUtf8(uri))",
@@ -684,6 +688,19 @@ for required in (
             f"manifest validation is missing content authority: {required}"
         )
 
+for required in (
+    "PDF_MIN_PAGE_DIMENSION = 3.0",
+    "PDF_MAX_PAGE_DIMENSION = 14400.0",
+    "pageWidth < PDF_MIN_PAGE_DIMENSION",
+    "pageWidth > PDF_MAX_PAGE_DIMENSION",
+    "pageHeight < PDF_MIN_PAGE_DIMENSION",
+    "pageHeight > PDF_MAX_PAGE_DIMENSION",
+):
+    if required not in navigation:
+        raise SystemExit(
+            f"runtime PDF page-size validation is missing: {required}"
+        )
+
 for forbidden in (
     "optInt(",
     "optLong(",
@@ -900,15 +917,17 @@ for required in (
     "self.directory_descriptor",
     "_validate_publication_ownership(ownership_guard)",
     "class _PublicationNamespace:",
-    "src_dir_fd=self.directory_descriptor",
-    "dst_dir_fd=self.directory_descriptor",
+    "source_dir_fd=self.directory_descriptor",
+    "target_dir_fd=self.directory_descriptor",
     "dir_fd=self.directory_descriptor",
     "def _publication_open_file(",
     "def _publication_unlink(",
     "Never expose the marker name until a complete, fsynced JSON record",
     'staged_marker = _temporary_neighbor(',
     '".publish-marker.tmp"',
-    "os.link(source, target, follow_symlinks=False)",
+    "def _posix_rename_noreplace(",
+    "RENAME_NOREPLACE = 1",
+    "renameat2(RENAME_NOREPLACE)",
     "def _publication_paths_share_inode(",
     "Interrupted publication target",
     "def _temporary_neighbor(",
@@ -941,11 +960,13 @@ for required in (
     "            replace_existing=False,\n"
     "            ownership_guard=ownership_guard,\n"
     "            expected_source_identity=published_manifest_identity",
+    "published_manifest_identity = _durable_replace(",
     "temporary_output,\n"
     "            output_path,\n"
     "            replace_existing=False,\n"
     "            ownership_guard=ownership_guard,\n"
     "            expected_source_identity=published_output_identity",
+    "published_output_identity = _durable_replace(",
     "backup,\n"
     "                    final_path,\n"
     "                    replace_existing=False,\n"
@@ -958,9 +979,18 @@ for required in (
     "expected_identity=identity",
     "outcome not in {\"committed\", \"rolled_back\", \"discarded\"}",
     "current_marker_identity, _ = _publication_file_evidence(",
+    "def _read_publication_marker(",
+    "marker_bytes = stream.read(MAX_MANIFEST_BYTES + 1)",
+    "marker_bytes.decode(\"utf-8\")",
+    "transaction, marker_identity, marker_hash = _read_publication_marker(",
+    "committed_output_identity=published_output_identity",
+    "committed_manifest_identity=published_manifest_identity",
+    "def require_committed_pair()",
+    'expected_identity=committed_output_identity',
+    'expected_identity=committed_manifest_identity',
     "path_identity.changed_ns == open_identity.changed_ns",
-    "                    expected_identity=final_identity,\n"
-    "                )",
+    "_same_file_after_namespace_move(\n"
+    "                            final_identity, restored_identity",
     '"layoutAuthoritySha256": layout_authority_hash',
     '"/SNVirtualSpreadLayoutSHA256": layout_authority_hash',
 ):
@@ -1051,9 +1081,12 @@ for required in (
     "test_recovery_removes_authenticated_deterministic_staging",
     "test_recovery_preserves_mismatched_deterministic_staging",
     "test_interrupted_marker_write_never_exposes_partial_record",
+    "test_marker_parse_is_bound_to_authenticated_handle",
     "test_unguarded_marker_publication_is_atomically_exclusive",
-    "test_unguarded_posix_no_replace_uses_atomic_link",
+    "test_unguarded_posix_no_replace_uses_atomic_rename",
+    "test_posix_no_replace_never_unlinks_recreated_source",
     "test_recovery_accepts_interrupted_posix_backup_hard_link",
+    "test_committed_cleanup_revalidates_pair_before_backup_retirement",
     "test_runtime_float_link_rect_is_rejected",
 ):
     if required not in generator_tests:
@@ -1072,8 +1105,7 @@ backup_move = generator.find(
 published_manifest_hash = generator.find('"Published manifest"')
 published_output_hash = generator.find('"Published output"')
 finish_transaction = generator.find(
-    "_finish_publication_transaction(\n"
-    "            transaction, ownership_guard, outcome=\"committed\""
+    "_finish_publication_transaction(", published_output_hash
 )
 if not (
     0 <= preflight_output_hash < backup_move

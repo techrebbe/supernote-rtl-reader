@@ -17,6 +17,8 @@ GENERATOR_FORMAT_VERSION = (
 )
 DOCUMENT_ID_PREFIX = "inkbridge-doc-v1-"
 VIEW_ID_PREFIX = "inkbridge-view-v1-"
+NORMALIZED_EDGE_TOLERANCE = 1.0e-12
+ROUND_TRIP_TOLERANCE = 1.0e-12
 
 _AUTHORITATIVE_MAPPING_FIELDS = frozenset({
     "sourcePageIndex",
@@ -289,12 +291,24 @@ def source_to_normalized(
         raise MappingContractError("Invalid sourceBox")
     rotation = item["sourceRotation"]
     if rotation == 0:
-        return (source_x - left) / width, (top - source_y) / height
-    if rotation == 90:
-        return (source_y - bottom) / height, (source_x - left) / width
-    if rotation == 180:
-        return (right - source_x) / width, (source_y - bottom) / height
-    return (top - source_y) / height, (right - source_x) / width
+        result = (source_x - left) / width, (top - source_y) / height
+    elif rotation == 90:
+        result = (source_y - bottom) / height, (source_x - left) / width
+    elif rotation == 180:
+        result = (right - source_x) / width, (source_y - bottom) / height
+    else:
+        result = (top - source_y) / height, (right - source_x) / width
+    bounded = []
+    for label, value in zip(("x", "y"), result):
+        if (
+            value < -NORMALIZED_EDGE_TOLERANCE
+            or value > 1.0 + NORMALIZED_EDGE_TOLERANCE
+        ):
+            raise MappingContractError(
+                f"Normalized {label} is outside [0,1]"
+            )
+        bounded.append(min(1.0, max(0.0, value)))
+    return bounded[0], bounded[1]
 
 
 def source_to_spread(
@@ -333,10 +347,43 @@ def spread_to_source(
 def normalized_to_spread(
     mapping: Mapping[str, Any], u: Any, v: Any
 ) -> tuple[float, float]:
-    return source_to_spread(mapping, *normalized_to_source(mapping, u, v))
+    normalized_x = _require_finite(u, "normalized x")
+    normalized_y = _require_finite(v, "normalized y")
+    spread = source_to_spread(
+        mapping,
+        *normalized_to_source(mapping, normalized_x, normalized_y),
+    )
+    restored = source_to_normalized(
+        mapping, *spread_to_source(mapping, *spread)
+    )
+    if any(
+        abs(actual - expected) > ROUND_TRIP_TOLERANCE
+        for actual, expected in zip(
+            restored, (normalized_x, normalized_y)
+        )
+    ):
+        raise MappingContractError(
+            "Forward/inverse round trip exceeds tolerance"
+        )
+    return spread
 
 
 def spread_to_normalized(
     mapping: Mapping[str, Any], x: Any, y: Any
 ) -> tuple[float, float]:
-    return source_to_normalized(mapping, *spread_to_source(mapping, x, y))
+    spread_x = _require_finite(x, "spread x")
+    spread_y = _require_finite(y, "spread y")
+    normalized = source_to_normalized(
+        mapping, *spread_to_source(mapping, spread_x, spread_y)
+    )
+    restored = source_to_spread(
+        mapping, *normalized_to_source(mapping, *normalized)
+    )
+    if any(
+        abs(actual - expected) > ROUND_TRIP_TOLERANCE
+        for actual, expected in zip(restored, (spread_x, spread_y))
+    ):
+        raise MappingContractError(
+            "Inverse/forward round trip exceeds tolerance"
+        )
+    return normalized

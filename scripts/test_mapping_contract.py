@@ -185,12 +185,74 @@ class MappingContractTest(unittest.TestCase):
                 except MappingContractError:
                     continue
                 self.assertNotEqual(changed, original)
+        uppercase = self.identity()
+        uppercase["source_sha256"] = uppercase["source_sha256"].upper()
+        with self.assertRaises(MappingContractError):
+            view_id(**uppercase)
 
     def test_singular_transform_is_rejected_on_inverse(self) -> None:
         mapping = copy.deepcopy(self.fixture["mappings"][2])
         mapping["transform"] = [1.0, 2.0, 2.0, 4.0, 0.0, 0.0]
         with self.assertRaisesRegex(MappingContractError, "Singular"):
             spread_to_normalized(mapping, 1.0, 1.0)
+
+    def test_inverse_rejects_points_outside_mapped_destination(self) -> None:
+        mapping = self.fixture["mappings"][self.fixture["page143MappingIndex"]]
+        midpoint_y = (
+            mapping["destination"][1] + mapping["destination"][3]
+        ) / 2
+        with self.assertRaisesRegex(MappingContractError, "outside"):
+            spread_to_normalized(
+                mapping, mapping["destination"][0] - 1.0, midpoint_y
+            )
+
+    def test_inverse_clamps_only_edge_roundoff(self) -> None:
+        mapping = self.fixture["mappings"][self.fixture["page143MappingIndex"]]
+        midpoint_y = (
+            mapping["destination"][1] + mapping["destination"][3]
+        ) / 2
+        normalized = spread_to_normalized(
+            mapping,
+            mapping["destination"][0] - 1.0e-13,
+            midpoint_y,
+        )
+        self.assertEqual(0.0, normalized[0])
+        self.assertAlmostEqual(0.5, normalized[1], delta=1.0e-12)
+
+    def test_ill_conditioned_transform_fails_round_trip(self) -> None:
+        mapping = copy.deepcopy(self.fixture["mappings"][2])
+        mapping["sourceBox"] = [0.0, 0.0, 1.0, 1.0]
+        mapping["normalizedSourceBox"] = [0.0, 0.0, 1.0, 1.0]
+        mapping["sourceRotation"] = 0
+        mapping["transform"] = [
+            1.0, 1.0, 1.0, 1.0000000000000002, 0.0, 0.0
+        ]
+        with self.assertRaisesRegex(MappingContractError, "round trip"):
+            normalized_to_spread(mapping, 0.25, 0.75)
+
+    def test_signed_zero_mapping_and_view_vectors(self) -> None:
+        vector = self.fixture["signedZeroVectors"]
+        mappings = copy.deepcopy(self.fixture["mappings"])
+        mutation = vector["mappingMutation"]
+        mapping = mappings[mutation["mappingIndex"]]
+        mapping[mutation["field"]][mutation["elementIndex"]] = -0.0
+        self.assertEqual(
+            mutation["canonicalRecord"], canonical_mapping_record(mapping)
+        )
+        self.assertEqual(
+            mutation["mappingAuthoritySha256"],
+            mapping_authority_sha256(mappings),
+        )
+
+        identity = self.identity()
+        identity["gutter"] = -0.0
+        view = vector["viewMutation"]
+        self.assertEqual(
+            view["canonicalView"],
+            canonical_view_bytes(**identity).decode(),
+        )
+        self.assertEqual(view["viewId"], view_id(**identity))
+        self.assertIn("8000000000000000", view["canonicalView"])
 
     def test_nonfinite_view_geometry_is_rejected(self) -> None:
         for value in (math.inf, -math.inf, math.nan, True, "864"):

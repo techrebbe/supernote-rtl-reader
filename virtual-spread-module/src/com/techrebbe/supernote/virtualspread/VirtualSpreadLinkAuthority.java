@@ -429,7 +429,7 @@ public final class VirtualSpreadLinkAuthority {
             return null;
         }
         String digest = tail.substring(digestStart, digestEnd);
-        return isSha256(digest) ? digest.toLowerCase() : null;
+        return isLowerSha256(digest) ? digest : null;
     }
 
     private static String common(

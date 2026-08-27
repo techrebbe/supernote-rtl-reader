@@ -30,6 +30,13 @@ from reportlab.pdfgen import canvas
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "virtual_spread"))
 
+from mapping_contract import (  # noqa: E402
+    GENERATOR_FORMAT_VERSION,
+    document_id,
+    output_basename,
+    view_id,
+)
+
 from generate_virtual_spread import (  # noqa: E402
     LAYOUT_AUTHORITY_MARKER,
     LINK_AUTHORITY_MARKER,
@@ -1377,8 +1384,40 @@ class VirtualSpreadTests(unittest.TestCase):
                 mapping_authority,
             )
             spread_view_id = manifest["output"]["viewId"]
+            identity = {
+                "source_sha256": source_authority,
+                "mapping_authority_sha256": mapping_authority,
+                "direction": "rtl",
+                "cover_separate": True,
+                "spread_width": 864.0,
+                "spread_height": 648.0,
+                "gutter": 0.0,
+                "manifest_schema": SCHEMA,
+                "generator_version": GENERATOR_FORMAT_VERSION,
+            }
+            self.assertEqual(
+                manifest["source"]["documentId"],
+                document_id(source_authority),
+            )
+            self.assertEqual(spread_view_id, view_id(**identity))
+            self.assertEqual(
+                manifest["output"]["cacheBasename"],
+                output_basename(**identity),
+            )
+            self.assertNotEqual(
+                manifest["output"]["cacheBasename"],
+                output.name,
+                "caller-selected output is a host staging name",
+            )
+            self.assertEqual(
+                manifest["generatorVersion"], GENERATOR_FORMAT_VERSION
+            )
             self.assertEqual(
                 metadata["/SNVirtualSpreadViewID"], spread_view_id
+            )
+            self.assertEqual(
+                metadata["/SNVirtualSpreadGeneratorVersion"],
+                GENERATOR_FORMAT_VERSION,
             )
             # Seven source pages produce four spreads with either cover mode.
             # The layout digest must still distinguish their different parity.

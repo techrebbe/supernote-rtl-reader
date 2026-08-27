@@ -93,6 +93,13 @@ python .\virtual_spread\generate_virtual_spread.py `
   --cover-separate
 ```
 
+The caller-selected output above is a host staging name, not the on-device
+cache identity. Read `output.cacheBasename` from the generated JSON, then
+publish the unchanged PDF to that exact basename and its JSON sibling to
+`<cacheBasename>.json` before opening it on Supernote. v0.0.25 rejects a valid
+pair opened under `source.virtual-spread.pdf` or any other renamed basename.
+See `MAPPING_WIRE_CONTRACT.md` for the versioned cache layout.
+
 The command refuses encrypted PDFs, unsupported annotation subtypes, unresolved
 links, and every document-catalog semantic it cannot preserve safely. It
 regenerates the structural `/Type` and `/Pages` entries and preserves validated

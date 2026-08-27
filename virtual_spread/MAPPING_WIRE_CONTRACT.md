@@ -165,7 +165,11 @@ The adapter derives normalized-to-original-PDF coordinates from `sourceBox` and
 the affine inverse for export. The inverse is never serialized as authority.
 The adapter rejects a singular matrix, an out-of-bounds canonical point, a
 non-finite result, or a forward/inverse round trip outside the contract's test
-tolerance.
+tolerance. Inverse results within `1e-12` of an edge are clamped to that edge;
+results farther outside `[0,1]` are rejected. Both normalized-to-spread-to-
+normalized and spread-to-normalized-to-spread conversions must reproduce both
+coordinates within an absolute `1e-12`; otherwise the adapter rejects the
+transform as numerically unusable.
 
 ## Failure behavior
 

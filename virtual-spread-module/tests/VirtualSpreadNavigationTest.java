@@ -1455,7 +1455,25 @@ public final class VirtualSpreadNavigationTest {
                 mappingAuthority,
                 viewId,
                 generatorVersion,
-                sourceAuthority.toUpperCase(),
+                sourceAuthority,
+                layoutAuthority,
+                linkAuthority,
+                mappingAuthority,
+                viewId,
+                generatorVersion
+            )
+        );
+        assertBoolean(
+            "uppercase native authority fails closed",
+            false,
+            VirtualSpreadNavigation.manifestMatchesNativeSnapshot(
+                sourceAuthority,
+                layoutAuthority,
+                linkAuthority,
+                mappingAuthority,
+                viewId,
+                generatorVersion,
+                sourceAuthority,
                 layoutAuthority,
                 linkAuthority,
                 mappingAuthority.toUpperCase(),

@@ -150,6 +150,31 @@ public final class VirtualSpreadLinkAuthorityTest {
             "2c9e95573ea47e7cb7bc507350f49429ec2e72b4fc1eb4cd8c19774aa110ac1f",
             mappingDigest
         );
+        String signedZeroRecord = VirtualSpreadLinkAuthority.mapping(
+            2, 1, "left", 90,
+            sourceBox, normalizedSourceBox,
+            new double[] {-0.0, 0.0, 432.0, 648.0},
+            leftDestination, 0.6, leftTransform
+        );
+        assertEquals(
+            "signed-zero mapping record",
+            "page|2|1|left|90|4032000000000000|4042000000000000"
+                + "|4082900000000000|4087a00000000000|4042000000000000"
+                + "|4032000000000000|4087a00000000000|4082900000000000"
+                + "|8000000000000000|0000000000000000|407b000000000000"
+                + "|4084400000000000|0000000000000000|4062e66666666667"
+                + "|407b000000000000|407f0ccccccccccc|3fe3333333333333"
+                + "|3c852dc7707ed4d5|bfe3333333333333|3fe3333333333333"
+                + "|3c852dc7707ed4d5|c035999999999999|407fb9999999999a",
+            signedZeroRecord
+        );
+        assertEquals(
+            "signed-zero mapping digest",
+            "f0d4dd10f3e1a60d8060ef32f7074f30197ed05c03a3ce05547489387cd7d857",
+            VirtualSpreadLinkAuthority.mappingDigest(new String[] {
+                mappingRecords[0], mappingRecords[1], signedZeroRecord
+            })
+        );
         String goldenSource =
             "0123456789abcdef0123456789abcdef"
             + "0123456789abcdef0123456789abcdef";
@@ -170,6 +195,23 @@ public final class VirtualSpreadLinkAuthorityTest {
                 + "7c007c46bd6dd42511429245b65d2967"
                 + "f0f05d18eaf215566a08a7149bfaf491",
             spreadViewId
+        );
+        assertEquals(
+            "signed-zero view identity",
+            "inkbridge-view-v1-"
+                + "d8df97cac38980710edfd782072a7cdc"
+                + "072d0f2196104febdbc1773ebafe156d",
+            VirtualSpreadLinkAuthority.viewId(
+                goldenSource,
+                "techrebbe.supernote.virtual-spread/v3",
+                "techrebbe.supernote.virtual-spread-generator/v1",
+                "rtl",
+                true,
+                864.0,
+                648.0,
+                -0.0,
+                mappingDigest
+            )
         );
         assertEquals(
             "page-143 deterministic output basename",
@@ -277,6 +319,49 @@ public final class VirtualSpreadLinkAuthorityTest {
                 864.0, 648.0, 0.0
             )
         );
+        double[] simpleSource = new double[] {0.0, 0.0, 100.0, 200.0};
+        assertBoolean(
+            "generator rotation 0 transform is accepted",
+            true,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 0, simpleSource, simpleSource, leftSlot,
+                new double[] {54.0, 0.0, 378.0, 648.0}, 3.24,
+                new double[] {3.24, 0.0, 0.0, 3.24, 54.0, 0.0},
+                864.0, 648.0, 0.0
+            )
+        );
+        assertBoolean(
+            "generator rotation 90 transform is accepted",
+            true,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 90, simpleSource,
+                new double[] {0.0, 0.0, 200.0, 100.0}, leftSlot,
+                new double[] {0.0, 216.0, 432.0, 432.0}, 2.16,
+                new double[] {0.0, -2.16, 2.16, 0.0, 0.0, 432.0},
+                864.0, 648.0, 0.0
+            )
+        );
+        assertBoolean(
+            "generator rotation 180 transform is accepted",
+            true,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 180, simpleSource, simpleSource, leftSlot,
+                new double[] {54.0, 0.0, 378.0, 648.0}, 3.24,
+                new double[] {-3.24, 0.0, 0.0, -3.24, 378.0, 648.0},
+                864.0, 648.0, 0.0
+            )
+        );
+        assertBoolean(
+            "generator rotation 270 transform is accepted",
+            true,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 270, simpleSource,
+                new double[] {0.0, 0.0, 200.0, 100.0}, leftSlot,
+                new double[] {0.0, 216.0, 432.0, 432.0}, 2.16,
+                new double[] {0.0, 2.16, -2.16, 0.0, 432.0, 216.0},
+                864.0, 648.0, 0.0
+            )
+        );
         Path fixture = Files.createTempFile("virtual-spread-authority", ".pdf");
         try {
             String sourceDigest =
@@ -322,6 +407,37 @@ public final class VirtualSpreadLinkAuthorityTest {
             assertEquals(
                 "PDF-bound view authority digest",
                 spreadViewId.substring("inkbridge-view-v1-".length()),
+                VirtualSpreadLinkAuthority.readPdfViewDigest(fixture.toFile())
+            );
+            String uppercaseMapping = bound.replace(
+                mappingDigest,
+                mappingDigest.toUpperCase()
+            );
+            Files.write(
+                fixture,
+                uppercaseMapping.getBytes(StandardCharsets.ISO_8859_1)
+            );
+            assertEquals(
+                "uppercase mapping authority marker is rejected",
+                null,
+                VirtualSpreadLinkAuthority.readPdfMappingDigest(
+                    fixture.toFile()
+                )
+            );
+            String viewDigest = spreadViewId.substring(
+                "inkbridge-view-v1-".length()
+            );
+            String uppercaseView = bound.replace(
+                viewDigest,
+                viewDigest.toUpperCase()
+            );
+            Files.write(
+                fixture,
+                uppercaseView.getBytes(StandardCharsets.ISO_8859_1)
+            );
+            assertEquals(
+                "uppercase view authority marker is rejected",
+                null,
                 VirtualSpreadLinkAuthority.readPdfViewDigest(fixture.toFile())
             );
             String displacedSource = bound.replace(

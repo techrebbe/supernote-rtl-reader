@@ -104,5 +104,20 @@
     "spread": [[43.2, 427.68], [216.0, 324.0], [388.8, 220.32]],
     "normalizedAfterInverse": [[0.1, 0.2], [0.5, 0.5], [0.9, 0.8]]
   },
+  "signedZeroVectors": {
+    "mappingMutation": {
+      "mappingIndex": 2,
+      "field": "slot",
+      "elementIndex": 0,
+      "canonicalRecord": "page|2|1|left|90|4032000000000000|4042000000000000|4082900000000000|4087a00000000000|4042000000000000|4032000000000000|4087a00000000000|4082900000000000|8000000000000000|0000000000000000|407b000000000000|4084400000000000|0000000000000000|4062e66666666667|407b000000000000|407f0ccccccccccc|3fe3333333333333|3c852dc7707ed4d5|bfe3333333333333|3fe3333333333333|3c852dc7707ed4d5|c035999999999999|407fb9999999999a",
+      "mappingAuthoritySha256": "f0d4dd10f3e1a60d8060ef32f7074f30197ed05c03a3ce05547489387cd7d857"
+    },
+    "viewMutation": {
+      "field": "gutter",
+      "canonicalBits": "8000000000000000",
+      "canonicalView": "techrebbe.supernote.virtual-spread-view/v1\nsource|0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nschema|techrebbe.supernote.virtual-spread/v3\ngenerator|techrebbe.supernote.virtual-spread-generator/v1\ndirection|rtl\ncover|1\nspread|408b000000000000|4084400000000000|8000000000000000\nmapping|2c9e95573ea47e7cb7bc507350f49429ec2e72b4fc1eb4cd8c19774aa110ac1f\n",
+      "viewId": "inkbridge-view-v1-d8df97cac38980710edfd782072a7cdc072d0f2196104febdbc1773ebafe156d"
+    }
+  },
   "tolerance": 1e-12
 }

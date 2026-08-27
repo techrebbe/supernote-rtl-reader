@@ -971,11 +971,23 @@ public final class VirtualSpreadNavigation {
     }
 
     private static boolean sameAuthority(String expected, String actual) {
-        return expected != null
-            && actual != null
-            && expected.length() == 64
-            && actual.length() == 64
-            && expected.equalsIgnoreCase(actual);
+        return lowerSha256(expected)
+            && lowerSha256(actual)
+            && expected.equals(actual);
+    }
+
+    private static boolean lowerSha256(String value) {
+        if (value == null || value.length() != 64) {
+            return false;
+        }
+        for (int index = 0; index < value.length(); index++) {
+            char current = value.charAt(index);
+            if (!((current >= '0' && current <= '9')
+                    || (current >= 'a' && current <= 'f'))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static boolean sameViewId(String expected, String actual) {

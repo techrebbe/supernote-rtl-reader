@@ -4486,7 +4486,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             return null;
         }
         if (!isSha256(expectedHash)
-            || !expectedHash.equalsIgnoreCase(
+            || !expectedHash.equals(
                 sha256File(pdfInput, key, owner)
             )) {
             log("manifest_rejected reason=output_hash path=" + key);
@@ -4507,7 +4507,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         String embeddedSourceAuthority =
             VirtualSpreadLinkAuthority.readPdfSourceDigest(pdfInput);
         if (!isSha256(expectedSourceAuthority)
-            || !expectedSourceAuthority.equalsIgnoreCase(
+            || !expectedSourceAuthority.equals(
                 embeddedSourceAuthority
             )) {
             log("manifest_rejected reason=source_authority path="
@@ -4521,7 +4521,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         String embeddedLinkAuthority =
             VirtualSpreadLinkAuthority.readPdfDigest(pdfInput);
         if (!isSha256(expectedLinkAuthority)
-            || !expectedLinkAuthority.equalsIgnoreCase(embeddedLinkAuthority)) {
+            || !expectedLinkAuthority.equals(embeddedLinkAuthority)) {
             log("manifest_rejected reason=link_authority path=" + key);
             return null;
         }
@@ -4532,7 +4532,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         String embeddedLayoutAuthority =
             VirtualSpreadLinkAuthority.readPdfLayoutDigest(pdfInput);
         if (!isSha256(expectedLayoutAuthority)
-            || !expectedLayoutAuthority.equalsIgnoreCase(embeddedLayoutAuthority)) {
+            || !expectedLayoutAuthority.equals(embeddedLayoutAuthority)) {
             log("manifest_rejected reason=layout_authority path=" + key);
             return null;
         }
@@ -4543,7 +4543,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         String embeddedMappingAuthority =
             VirtualSpreadLinkAuthority.readPdfMappingDigest(pdfInput);
         if (!isSha256(expectedMappingAuthority)
-            || !expectedMappingAuthority.equalsIgnoreCase(
+            || !expectedMappingAuthority.equals(
                 embeddedMappingAuthority
             )) {
             log("manifest_rejected reason=mapping_authority path=" + key);
@@ -4611,7 +4611,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 gutter
             )
         );
-        if (!expectedLayoutAuthority.equalsIgnoreCase(actualLayoutAuthority)) {
+        if (!expectedLayoutAuthority.equals(actualLayoutAuthority)) {
             log("manifest_rejected reason=layout_authority_records path=" + key);
             return null;
         }
@@ -4905,7 +4905,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 new String[linkAuthorityRecords.size()]
             )
         );
-        if (!expectedLinkAuthority.equalsIgnoreCase(actualLinkAuthority)) {
+        if (!expectedLinkAuthority.equals(actualLinkAuthority)) {
             log("manifest_rejected reason=link_authority_records path=" + key);
             return null;
         }
@@ -5018,7 +5018,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             return false;
         }
         for (int index = 0; index < value.length(); index++) {
-            if (Character.digit(value.charAt(index), 16) < 0) {
+            char current = value.charAt(index);
+            if (!((current >= '0' && current <= '9')
+                    || (current >= 'a' && current <= 'f'))) {
                 return false;
             }
         }

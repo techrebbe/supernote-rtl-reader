@@ -33,8 +33,10 @@ sys.path.insert(0, str(ROOT / "virtual_spread"))
 from generate_virtual_spread import (  # noqa: E402
     LAYOUT_AUTHORITY_MARKER,
     LINK_AUTHORITY_MARKER,
+    MAPPING_AUTHORITY_MARKER,
     SCHEMA,
     SOURCE_AUTHORITY_MARKER,
+    VIEW_ID_MARKER,
     MAX_MANIFEST_BYTES,
     MOVEFILE_REPLACE_EXISTING,
     MOVEFILE_WRITE_THROUGH,
@@ -51,6 +53,7 @@ from generate_virtual_spread import (  # noqa: E402
     _identity,
     _layout_authority_sha256,
     _link_authority_sha256,
+    mapping_authority_sha256,
     _link_annotation_flags,
     _layout_for_page,
     _lexical_absolute,
@@ -881,7 +884,7 @@ class VirtualSpreadTests(unittest.TestCase):
             )
             self.assertEqual(
                 SCHEMA,
-                "techrebbe.supernote.virtual-spread/v2",
+                "techrebbe.supernote.virtual-spread/v3",
             )
 
             reader = PdfReader(str(output), strict=True)
@@ -1362,6 +1365,21 @@ class VirtualSpreadTests(unittest.TestCase):
                 metadata["/SNVirtualSpreadLayoutSHA256"],
                 layout_authority,
             )
+            mapping_authority = mapping_authority_sha256(
+                manifest["sourcePages"]
+            )
+            self.assertEqual(
+                manifest["output"]["mappingAuthoritySha256"],
+                mapping_authority,
+            )
+            self.assertEqual(
+                metadata["/SNVirtualSpreadMappingSHA256"],
+                mapping_authority,
+            )
+            spread_view_id = manifest["output"]["viewId"]
+            self.assertEqual(
+                metadata["/SNVirtualSpreadViewID"], spread_view_id
+            )
             # Seven source pages produce four spreads with either cover mode.
             # The layout digest must still distinguish their different parity.
             self.assertEqual(manifest["output"]["pageCount"], 4)
@@ -1387,9 +1405,19 @@ class VirtualSpreadTests(unittest.TestCase):
             link_marker = (
                 LINK_AUTHORITY_MARKER + authority.encode("ascii") + b"\n"
             )
+            mapping_marker = (
+                MAPPING_AUTHORITY_MARKER
+                + mapping_authority.encode("ascii")
+                + b"\n"
+            )
+            view_marker = (
+                VIEW_ID_MARKER + spread_view_id.encode("ascii") + b"\n"
+            )
             self.assertEqual(tail.count(source_marker), 1)
             self.assertEqual(tail.count(layout_marker), 1)
             self.assertEqual(tail.count(link_marker), 1)
+            self.assertEqual(tail.count(mapping_marker), 1)
+            self.assertEqual(tail.count(view_marker), 1)
             self.assertEqual(
                 tail.index(source_marker) + len(source_marker),
                 tail.index(layout_marker),
@@ -1400,6 +1428,14 @@ class VirtualSpreadTests(unittest.TestCase):
             )
             self.assertEqual(
                 tail.index(link_marker) + len(link_marker),
+                tail.index(mapping_marker),
+            )
+            self.assertEqual(
+                tail.index(mapping_marker) + len(mapping_marker),
+                tail.index(view_marker),
+            )
+            self.assertEqual(
+                tail.index(view_marker) + len(view_marker),
                 tail.rindex(b"startxref"),
             )
 

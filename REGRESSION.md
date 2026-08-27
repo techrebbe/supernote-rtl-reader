@@ -1,6 +1,8 @@
 # RTL Reader hardware regression
 
-Device baseline: Supernote Nomad, plugin beta firmware.
+Device baseline: Supernote Nomad running firmware fingerprint
+`Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys`
+with SupernoteDocument `1.02.446`.
 
 v0.0.9 established the hardware-validated reading-engine baseline. v0.1.1 subsequently validated the polished UI and direction-aware footer. v0.4.2 is the current merged hardware-validated direct-render and direction-aware native bitmap-prefetch baseline.
 
@@ -542,6 +544,1429 @@ in a half-page landscape spread initially appears thicker than the settled
 stroke after Supernote commits and redraws it. The saved `.mark` retains the
 canonical Supernote thickness and remains portable through InkBridge; matching
 the transient preview to the half-page scale is tracked as post-v0.4.10 polish.
+
+## Native Virtual Spread v0.0.8 architecture validation — PASS
+
+Hardware validation was completed on 2026-08-21 on a Supernote Nomad running
+firmware fingerprint
+`Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys`
+and SupernoteDocument `1.02.446`, using the native
+`com.supernote.document` reader. The legacy dual-page Native Spread compositor
+was disabled and absent from the document process.
+
+- [x] Native landscape displayed `blank | cover`, `3 | 2`, `5 | 4`, and
+  `7 | 6` as real fixed PDF spread pages.
+- [x] Native beginning/end boundaries, RTL turns, and portrait half focus were
+  correct, including internal links to both halves plus Back/Original Back.
+- [x] Mixed rotations and extreme source page dimensions navigated without the
+  former page-turn failure.
+- [x] Portrait-to-landscape and landscape-to-portrait refresh completed without
+  a page turn while retaining the focused source half.
+- [x] Pen input on both halves, erasing, lasso movement, undo/redo, text
+  highlighting, and portrait writing all persisted through document round trips.
+- [x] An ordinary PDF without a valid sidecar retained unmodified native LTR
+  behavior and emitted no virtual-spread events.
+
+The complete fixture list, visible observations, logs, and before/after `.mark`
+hash evidence are recorded in `virtual_spread/HARDWARE_VALIDATION.md`. Later
+v0.0.9-v0.0.15 changes harden manifest authority, revision invalidation,
+publication transactions, internal-link mapping validation, and asynchronous
+full-file verification. v0.0.13 also rejects reversed link rectangles and
+dereferences indirect PDF destinations. v0.0.14 generates from a stable source
+snapshot, verifies source bytes independently of filesystem timestamps, binds
+the complete ordered link collection to the hashed PDF, and recovers an
+interrupted two-file publication through a transaction marker. v0.0.15 binds
+direction, cover parity, source/output page counts, spread geometry, and gutter
+to a second authority marker inside the hashed PDF, preventing stale sidecars
+from swapping layouts with equal page counts. It also makes Windows publication
+durable with write-through marker, backup, publication, rollback, and retirement
+renames; POSIX continues to synchronize affected directories. Older generated
+pairs fail closed and must be regenerated. The 19 generator regressions include
+metadata-preserving source changes, exact cross-language layout vectors,
+write-through flag invariants, plus both partial and fully committed
+crash-recovery states. CI also runs the complete Java companion-module suite,
+including ten layout/link authority assertions.
+A ninth review pass added an OS-owned per-pair publication lock so a concurrent
+generator cannot recover another process's live transaction, enforces the
+runtime's 8 MiB sidecar limit before publication, and makes CI compile, D8,
+package, sign, and verify the actual companion APK on Ubuntu. Deterministic
+regressions hold a live lock/marker while a second generator is rejected and
+inject an oversized staged manifest before any final file can change.
+A tenth review pass made publication ownership exclusively output-PDF keyed and
+restricted generation to the runtime's only discoverable sibling sidecar,
+`<output>.json`. One regression proves syntactic aliases of the same output use
+the same transaction artifacts and OS lock; another proves an alternate
+manifest path is rejected before a lock is created or the existing PDF, runtime
+sidecar, or alternate file can change. The generator suite now contains 21
+tests.
+An eleventh review pass rejects an output path containing a symlink, junction,
+or other filesystem alias before publication ownership is acquired. This keeps
+the generator's sidecar location identical to the lexical PDF path later probed
+by the Android runtime. A deterministic alias-path regression and a static
+guard-before-lock invariant raise the generator suite to 22 tests.
+A twelfth review pass keeps the lexical output and sibling manifest paths through
+the locked generation/recovery pipeline and repeats alias validation after the
+output-keyed OS lock is acquired. It also requires every existing publication
+target, transaction marker, and backup to be a regular file before rename or
+removal, so `--force` cannot displace a directory or special entry. Regressions
+simulate an alias appearing between the initial check and locked build, and
+preserve both output- and manifest-directory fixtures byte-for-byte. The suite
+also prevents a concurrently introduced backup directory from becoming a rename
+destination and rechecks file existence after interrupted-publication recovery.
+A thirteenth review pass protects the deterministic lock itself with no-follow,
+regular-file, and open-descriptor identity checks, and validates staged plus
+canonical publication hashes before retiring rollback state. It also moves all
+sidecar reads and hashes off native reader callbacks: UI paths compare strong PDF
+and sidecar identities while the background verifier proves stable content.
+Three fault and alias regressions raise the suite to 29 generator tests.
+A fourteenth review pass binds every PDF, sidecar, full-file hash, and embedded
+authority read to one captured descriptor pair. The verifier rejects a mismatch
+between callback identity and opened handle, rechecks both handles after all
+reads, and proves that each handle still names the visible pathname before
+publishing a cache entry. Publication marker v2 records the previous PDF and
+manifest hashes; recovery authenticates backups before restoring them and leaves
+tampered evidence in place. The generator also carries a live lock-identity guard
+through recovery and publication and rechecks it before each shared namespace
+mutation. A POSIX lock-replacement regression and a tampered-backup regression
+raise the generator suite to 31 tests; the complete Java companion suite and
+signed APK build also pass locally. A fifteenth review pass closes the remaining
+check-then-mutate race for cooperating publishers: POSIX generators acquire one
+stable output-directory lock before the per-output lock and retain both until the
+complete transaction ends. Replacing the per-output lock pathname therefore
+cannot admit a second generator between an ownership check and its mutation;
+Windows retains its nonreplaceable open-file lock. A deterministic Linux
+regression recreates the per-output lock during an active transaction and proves
+that a second publisher is still rejected, raising the generator suite to 32
+tests.
+A sixteenth review pass binds the complete POSIX publication namespace to the
+already-open output-directory descriptor. Staged PDF and manifest creation,
+writes, verification reads, hashes, size/type checks, transaction marker and
+backup operations, publication, rollback, and cleanup no longer resolve the
+replaceable parent pathname. The source snapshot uses one already-open temporary
+stream outside that namespace. Two deterministic Linux regressions exchange the
+parent directory precisely between validation and a final replace or staged JSON
+open. In both cases the replacement tree remains byte-for-byte unchanged while
+the original locked directory receives the descriptor-relative operation. The
+generator suite now contains 34 tests and passes completely on Linux; Windows
+passes the same suite with its five platform-specific POSIX cases skipped. A
+seventeenth review pass binds the 8 MiB runtime manifest ceiling, staged-file
+identity, and SHA-256 to one open descriptor. The same identity, size ceiling,
+and digest are revalidated before marker establishment, immediately before the
+sidecar move, and after canonical publication; interrupted-publication recovery
+also refuses to commit an oversized sidecar. Two deterministic races replace the
+already-checked staged manifest immediately before transaction preparation with
+either an oversized regular file or a byte-identical file on a different inode.
+Both prove that the previous PDF/sidecar pair remains untouched. The generator
+suite now contains 36 tests and passes completely on both Windows and Linux,
+with only the five POSIX-only cases skipped on Windows.
+An eighteenth review pass symmetrically binds the staged PDF's identity, size,
+and SHA-256 to the manifest and transaction. Descriptor-bound evidence is
+captured before strict PDF verification, revalidated afterward, and carried
+unchanged through marker creation, the sidecar move, the PDF move, and final
+canonical verification. Two deterministic races replace the already-checked
+staged PDF immediately before transaction preparation with either different
+bytes or byte-identical content on another inode. Both fail before the existing
+PDF/sidecar pair changes. The generator suite now contains 38 tests and passes
+completely on both Windows and Linux, with only the five POSIX-only cases skipped
+on Windows.
+A nineteenth review pass makes invalid-marker recovery handle the generator's
+own validation errors as well as malformed JSON and I/O failures. An obsolete v1
+marker is discarded only when neither backup exists, allowing recovery from a
+crash after marker durability but before canonical mutation. If either backup
+exists, recovery still fails closed and preserves all evidence. Two regressions
+cover both branches, raising the generator suite to 40 tests on Windows and
+Linux.
+A twentieth review pass validates and recovers the usable v1 marker fields when
+no backup exists. Only an unambiguous pre-mutation state discards its obsolete
+marker: previously existing artifacts must remain present without matching the
+staged digest, and previously absent artifacts must remain absent. Partial or
+complete new publication and every ambiguous state remain fail-closed with all
+evidence preserved. Unknown or malformed markers are discarded only when both
+canonical artifacts and both backups are absent. Three regressions cover a
+sidecar-only partial publication, a complete new pair, and an unknown marker with
+a canonical artifact, raising the generator suite to 43 tests on Windows and
+Linux.
+A twenty-first review pass rejects duplicate JSON keys while parsing publication
+markers and requires the exact field set for each recognized transaction schema.
+Structurally ambiguous markers bypass the evidence-free invalid-marker discard
+path and remain fail-closed even when no backup exists. Two regressions preserve
+the marker and canonical pair for a duplicate legacy field and an unknown legacy
+field, raising the generator suite to 45 tests on Windows and Linux.
+A twenty-second review pass preserves supported internal destination modes and
+transforms `/XYZ`, horizontal-fit, vertical-fit, and `/FitR` coordinates through
+the target source-to-spread affine transform. Unsupported modes and partial
+coordinates that cannot survive rotation now fail closed instead of silently
+degrading to `/Fit`. Two regressions cover all eight supported destination modes
+and one unsupported mode, raising the generator suite to 47 tests on Windows and
+Linux.
+A twenty-third review pass accepts destination modes only as PDF name objects
+and coordinates only as PDF numeric/null objects. Null `/XYZ`, horizontal-fit,
+and vertical-fit coordinates survive only when the source and target transforms
+preserve the relevant generated-spread axis; otherwise generation fails closed
+rather than retaining a coordinate from the wrong half or page geometry. Three
+regression groups cover matching transforms, differing transforms across all six
+partial destination forms, string-typed modes, and numeric strings, raising the
+generator suite to 50 tests on Windows and Linux.
+A twenty-fourth review pass preserves multiline link activation geometry by
+transforming every coordinate in a valid `/QuadPoints` array while retaining
+quadrilateral order. Empty, non-array, incomplete, null, nonnumeric, nonfinite,
+or overflowed quadrilateral geometry fails closed rather than widening the link
+to its bounding `/Rect`. Positive and malformed regressions raise the generator
+suite to 52 tests on Windows and Linux.
+A twenty-fifth review pass makes generator/runtime direction support explicit:
+LTR is rejected before publication because the companion runtime intentionally
+accepts only RTL manifests. Rebuilt links now retain every standardized integer
+annotation `/F` bit, while malformed, negative, or unknown flag values fail
+closed instead of turning a hidden or NoView link into an ordinary active link.
+Link `/Rect` arrays likewise require exactly four finite PDF number objects in
+increasing coordinate order, preventing numeric-string coercion, non-finite
+geometry, and repaired reversed hit regions. Three new regression groups plus
+the revised direction test raise the generator suite to 55 tests on Windows and
+Linux.
+A twenty-sixth review pass closes the complete supported-link annotation
+surface rather than continuing a field-by-field whitelist. Visible `/Border`
+and `/BS` styling, color, and `/H` activation highlight modes are validated,
+scaled through the source-to-spread transform, and retained. URI actions now
+require a PDF text-string operand and preserve a Boolean `/IsMap`. Chained
+`/Next` actions and unimplemented appearance, optional-content, additional-
+action, previous-action, structural-parent, or unknown entries fail closed
+instead of being partially reconstructed. Positive border/highlight and URI
+fixtures plus malformed and unsupported semantic matrices add five regression
+groups, raising the generator suite to 60 tests on Windows and Linux.
+A twenty-seventh review pass rejects every deterministic marker, backup,
+retirement, and lock filename as a source path before recovery or lock
+acquisition, so transaction cleanup cannot delete or overwrite an unusually
+named input PDF. The generator also detects a source catalog `/Outlines` tree
+and fails before publication rather than silently removing native table-of-
+contents navigation; destination remapping remains an explicit future
+capability. The runtime documentation now accurately distinguishes its
+identity-only callback fast path from descriptor-bound sidecar and PDF hashing
+on a background cache miss. Two deterministic regression groups cover all
+nine reserved source names and outline rejection, raising the generator suite
+to 62 tests on Windows and Linux.
+A twenty-eighth review pass extends the document-catalog preflight to reject a
+source `/OpenAction` before staging or publication, preventing the generated
+PDF from silently losing its persisted opening destination, zoom, or action.
+A serialized destination-array fixture verifies that the source and an existing
+published PDF/manifest pair remain byte-for-byte unchanged, raising the
+generator suite to 63 tests on Windows and Linux.
+A twenty-ninth review pass replaces the field-by-field document-catalog guard
+with an explicit complete supported surface. The generator preserves validated
+`/PageMode` and `/PageLayout`, regenerates structural `/Type` and `/Pages`, and
+rejects `/OCProperties` plus every other unsupported or unknown catalog entry
+before staging or publication. A real default-off optional-content-group
+fixture covers the reported visibility-loss case; positive view-setting
+preservation and generic viewer-preference rejection prevent another catalog
+field from being silently dropped. The generator suite now contains 66 tests
+on Windows and Linux.
+A thirtieth review pass applies the complete supported-surface design to each
+source page dictionary. Content, resources, geometry, rotation, and supported
+links remain explicit inputs; ReportLab's empty transition placeholder is
+accepted as inert; persisted durations, meaningful transitions, additional
+actions, user-unit scaling, and every other unsupported or unknown page entry
+fail closed before staging or publication. Real `/Dur`, `/Trans`, `/AA`, and
+`/UserUnit` fixtures verify all reported and generic paths while preserving the
+source and previous publication pair, raising the generator suite to 68 tests
+on Windows and Linux.
+A thirty-first review pass requires `/Rotate` to be an actual PDF integer and
+an exact multiple of 90 before normalization, rejecting string, fractional, and
+non-quarter-turn values without publication changes. Document information now
+bypasses pypdf's string-coercing `add_metadata()` helper: validated text,
+byte-string, name, Boolean, integer, real, and null primitives are copied with
+their PDF types intact; standardized text and `/Trapped` entries are constrained;
+arrays, dictionaries, streams, and other unsupported values fail closed. Typed
+`/Trapped`, custom number/Boolean, malformed rotation, unsupported metadata,
+numeric-title, and string-typed-`/Trapped` fixtures raise the generator suite to
+72 tests on Windows and Linux.
+
+A thirty-second review pass preserves `/XYZ` magnification after target-page
+fitting by dividing every non-null zoom operand by the target affine scale.
+Only finite, nondegenerate, orthogonal uniform transforms are representable;
+non-uniform or skewed transforms fail closed. The same pass detects duplicate
+annotation `/NM` identifiers after two source pages are paired onto one output
+page and fails before publication instead of emitting ambiguous link identities.
+Explicit scale, transform, and paired-page collision regressions bring the
+generator suite to 76 tests. All 76 pass on Windows (with five platform skips)
+and Linux; both native invariant suites, 47 navigation assertions, 10 link-
+authority assertions, 8,752 exhaustive navigation assertions, hook scope, and
+the signed v0.0.15 APK build also pass.
+
+A thirty-third review pass restricts persisted `/PageLayout` values to
+`/SinglePage` and `/OneColumn`. All four `/TwoPage*` and `/TwoColumn*` layouts
+now fail closed before staging or publication because retaining them after
+composition would place two complete virtual spreads—up to four source pages—
+beside one another and change the source layout semantics. Subtests cover every
+incompatible name while preserving the source and an existing output pair,
+bringing the generator suite to 77 tests on Windows and Linux.
+
+A thirty-fourth review pass validates every transformed destination coordinate
+again immediately before constructing its PDF number object. Finite source
+operands combined with extreme but finite affine coefficients can no longer
+publish infinity or NaN through `/XYZ`, `/FitH`, `/FitBH`, `/FitV`, or `/FitBV`.
+Direct overflow subtests exercise the shared guard through all three calculation
+paths and bring the generator suite to 78 tests on Windows and Linux.
+
+A thirty-fifth review pass applies the same fail-closed representability rule to
+all transformed link-border geometry. Every radius contribution, border width,
+border-style width, and dash measurement must remain finite after scaling, and a
+positive source measurement may not collapse to zero. The `/XYZ` destination
+path now likewise rejects a positive explicit zoom that underflows to zero while
+preserving a literal zero as PDF's intentional "retain current zoom" value;
+negative zoom operands fail closed. Direct overflow and underflow regressions
+cover `/Border` radii/width/dashes, `/BS` width/dashes, and `/XYZ` zoom, bringing
+the generator suite to 80 tests on Windows and Linux. These semantic guards do
+not change the v0.0.15 hardware-smoke pair, which regenerates byte-identically.
+
+A thirty-sixth review pass requires strict positive area immediately after every
+shared rectangle transform and again at the Android float boundary. A valid
+source link or `/FitR` rectangle whose endpoints collapse under scale and slot
+translation can no longer be published as an unclickable zero-width or zero-
+height region. The regression exercises the translated double-precision collapse,
+the runtime defense, and the shared `/FitR` path, bringing the generator suite to
+81 tests on Windows and Linux. The hardware-smoke pair remains byte-identical.
+
+A thirty-seventh review pass closes the same invariant at every remaining
+geometry boundary. The Android manifest parser and runtime link matcher now
+reject exact zero-width or zero-height rectangles rather than publishing an
+unmatchable target. Each transformed `/QuadPoints` group must retain strict
+positive horizontal and vertical extent independently of its larger `/Rect`, so
+slot translation cannot collapse a valid source quadrilateral into a line. The
+generator also validates effective source page boxes before normalization and
+rejects any derived page placement whose finite affine arithmetic collapses or
+overflows. Deterministic regressions exercise both exact Android zero-area forms,
+degenerate observed and persisted link targets, the translated quadrilateral
+counterexample, and an extreme finite page box that previously produced a
+zero-width placement. The generator remains at 81 tests on Windows and Linux;
+the focused companion suite now passes 51 assertions, alongside 10 link-authority
+and 8,752 exhaustive-navigation assertions. These fail-closed guards do not
+alter the valid v0.0.15 hardware-smoke pair.
+
+## v0.0.15 focused hardware smoke - PASS
+
+A fresh pair was generated from `VS-Link-Target-Sides-source.pdf` with the
+v0.0.15 generator and opened on the Nomad with companion module v0.0.15
+(`versionCode=15`). The runtime accepted all four virtual spreads and activated
+the exact regenerated manifest revision. The focused 2026-08-25 smoke pass
+confirmed:
+
+- initial landscape cold-open displayed `blank | page 1` without a page turn;
+- rightward RTL turns displayed `3 | 2`, `5 | 4`, and `7 | 6` in order;
+- an additional rightward turn at the end was an exact visual no-op, and the
+  reverse turn returned to `5 | 4`;
+- portrait focus immediately displayed full-size page 4 and later page 2, while
+  both rotations back to landscape immediately restored the complete spread;
+- internal links from page 2 opened the exact page 7 left half and page 6 right
+  half, and native Back restored page 2 after each link;
+- a native pen stroke written on portrait page 2 survived a page 3 round trip
+  and appeared in the correct position on the right half of the landscape
+  `3 | 2` spread; and
+- the same source PDF opened without a sidecar remained an ordinary native
+  single-page document and retained native LTR turns in portrait.
+
+This closes the v0.0.15 release gate without repeating the already completed
+v0.0.8 annotation campaign.
+
+## Review pass 38 and v0.0.16 automated gate - PASS
+
+The thirty-eighth review pass closes three remaining malformed-input and link-
+view gaps. Effective `/MediaBox` and `/CropBox` coordinates must now be genuine
+finite PDF number objects even when inherited through the page tree, preventing
+pypdf's rectangle accessor from coercing numeric strings. Every source and
+transformed `/QuadPoints` quadrilateral must contain at least one non-collinear
+triple, so a diagonal line with positive horizontal and vertical bounding extent
+cannot masquerade as a link activation region.
+
+Source `/Fit` links are now encoded as `/FitR` around the original target source
+page's placed rectangle rather than fitting the complete composite spread.
+Viewport- and content-dependent `/FitB`, `/FitH`, `/FitBH`, `/FitV`, and `/FitBV`
+forms fail closed because their original semantics cannot be represented safely
+after two pages are composed. Link-authority v2 authenticates a `targetView`
+field for every internal link. The companion uses that authenticated value to
+restore the complete spread after a `/Fit` traversal in landscape while leaving
+explicit `/XYZ` and `/FitR` views untouched; absent, non-string, or unknown view
+values reject the whole manifest.
+
+All 82 generator tests pass on Windows (with five platform-specific skips) and
+Linux. Both native invariant suites pass. The companion passes 55 navigation
+assertions, 10 cross-language link-authority assertions, 8,752 exhaustive
+navigation assertions, hook-scope validation, and a signed/verified v0.0.16
+(`versionCode=16`) APK build.
+
+## Review pass 39 target-view ambiguity guard - PASS
+
+The final exact-head draft review found that two link records could be
+indistinguishable within the runtime's native-coordinate tolerance while
+disagreeing on their authenticated target-view policy. The matcher now treats a
+`resetLandscapeFit` disagreement exactly like conflicting source or target
+halves and returns no match. A paired positive regression proves that duplicate
+records with the same target-view policy remain deterministic. The focused
+companion suite therefore increased from 53 to 55 assertions without changing
+the valid unique-link path exercised on hardware.
+
+## v0.0.16 focused hardware smoke - PASS
+
+On 2026-08-25, `VS-v16-Fit-Smoke.pdf` and its sidecar were regenerated from
+`VS-Link-Target-Sides-source.pdf` with the v0.0.16 generator. The pair contained
+four source `/Fit` links rewritten as target-source-page `/FitR` destinations,
+and every internal sidecar record authenticated
+`targetView=fit-source-page`. The Nomad accepted and activated revision
+`9fa9a9b875c0cc29a217c159693cf269b82ec0406372e0139a4ec10f3806ab29`.
+The output PDF SHA-256 was
+`09527f32803161d5d0b664cd68ce0f7409c8e3f2e86e25229847f2c23f0484ef`.
+
+Hardware confirmed:
+
+- in portrait, links from source page 2 opened page 6 and page 7 at normal
+  native Fit-page size, and native Back restored the exact page-2 source half
+  after each traversal;
+- rotating page 2 to landscape immediately restored the complete `3 | 2`
+  spread without a page turn;
+- both landscape links opened the complete `7 | 6` spread with the intended
+  right or left target half, and both native Back traversals restored `3 | 2`;
+- neither landscape link produced visible zoom, flicker, stale content, or an
+  incorrect page while the authenticated `internal_link_fit_reset` refresh ran;
+- one forward and reverse native page-bar turn retained RTL ordering; and
+- the same seven-page source opened as `VS-v16-Ordinary.pdf` without a sidecar
+  remained the native single-page landscape reader and retained native LTR
+  left/right swipe behavior.
+
+After the visual pass, the review-pass-39 ambiguity guard was built as the exact
+v0.0.16 APK (SHA-256
+`73d0e1024c58993a3b8ec7646f75739b2f0886cd7273ef80fbe0b1fb8e57e679`),
+installed on the same Nomad, and accepted and activated the same authenticated
+fixture. That guard is reached only when multiple tolerance-equivalent link
+records conflict; the tested fixture has one unique record per link, so the
+completed visual evidence remains directly applicable.
+
+## Review pass 40 native-open snapshot binding - AUTOMATED PASS
+
+The exact-head draft review identified that pathname-level PDF and sidecar
+verification did not prove that Supernote's already-open MuPDF object represented
+those same bytes. A same-path replacement could therefore publish a valid new
+manifest while the native reader still displayed the old object.
+
+v0.0.17 adds a source-authority marker to the descriptor-verified PDF tail and
+stores the authenticated source, layout, and link authorities in the parsed
+manifest. Before activation, the runtime reflects the actual
+`DocumentViewModel.mupdf -> DocumentMupdf.pdfMupdf -> PDFMupdf.document` object,
+reads all three custom Info values with MuPDF `getMetaData()`, and requires an
+exact match. The decision is cached only for that native `Document` object plus
+manifest revision, so a newly opened native object is always revalidated.
+
+Automated validation passes:
+
+- 82 generator tests on Windows, with five expected filesystem skips;
+- the same 82 tests on Linux with no skips;
+- 60 focused navigation assertions;
+- 12 cross-language PDF-authority assertions;
+- 8,752 exhaustive navigation assertions;
+- both native invariant suites and hook-scope validation; and
+- signed APK verification for v0.0.17 (`versionCode=17`) using v2/v3 schemes.
+
+Focused hardware validation of native metadata lookup and same-path replacement
+fail-closed behavior remains pending.
+
+## Review pass 41 transformed-link and manifest typing - AUTOMATED PASS
+
+The exact-head draft review identified four additional semantic-preservation
+boundaries. v0.0.18 now rejects URI `/IsMap true`, because a viewer would append
+coordinates from the transformed spread rather than the source page. Link
+`/Rect` and `/QuadPoints` geometry must remain wholly inside the effective source
+CropBox so hidden source interactions cannot become visible after composition.
+When both `/Border` and `/BS` are absent, the generator materializes PDF's
+implicit `[0 0 1]` border with the transformed width. Finally, the Android
+manifest parser accepts only actual JSON Integer or in-range Long tokens for
+every consumed page count and page index; strings and floating-point values no
+longer coerce or truncate into valid mappings.
+
+Automated validation passes:
+
+- 85 generator tests on Windows, with five expected filesystem skips;
+- the same 85 tests on Linux with no skips;
+- 68 focused navigation and manifest-typing assertions;
+- 12 cross-language PDF-authority assertions;
+- 8,752 exhaustive navigation assertions;
+- both native invariant suites and hook-scope validation; and
+- signed APK verification for v0.0.18 (`versionCode=18`) using v2/v3 schemes
+  (SHA-256 `08576673386430ba8ce38c35c314e5a1d04ce2bfd517bbbe422da69675eec92c`).
+
+Focused hardware validation of native metadata lookup and same-path replacement
+fail-closed behavior remains pending.
+
+## Review pass 42 exact output-size typing - AUTOMATED PASS
+
+The exact-head v0.0.18 review found that Android `JSONObject.optLong()` could
+still coerce a numeric string or truncate a fractional `output.size` value to
+the actual PDF length. v0.0.19 reads the raw token and accepts only a
+nonnegative JSON Integer or Long. Strings, Doubles (including integral-valued
+ones), negative values, and missing values fail closed before identity checks.
+The hook-scope invariant now bans both `optInt()` and `optLong()` from manifest
+validation.
+
+Automated validation passes 85 generator tests on Windows and Linux, 76 focused
+navigation/manifest assertions, 12 cross-language authority assertions, 8,752
+exhaustive assertions, both invariant suites, hook-scope validation, and the
+signed/verified v0.0.19 (`versionCode=19`) APK build (SHA-256
+`03852fe6c37a7cd99f0735f0f504702ee87368293e082bf045d73796d811c507`).
+Focused hardware validation of native metadata lookup and same-path replacement
+remains pending.
+
+## Review pass 43 exact geometry typing - AUTOMATED PASS
+
+The exact-head v0.0.19 review found that Android `JSONObject.optDouble()` could
+still coerce numeric strings in `output.spreadSize`, `output.gutter`, or a link
+`rect`. v0.0.20 reads every geometry token raw and accepts only finite JSON
+`Number` values. Strings, booleans, nulls, NaN, and either infinity fail closed
+before layout/link authority recomputation. The hook-scope invariant now bans
+`optDouble()` and `getDouble()` together with the integer coercion APIs.
+
+Automated validation passes 85 generator tests on Windows and Linux, 85 focused
+navigation/manifest assertions, 12 cross-language authority assertions, 8,752
+exhaustive assertions, both invariant suites, hook-scope validation, and the
+signed/verified v0.0.20 (`versionCode=20`) APK build (SHA-256
+`9740d4593ed2b2fb6598b0349adce43d1aa7bba5f879ca76320323a6e6bc0085`).
+Focused hardware validation of native metadata lookup and same-path replacement
+remains pending.
+
+## Review pass 44 unambiguous manifest and page boxes - AUTOMATED PASS
+
+The exact-head v0.0.20 review found two remaining ambiguous-input boundaries.
+Android's `JSONObject` silently keeps one value when an object repeats a name, so
+v0.0.21 first scans the complete manifest with a bounded strict JSON parser and
+rejects duplicate names at every nested object, including escape-equivalent
+spellings. The generator now also requires each effective source CropBox to be
+fully contained within its MediaBox in both the raw PDF operands and pypdf's
+resolved rectangle view. Any protruding left, bottom, right, or top edge fails
+closed before an output PDF or manifest can be published.
+
+Local automated validation passes 86 generator tests on Windows (five expected
+filesystem skips), 93 focused navigation/manifest assertions, 12 cross-language
+authority assertions, 8,752 exhaustive assertions, both invariant suites, hook-
+scope validation, and the signed/verified v0.0.21 (`versionCode=21`) APK build
+(SHA-256
+`60acd2fb4f10cebb6be57613a331c179eb3e30dfef0e3e64b9f4ca297d8f38ba`).
+The exact-head CI gate independently runs the generator suite on Linux. Focused
+hardware validation of native metadata lookup and same-path replacement remains
+pending.
+
+## Review pass 45 strict sidecar UTF-8 - AUTOMATED PASS
+
+The exact-head v0.0.21 review found that Java's ordinary UTF-8 `String`
+constructor replaces malformed byte sequences with U+FFFD before JSON parsing.
+v0.0.22 now decodes the raw sidecar bytes with a `CharsetDecoder` whose malformed
+and unmappable actions are both `REPORT`. Invalid bytes therefore produce a
+stable cached rejection before the duplicate-key scanner or Android
+`JSONObject` can accept a normalized representation. A legitimately encoded
+U+FFFD remains valid and is preserved exactly.
+
+Local automated validation passes 86 generator tests on Windows (five expected
+filesystem skips), 99 focused navigation/manifest assertions including malformed
+continuation, overlong, truncated, surrogate, and valid-replacement-character
+UTF-8 cases, 12 cross-language authority assertions, 8,752 exhaustive assertions,
+both invariant suites, hook-scope validation, and the signed/verified v0.0.22
+(`versionCode=22`) APK build (SHA-256
+`71cda2d144cf7c732fbb239f209bf8388bec24cd6e4b1bd8d4b48cd43c1ea01d`).
+The exact-head CI gate independently runs the generator suite on Linux. Focused
+hardware validation of native metadata lookup and same-path replacement remains
+pending.
+
+## Review pass 46 portrait link viewport and bounded cache - AUTOMATED PASS
+
+The independent full-diff review of v0.0.22 found two process-lifetime edge
+cases. A portrait internal link with an authenticated explicit `/XYZ` or `/FitR`
+destination could have Supernote's native viewport overwritten by the module's
+ordinary half-edge focus. v0.0.23 preserves that native destination view and
+binds every delayed portrait-focus retry to the page-load generation, so an old
+retry cannot move a newer link target. The process-wide manifest cache is now a
+synchronized four-entry access-order LRU rather than an unbounded map.
+
+Local automated validation passes 86 generator tests on Windows (five expected
+filesystem skips), 112 focused navigation/manifest/cache assertions, 12
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both invariant suites, hook-scope validation, and the signed/verified v0.0.23
+(`versionCode=23`) APK build (SHA-256
+`59457392533e6428e5c943eaa2f0c600afe67591041af6595c263e9bd917a9df`).
+The exact-head CI gate independently runs the generator suite on Linux. Focused
+hardware validation of same-path replacement and preserved portrait explicit
+link viewports remains pending.
+
+## Review pass 47 FitR containment and latest-only verification - AUTOMATED PASS
+
+The second independent full-branch review found three remaining hardening
+issues. Explicit `/FitR` destinations are now required to be positive rectangles
+fully contained by the target source page's effective CropBox, preventing a
+crafted viewport from exposing the neighboring page in a composed spread. The
+manifest verifier now has a one-entry pending queue: a newer document invalidates
+older work, queued stale jobs are removed, and active full-PDF hashing checks for
+supersession between chunks. Hardware evidence now records the exact Nomad
+firmware fingerprint and SupernoteDocument version rather than only the device
+model and date.
+
+Local automated validation passes 87 generator tests on Windows (five expected
+filesystem skips), 112 focused navigation/manifest/cache assertions, 12
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both invariant suites, hook-scope validation, and the signed/verified v0.0.23
+(`versionCode=23`) APK build (SHA-256
+`bd51d1397c7057fa0fd2957ea476cba43417b66a98f2e9b99edf1d56f4010c0c`).
+The exact-head CI gate independently runs the generator suite on Linux. Focused
+hardware validation of same-path replacement and preserved portrait explicit
+link viewports remains pending.
+
+## Review pass 48 destination and border edge semantics - AUTOMATED PASS
+
+The next independent full-branch review identified two neighboring-page or
+visual-semantics boundaries. Every non-null `/XYZ` left or top coordinate must
+now lie within the target source page's effective CropBox before it is
+transformed into a composed spread. An underlined link border (`/BS /S /U`) is
+preserved only when the source-to-spread transform leaves the source bottom
+edge as the output bottom edge; quarter-turn and half-turn page rotations fail
+closed rather than drawing the underline on a different edge.
+
+Local automated validation passes 89 generator tests on Windows (five expected
+filesystem skips), 112 focused navigation/manifest/cache assertions, 12
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, and the signed/verified
+v0.0.23 (`versionCode=23`) APK build (SHA-256
+`6f03e4b4e96053d8d794cc165a135cd09bde4b5a0c5ed922d7375eb7ebfdeca9`).
+The exact-head CI gate independently runs the generator suite on Linux. Focused
+hardware validation of same-path replacement and preserved portrait explicit
+link viewports remains pending.
+
+## Review pass 49 bounded XYZ viewport and Original Back chain - AUTOMATED PASS
+
+The following full-branch review found two remaining navigation boundaries.
+An explicit `/XYZ` anchor could lie inside the target CropBox while the retained
+portrait viewport still extended into the neighboring composed page. The
+generator now requires an explicit horizontal anchor and positive zoom, derives
+the portrait viewport width in spread coordinates, and publishes the link only
+when the complete viewport remains inside the authenticated target half.
+Retained/zero zoom and unknown horizontal anchors fail closed. Native direct
+Original Back after multiple link jumps now validates the newest recorded
+destination against the currently open page before restoring the oldest source
+half; a mismatched in-process history mirror is cleared and cannot fall back to
+ambiguous manifest inference.
+
+Local automated validation passes 91 generator tests on Windows (five expected
+filesystem skips), 116 focused navigation/manifest/cache assertions, 12
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, and the signed/verified
+v0.0.23 (`versionCode=23`) APK build (SHA-256
+`64ff19234647d324335a42b7e2e231bd2f62365c416499099226aff1d7ce8223`).
+The exact-head CI gate independently runs the generator suite on Linux. Focused
+hardware validation of same-path replacement and preserved portrait explicit
+link viewports remains pending.
+
+## Review pass 50 fitted viewport and document-switch cancellation - AUTOMATED PASS
+
+The next independent full-branch review found two remaining fail-closed
+boundaries. An explicit `/FitR` rectangle could lie inside one composed half
+while PDF aspect fitting expanded the actual portrait viewport into the other
+half. The generator now computes that fitted viewport from the authenticated
+spread aspect and rejects any neighboring-half exposure. The background
+manifest verifier now observes the active canonical document before cache and
+sidecar-existence fast paths. Switching to a cached spread, an ordinary PDF, a
+missing sidecar, or no document cancels old active and queued verification;
+delayed callbacks from a stale native view model cannot reclaim ownership.
+
+Local automated validation passes 92 generator tests on Windows (five expected
+filesystem skips), 116 focused navigation/manifest/cache assertions, 12
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, and the signed/verified
+v0.0.23 (`versionCode=23`) APK build (SHA-256
+`76d37364a059c957cbe19b1ac38886cc1b77db97efc24941b223fdf40a177492`).
+The exact-head CI gate independently runs the generator suite on Linux. Focused
+hardware validation of same-path replacement and preserved portrait explicit
+link viewports remains pending.
+
+## Review pass 51 pending turns, recovery evidence, and Nomad aspect - AUTOMATED PASS
+
+The next independent full-branch review found three accepted fail-closed
+boundaries. A cold or replaced spread could receive a native LTR turn while its
+manifest was still being verified; the lookup now returns an explicit pending
+state and consumes turns until the verified RTL manifest is activated. Recovery
+now restores an authenticated backup over a canonical target only when that
+target is absent or still matches the transaction's staged digest. An unrelated
+or concurrently replaced target remains untouched with the marker and backup
+evidence preserved. Finally, both generator and companion require the output
+geometry to retain the Nomad's 4:3 landscape aspect, while still allowing
+proportionally scaled coordinate systems.
+
+The review also suggested applying the explicit `/FitR` viewport guard to source
+`/Fit`. That suggestion was not adopted: source `/Fit` carries no explicit
+viewport, and this branch already authenticates `targetView=fit-source-page` so
+the companion restores Supernote's native Fit-page view after traversal. The
+dedicated v0.0.16 Nomad pass verified that behavior in portrait and landscape on
+both target halves with no zoom, flicker, stale content, or wrong page. A new
+deterministic regression preserves this intentional distinction; explicit
+source `/FitR` remains subject to the fitted-viewport containment guard.
+
+Local automated validation passes 95 generator tests on Windows (five expected
+filesystem skips), 119 focused navigation/manifest/cache assertions, 12
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, and the signed/verified
+v0.0.23 (`versionCode=23`) APK build (SHA-256
+`d8a98b94cfd3ec4a4fcbc4e997aab8c199cb83058e3c91bfa054196d222e69fa`).
+Focused hardware validation of same-path replacement and preserved portrait
+explicit link viewports remains pending.
+
+## Review pass 52 native mismatch, retained link view, and APK payload - AUTOMATED PASS
+
+The next independent full-branch review found three additional fail-closed and
+lifecycle boundaries. A fully verified replacement pair now continues consuming
+page turns when Supernote still holds an older, authority-mismatched MuPDF
+document at the same path; reopening the document is required before navigation
+can activate. An authenticated explicit `/XYZ` or `/FitR` destination now retains
+its native portrait viewport across repeated page-loaded, orientation, and native
+screen-reload callbacks for the same page, while an actual page/half transition
+clears that state. Finally, APK assembly checks the exit status of both JAR
+operations and verifies that `classes.dex`, `assets/xposed_init`, and the LSPosed
+scope entry are present before alignment and signing.
+
+Local automated validation passes 95 generator tests on Windows (five expected
+filesystem skips), 120 focused navigation/manifest/cache assertions, 12
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, and the signed/verified
+v0.0.23 (`versionCode=23`) APK build (SHA-256
+`c8c05613416966a3f6d1b9b2e65ee38c647ecb6e57c70b6799247850f2862341`).
+Focused hardware validation of same-path replacement and preserved portrait
+explicit link viewports remains pending.
+
+## Review pass 53 retry authority, rejected manifests, and recovery paths - AUTOMATED PASS
+
+The following whole-branch review found four further boundaries. Portrait
+`screenChange` callbacks and already queued focus retries now recheck the
+authenticated explicit-link viewport before changing the visible half. A
+generated PDF whose sidecar verification was rejected continues consuming
+native turns when its retained MuPDF document contains virtual-spread authority
+metadata; an unavailable metadata probe also fails closed, while an ordinary
+PDF with no such metadata remains native. Manifest activation now requires a
+positive native page count that exactly matches the authenticated output. On
+Windows, interrupted-publication recovery compares persisted paths using the
+filesystem's case and separator semantics without accepting dot-segment aliases.
+
+Local automated validation passes 96 generator tests on Windows (five expected
+filesystem skips), 120 focused navigation/manifest/cache assertions, 12
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, and the signed/verified
+v0.0.23 (`versionCode=23`) APK build (SHA-256
+`792226ff3048ad4fb24244e50b8b5efb4c91113b65cde5aaa31f027a835f5115`).
+Focused hardware validation remains pending.
+
+## Review pass 54 deferred links and publication-state retention - AUTOMATED PASS
+
+The next whole-branch review identified four remaining authority windows.
+Generated PDFs whose sidecar is missing or whose native metadata cannot be
+inspected now fail closed, while an ordinary native PDF is allowed through only
+after its open MuPDF document explicitly proves that no virtual-spread authority
+is present. Native link taps made during cold manifest verification are consumed,
+queued once, and replayed only after the same document and source page acquire
+verified authority; rejected, failed, stale, cross-page, and cross-document
+requests are discarded. Forced replacement now requires explicit cover parity,
+spread width, spread height, and gutter values, preventing implicit defaults from
+resetting persisted layout. Recovery also removes deterministic `.retired`
+artifacts left by a crash, including the case where the active path was already
+removed. Review pass 58 supersedes that cleanup behavior: because a bare
+`.retired` filename is not authenticated transaction evidence, current recovery
+preserves and rejects it for manual inspection instead of deleting it.
+
+Local automated validation passes 98 generator tests on Windows (five expected
+filesystem skips), 124 focused navigation/manifest/cache assertions, 12
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, and the signed/verified
+v0.0.23 (`versionCode=23`) APK build (SHA-256
+`1dcfee90040039914b7ac7ff173f56536e262d8de81d3ee89eb465657d2abc38`).
+Focused hardware validation remains pending.
+
+## Review pass 55 navigation snapshot binding and POSIX recovery - AUTOMATED PASS
+
+The next independent review found five related authority and crash-consistency
+windows. Native Back and Original Back now return no destination while manifest
+or native-snapshot authority is unresolved, and authenticated virtual-spread
+links with missing, malformed, unmatched, or ambiguous runtime geometry are
+consumed rather than navigating without a trusted half mapping. A link tapped
+during verification is bound to the exact PDF and sidecar filesystem identities
+being verified; same-path replacement or any verification snapshot change
+discards the queued invocation before native replay.
+
+Publication markers are now fully written and fsynced under a staged name on
+POSIX as well as Windows before the final marker path becomes visible. Recovery
+also recognizes the precise POSIX link-before-unlink crash state for an original
+being moved to its backup, requiring the canonical and backup names to share one
+inode and both to match the marker's authenticated old digest before rollback.
+
+Local automated validation passes 100 generator tests on Windows (six expected
+filesystem/platform skips), 125 focused navigation/manifest/cache assertions,
+12 cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, and the signed/verified
+v0.0.23 (`versionCode=23`) APK build (SHA-256
+`772b25ff8a163e148ae896f9bebb2990014d3986596d76417fa2d51a8c57ea5e`).
+Focused hardware validation of this exact build remains pending.
+
+## Review pass 56 native-link compatibility and atomic no-replace - AUTOMATED PASS
+
+A focused follow-up review found two regressions in pass 55. The shared
+`showLinkJumpView` callback now bypasses the companion when it is serving a
+native annotation or digest menu rather than a link. Authenticated external URI
+links also remain in Supernote's native handler; only internal page links require
+an authenticated target-half match. A link queued during manifest verification
+retains its exact external/internal routing classification as well as its exact
+PDF/sidecar snapshot, and is discarded if either changes before replay.
+
+Unguarded POSIX no-replace publication now uses the kernel's atomic hard-link
+operation instead of a check followed by overwrite-capable `os.replace`. A
+deterministic cross-platform emulation test proves that an incumbent destination
+cannot be displaced even when a stale existence check claims it is absent.
+
+Local automated validation passes 102 generator tests on Windows (seven expected
+filesystem/platform or privilege skips), 130 focused navigation/manifest/cache
+assertions, 12 cross-language authority assertions, 8,752 exhaustive navigation
+assertions, both native invariant suites, hook-scope validation, and the
+signed/verified v0.0.23 (`versionCode=23`) APK build (SHA-256
+`098208ae1a7f875e2a3c2b0c39561af5f90dd2a48b50cb217bee2d414558ce4b`).
+Focused hardware validation of this exact build remains pending.
+
+## Review pass 57 capability epoch and reader-state lifecycle - AUTOMATED PASS
+
+The required Ultra whole-branch review found five release-boundary defects before
+push. Manifest schema v2 now makes newly generated pairs incompatible with old
+companions that predate native-open snapshot binding. The companion clears every
+manifest-bound page, half, pending-link, history, viewport, queued-link, and
+native-snapshot value when a reused view model changes documents; its delayed-
+callback generation is incremented rather than reset, closing the prior ABA
+window. Deferred external links initialize the current verified spread
+immediately after native replay, while internal links continue to wait for their
+native page-load callback. The generator preserves the source PDF language-
+version header and verifies it after staging rather than silently emitting
+`%PDF-1.3`.
+
+Deterministic regressions pin schema v2, source-header preservation, all four
+queued-link initialization outcomes, complete document-state invalidation, and
+monotonic generations. Local automated validation passes 103 generator tests on
+Windows (seven expected platform/filesystem or privilege skips), 134 focused
+navigation/manifest/cache assertions, 12 cross-language authority assertions,
+8,752 exhaustive navigation assertions, both native invariant suites,
+hook-scope validation, and the signed/verified v0.0.24 (`versionCode=24`) APK
+build (SHA-256
+`de8ec66a858573a17fcdf8b2f8edbf3fd22c029f9850033e2f9900b31f942a4d`).
+Focused hardware validation of this exact build remains pending.
+
+## Review pass 58 publication namespace and atomic hook activation - LOCAL PASS
+
+The follow-up Ultra whole-branch review accepted four release-boundary defects.
+The generator now publishes the sidecar with the exact output-derived filename
+case even when Windows accepts a case-equivalent caller spelling. Publication
+stages use deterministic, reserved names so a process death cannot create an
+unbounded set of random orphan files. A stage without authenticated transaction
+evidence is preserved and rejected; after a valid marker exists, recovery
+removes a stage only when its SHA-256 matches that transaction. Pre-existing
+`.retired` paths are likewise preserved and rejected rather than being deleted
+based solely on their names.
+
+The companion now treats its activity, view-model, page-bar, link-target, and
+link-history hooks as one required capability set. Virtual-spread behavior is
+enabled only after all five install successfully; a failure leaves any already
+installed callback native pass-through for the process. Deterministic tests pin
+the output-derived case spelling and physical Windows directory entry, every
+reserved retirement path, orphaned and authenticated stage recovery, mismatch
+preservation, and the process-wide readiness gate.
+
+Local automated validation passes 109 generator tests on Windows (seven
+expected platform/filesystem or privilege skips), 134 focused
+navigation/manifest/cache assertions, 12 cross-language authority assertions,
+8,752 exhaustive navigation assertions, both native invariant suites,
+hook-scope validation, and the signed/verified v0.0.24 (`versionCode=24`) APK
+build (SHA-256
+`3e2e9df0435beef69b2d6b9b677bb864363d21010e487a91499d590cbf40e7d2`).
+The updated full-branch local review and focused hardware validation remain
+pending; PR #16 stays draft.
+
+## Review pass 59 filesystem-aware publication separation - LOCAL PASS
+
+The next Ultra whole-branch review found that a source and output whose names
+differed only by case could pass Python's case-sensitive `Path`-set check on
+Windows even though both names addressed the same filesystem entry. A forced
+publication could consequently replace the source PDF and then discard its
+backup. All three publication layers now share one filesystem-aware distinctness
+guard. It compares host-normalized paths and existing-file identity, rejecting
+case aliases and hard-link aliases before publication. The CLI also reports the
+actual output-derived sidecar spelling rather than a case-equivalent caller
+spelling.
+
+Deterministic regressions exercise the dangerous case-only collision on the real
+Windows filesystem, an existing hard-link alias, emulated host case semantics,
+and CLI sidecar reporting. Both aliases leave the source bytes intact. A static
+invariant pins the common guard at every repeated publication boundary and bans
+the former case-sensitive `Path`-set checks.
+
+Local automated validation passes 114 generator tests on Windows (seven
+expected platform/filesystem or privilege skips), 134 focused
+navigation/manifest/cache assertions, 12 cross-language authority assertions,
+8,752 exhaustive navigation assertions, both native invariant suites,
+hook-scope validation, and the signed/verified v0.0.24 (`versionCode=24`) APK
+build (SHA-256
+`65a62b821b45d95b48ba9cb1b9ac6e9c7971330c59c62336ecbdd5ca630804b2`).
+A clean follow-up full-branch review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
+## Review pass 60 publication and deferred-link race closure - LOCAL PASS
+
+The next independent Ultra review identified six final concurrency boundaries.
+Generator staging now keeps each exclusively created inode open through every
+write and binds its identity before Windows must release the handle for an atomic
+move. A replaced staging pathname is preserved, and cleanup no longer masks the
+more precise boundary error already in flight. The exact authorized state of the
+output and sidecar is captured before expensive generation, rechecked before the
+transaction, and carried through publication. Both final moves and every backup
+restore are kernel-level no-replace operations, so a file that appears late is
+never overwritten by either normal publication or rollback.
+
+The Android verifier now gives every task a unique monotonic owner rather than
+using a reusable filesystem snapshot token as task identity, closing an A-to-B-
+to-A cancellation race. A link deferred during cold verification is also bound
+to that unique verifier generation, the exact native MuPDF document object, and
+its three embedded authorities. Same-path replacement can therefore never replay
+a stale native `SuperNoteLink` against a different open document.
+
+Deterministic regressions cover a POSIX staging-name hard-link substitution, a
+no-force target appearing during generation, a late final target, a late target
+during backup restoration, verifier-generation ABA, and native-document mismatch
+during deferred-link replay. Local automated validation passes 118 generator
+tests on Windows (eight expected platform/filesystem or privilege skips), 135
+focused navigation/manifest/cache assertions, 12 cross-language authority
+assertions, 8,752 exhaustive navigation assertions, both native invariant suites,
+hook-scope validation, and the signed/verified v0.0.24 (`versionCode=24`) APK
+build (SHA-256
+`4c0983bdd2df031f3481509e0f00015a3e1c9cfb284da4fceccee8b2944fdc4c`).
+A fresh exact-head Ultra review and focused hardware validation remain release
+gates; PR #16 stays draft.
+
+## Review pass 61 recovery identity, captured layout state, and strict URI authority - LOCAL PASS
+
+The fresh exact-head Ultra review found three remaining authority races. Recovery
+now captures the verified filesystem identity of a newly published canonical
+target and supplies that identity to guarded removal. A matching hash is no
+longer sufficient to delete a pathname that may have been concurrently replaced.
+Forced-regeneration layout policy now derives replacement state from the same
+captured output/sidecar snapshots later authorized for publication, rather than
+from earlier existence observations. Finally, Android's link-authority encoder
+rejects unpaired UTF-16 surrogates before UTF-8 hashing, matching the generator's
+strict Unicode contract instead of silently hashing replacement characters.
+
+Deterministic regressions cover a recovery-time same-content pathname
+replacement, a target that appears between the initial observation and captured
+publication state, and malformed high-surrogate, low-surrogate, and record
+strings in the Android authority encoder. Local automated validation passes 120
+generator tests on Windows (eight expected platform/filesystem or privilege
+skips), 135 focused navigation/manifest/cache assertions, 15 cross-language
+authority assertions, 8,752 exhaustive navigation assertions, both native
+invariant suites, hook-scope validation, and the signed/verified v0.0.24
+(`versionCode=24`) APK build (SHA-256
+`120819858eb7ab8a897e032b543aed63687b5b50ecff9b39b32288c6f4464b0b`).
+A clean follow-up exact-head Ultra review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
+## Review pass 62 authenticated cleanup, strict geometry, and verifier ownership - LOCAL PASS
+
+The follow-up exact-head Ultra review identified six remaining fail-closed
+boundaries. Publication cleanup now authenticates the complete marker, stage,
+and backup set before deleting anything and carries each captured filesystem
+identity through an unguessable retirement name. A stage, backup, marker, or
+retirement entry replaced during cleanup is preserved rather than deleted.
+POSIX source identity now includes ctime, closing an in-place same-size mutation
+that restores mtime; only the ctime transition caused by the generator's own
+hard-link/unlink namespace move is accepted.
+
+The Android hook now verifies that a deferred link belongs to the exact verifier
+generation before reading or clearing it, so a stale activation cannot consume
+a newer queued link. Generator spread dimensions are bounded to PDF's
+3-to-14,400-unit page range. Link `/QuadPoints` must contain four distinct
+vertices forming one strict convex quadrilateral in PDF Z order; duplicate,
+concave, and self-intersecting regions fail closed before publication.
+
+Deterministic regressions cover replaced stages, backups, markers, and retirement
+entries; unauthorized backup state; POSIX ctime mutation; stale verifier
+generation; page-size limits; and malformed quadrilaterals. Local automated
+validation passes 127 generator tests on Windows (eight expected
+platform/filesystem or privilege skips), 138 focused navigation/manifest/cache
+assertions, 15 cross-language authority assertions, 8,752 exhaustive navigation
+assertions, both native invariant suites, hook-scope validation, and the
+signed/verified v0.0.24 (`versionCode=24`) APK build (SHA-256
+`3c67cab40653367cf83b4ef2ece8c21b01ce0247d80d40e796c558a518e876c2`).
+A fresh clean exact-head Ultra review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
+## Review pass 63 atomic publication and cross-layer geometry - LOCAL PASS
+
+The exact-head Ultra review found six additional release-boundary defects. POSIX
+publication now uses `renameat2(RENAME_NOREPLACE)` rather than a hard-link plus
+path-only unlink, so a non-cooperating writer cannot have its replacement source
+entry deleted. The post-rename identity is retained for every subsequent check,
+and recovery accepts only the authenticated ctime transition on the surviving
+link from a legacy link-before-unlink crash state.
+
+Publication-marker bytes are now read, hashed, and parsed through one
+descriptor-bound snapshot. Committed recovery captures both canonical
+identities and revalidates the complete pair immediately before every retirement
+of stage, backup, or marker evidence. A same-content pathname replacement thus
+fails closed while retaining the prior backups and transaction marker. The
+Android companion independently enforces the generator's exact 3-to-14,400-unit
+PDF page-dimension limits. The POSIX parent-exchange regression also now asserts
+the intended post-syscall fail-closed result while proving the descriptor-bound
+mutation remains confined to the originally locked directory.
+
+Deterministic regressions cover descriptor-swapped marker parsing, a recreated
+source after atomic rename, committed-pair replacement before cleanup, the
+legacy hard-link crash state, and runtime page-size boundaries. Local validation
+passes 130 generator tests on Windows (10 expected platform/filesystem or
+privilege skips) and the same 130 on Linux (two Windows-specific skips), 141
+focused navigation/manifest/cache assertions, 15 cross-language authority
+assertions, 8,752 exhaustive navigation assertions, both native invariant
+suites, hook-scope validation, and the signed/verified v0.0.24
+(`versionCode=24`) APK build (SHA-256
+`febb7b00de9ad41def5c83c41653d1473d5b1f51b44b2a64ea205516694e20a3`).
+A fresh clean exact-head Ultra review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
+## Review pass 64 source restoration and stale-action cancellation - SUPERSEDED
+
+The next exact-head Ultra review found three remaining cross-callback races.
+After a POSIX no-replace move, publication now verifies the moved inode and, if
+a non-cooperating writer substituted the checked source immediately before the
+syscall, atomically restores that foreign entry to its original source name
+before failing closed. It can no longer leave an unauthenticated replacement
+under a canonical output, backup, marker, or retirement name.
+
+The following exact-head review showed that the restoration step could not
+distinguish that source-side race from a destination replacement after the
+move. Review pass 65 therefore supersedes only this restoration mechanism; the
+stale/superseded lookup protections below remain current.
+
+Android manifest lookups from an obsolete native view model, or whose verifier
+ownership was superseded between observation and scheduling, are explicitly
+blocked rather than falling through to native LTR navigation. A fresh manual
+turn also clears any link invocation queued by an older cold-verification tap,
+so the delayed activation callback cannot replay that link over newer user
+navigation.
+
+Deterministic regressions cover the source substitution immediately before
+`RENAME_NOREPLACE`, enforce fail-closed stale/superseded lookup returns, and pin
+queued-link cancellation ahead of manual turn routing. Local validation passes
+131 generator tests on Windows (11 expected platform/filesystem or privilege
+skips) and the same 131 on Linux (two Windows-specific skips), 141 focused
+navigation/manifest/cache assertions, 15 cross-language authority assertions,
+8,752 exhaustive navigation assertions, both native invariant suites,
+hook-scope validation, and the signed/verified v0.0.24 (`versionCode=24`) APK
+build (SHA-256
+`77c5e3bf2b22d25e5277182e8d4c0c4e7f2cc4d9f89e2e7a9b083beb2c4739b8`).
+A fresh clean exact-head Ultra review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
+## Review pass 65 ambiguous-target preservation and action supersession - LOCAL PASS
+
+The next exact-head Ultra review found that reversing a mismatched POSIX move
+could relocate a non-cooperating writer's newly created destination. Because a
+post-move mismatch cannot distinguish a source replacement before the move from
+a destination replacement afterward, publication now preserves the ambiguous
+destination in place, leaves any existing transaction evidence intact, and
+fails closed. It never performs a destructive reverse move based on that
+ambiguity.
+
+The same review found two remaining queued-link ordering gaps. Every nonzero
+manual turn now clears any older cold-verification link before manifest lookup,
+including turns that must then remain blocked. A newly verified internal or
+external link also clears an older queued invocation before capture or native
+passthrough. A delayed verifier therefore cannot replay an older tap over either
+newer form of user intent.
+
+Deterministic POSIX regressions cover both a source substitution immediately
+before `RENAME_NOREPLACE` and a destination replacement immediately afterward;
+both preserve the ambiguous destination and fail closed. Structural Android
+regressions pin queued-link cancellation before every pending/blocked turn
+return and before both verified-link branches. Local validation passes 132
+generator tests on Windows (12 expected platform/filesystem or privilege skips)
+and the same 132 on Linux (two Windows-specific skips), 141 focused
+navigation/manifest/cache assertions, 15 cross-language authority assertions,
+8,752 exhaustive navigation assertions, both native invariant suites,
+hook-scope validation, syntax checks, and the signed/verified v0.0.24
+(`versionCode=24`) APK build (SHA-256
+`1702b0054afe2a7cf918f76be4fb77513e8ab0178f38d3012274d03ef0474971`).
+A fresh clean exact-head Ultra review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
+## Review pass 66 exact link semantics and blocked-action supersession - LOCAL PASS
+
+The next exact-head Ultra review found four remaining link-authority gaps. URI
+actions now require an absolute URI; relative references depend on a catalog
+base URI that the generated representation does not carry, so copying them
+unchanged could resolve against a different output directory. A link carrying
+the annotation `/NoRotate` flag on a rotated source page also fails closed. The
+generator bakes source rotation into an unrotated spread, where preserving that
+flag would change the annotation's display semantics.
+
+On Android, an uninspectable current link and Back or Original Back while
+manifest authority is blocked now each clear any invocation left queued by an
+older cold-verification callback before returning. A delayed verifier therefore
+cannot replay stale navigation over either newer user action.
+
+Deterministic regressions cover relative URI rejection, rotated-page
+`/NoRotate` rejection, and the ordering of both queued-link cancellation paths.
+Local validation passes 134 generator tests on Windows (12 expected
+platform/filesystem or privilege skips) and the same 134 on Linux (two
+Windows-specific skips), 141 focused navigation/manifest/cache assertions, 15
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, syntax checks, and the
+signed/verified v0.0.24 (`versionCode=24`) APK build (SHA-256
+`7cd1087c6ad44b6bd9dd359303191d0621a9810233a61e04ab3d7236cc05b1fa`).
+A fresh clean exact-head Ultra review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
+## Review pass 67 identity-bound retirement and stable rejection - LOCAL PASS
+
+The full-branch Ultra review found three remaining release-boundary defects.
+Publication cleanup no longer performs a pathname-only unlink after moving an
+authenticated stage, backup, or marker to its unguessable retirement name.
+Instead it opens and revalidates the exact retired inode, empties that inode
+through its descriptor, fsyncs it, and retains an inert zero-length tombstone.
+A non-cooperating writer's late pathname replacement is therefore preserved.
+An interrupted POSIX hard-link backup is retained without truncation while it
+still aliases a live canonical inode, so cleanup cannot corrupt the restored
+PDF through a shared inode; a later run treats that nonempty alias as
+fail-closed recovery evidence.
+
+Review pass 69 supersedes this descriptor-truncation implementation after a
+later review proved that a new hard-link alias could still be created between
+the link-count check and the mutation.
+
+The generator now rejects a link carrying `/NoZoom` whenever the source page is
+scaled into its virtual half; copying transformed annotation geometry while
+retaining that flag would change its visible semantics. On Android, an
+unchanged sidecar outside the 8 MiB ceiling is stored as a stable negative cache
+entry. An ordinary PDF with such an unrelated sidecar returns to native behavior
+after that deterministic rejection, while an authoritative generated PDF stays
+blocked without repeatedly scheduling the same verifier.
+
+Deterministic regressions cover pre-open and POSIX post-open retirement
+replacement, inert retirement tombstones, legacy hard-link recovery, scaled
+`/NoZoom` rejection, and ordering of the oversized-sidecar negative-cache path.
+Local validation passes 138 generator tests on Windows (13 expected
+platform/filesystem or privilege skips) and the same 138 on Linux (two
+Windows-specific skips), 141 focused navigation/manifest/cache assertions, 15
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, syntax checks, and the
+signed/verified v0.0.24 (`versionCode=24`) APK build (SHA-256
+`fea075f10b10701d73c8b7bf5c3998bb243fa31b1b89f27f47c745bc24c347c4`).
+A fresh clean exact-head Ultra review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
+## Review pass 68 exclusive lock initialization and deterministic rejection - LOCAL PASS
+
+The next full-branch Ultra review found four remaining fail-closed gaps. A
+publication-lock pathname is now initialized only when the generator created an
+unaliased inode with exclusive-create. A pre-existing empty lock and a lock that
+hard-links another file are rejected without changing either inode. The
+generator's spread width, height, and gutter boundary also rejects Python
+Booleans and every non-finite or nonnumeric value before staging, so it cannot
+publish a JSON Boolean that Android correctly refuses as geometry.
+
+On Android, stable JSON/canonical-string parse failures now become bounded
+negative cache entries only after exact PDF/sidecar descriptor, pathname, and
+digest authority has been rechecked. A malformed unchanged sidecar therefore
+does not repeatedly trigger a full-PDF hash, and a replaced snapshot cannot
+inherit the rejection. A verified virtual-spread turn is also consumed while
+the activity is temporarily unbound or the orientation is unavailable, rather
+than entering Supernote's native LTR offset path with stale lifecycle state.
+
+Deterministic regressions cover Boolean geometry, an empty hard-linked lock,
+an existing empty lock, stable malformed-manifest negative caching, activity-
+null turn blocking, and unknown-orientation turn blocking. Local validation
+passes 141 generator tests on Windows (13 expected platform/filesystem or
+privilege skips) and the same 141 on Linux (two Windows-specific skips), 141
+focused navigation/manifest/cache assertions, 15 cross-language authority
+assertions, 8,752 exhaustive navigation assertions, both native invariant
+suites, hook-scope validation, syntax checks, and the signed/verified v0.0.24
+(`versionCode=24`) APK build (SHA-256
+`e189fc6b8a489e1fd98988fd00b5137233e56dab206216a508e00bd88796c4f1`).
+A fresh clean exact-head Ultra review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
+## Review pass 69 immutable retirement and cold Back supersession - LOCAL PASS
+
+The fresh exact-head Ultra review found two remaining races. Publication
+cleanup could observe one link to an authenticated retired inode and then
+truncate it after a non-cooperating writer created another hard-link alias. The
+cleanup path now never truncates or unlinks authenticated retirement bytes. It
+moves the exact inode without replacement from its unguessable `.retired...`
+name into an inert unguessable `.retained...` namespace, preserving every late
+alias byte-for-byte and failing closed on either source or destination
+substitution. Retained bytes are deliberately kept until the containing
+versioned cache directory can be safely garbage-collected.
+
+The same review found a narrow cold-verification interval in which an accepted
+manifest had entered the verifier cache but had not yet activated on the main
+thread. Back or Original Back during that interval could miss the manifest-null
+queue-clear branch and allow an older queued link to replay later. Every
+concrete history-return action now clears the older queued link immediately
+after resolving the view model and before any manifest lookup.
+
+Deterministic regressions create a hard-link alias after the first retirement
+move and prove both names retain the original bytes, replace the retired path
+before the retention move and prove the unrelated replacement survives, pin
+the inert retention namespace, and require history queue cancellation before
+manifest lookup. Local validation passes 141 generator tests on Windows (12
+expected platform/filesystem or privilege skips) and the same 141 on Linux
+(two Windows-specific skips), 141 focused navigation/manifest/cache assertions,
+15 cross-language authority assertions, 8,752 exhaustive navigation
+assertions, both native invariant suites, hook-scope validation, syntax checks,
+and the signed/verified v0.0.24 (`versionCode=24`) APK build (SHA-256
+`c0eeb6b83f7b7fef7b7366a0eb46bb35205fa50c0d672f2c6f40bf6cf59536b5`).
+A fresh clean exact-head Ultra review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
+## Review pass 70 settled-pair and deferred-link generations - LOCAL PASS
+
+The next exact-head Ultra review found two remaining cross-layer races. Recovery
+could restore and authenticate the PDF, then restore the sidecar, yet retire all
+transaction evidence without rechecking a non-cooperating writer's intervening
+replacement of the first path. Every committed, rolled-back, and discarded
+cleanup now carries the exact settled PDF/sidecar existence, identity, and hash
+state and revalidates the complete pair before each retirement. A changed path
+therefore remains in place and the marker or other remaining evidence is
+preserved for fail-closed recovery.
+
+A native page-load callback that arrived while cold manifest verification was
+pending also returned before advancing the token used by a queued link. Moving
+away from and back to the original page could consequently replay the older tap.
+Every native page-load callback now advances a monotonic generation before
+manifest lookup; a queued link captures that generation and must match it at
+replay.
+
+Deterministic regressions replace the settled output after both rollback and
+legacy-discard state capture and prove cleanup preserves the marker, and reject
+a queued link after any intervening page load even when the final page number is
+unchanged. Local validation passes 143 generator tests on Windows (12 expected
+platform/filesystem or privilege skips) and the same 143 on Linux (two
+Windows-specific skips), 142 focused navigation/manifest/cache assertions, 15
+cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, and the signed/verified
+v0.0.24 (`versionCode=24`) APK build (SHA-256
+`7d3bd74eea3d74176777e4db6a29cb41f8f84d6dd35ee1ae0cd3cb9a3dd9ee6d`).
+A fresh clean exact-head Ultra review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
+## Review pass 71 source commit and stable APK identity - LOCAL PASS
+
+The fresh exact-head Ultra review found two release-path defects. The generator
+previously rehashed the canonical source immediately before calling the pair
+publisher, leaving publication itself free to commit an older snapshot after a
+concurrent source replacement. Source validation now belongs to the publication
+transaction: it runs before transaction evidence is created and again after the
+new canonical PDF and sidecar are authenticated but before rollback evidence is
+retired. A failure at that commit boundary disables committed-pair recovery, so
+the previous pair is restored (or a first-published pair is removed) and the
+changed source is preserved.
+
+GitHub-hosted runners also generated a new Android debug certificate for every
+run while uploading each APK. CI now restores a stable keystore from the
+encrypted `VIRTUAL_SPREAD_APK_KEYSTORE_BASE64` repository secret. If that secret
+is unavailable, an ephemeral signer is still sufficient for build verification,
+but the non-upgradeable APK is deliberately not uploaded. Deterministic invariant
+checks pin that upload gate and the build's selected-keystore argument.
+
+The source-race regression atomically replaces the source immediately after the
+new output reaches its canonical path and proves publication raises, the changed
+source survives, and the complete earlier PDF/sidecar pair is restored without a
+marker or backup remnant. Local validation passes 144 generator tests on Windows
+(12 expected platform/filesystem or privilege skips) and the same 144 on Linux
+(two Windows-specific skips), 142 focused navigation/manifest/cache assertions,
+15 cross-language authority assertions, 8,752 exhaustive navigation assertions,
+both native invariant suites, hook-scope validation, workflow YAML parsing, and
+the signed/verified v0.0.24 (`versionCode=24`) APK build. The APK uses the existing
+upgrade-compatible certificate and has SHA-256
+`0922b0bdd53732c6c07b26576c4795d01cdc0ffe16ff95c67a41c3fa23edf7f2`.
+A fresh exact-head Ultra review and focused hardware validation remain release
+gates; PR #16 stays draft.
+
+## Review pass 72 protected signer and crash-safe source commit - LOCAL PASS
+
+The next exact-head Ultra review found two release blockers in pass 71. The
+stable Android signer is no longer referenced by any pull-request-controlled
+job. Pull requests build and verify with a two-day ephemeral certificate. Only
+a successful trusted `main` push enters the `virtual-spread-release` GitHub
+environment and publishes an upgrade-compatible APK. That environment accepts
+deployments only from `main`; it now contains the sole encrypted signer secret,
+and the repository-wide duplicate was removed.
+
+A matching newly published PDF and sidecar are also no longer sufficient for
+crash recovery to infer commit. Source-validated publication starts
+rollback-only. After both canonical files are authenticated, the generator
+rehashes the original source and no-replace publishes a fsynced source-commit
+record bound to the publication-marker hash, both new pair hashes, and the exact
+source path, identity, timestamps, size, and SHA-256. Recovery commits only when
+that record is structurally exact and the persisted source snapshot still
+matches; a crash before the record or a changed source restores the previous
+pair. Committed cleanup keeps the source-commit record until after marker
+retirement, and an orphaned final record can retire itself only after
+reauthenticating both canonical files.
+
+Deterministic regressions cover a complete pair without commit evidence, an
+unchanged validated source, source replacement after durable commit evidence,
+marker-binding mutation, interrupted committed cleanup, mismatched orphaned
+pair bytes, all deterministic source-commit staging/reserved paths, and exact
+cleanup identities. Local validation passes 150 generator tests on Windows (12
+expected platform/filesystem or privilege skips) and the same 150 on Linux (two
+Windows-specific skips), 142 focused navigation assertions, 15 cross-language
+authority assertions, 8,752 exhaustive navigation assertions, both native
+invariant suites, hook-scope validation, workflow YAML parsing, and the
+signed/verified v0.0.24 (`versionCode=24`) APK build. The APK retains the
+upgrade-compatible signer and has SHA-256
+`1cef6b0bdb88ee57901e6d37b87920a49118e727af2977acbba6ffa24a374c25`.
+A fresh clean exact-head Ultra review and focused hardware validation remain
+release gates; PR #16 stays draft.
+
+## Review pass 73 exact-head authority closure - LOCAL PASS
+
+The final integrated Ultra review closed the remaining authority and release
+races. Ordinary PDFs now bypass Virtual Spread immediately when native MuPDF
+definitively reports no embedded representation metadata. Manifest verification
+uses bounded descriptor-authoritative background work, a short freshness lease,
+and demand-driven retry without a permanent transient-failure cache or an
+autonomous polling loop. A successful cached refresh schedules further work only
+for an authenticated Virtual Spread manifest.
+
+Back and Original Back now bind one exact preflight manifest/view-model snapshot
+to the full history-return action. All concrete `BackLinkUtils` history methods
+and both listeners share one fair lock, so no competing native history operation
+can consume or replace the trail between preflight, the destructive getter, and
+the resulting page load or external intent. Saving trails is accepted only after
+the exact `saveMarkData` callback acknowledges completion.
+
+Generator publication hashes the exact regular descriptor snapshot and rejects
+growth, nonregular files, aliases, and pathname substitution without waiting for
+EOF. The trusted release path is split into dependency-bearing tests, a fresh
+clean assembly job with no signing secret, and a protected sign-only job with no
+checkout or project scripts. The protected job verifies the assembly digest,
+pins the expected certificate, deletes the decoded key, and publishes only the
+stable signed APK. An unsafe `-SkipTests` invocation is rejected unless it is the
+explicit aligned-only clean-assembly mode.
+
+Deterministic regressions cover ordinary-PDF bypass, transient and stable
+manifest failures, stale async verification, demand-only retry, exact Back
+snapshot and lock authority, callback-acknowledged saves, descriptor growth and
+FIFO/nonblocking publication, and the three-stage signing boundary. Exact-head
+validation passes 154 generator tests on Windows (14 expected platform,
+filesystem, or privilege skips) and 154 on Linux (two Windows-specific skips),
+160 focused navigation/manifest/cache assertions, 15 cross-language authority
+assertions, 8,752 exhaustive navigation assertions, both native invariant
+suites, hook-scope validation, workflow checks, and clean aligned assembly. The
+final release-equivalent v0.0.24 (`versionCode=24`) APK verifies with the pinned
+upgrade-compatible certificate and has SHA-256
+`119b7fec18ee1939e836eec66a10905283887478916f36f4dfbd79434985e97f`.
+The clean exact-head Ultra review reports no actionable findings. Focused
+hardware validation remains the release gate; PR #16 stays draft.
+
+## v0.0.24-r1 focused Nomad gate - SUPERSEDED HARDWARE PASS
+
+The complete v0.0.24 gate passed on the Nomad on 2026-08-26 with isolated
+schema-v2 fixtures. Cold activation, cover and non-cover RTL parity, same-path
+replacement fail-closed behavior, replacement reopen, explicit `/XYZ` viewport
+preservation across orientation refresh, native link-history restoration, a
+rejected missing-sidecar turn, native ink persistence, and ordinary sidecar-free
+PDF pass-through all behaved as required.
+
+The final pass also exercised the cold-verification link queue. An internal
+link under a newly scheduled verifier owner logged exactly one queue and one
+replay, then opened page 7 only after authenticated activation. An earlier
+retry-backoff invocation exposed a firmware crash because the hooked
+`showLinkJumpView(...)` primitive-boolean result had been replaced with null.
+The r1 module returned `Boolean.FALSE` on every blocked link path; the exact
+race then produced no fatal or `Boolean.booleanValue()` log and the document
+reader remained usable. Subsequent exact-firmware review proved that false lets
+the single-tap listener fall through into its page-turn branch. r1 is therefore
+superseded despite that focused race appearing correct.
+
+MuPDF's absent metadata values were also observed as empty strings on hardware.
+The native authority classifier now treats null and trimmed-empty strings as
+absent, keeps nonblank and unexpected typed values fail-closed, and is pinned by
+focused tests and the hook-scope guard. On the exact rebuilt APK, the ordinary
+fixture advanced from `2 / 7` to `3 / 7` with zero blocked-navigation lines,
+while the generated missing-sidecar fixture stayed at `1 / 4` and logged the
+expected blocked turn.
+
+The signed v0.0.24-r1 (`versionCode=25`) APK SHA-256 is
+`4454237d921a090174c2b0e7c60726e2f73fd8164539557614fa18fe29bd57c4`;
+its signer certificate SHA-256 is
+`a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`.
+Final local validation passes 154 generator tests (14 expected Windows skips),
+165 focused navigation assertions, 15 cross-language authority assertions,
+8,752 exhaustive navigation assertions, both native invariant suites,
+hook-scope validation, and the signed APK build. PR #16 remains draft until
+fresh exact-head CI and review complete.
+
+## v0.0.24-r2 mixed-menu authority and blocked-tap consumption - LOCAL PASS / HARDWARE PASS
+
+Exact-firmware review found that `showLinkJumpView(...)` returns true whenever
+native firmware handles a tap; false means unhandled and falls through to page
+turning. Every blocked pure-link path now returns `Boolean.TRUE`, preventing both
+null unboxing and page-turn leakage.
+
+The review also established that a non-null link is not always immediate
+navigation. When a link overlaps a digest or annotation, firmware first opens a
+combined native menu. r2 leaves that menu and all non-Link actions native, then
+authenticates only the later `jumpLink(...)` callback if Link is actually chosen.
+The short-lived candidate and any cold direct-jump replay are bound to the exact
+document, native MuPDF object and embedded authorities, source page, generation,
+arguments, and age. Annotation/digest-only activity cancels an older queued link.
+
+The integrated exact-head review also hardened every publish/activation and
+freshness-invalidation interleaving. Posted activation is bound to the exact
+verification owner and native MuPDF object; passive UI binding preserves only
+same-verification deferred intent; real native page loads invalidate deferred
+intent while explicit synthetic activation may preserve an open mixed menu; and
+pre-removal freshness tokens cannot erase a newer turn, link, history action,
+queue, or menu candidate.
+
+The final review batch also makes Back/Original Back synchronously supersede an
+open mixed-link menu and binds every retained mixed-menu candidate to its exact
+verifier generation. A candidate from an older or unbound verification cannot
+be rebound or authenticated by a newer manifest.
+
+Deterministic checks pin pure-versus-mixed classification, TRUE tap consumption,
+annotation-only supersession, exact direct-jump arguments, candidate invalidation,
+dual replay dispatch, and the concurrency state machine. Local validation passes
+199 focused navigation
+assertions, 15 authority assertions, 8,752 exhaustive assertions, hook-scope
+validation, both native invariant suites, and signed compilation as
+v0.0.24-r2 (`versionCode=26`). The upgrade-compatible APK SHA-256 is
+`be2427543b8e41d6c4e5e42131fcfda92cbe8e82eeafa32582aa55083558fd38`.
+
+The focused hardware matrix passed on 2026-08-27 on a Supernote Nomad with
+firmware fingerprint
+`Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys`
+and SupernoteDocument `1.02.446`. The installed artifact was the exact
+v0.0.24-r2 (`versionCode=26`) APK above, built from reviewed code head
+`76ea0b71b518fb3c7c969fdd9bd9c1eb08dd53e6`.
+
+The device matrix observed all r2-specific boundaries:
+
+- a pure internal link without a sidecar stayed on `1 / 4`, was consumed, and
+  logged one `link_jump_queued`, one pending-verification block, and one
+  verification-failure discard without a page load or native page-turn
+  fallthrough;
+- the firmware's mixed `DocumentLinkJumpView2` menu kept Underline native,
+  while a later explicit Open Link action logged `mixed_link_menu_observed` and
+  reached source page 7 exactly once;
+- replacing an authenticated sidecar with an identical copy forced cold
+  verification, then produced exactly one `link_jump_queued source=3 target=1`,
+  one `link_jump_replayed`, and one target page load without reopening the
+  menu;
+- a markerless ordinary PDF created no manifest-verification, activation, or
+  blocked-turn state; and
+- both missing-sidecar fixtures rejected with `ENOENT`.
+
+The Live fixture's sidecar and `.mark` were restored to their pre-test hashes,
+and the disposable blocked-link PDF was removed from the Nomad. The r2 hardware
+gate is complete; PR readiness is governed only by the repository's final
+exact-head CI and review gates.
 
 ## Failure capture
 

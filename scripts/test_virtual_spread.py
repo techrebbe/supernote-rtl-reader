@@ -1,0 +1,7365 @@
+#!/usr/bin/env python3
+"""Deterministic tests for the virtual-spread PDF generator."""
+
+from __future__ import annotations
+
+import json
+import math
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+from pypdf import PdfReader, PdfWriter, Transformation
+from pypdf.generic import (
+    ArrayObject,
+    BooleanObject,
+    DictionaryObject,
+    FloatObject,
+    IndirectObject,
+    NameObject,
+    NumberObject,
+    NullObject,
+    TextStringObject,
+)
+from reportlab.pdfgen import canvas
+
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "virtual_spread"))
+
+from generate_virtual_spread import (  # noqa: E402
+    LAYOUT_AUTHORITY_MARKER,
+    LINK_AUTHORITY_MARKER,
+    SCHEMA,
+    SOURCE_AUTHORITY_MARKER,
+    MAX_MANIFEST_BYTES,
+    MOVEFILE_REPLACE_EXISTING,
+    MOVEFILE_WRITE_THROUGH,
+    PublicationSourceEvidence,
+    Slot,
+    SourceIdentity,
+    VirtualSpreadError,
+    _canonical_layout,
+    _destination_uniform_scale,
+    _durably_remove,
+    _durable_replace,
+    _finish_publication_transaction,
+    _filesystem_paths_collide,
+    _identity,
+    _layout_authority_sha256,
+    _link_authority_sha256,
+    _link_annotation_flags,
+    _layout_for_page,
+    _lexical_absolute,
+    _require_runtime_float_rect,
+    _require_runtime_float_geometry,
+    _same_open_file,
+    _transform_quad_points,
+    _publish_pair,
+    _require_unaliased_output_path,
+    _publication_artifacts,
+    _publication_file_evidence,
+    _publication_lock,
+    _publication_path_matches,
+    _publication_reserved_paths,
+    _publication_sha256,
+    _publication_source_commit_artifacts,
+    _publication_staging_artifacts,
+    _publication_target_state,
+    _require_source_snapshot,
+    _transform_rect,
+    _transform_link_border,
+    _transform_link_border_style,
+    _publication_lock_path,
+    _publication_open_file,
+    _posix_rename_noreplace,
+    _prepare_publication_transaction,
+    _recover_pair_publication,
+    _require_distinct_publication_paths,
+    _require_runtime_manifest_path,
+    _retired_publication_artifacts,
+    _transformed_internal_destination,
+    _sha256_open_file,
+    _sha256_open_file_exact,
+    _temporary_neighbor,
+    _windows_move_flags,
+    _write_json,
+    _write_publication_marker,
+    _write_source_commit_record,
+    _validated_publication_transaction,
+    build_pairs,
+    build_virtual_spread,
+    main,
+)
+
+
+PAGE_SIZES = [
+    (432, 576),
+    (300, 600),
+    (600, 300),
+    (420, 420),
+    (200, 700),
+    (700, 200),
+    (432, 576),
+]
+
+EXPLICIT_DEFAULT_LAYOUT = {
+    "cover_separate": True,
+    "spread_width": 864.0,
+    "spread_height": 648.0,
+    "gutter": 0.0,
+}
+
+
+def authorize_publication_without_source(
+    output: Path,
+    manifest: Path,
+) -> Path:
+    marker, output_backup, manifest_backup = _publication_artifacts(output)
+    transaction = _validated_publication_transaction(
+        marker,
+        output,
+        manifest,
+        output_backup,
+        manifest_backup,
+    )
+    transaction["markerPath"] = str(marker)
+    identity, digest = _write_source_commit_record(
+        output,
+        transaction,
+        None,
+    )
+    transaction["_sourceCommitIdentity"] = identity
+    transaction["_sourceCommitSha256"] = digest
+    return _publication_source_commit_artifacts(output)[0]
+
+
+def move_prepared_pair(
+    transaction: dict[str, object],
+    temporary_output: Path,
+    output: Path,
+    temporary_manifest: Path,
+    manifest: Path,
+) -> None:
+    if transaction["hadOutput"]:
+        _durable_replace(output, Path(transaction["outputBackupPath"]))
+    if transaction["hadManifest"]:
+        _durable_replace(manifest, Path(transaction["manifestBackupPath"]))
+    _durable_replace(temporary_manifest, manifest)
+    _durable_replace(temporary_output, output)
+
+
+def create_odd_page_fixture(path: Path) -> None:
+    pdf = canvas.Canvas(str(path), pagesize=PAGE_SIZES[0])
+    for index, (width, height) in enumerate(PAGE_SIZES):
+        pdf.setPageSize((width, height))
+        name = f"source-{index + 1}"
+        pdf.bookmarkPage(name)
+        pdf.setFont("Helvetica-Bold", 18)
+        pdf.drawString(20, height - 35, f"ODD SOURCE PAGE {index + 1}")
+        pdf.setFont("Helvetica", 10)
+        pdf.drawString(20, height - 55, f"SIZE {width} x {height}")
+        pdf.rect(10, 10, width - 20, height - 20)
+        if index == 1:
+            pdf.drawString(20, 30, "LINK TO PAGE 6")
+            pdf.linkRect("", "source-6", (15, 15, min(width - 15, 180), 48))
+            pdf.drawString(20, 75, "LINK TO PAGE 7")
+            pdf.linkRect("", "source-7", (15, 55, min(width - 15, 180), 93))
+        if index == 5:
+            pdf.drawString(20, 30, "LINK TO PAGE 2")
+            pdf.linkRect("", "source-2", (15, 15, min(width - 15, 180), 48))
+        if index == 6:
+            pdf.drawString(20, 30, "LINK TO PAGE 3")
+            pdf.linkRect("", "source-3", (15, 15, min(width - 15, 180), 48))
+        pdf.showPage()
+    pdf.save()
+
+
+def create_rotated_link_fixture(path: Path, rotation: int = 90) -> None:
+    unrotated = path.with_name(f"{path.stem}-unrotated.pdf")
+    pdf = canvas.Canvas(str(unrotated), pagesize=(200, 100))
+    pdf.bookmarkPage("first")
+    pdf.drawString(10, 70, "ROTATED LINK SOURCE")
+    pdf.linkRect("", "second", (10, 20, 60, 40))
+    pdf.showPage()
+    pdf.setPageSize((200, 100))
+    pdf.bookmarkPage("second")
+    pdf.drawString(10, 70, "LINK TARGET")
+    pdf.showPage()
+    pdf.save()
+
+    source = PdfReader(str(unrotated), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    writer.pages[0].rotate(rotation)
+    with path.open("wb") as stream:
+        writer.write(stream)
+    unrotated.unlink()
+
+
+def add_outline_entry(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    writer.add_outline_item("Chapter 2", 1)
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    persisted = PdfReader(str(path), strict=True)
+    catalog = persisted.trailer["/Root"]
+    if "/Outlines" not in catalog:
+        raise AssertionError("fixture document outline was not persisted")
+    if not persisted.outline:
+        raise AssertionError("fixture document outline is empty")
+
+
+def add_document_open_action(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    writer._root_object[NameObject("/OpenAction")] = ArrayObject(
+        [writer.pages[1].indirect_reference, NameObject("/Fit")]
+    )
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    persisted = PdfReader(str(path), strict=True)
+    catalog = persisted.trailer["/Root"]
+    if "/OpenAction" not in catalog:
+        raise AssertionError("fixture document open action was not persisted")
+    open_action = catalog["/OpenAction"]
+    if not isinstance(open_action, ArrayObject) or len(open_action) != 2:
+        raise AssertionError("fixture document open action is malformed")
+
+
+def add_document_view_settings(
+    path: Path, page_layout: str = "/SinglePage"
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    writer.page_mode = "/FullScreen"
+    writer.page_layout = page_layout
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    persisted = PdfReader(str(path), strict=True)
+    catalog = persisted.trailer["/Root"]
+    if catalog.get("/PageMode") != "/FullScreen":
+        raise AssertionError("fixture page mode was not persisted")
+    if catalog.get("/PageLayout") != page_layout:
+        raise AssertionError("fixture page layout was not persisted")
+
+
+def add_optional_content_catalog(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    group = writer._add_object(DictionaryObject({
+        NameObject("/Type"): NameObject("/OCG"),
+        NameObject("/Name"): TextStringObject("Hidden layer"),
+    }))
+    writer._root_object[NameObject("/OCProperties")] = DictionaryObject({
+        NameObject("/OCGs"): ArrayObject([group]),
+        NameObject("/D"): DictionaryObject({
+            NameObject("/OFF"): ArrayObject([group]),
+        }),
+    })
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    persisted = PdfReader(str(path), strict=True)
+    properties = persisted.trailer["/Root"]["/OCProperties"]
+    default = properties["/D"]
+    if len(properties["/OCGs"]) != 1 or len(default["/OFF"]) != 1:
+        raise AssertionError("fixture optional-content default-off group is malformed")
+
+
+def add_viewer_preferences(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    writer._root_object[NameObject("/ViewerPreferences")] = DictionaryObject({
+        NameObject("/HideToolbar"): BooleanObject(True),
+    })
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    persisted = PdfReader(str(path), strict=True)
+    preferences = persisted.trailer["/Root"]["/ViewerPreferences"]
+    hide_toolbar = preferences.raw_get("/HideToolbar")
+    if not isinstance(hide_toolbar, BooleanObject) or not hide_toolbar.value:
+        raise AssertionError("fixture viewer preference was not persisted")
+
+
+def add_page_behavior(path: Path, behavior: str) -> str:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    if behavior == "duration":
+        key = "/Dur"
+        value = NumberObject(5)
+    elif behavior == "transition":
+        key = "/Trans"
+        value = DictionaryObject({
+            NameObject("/S"): NameObject("/Dissolve"),
+            NameObject("/D"): NumberObject(1),
+        })
+    elif behavior == "additional-action":
+        key = "/AA"
+        value = DictionaryObject({
+            NameObject("/O"): DictionaryObject({
+                NameObject("/S"): NameObject("/URI"),
+                NameObject("/URI"): TextStringObject("https://example.com/open"),
+            }),
+        })
+    elif behavior == "user-unit":
+        key = "/UserUnit"
+        value = NumberObject(2)
+    else:
+        raise AssertionError(f"unknown page behavior fixture: {behavior}")
+    writer.pages[0][NameObject(key)] = value
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    persisted = PdfReader(str(path), strict=True)
+    if key not in persisted.pages[0]:
+        raise AssertionError(f"fixture page entry was not persisted: {key}")
+    return key
+
+
+def add_invalid_page_rotation(path: Path, value: object) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    writer.pages[0][NameObject("/Rotate")] = value
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def set_raw_page_box_coordinate(
+    path: Path,
+    key: str,
+    value: object,
+    *,
+    inherited: bool,
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    page = writer.pages[0]
+    box = ArrayObject([
+        value,
+        NumberObject(0),
+        NumberObject(432),
+        NumberObject(576),
+    ])
+    if inherited:
+        parent_reference = page.raw_get("/Parent")
+        parent = parent_reference.get_object()
+        if not isinstance(parent, DictionaryObject):
+            raise AssertionError("fixture page parent is not a dictionary")
+        parent[NameObject(key)] = box
+        page.pop(key, None)
+    else:
+        page[NameObject(key)] = box
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    persisted = PdfReader(str(path), strict=True)
+    raw_box = persisted.pages[0].raw_get(key)
+    if not isinstance(raw_box, ArrayObject):
+        raise AssertionError("fixture raw page box was not persisted")
+    if not isinstance(raw_box[0], type(value)):
+        raise AssertionError("fixture raw page-box operand type changed")
+
+
+def add_typed_document_information(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    if writer._info is None:
+        writer._info = DictionaryObject()
+    writer._info[NameObject("/Trapped")] = NameObject("/True")
+    writer._info[NameObject("/CustomNumber")] = NumberObject(7)
+    writer._info[NameObject("/CustomFlag")] = BooleanObject(True)
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    information = PdfReader(str(path), strict=True).trailer["/Info"]
+    if not isinstance(information.raw_get("/Trapped"), NameObject):
+        raise AssertionError("fixture /Trapped value is not a PDF name")
+    if not isinstance(information.raw_get("/CustomNumber"), NumberObject):
+        raise AssertionError("fixture custom number is not a PDF integer")
+    if not isinstance(information.raw_get("/CustomFlag"), BooleanObject):
+        raise AssertionError("fixture custom flag is not a PDF Boolean")
+
+
+def add_unsupported_document_information(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    if writer._info is None:
+        writer._info = DictionaryObject()
+    writer._info[NameObject("/CustomArray")] = ArrayObject([
+        NumberObject(1),
+        NumberObject(2),
+    ])
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    information = PdfReader(str(path), strict=True).trailer["/Info"]
+    if not isinstance(information.raw_get("/CustomArray"), ArrayObject):
+        raise AssertionError("fixture custom metadata array was not persisted")
+
+
+def add_invalid_standard_document_information(
+    path: Path,
+    key: str,
+    value: object,
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    if writer._info is None:
+        writer._info = DictionaryObject()
+    writer._info[NameObject(key)] = value
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def make_annotation_array_indirect(path: Path, page_index: int) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    annotations = writer.pages[page_index].get("/Annots")
+    if annotations is None:
+        raise AssertionError("fixture page has no annotations")
+    annotation_array = annotations.get_object()
+    writer.pages[page_index][NameObject("/Annots")] = writer._add_object(
+        annotation_array
+    )
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    persisted = PdfReader(str(path), strict=True)
+    persisted_annotations = persisted.pages[page_index].raw_get(
+        "/Annots"
+    )
+    if not isinstance(persisted_annotations, IndirectObject):
+        raise AssertionError("fixture annotation array is not indirect")
+
+
+def make_link_destination_indirect(
+    path: Path,
+    page_index: int,
+    annotation_index: int,
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    annotations = writer.pages[page_index].get("/Annots")
+    if annotations is None:
+        raise AssertionError("fixture page has no annotations")
+    annotation_array = annotations.get_object()
+    annotation = annotation_array[annotation_index].get_object()
+    destination = annotation.get("/Dest")
+    if destination is None:
+        raise AssertionError("fixture link has no direct destination")
+    annotation[NameObject("/Dest")] = writer._add_object(
+        destination.get_object()
+    )
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    persisted = PdfReader(str(path), strict=True)
+    persisted_annotations = persisted.pages[page_index]["/Annots"].get_object()
+    persisted_destination = persisted_annotations[
+        annotation_index
+    ].get_object().raw_get("/Dest")
+    if not isinstance(persisted_destination, IndirectObject):
+        raise AssertionError("fixture link destination is not indirect")
+
+
+def set_link_destination_mode(
+    path: Path,
+    source_page_index: int,
+    annotation_index: int,
+    target_page_index: int,
+    mode: str,
+    arguments: tuple[float | None, ...],
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    annotations = writer.pages[source_page_index].get("/Annots")
+    if annotations is None:
+        raise AssertionError("fixture page has no annotations")
+    annotation = annotations.get_object()[annotation_index].get_object()
+    target_reference = writer.pages[target_page_index].indirect_reference
+    if target_reference is None:
+        raise AssertionError("fixture target page has no indirect reference")
+    destination_arguments = [
+        NullObject() if value is None else FloatObject(value)
+        for value in arguments
+    ]
+    annotation.pop("/A", None)
+    annotation[NameObject("/Dest")] = ArrayObject(
+        [target_reference, NameObject(mode), *destination_arguments]
+    )
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def set_raw_link_destination(
+    path: Path,
+    source_page_index: int,
+    annotation_index: int,
+    target_page_index: int,
+    mode: object,
+    arguments: tuple[object, ...],
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    annotations = writer.pages[source_page_index].get("/Annots")
+    if annotations is None:
+        raise AssertionError("fixture page has no annotations")
+    annotation = annotations.get_object()[annotation_index].get_object()
+    target_reference = writer.pages[target_page_index].indirect_reference
+    if target_reference is None:
+        raise AssertionError("fixture target page has no indirect reference")
+    annotation.pop("/A", None)
+    annotation[NameObject("/Dest")] = ArrayObject(
+        [target_reference, mode, *arguments]
+    )
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def set_link_quad_points(
+    path: Path,
+    source_page_index: int,
+    annotation_index: int,
+    points: tuple[object, ...],
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    annotations = writer.pages[source_page_index].get("/Annots")
+    if annotations is None:
+        raise AssertionError("fixture page has no annotations")
+    annotation = annotations.get_object()[annotation_index].get_object()
+    annotation[NameObject("/QuadPoints")] = ArrayObject(points)
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def set_page_crop_box(
+    path: Path,
+    source_page_index: int,
+    values: tuple[float, float, float, float],
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    writer.pages[source_page_index][NameObject("/CropBox")] = ArrayObject(
+        FloatObject(value) for value in values
+    )
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def set_link_annotation_value(
+    path: Path,
+    source_page_index: int,
+    annotation_index: int,
+    key: str,
+    value: object,
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    annotations = writer.pages[source_page_index].get("/Annots")
+    if annotations is None:
+        raise AssertionError("fixture page has no annotations")
+    annotation = annotations.get_object()[annotation_index].get_object()
+    annotation[NameObject(key)] = value
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def delete_link_annotation_values(
+    path: Path,
+    source_page_index: int,
+    annotation_index: int,
+    keys: tuple[str, ...],
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    annotations = writer.pages[source_page_index].get("/Annots")
+    if annotations is None:
+        raise AssertionError("fixture page has no annotations")
+    annotation = annotations.get_object()[annotation_index].get_object()
+    for key in keys:
+        annotation.pop(key, None)
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def set_link_action(
+    path: Path,
+    source_page_index: int,
+    annotation_index: int,
+    action: DictionaryObject,
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    annotations = writer.pages[source_page_index].get("/Annots")
+    if annotations is None:
+        raise AssertionError("fixture page has no annotations")
+    annotation = annotations.get_object()[annotation_index].get_object()
+    annotation.pop("/Dest", None)
+    annotation[NameObject("/A")] = action
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def output_annotation_for_source(
+    output: Path,
+    manifest: dict[str, object],
+    source_page_index: int,
+) -> DictionaryObject:
+    reader = PdfReader(str(output), strict=True)
+    mapping = manifest["sourcePages"][source_page_index]
+    annotations = reader.pages[mapping["virtualPageIndex"]]["/Annots"]
+    return next(
+        item.get_object()
+        for item in annotations.get_object()
+        if int(item.get_object()["/SNSourcePage"]) == source_page_index
+    )
+
+
+def transform_point(
+    x: float, y: float, transform: list[float]
+) -> tuple[float, float]:
+    a, b, c, d, e, f = transform
+    return (a * x + c * y + e, b * x + d * y + f)
+
+
+def transform_rect(rect: object, transform: list[float]) -> list[float]:
+    x0, y0, x1, y1 = [float(value) for value in rect]
+    a, b, c, d, e, f = transform
+    points = [
+        (a * x + c * y + e, b * x + d * y + f)
+        for x, y in ((x0, y0), (x0, y1), (x1, y0), (x1, y1))
+    ]
+    return [
+        min(point[0] for point in points),
+        min(point[1] for point in points),
+        max(point[0] for point in points),
+        max(point[1] for point in points),
+    ]
+
+
+def destination_page_index(reader: PdfReader, annotation: object) -> int:
+    destination = annotation.get_object()["/Dest"]
+    target = destination[0]
+    for index, page in enumerate(reader.pages):
+        if page.indirect_reference == target:
+            return index
+    raise AssertionError("Destination page reference was not found")
+
+
+class VirtualSpreadTests(unittest.TestCase):
+    def test_v024_r2_hardware_pass_is_recorded_in_both_release_records(
+        self,
+    ) -> None:
+        regression = (ROOT / "REGRESSION.md").read_text(encoding="utf-8")
+        hardware = (
+            ROOT / "virtual_spread" / "HARDWARE_VALIDATION.md"
+        ).read_text(encoding="utf-8")
+
+        regression_heading = (
+            "## v0.0.24-r2 mixed-menu authority and blocked-tap "
+            "consumption - LOCAL PASS / HARDWARE PASS"
+        )
+        hardware_heading = (
+            "## v0.0.24-r2 link-menu and blocked-tap correction - "
+            "HARDWARE PASS"
+        )
+
+        def release_section(document: str, heading: str) -> str:
+            self.assertIn(heading, document)
+            remainder = document.split(heading, 1)[1]
+            self.assertIn("\n## ", remainder)
+            return heading + remainder.split("\n## ", 1)[0]
+
+        regression_section = release_section(regression, regression_heading)
+        hardware_section = release_section(hardware, hardware_heading)
+        for section in (regression_section, hardware_section):
+            self.assertNotIn("HARDWARE PENDING", section)
+            self.assertNotRegex(
+                section.lower(),
+                r"(?s)hardware (?:matrix|validation|gate).*remains? pending",
+            )
+            self.assertIn("Supernote Nomad", section)
+            self.assertRegex(section, r"firmware\s+fingerprint")
+            self.assertIn(
+                "Supernote/Supernote/Supernote:11/RQ2A.210505.003/"
+                "eng.supern.20260616.100032:user/release-keys",
+                section,
+            )
+            self.assertIn("SupernoteDocument `1.02.446`", section)
+            self.assertIn(
+                "76ea0b71b518fb3c7c969fdd9bd9c1eb08dd53e6",
+                section,
+            )
+            self.assertIn(
+                "be2427543b8e41d6c4e5e42131fcfda92cbe8e82eeafa32582aa55083558fd38",
+                section,
+            )
+            self.assertIn("DocumentLinkJumpView2", section)
+            self.assertIn("link_jump_queued", section)
+            self.assertIn("`ENOENT`", section)
+            self.assertRegex(section, r"removed\s+from\s+the\s+Nomad")
+
+    def test_source_pdf_version_is_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source-1.7.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+
+            source_bytes = source.read_bytes()
+            self.assertTrue(source_bytes.startswith(b"%PDF-1."))
+            source.write_bytes(b"%PDF-1.7" + source_bytes[8:])
+            self.assertEqual(
+                PdfReader(str(source), strict=True).pdf_header,
+                "%PDF-1.7",
+            )
+
+            build_virtual_spread(source, output, manifest_path)
+
+            self.assertEqual(
+                PdfReader(str(output), strict=True).pdf_header,
+                "%PDF-1.7",
+            )
+
+    def test_rtl_cover_pairing(self) -> None:
+        self.assertEqual(
+            build_pairs(7, "rtl", True),
+            [(None, 0), (2, 1), (4, 3), (6, 5)],
+        )
+
+    def test_ltr_generation_is_rejected_before_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Unsupported virtual-spread direction: ltr",
+            ):
+                build_virtual_spread(
+                    source, output, manifest_path, direction="ltr"
+                )
+
+            with self.assertRaisesRegex(VirtualSpreadError, "direction: ltr"):
+                build_pairs(5, "ltr", False)
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+            self.assertFalse(_publication_lock_path(output).exists())
+
+    def test_forced_replacement_requires_all_layout_options(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                cover_separate=False,
+                spread_width=1200.0,
+                spread_height=900.0,
+                gutter=12.0,
+            )
+            output_before = output.read_bytes()
+            manifest_before = manifest_path.read_bytes()
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Forced replacement requires explicit cover, spread width, "
+                "spread height, and gutter options",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    force=True,
+                )
+
+            self.assertEqual(output.read_bytes(), output_before)
+            self.assertEqual(manifest_path.read_bytes(), manifest_before)
+
+            regenerated = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                cover_separate=False,
+                spread_width=1200.0,
+                spread_height=900.0,
+                gutter=12.0,
+                force=True,
+            )
+            self.assertIs(regenerated["coverSeparate"], False)
+            self.assertEqual(regenerated["output"]["spreadSize"], [1200.0, 900.0])
+            self.assertEqual(regenerated["output"]["gutter"], 12.0)
+
+    def test_odd_pages_text_and_links_survive(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "odd-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                direction="rtl",
+                cover_separate=True,
+            )
+
+            self.assertIs(manifest["coverSeparate"], True)
+            self.assertEqual(manifest["output"]["pageCount"], 4)
+            self.assertEqual(len(manifest["sourcePages"]), 7)
+            self.assertEqual(
+                [
+                    (
+                        None if spread["left"] is None else
+                            spread["left"]["sourcePageIndex"],
+                        None if spread["right"] is None else
+                            spread["right"]["sourcePageIndex"],
+                    )
+                    for spread in manifest["spreads"]
+                ],
+                [(None, 0), (2, 1), (4, 3), (6, 5)],
+            )
+            self.assertEqual(
+                [
+                    (mapping["virtualPageIndex"], mapping["side"])
+                    for mapping in manifest["sourcePages"]
+                ],
+                [
+                    (0, "right"),
+                    (1, "right"), (1, "left"),
+                    (2, "right"), (2, "left"),
+                    (3, "right"), (3, "left"),
+                ],
+            )
+            self.assertEqual(len(manifest["links"]), 4)
+            self.assertEqual(
+                [link["sourceSide"] for link in manifest["links"]],
+                ["right", "right", "right", "left"],
+            )
+            self.assertEqual(
+                json.loads(manifest_path.read_text(encoding="utf-8"))["schema"],
+                SCHEMA,
+            )
+            self.assertEqual(
+                SCHEMA,
+                "techrebbe.supernote.virtual-spread/v2",
+            )
+
+            reader = PdfReader(str(output), strict=True)
+            self.assertEqual(len(reader.pages), 4)
+            for page in reader.pages:
+                self.assertAlmostEqual(float(page.mediabox.width), 864.0)
+                self.assertAlmostEqual(float(page.mediabox.height), 648.0)
+
+            first_text = reader.pages[0].extract_text() or ""
+            second_text = reader.pages[1].extract_text() or ""
+            self.assertIn("ODD SOURCE PAGE 1", first_text)
+            self.assertIn("ODD SOURCE PAGE 2", second_text)
+            self.assertIn("ODD SOURCE PAGE 3", second_text)
+
+            source_two_annotations = reader.pages[1]["/Annots"]
+            source_six_annotations = reader.pages[3]["/Annots"]
+            self.assertEqual(len(source_two_annotations), 2)
+            self.assertEqual(len(source_six_annotations), 2)
+            expected_links = (
+                (source_two_annotations[0], 3, "/Right", 1),
+                (source_two_annotations[1], 3, "/Left", 1),
+                (source_six_annotations[0], 1, "/Right", 5),
+                (source_six_annotations[1], 1, "/Left", 6),
+            )
+            for annotation, target_page, target_side, source_page in expected_links:
+                self.assertEqual(
+                    destination_page_index(reader, annotation),
+                    target_page,
+                )
+                self.assertEqual(
+                    annotation.get_object()["/SNTargetSide"],
+                    target_side,
+                )
+                self.assertEqual(
+                    annotation.get_object()["/SNSourcePage"],
+                    source_page,
+                )
+
+            for mapping in manifest["sourcePages"]:
+                left, bottom, right, top = mapping["destination"]
+                slot_left, slot_bottom, slot_right, slot_top = mapping["slot"]
+                self.assertGreater(right, left)
+                self.assertGreater(top, bottom)
+                self.assertGreaterEqual(left, slot_left - 0.001)
+                self.assertGreaterEqual(bottom, slot_bottom - 0.001)
+                self.assertLessEqual(right, slot_right + 0.001)
+                self.assertLessEqual(top, slot_top + 0.001)
+
+    def test_document_outlines_fail_closed_before_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "outlined-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_outline_entry(source)
+            source_bytes = source.read_bytes()
+            output.write_bytes(b"existing-output")
+            manifest_path.write_bytes(b"existing-manifest")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Document outlines are not supported",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(output.read_bytes(), b"existing-output")
+            self.assertEqual(
+                manifest_path.read_bytes(), b"existing-manifest"
+            )
+
+    def test_document_open_action_fails_closed_before_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "open-action-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_document_open_action(source)
+            source_bytes = source.read_bytes()
+            output.write_bytes(b"existing-output")
+            manifest_path.write_bytes(b"existing-manifest")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Document open actions are not supported",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(output.read_bytes(), b"existing-output")
+            self.assertEqual(
+                manifest_path.read_bytes(), b"existing-manifest"
+            )
+
+    def test_supported_catalog_view_settings_are_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, page_layout in enumerate(("/SinglePage", "/OneColumn")):
+                with self.subTest(page_layout=page_layout):
+                    source = root / f"view-settings-source-{index}.pdf"
+                    output = root / f"spread-{index}.pdf"
+                    manifest_path = root / f"spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    add_document_view_settings(source, page_layout)
+                    build_virtual_spread(source, output, manifest_path)
+                    catalog = PdfReader(
+                        str(output), strict=True
+                    ).trailer["/Root"]
+                    self.assertEqual(catalog.get("/PageMode"), "/FullScreen")
+                    self.assertEqual(catalog.get("/PageLayout"), page_layout)
+
+    def test_multi_page_catalog_layouts_fail_closed_before_publication(
+        self,
+    ) -> None:
+        layouts = (
+            "/TwoColumnLeft",
+            "/TwoColumnRight",
+            "/TwoPageLeft",
+            "/TwoPageRight",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, layout in enumerate(layouts):
+                with self.subTest(layout=layout):
+                    source = root / f"multi-layout-source-{index}.pdf"
+                    output = root / f"multi-layout-spread-{index}.pdf"
+                    manifest_path = (
+                        root / f"multi-layout-spread-{index}.pdf.json"
+                    )
+                    create_odd_page_fixture(source)
+                    add_document_view_settings(source, layout)
+                    source_bytes = source.read_bytes()
+                    output.write_bytes(b"existing-output")
+                    manifest_path.write_bytes(b"existing-manifest")
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "Multi-page document catalog /PageLayout",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            force=True,
+                            **EXPLICIT_DEFAULT_LAYOUT,
+                        )
+
+                    self.assertEqual(source.read_bytes(), source_bytes)
+                    self.assertEqual(output.read_bytes(), b"existing-output")
+                    self.assertEqual(
+                        manifest_path.read_bytes(), b"existing-manifest"
+                    )
+
+    def test_optional_content_catalog_fails_closed_before_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "optional-content-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_optional_content_catalog(source)
+            source_bytes = source.read_bytes()
+            output.write_bytes(b"existing-output")
+            manifest_path.write_bytes(b"existing-manifest")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Optional-content catalogs are not supported",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(output.read_bytes(), b"existing-output")
+            self.assertEqual(
+                manifest_path.read_bytes(), b"existing-manifest"
+            )
+
+    def test_unknown_document_catalog_entry_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "viewer-preferences-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_viewer_preferences(source)
+            source_bytes = source.read_bytes()
+            output.write_bytes(b"existing-output")
+            manifest_path.write_bytes(b"existing-manifest")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Unsupported document catalog entries: /ViewerPreferences",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(output.read_bytes(), b"existing-output")
+            self.assertEqual(
+                manifest_path.read_bytes(), b"existing-manifest"
+            )
+
+    def test_page_behaviors_fail_closed_before_publication(self) -> None:
+        cases = (
+            ("duration", "Page durations are not supported"),
+            ("transition", "Page transitions are not supported"),
+            ("additional-action", "Page additional actions are not supported"),
+        )
+        for behavior, message in cases:
+            with self.subTest(behavior=behavior):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    source = root / f"{behavior}-source.pdf"
+                    output = root / "spread.pdf"
+                    manifest_path = root / "spread.pdf.json"
+                    create_odd_page_fixture(source)
+                    add_page_behavior(source, behavior)
+                    source_bytes = source.read_bytes()
+                    output.write_bytes(b"existing-output")
+                    manifest_path.write_bytes(b"existing-manifest")
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        message,
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            force=True,
+                            **EXPLICIT_DEFAULT_LAYOUT,
+                        )
+
+                    self.assertEqual(source.read_bytes(), source_bytes)
+                    self.assertEqual(output.read_bytes(), b"existing-output")
+                    self.assertEqual(
+                        manifest_path.read_bytes(), b"existing-manifest"
+                    )
+
+    def test_unknown_source_page_entry_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "user-unit-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_page_behavior(source, "user-unit")
+            source_bytes = source.read_bytes()
+            output.write_bytes(b"existing-output")
+            manifest_path.write_bytes(b"existing-manifest")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Unsupported source page entries on page 1: /UserUnit",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(output.read_bytes(), b"existing-output")
+            self.assertEqual(
+                manifest_path.read_bytes(), b"existing-manifest"
+            )
+
+    def test_page_rotation_requires_exact_pdf_quarter_turn_integer(self) -> None:
+        cases = (
+            ("string", TextStringObject("90")),
+            ("fractional", FloatObject(90.5)),
+            ("not-quarter-turn", NumberObject(45)),
+        )
+        for label, value in cases:
+            with self.subTest(value=label):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    source = root / f"rotation-{label}.pdf"
+                    output = root / "spread.pdf"
+                    manifest_path = root / "spread.pdf.json"
+                    create_odd_page_fixture(source)
+                    add_invalid_page_rotation(source, value)
+                    source_bytes = source.read_bytes()
+                    output.write_bytes(b"existing-output")
+                    manifest_path.write_bytes(b"existing-manifest")
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "Source page /Rotate must be a PDF integer multiple of 90",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            force=True,
+                            **EXPLICIT_DEFAULT_LAYOUT,
+                        )
+
+                    self.assertEqual(source.read_bytes(), source_bytes)
+                    self.assertEqual(output.read_bytes(), b"existing-output")
+                    self.assertEqual(
+                        manifest_path.read_bytes(), b"existing-manifest"
+                    )
+
+    def test_typed_document_information_is_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "typed-information-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_typed_document_information(source)
+
+            build_virtual_spread(source, output, manifest_path)
+
+            information = PdfReader(str(output), strict=True).trailer["/Info"]
+            trapped = information.raw_get("/Trapped")
+            number = information.raw_get("/CustomNumber")
+            flag = information.raw_get("/CustomFlag")
+            self.assertIsInstance(trapped, NameObject)
+            self.assertEqual(trapped, "/True")
+            self.assertIsInstance(number, NumberObject)
+            self.assertEqual(number, 7)
+            self.assertIsInstance(flag, BooleanObject)
+            self.assertTrue(flag.value)
+
+    def test_unsupported_document_information_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "unsupported-information-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_unsupported_document_information(source)
+            source_bytes = source.read_bytes()
+            output.write_bytes(b"existing-output")
+            manifest_path.write_bytes(b"existing-manifest")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Unsupported document information value for /CustomArray",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(output.read_bytes(), b"existing-output")
+            self.assertEqual(
+                manifest_path.read_bytes(), b"existing-manifest"
+            )
+
+    def test_invalid_standard_document_information_fails_closed(self) -> None:
+        cases = (
+            (
+                "numeric-title",
+                "/Title",
+                NumberObject(7),
+                "Invalid text document information value for /Title",
+            ),
+            (
+                "string-trapped",
+                "/Trapped",
+                TextStringObject("/True"),
+                "Invalid document information /Trapped value",
+            ),
+        )
+        for label, key, value, message in cases:
+            with self.subTest(value=label):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    source = root / f"{label}-source.pdf"
+                    output = root / "spread.pdf"
+                    manifest_path = root / "spread.pdf.json"
+                    create_odd_page_fixture(source)
+                    add_invalid_standard_document_information(source, key, value)
+                    source_bytes = source.read_bytes()
+                    output.write_bytes(b"existing-output")
+                    manifest_path.write_bytes(b"existing-manifest")
+
+                    with self.assertRaisesRegex(VirtualSpreadError, message):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            force=True,
+                            **EXPLICIT_DEFAULT_LAYOUT,
+                        )
+
+                    self.assertEqual(source.read_bytes(), source_bytes)
+                    self.assertEqual(output.read_bytes(), b"existing-output")
+                    self.assertEqual(
+                        manifest_path.read_bytes(), b"existing-manifest"
+                    )
+
+    def test_pdf_authorities_are_embedded_and_tamper_evident(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                direction="rtl",
+                cover_separate=True,
+            )
+
+            source_authority = manifest["source"]["sha256"]
+            authority = _link_authority_sha256(manifest["links"])
+            self.assertEqual(
+                manifest["output"]["linkAuthoritySha256"],
+                authority,
+            )
+            metadata = PdfReader(str(output), strict=True).metadata
+            self.assertEqual(
+                metadata["/SNVirtualSpreadSourceSHA256"],
+                source_authority,
+            )
+            self.assertEqual(
+                metadata["/SNVirtualSpreadLinksSHA256"],
+                authority,
+            )
+            layout_record = _canonical_layout(
+                "rtl", True, 7, 4, 864.0, 648.0, 0.0
+            )
+            self.assertEqual(
+                layout_record,
+                "v1|layout|rtl|1|7|4|408b000000000000|"
+                "4084400000000000|0000000000000000",
+            )
+            layout_authority = _layout_authority_sha256(
+                "rtl", True, 7, 4, 864.0, 648.0, 0.0
+            )
+            self.assertEqual(
+                layout_authority,
+                "53d5b0b6c97118392220518325c8ee23f1a81d04bf430e01c893d88c490a4307",
+            )
+            self.assertEqual(
+                manifest["output"]["layoutAuthoritySha256"],
+                layout_authority,
+            )
+            self.assertEqual(
+                metadata["/SNVirtualSpreadLayoutSHA256"],
+                layout_authority,
+            )
+            # Seven source pages produce four spreads with either cover mode.
+            # The layout digest must still distinguish their different parity.
+            self.assertEqual(manifest["output"]["pageCount"], 4)
+            self.assertNotEqual(
+                _layout_authority_sha256(
+                    "rtl", False, 7, 4, 864.0, 648.0, 0.0
+                ),
+                layout_authority,
+            )
+            with output.open("rb") as stream:
+                stream.seek(max(0, output.stat().st_size - 4096))
+                tail = stream.read()
+            source_marker = (
+                SOURCE_AUTHORITY_MARKER
+                + source_authority.encode("ascii")
+                + b"\n"
+            )
+            layout_marker = (
+                LAYOUT_AUTHORITY_MARKER
+                + layout_authority.encode("ascii")
+                + b"\n"
+            )
+            link_marker = (
+                LINK_AUTHORITY_MARKER + authority.encode("ascii") + b"\n"
+            )
+            self.assertEqual(tail.count(source_marker), 1)
+            self.assertEqual(tail.count(layout_marker), 1)
+            self.assertEqual(tail.count(link_marker), 1)
+            self.assertEqual(
+                tail.index(source_marker) + len(source_marker),
+                tail.index(layout_marker),
+            )
+            self.assertEqual(
+                tail.index(layout_marker) + len(layout_marker),
+                tail.index(link_marker),
+            )
+            self.assertEqual(
+                tail.index(link_marker) + len(link_marker),
+                tail.rindex(b"startxref"),
+            )
+
+            tampered_links = json.loads(json.dumps(manifest["links"]))
+            tampered_links[0]["targetSourcePage"] = 6
+            tampered_links[0]["targetSide"] = "left"
+            self.assertEqual(tampered_links[0]["targetOutputPage"], 3)
+            self.assertNotEqual(
+                _link_authority_sha256(tampered_links),
+                authority,
+            )
+            self.assertNotEqual(_link_authority_sha256([]), authority)
+
+    def test_windows_namespace_changes_always_request_write_through(self) -> None:
+        self.assertEqual(
+            _windows_move_flags(False),
+            MOVEFILE_WRITE_THROUGH,
+        )
+        self.assertEqual(
+            _windows_move_flags(True),
+            MOVEFILE_WRITE_THROUGH | MOVEFILE_REPLACE_EXISTING,
+        )
+
+    def test_publication_marker_paths_use_filesystem_case_semantics(
+        self,
+    ) -> None:
+        windows_normcase = lambda value: value.replace("/", "\\").lower()
+        expected = Path("C:/Books/Spread.pdf")
+        with mock.patch(
+            "generate_virtual_spread.os.path.normcase",
+            side_effect=windows_normcase,
+        ), mock.patch(
+            "generate_virtual_spread._lexical_absolute",
+            return_value=expected,
+        ):
+            self.assertTrue(
+                _publication_path_matches(
+                    "c:\\books\\SPREAD.PDF",
+                    expected,
+                )
+            )
+            self.assertFalse(
+                _publication_path_matches(
+                    "c:\\books\\other.pdf",
+                    expected,
+                )
+            )
+            self.assertFalse(
+                _publication_path_matches(
+                    "c:\\books\\folder\\..\\spread.pdf",
+                    expected,
+                )
+            )
+            self.assertFalse(_publication_path_matches(None, expected))
+
+    def test_runtime_manifest_uses_output_derived_case_spelling(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "Spread.PDF"
+            caller_manifest = root / "spread.pdf.JSON"
+            expected_manifest = root / "Spread.PDF.json"
+            windows_normcase = lambda value: value.replace("/", "\\").lower()
+
+            with mock.patch(
+                "generate_virtual_spread.os.path.normcase",
+                side_effect=windows_normcase,
+            ):
+                selected = _require_runtime_manifest_path(
+                    output,
+                    caller_manifest,
+                )
+
+            self.assertEqual(selected, expected_manifest)
+            self.assertNotEqual(str(selected), str(caller_manifest))
+
+    @unittest.skipUnless(
+        os.name == "nt",
+        "case-equivalent publication is specific to Windows",
+    )
+    def test_case_equivalent_manifest_is_republished_with_exact_name(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "Spread.PDF"
+            caller_manifest = root / "spread.pdf.JSON"
+            expected_manifest = root / "Spread.PDF.json"
+            caller_manifest.write_bytes(b"old-manifest")
+            staged = root / ".Spread.PDF.json.tmp"
+            staged.write_bytes(b"new-manifest")
+
+            selected = _require_runtime_manifest_path(
+                output,
+                caller_manifest,
+            )
+            _durable_replace(staged, selected)
+
+            self.assertEqual(selected, expected_manifest)
+            self.assertEqual(expected_manifest.read_bytes(), b"new-manifest")
+            self.assertIn(
+                expected_manifest.name,
+                tuple(path.name for path in root.iterdir()),
+            )
+            self.assertNotIn(
+                caller_manifest.name,
+                tuple(path.name for path in root.iterdir()),
+            )
+
+    def test_source_change_before_publication_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+
+            def write_then_mutate(
+                path: Path,
+                value: dict[str, object],
+                ownership_guard: object = None,
+                retained_descriptor: int | None = None,
+            ) -> None:
+                _write_json(
+                    path,
+                    value,
+                    ownership_guard,
+                    retained_descriptor=retained_descriptor,
+                )
+                source.write_bytes(source.read_bytes() + b"\n% changed\n")
+
+            with mock.patch(
+                "generate_virtual_spread._write_json",
+                side_effect=write_then_mutate,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "changed before publication",
+                ):
+                    build_virtual_spread(source, output, manifest_path)
+
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+            retained_artifacts = tuple(
+                path for path in root.iterdir()
+                if ".retained." in path.name
+            )
+            self.assertTrue(retained_artifacts)
+            self.assertTrue(all(
+                path.is_file() and path.stat().st_size > 0
+                for path in retained_artifacts
+            ))
+            self.assertEqual(
+                sorted(
+                    path.name for path in root.iterdir()
+                    if path not in retained_artifacts
+                ),
+                sorted([
+                    "source.pdf",
+                    _publication_lock_path(output).name,
+                ]),
+            )
+
+    def test_source_replacement_at_publication_commit_rolls_back_pair(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            replacement = root / "replacement.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            build_virtual_spread(source, output, manifest_path)
+            previous_output = output.read_bytes()
+            previous_manifest = manifest_path.read_bytes()
+
+            create_odd_page_fixture(replacement)
+            replacement.write_bytes(
+                replacement.read_bytes() + b"\n% replacement source\n"
+            )
+            replacement_bytes = replacement.read_bytes()
+            real_durable_replace = _durable_replace
+            replaced_at_commit = False
+
+            def move_then_replace_source(
+                moving_source: Path,
+                target: Path,
+                replace_existing: bool,
+                ownership_guard: object = None,
+                expected_source_identity: SourceIdentity | None = None,
+            ) -> SourceIdentity:
+                nonlocal replaced_at_commit
+                moved_identity = real_durable_replace(
+                    moving_source,
+                    target,
+                    replace_existing=replace_existing,
+                    ownership_guard=ownership_guard,
+                    expected_source_identity=expected_source_identity,
+                )
+                if (
+                    not replaced_at_commit
+                    and _lexical_absolute(target) == _lexical_absolute(output)
+                    and moving_source.name == f".{output.name}.tmp"
+                ):
+                    os.replace(replacement, source)
+                    replaced_at_commit = True
+                return moved_identity
+
+            with mock.patch(
+                "generate_virtual_spread._durable_replace",
+                side_effect=move_then_replace_source,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Source PDF changed before publication",
+                ):
+                    build_virtual_spread(
+                        source,
+                        output,
+                        manifest_path,
+                        force=True,
+                        **EXPLICIT_DEFAULT_LAYOUT,
+                    )
+
+            self.assertTrue(replaced_at_commit)
+            self.assertEqual(source.read_bytes(), replacement_bytes)
+            self.assertEqual(output.read_bytes(), previous_output)
+            self.assertEqual(manifest_path.read_bytes(), previous_manifest)
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            self.assertFalse(marker.exists())
+            self.assertFalse(output_backup.exists())
+            self.assertFalse(manifest_backup.exists())
+
+    def test_source_change_during_snapshot_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            stable = _identity(source.stat())
+            changed = SourceIdentity(
+                device=stable.device,
+                inode=stable.inode,
+                size=stable.size,
+                modified_ns=stable.modified_ns,
+                changed_ns=stable.changed_ns + 1,
+            )
+
+            with mock.patch(
+                "generate_virtual_spread._identity",
+                side_effect=(stable, stable, changed, changed),
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "changed while snapshotting",
+                ):
+                    build_virtual_spread(source, output, manifest_path)
+
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+            self.assertEqual(
+                sorted(path.name for path in root.iterdir()),
+                sorted([
+                    "source.pdf",
+                    _publication_lock_path(output).name,
+                ]),
+            )
+
+    def test_content_change_during_snapshot_is_rejected_with_stable_metadata(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            stable = _identity(source.stat())
+            real_hash = _sha256_open_file_exact
+            changed = False
+
+            def mutate_then_hash(
+                stream: object,
+                expected_size: int,
+                label: str,
+            ) -> str:
+                nonlocal changed
+                if not changed:
+                    contents = bytearray(source.read_bytes())
+                    contents[len(contents) // 2] ^= 1
+                    source.write_bytes(contents)
+                    changed = True
+                return real_hash(
+                    stream,  # type: ignore[arg-type]
+                    expected_size,
+                    label,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._identity",
+                return_value=stable,
+            ), mock.patch(
+                "generate_virtual_spread._sha256_open_file_exact",
+                side_effect=mutate_then_hash,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "content changed while snapshotting",
+                ):
+                    build_virtual_spread(source, output, manifest_path)
+
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+            self.assertEqual(
+                sorted(path.name for path in root.iterdir()),
+                sorted([
+                    "source.pdf",
+                    _publication_lock_path(output).name,
+                ]),
+            )
+
+    def test_content_change_before_publication_is_rejected_with_stable_metadata(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            stable = _identity(source.stat())
+            real_identity = _identity
+            changed_contents = bytearray(source.read_bytes())
+            changed_contents[len(changed_contents) // 2] ^= 1
+
+            def stable_source_identity(
+                value: os.stat_result,
+            ) -> SourceIdentity:
+                actual = real_identity(value)
+                if (
+                    actual.device == stable.device
+                    and actual.inode == stable.inode
+                ):
+                    return stable
+                return actual
+
+            def write_then_mutate(
+                path: Path,
+                value: dict[str, object],
+                ownership_guard: object = None,
+                retained_descriptor: int | None = None,
+            ) -> None:
+                _write_json(
+                    path,
+                    value,
+                    ownership_guard,
+                    retained_descriptor=retained_descriptor,
+                )
+                source.write_bytes(changed_contents)
+
+            with mock.patch(
+                "generate_virtual_spread._identity",
+                side_effect=stable_source_identity,
+            ), mock.patch(
+                "generate_virtual_spread._write_json",
+                side_effect=write_then_mutate,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "content changed before publication",
+                ):
+                    build_virtual_spread(source, output, manifest_path)
+
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+            retained_artifacts = tuple(
+                path for path in root.iterdir()
+                if ".retained." in path.name
+            )
+            self.assertTrue(retained_artifacts)
+            self.assertTrue(all(
+                path.is_file() and path.stat().st_size > 0
+                for path in retained_artifacts
+            ))
+            self.assertEqual(
+                sorted(
+                    path.name for path in root.iterdir()
+                    if path not in retained_artifacts
+                ),
+                sorted([
+                    "source.pdf",
+                    _publication_lock_path(output).name,
+                ]),
+            )
+
+    def test_output_and_manifest_paths_must_be_distinct(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            collision = root / "collision.pdf"
+            create_odd_page_fixture(source)
+
+            with self.assertRaisesRegex(VirtualSpreadError, "must be distinct"):
+                build_virtual_spread(
+                    source,
+                    collision,
+                    collision,
+                    force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+            self.assertFalse(collision.exists())
+
+    def test_distinct_paths_follow_host_case_semantics(self) -> None:
+        windows_normcase = lambda value: value.replace("/", "\\").lower()
+        with mock.patch(
+            "generate_virtual_spread.os.path.normcase",
+            side_effect=windows_normcase,
+        ):
+            self.assertTrue(
+                _filesystem_paths_collide(
+                    Path("C:/Books/Book.pdf"),
+                    Path("c:/books/book.PDF"),
+                )
+            )
+            with self.assertRaisesRegex(VirtualSpreadError, "must be distinct"):
+                _require_distinct_publication_paths(
+                    Path("C:/Books/Book.pdf"),
+                    Path("c:/books/book.PDF"),
+                    Path("C:/Books/book.PDF.json"),
+                )
+
+    def test_existing_hardlink_source_output_is_rejected_without_mutation(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "output.pdf"
+            manifest_path = root / "output.pdf.json"
+            create_odd_page_fixture(source)
+            source_bytes = source.read_bytes()
+            try:
+                os.link(source, output)
+            except OSError as error:
+                self.skipTest(f"hard links unavailable: {error}")
+
+            with self.assertRaisesRegex(VirtualSpreadError, "must be distinct"):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(output.read_bytes(), source_bytes)
+            self.assertFalse(manifest_path.exists())
+
+    def test_path_identity_inspection_error_fails_closed(self) -> None:
+        with mock.patch(
+            "generate_virtual_spread.os.path.samefile",
+            side_effect=PermissionError("simulated identity denial"),
+        ):
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot verify publication path distinctness",
+            ):
+                _require_distinct_publication_paths(
+                    Path("source.pdf"),
+                    Path("output.pdf"),
+                    Path("output.pdf.json"),
+                )
+
+    @unittest.skipUnless(
+        os.name != "nt" and hasattr(os, "mkfifo"),
+        "FIFO safety is exercised on POSIX hosts",
+    )
+    def test_source_fifo_is_rejected_before_open(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.pdf"
+            os.mkfifo(source)
+            placeholder = SourceIdentity(0, 0, 0, 0, 0)
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Source PDF must be a regular file",
+            ):
+                _require_source_snapshot(source, placeholder, "0" * 64)
+
+    @unittest.skipUnless(
+        os.name != "nt" and hasattr(os, "mkfifo"),
+        "FIFO descriptor safety is exercised on POSIX hosts",
+    )
+    def test_publication_sha256_rejects_nonblocking_fifo_descriptor(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "publication-candidate"
+            os.mkfifo(target)
+            descriptor = os.open(
+                target,
+                os.O_RDONLY | getattr(os, "O_NONBLOCK", 0),
+            )
+            with mock.patch(
+                "generate_virtual_spread._publication_open_file",
+                return_value=descriptor,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Publication file must be a regular file",
+                ):
+                    _publication_sha256(target, None)
+
+    def test_readonly_publication_open_is_always_nonblocking(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "candidate"
+            target.write_bytes(b"candidate")
+            real_open = os.open
+            observed_flags: list[int] = []
+
+            def recording_open(
+                path: object,
+                flags: int,
+                mode: int = 0o666,
+                *,
+                dir_fd: int | None = None,
+            ) -> int:
+                observed_flags.append(flags)
+                if dir_fd is None:
+                    return real_open(path, flags, mode)
+                return real_open(path, flags, mode, dir_fd=dir_fd)
+
+            with mock.patch(
+                "generate_virtual_spread.os.open",
+                side_effect=recording_open,
+            ):
+                _publication_file_evidence(
+                    target,
+                    "Publication candidate",
+                    None,
+                )
+
+            self.assertTrue(observed_flags)
+            nonblock = getattr(os, "O_NONBLOCK", 0)
+            if nonblock:
+                self.assertTrue(all(flags & nonblock for flags in observed_flags))
+
+    def test_publication_evidence_rejects_growth_without_eof_hash(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "candidate"
+            target.write_bytes(b"captured")
+            exact_hash = _sha256_open_file_exact
+
+            def grow_then_hash(
+                stream: object,
+                expected_size: int,
+                label: str,
+            ) -> str:
+                with target.open("ab") as writer:
+                    writer.write(b"-growth")
+                    writer.flush()
+                    os.fsync(writer.fileno())
+                return exact_hash(stream, expected_size, label)
+
+            with mock.patch(
+                "generate_virtual_spread._sha256_open_file_exact",
+                side_effect=grow_then_hash,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "grew while reading",
+                ):
+                    _publication_file_evidence(
+                        target,
+                        "Publication candidate",
+                        None,
+                    )
+
+    @unittest.skipUnless(
+        os.name == "nt",
+        "case-equivalent path mutation is specific to Windows",
+    )
+    def test_case_equivalent_source_output_is_rejected_without_mutation(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "Book.pdf"
+            output = root / "book.pdf"
+            manifest_path = root / "book.pdf.json"
+            create_odd_page_fixture(source)
+            source_bytes = source.read_bytes()
+
+            with self.assertRaisesRegex(VirtualSpreadError, "must be distinct"):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertFalse(manifest_path.exists())
+            self.assertEqual(
+                [entry.name for entry in root.iterdir()],
+                [source.name],
+            )
+
+    def test_cli_reports_output_derived_manifest_spelling(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "Spread.PDF"
+            caller_manifest = root / "spread.pdf.JSON"
+            generated = {
+                "source": {"pageCount": 2},
+                "output": {
+                    "path": str(output),
+                    "pageCount": 1,
+                    "sha256": "a" * 64,
+                },
+            }
+            with mock.patch.object(
+                sys,
+                "argv",
+                [
+                    "generate_virtual_spread.py",
+                    str(source),
+                    str(output),
+                    "--manifest",
+                    str(caller_manifest),
+                ],
+            ), mock.patch(
+                "generate_virtual_spread.build_virtual_spread",
+                return_value=generated,
+            ), mock.patch("builtins.print") as print_mock:
+                self.assertEqual(main(), 0)
+
+            messages = [call.args[0] for call in print_mock.call_args_list]
+            self.assertIn(
+                "Mapping manifest:   " + str(Path(str(output) + ".json")),
+                messages,
+            )
+            self.assertNotIn(
+                "Mapping manifest:   " + str(_lexical_absolute(caller_manifest)),
+                messages,
+            )
+
+    def test_source_reserved_artifact_collisions_fail_before_locking(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sample_output = root / "sample" / "spread.pdf"
+            reserved_count = len(_publication_reserved_paths(sample_output))
+            for index in range(reserved_count):
+                with self.subTest(index=index):
+                    case_root = root / str(index)
+                    case_root.mkdir()
+                    output = case_root / "spread.pdf"
+                    manifest_path = case_root / "spread.pdf.json"
+                    reserved = _publication_reserved_paths(output)
+                    source = reserved[index]
+                    create_odd_page_fixture(source)
+                    source_bytes = source.read_bytes()
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "reserved virtual-spread publication artifact",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            force=True,
+                            **EXPLICIT_DEFAULT_LAYOUT,
+                        )
+
+                    self.assertEqual(source.read_bytes(), source_bytes)
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+                    for artifact in reserved:
+                        if artifact != source:
+                            self.assertFalse(artifact.exists())
+
+    def test_indirect_annotation_array_is_dereferenced(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            make_annotation_array_indirect(source, 1)
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                direction="rtl",
+                cover_separate=True,
+            )
+
+            self.assertEqual(len(manifest["links"]), 4)
+            persisted_source = PdfReader(str(source), strict=True)
+            self.assertIsInstance(
+                persisted_source.pages[1].raw_get("/Annots"),
+                IndirectObject,
+            )
+            output_reader = PdfReader(str(output), strict=True)
+            self.assertEqual(
+                len(output_reader.pages[1]["/Annots"].get_object()),
+                2,
+            )
+
+    def test_indirect_link_destination_is_dereferenced(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            make_link_destination_indirect(source, 1, 0)
+
+            persisted_source = PdfReader(str(source), strict=True)
+            persisted_annotation = (
+                persisted_source.pages[1]["/Annots"].get_object()[0]
+                .get_object()
+            )
+            self.assertIsInstance(
+                persisted_annotation.raw_get("/Dest"),
+                IndirectObject,
+            )
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                direction="rtl",
+                cover_separate=True,
+            )
+
+            self.assertEqual(len(manifest["links"]), 4)
+            output_reader = PdfReader(str(output), strict=True)
+            first_link = output_reader.pages[1]["/Annots"].get_object()[0]
+            self.assertEqual(
+                destination_page_index(output_reader, first_link),
+                3,
+            )
+
+    def test_representable_internal_destinations_are_transformed(
+        self,
+    ) -> None:
+        cases = (
+            ("/Fit", (), "/FitR"),
+            ("/XYZ", (30.0, 160.0, 1.25), "/XYZ"),
+            ("/FitR", (10.0, 20.0, 100.0, 160.0), "/FitR"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, (mode, arguments, output_mode) in enumerate(cases):
+                with self.subTest(mode=mode):
+                    source = root / f"source-{index}.pdf"
+                    output = root / f"spread-{index}.pdf"
+                    manifest_path = root / f"spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    set_link_destination_mode(
+                        source,
+                        source_page_index=1,
+                        annotation_index=0,
+                        target_page_index=5,
+                        mode=mode,
+                        arguments=arguments,
+                    )
+
+                    manifest = build_virtual_spread(
+                        source,
+                        output,
+                        manifest_path,
+                        direction="rtl",
+                        cover_separate=True,
+                    )
+                    reader = PdfReader(str(output), strict=True)
+                    source_mapping = manifest["sourcePages"][1]
+                    target_mapping = manifest["sourcePages"][5]
+                    annotation = reader.pages[
+                        source_mapping["virtualPageIndex"]
+                    ]["/Annots"].get_object()[0].get_object()
+                    destination = annotation["/Dest"]
+
+                    self.assertEqual(str(destination[1]), output_mode)
+                    self.assertEqual(
+                        destination_page_index(reader, annotation),
+                        target_mapping["virtualPageIndex"],
+                    )
+                    transform = target_mapping["transform"]
+                    if mode == "/Fit":
+                        self.assertEqual(len(destination), 6)
+                        for actual, expected in zip(
+                            destination[2:6], target_mapping["destination"]
+                        ):
+                            self.assertAlmostEqual(
+                                float(actual), expected, places=4
+                            )
+                        self.assertEqual(
+                            manifest["links"][0]["targetView"],
+                            "fit-source-page",
+                        )
+                    elif mode == "/XYZ":
+                        expected_left, expected_top = transform_point(
+                            arguments[0], arguments[1], transform
+                        )
+                        self.assertAlmostEqual(
+                            float(destination[2]), expected_left, places=4
+                        )
+                        self.assertAlmostEqual(
+                            float(destination[3]), expected_top, places=4
+                        )
+                        target_scale = math.hypot(
+                            transform[0], transform[1]
+                        )
+                        self.assertNotAlmostEqual(
+                            target_scale, 1.0, places=4
+                        )
+                        self.assertAlmostEqual(
+                            float(destination[4]),
+                            arguments[2] / target_scale,
+                            places=4,
+                        )
+                    elif mode == "/FitR":
+                        expected_rectangle = transform_rect(
+                            arguments, transform
+                        )
+                        for actual, expected in zip(
+                            destination[2:6], expected_rectangle
+                        ):
+                            self.assertAlmostEqual(
+                                float(actual), expected, places=4
+                            )
+                    if mode != "/Fit":
+                        self.assertEqual(
+                            manifest["links"][0]["targetView"], "preserve"
+                        )
+
+    def test_fitr_destination_must_be_inside_target_crop_box(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target_box = (0.0, 0.0, 700.0, 200.0)
+            cases = (
+                (target_box[0] - 1.0, 20.0, 100.0, 160.0),
+                (10.0, target_box[1] - 1.0, 100.0, 160.0),
+                (10.0, 20.0, target_box[2] + 1.0, 160.0),
+                (10.0, 20.0, 100.0, target_box[3] + 1.0),
+            )
+            for index, rectangle in enumerate(cases):
+                with self.subTest(rectangle=rectangle):
+                    source = root / f"fitr-outside-{index}.pdf"
+                    output = root / f"fitr-outside-{index}-spread.pdf"
+                    manifest_path = output.with_suffix(".pdf.json")
+                    create_odd_page_fixture(source)
+                    actual_target_box = PdfReader(
+                        str(source), strict=True
+                    ).pages[5].cropbox
+                    self.assertEqual(
+                        tuple(float(value) for value in actual_target_box),
+                        target_box,
+                    )
+                    set_link_destination_mode(
+                        source,
+                        source_page_index=1,
+                        annotation_index=0,
+                        target_page_index=5,
+                        mode="/FitR",
+                        arguments=rectangle,
+                    )
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "internal destination /FitR rectangle extends "
+                        "outside target source /CropBox",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            direction="rtl",
+                            cover_separate=True,
+                        )
+
+    def test_xyz_destination_must_be_inside_target_crop_box(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target_box = (0.0, 0.0, 700.0, 200.0)
+            cases = (
+                ((target_box[0] - 1.0, 160.0, 1.25), "left"),
+                ((target_box[2] + 1.0, 160.0, 1.25), "left"),
+                ((30.0, target_box[1] - 1.0, 1.25), "top"),
+                ((30.0, target_box[3] + 1.0, 1.25), "top"),
+            )
+            for index, (arguments, coordinate) in enumerate(cases):
+                with self.subTest(arguments=arguments):
+                    source = root / f"xyz-outside-{index}.pdf"
+                    output = root / f"xyz-outside-{index}-spread.pdf"
+                    manifest_path = output.with_suffix(".pdf.json")
+                    create_odd_page_fixture(source)
+                    set_link_destination_mode(
+                        source,
+                        source_page_index=1,
+                        annotation_index=0,
+                        target_page_index=5,
+                        mode="/XYZ",
+                        arguments=arguments,
+                    )
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        f"internal destination /XYZ {coordinate} extends "
+                        "outside target source /CropBox",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            direction="rtl",
+                            cover_separate=True,
+                        )
+
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
+    def test_fitr_viewport_must_stay_inside_target_half(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "fitr-viewport-source.pdf"
+            output = root / "fitr-viewport-spread.pdf"
+            manifest_path = output.with_suffix(".pdf.json")
+            create_odd_page_fixture(source)
+            set_link_destination_mode(
+                source,
+                source_page_index=1,
+                annotation_index=0,
+                target_page_index=4,
+                mode="/FitR",
+                arguments=(0.0, 0.0, 200.0, 700.0),
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot preserve internal destination /FitR viewport "
+                "inside target half",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    direction="rtl",
+                    cover_separate=True,
+                )
+
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+
+    def test_fit_source_page_uses_authenticated_runtime_reset(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "fit-source-page.pdf"
+            output = root / "fit-source-page-spread.pdf"
+            manifest_path = output.with_suffix(".pdf.json")
+            create_odd_page_fixture(source)
+            set_link_destination_mode(
+                source,
+                source_page_index=1,
+                annotation_index=0,
+                target_page_index=4,
+                mode="/Fit",
+                arguments=(),
+            )
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                direction="rtl",
+                cover_separate=True,
+            )
+
+            self.assertEqual(
+                manifest["links"][0]["targetView"],
+                "fit-source-page",
+            )
+            reader = PdfReader(str(output), strict=True)
+            source_mapping = manifest["sourcePages"][1]
+            annotation = reader.pages[
+                source_mapping["virtualPageIndex"]
+            ]["/Annots"].get_object()[0].get_object()
+            self.assertEqual(str(annotation["/Dest"][1]), "/FitR")
+
+    def test_xyz_viewport_must_stay_inside_target_half(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cases = (
+                (432.0, 500.0, 4.0),
+                (0.0, 500.0, 1.0),
+                (0.0, 500.0, None),
+            )
+            for index, arguments in enumerate(cases):
+                with self.subTest(arguments=arguments):
+                    source = root / f"xyz-viewport-{index}.pdf"
+                    output = root / f"xyz-viewport-{index}-spread.pdf"
+                    manifest_path = output.with_suffix(".pdf.json")
+                    create_odd_page_fixture(source)
+                    set_link_destination_mode(
+                        source,
+                        source_page_index=1,
+                        annotation_index=0,
+                        target_page_index=6,
+                        mode="/XYZ",
+                        arguments=arguments,
+                    )
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "Cannot preserve internal destination /XYZ "
+                        "viewport inside target half",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            direction="rtl",
+                            cover_separate=True,
+                        )
+
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
+    def test_xyz_zoom_requires_a_uniform_target_transform(self) -> None:
+        self.assertAlmostEqual(
+            _destination_uniform_scale(
+                [0.0, 0.5, -0.5, 0.0, 10.0, 20.0], "/XYZ zoom"
+            ),
+            0.5,
+        )
+        invalid_transforms = (
+            [2.0, 0.0, 0.0, 3.0, 0.0, 0.0],
+            [1.0, 0.0, 0.25, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        )
+        for transform in invalid_transforms:
+            with self.subTest(transform=transform):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "non-uniform page transform",
+                ):
+                    _destination_uniform_scale(
+                        transform, "/XYZ zoom"
+                    )
+
+    def test_transformed_destination_coordinate_overflow_fails_closed(
+        self,
+    ) -> None:
+        writer = PdfWriter()
+        target_reference = writer._add_object(DictionaryObject())
+        source_mapping = {
+            "transform": [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            "sourceBox": [0.0, 0.0, 10.0, 10.0],
+        }
+        target_mapping = {
+            "transform": [1e308, 0.0, 0.0, 1e308, 0.0, 0.0],
+            "sourceBox": [0.0, 0.0, 10.0, 10.0],
+        }
+        cases = (
+            ArrayObject([
+                NullObject(),
+                NameObject("/XYZ"),
+                FloatObject(2.0),
+                FloatObject(2.0),
+                NullObject(),
+            ]),
+        )
+        for destination in cases:
+            with self.subTest(mode=str(destination[1])):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Invalid transformed internal destination coordinate",
+                ):
+                    _transformed_internal_destination(
+                        destination,
+                        target_reference,
+                        source_mapping,
+                        target_mapping,
+                        20.0,
+                        10.0,
+                    )
+
+    def test_xyz_zoom_underflow_and_negative_values_fail_closed(self) -> None:
+        writer = PdfWriter()
+        target_reference = writer._add_object(DictionaryObject())
+        source_mapping = {
+            "transform": [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            "sourceBox": [0.0, 0.0, 10.0, 10.0],
+            "slot": [0.0, 0.0, 10.0, 10.0],
+        }
+        underflow_mapping = {
+            "transform": [1e308, 0.0, 0.0, 1e308, 0.0, 0.0],
+            "sourceBox": [0.0, 0.0, 10.0, 10.0],
+            "slot": [0.0, 0.0, 10.0, 10.0],
+        }
+        underflow_destination = ArrayObject([
+            NullObject(),
+            NameObject("/XYZ"),
+            FloatObject(0.0),
+            FloatObject(0.0),
+            FloatObject(1e-320),
+        ])
+        with self.assertRaisesRegex(
+            VirtualSpreadError,
+            "Invalid transformed internal destination /XYZ zoom",
+        ):
+            _transformed_internal_destination(
+                underflow_destination,
+                target_reference,
+                source_mapping,
+                underflow_mapping,
+                20.0,
+                10.0,
+            )
+
+        zero_destination = ArrayObject([
+            NullObject(),
+            NameObject("/XYZ"),
+            FloatObject(0.0),
+            FloatObject(0.0),
+            FloatObject(0.0),
+        ])
+        with self.assertRaisesRegex(
+            VirtualSpreadError,
+            "Cannot preserve internal destination /XYZ viewport inside "
+            "target half",
+        ):
+            _transformed_internal_destination(
+                zero_destination,
+                target_reference,
+                source_mapping,
+                underflow_mapping,
+                20.0,
+                10.0,
+            )
+
+        negative_destination = ArrayObject([
+            NullObject(),
+            NameObject("/XYZ"),
+            NullObject(),
+            NullObject(),
+            FloatObject(-1.0),
+        ])
+        with self.assertRaisesRegex(
+            VirtualSpreadError,
+            "Invalid internal destination /XYZ zoom",
+        ):
+            _transformed_internal_destination(
+                negative_destination,
+                target_reference,
+                source_mapping,
+                source_mapping,
+                20.0,
+                10.0,
+            )
+
+    def test_null_top_destination_survives_with_bounded_viewport(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "matching-source.pdf"
+            output = root / "matching-spread.pdf"
+            manifest_path = root / "matching-spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_destination_mode(
+                source,
+                source_page_index=1,
+                annotation_index=0,
+                target_page_index=1,
+                mode="/XYZ",
+                arguments=(30.0, None, 3.0),
+            )
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                direction="rtl",
+                cover_separate=True,
+            )
+            reader = PdfReader(str(output), strict=True)
+            source_mapping = manifest["sourcePages"][1]
+            annotation = reader.pages[
+                source_mapping["virtualPageIndex"]
+            ]["/Annots"].get_object()[0].get_object()
+            destination = annotation["/Dest"]
+
+            self.assertEqual(str(destination[1]), "/XYZ")
+            self.assertIsInstance(destination[3], NullObject)
+
+    def test_unknown_xyz_left_fails_closed_even_matching_transform(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "unknown-left-source.pdf"
+            output = root / "unknown-left-spread.pdf"
+            manifest_path = root / "unknown-left-spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_destination_mode(
+                source,
+                source_page_index=1,
+                annotation_index=0,
+                target_page_index=1,
+                mode="/XYZ",
+                arguments=(None, 160.0, 3.0),
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot preserve internal destination /XYZ viewport inside "
+                "target half",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    direction="rtl",
+                    cover_separate=True,
+                )
+
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+
+    def test_null_destination_coordinates_reject_different_transforms(
+        self,
+    ) -> None:
+        cases = (
+            ("/XYZ", (None, 160.0, 1.25)),
+            ("/XYZ", (30.0, None, 1.25)),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, (mode, arguments) in enumerate(cases):
+                with self.subTest(mode=mode, arguments=arguments):
+                    source = root / f"different-source-{index}.pdf"
+                    output = root / f"different-spread-{index}.pdf"
+                    manifest_path = root / f"different-spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    set_link_destination_mode(
+                        source,
+                        source_page_index=1,
+                        annotation_index=0,
+                        target_page_index=5,
+                        mode=mode,
+                        arguments=arguments,
+                    )
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "Cannot preserve null",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            direction="rtl",
+                            cover_separate=True,
+                        )
+
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
+    def test_destination_operands_require_pdf_name_and_numbers(self) -> None:
+        cases = (
+            (
+                TextStringObject("/Fit"),
+                (),
+                "Invalid internal destination mode object",
+            ),
+            (
+                NameObject("/XYZ"),
+                (
+                    TextStringObject("30"),
+                    FloatObject(160.0),
+                    FloatObject(1.25),
+                ),
+                "Invalid internal destination /XYZ left",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, (mode, arguments, message) in enumerate(cases):
+                with self.subTest(mode=mode):
+                    source = root / f"operand-source-{index}.pdf"
+                    output = root / f"operand-spread-{index}.pdf"
+                    manifest_path = root / f"operand-spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    set_raw_link_destination(
+                        source,
+                        source_page_index=1,
+                        annotation_index=0,
+                        target_page_index=5,
+                        mode=mode,
+                        arguments=arguments,
+                    )
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        message,
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            direction="rtl",
+                            cover_separate=True,
+                        )
+
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
+    def test_link_quad_points_are_preserved_and_transformed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "quadpoints-source.pdf"
+            output = root / "quadpoints-spread.pdf"
+            manifest_path = root / "quadpoints-spread.pdf.json"
+            create_odd_page_fixture(source)
+            coordinates = (
+                15.0,
+                48.0,
+                80.0,
+                48.0,
+                15.0,
+                30.0,
+                80.0,
+                30.0,
+                100.0,
+                48.0,
+                165.0,
+                48.0,
+                100.0,
+                30.0,
+                165.0,
+                30.0,
+            )
+            set_link_quad_points(
+                source,
+                source_page_index=1,
+                annotation_index=0,
+                points=tuple(FloatObject(value) for value in coordinates),
+            )
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                direction="rtl",
+                cover_separate=True,
+            )
+            reader = PdfReader(str(output), strict=True)
+            source_mapping = manifest["sourcePages"][1]
+            annotation = reader.pages[
+                source_mapping["virtualPageIndex"]
+            ]["/Annots"].get_object()[0].get_object()
+            actual = annotation["/QuadPoints"]
+            expected: list[float] = []
+            for index in range(0, len(coordinates), 2):
+                expected.extend(
+                    transform_point(
+                        coordinates[index],
+                        coordinates[index + 1],
+                        source_mapping["transform"],
+                    )
+                )
+
+            self.assertEqual(len(actual), len(expected))
+            for actual_coordinate, expected_coordinate in zip(
+                actual, expected
+            ):
+                self.assertAlmostEqual(
+                    float(actual_coordinate), expected_coordinate, places=4
+                )
+
+    def test_link_geometry_must_remain_inside_effective_crop(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            boundary_source = root / "crop-boundary-source.pdf"
+            boundary_output = root / "crop-boundary-spread.pdf"
+            boundary_manifest = root / "crop-boundary-spread.pdf.json"
+            create_odd_page_fixture(boundary_source)
+            set_page_crop_box(boundary_source, 1, (15.0, 15.0, 180.0, 93.0))
+            set_link_quad_points(
+                boundary_source,
+                1,
+                0,
+                tuple(
+                    FloatObject(value)
+                    for value in (
+                        15.0, 48.0, 180.0, 48.0,
+                        15.0, 15.0, 180.0, 15.0,
+                    )
+                ),
+            )
+            build_virtual_spread(
+                boundary_source,
+                boundary_output,
+                boundary_manifest,
+                direction="rtl",
+            )
+            self.assertTrue(boundary_output.exists())
+            self.assertTrue(boundary_manifest.exists())
+
+            cases = (
+                (
+                    "partially-cropped-rect",
+                    (20.0, 15.0, 180.0, 93.0),
+                    None,
+                    "/Rect lies outside",
+                ),
+                (
+                    "fully-cropped-rect",
+                    (200.0, 100.0, 290.0, 590.0),
+                    None,
+                    "/Rect lies outside",
+                ),
+                (
+                    "cropped-quadpoints",
+                    (15.0, 15.0, 180.0, 93.0),
+                    (
+                        10.0, 48.0, 165.0, 48.0,
+                        10.0, 30.0, 165.0, 30.0,
+                    ),
+                    "/QuadPoints lies outside",
+                ),
+            )
+            for index, (label, crop, quad, message) in enumerate(cases):
+                with self.subTest(label=label):
+                    source = root / f"crop-source-{index}.pdf"
+                    output = root / f"crop-spread-{index}.pdf"
+                    manifest_path = root / f"crop-spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    set_page_crop_box(source, 1, crop)
+                    if quad is not None:
+                        set_link_quad_points(
+                            source,
+                            1,
+                            0,
+                            tuple(FloatObject(value) for value in quad),
+                        )
+                    with self.assertRaisesRegex(VirtualSpreadError, message):
+                        build_virtual_spread(
+                            source, output, manifest_path, direction="rtl"
+                        )
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
+    def test_malformed_link_quad_points_fail_closed(self) -> None:
+        cases = (
+            tuple(FloatObject(value) for value in range(6)),
+            (
+                TextStringObject("15"),
+                *(FloatObject(value) for value in range(1, 8)),
+            ),
+            tuple(
+                FloatObject(value)
+                for value in (0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0)
+            ),
+            tuple(
+                FloatObject(value)
+                for value in (0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0)
+            ),
+            tuple(
+                FloatObject(value)
+                for value in (0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0)
+            ),
+            tuple(
+                FloatObject(value)
+                for value in (0.0, 1.0, 2.0, 1.0, 0.0, 0.0, 1.0, 0.5)
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, points in enumerate(cases):
+                with self.subTest(index=index):
+                    source = root / f"bad-quadpoints-source-{index}.pdf"
+                    output = root / f"bad-quadpoints-spread-{index}.pdf"
+                    manifest_path = (
+                        root / f"bad-quadpoints-spread-{index}.pdf.json"
+                    )
+                    create_odd_page_fixture(source)
+                    set_link_quad_points(source, 1, 0, points)
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "/QuadPoints",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            direction="rtl",
+                            cover_separate=True,
+                        )
+
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
+    def test_duplicate_annotation_names_on_paired_pages_fail_closed(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "duplicate-names-source.pdf"
+            output = root / "duplicate-names-spread.pdf"
+            manifest_path = root / "duplicate-names-spread.pdf.json"
+            create_odd_page_fixture(source)
+            duplicate_name = TextStringObject("paired-page-link")
+            set_link_annotation_value(
+                source,
+                source_page_index=5,
+                annotation_index=0,
+                key="/NM",
+                value=duplicate_name,
+            )
+            set_link_annotation_value(
+                source,
+                source_page_index=6,
+                annotation_index=0,
+                key="/NM",
+                value=duplicate_name,
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Duplicate link annotation /NM on output page",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    direction="rtl",
+                    cover_separate=True,
+                )
+
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+
+    def test_link_annotation_flags_are_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "flags-source.pdf"
+            output = root / "flags-spread.pdf"
+            manifest_path = root / "flags-spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_annotation_value(
+                source,
+                source_page_index=1,
+                annotation_index=0,
+                key="/F",
+                value=NumberObject(34),
+            )
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                direction="rtl",
+                cover_separate=True,
+            )
+            reader = PdfReader(str(output), strict=True)
+            mapping = manifest["sourcePages"][1]
+            annotations = reader.pages[
+                mapping["virtualPageIndex"]
+            ]["/Annots"].get_object()
+            copied = next(
+                item.get_object()
+                for item in annotations
+                if int(item.get_object()["/SNSourcePage"]) == 1
+            )
+            self.assertIsInstance(copied.raw_get("/F"), NumberObject)
+            self.assertEqual(int(copied["/F"]), 34)
+
+    def test_no_rotate_link_on_rotated_page_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "no-rotate-source.pdf"
+            output = root / "no-rotate-spread.pdf"
+            manifest_path = root / "no-rotate-spread.pdf.json"
+            create_rotated_link_fixture(source, rotation=90)
+            set_link_annotation_value(
+                source,
+                source_page_index=0,
+                annotation_index=0,
+                key="/F",
+                value=NumberObject(0x10),
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot preserve NoRotate link annotation flag",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    direction="rtl",
+                    cover_separate=True,
+                )
+
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+
+    def test_no_zoom_link_on_scaled_page_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "no-zoom-source.pdf"
+            output = root / "no-zoom-spread.pdf"
+            manifest_path = root / "no-zoom-spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_annotation_value(
+                source,
+                source_page_index=1,
+                annotation_index=0,
+                key="/F",
+                value=NumberObject(0x08),
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot preserve NoZoom link annotation flag",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    direction="rtl",
+                    cover_separate=True,
+                )
+
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+
+    def test_malformed_link_annotation_flags_fail_closed(self) -> None:
+        malformed_type = DictionaryObject(
+            {NameObject("/F"): FloatObject(2.0)}
+        )
+        with self.assertRaisesRegex(
+            VirtualSpreadError,
+            "Invalid link annotation /F flags",
+        ):
+            _link_annotation_flags(malformed_type)
+
+        cases = (
+            TextStringObject("2"),
+            NumberObject(-1),
+            NumberObject(0x0400),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, flags in enumerate(cases):
+                with self.subTest(flags=flags):
+                    source = root / f"bad-flags-source-{index}.pdf"
+                    output = root / f"bad-flags-spread-{index}.pdf"
+                    manifest_path = root / f"bad-flags-spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    set_link_annotation_value(
+                        source,
+                        source_page_index=1,
+                        annotation_index=0,
+                        key="/F",
+                        value=flags,
+                    )
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "link annotation /F flags",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            direction="rtl",
+                            cover_separate=True,
+                        )
+
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
+    def test_link_rect_requires_finite_pdf_numbers(self) -> None:
+        invalid_rectangles = (
+            ArrayObject(
+                [
+                    TextStringObject("15"),
+                    FloatObject(15.0),
+                    FloatObject(180.0),
+                    FloatObject(48.0),
+                ]
+            ),
+            ArrayObject(
+                [
+                    FloatObject(float("nan")),
+                    FloatObject(15.0),
+                    FloatObject(180.0),
+                    FloatObject(48.0),
+                ]
+            ),
+            ArrayObject(
+                [
+                    FloatObject(180.0),
+                    FloatObject(15.0),
+                    FloatObject(15.0),
+                    FloatObject(48.0),
+                ]
+            ),
+        )
+        identity = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+        for rectangle in invalid_rectangles:
+            with self.subTest(rectangle=rectangle):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "link annotation /Rect",
+                ):
+                    _transform_rect(rectangle, identity)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "bad-rect-source.pdf"
+            output = root / "bad-rect-spread.pdf"
+            manifest_path = root / "bad-rect-spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_annotation_value(
+                source,
+                source_page_index=1,
+                annotation_index=0,
+                key="/Rect",
+                value=invalid_rectangles[0],
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "link annotation /Rect coordinate",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    direction="rtl",
+                    cover_separate=True,
+                )
+
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+
+    def test_transformed_rectangle_collapse_fails_closed(self) -> None:
+        source_rectangle = ArrayObject([
+            FloatObject(0.0),
+            FloatObject(0.0),
+            FloatObject(1.0),
+            FloatObject(1.0),
+        ])
+        collapsed_transform = [
+            1e-17, 0.0, 0.0, 1.0, 432.0, 0.0
+        ]
+        with self.assertRaisesRegex(
+            VirtualSpreadError,
+            "Invalid transformed link annotation /Rect ordering",
+        ):
+            _transform_rect(source_rectangle, collapsed_transform)
+
+        quadrilateral = ArrayObject([
+            FloatObject(value)
+            for value in (0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0)
+        ])
+        with self.assertRaisesRegex(
+            VirtualSpreadError,
+            "Invalid transformed link annotation /QuadPoints quadrilateral "
+            "ordering",
+        ):
+            _transform_quad_points(quadrilateral, collapsed_transform)
+
+        collapsed_page = mock.Mock()
+        collapsed_page.cropbox = mock.Mock(
+            left=0.0,
+            bottom=0.0,
+            right=1e-320,
+            top=1.0,
+        )
+        with self.assertRaisesRegex(
+            VirtualSpreadError,
+            "Invalid source page layout destination ordering",
+        ):
+            _layout_for_page(
+                collapsed_page,
+                Slot("left", 0.0, 0.0, 432.0, 648.0),
+                Transformation(),
+            )
+
+        with self.assertRaisesRegex(
+            VirtualSpreadError,
+            "Link rectangle is not representable by Android runtime floats",
+        ):
+            _require_runtime_float_rect(
+                [432.0, 0.0, 432.0, 1.0], 648.0
+            )
+
+        writer = PdfWriter()
+        target_reference = writer._add_object(DictionaryObject())
+        fit_rectangle = ArrayObject([
+            NullObject(),
+            NameObject("/FitR"),
+            FloatObject(0.0),
+            FloatObject(0.0),
+            FloatObject(1.0),
+            FloatObject(1.0),
+        ])
+        with self.assertRaisesRegex(
+            VirtualSpreadError,
+            "Invalid transformed internal destination /FitR rectangle "
+            "ordering",
+        ):
+            _transformed_internal_destination(
+                fit_rectangle,
+                target_reference,
+                {"transform": [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]},
+                {
+                    "transform": collapsed_transform,
+                    "sourceBox": [0.0, 0.0, 1.0, 1.0],
+                },
+                20.0,
+                10.0,
+            )
+
+    def test_visible_link_border_and_highlight_are_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "border-source.pdf"
+            output = root / "border-spread.pdf"
+            manifest_path = root / "border-spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_annotation_value(
+                source, 1, 0, "/Border", ArrayObject([
+                    FloatObject(2.0),
+                    FloatObject(3.0),
+                    FloatObject(4.0),
+                    ArrayObject([FloatObject(5.0), FloatObject(2.0)]),
+                ])
+            )
+            set_link_annotation_value(
+                source, 1, 0, "/BS", DictionaryObject({
+                    NameObject("/Type"): NameObject("/Border"),
+                    NameObject("/W"): FloatObject(2.0),
+                    NameObject("/S"): NameObject("/D"),
+                    NameObject("/D"): ArrayObject([
+                        FloatObject(3.0), FloatObject(1.0)
+                    ]),
+                })
+            )
+            set_link_annotation_value(
+                source, 1, 0, "/C", ArrayObject([
+                    FloatObject(0.1),
+                    FloatObject(0.2),
+                    FloatObject(0.3),
+                ])
+            )
+            set_link_annotation_value(
+                source, 1, 0, "/H", NameObject("/O")
+            )
+
+            manifest = build_virtual_spread(
+                source, output, manifest_path, direction="rtl"
+            )
+            copied = output_annotation_for_source(output, manifest, 1)
+            transform = manifest["sourcePages"][1]["transform"]
+            a, b, c, d = transform[:4]
+            scale = math.hypot(a, b)
+            expected_border = [
+                abs(a) * 2.0 + abs(c) * 3.0,
+                abs(b) * 2.0 + abs(d) * 3.0,
+                4.0 * scale,
+            ]
+            for actual, expected in zip(
+                copied["/Border"][:3], expected_border
+            ):
+                self.assertAlmostEqual(float(actual), expected, places=4)
+            for actual, expected in zip(
+                copied["/Border"][3], (5.0 * scale, 2.0 * scale)
+            ):
+                self.assertAlmostEqual(float(actual), expected, places=4)
+            self.assertEqual(copied["/H"], "/O")
+            self.assertEqual(
+                [round(float(value), 4) for value in copied["/C"]],
+                [0.1, 0.2, 0.3],
+            )
+            border_style = copied["/BS"]
+            self.assertEqual(border_style["/S"], "/D")
+            self.assertAlmostEqual(
+                float(border_style["/W"]), 2.0 * scale, places=4
+            )
+            for actual, expected in zip(
+                border_style["/D"], (3.0 * scale, 1.0 * scale)
+            ):
+                self.assertAlmostEqual(float(actual), expected, places=4)
+
+    def test_underlined_link_border_requires_preserved_bottom_edge(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            unrotated_source = root / "underlined-source.pdf"
+            unrotated_output = root / "underlined-spread.pdf"
+            unrotated_manifest = root / "underlined-spread.pdf.json"
+            create_rotated_link_fixture(unrotated_source, rotation=0)
+            set_link_annotation_value(
+                unrotated_source,
+                0,
+                0,
+                "/BS",
+                DictionaryObject({
+                    NameObject("/Type"): NameObject("/Border"),
+                    NameObject("/W"): FloatObject(2.0),
+                    NameObject("/S"): NameObject("/U"),
+                }),
+            )
+            manifest = build_virtual_spread(
+                unrotated_source,
+                unrotated_output,
+                unrotated_manifest,
+                direction="rtl",
+            )
+            copied = output_annotation_for_source(
+                unrotated_output, manifest, 0
+            )
+            self.assertEqual(copied["/BS"]["/S"], "/U")
+
+            for rotation in (90, 180, 270):
+                with self.subTest(rotation=rotation):
+                    source = root / f"underlined-rotated-{rotation}.pdf"
+                    output = root / f"underlined-rotated-{rotation}-spread.pdf"
+                    manifest_path = output.with_suffix(".pdf.json")
+                    create_rotated_link_fixture(source, rotation=rotation)
+                    set_link_annotation_value(
+                        source,
+                        0,
+                        0,
+                        "/BS",
+                        DictionaryObject({
+                            NameObject("/Type"): NameObject("/Border"),
+                            NameObject("/W"): FloatObject(2.0),
+                            NameObject("/S"): NameObject("/U"),
+                        }),
+                    )
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "Cannot preserve underlined link annotation /BS "
+                        "through page rotation",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            direction="rtl",
+                        )
+
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
+    def test_implicit_default_link_border_is_scaled(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "default-border-source.pdf"
+            output = root / "default-border-spread.pdf"
+            manifest_path = root / "default-border-spread.pdf.json"
+            create_odd_page_fixture(source)
+            delete_link_annotation_values(
+                source, 1, 0, ("/Border", "/BS")
+            )
+
+            manifest = build_virtual_spread(
+                source, output, manifest_path, direction="rtl"
+            )
+            copied = output_annotation_for_source(output, manifest, 1)
+            scale = math.hypot(*manifest["sourcePages"][1]["transform"][:2])
+            self.assertNotIn("/BS", copied)
+            self.assertEqual(len(copied["/Border"]), 3)
+            self.assertEqual(float(copied["/Border"][0]), 0.0)
+            self.assertEqual(float(copied["/Border"][1]), 0.0)
+            self.assertAlmostEqual(
+                float(copied["/Border"][2]), scale, places=4
+            )
+
+    def test_transformed_border_measures_must_remain_representable(
+        self,
+    ) -> None:
+        overflow_transform = [
+            1e308, 0.0, 0.0, 1e308, 0.0, 0.0
+        ]
+        underflow_transform = [
+            1e-320, 0.0, 0.0, 1e-320, 0.0, 0.0
+        ]
+        large = FloatObject(2.0)
+        small = FloatObject(1e-10)
+        zero = FloatObject(0.0)
+        cases = (
+            (
+                "border radius overflow",
+                _transform_link_border,
+                DictionaryObject({
+                    NameObject("/Border"): ArrayObject([
+                        large, large, zero
+                    ])
+                }),
+                overflow_transform,
+            ),
+            (
+                "border radius underflow",
+                _transform_link_border,
+                DictionaryObject({
+                    NameObject("/Border"): ArrayObject([
+                        small, small, zero
+                    ])
+                }),
+                underflow_transform,
+            ),
+            (
+                "border width overflow",
+                _transform_link_border,
+                DictionaryObject({
+                    NameObject("/Border"): ArrayObject([
+                        zero, zero, large
+                    ])
+                }),
+                overflow_transform,
+            ),
+            (
+                "border dash underflow",
+                _transform_link_border,
+                DictionaryObject({
+                    NameObject("/Border"): ArrayObject([
+                        zero,
+                        zero,
+                        zero,
+                        ArrayObject([small]),
+                    ])
+                }),
+                underflow_transform,
+            ),
+            (
+                "border-style width overflow",
+                _transform_link_border_style,
+                DictionaryObject({
+                    NameObject("/BS"): DictionaryObject({
+                        NameObject("/S"): NameObject("/S"),
+                        NameObject("/W"): large,
+                    })
+                }),
+                overflow_transform,
+            ),
+            (
+                "border-style dash underflow",
+                _transform_link_border_style,
+                DictionaryObject({
+                    NameObject("/BS"): DictionaryObject({
+                        NameObject("/S"): NameObject("/D"),
+                        NameObject("/W"): zero,
+                        NameObject("/D"): ArrayObject([small]),
+                    })
+                }),
+                underflow_transform,
+            ),
+        )
+        for label, transform_function, annotation, transform in cases:
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Invalid transformed link annotation",
+                ):
+                    transform_function(annotation, transform)
+
+    def test_malformed_link_border_or_highlight_fails_closed(self) -> None:
+        cases = (
+            (
+                "/Border",
+                ArrayObject([
+                    TextStringObject("0"),
+                    NumberObject(0),
+                    NumberObject(1),
+                ]),
+                "/Border value",
+            ),
+            ("/H", TextStringObject("/N"), "annotation /H"),
+            ("/H", NameObject("/X"), "annotation /H"),
+            (
+                "/BS",
+                DictionaryObject({NameObject("/Foo"): NumberObject(1)}),
+                "Unsupported link annotation /BS entries",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, (key, value, message) in enumerate(cases):
+                with self.subTest(key=key, value=value):
+                    source = root / f"bad-border-source-{index}.pdf"
+                    output = root / f"bad-border-spread-{index}.pdf"
+                    manifest_path = root / f"bad-border-spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    set_link_annotation_value(source, 1, 0, key, value)
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError, message
+                    ):
+                        build_virtual_spread(
+                            source, output, manifest_path, direction="rtl"
+                        )
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
+    def test_uri_action_is_map_false_is_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "uri-source.pdf"
+            output = root / "uri-spread.pdf"
+            manifest_path = root / "uri-spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_action(
+                source,
+                1,
+                0,
+                DictionaryObject({
+                    NameObject("/Type"): NameObject("/Action"),
+                    NameObject("/S"): NameObject("/URI"),
+                    NameObject("/URI"): TextStringObject(
+                        "https://example.test/map"
+                    ),
+                    NameObject("/IsMap"): BooleanObject(False),
+                }),
+            )
+
+            manifest = build_virtual_spread(
+                source, output, manifest_path, direction="rtl"
+            )
+            copied = output_annotation_for_source(output, manifest, 1)
+            action = copied["/A"]
+            self.assertEqual(action["/S"], "/URI")
+            self.assertEqual(
+                action["/URI"], "https://example.test/map"
+            )
+            self.assertIsInstance(action.raw_get("/IsMap"), BooleanObject)
+            self.assertIs(action["/IsMap"].value, False)
+            uri_link = next(
+                link for link in manifest["links"]
+                if link["kind"] == "uri"
+            )
+            self.assertEqual(
+                uri_link["uri"], "https://example.test/map"
+            )
+
+    def test_uri_action_is_map_true_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "is-map-source.pdf"
+            output = root / "is-map-spread.pdf"
+            manifest_path = root / "is-map-spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_action(
+                source,
+                1,
+                0,
+                DictionaryObject({
+                    NameObject("/S"): NameObject("/URI"),
+                    NameObject("/URI"): TextStringObject(
+                        "https://example.test/map"
+                    ),
+                    NameObject("/IsMap"): BooleanObject(True),
+                }),
+            )
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot preserve URI link /IsMap true",
+            ):
+                build_virtual_spread(
+                    source, output, manifest_path, direction="rtl"
+                )
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+
+    def test_relative_uri_action_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "relative-uri-source.pdf"
+            output = root / "relative-uri-spread.pdf"
+            manifest_path = root / "relative-uri-spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_action(
+                source,
+                1,
+                0,
+                DictionaryObject({
+                    NameObject("/S"): NameObject("/URI"),
+                    NameObject("/URI"): TextStringObject("help/index.html"),
+                }),
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "URI link /URI must be an absolute URI",
+            ):
+                build_virtual_spread(
+                    source, output, manifest_path, direction="rtl"
+                )
+
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+
+    def test_uri_action_operands_and_chains_fail_closed(self) -> None:
+        base = {
+            NameObject("/S"): NameObject("/URI"),
+            NameObject("/URI"): TextStringObject("https://example.test"),
+        }
+        actions = (
+            (
+                DictionaryObject({
+                    NameObject("/S"): NameObject("/URI"),
+                    NameObject("/URI"): NumberObject(7),
+                }),
+                "Invalid URI link /URI string",
+            ),
+            (
+                DictionaryObject({
+                    **base,
+                    NameObject("/IsMap"): NumberObject(1),
+                }),
+                "Invalid URI link /IsMap boolean",
+            ),
+            (
+                DictionaryObject({
+                    **base,
+                    NameObject("/Next"): DictionaryObject({
+                        NameObject("/S"): NameObject("/URI"),
+                        NameObject("/URI"): TextStringObject(
+                            "https://example.test/next"
+                        ),
+                    }),
+                }),
+                "Chained link /Next actions are unsupported",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, (action, message) in enumerate(actions):
+                with self.subTest(index=index):
+                    source = root / f"bad-uri-source-{index}.pdf"
+                    output = root / f"bad-uri-spread-{index}.pdf"
+                    manifest_path = root / f"bad-uri-spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    set_link_action(source, 1, 0, action)
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError, message
+                    ):
+                        build_virtual_spread(
+                            source, output, manifest_path, direction="rtl"
+                        )
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
+    def test_unsupported_link_semantics_fail_closed(self) -> None:
+        cases = (
+            ("/AP", DictionaryObject()),
+            ("/AS", NameObject("/On")),
+            ("/OC", NameObject("/Layer")),
+            ("/AA", DictionaryObject()),
+            ("/PA", DictionaryObject()),
+            ("/StructParent", NumberObject(0)),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, (key, value) in enumerate(cases):
+                with self.subTest(key=key):
+                    source = root / f"unsupported-link-source-{index}.pdf"
+                    output = root / f"unsupported-link-spread-{index}.pdf"
+                    manifest_path = (
+                        root / f"unsupported-link-spread-{index}.pdf.json"
+                    )
+                    create_odd_page_fixture(source)
+                    set_link_annotation_value(source, 1, 0, key, value)
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "Unsupported link annotation entries",
+                    ):
+                        build_virtual_spread(
+                            source, output, manifest_path, direction="rtl"
+                        )
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
+    def test_unsupported_internal_destination_mode_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cases = (
+                ("/FitB", ()),
+                ("/FitH", (160.0,)),
+                ("/FitBH", (160.0,)),
+                ("/FitV", (30.0,)),
+                ("/FitBV", (30.0,)),
+                ("/FitWindow", ()),
+            )
+            for index, (mode, arguments) in enumerate(cases):
+                with self.subTest(mode=mode):
+                    source = root / f"source-{index}.pdf"
+                    output = root / f"spread-{index}.pdf"
+                    manifest_path = root / f"spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    set_link_destination_mode(
+                        source,
+                        source_page_index=1,
+                        annotation_index=0,
+                        target_page_index=5,
+                        mode=mode,
+                        arguments=arguments,
+                    )
+                    expected_error = (
+                        "Unsupported internal destination mode: /FitWindow"
+                        if mode == "/FitWindow"
+                        else "Cannot preserve internal destination mode"
+                    )
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError, expected_error
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            direction="rtl",
+                            cover_separate=True,
+                        )
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
+    def test_crop_box_must_be_contained_by_media_box(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, side in enumerate(("left", "bottom", "right", "top")):
+                with self.subTest(side=side):
+                    source = root / f"crop-media-source-{index}.pdf"
+                    output = root / f"crop-media-spread-{index}.pdf"
+                    manifest_path = root / f"crop-media-spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    page = PdfReader(str(source), strict=True).pages[0]
+                    media = page.mediabox
+                    crop = [
+                        float(media.left),
+                        float(media.bottom),
+                        float(media.right),
+                        float(media.top),
+                    ]
+                    crop[index] += -1.0 if index < 2 else 1.0
+                    set_page_crop_box(source, 0, tuple(crop))
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "effective /CropBox extends outside /MediaBox",
+                    ):
+                        build_virtual_spread(source, output, manifest_path)
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
+    def test_page_boxes_require_raw_pdf_number_operands(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cases = (("/CropBox", False), ("/MediaBox", True))
+            for index, (key, inherited) in enumerate(cases):
+                with self.subTest(key=key, inherited=inherited):
+                    source = root / f"page-box-source-{index}.pdf"
+                    output = root / f"page-box-spread-{index}.pdf"
+                    manifest_path = root / f"page-box-spread-{index}.pdf.json"
+                    create_odd_page_fixture(source)
+                    set_raw_page_box_coordinate(
+                        source,
+                        key,
+                        TextStringObject("0"),
+                        inherited=inherited,
+                    )
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError, "page.*coordinate"
+                    ):
+                        build_virtual_spread(source, output, manifest_path)
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
+    def test_non_finite_spread_geometry_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            create_odd_page_fixture(source)
+            cases = (
+                {"spread_width": float("nan")},
+                {"spread_height": float("inf")},
+                {"gutter": float("nan")},
+            )
+            for index, values in enumerate(cases):
+                with self.subTest(values=values):
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "dimensions and gutter",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            root / f"spread-{index}.pdf",
+                            root / f"spread-{index}.pdf.json",
+                            **values,
+                        )
+
+    def test_boolean_spread_geometry_is_rejected_before_publication(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            create_odd_page_fixture(source)
+            cases = (
+                {"spread_width": True},
+                {"spread_height": False},
+                {"gutter": True},
+                {"gutter": False},
+            )
+            for index, values in enumerate(cases):
+                with self.subTest(values=values):
+                    output = root / f"spread-{index}.pdf"
+                    manifest = root / f"spread-{index}.pdf.json"
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "dimensions and gutter",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest,
+                            **values,
+                        )
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest.exists())
+
+    def test_non_nomad_spread_aspect_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            create_odd_page_fixture(source)
+            invalid_output = root / "invalid-aspect.pdf"
+            invalid_manifest = invalid_output.with_suffix(".pdf.json")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Nomad 4:3 landscape aspect",
+            ):
+                build_virtual_spread(
+                    source,
+                    invalid_output,
+                    invalid_manifest,
+                    spread_width=864.0,
+                    spread_height=864.0,
+                )
+
+            self.assertFalse(invalid_output.exists())
+            self.assertFalse(invalid_manifest.exists())
+
+            valid_output = root / "scaled-aspect.pdf"
+            valid_manifest = valid_output.with_suffix(".pdf.json")
+            manifest = build_virtual_spread(
+                source,
+                valid_output,
+                valid_manifest,
+                spread_width=1728.0,
+                spread_height=1296.0,
+            )
+            self.assertEqual(
+                manifest["output"]["spreadSize"],
+                [1728.0, 1296.0],
+            )
+
+    def test_pdf_page_dimension_bounds_are_enforced(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            create_odd_page_fixture(source)
+            for index, (width, height) in enumerate((
+                (20000.0, 15000.0),
+                (3.9, 2.925),
+            )):
+                with self.subTest(width=width, height=height):
+                    output = root / f"bounded-{index}.pdf"
+                    manifest = root / f"bounded-{index}.pdf.json"
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "PDF page-size bounds",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest,
+                            spread_width=width,
+                            spread_height=height,
+                        )
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest.exists())
+
+        self.assertAlmostEqual(
+            _require_runtime_float_geometry(4.0, 3.0, 0.0),
+            2.0,
+        )
+        self.assertAlmostEqual(
+            _require_runtime_float_geometry(14400.0, 10800.0, 0.0),
+            7200.0,
+        )
+
+    def test_posix_identity_comparison_includes_ctime(self) -> None:
+        stable = SourceIdentity(1, 2, 3, 4, 5)
+        changed = SourceIdentity(1, 2, 3, 4, 6)
+        with mock.patch("generate_virtual_spread.os.name", "posix"):
+            self.assertTrue(_same_open_file(stable, stable))
+            self.assertFalse(_same_open_file(stable, changed))
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            target = root / "target"
+            source.write_bytes(b"stable")
+            actual = _identity(source.stat())
+            stale = SourceIdentity(
+                actual.device,
+                actual.inode,
+                actual.size,
+                actual.modified_ns,
+                actual.changed_ns - 1,
+            )
+            with mock.patch("generate_virtual_spread.os.name", "posix"):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Publication move source identity changed",
+                ):
+                    _durable_replace(
+                        source,
+                        target,
+                        replace_existing=False,
+                        expected_source_identity=stale,
+                    )
+            self.assertEqual(source.read_bytes(), b"stable")
+            self.assertFalse(target.exists())
+
+    def test_runtime_float_spread_geometry_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            create_odd_page_fixture(source)
+            smallest_float32 = math.ldexp(1.0, -149)
+            cases = (
+                {"spread_width": 1e40},
+                {"spread_height": 1e40},
+                {"spread_width": 1e-50},
+                {"spread_height": 1e-50},
+                {"gutter": 1e-50},
+                {
+                    "spread_width": 2e-40,
+                    "spread_height": 1.0,
+                    "gutter": 1.999999999e-40,
+                },
+                {
+                    "spread_width": 1.0,
+                    "gutter": 1.0 - 1e-16,
+                },
+                {
+                    "spread_width": 2.49 * smallest_float32,
+                    "spread_height": 1.0,
+                    "gutter": 0.51 * smallest_float32,
+                },
+            )
+            for index, values in enumerate(cases):
+                with self.subTest(values=values):
+                    output = root / f"spread-{index}.pdf"
+                    manifest = root / f"spread-{index}.pdf.json"
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "not representable by Android runtime floats",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest,
+                            **values,
+                        )
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest.exists())
+
+    def test_runtime_float_link_rect_is_rejected(self) -> None:
+        _require_runtime_float_rect([0.0, 0.0, 100.0, 50.0], 648.0)
+        _require_runtime_float_rect(
+            [0.0, 10.0, 100.0, 20.0], float(2 ** 27)
+        )
+        cases = (
+            ([0.0, 0.0, 1e40, 50.0], 648.0),
+            ([1e-50, 0.0, 2e-50, 50.0], 648.0),
+            ([0.0, 1e-50, 100.0, 2e-50], 648.0),
+            ([0.0, 10.0, 100.0, 11.0], float(2 ** 27)),
+        )
+        for rect, page_height in cases:
+            with self.subTest(rect=rect, page_height=page_height):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Link rectangle is not representable by Android "
+                    "runtime floats",
+                ):
+                    _require_runtime_float_rect(rect, page_height)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "oversized-link-source.pdf"
+            output = root / "oversized-link-spread.pdf"
+            manifest = root / "oversized-link-spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_annotation_value(
+                source,
+                source_page_index=1,
+                annotation_index=0,
+                key="/Rect",
+                value=ArrayObject([
+                    FloatObject(15.0),
+                    FloatObject(15.0),
+                    FloatObject(1e40),
+                    FloatObject(48.0),
+                ]),
+            )
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Link annotation /Rect lies outside source page effective "
+                "/CropBox",
+            ):
+                build_virtual_spread(source, output, manifest)
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest.exists())
+
+    def test_rotated_page_link_uses_source_to_spread_transform(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "rotated-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_rotated_link_fixture(source)
+            source_reader = PdfReader(str(source), strict=True)
+            source_rect = source_reader.pages[0]["/Annots"][0].get_object()[
+                "/Rect"
+            ]
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                direction="rtl",
+                cover_separate=False,
+            )
+            mapping = manifest["sourcePages"][0]
+            transform = mapping["transform"]
+            self.assertNotAlmostEqual(transform[1], 0.0)
+            self.assertNotAlmostEqual(transform[2], 0.0)
+
+            output_reader = PdfReader(str(output), strict=True)
+            output_rect = [
+                float(value)
+                for value in output_reader.pages[0]["/Annots"][0]
+                .get_object()["/Rect"]
+            ]
+            expected_rect = transform_rect(source_rect, transform)
+            for actual, expected in zip(output_rect, expected_rect):
+                self.assertAlmostEqual(actual, expected, places=4)
+
+            left, bottom, right, top = mapping["destination"]
+            self.assertGreaterEqual(output_rect[0], left - 0.001)
+            self.assertGreaterEqual(output_rect[1], bottom - 0.001)
+            self.assertLessEqual(output_rect[2], right + 0.001)
+            self.assertLessEqual(output_rect[3], top + 0.001)
+
+    def test_publication_ownership_is_keyed_only_by_output_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "nested" / ".." / "spread.pdf"
+            canonical = root / "spread.pdf"
+
+            self.assertEqual(
+                _publication_artifacts(output),
+                _publication_artifacts(canonical),
+            )
+            marker, output_backup, manifest_backup = (
+                _publication_artifacts(canonical)
+            )
+            self.assertEqual(marker.parent, root)
+            self.assertEqual(output_backup.parent, root)
+            self.assertEqual(manifest_backup.parent, root)
+            self.assertEqual(
+                _publication_lock_path(output),
+                _publication_lock_path(canonical),
+            )
+
+    def test_custom_manifest_path_is_rejected_before_lock_or_mutation(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            runtime_manifest = root / "spread.pdf.json"
+            custom_manifest = root / "custom.json"
+            create_odd_page_fixture(source)
+            output.write_bytes(b"old-pdf")
+            runtime_manifest.write_bytes(b"old-runtime-manifest")
+            custom_manifest.write_bytes(b"old-custom-manifest")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Manifest path must be the runtime sibling",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    custom_manifest,
+                    force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(
+                runtime_manifest.read_bytes(), b"old-runtime-manifest"
+            )
+            self.assertEqual(
+                custom_manifest.read_bytes(), b"old-custom-manifest"
+            )
+            self.assertFalse(_publication_lock_path(output).exists())
+
+    def test_output_filesystem_alias_is_rejected_before_publication(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            lexical = root / "alias.pdf"
+            resolved = root / "target.pdf"
+
+            class AliasedPath:
+                def __fspath__(self) -> str:
+                    return str(lexical)
+
+                def resolve(self) -> Path:
+                    return resolved
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "must not contain symlinks or filesystem aliases",
+            ):
+                _require_unaliased_output_path(
+                    AliasedPath(),  # type: ignore[arg-type]
+                )
+
+            self.assertFalse(lexical.exists())
+            self.assertFalse(resolved.exists())
+            self.assertFalse(_publication_lock_path(lexical).exists())
+
+    def test_output_alias_is_rechecked_after_publication_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            lexical_output = output.absolute()
+
+            with mock.patch(
+                "generate_virtual_spread._require_unaliased_output_path",
+                side_effect=(
+                    lexical_output,
+                    VirtualSpreadError("simulated output alias race"),
+                ),
+            ) as alias_guard:
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "simulated output alias race",
+                ):
+                    build_virtual_spread(
+                        source,
+                        output,
+                        manifest,
+                        force=True,
+                        **EXPLICIT_DEFAULT_LAYOUT,
+                    )
+
+            self.assertEqual(alias_guard.call_count, 2)
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest.exists())
+            self.assertTrue(_publication_lock_path(output).is_file())
+
+    def test_publication_lock_symlink_never_touches_target(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            victim = root / "victim.bin"
+            create_odd_page_fixture(source)
+            victim.write_bytes(b"victim")
+            lock_path = _publication_lock_path(output)
+            try:
+                lock_path.symlink_to(victim)
+            except OSError as error:
+                self.skipTest(f"symlink creation unavailable: {error}")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Publication lock must be a regular file",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest,
+                    force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+
+            self.assertEqual(victim.read_bytes(), b"victim")
+            self.assertTrue(lock_path.is_symlink())
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest.exists())
+
+    def test_publication_lock_hardlink_never_touches_target(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            victim = root / "victim.bin"
+            create_odd_page_fixture(source)
+            victim.write_bytes(b"")
+            lock_path = _publication_lock_path(output)
+            try:
+                os.link(victim, lock_path)
+            except OSError as error:
+                self.skipTest(f"hard-link creation unavailable: {error}")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "one regular, unaliased file",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest,
+                    force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+
+            self.assertEqual(victim.read_bytes(), b"")
+            self.assertEqual(lock_path.read_bytes(), b"")
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest.exists())
+
+    def test_preexisting_empty_publication_lock_is_never_initialized(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            lock_path = _publication_lock_path(output)
+            lock_path.write_bytes(b"")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "must contain its lock byte",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest,
+                    force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+
+            self.assertEqual(lock_path.read_bytes(), b"")
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest.exists())
+
+    @unittest.skipIf(
+        os.name == "nt",
+        "Windows does not allow an open lock pathname to be unlinked",
+    )
+    def test_publication_lock_replacement_is_detected_while_held(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            lock_path = _publication_lock_path(output)
+
+            with _publication_lock(output) as ownership_guard:
+                lock_path.unlink()
+                lock_path.write_bytes(b"replacement-lock")
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Publication lock must remain one regular, unaliased file",
+                ):
+                    ownership_guard()
+
+            self.assertEqual(lock_path.read_bytes(), b"replacement-lock")
+            self.assertFalse(output.exists())
+
+    @unittest.skipIf(
+        os.name == "nt",
+        "Windows does not allow an open lock pathname to be unlinked",
+    )
+    def test_replaced_lock_path_does_not_admit_second_publisher(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            lock_path = _publication_lock_path(output)
+
+            with _publication_lock(output):
+                lock_path.unlink()
+                lock_path.write_bytes(b"replacement-lock")
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Publication is already active",
+                ):
+                    with _publication_lock(output):
+                        self.fail(
+                            "replacement lock admitted a second publisher"
+                        )
+
+            self.assertEqual(lock_path.read_bytes(), b"replacement-lock")
+            self.assertFalse(output.exists())
+
+    @unittest.skipIf(
+        os.name == "nt",
+        "Windows does not allow an open publication tree to be exchanged",
+    )
+    def test_parent_exchange_cannot_redirect_locked_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            active = root / "active"
+            detached = root / "detached"
+            active.mkdir()
+            output = active / "spread.pdf"
+            staged = active / ".spread.pdf.new"
+            output.write_bytes(b"old-output")
+            staged.write_bytes(b"old-staged")
+            real_replace = os.replace
+            exchanged = False
+
+            with _publication_lock(output) as ownership_guard:
+                def exchange_then_replace(
+                    source: object,
+                    target: object,
+                    *args: object,
+                    **kwargs: object,
+                ) -> None:
+                    nonlocal exchanged
+                    if not exchanged:
+                        active.rename(detached)
+                        active.mkdir()
+                        (active / "spread.pdf").write_bytes(
+                            b"replacement-output"
+                        )
+                        (active / ".spread.pdf.new").write_bytes(
+                            b"replacement-staged"
+                        )
+                        with _publication_lock(output):
+                            pass
+                        exchanged = True
+                    real_replace(source, target, *args, **kwargs)
+
+                with mock.patch(
+                    "generate_virtual_spread.os.replace",
+                    side_effect=exchange_then_replace,
+                ):
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "Publication lock directory must remain one unaliased",
+                    ):
+                        _durable_replace(
+                            staged,
+                            output,
+                            ownership_guard=ownership_guard,
+                        )
+
+            self.assertTrue(exchanged)
+            self.assertEqual(
+                (active / "spread.pdf").read_bytes(),
+                b"replacement-output",
+            )
+            self.assertEqual(
+                (active / ".spread.pdf.new").read_bytes(),
+                b"replacement-staged",
+            )
+            self.assertEqual(
+                (detached / "spread.pdf").read_bytes(),
+                b"old-staged",
+            )
+            self.assertFalse((detached / ".spread.pdf.new").exists())
+
+    @unittest.skipIf(
+        os.name == "nt",
+        "Windows does not allow an open publication tree to be exchanged",
+    )
+    def test_parent_exchange_cannot_redirect_staged_write(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            active = root / "active"
+            detached = root / "detached"
+            active.mkdir()
+            output = active / "spread.pdf"
+            staged = active / ".spread.pdf.manifest.tmp"
+            staged.write_bytes(b"old-staged")
+            real_open = os.open
+            exchanged = False
+
+            with _publication_lock(output) as ownership_guard:
+                directory_descriptor = getattr(
+                    ownership_guard, "directory_descriptor"
+                )
+
+                def exchange_then_open(
+                    path: object,
+                    flags: int,
+                    mode: int = 0o777,
+                    *,
+                    dir_fd: int | None = None,
+                ) -> int:
+                    nonlocal exchanged
+                    if (
+                        not exchanged
+                        and dir_fd == directory_descriptor
+                        and os.fspath(path) == staged.name
+                    ):
+                        active.rename(detached)
+                        active.mkdir()
+                        (active / staged.name).write_bytes(
+                            b"replacement-staged"
+                        )
+                        exchanged = True
+                    if dir_fd is None:
+                        return real_open(path, flags, mode)
+                    return real_open(
+                        path,
+                        flags,
+                        mode,
+                        dir_fd=dir_fd,
+                    )
+
+                with mock.patch(
+                    "generate_virtual_spread.os.open",
+                    side_effect=exchange_then_open,
+                ):
+                    _write_json(
+                        staged,
+                        {"owner": "detached"},
+                        ownership_guard,
+                    )
+
+            self.assertTrue(exchanged)
+            self.assertEqual(
+                (active / staged.name).read_bytes(),
+                b"replacement-staged",
+            )
+            self.assertEqual(
+                json.loads((detached / staged.name).read_text("utf-8")),
+                {"owner": "detached"},
+            )
+
+    def test_force_rejects_directory_publication_targets(self) -> None:
+        for directory_target in ("output", "manifest"):
+            with self.subTest(directory_target=directory_target):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    source = root / "source.pdf"
+                    output = root / "spread.pdf"
+                    manifest = root / "spread.pdf.json"
+                    create_odd_page_fixture(source)
+
+                    if directory_target == "output":
+                        blocked = output
+                        preserved_file = manifest
+                        preserved_bytes = b"old-manifest"
+                    else:
+                        blocked = manifest
+                        preserved_file = output
+                        preserved_bytes = b"old-pdf"
+                    blocked.mkdir()
+                    sentinel = blocked / "keep.txt"
+                    sentinel.write_bytes(b"keep")
+                    preserved_file.write_bytes(preserved_bytes)
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "must be a regular file",
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest,
+                            force=True,
+                            **EXPLICIT_DEFAULT_LAYOUT,
+                        )
+
+                    self.assertTrue(blocked.is_dir())
+                    self.assertEqual(sentinel.read_bytes(), b"keep")
+                    self.assertEqual(
+                        preserved_file.read_bytes(),
+                        preserved_bytes,
+                    )
+                    self.assertFalse(
+                        _publication_lock_path(output).exists()
+                    )
+                    self.assertFalse(any(root.glob("*.publish.json")))
+                    self.assertFalse(any(root.glob("*.bak")))
+                    self.assertFalse(any(root.glob("*.retired")))
+
+    def test_concurrent_backup_directory_is_never_replaced(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+            real_prepare = _prepare_publication_transaction
+            created_backup: Path | None = None
+
+            def prepare_then_race(
+                staged_output: Path,
+                final_output: Path,
+                staged_manifest: Path,
+                final_manifest: Path,
+                ownership_guard: object = None,
+                expected_output_state: object = None,
+                expected_manifest_state: object = None,
+                replace_authorized: bool = True,
+                source_validation_required: bool = False,
+            ) -> dict[str, object]:
+                nonlocal created_backup
+                transaction = real_prepare(
+                    staged_output,
+                    final_output,
+                    staged_manifest,
+                    final_manifest,
+                    ownership_guard,
+                    expected_output_state=expected_output_state,
+                    expected_manifest_state=expected_manifest_state,
+                    replace_authorized=replace_authorized,
+                    source_validation_required=source_validation_required,
+                )
+                created_backup = Path(transaction["outputBackupPath"])
+                created_backup.mkdir()
+                (created_backup / "keep.txt").write_bytes(b"keep")
+                return transaction
+
+            with mock.patch(
+                "generate_virtual_spread._prepare_publication_transaction",
+                side_effect=prepare_then_race,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "rollback was incomplete: Output backup must be a regular file",
+                ):
+                    _publish_pair(
+                        temporary_output,
+                        output,
+                        temporary_manifest,
+                        manifest,
+                    )
+
+            self.assertIsNotNone(created_backup)
+            assert created_backup is not None
+            self.assertTrue(created_backup.is_dir())
+            self.assertEqual(
+                (created_backup / "keep.txt").read_bytes(),
+                b"keep",
+            )
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+
+    def test_first_publication_rechecks_state_after_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            create_odd_page_fixture(source)
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            marker = Path(transaction["markerPath"])
+            _durable_replace(temporary_manifest, manifest)
+
+            generated = build_virtual_spread(source, output, manifest)
+
+            self.assertEqual(generated["output"]["path"], str(output))
+            self.assertTrue(output.is_file())
+            self.assertTrue(manifest.is_file())
+            self.assertFalse(marker.exists())
+            self.assertFalse(any(root.glob("*.bak")))
+
+    def test_staged_directory_is_rejected_before_backup_moves(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+            real_prepare = _prepare_publication_transaction
+
+            def prepare_then_replace_stage(
+                staged_output: Path,
+                final_output: Path,
+                staged_manifest: Path,
+                final_manifest: Path,
+                ownership_guard: object = None,
+                expected_output_state: object = None,
+                expected_manifest_state: object = None,
+                replace_authorized: bool = True,
+                source_validation_required: bool = False,
+            ) -> dict[str, object]:
+                transaction = real_prepare(
+                    staged_output,
+                    final_output,
+                    staged_manifest,
+                    final_manifest,
+                    ownership_guard,
+                    expected_output_state=expected_output_state,
+                    expected_manifest_state=expected_manifest_state,
+                    replace_authorized=replace_authorized,
+                    source_validation_required=source_validation_required,
+                )
+                staged_manifest.unlink()
+                staged_manifest.mkdir()
+                (staged_manifest / "keep.txt").write_bytes(b"keep")
+                return transaction
+
+            with mock.patch(
+                "generate_virtual_spread._prepare_publication_transaction",
+                side_effect=prepare_then_replace_stage,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Staged manifest must be a regular file",
+                ):
+                    _publish_pair(
+                        temporary_output,
+                        output,
+                        temporary_manifest,
+                        manifest,
+                    )
+
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(temporary_manifest.is_dir())
+            self.assertEqual(
+                (temporary_manifest / "keep.txt").read_bytes(),
+                b"keep",
+            )
+            self.assertFalse(any(root.glob("*.bak")))
+            self.assertFalse(any(root.glob("*.publish.json")))
+
+    def test_staged_tamper_before_move_preserves_original_pair(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+            real_replace = _durable_replace
+            replaced_stage = False
+
+            def replace_with_tamper(
+                source: object,
+                target: object,
+                *,
+                replace_existing: bool = True,
+                ownership_guard: object = None,
+                expected_source_identity: object = None,
+            ) -> None:
+                nonlocal replaced_stage
+                if (
+                    not replaced_stage
+                    and Path(source) == temporary_manifest
+                    and Path(target) == manifest
+                ):
+                    temporary_manifest.write_bytes(b"tampered-manifest")
+                    replaced_stage = True
+                real_replace(
+                    Path(source),
+                    Path(target),
+                    replace_existing=replace_existing,
+                    ownership_guard=ownership_guard,
+                    expected_source_identity=expected_source_identity,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._durable_replace",
+                side_effect=replace_with_tamper,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Publication move source identity changed",
+                ):
+                    _publish_pair(
+                        temporary_output,
+                        output,
+                        temporary_manifest,
+                        manifest,
+                    )
+
+            self.assertTrue(replaced_stage)
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(temporary_output.is_file())
+            self.assertEqual(
+                temporary_manifest.read_bytes(), b"tampered-manifest"
+            )
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            self.assertFalse(marker.exists())
+            self.assertFalse(output_backup.exists())
+            self.assertFalse(manifest_backup.exists())
+
+    def test_live_publication_lock_blocks_recovery_by_second_generator(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            create_odd_page_fixture(source)
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            marker = Path(transaction["markerPath"])
+            marker_before = marker.read_bytes()
+
+            with _publication_lock(output):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Publication is already active",
+                ):
+                    build_virtual_spread(
+                        source,
+                        output,
+                        manifest,
+                        force=True,
+                        **EXPLICIT_DEFAULT_LAYOUT,
+                    )
+                self.assertEqual(marker.read_bytes(), marker_before)
+                self.assertEqual(output.read_bytes(), b"old-pdf")
+                self.assertEqual(manifest.read_bytes(), b"old-manifest")
+
+            self.assertEqual(
+                _recover_pair_publication(output, manifest),
+                "rolled_back",
+            )
+            self.assertFalse(marker.exists())
+
+    def test_oversized_manifest_is_rejected_before_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+
+            def write_oversized(
+                path: Path,
+                value: object,
+                ownership_guard: object = None,
+                retained_descriptor: int | None = None,
+            ) -> None:
+                del value
+                _write_json(
+                    path,
+                    {"padding": "x" * MAX_MANIFEST_BYTES},
+                    ownership_guard,
+                    retained_descriptor=retained_descriptor,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._write_json",
+                side_effect=write_oversized,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "exceeds the runtime limit",
+                ):
+                    build_virtual_spread(
+                        source,
+                        output,
+                        manifest,
+                        force=True,
+                        **EXPLICIT_DEFAULT_LAYOUT,
+                    )
+
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertFalse(any(root.glob("*.bak")))
+            self.assertFalse(any(root.glob("*.publish.json")))
+
+    def test_staged_manifest_swap_to_oversized_is_rejected_at_publication_boundary(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            real_prepare = _prepare_publication_transaction
+            swapped = False
+
+            def swap_then_prepare(
+                temporary_output: Path,
+                output_path: Path,
+                temporary_manifest: Path,
+                manifest_path: Path,
+                ownership_guard: object = None,
+                expected_output_identity: object = None,
+                expected_output_hash: str | None = None,
+                expected_manifest_identity: object = None,
+                expected_manifest_hash: str | None = None,
+                expected_output_state: object = None,
+                expected_manifest_state: object = None,
+                replace_authorized: bool = True,
+                source_validation_required: bool = False,
+            ) -> dict[str, object]:
+                nonlocal swapped
+                temporary_manifest.unlink()
+                temporary_manifest.write_bytes(b"x" * (MAX_MANIFEST_BYTES + 1))
+                swapped = True
+                return real_prepare(
+                    temporary_output,
+                    output_path,
+                    temporary_manifest,
+                    manifest_path,
+                    ownership_guard,
+                    expected_output_identity=expected_output_identity,
+                    expected_output_hash=expected_output_hash,
+                    expected_manifest_identity=expected_manifest_identity,
+                    expected_manifest_hash=expected_manifest_hash,
+                    expected_output_state=expected_output_state,
+                    expected_manifest_state=expected_manifest_state,
+                    replace_authorized=replace_authorized,
+                    source_validation_required=source_validation_required,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._prepare_publication_transaction",
+                side_effect=swap_then_prepare,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "exceeds the runtime limit",
+                ):
+                    build_virtual_spread(
+                        source,
+                        output,
+                        manifest,
+                        force=True,
+                        **EXPLICIT_DEFAULT_LAYOUT,
+                    )
+
+            self.assertTrue(swapped)
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertFalse(any(root.glob("*.bak")))
+            self.assertFalse(any(root.glob("*.publish.json")))
+
+    def test_same_content_staged_manifest_replacement_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            real_prepare = _prepare_publication_transaction
+            swapped = False
+
+            def swap_then_prepare(
+                temporary_output: Path,
+                output_path: Path,
+                temporary_manifest: Path,
+                manifest_path: Path,
+                ownership_guard: object = None,
+                expected_output_identity: object = None,
+                expected_output_hash: str | None = None,
+                expected_manifest_identity: object = None,
+                expected_manifest_hash: str | None = None,
+                expected_output_state: object = None,
+                expected_manifest_state: object = None,
+                replace_authorized: bool = True,
+                source_validation_required: bool = False,
+            ) -> dict[str, object]:
+                nonlocal swapped
+                replacement = temporary_manifest.with_name(
+                    temporary_manifest.name + ".replacement"
+                )
+                replacement.write_bytes(temporary_manifest.read_bytes())
+                os.replace(replacement, temporary_manifest)
+                swapped = True
+                return real_prepare(
+                    temporary_output,
+                    output_path,
+                    temporary_manifest,
+                    manifest_path,
+                    ownership_guard,
+                    expected_output_identity=expected_output_identity,
+                    expected_output_hash=expected_output_hash,
+                    expected_manifest_identity=expected_manifest_identity,
+                    expected_manifest_hash=expected_manifest_hash,
+                    expected_output_state=expected_output_state,
+                    expected_manifest_state=expected_manifest_state,
+                    replace_authorized=replace_authorized,
+                    source_validation_required=source_validation_required,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._prepare_publication_transaction",
+                side_effect=swap_then_prepare,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "identity changed before publication",
+                ):
+                    build_virtual_spread(
+                        source,
+                        output,
+                        manifest,
+                        force=True,
+                        **EXPLICIT_DEFAULT_LAYOUT,
+                    )
+
+            self.assertTrue(swapped)
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertFalse(any(root.glob("*.bak")))
+            self.assertFalse(any(root.glob("*.publish.json")))
+
+    def test_staged_output_swap_is_rejected_at_publication_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            real_prepare = _prepare_publication_transaction
+            swapped = False
+
+            def swap_then_prepare(
+                temporary_output: Path,
+                output_path: Path,
+                temporary_manifest: Path,
+                manifest_path: Path,
+                ownership_guard: object = None,
+                expected_output_identity: object = None,
+                expected_output_hash: str | None = None,
+                expected_manifest_identity: object = None,
+                expected_manifest_hash: str | None = None,
+                expected_output_state: object = None,
+                expected_manifest_state: object = None,
+                replace_authorized: bool = True,
+                source_validation_required: bool = False,
+            ) -> dict[str, object]:
+                nonlocal swapped
+                replacement = temporary_output.with_name(
+                    temporary_output.name + ".replacement"
+                )
+                replacement.write_bytes(b"replacement-pdf")
+                os.replace(replacement, temporary_output)
+                swapped = True
+                return real_prepare(
+                    temporary_output,
+                    output_path,
+                    temporary_manifest,
+                    manifest_path,
+                    ownership_guard,
+                    expected_output_identity=expected_output_identity,
+                    expected_output_hash=expected_output_hash,
+                    expected_manifest_identity=expected_manifest_identity,
+                    expected_manifest_hash=expected_manifest_hash,
+                    expected_output_state=expected_output_state,
+                    expected_manifest_state=expected_manifest_state,
+                    replace_authorized=replace_authorized,
+                    source_validation_required=source_validation_required,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._prepare_publication_transaction",
+                side_effect=swap_then_prepare,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Staged output SHA-256 mismatch",
+                ):
+                    build_virtual_spread(
+                        source,
+                        output,
+                        manifest,
+                        force=True,
+                        **EXPLICIT_DEFAULT_LAYOUT,
+                    )
+
+            self.assertTrue(swapped)
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertFalse(any(root.glob("*.bak")))
+            self.assertFalse(any(root.glob("*.publish.json")))
+
+    def test_same_content_staged_output_replacement_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            real_prepare = _prepare_publication_transaction
+            swapped = False
+
+            def swap_then_prepare(
+                temporary_output: Path,
+                output_path: Path,
+                temporary_manifest: Path,
+                manifest_path: Path,
+                ownership_guard: object = None,
+                expected_output_identity: object = None,
+                expected_output_hash: str | None = None,
+                expected_manifest_identity: object = None,
+                expected_manifest_hash: str | None = None,
+                expected_output_state: object = None,
+                expected_manifest_state: object = None,
+                replace_authorized: bool = True,
+                source_validation_required: bool = False,
+            ) -> dict[str, object]:
+                nonlocal swapped
+                replacement = temporary_output.with_name(
+                    temporary_output.name + ".replacement"
+                )
+                replacement.write_bytes(temporary_output.read_bytes())
+                os.replace(replacement, temporary_output)
+                swapped = True
+                return real_prepare(
+                    temporary_output,
+                    output_path,
+                    temporary_manifest,
+                    manifest_path,
+                    ownership_guard,
+                    expected_output_identity=expected_output_identity,
+                    expected_output_hash=expected_output_hash,
+                    expected_manifest_identity=expected_manifest_identity,
+                    expected_manifest_hash=expected_manifest_hash,
+                    expected_output_state=expected_output_state,
+                    expected_manifest_state=expected_manifest_state,
+                    replace_authorized=replace_authorized,
+                    source_validation_required=source_validation_required,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._prepare_publication_transaction",
+                side_effect=swap_then_prepare,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "identity changed before publication",
+                ):
+                    build_virtual_spread(
+                        source,
+                        output,
+                        manifest,
+                        force=True,
+                        **EXPLICIT_DEFAULT_LAYOUT,
+                    )
+
+            self.assertTrue(swapped)
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertFalse(any(root.glob("*.bak")))
+            self.assertFalse(any(root.glob("*.publish.json")))
+
+    def test_obsolete_marker_without_backups_is_discarded(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            marker.write_text(
+                json.dumps(
+                    {
+                        "schema": (
+                            "techrebbe.supernote."
+                            "virtual-spread-publication/v1"
+                        ),
+                        "outputPath": str(output),
+                        "manifestPath": str(manifest),
+                        "outputBackupPath": str(output_backup),
+                        "manifestBackupPath": str(manifest_backup),
+                        "hadOutput": True,
+                        "hadManifest": True,
+                        "newOutputSha256": "0" * 64,
+                        "newManifestSha256": "1" * 64,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                _recover_pair_publication(output, manifest),
+                "discarded",
+            )
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertFalse(marker.exists())
+            self.assertFalse(output_backup.exists())
+            self.assertFalse(manifest_backup.exists())
+
+    def test_discarded_marker_revalidates_pair_before_retirement(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            marker.write_text(
+                json.dumps(
+                    {
+                        "schema": (
+                            "techrebbe.supernote."
+                            "virtual-spread-publication/v1"
+                        ),
+                        "outputPath": str(output),
+                        "manifestPath": str(manifest),
+                        "outputBackupPath": str(output_backup),
+                        "manifestBackupPath": str(manifest_backup),
+                        "hadOutput": True,
+                        "hadManifest": True,
+                        "newOutputSha256": "0" * 64,
+                        "newManifestSha256": "1" * 64,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            real_finish = _finish_publication_transaction
+            raced = False
+
+            def replace_after_pair_capture(*args: object, **kwargs: object) -> None:
+                nonlocal raced
+                replacement = root / "late-output.pdf"
+                replacement.write_bytes(b"late-output")
+                os.replace(replacement, output)
+                raced = True
+                real_finish(*args, **kwargs)
+
+            with mock.patch(
+                "generate_virtual_spread._finish_publication_transaction",
+                side_effect=replace_after_pair_capture,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Settled output",
+                ):
+                    _recover_pair_publication(output, manifest)
+
+            self.assertTrue(raced)
+            self.assertEqual(output.read_bytes(), b"late-output")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(marker.is_file())
+
+    def test_recovery_rejects_unauthenticated_retired_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sample_output = root / "sample" / "spread.pdf"
+            sample_reserved = _publication_reserved_paths(sample_output)
+            retired_count = sum(
+                path.name.endswith(".retired")
+                for path in sample_reserved
+            )
+            for index in range(retired_count):
+                with self.subTest(index=index):
+                    case_root = root / str(index)
+                    case_root.mkdir()
+                    output = case_root / "spread.pdf"
+                    manifest = case_root / "spread.pdf.json"
+                    output.write_bytes(b"stable-pdf")
+                    manifest.write_bytes(b"stable-manifest")
+                    retired_artifacts = tuple(
+                        path
+                        for path in _publication_reserved_paths(output)
+                        if path.name.endswith(".retired")
+                    )
+                    retired = retired_artifacts[index]
+                    retired.write_bytes(b"untrusted-retired")
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "Retired publication artifact requires manual recovery",
+                    ):
+                        _recover_pair_publication(output, manifest)
+
+                    self.assertEqual(output.read_bytes(), b"stable-pdf")
+                    self.assertEqual(manifest.read_bytes(), b"stable-manifest")
+                    self.assertEqual(retired.read_bytes(), b"untrusted-retired")
+
+            orphan = root / "orphan"
+            orphan_retired = orphan.with_name(orphan.name + ".retired")
+            orphan_retired.write_bytes(b"retired")
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Retired publication artifact requires manual recovery",
+            ):
+                _durably_remove(orphan)
+            self.assertEqual(orphan_retired.read_bytes(), b"retired")
+
+    def test_publication_staging_paths_are_deterministic(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "Spread.pdf"
+            marker, _, _ = _publication_artifacts(output)
+
+            self.assertEqual(
+                _publication_staging_artifacts(output),
+                (
+                    root / ".Spread.pdf.tmp",
+                    root / ".Spread.pdf.json.tmp",
+                    marker.with_name(
+                        f".{marker.name}.publish-marker.tmp"
+                    ),
+                ),
+            )
+            source_commit, source_commit_stage = (
+                _publication_source_commit_artifacts(output)
+            )
+            self.assertEqual(
+                source_commit_stage,
+                source_commit.with_name(f".{source_commit.name}.tmp"),
+            )
+
+    def test_recovery_preserves_orphaned_deterministic_staging(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index in range(4):
+                with self.subTest(index=index):
+                    case_root = root / str(index)
+                    case_root.mkdir()
+                    output = case_root / "spread.pdf"
+                    manifest = case_root / "spread.pdf.json"
+                    output.write_bytes(b"stable-pdf")
+                    manifest.write_bytes(b"stable-manifest")
+                    stages = (
+                        *_publication_staging_artifacts(output),
+                        _publication_source_commit_artifacts(output)[1],
+                    )
+                    stage = stages[index]
+                    stage.write_bytes(b"orphaned-stage")
+
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        "Orphaned virtual-spread staged artifact requires recovery",
+                    ):
+                        _recover_pair_publication(output, manifest)
+
+                    self.assertEqual(output.read_bytes(), b"stable-pdf")
+                    self.assertEqual(manifest.read_bytes(), b"stable-manifest")
+                    self.assertEqual(stage.read_bytes(), b"orphaned-stage")
+
+    def test_recovery_removes_authenticated_deterministic_staging(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            output.write_bytes(b"new-pdf")
+            manifest.write_bytes(b"new-manifest")
+            output_stage, manifest_stage, marker_stage = (
+                _publication_staging_artifacts(output)
+            )
+            output_stage.write_bytes(output.read_bytes())
+            manifest_stage.write_bytes(manifest.read_bytes())
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            with output.open("rb") as stream:
+                output_hash = _sha256_open_file(stream)
+            with manifest.open("rb") as stream:
+                manifest_hash = _sha256_open_file(stream)
+            _write_publication_marker(
+                marker,
+                {
+                    "schema": (
+                        "techrebbe.supernote."
+                        "virtual-spread-publication/v2"
+                    ),
+                    "outputPath": str(output),
+                    "manifestPath": str(manifest),
+                    "outputBackupPath": str(output_backup),
+                    "manifestBackupPath": str(manifest_backup),
+                    "hadOutput": False,
+                    "hadManifest": False,
+                    "oldOutputSha256": None,
+                    "oldManifestSha256": None,
+                    "newOutputSha256": output_hash,
+                    "newManifestSha256": manifest_hash,
+                },
+            )
+            authorize_publication_without_source(output, manifest)
+            marker_stage.write_bytes(marker.read_bytes())
+
+            self.assertEqual(
+                _recover_pair_publication(output, manifest),
+                "committed",
+            )
+            self.assertEqual(output.read_bytes(), b"new-pdf")
+            self.assertEqual(manifest.read_bytes(), b"new-manifest")
+            self.assertFalse(marker.exists())
+            self.assertFalse(output_stage.exists())
+            self.assertFalse(manifest_stage.exists())
+            self.assertFalse(marker_stage.exists())
+
+    def test_recovery_preserves_mismatched_deterministic_staging(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            output.write_bytes(b"new-pdf")
+            manifest.write_bytes(b"new-manifest")
+            output_stage, _, _ = _publication_staging_artifacts(output)
+            output_stage.write_bytes(b"untrusted-stage")
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            with output.open("rb") as stream:
+                output_hash = _sha256_open_file(stream)
+            with manifest.open("rb") as stream:
+                manifest_hash = _sha256_open_file(stream)
+            _write_publication_marker(
+                marker,
+                {
+                    "schema": (
+                        "techrebbe.supernote."
+                        "virtual-spread-publication/v2"
+                    ),
+                    "outputPath": str(output),
+                    "manifestPath": str(manifest),
+                    "outputBackupPath": str(output_backup),
+                    "manifestBackupPath": str(manifest_backup),
+                    "hadOutput": False,
+                    "hadManifest": False,
+                    "oldOutputSha256": None,
+                    "oldManifestSha256": None,
+                    "newOutputSha256": output_hash,
+                    "newManifestSha256": manifest_hash,
+                },
+            )
+            authorize_publication_without_source(output, manifest)
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Staged output SHA-256 mismatch",
+            ):
+                _recover_pair_publication(output, manifest)
+
+            self.assertEqual(output.read_bytes(), b"new-pdf")
+            self.assertEqual(manifest.read_bytes(), b"new-manifest")
+            self.assertEqual(output_stage.read_bytes(), b"untrusted-stage")
+            self.assertTrue(marker.exists())
+
+    def test_interrupted_marker_write_never_exposes_partial_record(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            transaction = {
+                "schema": "techrebbe.supernote.virtual-spread-publication/v2",
+                "outputPath": str(output),
+                "manifestPath": str(Path(str(output) + ".json")),
+                "outputBackupPath": str(output_backup),
+                "manifestBackupPath": str(manifest_backup),
+                "hadOutput": False,
+                "hadManifest": False,
+                "oldOutputSha256": None,
+                "oldManifestSha256": None,
+                "newOutputSha256": "0" * 64,
+                "newManifestSha256": "1" * 64,
+            }
+
+            def interrupt_staged_write(
+                path: Path,
+                value: object,
+                ownership_guard: object = None,
+                retained_descriptor: int | None = None,
+            ) -> None:
+                del value, ownership_guard
+                if retained_descriptor is None:
+                    path.write_text("{\n", encoding="utf-8")
+                else:
+                    with os.fdopen(
+                        os.dup(retained_descriptor),
+                        "w",
+                        encoding="utf-8",
+                        newline="\n",
+                    ) as stream:
+                        stream.seek(0)
+                        stream.truncate(0)
+                        stream.write("{\n")
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                raise OSError("simulated marker write interruption")
+
+            with mock.patch(
+                "generate_virtual_spread._write_json",
+                side_effect=interrupt_staged_write,
+            ):
+                with self.assertRaisesRegex(
+                    OSError,
+                    "simulated marker write interruption",
+                ):
+                    _write_publication_marker(marker, transaction)
+
+            self.assertFalse(marker.exists())
+            self.assertEqual(
+                list(root.glob("*.publish-marker.tmp")),
+                [],
+            )
+
+    def test_marker_parse_is_bound_to_authenticated_handle(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            original = {
+                "schema": "techrebbe.supernote.virtual-spread-publication/v2",
+                "outputPath": str(output),
+                "manifestPath": str(manifest),
+                "outputBackupPath": str(output_backup),
+                "manifestBackupPath": str(manifest_backup),
+                "hadOutput": False,
+                "hadManifest": False,
+                "oldOutputSha256": None,
+                "oldManifestSha256": None,
+                "newOutputSha256": "0" * 64,
+                "newManifestSha256": "1" * 64,
+            }
+            forged = dict(original)
+            forged["hadOutput"] = True
+            forged["oldOutputSha256"] = "2" * 64
+            _write_publication_marker(marker, original)
+            forged_path = root / "forged-marker"
+            forged_path.write_text(
+                json.dumps(forged, sort_keys=True), encoding="utf-8"
+            )
+            real_open = _publication_open_file
+
+            def open_forged_marker(
+                path: Path,
+                flags: int,
+                ownership_guard: object = None,
+                mode: int = 0o666,
+            ) -> int:
+                selected = forged_path if Path(path) == marker else Path(path)
+                return real_open(
+                    selected,
+                    flags,
+                    ownership_guard,  # type: ignore[arg-type]
+                    mode,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._publication_open_file",
+                side_effect=open_forged_marker,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Publication marker changed while it was being verified",
+                ):
+                    _validated_publication_transaction(
+                        marker,
+                        output,
+                        manifest,
+                        output_backup,
+                        manifest_backup,
+                    )
+
+            self.assertEqual(json.loads(marker.read_text("utf-8")), original)
+            self.assertTrue(forged_path.is_file())
+
+    @unittest.skipIf(
+        os.name == "nt",
+        "POSIX atomic no-replace rename is unavailable on Windows",
+    )
+    def test_unguarded_posix_no_replace_uses_atomic_rename(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            staged = root / "staged-marker"
+            incumbent = root / "published-marker"
+            staged.write_bytes(b"staged")
+            incumbent.write_bytes(b"incumbent")
+
+            # The kernel must reject the occupied destination without changing
+            # either file; there is no check-then-rename existence probe.
+            with mock.patch.object(Path, "exists", return_value=False):
+                with self.assertRaises(FileExistsError):
+                    _durable_replace(
+                        staged,
+                        incumbent,
+                        replace_existing=False,
+                    )
+
+            self.assertEqual(staged.read_bytes(), b"staged")
+            self.assertEqual(incumbent.read_bytes(), b"incumbent")
+
+    @unittest.skipIf(
+        os.name == "nt",
+        "POSIX atomic no-replace rename is unavailable on Windows",
+    )
+    def test_posix_no_replace_never_unlinks_recreated_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            staged = root / "staged"
+            published = root / "published"
+            staged.write_bytes(b"authenticated-stage")
+            expected_identity = _identity(staged.stat())
+            real_rename = _posix_rename_noreplace
+            recreated = False
+
+            def rename_then_recreate(
+                source: Path | str,
+                target: Path | str,
+                **kwargs: object,
+            ) -> None:
+                nonlocal recreated
+                real_rename(source, target, **kwargs)  # type: ignore[arg-type]
+                staged.write_bytes(b"non-cooperating-writer")
+                recreated = True
+
+            with mock.patch(
+                "generate_virtual_spread._posix_rename_noreplace",
+                side_effect=rename_then_recreate,
+            ):
+                published_identity = _durable_replace(
+                    staged,
+                    published,
+                    replace_existing=False,
+                    expected_source_identity=expected_identity,
+                )
+
+            self.assertTrue(recreated)
+            self.assertEqual(published.read_bytes(), b"authenticated-stage")
+            self.assertEqual(staged.read_bytes(), b"non-cooperating-writer")
+            self.assertEqual(published_identity, _identity(published.stat()))
+
+    @unittest.skipIf(
+        os.name == "nt",
+        "POSIX atomic no-replace rename is unavailable on Windows",
+    )
+    def test_posix_no_replace_preserves_ambiguous_target_after_source_swap(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            staged = root / "staged"
+            published = root / "published"
+            staged.write_bytes(b"authenticated-stage")
+            expected_identity = _identity(staged.stat())
+            real_rename = _posix_rename_noreplace
+            replaced = False
+
+            def replace_before_rename(
+                source: Path | str,
+                target: Path | str,
+                **kwargs: object,
+            ) -> None:
+                nonlocal replaced
+                if not replaced and Path(source) == staged:
+                    replacement = root / "non-cooperating-replacement"
+                    replacement.write_bytes(b"foreign-stage")
+                    os.replace(replacement, staged)
+                    replaced = True
+                real_rename(source, target, **kwargs)  # type: ignore[arg-type]
+
+            with mock.patch(
+                "generate_virtual_spread._posix_rename_noreplace",
+                side_effect=replace_before_rename,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "ambiguous target preserved",
+                ):
+                    _durable_replace(
+                        staged,
+                        published,
+                        replace_existing=False,
+                        expected_source_identity=expected_identity,
+                    )
+
+            self.assertTrue(replaced)
+            self.assertFalse(staged.exists())
+            self.assertEqual(published.read_bytes(), b"foreign-stage")
+
+    @unittest.skipIf(
+        os.name == "nt",
+        "POSIX atomic no-replace rename is unavailable on Windows",
+    )
+    def test_posix_no_replace_never_moves_a_replaced_destination_back(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            staged = root / "staged"
+            published = root / "published"
+            staged.write_bytes(b"authenticated-stage")
+            expected_identity = _identity(staged.stat())
+            real_rename = _posix_rename_noreplace
+            replaced = False
+
+            def rename_then_replace_target(
+                source: Path | str,
+                target: Path | str,
+                **kwargs: object,
+            ) -> None:
+                nonlocal replaced
+                real_rename(source, target, **kwargs)  # type: ignore[arg-type]
+                replacement = root / "non-cooperating-destination"
+                replacement.write_bytes(b"foreign-destination")
+                os.replace(replacement, published)
+                replaced = True
+
+            with mock.patch(
+                "generate_virtual_spread._posix_rename_noreplace",
+                side_effect=rename_then_replace_target,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "ambiguous target preserved",
+                ):
+                    _durable_replace(
+                        staged,
+                        published,
+                        replace_existing=False,
+                        expected_source_identity=expected_identity,
+                    )
+
+            self.assertTrue(replaced)
+            self.assertFalse(staged.exists())
+            self.assertEqual(published.read_bytes(), b"foreign-destination")
+
+    @unittest.skipIf(
+        os.name == "nt",
+        "POSIX retained staging-inode attack requires unlinking an open file",
+    )
+    def test_retained_staging_inode_prevents_source_hardlink_write(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            source_before = source.read_bytes()
+            staged_output = output.with_name(f".{output.name}.tmp")
+            real_temporary_neighbor = _temporary_neighbor
+            attacked = False
+
+            def replace_stage_with_source_hardlink(
+                path: Path,
+                suffix: str,
+                ownership_guard: object = None,
+            ) -> object:
+                nonlocal attacked
+                artifact = real_temporary_neighbor(
+                    path, suffix, ownership_guard
+                )
+                if path == output and suffix == ".tmp":
+                    artifact.path.unlink()
+                    os.link(source, artifact.path)
+                    attacked = True
+                return artifact
+
+            with mock.patch(
+                "generate_virtual_spread._temporary_neighbor",
+                side_effect=replace_stage_with_source_hardlink,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Staged publication artifact identity changed",
+                ):
+                    build_virtual_spread(source, output, manifest)
+
+            self.assertTrue(attacked)
+            self.assertEqual(source.read_bytes(), source_before)
+            self.assertTrue(staged_output.is_file())
+            self.assertTrue(os.path.samefile(source, staged_output))
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest.exists())
+
+    def test_no_force_preserves_targets_that_appear_during_generation(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            real_publish_pair = _publish_pair
+            raced = False
+
+            def publish_after_late_targets(*args: object, **kwargs: object) -> None:
+                nonlocal raced
+                output.write_bytes(b"late-output")
+                manifest.write_bytes(b"late-manifest")
+                raced = True
+                real_publish_pair(*args, **kwargs)
+
+            with mock.patch(
+                "generate_virtual_spread._publish_pair",
+                side_effect=publish_after_late_targets,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Publication target appeared during generation",
+                ):
+                    build_virtual_spread(source, output, manifest)
+
+            self.assertTrue(raced)
+            self.assertEqual(output.read_bytes(), b"late-output")
+            self.assertEqual(manifest.read_bytes(), b"late-manifest")
+            self.assertFalse(any(root.glob("*.bak")))
+            self.assertFalse(any(root.glob("*.publish.json")))
+
+    def test_force_late_targets_require_explicit_replacement_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            real_target_state = _publication_target_state
+            raced = False
+
+            def capture_after_late_targets(
+                path: Path,
+                label: str,
+                ownership_guard: object = None,
+                *,
+                manifest: bool = False,
+            ) -> object:
+                nonlocal raced
+                if not raced:
+                    output.write_bytes(b"late-output")
+                    manifest_path.write_bytes(b"late-manifest")
+                    raced = True
+                return real_target_state(
+                    path,
+                    label,
+                    ownership_guard,
+                    manifest=manifest,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._publication_target_state",
+                side_effect=capture_after_late_targets,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Forced replacement requires explicit cover, spread width, "
+                    "spread height, and gutter options",
+                ):
+                    build_virtual_spread(
+                        source,
+                        output,
+                        manifest_path,
+                        force=True,
+                    )
+
+            self.assertTrue(raced)
+            self.assertEqual(output.read_bytes(), b"late-output")
+            self.assertEqual(manifest_path.read_bytes(), b"late-manifest")
+            self.assertFalse(any(root.glob("*.bak")))
+            self.assertFalse(any(root.glob("*.publish.json")))
+
+    def test_final_publication_never_replaces_a_late_target(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+            real_replace = _durable_replace
+            raced = False
+
+            def inject_target_before_final_move(
+                source: object,
+                target: object,
+                *,
+                replace_existing: bool = True,
+                ownership_guard: object = None,
+                expected_source_identity: object = None,
+            ) -> None:
+                nonlocal raced
+                if (
+                    not raced
+                    and Path(source) == temporary_manifest
+                    and Path(target) == manifest
+                ):
+                    manifest.write_bytes(b"late-manifest")
+                    raced = True
+                real_replace(
+                    Path(source),
+                    Path(target),
+                    replace_existing=replace_existing,
+                    ownership_guard=ownership_guard,
+                    expected_source_identity=expected_source_identity,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._durable_replace",
+                side_effect=inject_target_before_final_move,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "rollback was incomplete:.*Unexpected publication target",
+                ):
+                    _publish_pair(
+                        temporary_output,
+                        output,
+                        temporary_manifest,
+                        manifest,
+                    )
+
+            self.assertTrue(raced)
+            self.assertFalse(output.exists())
+            self.assertEqual(manifest.read_bytes(), b"late-manifest")
+            self.assertEqual(temporary_output.read_bytes(), b"new-pdf")
+            self.assertEqual(temporary_manifest.read_bytes(), b"new-manifest")
+
+    def test_recovery_never_replaces_a_target_that_appears_before_restore(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            output_backup = Path(transaction["outputBackupPath"])
+            marker = Path(transaction["markerPath"])
+            _durable_replace(output, output_backup)
+            real_replace = _durable_replace
+            raced = False
+
+            def inject_target_before_restore(
+                source: object,
+                target: object,
+                *,
+                replace_existing: bool = True,
+                ownership_guard: object = None,
+                expected_source_identity: object = None,
+            ) -> None:
+                nonlocal raced
+                if (
+                    not raced
+                    and Path(source) == output_backup
+                    and Path(target) == output
+                ):
+                    output.write_bytes(b"late-output")
+                    raced = True
+                real_replace(
+                    Path(source),
+                    Path(target),
+                    replace_existing=replace_existing,
+                    ownership_guard=ownership_guard,
+                    expected_source_identity=expected_source_identity,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._durable_replace",
+                side_effect=inject_target_before_restore,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "recovery was incomplete",
+                ):
+                    _recover_pair_publication(output, manifest)
+
+            self.assertTrue(raced)
+            self.assertEqual(output.read_bytes(), b"late-output")
+            self.assertEqual(output_backup.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(marker.is_file())
+
+    def test_recovery_never_deletes_a_replaced_new_target(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            output_stage, manifest_stage, _ = _publication_staging_artifacts(
+                output
+            )
+            output_stage.write_bytes(b"new-pdf")
+            manifest_stage.write_bytes(b"new-manifest")
+            transaction = _prepare_publication_transaction(
+                output_stage,
+                output,
+                manifest_stage,
+                manifest,
+            )
+            marker = Path(transaction["markerPath"])
+            _durable_replace(
+                output_stage,
+                output,
+                replace_existing=False,
+            )
+            real_remove = _durably_remove
+            raced = False
+
+            def replace_before_recovery_delete(
+                path: Path,
+                ownership_guard: object = None,
+                *,
+                expected_identity: object = None,
+            ) -> None:
+                nonlocal raced
+                if not raced and Path(path) == output:
+                    replacement = root / "unrelated-replacement.pdf"
+                    replacement.write_bytes(b"unrelated-replacement")
+                    os.replace(replacement, output)
+                    raced = True
+                real_remove(
+                    Path(path),
+                    ownership_guard,
+                    expected_identity=expected_identity,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._durably_remove",
+                side_effect=replace_before_recovery_delete,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "recovery was incomplete:.*identity changed",
+                ):
+                    _recover_pair_publication(output, manifest)
+
+            self.assertTrue(raced)
+            self.assertEqual(output.read_bytes(), b"unrelated-replacement")
+            self.assertTrue(manifest_stage.is_file())
+            self.assertTrue(marker.is_file())
+
+    def test_rollback_revalidates_pair_before_retiring_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            output_backup = Path(transaction["outputBackupPath"])
+            manifest_backup = Path(transaction["manifestBackupPath"])
+            marker = Path(transaction["markerPath"])
+            _durable_replace(output, output_backup)
+            _durable_replace(manifest, manifest_backup)
+            _durable_replace(
+                temporary_output,
+                output,
+                replace_existing=False,
+            )
+            real_finish = _finish_publication_transaction
+            raced = False
+
+            def replace_after_pair_capture(*args: object, **kwargs: object) -> None:
+                nonlocal raced
+                replacement = root / "late-output.pdf"
+                replacement.write_bytes(b"late-output")
+                os.replace(replacement, output)
+                raced = True
+                real_finish(*args, **kwargs)
+
+            with mock.patch(
+                "generate_virtual_spread._finish_publication_transaction",
+                side_effect=replace_after_pair_capture,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Settled output",
+                ):
+                    _recover_pair_publication(output, manifest)
+
+            self.assertTrue(raced)
+            self.assertEqual(output.read_bytes(), b"late-output")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(marker.is_file())
+
+    @unittest.skipIf(
+        os.name == "nt",
+        "POSIX unguarded no-replace publication is not used on Windows",
+    )
+    def test_unguarded_marker_publication_is_atomically_exclusive(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            marker = root / "spread.pdf.publish.json"
+            marker.write_bytes(b"incumbent-marker")
+            transaction = {
+                "schema": "techrebbe.supernote.virtual-spread-publication/v2",
+                "outputPath": str(root / "spread.pdf"),
+                "manifestPath": str(root / "spread.pdf.json"),
+                "outputBackupPath": str(root / "spread.pdf.backup"),
+                "manifestBackupPath": str(root / "spread.pdf.json.backup"),
+                "hadOutput": False,
+                "hadManifest": False,
+                "oldOutputSha256": None,
+                "oldManifestSha256": None,
+                "newOutputSha256": "0" * 64,
+                "newManifestSha256": "1" * 64,
+            }
+
+            # Recreate the old check-then-replace race deterministically: an
+            # existence probe lies that the incumbent is absent. Atomic link
+            # publication must still reject the occupied marker name.
+            with mock.patch.object(Path, "exists", return_value=False):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Publication is already in progress",
+                ):
+                    _write_publication_marker(marker, transaction)
+
+            self.assertEqual(marker.read_bytes(), b"incumbent-marker")
+            self.assertEqual(
+                list(root.glob("*.publish-marker.tmp")),
+                [],
+            )
+
+    @unittest.skipIf(
+        os.name == "nt",
+        "POSIX link-before-unlink recovery is not used on Windows",
+    )
+    def test_recovery_accepts_interrupted_posix_backup_hard_link(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            output_backup = Path(transaction["outputBackupPath"])
+            marker = Path(transaction["markerPath"])
+            os.link(output, output_backup)
+
+            self.assertEqual(
+                _recover_pair_publication(output, manifest),
+                "rolled_back",
+            )
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertFalse(marker.exists())
+            self.assertFalse(output_backup.exists())
+            retained_aliases = tuple(
+                root.glob(output_backup.name + ".retained.*")
+            )
+            self.assertEqual(len(retained_aliases), 1)
+            self.assertTrue(os.path.samefile(retained_aliases[0], output))
+            self.assertEqual(
+                _retired_publication_artifacts(output_backup),
+                (),
+            )
+
+    def test_legacy_marker_with_duplicate_keys_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            record = {
+                "schema": (
+                    "techrebbe.supernote."
+                    "virtual-spread-publication/v1"
+                ),
+                "outputPath": str(output),
+                "manifestPath": str(manifest),
+                "outputBackupPath": str(output_backup),
+                "manifestBackupPath": str(manifest_backup),
+                "hadOutput": True,
+                "hadManifest": True,
+                "newOutputSha256": "0" * 64,
+                "newManifestSha256": "1" * 64,
+            }
+            marker_text = json.dumps(record).replace(
+                '"hadOutput": true',
+                '"hadOutput": false, "hadOutput": true',
+                1,
+            )
+            self.assertEqual(marker_text.count('"hadOutput"'), 2)
+            marker.write_text(marker_text, encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot recover ambiguous virtual-spread publication marker",
+            ):
+                _recover_pair_publication(output, manifest)
+
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(marker.is_file())
+            self.assertFalse(output_backup.exists())
+            self.assertFalse(manifest_backup.exists())
+
+    def test_legacy_marker_with_unknown_fields_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            marker.write_text(
+                json.dumps(
+                    {
+                        "schema": (
+                            "techrebbe.supernote."
+                            "virtual-spread-publication/v1"
+                        ),
+                        "outputPath": str(output),
+                        "manifestPath": str(manifest),
+                        "outputBackupPath": str(output_backup),
+                        "manifestBackupPath": str(manifest_backup),
+                        "hadOutput": True,
+                        "hadManifest": True,
+                        "newOutputSha256": "0" * 64,
+                        "newManifestSha256": "1" * 64,
+                        "unexpectedRecoveryHint": "discard-marker",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot recover ambiguous virtual-spread publication marker",
+            ):
+                _recover_pair_publication(output, manifest)
+
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(marker.is_file())
+            self.assertFalse(output_backup.exists())
+            self.assertFalse(manifest_backup.exists())
+
+    def test_obsolete_marker_with_backup_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            marker.write_text(
+                json.dumps(
+                    {
+                        "schema": (
+                            "techrebbe.supernote."
+                            "virtual-spread-publication/v1"
+                        ),
+                        "outputPath": str(output),
+                        "manifestPath": str(manifest),
+                        "outputBackupPath": str(output_backup),
+                        "manifestBackupPath": str(manifest_backup),
+                        "hadOutput": True,
+                        "hadManifest": True,
+                        "newOutputSha256": "0" * 64,
+                        "newManifestSha256": "1" * 64,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            output_backup.write_bytes(b"recovery-evidence")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot recover obsolete virtual-spread publication marker",
+            ):
+                _recover_pair_publication(output, manifest)
+
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(marker.is_file())
+            self.assertEqual(
+                output_backup.read_bytes(),
+                b"recovery-evidence",
+            )
+            self.assertFalse(manifest_backup.exists())
+
+    def test_obsolete_new_pair_partial_sidecar_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            manifest.write_bytes(b"published-sidecar")
+            with manifest.open("rb") as stream:
+                manifest_hash = _sha256_open_file(stream)
+            marker.write_text(
+                json.dumps(
+                    {
+                        "schema": (
+                            "techrebbe.supernote."
+                            "virtual-spread-publication/v1"
+                        ),
+                        "outputPath": str(output),
+                        "manifestPath": str(manifest),
+                        "outputBackupPath": str(output_backup),
+                        "manifestBackupPath": str(manifest_backup),
+                        "hadOutput": False,
+                        "hadManifest": False,
+                        "newOutputSha256": "0" * 64,
+                        "newManifestSha256": manifest_hash,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot recover obsolete virtual-spread publication marker",
+            ):
+                _recover_pair_publication(output, manifest)
+
+            self.assertFalse(output.exists())
+            self.assertEqual(manifest.read_bytes(), b"published-sidecar")
+            self.assertTrue(marker.is_file())
+            self.assertFalse(output_backup.exists())
+            self.assertFalse(manifest_backup.exists())
+
+    def test_obsolete_new_pair_complete_publication_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            output.write_bytes(b"published-output")
+            manifest.write_bytes(b"published-sidecar")
+            with output.open("rb") as stream:
+                output_hash = _sha256_open_file(stream)
+            with manifest.open("rb") as stream:
+                manifest_hash = _sha256_open_file(stream)
+            marker.write_text(
+                json.dumps(
+                    {
+                        "schema": (
+                            "techrebbe.supernote."
+                            "virtual-spread-publication/v1"
+                        ),
+                        "outputPath": str(output),
+                        "manifestPath": str(manifest),
+                        "outputBackupPath": str(output_backup),
+                        "manifestBackupPath": str(manifest_backup),
+                        "hadOutput": False,
+                        "hadManifest": False,
+                        "newOutputSha256": output_hash,
+                        "newManifestSha256": manifest_hash,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot recover obsolete virtual-spread publication marker",
+            ):
+                _recover_pair_publication(output, manifest)
+
+            self.assertEqual(output.read_bytes(), b"published-output")
+            self.assertEqual(manifest.read_bytes(), b"published-sidecar")
+            self.assertTrue(marker.is_file())
+            self.assertFalse(output_backup.exists())
+            self.assertFalse(manifest_backup.exists())
+
+    def test_invalid_marker_with_canonical_artifact_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            manifest.write_bytes(b"unclassified-canonical-artifact")
+            marker.write_text(
+                json.dumps(
+                    {
+                        "schema": "unsupported-publication-schema",
+                        "outputPath": str(output),
+                        "manifestPath": str(manifest),
+                        "outputBackupPath": str(output_backup),
+                        "manifestBackupPath": str(manifest_backup),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot recover invalid virtual-spread publication marker",
+            ):
+                _recover_pair_publication(output, manifest)
+
+            self.assertFalse(output.exists())
+            self.assertEqual(
+                manifest.read_bytes(),
+                b"unclassified-canonical-artifact",
+            )
+            self.assertTrue(marker.is_file())
+            self.assertFalse(output_backup.exists())
+            self.assertFalse(manifest_backup.exists())
+
+    def test_pair_publication_rolls_back_after_second_replace_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            real_replace = _durable_replace
+
+            def fail_output_publication(
+                source: object,
+                target: object,
+                *,
+                replace_existing: bool = True,
+                ownership_guard: object = None,
+                expected_source_identity: object = None,
+            ) -> None:
+                if (
+                    Path(source) == temporary_output
+                    and Path(target) == output
+                ):
+                    raise OSError("simulated output publication failure")
+                real_replace(
+                    Path(source),
+                    Path(target),
+                    replace_existing=replace_existing,
+                    ownership_guard=ownership_guard,
+                    expected_source_identity=expected_source_identity,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._durable_replace",
+                side_effect=fail_output_publication,
+            ):
+                with self.assertRaisesRegex(
+                    OSError,
+                    "simulated output publication failure",
+                ):
+                    _publish_pair(
+                        temporary_output,
+                        output,
+                        temporary_manifest,
+                        manifest,
+                    )
+
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(temporary_output.exists())
+            self.assertFalse(temporary_manifest.exists())
+            self.assertEqual(
+                list(root.glob("*.bak")),
+
+                [],
+            )
+    def test_next_run_recovers_interrupted_partial_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            create_odd_page_fixture(source)
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            output_backup = Path(transaction["outputBackupPath"])
+            manifest_backup = Path(transaction["manifestBackupPath"])
+            marker = Path(transaction["markerPath"])
+            _durable_replace(output, output_backup)
+            _durable_replace(manifest, manifest_backup)
+            _durable_replace(temporary_manifest, manifest)
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Output already exists",
+            ):
+                build_virtual_spread(source, output, manifest)
+
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(temporary_output.exists())
+            self.assertFalse(temporary_manifest.exists())
+            self.assertFalse(marker.exists())
+            self.assertFalse(output_backup.exists())
+            self.assertFalse(manifest_backup.exists())
+
+    def test_recovery_rejects_tampered_backup_without_restoring_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            output_backup = Path(transaction["outputBackupPath"])
+            marker = Path(transaction["markerPath"])
+            _durable_replace(output, output_backup)
+            output_backup.write_bytes(b"tampered-old-pdf")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Output backup SHA-256 mismatch",
+            ):
+                _recover_pair_publication(output, manifest)
+
+            self.assertFalse(output.exists())
+            self.assertEqual(output_backup.read_bytes(), b"tampered-old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(marker.is_file())
+
+    def test_recovery_preserves_unexpected_target_in_front_of_backup(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            output_backup = Path(transaction["outputBackupPath"])
+            marker = Path(transaction["markerPath"])
+            _durable_replace(output, output_backup)
+            output.write_bytes(b"unexpected-concurrent-pdf")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Staged publication target SHA-256 mismatch",
+            ):
+                _recover_pair_publication(output, manifest)
+
+            self.assertEqual(
+                output.read_bytes(),
+                b"unexpected-concurrent-pdf",
+            )
+            self.assertEqual(output_backup.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertTrue(marker.is_file())
+
+    def test_recovery_rolls_back_complete_pair_without_source_commit(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+                source_validation_required=True,
+            )
+            move_prepared_pair(
+                transaction,
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+
+            self.assertEqual(
+                _recover_pair_publication(output, manifest),
+                "rolled_back",
+            )
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+            self.assertFalse(
+                _publication_source_commit_artifacts(output)[0].exists()
+            )
+
+    def test_recovery_commits_only_after_durable_source_validation(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            source.write_bytes(b"stable-source")
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+            source_identity = _identity(source.stat())
+            with source.open("rb") as stream:
+                source_hash = _sha256_open_file(stream)
+            evidence = PublicationSourceEvidence(
+                source,
+                source_identity,
+                source_hash,
+            )
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+                source_validation_required=True,
+            )
+            move_prepared_pair(
+                transaction,
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            _require_source_snapshot(source, source_identity, source_hash)
+            _write_source_commit_record(output, transaction, evidence)
+
+            self.assertEqual(
+                _recover_pair_publication(output, manifest),
+                "committed",
+            )
+            self.assertEqual(output.read_bytes(), b"new-pdf")
+            self.assertEqual(manifest.read_bytes(), b"new-manifest")
+
+    def test_recovery_revalidates_durable_source_commit_before_commit(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            replacement = root / "replacement.pdf"
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            source.write_bytes(b"stable-source")
+            replacement.write_bytes(b"changed-source")
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+            source_identity = _identity(source.stat())
+            with source.open("rb") as stream:
+                source_hash = _sha256_open_file(stream)
+            evidence = PublicationSourceEvidence(
+                source,
+                source_identity,
+                source_hash,
+            )
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+                source_validation_required=True,
+            )
+            move_prepared_pair(
+                transaction,
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            _write_source_commit_record(output, transaction, evidence)
+            os.replace(replacement, source)
+
+            self.assertEqual(
+                _recover_pair_publication(output, manifest),
+                "rolled_back",
+            )
+            self.assertEqual(output.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest.read_bytes(), b"old-manifest")
+
+    def test_orphaned_source_commit_finishes_committed_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            move_prepared_pair(
+                transaction,
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            for backup_key in (
+                "outputBackupPath",
+                "manifestBackupPath",
+            ):
+                backup = Path(transaction[backup_key])
+                _durably_remove(
+                    backup,
+                    expected_identity=_identity(backup.stat()),
+                )
+            _durably_remove(
+                Path(transaction["markerPath"]),
+                expected_identity=transaction["_markerIdentity"],
+            )
+
+            self.assertEqual(
+                _recover_pair_publication(output, manifest),
+                "committed",
+            )
+            self.assertEqual(output.read_bytes(), b"new-pdf")
+            self.assertEqual(manifest.read_bytes(), b"new-manifest")
+            self.assertFalse(
+                _publication_source_commit_artifacts(output)[0].exists()
+            )
+
+    def test_source_commit_record_is_bound_to_publication_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            move_prepared_pair(
+                transaction,
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            source_commit = _publication_source_commit_artifacts(output)[0]
+            record = json.loads(source_commit.read_text(encoding="utf-8"))
+            record["publicationMarkerSha256"] = "f" * 64
+            source_commit.write_text(
+                json.dumps(record, sort_keys=True),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot recover invalid source-commit record",
+            ):
+                _recover_pair_publication(output, manifest)
+
+            self.assertEqual(output.read_bytes(), b"new-pdf")
+            self.assertEqual(manifest.read_bytes(), b"new-manifest")
+            self.assertTrue(Path(transaction["markerPath"]).exists())
+            self.assertTrue(source_commit.exists())
+
+    def test_orphaned_source_commit_requires_matching_pair(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            move_prepared_pair(
+                transaction,
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            for backup_key in (
+                "outputBackupPath",
+                "manifestBackupPath",
+            ):
+                backup = Path(transaction[backup_key])
+                _durably_remove(
+                    backup,
+                    expected_identity=_identity(backup.stat()),
+                )
+            _durably_remove(
+                Path(transaction["markerPath"]),
+                expected_identity=transaction["_markerIdentity"],
+            )
+            output.write_bytes(b"unrelated-output")
+            source_commit = _publication_source_commit_artifacts(output)[0]
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot recover invalid orphaned source-commit record",
+            ):
+                _recover_pair_publication(output, manifest)
+
+            self.assertEqual(output.read_bytes(), b"unrelated-output")
+            self.assertEqual(manifest.read_bytes(), b"new-manifest")
+            self.assertTrue(source_commit.exists())
+
+    def test_recovery_finishes_cleanup_after_complete_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            output_backup = Path(transaction["outputBackupPath"])
+            manifest_backup = Path(transaction["manifestBackupPath"])
+            marker = Path(transaction["markerPath"])
+            _durable_replace(output, output_backup)
+            _durable_replace(manifest, manifest_backup)
+            _durable_replace(temporary_manifest, manifest)
+            _durable_replace(temporary_output, output)
+
+            self.assertEqual(
+                _recover_pair_publication(output, manifest),
+                "committed",
+            )
+            self.assertEqual(output.read_bytes(), b"new-pdf")
+            self.assertEqual(manifest.read_bytes(), b"new-manifest")
+            self.assertFalse(marker.exists())
+            self.assertFalse(output_backup.exists())
+            self.assertFalse(manifest_backup.exists())
+
+    def test_cleanup_carries_identity_for_every_removed_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            output_backup = Path(transaction["outputBackupPath"])
+            manifest_backup = Path(transaction["manifestBackupPath"])
+            marker = Path(transaction["markerPath"])
+            _durable_replace(output, output_backup)
+            _durable_replace(manifest, manifest_backup)
+            _durable_replace(temporary_manifest, manifest)
+            _durable_replace(temporary_output, output)
+
+            real_remove = _durably_remove
+            removed: list[Path] = []
+
+            def require_bound_remove(
+                path: Path,
+                ownership_guard: object = None,
+                *,
+                expected_identity: object = None,
+                missing_ok: bool = False,
+            ) -> None:
+                self.assertIsInstance(expected_identity, SourceIdentity)
+                removed.append(Path(path))
+                real_remove(
+                    path,
+                    ownership_guard,  # type: ignore[arg-type]
+                    expected_identity=expected_identity,  # type: ignore[arg-type]
+                    missing_ok=missing_ok,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._durably_remove",
+                side_effect=require_bound_remove,
+            ):
+                self.assertEqual(
+                    _recover_pair_publication(output, manifest),
+                    "committed",
+                )
+
+            self.assertEqual(
+                removed,
+                [
+                    output_backup,
+                    manifest_backup,
+                    marker,
+                    _publication_source_commit_artifacts(output)[0],
+                ],
+            )
+
+    def test_cleanup_never_deletes_a_replaced_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / ".spread.pdf.new"
+            temporary_manifest = root / ".spread.pdf.json.new"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            output_backup = Path(transaction["outputBackupPath"])
+            marker = Path(transaction["markerPath"])
+            _durable_replace(output, output_backup)
+            _durable_replace(
+                manifest, Path(transaction["manifestBackupPath"])
+            )
+            _durable_replace(temporary_manifest, manifest)
+            _durable_replace(temporary_output, output)
+
+            real_remove = _durably_remove
+            replaced = False
+
+            def replace_before_remove(
+                path: Path,
+                ownership_guard: object = None,
+                *,
+                expected_identity: object = None,
+                missing_ok: bool = False,
+            ) -> None:
+                nonlocal replaced
+                if Path(path) == output_backup and not replaced:
+                    replacement = root / "unrelated-backup-replacement"
+                    replacement.write_bytes(b"unrelated")
+                    os.replace(replacement, output_backup)
+                    replaced = True
+                real_remove(
+                    path,
+                    ownership_guard,  # type: ignore[arg-type]
+                    expected_identity=expected_identity,  # type: ignore[arg-type]
+                    missing_ok=missing_ok,
+                )
+
+            with mock.patch(
+                "generate_virtual_spread._durably_remove",
+                side_effect=replace_before_remove,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "identity changed",
+                ):
+                    _recover_pair_publication(output, manifest)
+
+            self.assertTrue(replaced)
+            self.assertEqual(output_backup.read_bytes(), b"unrelated")
+            self.assertTrue(marker.exists())
+
+    def test_cleanup_never_deletes_replaced_stage_or_marker(self) -> None:
+        for target_kind in ("stage", "marker"):
+            with self.subTest(target_kind=target_kind):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    output = root / "spread.pdf"
+                    manifest = root / "spread.pdf.json"
+                    output.write_bytes(b"new-pdf")
+                    manifest.write_bytes(b"new-manifest")
+                    output_stage, _, _ = _publication_staging_artifacts(output)
+                    marker, output_backup, manifest_backup = (
+                        _publication_artifacts(output)
+                    )
+                    with output.open("rb") as stream:
+                        output_hash = _sha256_open_file(stream)
+                    with manifest.open("rb") as stream:
+                        manifest_hash = _sha256_open_file(stream)
+                    _write_publication_marker(
+                        marker,
+                        {
+                            "schema": (
+                                "techrebbe.supernote."
+                                "virtual-spread-publication/v2"
+                            ),
+                            "outputPath": str(output),
+                            "manifestPath": str(manifest),
+                            "outputBackupPath": str(output_backup),
+                            "manifestBackupPath": str(manifest_backup),
+                            "hadOutput": False,
+                            "hadManifest": False,
+                            "oldOutputSha256": None,
+                            "oldManifestSha256": None,
+                            "newOutputSha256": output_hash,
+                            "newManifestSha256": manifest_hash,
+                        },
+                    )
+                    authorize_publication_without_source(output, manifest)
+                    if target_kind == "stage":
+                        output_stage.write_bytes(output.read_bytes())
+                        target = output_stage
+                    else:
+                        target = marker
+
+                    real_remove = _durably_remove
+                    replaced = False
+
+                    def replace_before_remove(
+                        path: Path,
+                        ownership_guard: object = None,
+                        *,
+                        expected_identity: object = None,
+                        missing_ok: bool = False,
+                    ) -> None:
+                        nonlocal replaced
+                        if Path(path) == target and not replaced:
+                            replacement = root / "unrelated-cleanup-replacement"
+                            replacement.write_bytes(b"unrelated")
+                            os.replace(replacement, target)
+                            replaced = True
+                        real_remove(
+                            path,
+                            ownership_guard,  # type: ignore[arg-type]
+                            expected_identity=expected_identity,  # type: ignore[arg-type]
+                            missing_ok=missing_ok,
+                        )
+
+                    with mock.patch(
+                        "generate_virtual_spread._durably_remove",
+                        side_effect=replace_before_remove,
+                    ):
+                        with self.assertRaisesRegex(
+                            VirtualSpreadError,
+                            "identity changed",
+                        ):
+                            _recover_pair_publication(output, manifest)
+
+                    self.assertTrue(replaced)
+                    self.assertEqual(target.read_bytes(), b"unrelated")
+                    self.assertEqual(output.read_bytes(), b"new-pdf")
+                    self.assertEqual(manifest.read_bytes(), b"new-manifest")
+
+    def test_committed_cleanup_revalidates_pair_before_backup_retirement(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            temporary_output = root / "new-output"
+            temporary_manifest = root / "new-manifest"
+            output.write_bytes(b"old-pdf")
+            manifest.write_bytes(b"old-manifest")
+            temporary_output.write_bytes(b"new-pdf")
+            temporary_manifest.write_bytes(b"new-manifest")
+            transaction = _prepare_publication_transaction(
+                temporary_output,
+                output,
+                temporary_manifest,
+                manifest,
+            )
+            marker = Path(transaction["markerPath"])
+            output_backup = Path(transaction["outputBackupPath"])
+            manifest_backup = Path(transaction["manifestBackupPath"])
+            _durable_replace(output, output_backup)
+            _durable_replace(manifest, manifest_backup)
+            _durable_replace(temporary_manifest, manifest)
+            _durable_replace(temporary_output, output)
+            real_finish = _finish_publication_transaction
+            replaced = False
+
+            def replace_before_finish(*args: object, **kwargs: object) -> None:
+                nonlocal replaced
+                if not replaced:
+                    replacement = root / "unrelated-output"
+                    replacement.write_bytes(b"new-pdf")
+                    os.replace(replacement, output)
+                    replaced = True
+                real_finish(*args, **kwargs)  # type: ignore[arg-type]
+
+            with mock.patch(
+                "generate_virtual_spread._finish_publication_transaction",
+                side_effect=replace_before_finish,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Settled output identity changed",
+                ):
+                    _recover_pair_publication(output, manifest)
+
+            self.assertTrue(replaced)
+            self.assertEqual(output.read_bytes(), b"new-pdf")
+            self.assertEqual(manifest.read_bytes(), b"new-manifest")
+            self.assertEqual(output_backup.read_bytes(), b"old-pdf")
+            self.assertEqual(manifest_backup.read_bytes(), b"old-manifest")
+            self.assertTrue(marker.is_file())
+
+    def test_cleanup_rejects_backup_for_absent_original(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "spread.pdf"
+            manifest = root / "spread.pdf.json"
+            output.write_bytes(b"new-pdf")
+            manifest.write_bytes(b"new-manifest")
+            marker, output_backup, manifest_backup = _publication_artifacts(
+                output
+            )
+            output_backup.write_bytes(b"unrelated-backup")
+            with output.open("rb") as stream:
+                output_hash = _sha256_open_file(stream)
+            with manifest.open("rb") as stream:
+                manifest_hash = _sha256_open_file(stream)
+            _write_publication_marker(
+                marker,
+                {
+                    "schema": (
+                        "techrebbe.supernote.virtual-spread-publication/v2"
+                    ),
+                    "outputPath": str(output),
+                    "manifestPath": str(manifest),
+                    "outputBackupPath": str(output_backup),
+                    "manifestBackupPath": str(manifest_backup),
+                    "hadOutput": False,
+                    "hadManifest": False,
+                    "oldOutputSha256": None,
+                    "oldManifestSha256": None,
+                    "newOutputSha256": output_hash,
+                    "newManifestSha256": manifest_hash,
+                },
+            )
+            authorize_publication_without_source(output, manifest)
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Unexpected publication backup",
+            ):
+                _recover_pair_publication(output, manifest)
+
+            self.assertEqual(output_backup.read_bytes(), b"unrelated-backup")
+            self.assertTrue(marker.exists())
+
+    def test_unique_retirement_preserves_a_replaced_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "cleanup-target"
+            target.write_bytes(b"authorized")
+            expected = _identity(target.stat())
+            real_replace = _durable_replace
+            replacement_path: Path | None = None
+
+            def replace_retired_after_move(
+                source: Path,
+                destination: Path,
+                **kwargs: object,
+            ) -> object:
+                nonlocal replacement_path
+                result = real_replace(source, destination, **kwargs)
+                if Path(source) == target:
+                    replacement = root / "unrelated-retired-replacement"
+                    replacement.write_bytes(b"unrelated")
+                    os.replace(replacement, destination)
+                    replacement_path = Path(destination)
+                return result
+
+            with mock.patch(
+                "generate_virtual_spread._durable_replace",
+                side_effect=replace_retired_after_move,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Retired publication artifact identity changed",
+                ):
+                    _durably_remove(target, expected_identity=expected)
+
+            self.assertIsNotNone(replacement_path)
+            assert replacement_path is not None
+            self.assertRegex(
+                replacement_path.name,
+                r"^cleanup-target\.retired\.[0-9a-f]{32}$",
+            )
+            self.assertEqual(replacement_path.read_bytes(), b"unrelated")
+
+    def test_retirement_keeps_identity_bound_bytes_in_inert_retention(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "cleanup-target"
+            target.write_bytes(b"authorized")
+            expected = _identity(target.stat())
+
+            _durably_remove(target, expected_identity=expected)
+
+            self.assertFalse(target.exists())
+            self.assertEqual(tuple(root.glob("cleanup-target.retired.*")), ())
+            retained = tuple(root.glob("cleanup-target.retained.*"))
+            self.assertEqual(len(retained), 1)
+            self.assertEqual(retained[0].read_bytes(), b"authorized")
+            self.assertEqual(_retired_publication_artifacts(target), ())
+
+    def test_retirement_preserves_a_late_path_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "cleanup-target"
+            target.write_bytes(b"authorized")
+            expected = _identity(target.stat())
+            real_replace = _durable_replace
+            retired_path: Path | None = None
+            replaced = False
+
+            def replace_before_retention(
+                source: Path,
+                destination: Path,
+                **kwargs: object,
+            ) -> object:
+                nonlocal replaced, retired_path
+                source = Path(source)
+                destination = Path(destination)
+                if retired_path is not None and source == retired_path and not replaced:
+                    replacement = root / "unrelated-retired-replacement"
+                    replacement.write_bytes(b"unrelated")
+                    os.replace(replacement, retired_path)
+                    replaced = True
+                result = real_replace(source, destination, **kwargs)
+                if source == target:
+                    retired_path = destination
+                return result
+
+            with mock.patch(
+                "generate_virtual_spread._durable_replace",
+                side_effect=replace_before_retention,
+            ):
+                with self.assertRaisesRegex(
+                    VirtualSpreadError,
+                    "Publication move source identity changed",
+                ):
+                    _durably_remove(target, expected_identity=expected)
+
+            self.assertTrue(replaced)
+            assert retired_path is not None
+            self.assertEqual(retired_path.read_bytes(), b"unrelated")
+
+    def test_retirement_never_mutates_a_late_hardlink_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "cleanup-target"
+            target.write_bytes(b"authorized")
+            link_probe = root / "hardlink-probe"
+            try:
+                os.link(target, link_probe)
+            except OSError as error:
+                self.skipTest(f"hard links unavailable: {error}")
+            link_probe.unlink()
+            expected = _identity(target.stat())
+            real_replace = _durable_replace
+            late_alias = root / "late-alias"
+            linked = False
+
+            def add_alias_after_retirement(
+                source: Path,
+                destination: Path,
+                **kwargs: object,
+            ) -> object:
+                nonlocal linked
+                source = Path(source)
+                destination = Path(destination)
+                result = real_replace(source, destination, **kwargs)
+                if source == target and not linked:
+                    os.link(destination, late_alias)
+                    linked = True
+                return result
+
+            with mock.patch(
+                "generate_virtual_spread._durable_replace",
+                side_effect=add_alias_after_retirement,
+            ):
+                _durably_remove(target, expected_identity=expected)
+
+            self.assertTrue(linked)
+            retained = tuple(root.glob("cleanup-target.retained.*"))
+            self.assertEqual(len(retained), 1)
+            self.assertTrue(os.path.samefile(retained[0], late_alias))
+            self.assertEqual(retained[0].read_bytes(), b"authorized")
+            self.assertEqual(late_alias.read_bytes(), b"authorized")
+
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

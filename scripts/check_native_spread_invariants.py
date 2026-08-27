@@ -7,6 +7,8 @@ import re
 import sys
 from pathlib import Path
 
+import yaml
+
 
 def fail(message: str) -> None:
     raise SystemExit(f"check_native_spread_invariants.py: {message}")
@@ -36,6 +38,7 @@ def check(repo_root: Path) -> None:
     pdf_view_path = repo_root / "native" / "PdfPageView.kt.template"
     pdf_view_manager_path = repo_root / "native" / "PdfPageViewManager.kt.template"
     direct_patch_path = repo_root / "scripts" / "patch_direct_view.py"
+    workflow_path = repo_root / ".github" / "workflows" / "build.yml"
 
     plugin = plugin_path.read_text(encoding="utf-8")
     module = module_path.read_text(encoding="utf-8")
@@ -45,6 +48,210 @@ def check(repo_root: Path) -> None:
     pdf_view = pdf_view_path.read_text(encoding="utf-8")
     pdf_view_manager = pdf_view_manager_path.read_text(encoding="utf-8")
     direct_patch = direct_patch_path.read_text(encoding="utf-8")
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    parsed_workflow = yaml.safe_load(workflow)
+    if not isinstance(parsed_workflow, dict):
+        fail("workflow YAML must decode to an object")
+    if parsed_workflow.get("permissions") != {"contents": "read"}:
+        fail("workflow token permissions must be explicitly read-only")
+    jobs = parsed_workflow.get("jobs")
+    if not isinstance(jobs, dict):
+        fail("workflow jobs must decode to an object")
+    test_job = jobs.get("virtual-spread-tests")
+    assembly_job = jobs.get("virtual-spread-release-assembly")
+    release_job = jobs.get("virtual-spread-release-apk")
+    if any(
+        not isinstance(job, dict)
+        for job in (test_job, assembly_job, release_job)
+    ):
+        fail("workflow must contain test, clean assembly, and release jobs")
+    assert isinstance(assembly_job, dict)
+    if release_job.get("if") != (
+        "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    ):
+        fail("protected release job must run only for trusted main pushes")
+    if assembly_job.get("if") != (
+        "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    ) or assembly_job.get("needs") != "virtual-spread-tests":
+        fail("clean assembly must follow tests on trusted main only")
+    if release_job.get("needs") != "virtual-spread-release-assembly":
+        fail("protected release job must depend on clean assembly")
+    if release_job.get("environment") != "virtual-spread-release":
+        fail("protected release job must use the signing environment")
+    test_steps = test_job.get("steps")
+    assembly_steps = assembly_job.get("steps")
+    release_steps = release_job.get("steps")
+    if any(
+        not isinstance(steps, list)
+        for steps in (test_steps, assembly_steps, release_steps)
+    ):
+        fail("workflow job steps must be lists")
+    assert isinstance(assembly_steps, list)
+
+    all_steps: list[dict[str, object]] = []
+    for job_name, job in jobs.items():
+        if not isinstance(job, dict) or not isinstance(job.get("steps"), list):
+            fail(f"workflow job has invalid steps: {job_name}")
+        for step in job["steps"]:
+            if not isinstance(step, dict):
+                fail(f"workflow job has a non-object step: {job_name}")
+            all_steps.append(step)
+            uses = step.get("uses")
+            if uses is not None and (
+                not isinstance(uses, str)
+                or re.fullmatch(r"[^/@]+/[^@]+@[0-9a-f]{40}", uses) is None
+            ):
+                fail(f"workflow action is not commit-pinned: {uses}")
+            if isinstance(uses, str) and uses.startswith("actions/checkout@"):
+                settings = step.get("with")
+                if not isinstance(settings, dict) or settings.get(
+                    "persist-credentials"
+                ) is not False:
+                    fail("workflow checkout must not persist credentials")
+
+    def named_step(steps: list[object], name: str) -> dict[str, object]:
+        matches = [
+            step
+            for step in steps
+            if isinstance(step, dict) and step.get("name") == name
+        ]
+        if len(matches) != 1:
+            fail(f"workflow must contain exactly one step named {name!r}")
+        return matches[0]
+
+    ephemeral = named_step(
+        test_steps, "Prepare ephemeral companion signing key"
+    )
+    ephemeral_run = str(ephemeral.get("run", ""))
+    if (
+        ephemeral.get("id") != "companion-signing"
+        or "-validity 2" not in ephemeral_run
+        or 'echo "sha256=$fingerprint" >> "$GITHUB_OUTPUT"' not in ephemeral_run
+    ):
+        fail("pull-request CI must identify its two-day ephemeral signer")
+    test_build = named_step(
+        test_steps, "Build and verify virtual-spread companion APK"
+    )
+    test_build_run = str(test_build.get("run", ""))
+    test_build_env = test_build.get("env")
+    if (
+        "-ExpectedSignerSha256 $env:EXPECTED_SIGNER_SHA256"
+        not in test_build_run
+        or not isinstance(test_build_env, dict)
+        or "steps.companion-signing.outputs.sha256"
+        not in str(test_build_env.get("EXPECTED_SIGNER_SHA256", ""))
+    ):
+        fail("pull-request CI must verify its selected APK certificate")
+    mismatch = named_step(
+        test_steps, "Reject mismatched virtual-spread companion signer"
+    )
+    if (
+        "-ExpectedSignerSha256 ('0' * 64)" not in str(mismatch.get("run", ""))
+        or "certificate does not match the expected release signer"
+        not in str(mismatch.get("run", ""))
+    ):
+        fail("pull-request CI must reject a mismatched APK certificate")
+    prepare_input = named_step(
+        assembly_steps, "Prepare clean aligned APK evidence"
+    )
+    upload_input = named_step(
+        assembly_steps, "Upload clean aligned APK for protected signing"
+    )
+    assembly_build = named_step(
+        assembly_steps,
+        "Assemble aligned APK without Python or signing credentials",
+    )
+    if (
+        "-SkipTests -AlignedOnly" not in str(assembly_build.get("run", ""))
+        or "virtual-spread-aligned.apk.sha256"
+        not in str(prepare_input.get("run", ""))
+        or upload_input.get("uses")
+        != "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
+        or "virtual-spread-release-input-${{ github.sha }}"
+        not in str(upload_input.get("with", {}))
+    ):
+        fail("clean no-Python assembly must publish the release input")
+    assembly_text = str(assembly_job)
+    if any(
+        forbidden in assembly_text
+        for forbidden in (
+            "actions/setup-python@",
+            "pip install",
+            "VIRTUAL_SPREAD_APK_KEYSTORE_BASE64",
+        )
+    ):
+        fail("clean assembly must not load Python packages or signing secrets")
+    release_text = str(release_job)
+    if any(
+        forbidden in release_text
+        for forbidden in (
+            "actions/checkout@",
+            "actions/setup-python@",
+            "pip install",
+            "build.ps1",
+        )
+    ):
+        fail("protected signer job must not checkout or execute project code")
+    download_input = named_step(release_steps, "Download tested aligned APK")
+    verify_input = named_step(
+        release_steps, "Verify tested aligned APK digest"
+    )
+    if (
+        download_input.get("uses")
+        != "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093"
+        or "virtual-spread-release-input-${{ github.sha }}"
+        not in str(download_input.get("with", {}))
+        or "sha256sum --check --strict"
+        not in str(verify_input.get("run", ""))
+    ):
+        fail("protected signer must verify the tested aligned APK artifact")
+    secret_reference = "secrets.VIRTUAL_SPREAD_APK_KEYSTORE_BASE64"
+    if secret_reference in str(test_job):
+        fail("pull-request-controlled CI can access the stable APK signer")
+    signer_step = named_step(
+        release_steps, "Sign, verify, and remove protected signing key"
+    )
+    signer_env = signer_step.get("env")
+    signer_run = signer_step.get("run")
+    if not isinstance(signer_env, dict) or secret_reference not in str(
+        signer_env.get("KEYSTORE_BASE64", "")
+    ):
+        fail("protected signing secret must be scoped to the signing step")
+    if not isinstance(signer_run, str) or any(
+        marker not in signer_run
+        for marker in (
+            "try {",
+            "finally {",
+            "$env:KEYSTORE_BASE64 = $null",
+            "[Array]::Clear($bytes, 0, $bytes.Length)",
+            "[Guid]::NewGuid().ToString('N')",
+            "Remove-Item -LiteralPath $stablePath -Force",
+            "& $apksigner sign",
+            "virtual-spread-aligned.apk",
+            "Expected exactly one APK signer certificate",
+            "APK signer certificate does not match the expected release signer",
+        )
+    ):
+        fail("protected signer must be verified and deleted in one step")
+    if not (
+        signer_run.find("$env:KEYSTORE_BASE64 = $null")
+        < signer_run.find("& $apksigner sign")
+    ):
+        fail("stable credential must leave the environment before signing")
+    secret_steps = [
+        step for step in all_steps if secret_reference in str(step)
+    ]
+    if secret_steps != [signer_step]:
+        fail("stable signer must appear only in the protected signing step")
+    upload_step = named_step(
+        release_steps, "Upload upgrade-compatible companion APK"
+    )
+    if upload_step.get("uses") != (
+        "actions/upload-artifact@"
+        "ea165f8d65b6e75b540449e92b4886f43607fa02"
+    ):
+        fail("protected APK upload action must remain commit-pinned")
 
     require_markers(
         plugin,

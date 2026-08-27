@@ -1,1 +1,6 @@
 native-spread-module/trace-bundles/
+__pycache__/
+*.py[cod]
+tmp/
+output/
+virtual-spread-module/build/

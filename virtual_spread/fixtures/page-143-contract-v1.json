@@ -16,31 +16,72 @@
   "coverSeparate": true,
   "spreadSize": [864.0, 648.0],
   "gutter": 0.0,
-  "mapping": {
-    "sourcePageIndex": 142,
-    "virtualPageIndex": 71,
-    "side": "left",
-    "sourceRotation": 90,
-    "sourceBox": [18.0, 36.0, 594.0, 756.0],
-    "normalizedSourceBox": [36.0, 18.0, 756.0, 594.0],
-    "slot": [0.0, 0.0, 432.0, 648.0],
-    "destination": [0.0, 151.20000000000002, 432.0, 496.79999999999995],
-    "scale": 0.6,
-    "transform": [
-      3.6739403974420595e-17,
-      -0.6,
-      0.6,
-      3.6739403974420595e-17,
-      -21.599999999999998,
-      507.6
-    ]
-  },
-  "canonicalMapping": "techrebbe.supernote.virtual-spread-mapping/v1\npage|142|71|left|90|4032000000000000|4042000000000000|4082900000000000|4087a00000000000|4042000000000000|4032000000000000|4087a00000000000|4082900000000000|0000000000000000|0000000000000000|407b000000000000|4084400000000000|0000000000000000|4062e66666666667|407b000000000000|407f0ccccccccccc|3fe3333333333333|3c852dc7707ed4d5|bfe3333333333333|3fe3333333333333|3c852dc7707ed4d5|c035999999999999|407fb9999999999a\n",
-  "mappingAuthoritySha256": "3e4d11bd8d717c670424c4da65f97261f0c92efdd1a04be0d9442dfff3df824f",
-  "canonicalView": "techrebbe.supernote.virtual-spread-view/v1\nsource|0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nschema|techrebbe.supernote.virtual-spread/v3\ngenerator|techrebbe.supernote.virtual-spread-generator/v1\ndirection|rtl\ncover|1\nspread|408b000000000000|4084400000000000|0000000000000000\nmapping|3e4d11bd8d717c670424c4da65f97261f0c92efdd1a04be0d9442dfff3df824f\n",
+  "page143MappingIndex": 2,
+  "mappings": [
+    {
+      "sourcePageIndex": 0,
+      "virtualPageIndex": 0,
+      "side": "right",
+      "sourceRotation": 90,
+      "sourceBox": [18.0, 36.0, 594.0, 756.0],
+      "normalizedSourceBox": [36.0, 18.0, 756.0, 594.0],
+      "slot": [432.0, 0.0, 864.0, 648.0],
+      "destination": [432.0, 151.20000000000002, 864.0, 496.79999999999995],
+      "scale": 0.6,
+      "transform": [
+        3.6739403974420595e-17,
+        -0.6,
+        0.6,
+        3.6739403974420595e-17,
+        410.4,
+        507.6
+      ]
+    },
+    {
+      "sourcePageIndex": 1,
+      "virtualPageIndex": 1,
+      "side": "right",
+      "sourceRotation": 90,
+      "sourceBox": [18.0, 36.0, 594.0, 756.0],
+      "normalizedSourceBox": [36.0, 18.0, 756.0, 594.0],
+      "slot": [432.0, 0.0, 864.0, 648.0],
+      "destination": [432.0, 151.20000000000002, 864.0, 496.79999999999995],
+      "scale": 0.6,
+      "transform": [
+        3.6739403974420595e-17,
+        -0.6,
+        0.6,
+        3.6739403974420595e-17,
+        410.4,
+        507.6
+      ]
+    },
+    {
+      "sourcePageIndex": 2,
+      "virtualPageIndex": 1,
+      "side": "left",
+      "sourceRotation": 90,
+      "sourceBox": [18.0, 36.0, 594.0, 756.0],
+      "normalizedSourceBox": [36.0, 18.0, 756.0, 594.0],
+      "slot": [0.0, 0.0, 432.0, 648.0],
+      "destination": [0.0, 151.20000000000002, 432.0, 496.79999999999995],
+      "scale": 0.6,
+      "transform": [
+        3.6739403974420595e-17,
+        -0.6,
+        0.6,
+        3.6739403974420595e-17,
+        -21.599999999999998,
+        507.6
+      ]
+    }
+  ],
+  "canonicalMapping": "techrebbe.supernote.virtual-spread-mapping/v1\npage|0|0|right|90|4032000000000000|4042000000000000|4082900000000000|4087a00000000000|4042000000000000|4032000000000000|4087a00000000000|4082900000000000|407b000000000000|0000000000000000|408b000000000000|4084400000000000|407b000000000000|4062e66666666667|408b000000000000|407f0ccccccccccc|3fe3333333333333|3c852dc7707ed4d5|bfe3333333333333|3fe3333333333333|3c852dc7707ed4d5|4079a66666666666|407fb9999999999a\npage|1|1|right|90|4032000000000000|4042000000000000|4082900000000000|4087a00000000000|4042000000000000|4032000000000000|4087a00000000000|4082900000000000|407b000000000000|0000000000000000|408b000000000000|4084400000000000|407b000000000000|4062e66666666667|408b000000000000|407f0ccccccccccc|3fe3333333333333|3c852dc7707ed4d5|bfe3333333333333|3fe3333333333333|3c852dc7707ed4d5|4079a66666666666|407fb9999999999a\npage|2|1|left|90|4032000000000000|4042000000000000|4082900000000000|4087a00000000000|4042000000000000|4032000000000000|4087a00000000000|4082900000000000|0000000000000000|0000000000000000|407b000000000000|4084400000000000|0000000000000000|4062e66666666667|407b000000000000|407f0ccccccccccc|3fe3333333333333|3c852dc7707ed4d5|bfe3333333333333|3fe3333333333333|3c852dc7707ed4d5|c035999999999999|407fb9999999999a\n",
+  "mappingAuthoritySha256": "2c9e95573ea47e7cb7bc507350f49429ec2e72b4fc1eb4cd8c19774aa110ac1f",
+  "canonicalView": "techrebbe.supernote.virtual-spread-view/v1\nsource|0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nschema|techrebbe.supernote.virtual-spread/v3\ngenerator|techrebbe.supernote.virtual-spread-generator/v1\ndirection|rtl\ncover|1\nspread|408b000000000000|4084400000000000|0000000000000000\nmapping|2c9e95573ea47e7cb7bc507350f49429ec2e72b4fc1eb4cd8c19774aa110ac1f\n",
   "documentId": "inkbridge-doc-v1-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-  "viewId": "inkbridge-view-v1-ec3c6fd071746dcaa7d5ea1089e42944cf32431e838fcbc2aedb0b6c14e18e1e",
-  "outputBasename": "inkbridge-doc-v1-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.inkbridge-view-v1-ec3c6fd071746dcaa7d5ea1089e42944cf32431e838fcbc2aedb0b6c14e18e1e.virtual-spread.pdf",
+  "viewId": "inkbridge-view-v1-7c007c46bd6dd42511429245b65d2967f0f05d18eaf215566a08a7149bfaf491",
+  "outputBasename": "inkbridge-doc-v1-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.inkbridge-view-v1-7c007c46bd6dd42511429245b65d2967f0f05d18eaf215566a08a7149bfaf491.virtual-spread.pdf",
   "pointRoundTrips": [
     {
       "normalized": [0.0, 0.0],

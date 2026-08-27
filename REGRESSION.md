@@ -1968,6 +1968,38 @@ and the disposable blocked-link PDF was removed from the Nomad. The r2 hardware
 gate is complete; PR readiness is governed only by the repository's final
 exact-head CI and review gates.
 
+## v0.0.25 authenticated mapping/view contract - HARDWARE PASS
+
+The focused v0.0.25 hardware matrix passed on 2026-08-27 on a Supernote
+Nomad with firmware fingerprint
+`Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys`
+and SupernoteDocument `1.02.446`. The exact installed v0.0.25
+(`versionCode=27`) APK had SHA-256
+`eeab846aa6a937d14fad0702b079ecb4d24a326d40ab64613b2f730196407b76`;
+its upgrade-compatible signer certificate SHA-256 was
+`a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`.
+The behavior-changing code head was
+`5ff122ebdd9824d28ce1b774c9568a6678d3b9fc`.
+
+The device opened and authenticated a freshly generated schema-v3 pair directly
+from `/storage/emulated/0/.inkbridge/virtual-spread/v1/`. It logged
+`manifest_accepted`, `native_snapshot_accepted`, and
+`manifest_activated`; showed `blank | page 1`; advanced in RTL order to
+`page 3 | page 2`; and returned to `blank | page 1` on the reverse swipe.
+The same generated PDF without its sidecar failed closed without activation, and
+an altered sidecar mapping authority was rejected with
+`reason=mapping_authority`. The original sidecar-free source PDF remained on
+the ordinary native-reader path with no accepted or activated manifest event.
+Supernote's native reader could open the deterministic pair by direct path,
+while its normal Documents library displayed neither the `.inkbridge`
+directory nor the cached document.
+
+This hardware gate validates only RTL Reader's narrow authenticated detection,
+RTL navigation, and native viewport/focus boundary. It adds no annotation
+interception or conversion; InkBridge owns canonical annotation conversion using
+the authenticated schema-v3 mapping authority. Full hardware steps and hashes
+remain recorded in `virtual_spread/HARDWARE_VALIDATION.md`.
+
 ## Failure capture
 
 Before reproducing a failure:

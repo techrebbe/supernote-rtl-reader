@@ -93,6 +93,13 @@ python .\virtual_spread\generate_virtual_spread.py `
   --cover-separate
 ```
 
+The caller-selected output above is a host staging name, not the on-device
+cache identity. Read `output.cacheBasename` from the generated JSON, then
+publish the unchanged PDF to that exact basename and its JSON sibling to
+`<cacheBasename>.json` before opening it on Supernote. v0.0.25 rejects a valid
+pair opened under `source.virtual-spread.pdf` or any other renamed basename.
+See `MAPPING_WIRE_CONTRACT.md` for the versioned cache layout.
+
 The command refuses encrypted PDFs, unsupported annotation subtypes, unresolved
 links, and every document-catalog semantic it cannot preserve safely. It
 regenerates the structural `/Type` and `/Pages` entries and preserves validated
@@ -107,7 +114,11 @@ content, resources, geometry, rotation, and supported link annotations are
 consumed explicitly; ReportLab's empty transition placeholder is inert; page
 durations, meaningful transitions, additional actions, user-unit scaling, and
 every other unsupported or unknown page entry fail closed. Persisted rotation
-must be a true PDF integer divisible by 90. The document information dictionary
+must be a true PDF integer divisible by 90. Quarter-turns are transferred with
+exact `0/1/-1` matrices, so the mapping and PDF content do not contain
+trigonometric near-zero coefficients. CropBoxes with absolute offsets large
+enough to lose the mapping contract's placement or round-trip precision fail
+before staging or publication. The document information dictionary
 is copied with primitive PDF types intact; standardized text and `/Trapped`
 entries are validated, while arrays, dictionaries, streams, or other unsupported
 values fail closed rather than being stringified. Existing outputs also require
@@ -247,9 +258,9 @@ The published sidecar nevertheless always uses the exact output-derived
 `<PDF filename>.json` spelling, including case, so copying the pair onto
 Supernote's case-sensitive storage cannot make the runtime sidecar invisible.
 Ordinary publication errors use that same recovery path immediately.
-Manifest schema `techrebbe.supernote.virtual-spread/v2` deliberately requires a
-snapshot-binding-capable companion. Older companions reject newly generated v2
-pairs, and v0.0.24 rejects legacy v1 pairs; regenerate the PDF and sidecar
+Manifest schema `techrebbe.supernote.virtual-spread/v3` deliberately requires a
+mapping-authority-capable companion. Older companions reject newly generated v3
+pairs, and v0.0.25 rejects legacy v1/v2 pairs; regenerate the PDF and sidecar
 together when upgrading. The manifest records the staged PDF's exact size and SHA-256, which the runtime
 module verifies before trusting its mappings. A canonical digest of every link
 record is also embedded in the generated PDF and verified against the sidecar,
@@ -257,7 +268,17 @@ preventing a separately edited sidecar from omitting or retargeting links.
 A second canonical authority binds RTL direction, cover parity, source/output
 page counts, spread dimensions, and gutter to that same hashed PDF. This keeps
 an otherwise internally consistent sidecar from swapping cover pairing or
-geometry. Native module v0.0.24 authenticates each internal link's target-view
+geometry. A third frozen digest authenticates every InkBridge-consumed mapping
+field for every source page, including CropBox/rotation, virtual page/side,
+destination, scale, and the authoritative forward affine transform. The same
+mapping digest is bound into the PDF tail and into a deterministic view ID and
+cache basename. Page indices are capped at Java's signed 32-bit maximum, and
+both producer and runtime reject reflected or wrong-rotation matrices,
+non-generator scale/fit, and off-center placement. Source filenames and paths
+remain sidecar diagnostics only: byte-identical source PDFs under different
+names produce byte-identical generated PDFs, output hashes, and cache identity.
+Native module v0.0.25 recomputes and validates these records,
+then authenticates each internal link's target-view
 policy and the exact source snapshot. It rejects malformed UTF-8 bytes before
 decoding, non-integral manifest page indices or output sizes, numeric strings or
 non-finite values in spread/link geometry, and malformed or duplicate-key
@@ -268,7 +289,7 @@ transformed URI `/IsMap true` actions, a source CropBox outside its MediaBox, an
 link geometry outside the effective source CropBox. It preserves an omitted PDF
 link border at its correct transformed default width. Link-authority v2 records
 and the source marker fail closed on older generated pairs; regenerate the PDF
-and sidecar together before opening them with v0.0.24. Native reader callbacks
+and sidecar together before opening them with v0.0.25. Native reader callbacks
 perform only strong PDF and sidecar
 identity checks. Sidecar reading/hashing, parsing, full-PDF hashing, and stable-
 snapshot verification run on the single background verifier. Its bounded queue
@@ -391,5 +412,9 @@ source-page, half, and affine-transform data needed for a later InkBridge
 conversion layer. The versioned ownership, mapping-authority, cache, and
 regeneration boundary for that work is recorded in
 [`INKBRIDGE_REPRESENTATION_CONTRACT.md`](INKBRIDGE_REPRESENTATION_CONTRACT.md).
-It begins only after the exact v0.0.24 review and hardware gate; it does not add
-annotation interception to this companion.
+The v0.0.25 exact-head review and Nomad hardware gate are complete. It freezes
+and enforces the representation boundary without adding annotation interception
+to this companion. Hardware confirmed authenticated schema-v3 activation and
+RTL navigation from the deterministic dot-cache path, fail-closed missing and
+altered sidecars, ordinary-PDF pass-through, and absence of the cache from the
+normal Supernote Documents library.

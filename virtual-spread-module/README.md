@@ -8,15 +8,21 @@ untouched.
 It activates only when all of these are true:
 
 - the open file has a sibling `<pdf>.json` manifest;
-- the manifest schema is `techrebbe.supernote.virtual-spread/v2`;
+- the manifest schema is `techrebbe.supernote.virtual-spread/v3` and its
+  generator format is the frozen v1 format;
 - the manifest direction is `rtl`;
 - the PDF byte length, page count, and full SHA-256 match the manifest;
-- the persisted `coverSeparate`, spread occupancy, and source-page mappings
-  describe the same complete RTL layout;
+- every strict source-page mapping matches its spread duplicate, expected RTL
+  cover placement, bounded geometry, scale, and forward affine transform;
+- the recomputed mapping digest, deterministic document/view identity, and
+  cache basename match the sidecar and the descriptor-verified PDF tail;
+- the opened PDF's actual filename is the exact authenticated cache basename
+  (host staging names and renamed copies are rejected);
 - the canonical direction, cover parity, page counts, spread geometry, and
   gutter digest match the authority markers embedded in the hashed PDF;
-- the source, layout, and link authorities read from Supernote's actually open
-  native MuPDF `Document` match the authenticated manifest; and
+- the source, layout, link, mapping, view, and generator authorities read from
+  Supernote's actually open native MuPDF `Document` match the authenticated
+  manifest; and
 - the known Supernote document firmware fingerprint and APK size match.
 
 The activity, view-model, page-bar, link-target, link-history action, and
@@ -26,10 +32,11 @@ until every hook installs successfully; if any required hook is unavailable,
 already installed callbacks remain native pass-through for that process rather
 than leaving a partially active navigation layer.
 
-v0.0.24 retains link-authority v2 and the v0.0.17 native-open snapshot
-binding. Manifest schema v2 is intentionally incompatible with older companions:
-it prevents a pre-snapshot-binding runtime from accepting a newly generated pair.
-Regenerate existing v1 PDF/sidecar pairs before opening them with this build.
+v0.0.25 retains link-authority v2 and the v0.0.24-r2 native-open snapshot
+binding, while advancing the manifest to schema v3. Schema v3 adds the frozen
+InkBridge mapping authority, deterministic document/view identity, and
+versioned cache basename. Older companions reject newly generated v3 pairs,
+and v0.0.25 rejects legacy v1/v2 pairs; regenerate the PDF and sidecar together.
 It first decodes the raw sidecar bytes with replacement disabled, so
 malformed UTF-8 fails closed even inside an otherwise ignored field. It requires
 exact JSON integer tokens for every consumed page count,
@@ -136,7 +143,8 @@ stale lifecycle state. A native link
 tapped during verification is also consumed and queued once. After successful
 activation, the module replays it only if the same document, exact PDF/sidecar
 filesystem snapshot, unique verifier generation, native MuPDF document object,
-embedded source/layout/link authorities, source page, and external/internal
+embedded source/layout/link/mapping/view/generator authorities, source page,
+and external/internal
 routing classification are still current, no native page-load callback has
 occurred since the tap, and the request is fresh; same-path
 replacement, document/page changes, a newer manual turn (even while authority

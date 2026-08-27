@@ -386,6 +386,11 @@ public final class VirtualSpreadNavigation {
     private VirtualSpreadNavigation() {
     }
 
+    /** Accept only an exact JSON string token. */
+    public static String exactJsonString(Object value) {
+        return value instanceof String ? (String) value : null;
+    }
+
     /** Accept only an exact JSON integer token representable by Java int. */
     public static Integer exactJsonInteger(Object value) {
         if (value instanceof Integer) {
@@ -918,13 +923,23 @@ public final class VirtualSpreadNavigation {
         String expectedSource,
         String expectedLayout,
         String expectedLinks,
+        String expectedMapping,
+        String expectedViewId,
+        String expectedGenerator,
         String nativeSource,
         String nativeLayout,
-        String nativeLinks
+        String nativeLinks,
+        String nativeMapping,
+        String nativeViewId,
+        String nativeGenerator
     ) {
         return sameAuthority(expectedSource, nativeSource)
             && sameAuthority(expectedLayout, nativeLayout)
-            && sameAuthority(expectedLinks, nativeLinks);
+            && sameAuthority(expectedLinks, nativeLinks)
+            && sameAuthority(expectedMapping, nativeMapping)
+            && sameViewId(expectedViewId, nativeViewId)
+            && expectedGenerator != null
+            && expectedGenerator.equals(nativeGenerator);
     }
 
     /**
@@ -937,11 +952,17 @@ public final class VirtualSpreadNavigation {
     public static boolean nativeMetadataClaimsVirtualSpread(
         Object source,
         Object layout,
-        Object links
+        Object links,
+        Object mapping,
+        Object viewId,
+        Object generator
     ) {
         return nativeAuthorityValuePresent(source)
             || nativeAuthorityValuePresent(layout)
-            || nativeAuthorityValuePresent(links);
+            || nativeAuthorityValuePresent(links)
+            || nativeAuthorityValuePresent(mapping)
+            || nativeAuthorityValuePresent(viewId)
+            || nativeAuthorityValuePresent(generator);
     }
 
     private static boolean nativeAuthorityValuePresent(Object value) {
@@ -955,11 +976,303 @@ public final class VirtualSpreadNavigation {
     }
 
     private static boolean sameAuthority(String expected, String actual) {
+        return lowerSha256(expected)
+            && lowerSha256(actual)
+            && expected.equals(actual);
+    }
+
+    private static boolean lowerSha256(String value) {
+        if (value == null || value.length() != 64) {
+            return false;
+        }
+        for (int index = 0; index < value.length(); index++) {
+            char current = value.charAt(index);
+            if (!((current >= '0' && current <= '9')
+                    || (current >= 'a' && current <= 'f'))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean sameViewId(String expected, String actual) {
+        String prefix = "inkbridge-view-v1-";
         return expected != null
             && actual != null
-            && expected.length() == 64
-            && actual.length() == 64
-            && expected.equalsIgnoreCase(actual);
+            && expected.startsWith(prefix)
+            && expected.length() == prefix.length() + 64
+            && expected.equals(actual);
+    }
+
+    /**
+     * Validate the geometry carried by one authenticated mapping record.
+     * Canonical hashing is handled separately; this rejects self-consistent
+     * but unusable geometry before it reaches native page handling.
+     */
+    public static boolean mappingGeometryIsValid(
+        String side,
+        int rotation,
+        double[] sourceBox,
+        double[] normalizedSourceBox,
+        double[] slot,
+        double[] destination,
+        double scale,
+        double[] transform,
+        double pageWidth,
+        double pageHeight,
+        double gutter
+    ) {
+        if (!("left".equals(side) || "right".equals(side))
+            || !(rotation == 0 || rotation == 90
+                || rotation == 180 || rotation == 270)
+            || !positiveRect(sourceBox)
+            || !positiveRect(normalizedSourceBox)
+            || !positiveRect(slot)
+            || !positiveRect(destination)
+            || !finiteArray(transform, 6)
+            || !Double.isFinite(scale) || scale <= 0.0
+            || !runtimeGeometryIsRepresentable(
+                pageWidth, pageHeight, gutter)) {
+            return false;
+        }
+        double halfWidth = (pageWidth - gutter) / 2.0;
+        double slotLeft = "left".equals(side) ? 0.0 : halfWidth + gutter;
+        double slotRight = "left".equals(side) ? halfWidth : pageWidth;
+        if (!rectNearlyEquals(slot, slotLeft, 0.0, slotRight, pageHeight)
+            || destination[0] < slot[0] - 1.0e-7
+            || destination[1] < slot[1] - 1.0e-7
+            || destination[2] > slot[2] + 1.0e-7
+            || destination[3] > slot[3] + 1.0e-7) {
+            return false;
+        }
+
+        double sourceWidth = sourceBox[2] - sourceBox[0];
+        double sourceHeight = sourceBox[3] - sourceBox[1];
+        double normalizedWidth = normalizedSourceBox[2]
+            - normalizedSourceBox[0];
+        double normalizedHeight = normalizedSourceBox[3]
+            - normalizedSourceBox[1];
+        boolean quarterTurn = rotation == 90 || rotation == 270;
+        if (!nearlyEqual(
+                normalizedWidth,
+                quarterTurn ? sourceHeight : sourceWidth
+            ) || !nearlyEqual(
+                normalizedHeight,
+                quarterTurn ? sourceWidth : sourceHeight
+            )) {
+            return false;
+        }
+
+        double slotWidth = slot[2] - slot[0];
+        double slotHeight = slot[3] - slot[1];
+        double expectedScale = Math.min(
+            slotWidth / normalizedWidth,
+            slotHeight / normalizedHeight
+        );
+        double expectedWidth = normalizedWidth * expectedScale;
+        double expectedHeight = normalizedHeight * expectedScale;
+        double expectedLeft = slot[0] + (slotWidth - expectedWidth) / 2.0;
+        double expectedBottom = slot[1]
+            + (slotHeight - expectedHeight) / 2.0;
+        if (!Double.isFinite(expectedScale)
+            || !Double.isFinite(expectedWidth)
+            || !Double.isFinite(expectedHeight)
+            || !nearlyEqual(scale, expectedScale)
+            || !rectNearlyEquals(
+                destination,
+                expectedLeft,
+                expectedBottom,
+                expectedLeft + expectedWidth,
+                expectedBottom + expectedHeight
+            )) {
+            return false;
+        }
+
+        double a = transform[0];
+        double b = transform[1];
+        double c = transform[2];
+        double d = transform[3];
+        double determinant = a * d - b * c;
+        double expectedA = (rotation == 0 ? scale
+            : rotation == 180 ? -scale : 0.0);
+        double expectedB = (rotation == 90 ? -scale
+            : rotation == 270 ? scale : 0.0);
+        double expectedC = (rotation == 90 ? scale
+            : rotation == 270 ? -scale : 0.0);
+        double expectedD = (rotation == 0 ? scale
+            : rotation == 180 ? -scale : 0.0);
+        if (!Double.isFinite(determinant) || determinant <= 0.0
+            || !sameRawDouble(a, expectedA)
+            || !sameRawDouble(b, expectedB)
+            || !sameRawDouble(c, expectedC)
+            || !sameRawDouble(d, expectedD)) {
+            return false;
+        }
+        double[] xs = new double[] {
+            sourceBox[0], sourceBox[2], sourceBox[2], sourceBox[0]
+        };
+        double[] ys = new double[] {
+            sourceBox[1], sourceBox[1], sourceBox[3], sourceBox[3]
+        };
+        double minX = Double.POSITIVE_INFINITY;
+        double minY = Double.POSITIVE_INFINITY;
+        double maxX = Double.NEGATIVE_INFINITY;
+        double maxY = Double.NEGATIVE_INFINITY;
+        for (int index = 0; index < 4; index++) {
+            double x = a * xs[index] + c * ys[index] + transform[4];
+            double y = b * xs[index] + d * ys[index] + transform[5];
+            if (!Double.isFinite(x) || !Double.isFinite(y)) {
+                return false;
+            }
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            maxX = Math.max(maxX, x);
+            maxY = Math.max(maxY, y);
+        }
+        return rectNearlyEquals(destination, minX, minY, maxX, maxY)
+            && mappingRoundTripsAreStable(
+                rotation,
+                sourceBox,
+                destination,
+                transform
+            );
+    }
+
+    private static boolean sameRawDouble(double left, double right) {
+        return Double.doubleToRawLongBits(left)
+            == Double.doubleToRawLongBits(right);
+    }
+
+    private static boolean mappingRoundTripsAreStable(
+        int rotation,
+        double[] sourceBox,
+        double[] destination,
+        double[] transform
+    ) {
+        double destinationWidth = destination[2] - destination[0];
+        double destinationHeight = destination[3] - destination[1];
+        double sourceWidth = sourceBox[2] - sourceBox[0];
+        double sourceHeight = sourceBox[3] - sourceBox[1];
+        double determinant = transform[0] * transform[3]
+            - transform[1] * transform[2];
+        double[][] probes = new double[][] {
+            {0.0, 0.0},
+            {0.25, 0.5},
+            {0.5, 0.5},
+            {0.75, 0.25},
+            {1.0, 1.0}
+        };
+        for (double[] probe : probes) {
+            double normalizedX = probe[0];
+            double normalizedY = probe[1];
+            double sourceX;
+            double sourceY;
+            if (rotation == 0) {
+                sourceX = sourceBox[0] + normalizedX * sourceWidth;
+                sourceY = sourceBox[3] - normalizedY * sourceHeight;
+            } else if (rotation == 90) {
+                sourceX = sourceBox[0] + normalizedY * sourceWidth;
+                sourceY = sourceBox[1] + normalizedX * sourceHeight;
+            } else if (rotation == 180) {
+                sourceX = sourceBox[2] - normalizedX * sourceWidth;
+                sourceY = sourceBox[1] + normalizedY * sourceHeight;
+            } else {
+                sourceX = sourceBox[2] - normalizedY * sourceWidth;
+                sourceY = sourceBox[3] - normalizedX * sourceHeight;
+            }
+            double spreadX = transform[0] * sourceX
+                + transform[2] * sourceY + transform[4];
+            double spreadY = transform[1] * sourceX
+                + transform[3] * sourceY + transform[5];
+            double expectedSpreadX = destination[0]
+                + normalizedX * destinationWidth;
+            double expectedSpreadY = destination[3]
+                - normalizedY * destinationHeight;
+            double deltaX = spreadX - transform[4];
+            double deltaY = spreadY - transform[5];
+            double restoredX = (
+                transform[3] * deltaX - transform[2] * deltaY
+            ) / determinant;
+            double restoredY = (
+                -transform[1] * deltaX + transform[0] * deltaY
+            ) / determinant;
+            double restoredNormalizedX;
+            double restoredNormalizedY;
+            if (rotation == 0) {
+                restoredNormalizedX = (restoredX - sourceBox[0])
+                    / sourceWidth;
+                restoredNormalizedY = (sourceBox[3] - restoredY)
+                    / sourceHeight;
+            } else if (rotation == 90) {
+                restoredNormalizedX = (restoredY - sourceBox[1])
+                    / sourceHeight;
+                restoredNormalizedY = (restoredX - sourceBox[0])
+                    / sourceWidth;
+            } else if (rotation == 180) {
+                restoredNormalizedX = (sourceBox[2] - restoredX)
+                    / sourceWidth;
+                restoredNormalizedY = (restoredY - sourceBox[1])
+                    / sourceHeight;
+            } else {
+                restoredNormalizedX = (sourceBox[3] - restoredY)
+                    / sourceHeight;
+                restoredNormalizedY = (sourceBox[2] - restoredX)
+                    / sourceWidth;
+            }
+            if (!Double.isFinite(spreadX)
+                || !Double.isFinite(spreadY)
+                || !Double.isFinite(restoredX)
+                || !Double.isFinite(restoredY)
+                || Math.abs(spreadX - expectedSpreadX) > 1.0e-12
+                || Math.abs(spreadY - expectedSpreadY) > 1.0e-12
+                || Math.abs(restoredNormalizedX - normalizedX) > 1.0e-12
+                || Math.abs(restoredNormalizedY - normalizedY) > 1.0e-12) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean positiveRect(double[] rect) {
+        return finiteArray(rect, 4)
+            && rect[0] < rect[2] && rect[1] < rect[3];
+    }
+
+    private static boolean finiteArray(double[] values, int length) {
+        if (values == null || values.length != length) {
+            return false;
+        }
+        for (double value : values) {
+            if (!Double.isFinite(value)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean nearlyEqual(double left, double right) {
+        if (!Double.isFinite(left) || !Double.isFinite(right)) {
+            return false;
+        }
+        double magnitude = Math.max(
+            1.0,
+            Math.max(Math.abs(left), Math.abs(right))
+        );
+        return Math.abs(left - right) <= 1.0e-7 * magnitude;
+    }
+
+    private static boolean rectNearlyEquals(
+        double[] actual,
+        double left,
+        double bottom,
+        double right,
+        double top
+    ) {
+        return positiveRect(actual)
+            && nearlyEqual(actual[0], left)
+            && nearlyEqual(actual[1], bottom)
+            && nearlyEqual(actual[2], right)
+            && nearlyEqual(actual[3], top);
     }
 
     /** True only for bounded PDF geometry that survives Android floats. */

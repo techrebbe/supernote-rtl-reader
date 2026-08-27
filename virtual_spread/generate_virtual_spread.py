@@ -33,14 +33,38 @@ from pypdf.generic import (
     NameObject,
     NullObject,
     NumberObject,
+    RectangleObject,
     TextStringObject,
 )
 
+if __package__:
+    from .mapping_contract import (
+        GENERATOR_FORMAT_VERSION,
+        MANIFEST_SCHEMA,
+        MappingContractError,
+        document_id,
+        mapping_authority_sha256,
+        output_basename,
+        view_id,
+    )
+else:  # Direct script/test import from virtual_spread/.
+    from mapping_contract import (  # type: ignore[no-redef]
+        GENERATOR_FORMAT_VERSION,
+        MANIFEST_SCHEMA,
+        MappingContractError,
+        document_id,
+        mapping_authority_sha256,
+        output_basename,
+        view_id,
+    )
 
-SCHEMA = "techrebbe.supernote.virtual-spread/v2"
+
+SCHEMA = MANIFEST_SCHEMA
 SOURCE_AUTHORITY_MARKER = b"%SNVirtualSpreadSourceSHA256:"
 LINK_AUTHORITY_MARKER = b"%SNVirtualSpreadLinksSHA256:"
 LAYOUT_AUTHORITY_MARKER = b"%SNVirtualSpreadLayoutSHA256:"
+MAPPING_AUTHORITY_MARKER = b"%SNVirtualSpreadMappingSHA256:"
+VIEW_AUTHORITY_MARKER = b"%SNVirtualSpreadViewSHA256:"
 PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v2"
 LEGACY_PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v1"
 SOURCE_COMMIT_SCHEMA = (
@@ -661,6 +685,8 @@ def _bind_pdf_authorities(
     source_authority_sha256: str,
     layout_authority_sha256: str,
     link_authority_sha256: str,
+    mapping_authority_sha256: str,
+    spread_view_id: str,
     ownership_guard: PublicationOwnershipGuard | None = None,
     retained_descriptor: int | None = None,
 ) -> None:
@@ -668,11 +694,21 @@ def _bind_pdf_authorities(
         ("source", source_authority_sha256),
         ("layout", layout_authority_sha256),
         ("link", link_authority_sha256),
+        ("mapping", mapping_authority_sha256),
     ):
         if len(value) != 64 or any(
             character not in "0123456789abcdef" for character in value
         ):
             raise VirtualSpreadError(f"Invalid {label} authority digest")
+    if (
+        not spread_view_id.startswith("inkbridge-view-v1-")
+        or len(spread_view_id) != len("inkbridge-view-v1-") + 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in spread_view_id[len("inkbridge-view-v1-"):]
+        )
+    ):
+        raise VirtualSpreadError("Invalid view identity")
     marker = (
         SOURCE_AUTHORITY_MARKER
         + source_authority_sha256.encode("ascii")
@@ -682,6 +718,12 @@ def _bind_pdf_authorities(
         + b"\n"
         + LINK_AUTHORITY_MARKER
         + link_authority_sha256.encode("ascii")
+        + b"\n"
+        + MAPPING_AUTHORITY_MARKER
+        + mapping_authority_sha256.encode("ascii")
+        + b"\n"
+        + VIEW_AUTHORITY_MARKER
+        + spread_view_id[len("inkbridge-view-v1-"):].encode("ascii")
         + b"\n"
     )
     if retained_descriptor is None:
@@ -709,6 +751,8 @@ def _bind_pdf_authorities(
             SOURCE_AUTHORITY_MARKER in authority_tail
             or LAYOUT_AUTHORITY_MARKER in authority_tail
             or LINK_AUTHORITY_MARKER in authority_tail
+            or MAPPING_AUTHORITY_MARKER in authority_tail
+            or VIEW_AUTHORITY_MARKER in authority_tail
         ):
             raise VirtualSpreadError("Written PDF has an invalid authority marker")
         stream.seek(tail_start + startxref)
@@ -773,20 +817,43 @@ def _normalization_transform(page: Any) -> Transformation:
     if rotation == 0:
         return Transformation()
     box = page.mediabox
-    transform = (
-        Transformation()
-        .translate(
-            -float(box.left + box.width / 2),
-            -float(box.bottom + box.height / 2),
-        )
-        .rotate(-rotation)
+    left = float(box.left)
+    bottom = float(box.bottom)
+    right = float(box.right)
+    top = float(box.top)
+    exact_matrices = {
+        90: (0.0, -1.0, 1.0, 0.0, -bottom, right),
+        180: (-1.0, 0.0, 0.0, -1.0, right, top),
+        270: (0.0, 1.0, -1.0, 0.0, top, -left),
+    }
+    return Transformation(ctm=exact_matrices[rotation])
+
+
+def _transfer_rotation_to_content_exact(
+    page: Any, transform: Transformation
+) -> None:
+    """Transfer a quarter-turn with no trigonometric matrix residue."""
+    page[NameObject("/Rotate")] = NumberObject(0)
+    page.add_transformation(transform, False)
+    page_box_keys = (
+        "/MediaBox",
+        "/CropBox",
+        "/BleedBox",
+        "/TrimBox",
+        "/ArtBox",
     )
-    lower = transform.apply_on(box.lower_left)
-    upper = transform.apply_on(box.upper_right)
-    return transform.translate(
-        -min(lower[0], upper[0]),
-        -min(lower[1], upper[1]),
-    )
+    for key in page_box_keys:
+        if key not in page:
+            continue
+        rectangle = RectangleObject(page[key])
+        lower = transform.apply_on(rectangle.lower_left)
+        upper = transform.apply_on(rectangle.upper_right)
+        page[NameObject(key)] = RectangleObject((
+            min(lower[0], upper[0]),
+            min(lower[1], upper[1]),
+            max(lower[0], upper[0]),
+            max(lower[1], upper[1]),
+        ))
 
 
 def _normalized_page(source_page: Any) -> tuple[Any, Transformation]:
@@ -800,7 +867,7 @@ def _normalized_page(source_page: Any) -> tuple[Any, Transformation]:
     rotation = int(page.get("/Rotate", 0) or 0) % 360
     normalization = _normalization_transform(page)
     if rotation:
-        page.transfer_rotation_to_content()
+        _transfer_rotation_to_content_exact(page, normalization)
     return page, normalization
 
 
@@ -1398,6 +1465,7 @@ def _write_document_information(
             information[NameObject(key_text)] = (
                 _copy_document_information_value(value, key_text)
             )
+    information.pop(NameObject("/SNVirtualSpreadSource"), None)
     for key, value in generated_entries.items():
         information[NameObject(key)] = TextStringObject(value)
     writer._info = information
@@ -5499,6 +5567,9 @@ def _build_virtual_spread_from_snapshot(
                 continue
             page, source_transform = normalized_pages[source_page_index]
             layout = _layout_for_page(page, slot, source_transform)
+            layout["sourceRotation"] = int(
+                reader.pages[source_page_index].get("/Rotate", 0) or 0
+            ) % 360
             original_box = reader.pages[source_page_index].cropbox
             layout["sourceBox"] = [
                 float(original_box.left),
@@ -5569,15 +5640,42 @@ def _build_virtual_spread_from_snapshot(
         spread_height,
         gutter,
     )
+    ordered_source_mappings = [
+        source_mapping[index] for index in range(len(reader.pages))
+    ]
+    try:
+        mapping_authority_hash = mapping_authority_sha256(
+            ordered_source_mappings
+        )
+    except MappingContractError as error:
+        raise VirtualSpreadError(
+            f"Generated mapping failed contract validation: {error}"
+        ) from error
+    identity = {
+        "source_sha256": source_hash,
+        "mapping_authority_sha256": mapping_authority_hash,
+        "direction": direction,
+        "cover_separate": cover_separate,
+        "spread_width": spread_width,
+        "spread_height": spread_height,
+        "gutter": gutter,
+        "manifest_schema": SCHEMA,
+        "generator_version": GENERATOR_FORMAT_VERSION,
+    }
+    spread_document_id = document_id(source_hash)
+    spread_view_id = view_id(**identity)
+    cache_basename = output_basename(**identity)
     _write_document_information(
         reader,
         writer,
         {
             "/SNVirtualSpreadSchema": SCHEMA,
-            "/SNVirtualSpreadSource": source_path.name,
             "/SNVirtualSpreadSourceSHA256": source_hash,
             "/SNVirtualSpreadLayoutSHA256": layout_authority_hash,
             "/SNVirtualSpreadLinksSHA256": link_authority_hash,
+            "/SNVirtualSpreadMappingSHA256": mapping_authority_hash,
+            "/SNVirtualSpreadViewID": spread_view_id,
+            "/SNVirtualSpreadGeneratorVersion": GENERATOR_FORMAT_VERSION,
         },
     )
 
@@ -5603,6 +5701,8 @@ def _build_virtual_spread_from_snapshot(
             source_hash,
             layout_authority_hash,
             link_authority_hash,
+            mapping_authority_hash,
+            spread_view_id,
             ownership_guard,
             retained_descriptor=temporary_output.descriptor,
         )
@@ -5661,6 +5761,7 @@ def _build_virtual_spread_from_snapshot(
                 "size": source_identity.size,
                 "sha256": source_hash,
                 "pageCount": len(reader.pages),
+                "documentId": spread_document_id,
             },
             "output": {
                 "name": output_path.name,
@@ -5672,13 +5773,15 @@ def _build_virtual_spread_from_snapshot(
                 "gutter": gutter,
                 "layoutAuthoritySha256": layout_authority_hash,
                 "linkAuthoritySha256": link_authority_hash,
+                "mappingAuthoritySha256": mapping_authority_hash,
+                "viewId": spread_view_id,
+                "cacheBasename": cache_basename,
             },
+            "generatorVersion": GENERATOR_FORMAT_VERSION,
             "direction": direction,
             "coverSeparate": cover_separate,
             "spreads": spread_records,
-            "sourcePages": [
-                source_mapping[index] for index in range(len(reader.pages))
-            ],
+            "sourcePages": ordered_source_mappings,
             "links": links,
         }
         temporary_manifest = _temporary_neighbor(

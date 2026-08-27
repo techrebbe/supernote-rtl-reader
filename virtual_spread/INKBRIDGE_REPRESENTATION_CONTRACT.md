@@ -1,6 +1,11 @@
 # InkBridge representation contract
 
-Status: planned next milestone after the exact v0.0.24 hardware gate.
+Status: v0.0.24 hardware gate complete; v0.0.25 wire contract frozen.
+
+The exact byte-level mapping and view-identity rules are normative in
+[`MAPPING_WIRE_CONTRACT.md`](MAPPING_WIRE_CONTRACT.md). The page-143 fixture
+referenced below is checked in at
+[`fixtures/page-143-contract-v1.json`](fixtures/page-143-contract-v1.json).
 
 ## Ownership boundary
 
@@ -40,7 +45,7 @@ is enabled.
 
 ## Authenticated mapping authority
 
-The next manifest schema must add one canonical mapping digest covering every
+Manifest schema v3 adds one canonical mapping digest covering every
 field consumed by InkBridge for every source page:
 
 - source page index and virtual page index;
@@ -49,11 +54,11 @@ field consumed by InkBridge for every source page:
 - destination rectangle and uniform scale; and
 - the six-number forward affine transform.
 
-Canonicalization must define field order, record order, integer encoding, and
-finite-number encoding. It should reuse the existing IEEE-754 bit encoding used
-by layout/link authority. The generator writes the same digest into the sidecar
-and the descriptor-verified PDF tail. The Android runtime accepts mappings only
-when both values agree with a recomputed strict sidecar digest.
+Canonicalization uses the frozen field/record order, decimal integer encoding,
+and IEEE-754 binary64 bit encoding in `MAPPING_WIRE_CONTRACT.md`. The generator
+writes the same digest into the sidecar and the descriptor-verified PDF tail.
+The Android runtime accepts mappings only when both values agree with a
+recomputed strict sidecar digest.
 
 The global layout digest remains necessary but is not a substitute for mapping
 authority. Source SHA-256, source page count, effective CropBox/rotation,
@@ -76,6 +81,9 @@ the sidecar named as the exact `<output>.json` sibling. A candidate device cache
 is a dot-prefixed directory under shared storage, organized by document and view
 ID. It is not approved until a Nomad test proves that Supernote's native reader
 can open it directly while its normal library does not list it.
+Host generation may use a temporary staging filename. InkBridge must publish
+the verified pair to the Nomad cache under the manifest's exact canonical
+basename before opening it; the runtime rejects renamed cache views.
 
 ## Regeneration transaction
 
@@ -100,9 +108,9 @@ round trips, mapping digest, and view ID for both projects.
 
 Sequence:
 
-1. finish the exact v0.0.24 review and Nomad hardware gate;
-2. introduce mapping authority, view identity/naming, the golden fixture, and a
-   hardware-proven hidden cache location in a new schema/version;
+1. use the completed v0.0.24 review and Nomad hardware gate as the stable base;
+2. merge v0.0.25 mapping authority, view identity/naming, and the golden fixture,
+   then hardware-prove the hidden cache location;
 3. implement and host-test InkBridge's forward/inverse transform adapter;
 4. run page-143 ink create, sync, move, erase/tombstone, and idempotent-reimport
    end-to-end tests;
@@ -112,4 +120,4 @@ Sequence:
 
 Native text-highlight enumeration/export and existing non-link source-PDF
 annotations remain separate blockers. The earlier v0.0.18 preview and v0.0.23
-planning baseline are superseded by the schema-v2 v0.0.24 release candidate.
+planning baseline are superseded by the merged schema-v2 v0.0.24 release.

@@ -1,0 +1,123 @@
+{
+  "schema": "techrebbe.supernote.virtual-spread-golden/v1",
+  "logicalCase": "page-143",
+  "indexBase": 0,
+  "coordinateSystem": {
+    "space": "displayed-cropbox-normalized",
+    "origin": "top-left",
+    "xAxis": "right",
+    "yAxis": "down",
+    "bounds": [0.0, 1.0]
+  },
+  "sourceSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "manifestSchema": "techrebbe.supernote.virtual-spread/v3",
+  "generatorVersion": "techrebbe.supernote.virtual-spread-generator/v1",
+  "direction": "rtl",
+  "coverSeparate": true,
+  "spreadSize": [864.0, 648.0],
+  "gutter": 0.0,
+  "page143MappingIndex": 2,
+  "mappings": [
+    {
+      "sourcePageIndex": 0,
+      "virtualPageIndex": 0,
+      "side": "right",
+      "sourceRotation": 90,
+      "sourceBox": [18.0, 36.0, 594.0, 756.0],
+      "normalizedSourceBox": [36.0, 18.0, 756.0, 594.0],
+      "slot": [432.0, 0.0, 864.0, 648.0],
+      "destination": [432.0, 151.20000000000002, 864.0, 496.79999999999995],
+      "scale": 0.6,
+      "transform": [
+        0.0,
+        -0.6,
+        0.6,
+        0.0,
+        410.4,
+        507.6
+      ]
+    },
+    {
+      "sourcePageIndex": 1,
+      "virtualPageIndex": 1,
+      "side": "right",
+      "sourceRotation": 90,
+      "sourceBox": [18.0, 36.0, 594.0, 756.0],
+      "normalizedSourceBox": [36.0, 18.0, 756.0, 594.0],
+      "slot": [432.0, 0.0, 864.0, 648.0],
+      "destination": [432.0, 151.20000000000002, 864.0, 496.79999999999995],
+      "scale": 0.6,
+      "transform": [
+        0.0,
+        -0.6,
+        0.6,
+        0.0,
+        410.4,
+        507.6
+      ]
+    },
+    {
+      "sourcePageIndex": 2,
+      "virtualPageIndex": 1,
+      "side": "left",
+      "sourceRotation": 90,
+      "sourceBox": [18.0, 36.0, 594.0, 756.0],
+      "normalizedSourceBox": [36.0, 18.0, 756.0, 594.0],
+      "slot": [0.0, 0.0, 432.0, 648.0],
+      "destination": [0.0, 151.20000000000002, 432.0, 496.79999999999995],
+      "scale": 0.6,
+      "transform": [
+        0.0,
+        -0.6,
+        0.6,
+        0.0,
+        -21.599999999999998,
+        507.6
+      ]
+    }
+  ],
+  "canonicalMapping": "techrebbe.supernote.virtual-spread-mapping/v1\npage|0|0|right|90|4032000000000000|4042000000000000|4082900000000000|4087a00000000000|4042000000000000|4032000000000000|4087a00000000000|4082900000000000|407b000000000000|0000000000000000|408b000000000000|4084400000000000|407b000000000000|4062e66666666667|408b000000000000|407f0ccccccccccc|3fe3333333333333|0000000000000000|bfe3333333333333|3fe3333333333333|0000000000000000|4079a66666666666|407fb9999999999a\npage|1|1|right|90|4032000000000000|4042000000000000|4082900000000000|4087a00000000000|4042000000000000|4032000000000000|4087a00000000000|4082900000000000|407b000000000000|0000000000000000|408b000000000000|4084400000000000|407b000000000000|4062e66666666667|408b000000000000|407f0ccccccccccc|3fe3333333333333|0000000000000000|bfe3333333333333|3fe3333333333333|0000000000000000|4079a66666666666|407fb9999999999a\npage|2|1|left|90|4032000000000000|4042000000000000|4082900000000000|4087a00000000000|4042000000000000|4032000000000000|4087a00000000000|4082900000000000|0000000000000000|0000000000000000|407b000000000000|4084400000000000|0000000000000000|4062e66666666667|407b000000000000|407f0ccccccccccc|3fe3333333333333|0000000000000000|bfe3333333333333|3fe3333333333333|0000000000000000|c035999999999999|407fb9999999999a\n",
+  "mappingAuthoritySha256": "646b905c12266774882e0c4d7ebbbca77b2f386f432979ebcbfcda1d9ace268a",
+  "canonicalView": "techrebbe.supernote.virtual-spread-view/v1\nsource|0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nschema|techrebbe.supernote.virtual-spread/v3\ngenerator|techrebbe.supernote.virtual-spread-generator/v1\ndirection|rtl\ncover|1\nspread|408b000000000000|4084400000000000|0000000000000000\nmapping|646b905c12266774882e0c4d7ebbbca77b2f386f432979ebcbfcda1d9ace268a\n",
+  "documentId": "inkbridge-doc-v1-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "viewId": "inkbridge-view-v1-43f3e4f6cafaa07589e7ea1d27ae821d785851a6f26ff0007f3faeb6323c6d74",
+  "outputBasename": "inkbridge-doc-v1-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.inkbridge-view-v1-43f3e4f6cafaa07589e7ea1d27ae821d785851a6f26ff0007f3faeb6323c6d74.virtual-spread.pdf",
+  "pointRoundTrips": [
+    {
+      "normalized": [0.0, 0.0],
+      "spread": [0.0, 496.8],
+      "normalizedAfterInverse": [0.0, 0.0]
+    },
+    {
+      "normalized": [0.25, 0.5],
+      "spread": [108.0, 324.0],
+      "normalizedAfterInverse": [0.25, 0.5]
+    },
+    {
+      "normalized": [1.0, 1.0],
+      "spread": [432.0, 151.2],
+      "normalizedAfterInverse": [1.0, 1.0]
+    }
+  ],
+  "strokeRoundTrip": {
+    "normalized": [[0.1, 0.2], [0.5, 0.5], [0.9, 0.8]],
+    "spread": [[43.2, 427.68], [216.0, 324.0], [388.8, 220.32]],
+    "normalizedAfterInverse": [[0.1, 0.2], [0.5, 0.5], [0.9, 0.8]]
+  },
+  "signedZeroVectors": {
+    "mappingMutation": {
+      "mappingIndex": 2,
+      "field": "slot",
+      "elementIndex": 0,
+      "canonicalRecord": "page|2|1|left|90|4032000000000000|4042000000000000|4082900000000000|4087a00000000000|4042000000000000|4032000000000000|4087a00000000000|4082900000000000|8000000000000000|0000000000000000|407b000000000000|4084400000000000|0000000000000000|4062e66666666667|407b000000000000|407f0ccccccccccc|3fe3333333333333|0000000000000000|bfe3333333333333|3fe3333333333333|0000000000000000|c035999999999999|407fb9999999999a",
+      "mappingAuthoritySha256": "29e401f801b2c4867061385f9472dc061f3404db18427491af0dd64cca795832"
+    },
+    "viewMutation": {
+      "field": "gutter",
+      "canonicalBits": "8000000000000000",
+      "canonicalView": "techrebbe.supernote.virtual-spread-view/v1\nsource|0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nschema|techrebbe.supernote.virtual-spread/v3\ngenerator|techrebbe.supernote.virtual-spread-generator/v1\ndirection|rtl\ncover|1\nspread|408b000000000000|4084400000000000|8000000000000000\nmapping|646b905c12266774882e0c4d7ebbbca77b2f386f432979ebcbfcda1d9ace268a\n",
+      "viewId": "inkbridge-view-v1-426c932db050a81ef7d10c3491e24e9c388b87bae25b371bfab67eacc5e2158d"
+    }
+  },
+  "tolerance": 1e-12
+}

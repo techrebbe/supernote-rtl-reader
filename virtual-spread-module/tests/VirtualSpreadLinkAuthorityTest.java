@@ -1,4 +1,5 @@
 import com.techrebbe.supernote.virtualspread.VirtualSpreadLinkAuthority;
+import com.techrebbe.supernote.virtualspread.VirtualSpreadNavigation;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -104,6 +105,337 @@ public final class VirtualSpreadLinkAuthorityTest {
                 }
             }
         );
+        double[] sourceBox = {18.0, 36.0, 594.0, 756.0};
+        double[] normalizedSourceBox = {36.0, 18.0, 756.0, 594.0};
+        double[] rightSlot = {432.0, 0.0, 864.0, 648.0};
+        double[] leftSlot = {0.0, 0.0, 432.0, 648.0};
+        double[] rightDestination = {
+            432.0, 151.20000000000002, 864.0, 496.79999999999995
+        };
+        double[] leftDestination = {
+            0.0, 151.20000000000002, 432.0, 496.79999999999995
+        };
+        double[] rightTransform = {
+            0.0, -0.6,
+            0.6, 0.0,
+            410.4, 507.6
+        };
+        double[] leftTransform = {
+            0.0, -0.6,
+            0.6, 0.0,
+            -21.599999999999998, 507.6
+        };
+        String[] mappingRecords = {
+            VirtualSpreadLinkAuthority.mapping(
+                0, 0, "right", 90,
+                sourceBox, normalizedSourceBox,
+                rightSlot, rightDestination, 0.6, rightTransform
+            ),
+            VirtualSpreadLinkAuthority.mapping(
+                1, 1, "right", 90,
+                sourceBox, normalizedSourceBox,
+                rightSlot, rightDestination, 0.6, rightTransform
+            ),
+            VirtualSpreadLinkAuthority.mapping(
+                2, 1, "left", 90,
+                sourceBox, normalizedSourceBox,
+                leftSlot, leftDestination, 0.6, leftTransform
+            ),
+        };
+        String mappingDigest = VirtualSpreadLinkAuthority.mappingDigest(
+            mappingRecords
+        );
+        assertEquals(
+            "page-143 mapping digest",
+            "646b905c12266774882e0c4d7ebbbca77b2f386f432979ebcbfcda1d9ace268a",
+            mappingDigest
+        );
+        String signedZeroRecord = VirtualSpreadLinkAuthority.mapping(
+            2, 1, "left", 90,
+            sourceBox, normalizedSourceBox,
+            new double[] {-0.0, 0.0, 432.0, 648.0},
+            leftDestination, 0.6, leftTransform
+        );
+        assertEquals(
+            "signed-zero mapping record",
+            "page|2|1|left|90|4032000000000000|4042000000000000"
+                + "|4082900000000000|4087a00000000000|4042000000000000"
+                + "|4032000000000000|4087a00000000000|4082900000000000"
+                + "|8000000000000000|0000000000000000|407b000000000000"
+                + "|4084400000000000|0000000000000000|4062e66666666667"
+                + "|407b000000000000|407f0ccccccccccc|3fe3333333333333"
+                + "|0000000000000000|bfe3333333333333|3fe3333333333333"
+                + "|0000000000000000|c035999999999999|407fb9999999999a",
+            signedZeroRecord
+        );
+        assertEquals(
+            "signed-zero mapping digest",
+            "29e401f801b2c4867061385f9472dc061f3404db18427491af0dd64cca795832",
+            VirtualSpreadLinkAuthority.mappingDigest(new String[] {
+                mappingRecords[0], mappingRecords[1], signedZeroRecord
+            })
+        );
+        String goldenSource =
+            "0123456789abcdef0123456789abcdef"
+            + "0123456789abcdef0123456789abcdef";
+        String spreadViewId = VirtualSpreadLinkAuthority.viewId(
+            goldenSource,
+            "techrebbe.supernote.virtual-spread/v3",
+            "techrebbe.supernote.virtual-spread-generator/v1",
+            "rtl",
+            true,
+            864.0,
+            648.0,
+            0.0,
+            mappingDigest
+        );
+        assertEquals(
+            "page-143 view identity",
+            "inkbridge-view-v1-"
+                + "43f3e4f6cafaa07589e7ea1d27ae821d"
+                + "785851a6f26ff0007f3faeb6323c6d74",
+            spreadViewId
+        );
+        assertEquals(
+            "signed-zero view identity",
+            "inkbridge-view-v1-"
+                + "426c932db050a81ef7d10c3491e24e9c"
+                + "388b87bae25b371bfab67eacc5e2158d",
+            VirtualSpreadLinkAuthority.viewId(
+                goldenSource,
+                "techrebbe.supernote.virtual-spread/v3",
+                "techrebbe.supernote.virtual-spread-generator/v1",
+                "rtl",
+                true,
+                864.0,
+                648.0,
+                -0.0,
+                mappingDigest
+            )
+        );
+        assertEquals(
+            "page-143 deterministic output basename",
+            "inkbridge-doc-v1-" + goldenSource + "." + spreadViewId
+                + ".virtual-spread.pdf",
+            VirtualSpreadLinkAuthority.outputBasename(
+                goldenSource, spreadViewId
+            )
+        );
+        assertBoolean(
+            "page-143 left mapping geometry",
+            true,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 90,
+                sourceBox, normalizedSourceBox,
+                leftSlot, leftDestination, 0.6, leftTransform,
+                864.0, 648.0, 0.0
+            )
+        );
+        assertBoolean(
+            "wrong mapping side is rejected",
+            false,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "right", 90,
+                sourceBox, normalizedSourceBox,
+                leftSlot, leftDestination, 0.6, leftTransform,
+                864.0, 648.0, 0.0
+            )
+        );
+        assertBoolean(
+            "wrong mapping rotation is rejected",
+            false,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 180,
+                sourceBox, normalizedSourceBox,
+                leftSlot, leftDestination, 0.6, leftTransform,
+                864.0, 648.0, 0.0
+            )
+        );
+        assertBoolean(
+            "wrong mapping destination is rejected",
+            false,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 90,
+                sourceBox, normalizedSourceBox,
+                leftSlot,
+                new double[] {1.0, 151.2, 432.0, 496.8},
+                0.6, leftTransform,
+                864.0, 648.0, 0.0
+            )
+        );
+        assertBoolean(
+            "wrong mapping scale is rejected",
+            false,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 90,
+                sourceBox, normalizedSourceBox,
+                leftSlot, leftDestination, 0.5, leftTransform,
+                864.0, 648.0, 0.0
+            )
+        );
+        assertBoolean(
+            "non-finite mapping transform is rejected",
+            false,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 90,
+                sourceBox, normalizedSourceBox,
+                leftSlot, leftDestination, 0.6,
+                new double[] {0.0, -0.6, 0.6, 0.0, Double.NaN, 507.6},
+                864.0, 648.0, 0.0
+            )
+        );
+        assertBoolean(
+            "reflected mapping transform is rejected",
+            false,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 90,
+                sourceBox, normalizedSourceBox,
+                leftSlot, leftDestination, 0.6,
+                new double[] {0.0, 0.6, 0.6, 0.0, -21.6, 140.4},
+                864.0, 648.0, 0.0
+            )
+        );
+        assertBoolean(
+            "nonzero quarter-turn residue is rejected",
+            false,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 90,
+                sourceBox, normalizedSourceBox,
+                leftSlot, leftDestination, 0.6,
+                new double[] {
+                    1.0e-15, -0.6, 0.6, 0.0, -21.6, 507.6
+                },
+                864.0, 648.0, 0.0
+            )
+        );
+        double tinyHalfWidth = (864.0 - 863.999) / 2.0;
+        double tinyScale = tinyHalfWidth / 14400.0;
+        double tinyBottom = (648.0 - tinyHalfWidth) / 2.0;
+        assertBoolean(
+            "tiny-scale reflected mapping is rejected",
+            false,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 0,
+                new double[] {0.0, 0.0, 14400.0, 14400.0},
+                new double[] {0.0, 0.0, 14400.0, 14400.0},
+                new double[] {0.0, 0.0, tinyHalfWidth, 648.0},
+                new double[] {
+                    0.0,
+                    tinyBottom,
+                    tinyHalfWidth,
+                    tinyBottom + tinyHalfWidth
+                },
+                tinyScale,
+                new double[] {
+                    -tinyScale,
+                    0.0,
+                    0.0,
+                    tinyScale,
+                    tinyHalfWidth,
+                    tinyBottom
+                },
+                864.0, 648.0, 863.999
+            )
+        );
+        double farOffset = Math.scalb(1.0, 40);
+        assertBoolean(
+            "far-offset numerically unstable mapping is rejected",
+            false,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 0,
+                new double[] {
+                    farOffset,
+                    farOffset,
+                    farOffset + 100.0,
+                    farOffset + 200.0
+                },
+                new double[] {
+                    farOffset,
+                    farOffset,
+                    farOffset + 100.0,
+                    farOffset + 200.0
+                },
+                leftSlot,
+                new double[] {54.0, 0.0, 378.0, 648.0},
+                3.24,
+                new double[] {
+                    3.24,
+                    0.0,
+                    0.0,
+                    3.24,
+                    54.0 - 3.24 * farOffset,
+                    -3.24 * farOffset
+                },
+                864.0, 648.0, 0.0
+            )
+        );
+        assertBoolean(
+            "overflowing mapping transform is rejected",
+            false,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 0,
+                new double[] {1.0e308, 0.0, 1.1e308, 1.0},
+                new double[] {1.0e308, 0.0, 1.1e308, 1.0},
+                leftSlot, new double[] {0.0, 0.0, 432.0, 10.0}, 10.0,
+                new double[] {10.0, 0.0, 0.0, 10.0, 0.0, 0.0},
+                864.0, 648.0, 0.0
+            )
+        );
+        assertBoolean(
+            "non-generator scale and placement are rejected",
+            false,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 0,
+                new double[] {0.0, 0.0, 100.0, 100.0},
+                new double[] {0.0, 0.0, 100.0, 100.0},
+                leftSlot, new double[] {0.0, 0.0, 100.0, 100.0}, 1.0,
+                new double[] {1.0, 0.0, 0.0, 1.0, 0.0, 0.0},
+                864.0, 648.0, 0.0
+            )
+        );
+        double[] simpleSource = new double[] {0.0, 0.0, 100.0, 200.0};
+        assertBoolean(
+            "generator rotation 0 transform is accepted",
+            true,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 0, simpleSource, simpleSource, leftSlot,
+                new double[] {54.0, 0.0, 378.0, 648.0}, 3.24,
+                new double[] {3.24, 0.0, 0.0, 3.24, 54.0, 0.0},
+                864.0, 648.0, 0.0
+            )
+        );
+        assertBoolean(
+            "generator rotation 90 transform is accepted",
+            true,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 90, simpleSource,
+                new double[] {0.0, 0.0, 200.0, 100.0}, leftSlot,
+                new double[] {0.0, 216.0, 432.0, 432.0}, 2.16,
+                new double[] {0.0, -2.16, 2.16, 0.0, 0.0, 432.0},
+                864.0, 648.0, 0.0
+            )
+        );
+        assertBoolean(
+            "generator rotation 180 transform is accepted",
+            true,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 180, simpleSource, simpleSource, leftSlot,
+                new double[] {54.0, 0.0, 378.0, 648.0}, 3.24,
+                new double[] {-3.24, 0.0, 0.0, -3.24, 378.0, 648.0},
+                864.0, 648.0, 0.0
+            )
+        );
+        assertBoolean(
+            "generator rotation 270 transform is accepted",
+            true,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 270, simpleSource,
+                new double[] {0.0, 0.0, 200.0, 100.0}, leftSlot,
+                new double[] {0.0, 216.0, 432.0, 432.0}, 2.16,
+                new double[] {0.0, 2.16, -2.16, 0.0, 432.0, 216.0},
+                864.0, 648.0, 0.0
+            )
+        );
         Path fixture = Files.createTempFile("virtual-spread-authority", ".pdf");
         try {
             String sourceDigest =
@@ -116,6 +448,10 @@ public final class VirtualSpreadLinkAuthorityTest {
                 + layoutDigest + "\n"
                 + "%SNVirtualSpreadLinksSHA256:"
                 + "da3eeef9e81fe1f232cd3ac200c90841436855c9ac4a517b1a82021bc099800c"
+                + "\n%SNVirtualSpreadMappingSHA256:"
+                + mappingDigest
+                + "\n%SNVirtualSpreadViewSHA256:"
+                + spreadViewId.substring("inkbridge-view-v1-".length())
                 + "\nstartxref\n42\n%%EOF\n";
             Files.write(fixture, bound.getBytes(StandardCharsets.ISO_8859_1));
             assertEquals(
@@ -134,6 +470,49 @@ public final class VirtualSpreadLinkAuthorityTest {
                 "PDF-bound layout authority digest",
                 layoutDigest,
                 VirtualSpreadLinkAuthority.readPdfLayoutDigest(fixture.toFile())
+            );
+            assertEquals(
+                "PDF-bound mapping authority digest",
+                mappingDigest,
+                VirtualSpreadLinkAuthority.readPdfMappingDigest(
+                    fixture.toFile()
+                )
+            );
+            assertEquals(
+                "PDF-bound view authority digest",
+                spreadViewId.substring("inkbridge-view-v1-".length()),
+                VirtualSpreadLinkAuthority.readPdfViewDigest(fixture.toFile())
+            );
+            String uppercaseMapping = bound.replace(
+                mappingDigest,
+                mappingDigest.toUpperCase()
+            );
+            Files.write(
+                fixture,
+                uppercaseMapping.getBytes(StandardCharsets.ISO_8859_1)
+            );
+            assertEquals(
+                "uppercase mapping authority marker is rejected",
+                null,
+                VirtualSpreadLinkAuthority.readPdfMappingDigest(
+                    fixture.toFile()
+                )
+            );
+            String viewDigest = spreadViewId.substring(
+                "inkbridge-view-v1-".length()
+            );
+            String uppercaseView = bound.replace(
+                viewDigest,
+                viewDigest.toUpperCase()
+            );
+            Files.write(
+                fixture,
+                uppercaseView.getBytes(StandardCharsets.ISO_8859_1)
+            );
+            assertEquals(
+                "uppercase view authority marker is rejected",
+                null,
+                VirtualSpreadLinkAuthority.readPdfViewDigest(fixture.toFile())
             );
             String displacedSource = bound.replace(
                 "\n%SNVirtualSpreadLayoutSHA256:",
@@ -171,7 +550,7 @@ public final class VirtualSpreadLinkAuthorityTest {
             assertEquals(
                 "displaced authority marker is rejected",
                 null,
-                VirtualSpreadLinkAuthority.readPdfDigest(fixture.toFile())
+                VirtualSpreadLinkAuthority.readPdfViewDigest(fixture.toFile())
             );
         } finally {
             Files.deleteIfExists(fixture);
@@ -205,6 +584,19 @@ public final class VirtualSpreadLinkAuthorityTest {
             return;
         }
         throw new AssertionError(label + " expected rejection");
+    }
+
+    private static void assertBoolean(
+        String label,
+        boolean expected,
+        boolean actual
+    ) {
+        assertions++;
+        if (expected != actual) {
+            throw new AssertionError(
+                label + " expected=" + expected + " actual=" + actual
+            );
+        }
     }
 
     private interface CheckedAction {

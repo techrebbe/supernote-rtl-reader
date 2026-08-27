@@ -330,8 +330,8 @@ requires the same mapping/view/generator metadata from Supernote's actually open
 MuPDF document. Queued and mixed-menu link contexts now retain those additional
 native authorities so same-path replacement cannot replay against another view.
 
-The local gate passes the page-143 Python/Java golden vectors, per-field mapping
-and view mutations, 155 generator/publication tests (14 platform skips), 26 Java
+The local gate passes 8 page-143 Python golden/mutation tests, the matching Java
+golden vectors, 155 generator/publication tests (14 platform skips), 29 Java
 authority assertions, 202 focused navigation assertions, 8,752 exhaustive
 navigation assertions, hook-scope validation, and signed APK compilation as
 v0.0.25 (`versionCode=27`). Exact-head review and the Nomad gate remain pending.

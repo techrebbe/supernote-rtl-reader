@@ -1185,6 +1185,8 @@ for required in (
     "VirtualSpreadLinkAuthority.mappingDigest(",
     "VirtualSpreadLinkAuthority.viewId(",
     "VirtualSpreadLinkAuthority.outputBasename(",
+    'expectedCacheBasename.equals(new File(key).getName())',
+    'manifest_rejected reason=cache_basename_path',
     "VirtualSpreadLinkAuthority.layout(",
     "VirtualSpreadLinkAuthority.layoutDigest(",
     "VirtualSpreadLinkAuthority.uri(",
@@ -1329,6 +1331,8 @@ if "run: ./virtual-spread-module/test.ps1" not in workflow:
     raise SystemExit(
         "CI must run the complete virtual-spread companion test script"
     )
+if "run: python scripts/test_mapping_contract.py" not in workflow:
+    raise SystemExit("CI must run the frozen mapping contract tests")
 if (
     "./virtual-spread-module/build.ps1" not in workflow
     or "-DebugKeystore $env:VIRTUAL_SPREAD_KEYSTORE" not in workflow

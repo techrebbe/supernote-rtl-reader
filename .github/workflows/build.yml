@@ -78,6 +78,9 @@ jobs:
       - name: Test virtual-spread generator
         run: python scripts/test_virtual_spread.py
 
+      - name: Test mapping wire contract
+        run: python scripts/test_mapping_contract.py
+
       - name: Check native invariants
         run: |
           python scripts/check_native_invariants.py .

@@ -1046,6 +1046,31 @@ public final class VirtualSpreadNavigation {
             return false;
         }
 
+        double slotWidth = slot[2] - slot[0];
+        double slotHeight = slot[3] - slot[1];
+        double expectedScale = Math.min(
+            slotWidth / normalizedWidth,
+            slotHeight / normalizedHeight
+        );
+        double expectedWidth = normalizedWidth * expectedScale;
+        double expectedHeight = normalizedHeight * expectedScale;
+        double expectedLeft = slot[0] + (slotWidth - expectedWidth) / 2.0;
+        double expectedBottom = slot[1]
+            + (slotHeight - expectedHeight) / 2.0;
+        if (!Double.isFinite(expectedScale)
+            || !Double.isFinite(expectedWidth)
+            || !Double.isFinite(expectedHeight)
+            || !nearlyEqual(scale, expectedScale)
+            || !rectNearlyEquals(
+                destination,
+                expectedLeft,
+                expectedBottom,
+                expectedLeft + expectedWidth,
+                expectedBottom + expectedHeight
+            )) {
+            return false;
+        }
+
         double a = transform[0];
         double b = transform[1];
         double c = transform[2];
@@ -1053,11 +1078,23 @@ public final class VirtualSpreadNavigation {
         double determinant = a * d - b * c;
         double firstScale = Math.hypot(a, b);
         double secondScale = Math.hypot(c, d);
+        double expectedA = (rotation == 0 ? scale
+            : rotation == 180 ? -scale : 0.0);
+        double expectedB = (rotation == 90 ? -scale
+            : rotation == 270 ? scale : 0.0);
+        double expectedC = (rotation == 90 ? scale
+            : rotation == 270 ? -scale : 0.0);
+        double expectedD = (rotation == 0 ? scale
+            : rotation == 180 ? -scale : 0.0);
         if (!Double.isFinite(determinant) || determinant == 0.0
             || !nearlyEqual(firstScale, scale)
             || !nearlyEqual(secondScale, scale)
             || !nearlyEqual(a * c + b * d, 0.0)
-            || !nearlyEqual(Math.abs(determinant), scale * scale)) {
+            || !nearlyEqual(Math.abs(determinant), scale * scale)
+            || !nearlyEqual(a, expectedA)
+            || !nearlyEqual(b, expectedB)
+            || !nearlyEqual(c, expectedC)
+            || !nearlyEqual(d, expectedD)) {
             return false;
         }
         double[] xs = new double[] {
@@ -1073,6 +1110,9 @@ public final class VirtualSpreadNavigation {
         for (int index = 0; index < 4; index++) {
             double x = a * xs[index] + c * ys[index] + transform[4];
             double y = b * xs[index] + d * ys[index] + transform[5];
+            if (!Double.isFinite(x) || !Double.isFinite(y)) {
+                return false;
+            }
             minX = Math.min(minX, x);
             minY = Math.min(minY, y);
             maxX = Math.max(maxX, x);
@@ -1099,6 +1139,9 @@ public final class VirtualSpreadNavigation {
     }
 
     private static boolean nearlyEqual(double left, double right) {
+        if (!Double.isFinite(left) || !Double.isFinite(right)) {
+            return false;
+        }
         double magnitude = Math.max(
             1.0,
             Math.max(Math.abs(left), Math.abs(right))

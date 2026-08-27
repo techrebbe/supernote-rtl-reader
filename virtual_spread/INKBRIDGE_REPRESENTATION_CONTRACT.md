@@ -81,6 +81,9 @@ the sidecar named as the exact `<output>.json` sibling. A candidate device cache
 is a dot-prefixed directory under shared storage, organized by document and view
 ID. It is not approved until a Nomad test proves that Supernote's native reader
 can open it directly while its normal library does not list it.
+Host generation may use a temporary staging filename. InkBridge must publish
+the verified pair to the Nomad cache under the manifest's exact canonical
+basename before opening it; the runtime rejects renamed cache views.
 
 ## Regeneration transaction
 

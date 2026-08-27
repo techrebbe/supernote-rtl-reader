@@ -242,6 +242,41 @@ public final class VirtualSpreadLinkAuthorityTest {
                 864.0, 648.0, 0.0
             )
         );
+        assertBoolean(
+            "reflected mapping transform is rejected",
+            false,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 90,
+                sourceBox, normalizedSourceBox,
+                leftSlot, leftDestination, 0.6,
+                new double[] {0.0, 0.6, 0.6, 0.0, -21.6, 140.4},
+                864.0, 648.0, 0.0
+            )
+        );
+        assertBoolean(
+            "overflowing mapping transform is rejected",
+            false,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 0,
+                new double[] {1.0e308, 0.0, 1.1e308, 1.0},
+                new double[] {1.0e308, 0.0, 1.1e308, 1.0},
+                leftSlot, new double[] {0.0, 0.0, 432.0, 10.0}, 10.0,
+                new double[] {10.0, 0.0, 0.0, 10.0, 0.0, 0.0},
+                864.0, 648.0, 0.0
+            )
+        );
+        assertBoolean(
+            "non-generator scale and placement are rejected",
+            false,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 0,
+                new double[] {0.0, 0.0, 100.0, 100.0},
+                new double[] {0.0, 0.0, 100.0, 100.0},
+                leftSlot, new double[] {0.0, 0.0, 100.0, 100.0}, 1.0,
+                new double[] {1.0, 0.0, 0.0, 1.0, 0.0, 0.0},
+                864.0, 648.0, 0.0
+            )
+        );
         Path fixture = Files.createTempFile("virtual-spread-authority", ".pdf");
         try {
             String sourceDigest =

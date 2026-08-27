@@ -138,6 +138,11 @@ The versioned PDF basename is:
 
 The sidecar is the exact `<PDF basename>.json` sibling. An existing file at a
 different name is not the same cache view even if its bytes happen to match.
+The generator CLI may materialize a pair under a caller-selected host staging
+path, but that path is not cache authority. Before activation on Supernote, the
+verified bytes and sidecar must be published under the exact basename above.
+The Android runtime rejects an otherwise valid pair opened under any other
+basename.
 
 The initial Nomad cache candidate is:
 

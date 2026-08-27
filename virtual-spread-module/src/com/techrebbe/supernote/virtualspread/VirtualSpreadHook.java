@@ -4670,6 +4670,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             log("manifest_rejected reason=view_identity path=" + key);
             return null;
         }
+        if (!expectedCacheBasename.equals(new File(key).getName())) {
+            log("manifest_rejected reason=cache_basename_path path=" + key);
+            return null;
+        }
         VirtualSpreadNavigation.Spread[] spreads =
             new VirtualSpreadNavigation.Spread[pageCount];
         for (int index = 0; index < pageCount; index++) {

@@ -17,6 +17,16 @@ public final class VirtualSpreadLinkAuthority {
         "%SNVirtualSpreadLinksSHA256:";
     private static final String LAYOUT_PDF_MARKER =
         "%SNVirtualSpreadLayoutSHA256:";
+    private static final String MAPPING_PDF_MARKER =
+        "%SNVirtualSpreadMappingSHA256:";
+    private static final String VIEW_PDF_MARKER =
+        "%SNVirtualSpreadViewSHA256:";
+    private static final String MAPPING_DOMAIN =
+        "techrebbe.supernote.virtual-spread-mapping/v1";
+    private static final String VIEW_DOMAIN =
+        "techrebbe.supernote.virtual-spread-view/v1";
+    private static final String VIEW_PREFIX = "inkbridge-view-v1-";
+    private static final String DOCUMENT_PREFIX = "inkbridge-doc-v1-";
 
     public static String layout(
         String direction,
@@ -40,6 +50,113 @@ public final class VirtualSpreadLinkAuthority {
         String layoutRecord
     ) throws Exception {
         return digest(new String[] {layoutRecord});
+    }
+
+    public static String mapping(
+        int sourcePageIndex,
+        int virtualPageIndex,
+        String side,
+        int sourceRotation,
+        double[] sourceBox,
+        double[] normalizedSourceBox,
+        double[] slot,
+        double[] destination,
+        double scale,
+        double[] transform
+    ) {
+        if (sourcePageIndex < 0 || virtualPageIndex < 0
+            || !("left".equals(side) || "right".equals(side))
+            || !(sourceRotation == 0 || sourceRotation == 90
+                || sourceRotation == 180 || sourceRotation == 270)
+            || !finiteArray(sourceBox, 4)
+            || !finiteArray(normalizedSourceBox, 4)
+            || !finiteArray(slot, 4)
+            || !finiteArray(destination, 4)
+            || !Double.isFinite(scale) || scale <= 0.0
+            || !finiteArray(transform, 6)) {
+            throw new IllegalArgumentException("Invalid mapping record");
+        }
+        StringBuilder record = new StringBuilder("page")
+            .append('|').append(sourcePageIndex)
+            .append('|').append(virtualPageIndex)
+            .append('|').append(side)
+            .append('|').append(sourceRotation);
+        appendBits(record, sourceBox);
+        appendBits(record, normalizedSourceBox);
+        appendBits(record, slot);
+        appendBits(record, destination);
+        record.append('|').append(doubleBits(scale));
+        appendBits(record, transform);
+        return record.toString();
+    }
+
+    public static String mappingDigest(String[] records) throws Exception {
+        if (records == null || records.length == 0) {
+            throw new IllegalArgumentException("Mapping records are missing");
+        }
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        digest.update(strictUtf8(MAPPING_DOMAIN));
+        digest.update((byte) '\n');
+        for (String record : records) {
+            digest.update(strictUtf8(record));
+            digest.update((byte) '\n');
+        }
+        return toHex(digest.digest());
+    }
+
+    public static String viewId(
+        String sourceSha256,
+        String manifestSchema,
+        String generatorVersion,
+        String direction,
+        boolean coverSeparate,
+        double spreadWidth,
+        double spreadHeight,
+        double gutter,
+        String mappingSha256
+    ) throws Exception {
+        if (!isLowerSha256(sourceSha256)
+            || !isLowerSha256(mappingSha256)
+            || !"techrebbe.supernote.virtual-spread/v3".equals(
+                manifestSchema)
+            || !"techrebbe.supernote.virtual-spread-generator/v1".equals(
+                generatorVersion)
+            || !"rtl".equals(direction)
+            || !Double.isFinite(spreadWidth)
+            || !Double.isFinite(spreadHeight)
+            || !Double.isFinite(gutter)) {
+            throw new IllegalArgumentException("Invalid view identity");
+        }
+        String canonical = VIEW_DOMAIN
+            + "\nsource|" + sourceSha256
+            + "\nschema|" + manifestSchema
+            + "\ngenerator|" + generatorVersion
+            + "\ndirection|" + direction
+            + "\ncover|" + (coverSeparate ? "1" : "0")
+            + "\nspread|" + doubleBits(spreadWidth)
+            + "|" + doubleBits(spreadHeight)
+            + "|" + doubleBits(gutter)
+            + "\nmapping|" + mappingSha256
+            + "\n";
+        return VIEW_PREFIX + sha256(strictUtf8(canonical));
+    }
+
+    public static String documentId(String sourceSha256) {
+        if (!isLowerSha256(sourceSha256)) {
+            throw new IllegalArgumentException("Invalid document identity");
+        }
+        return DOCUMENT_PREFIX + sourceSha256;
+    }
+
+    public static String outputBasename(
+        String sourceSha256,
+        String viewId
+    ) {
+        if (!isViewId(viewId)) {
+            throw new IllegalArgumentException("Invalid view identity");
+        }
+        return documentId(sourceSha256) + "." + viewId
+            + ".virtual-spread.pdf";
     }
 
     public static String internal(
@@ -113,38 +230,9 @@ public final class VirtualSpreadLinkAuthority {
     public static String readPdfSourceDigest(
         RandomAccessFile input
     ) throws Exception {
-        long originalPosition = input.getFilePointer();
-        try {
-            long length = input.length();
-            int count = (int) Math.min(length, 4096L);
-            if (count <= SOURCE_PDF_MARKER.length() + 65) {
-                return null;
-            }
-            byte[] data = new byte[count];
-            input.seek(length - count);
-            input.readFully(data);
-            String tail = new String(data, StandardCharsets.ISO_8859_1);
-            int startxref = tail.lastIndexOf("startxref");
-            if (startxref < 0) {
-                return null;
-            }
-            int marker = tail.lastIndexOf(SOURCE_PDF_MARKER, startxref);
-            if (marker < 0) {
-                return null;
-            }
-            int digestStart = marker + SOURCE_PDF_MARKER.length();
-            int digestEnd = digestStart + 64;
-            int nextMarker = digestEnd + 1;
-            if (digestEnd >= tail.length()
-                || tail.charAt(digestEnd) != '\n'
-                || !tail.startsWith(LAYOUT_PDF_MARKER, nextMarker)) {
-                return null;
-            }
-            String digest = tail.substring(digestStart, digestEnd);
-            return isSha256(digest) ? digest.toLowerCase() : null;
-        } finally {
-            input.seek(originalPosition);
-        }
+        return readPdfMarker(
+            input, SOURCE_PDF_MARKER, LAYOUT_PDF_MARKER, false
+        );
     }
 
     public static String readPdfSourceDigest(
@@ -168,41 +256,13 @@ public final class VirtualSpreadLinkAuthority {
     }
 
     public static String readPdfDigest(RandomAccessFile input) throws Exception {
-        long originalPosition = input.getFilePointer();
-        try {
-            long length = input.length();
-            int count = (int) Math.min(length, 4096L);
-            if (count <= PDF_MARKER.length() + 65) {
-                return null;
-            }
-            byte[] data = new byte[count];
-            input.seek(length - count);
-            input.readFully(data);
-            String tail = new String(data, StandardCharsets.ISO_8859_1);
-            int startxref = tail.lastIndexOf("startxref");
-            if (startxref < 0) {
-                return null;
-            }
-            int marker = tail.lastIndexOf(PDF_MARKER, startxref);
-            if (marker < 0) {
-                return null;
-            }
-            int digestStart = marker + PDF_MARKER.length();
-            int digestEnd = digestStart + 64;
-            if (digestEnd >= tail.length()
-                || tail.charAt(digestEnd) != '\n'
-                || digestEnd + 1 != startxref) {
-                return null;
-            }
-            String digest = tail.substring(digestStart, digestEnd);
-            return isSha256(digest) ? digest.toLowerCase() : null;
-        } finally {
-            input.seek(originalPosition);
-        }
+        return readPdfMarker(input, PDF_MARKER, MAPPING_PDF_MARKER, false);
     }
 
     public static String readPdfDigest(FileInputStream input) throws Exception {
-        return readPdfMarker(input, PDF_MARKER, null, true);
+        return readPdfMarker(
+            input, PDF_MARKER, MAPPING_PDF_MARKER, false
+        );
     }
 
     public static String readPdfLayoutDigest(File pdf) throws Exception {
@@ -215,38 +275,9 @@ public final class VirtualSpreadLinkAuthority {
     }
 
     public static String readPdfLayoutDigest(RandomAccessFile input) throws Exception {
-        long originalPosition = input.getFilePointer();
-        try {
-            long length = input.length();
-            int count = (int) Math.min(length, 4096L);
-            if (count <= LAYOUT_PDF_MARKER.length() + 65) {
-                return null;
-            }
-            byte[] data = new byte[count];
-            input.seek(length - count);
-            input.readFully(data);
-            String tail = new String(data, StandardCharsets.ISO_8859_1);
-            int startxref = tail.lastIndexOf("startxref");
-            if (startxref < 0) {
-                return null;
-            }
-            int marker = tail.lastIndexOf(LAYOUT_PDF_MARKER, startxref);
-            if (marker < 0) {
-                return null;
-            }
-            int digestStart = marker + LAYOUT_PDF_MARKER.length();
-            int digestEnd = digestStart + 64;
-            int nextMarker = digestEnd + 1;
-            if (digestEnd >= tail.length()
-                || tail.charAt(digestEnd) != '\n'
-                || !tail.startsWith(PDF_MARKER, nextMarker)) {
-                return null;
-            }
-            String digest = tail.substring(digestStart, digestEnd);
-            return isSha256(digest) ? digest.toLowerCase() : null;
-        } finally {
-            input.seek(originalPosition);
-        }
+        return readPdfMarker(
+            input, LAYOUT_PDF_MARKER, PDF_MARKER, false
+        );
     }
 
     public static String readPdfLayoutDigest(
@@ -258,6 +289,79 @@ public final class VirtualSpreadLinkAuthority {
             PDF_MARKER,
             false
         );
+    }
+
+    public static String readPdfMappingDigest(File pdf) throws Exception {
+        RandomAccessFile input = new RandomAccessFile(pdf, "r");
+        try {
+            return readPdfMappingDigest(input);
+        } finally {
+            input.close();
+        }
+    }
+
+    public static String readPdfMappingDigest(
+        RandomAccessFile input
+    ) throws Exception {
+        return readPdfMarker(
+            input, MAPPING_PDF_MARKER, VIEW_PDF_MARKER, false
+        );
+    }
+
+    public static String readPdfMappingDigest(
+        FileInputStream input
+    ) throws Exception {
+        return readPdfMarker(
+            input, MAPPING_PDF_MARKER, VIEW_PDF_MARKER, false
+        );
+    }
+
+    public static String readPdfViewDigest(File pdf) throws Exception {
+        RandomAccessFile input = new RandomAccessFile(pdf, "r");
+        try {
+            return readPdfViewDigest(input);
+        } finally {
+            input.close();
+        }
+    }
+
+    public static String readPdfViewDigest(
+        RandomAccessFile input
+    ) throws Exception {
+        return readPdfMarker(input, VIEW_PDF_MARKER, null, true);
+    }
+
+    public static String readPdfViewDigest(
+        FileInputStream input
+    ) throws Exception {
+        return readPdfMarker(input, VIEW_PDF_MARKER, null, true);
+    }
+
+    private static String readPdfMarker(
+        RandomAccessFile input,
+        String markerText,
+        String followingMarker,
+        boolean immediatelyBeforeStartxref
+    ) throws Exception {
+        long originalPosition = input.getFilePointer();
+        try {
+            long length = input.length();
+            int count = (int) Math.min(length, 4096L);
+            if (count <= markerText.length() + 65) {
+                return null;
+            }
+            byte[] data = new byte[count];
+            input.seek(length - count);
+            input.readFully(data);
+            return markerValue(
+                new String(data, StandardCharsets.ISO_8859_1),
+                markerText,
+                followingMarker,
+                immediatelyBeforeStartxref
+            );
+        } finally {
+            input.seek(originalPosition);
+        }
     }
 
     private static String readPdfMarker(
@@ -285,34 +389,47 @@ public final class VirtualSpreadLinkAuthority {
                 buffer.array(),
                 StandardCharsets.ISO_8859_1
             );
-            int startxref = tail.lastIndexOf("startxref");
-            if (startxref < 0) {
-                return null;
-            }
-            int marker = tail.lastIndexOf(markerText, startxref);
-            if (marker < 0) {
-                return null;
-            }
-            int digestStart = marker + markerText.length();
-            int digestEnd = digestStart + 64;
-            if (digestEnd >= tail.length()
-                || tail.charAt(digestEnd) != '\n') {
-                return null;
-            }
-            int next = digestEnd + 1;
-            if (immediatelyBeforeStartxref) {
-                if (next != startxref) {
-                    return null;
-                }
-            } else if (followingMarker == null
-                || !tail.startsWith(followingMarker, next)) {
-                return null;
-            }
-            String digest = tail.substring(digestStart, digestEnd);
-            return isSha256(digest) ? digest.toLowerCase() : null;
+            return markerValue(
+                tail,
+                markerText,
+                followingMarker,
+                immediatelyBeforeStartxref
+            );
         } finally {
             channel.position(originalPosition);
         }
+    }
+
+    private static String markerValue(
+        String tail,
+        String markerText,
+        String followingMarker,
+        boolean immediatelyBeforeStartxref
+    ) {
+        int startxref = tail.lastIndexOf("startxref");
+        if (startxref < 0) {
+            return null;
+        }
+        int marker = tail.lastIndexOf(markerText, startxref);
+        if (marker < 0) {
+            return null;
+        }
+        int digestStart = marker + markerText.length();
+        int digestEnd = digestStart + 64;
+        if (digestEnd >= tail.length() || tail.charAt(digestEnd) != '\n') {
+            return null;
+        }
+        int next = digestEnd + 1;
+        if (immediatelyBeforeStartxref) {
+            if (next != startxref) {
+                return null;
+            }
+        } else if (followingMarker == null
+            || !tail.startsWith(followingMarker, next)) {
+            return null;
+        }
+        String digest = tail.substring(digestStart, digestEnd);
+        return isSha256(digest) ? digest.toLowerCase() : null;
     }
 
     private static String common(
@@ -346,6 +463,37 @@ public final class VirtualSpreadLinkAuthority {
         }
         padded.append(hex);
         return padded.toString();
+    }
+
+    private static boolean finiteArray(double[] values, int length) {
+        if (values == null || values.length != length) {
+            return false;
+        }
+        for (double value : values) {
+            if (!Double.isFinite(value)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static void appendBits(StringBuilder record, double[] values) {
+        for (double value : values) {
+            record.append('|').append(doubleBits(value));
+        }
+    }
+
+    private static boolean isLowerSha256(String value) {
+        if (!isSha256(value)) {
+            return false;
+        }
+        return value.equals(value.toLowerCase(java.util.Locale.ROOT));
+    }
+
+    private static boolean isViewId(String value) {
+        return value != null
+            && value.startsWith(VIEW_PREFIX)
+            && isLowerSha256(value.substring(VIEW_PREFIX.length()));
     }
 
     private static byte[] strictUtf8(String value) {

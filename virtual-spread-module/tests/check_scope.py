@@ -31,9 +31,9 @@ for required in (
         )
 
 if ('private static final String SCHEMA =\n'
-        '        "techrebbe.supernote.virtual-spread/v2";' not in hook):
+        '        "techrebbe.supernote.virtual-spread/v3";' not in hook):
     raise SystemExit(
-        "runtime must require the v2 native-snapshot-capable manifest schema"
+        "runtime must require the v3 authenticated-mapping manifest schema"
     )
 
 for required in (
@@ -778,7 +778,13 @@ for required in (
     '"SNVirtualSpreadSourceSHA256"',
     '"SNVirtualSpreadLayoutSHA256"',
     '"SNVirtualSpreadLinksSHA256"',
+    '"SNVirtualSpreadMappingSHA256"',
+    '"SNVirtualSpreadViewID"',
+    '"SNVirtualSpreadGeneratorVersion"',
     "!isSha256(nativeSource)",
+    "!isSha256(nativeMapping)",
+    "manifest.viewId.equals(nativeViewId)",
+    "GENERATOR_VERSION.equals(nativeGenerator)",
     'manifest_rejected reason=native_snapshot_metadata',
     'objectField(currentPdfMupdf, "document") != nativeDocument',
     "state.nativeSnapshotDocument = nativeDocument",
@@ -1133,7 +1139,7 @@ for required in (
     "FileIdentity sidecarBefore = FileIdentity.captureRegularPath(",
     "FileInputStream sidecarInput = openRegularFile(",
     "String sidecarDigest = sha256(sidecarData)",
-    'output.optString("sha256", "")',
+    'exactManifestString(output, "sha256")',
     "sha256File(pdfInput, key, owner)",
     "VirtualSpreadLinkAuthority.readPdfSourceDigest(pdfInput)",
     'manifest_rejected reason=output_hash',
@@ -1143,7 +1149,8 @@ for required in (
     'JSONArray linksJson = root.optJSONArray("links")',
     "linksJson == null",
     "spreadEntryMatches(",
-    "sourceEntryMatches(",
+    "parseMappingRecord(",
+    "mappingHasFrozenFieldSet(",
     "linkEndpointMatches(",
     "exactManifestInteger(",
     "VirtualSpreadNavigation.exactJsonInteger(",
@@ -1169,6 +1176,15 @@ for required in (
     "VirtualSpreadLinkAuthority.readPdfDigest(pdfInput)",
     '"layoutAuthoritySha256"',
     "VirtualSpreadLinkAuthority.readPdfLayoutDigest(pdfInput)",
+    '"mappingAuthoritySha256"',
+    "VirtualSpreadLinkAuthority.readPdfMappingDigest(pdfInput)",
+    'exactManifestString(output, "viewId")',
+    'exactManifestString(\n            output, "cacheBasename"',
+    "VirtualSpreadLinkAuthority.readPdfViewDigest(pdfInput)",
+    "VirtualSpreadLinkAuthority.mapping(",
+    "VirtualSpreadLinkAuthority.mappingDigest(",
+    "VirtualSpreadLinkAuthority.viewId(",
+    "VirtualSpreadLinkAuthority.outputBasename(",
     "VirtualSpreadLinkAuthority.layout(",
     "VirtualSpreadLinkAuthority.layoutDigest(",
     "VirtualSpreadLinkAuthority.uri(",
@@ -1181,7 +1197,7 @@ for required in (
     'manifest_rejected reason=layout_authority',
     'manifest_rejected reason=layout_authority_records',
     'manifest_rejected reason=cover_layout',
-    'manifest_rejected reason=source_layout',
+    'manifest_rejected reason=source_mapping',
     "VirtualSpreadNavigation.runtimeGeometryIsRepresentable(",
     "VirtualSpreadNavigation.nomadSpreadAspectIsSupported(",
     "VirtualSpreadNavigation.runtimeRectIsRepresentable(",
@@ -1231,11 +1247,11 @@ if not (0 <= duplicate_guard < json_parse):
     )
 
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
-if 'android:versionCode="26"' not in manifest:
+if 'android:versionCode="27"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version code")
-if 'android:versionName="0.0.24-r2"' not in manifest:
+if 'android:versionName="0.0.25"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
-if 'private static final String VERSION = "0.0.24-r2"' not in hook:
+if 'private static final String VERSION = "0.0.25"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
 if (
     'android:name="xposedscope"' not in manifest
@@ -1538,10 +1554,12 @@ generator = (root.parent / "virtual_spread/generate_virtual_spread.py").read_tex
     encoding="utf-8"
 )
 for required in (
-    'SCHEMA = "techrebbe.supernote.virtual-spread/v2"',
+    'SCHEMA = MANIFEST_SCHEMA',
     'PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v2"',
     '"techrebbe.supernote.virtual-spread-source-commit/v1"',
     'SOURCE_AUTHORITY_MARKER = b"%SNVirtualSpreadSourceSHA256:"',
+    'MAPPING_AUTHORITY_MARKER = b"%SNVirtualSpreadMappingSHA256:"',
+    'VIEW_AUTHORITY_MARKER = b"%SNVirtualSpreadViewSHA256:"',
     "source_hash,",
     'LEGACY_PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v1"',
     "class AmbiguousPublicationMarkerError(",
@@ -1758,6 +1776,10 @@ for required in (
     "                            final_identity, restored_identity",
     '"layoutAuthoritySha256": layout_authority_hash',
     '"/SNVirtualSpreadLayoutSHA256": layout_authority_hash',
+    '"mappingAuthoritySha256": mapping_authority_hash',
+    '"/SNVirtualSpreadMappingSHA256": mapping_authority_hash',
+    '"viewId": spread_view_id',
+    '"/SNVirtualSpreadViewID": spread_view_id',
 ):
     if required not in generator:
         raise SystemExit(

@@ -247,9 +247,9 @@ The published sidecar nevertheless always uses the exact output-derived
 `<PDF filename>.json` spelling, including case, so copying the pair onto
 Supernote's case-sensitive storage cannot make the runtime sidecar invisible.
 Ordinary publication errors use that same recovery path immediately.
-Manifest schema `techrebbe.supernote.virtual-spread/v2` deliberately requires a
-snapshot-binding-capable companion. Older companions reject newly generated v2
-pairs, and v0.0.24 rejects legacy v1 pairs; regenerate the PDF and sidecar
+Manifest schema `techrebbe.supernote.virtual-spread/v3` deliberately requires a
+mapping-authority-capable companion. Older companions reject newly generated v3
+pairs, and v0.0.25 rejects legacy v1/v2 pairs; regenerate the PDF and sidecar
 together when upgrading. The manifest records the staged PDF's exact size and SHA-256, which the runtime
 module verifies before trusting its mappings. A canonical digest of every link
 record is also embedded in the generated PDF and verified against the sidecar,
@@ -257,7 +257,12 @@ preventing a separately edited sidecar from omitting or retargeting links.
 A second canonical authority binds RTL direction, cover parity, source/output
 page counts, spread dimensions, and gutter to that same hashed PDF. This keeps
 an otherwise internally consistent sidecar from swapping cover pairing or
-geometry. Native module v0.0.24 authenticates each internal link's target-view
+geometry. A third frozen digest authenticates every InkBridge-consumed mapping
+field for every source page, including CropBox/rotation, virtual page/side,
+destination, scale, and the authoritative forward affine transform. The same
+mapping digest is bound into the PDF tail and into a deterministic view ID and
+cache basename. Native module v0.0.25 recomputes and validates these records,
+then authenticates each internal link's target-view
 policy and the exact source snapshot. It rejects malformed UTF-8 bytes before
 decoding, non-integral manifest page indices or output sizes, numeric strings or
 non-finite values in spread/link geometry, and malformed or duplicate-key
@@ -268,7 +273,7 @@ transformed URI `/IsMap true` actions, a source CropBox outside its MediaBox, an
 link geometry outside the effective source CropBox. It preserves an omitted PDF
 link border at its correct transformed default width. Link-authority v2 records
 and the source marker fail closed on older generated pairs; regenerate the PDF
-and sidecar together before opening them with v0.0.24. Native reader callbacks
+and sidecar together before opening them with v0.0.25. Native reader callbacks
 perform only strong PDF and sidecar
 identity checks. Sidecar reading/hashing, parsing, full-PDF hashing, and stable-
 snapshot verification run on the single background verifier. Its bounded queue
@@ -391,5 +396,6 @@ source-page, half, and affine-transform data needed for a later InkBridge
 conversion layer. The versioned ownership, mapping-authority, cache, and
 regeneration boundary for that work is recorded in
 [`INKBRIDGE_REPRESENTATION_CONTRACT.md`](INKBRIDGE_REPRESENTATION_CONTRACT.md).
-It begins only after the exact v0.0.24 review and hardware gate; it does not add
-annotation interception to this companion.
+The v0.0.24 review and hardware gate are complete. v0.0.25 freezes and enforces
+the representation boundary without adding annotation interception to this
+companion.

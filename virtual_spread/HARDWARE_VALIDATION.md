@@ -319,6 +319,27 @@ and its restored `.mark` SHA-256 was
 matching the pre-test backups. The disposable blocked-link PDF was removed from
 the Nomad after the gate.
 
+## v0.0.25 authenticated mapping/view contract - PENDING HARDWARE GATE
+
+v0.0.25 advances generated pairs to manifest schema v3. It authenticates every
+InkBridge-consumed source-page mapping field through one frozen cross-language
+digest, binds that digest into the PDF and sidecar, and derives a deterministic
+document ID, view ID, and cache basename. The Android runtime independently
+recomputes the mapping digest and view identity, validates mapping geometry, and
+requires the same mapping/view/generator metadata from Supernote's actually open
+MuPDF document. Queued and mixed-menu link contexts now retain those additional
+native authorities so same-path replacement cannot replay against another view.
+
+The local gate passes the page-143 Python/Java golden vectors, per-field mapping
+and view mutations, 155 generator/publication tests (14 platform skips), 26 Java
+authority assertions, 202 focused navigation assertions, 8,752 exhaustive
+navigation assertions, hook-scope validation, and signed APK compilation as
+v0.0.25 (`versionCode=27`). Exact-head review and the Nomad gate remain pending.
+The device gate must prove activation/navigation with a schema-v3 pair, fail-
+closed behavior for a missing or altered mapping authority, ordinary-PDF pass-
+through, and a shared-storage dot-cache path that the native reader can open but
+does not list in its normal library.
+
 ## Decision
 
 Proceed with the virtual-spread architecture. Do not port the legacy dual-page

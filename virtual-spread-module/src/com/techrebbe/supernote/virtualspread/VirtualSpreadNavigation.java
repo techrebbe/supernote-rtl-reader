@@ -918,13 +918,23 @@ public final class VirtualSpreadNavigation {
         String expectedSource,
         String expectedLayout,
         String expectedLinks,
+        String expectedMapping,
+        String expectedViewId,
+        String expectedGenerator,
         String nativeSource,
         String nativeLayout,
-        String nativeLinks
+        String nativeLinks,
+        String nativeMapping,
+        String nativeViewId,
+        String nativeGenerator
     ) {
         return sameAuthority(expectedSource, nativeSource)
             && sameAuthority(expectedLayout, nativeLayout)
-            && sameAuthority(expectedLinks, nativeLinks);
+            && sameAuthority(expectedLinks, nativeLinks)
+            && sameAuthority(expectedMapping, nativeMapping)
+            && sameViewId(expectedViewId, nativeViewId)
+            && expectedGenerator != null
+            && expectedGenerator.equals(nativeGenerator);
     }
 
     /**
@@ -937,11 +947,17 @@ public final class VirtualSpreadNavigation {
     public static boolean nativeMetadataClaimsVirtualSpread(
         Object source,
         Object layout,
-        Object links
+        Object links,
+        Object mapping,
+        Object viewId,
+        Object generator
     ) {
         return nativeAuthorityValuePresent(source)
             || nativeAuthorityValuePresent(layout)
-            || nativeAuthorityValuePresent(links);
+            || nativeAuthorityValuePresent(links)
+            || nativeAuthorityValuePresent(mapping)
+            || nativeAuthorityValuePresent(viewId)
+            || nativeAuthorityValuePresent(generator);
     }
 
     private static boolean nativeAuthorityValuePresent(Object value) {
@@ -960,6 +976,148 @@ public final class VirtualSpreadNavigation {
             && expected.length() == 64
             && actual.length() == 64
             && expected.equalsIgnoreCase(actual);
+    }
+
+    private static boolean sameViewId(String expected, String actual) {
+        String prefix = "inkbridge-view-v1-";
+        return expected != null
+            && actual != null
+            && expected.startsWith(prefix)
+            && expected.length() == prefix.length() + 64
+            && expected.equals(actual);
+    }
+
+    /**
+     * Validate the geometry carried by one authenticated mapping record.
+     * Canonical hashing is handled separately; this rejects self-consistent
+     * but unusable geometry before it reaches native page handling.
+     */
+    public static boolean mappingGeometryIsValid(
+        String side,
+        int rotation,
+        double[] sourceBox,
+        double[] normalizedSourceBox,
+        double[] slot,
+        double[] destination,
+        double scale,
+        double[] transform,
+        double pageWidth,
+        double pageHeight,
+        double gutter
+    ) {
+        if (!("left".equals(side) || "right".equals(side))
+            || !(rotation == 0 || rotation == 90
+                || rotation == 180 || rotation == 270)
+            || !positiveRect(sourceBox)
+            || !positiveRect(normalizedSourceBox)
+            || !positiveRect(slot)
+            || !positiveRect(destination)
+            || !finiteArray(transform, 6)
+            || !Double.isFinite(scale) || scale <= 0.0
+            || !runtimeGeometryIsRepresentable(
+                pageWidth, pageHeight, gutter)) {
+            return false;
+        }
+        double halfWidth = (pageWidth - gutter) / 2.0;
+        double slotLeft = "left".equals(side) ? 0.0 : halfWidth + gutter;
+        double slotRight = "left".equals(side) ? halfWidth : pageWidth;
+        if (!rectNearlyEquals(slot, slotLeft, 0.0, slotRight, pageHeight)
+            || destination[0] < slot[0] - 1.0e-7
+            || destination[1] < slot[1] - 1.0e-7
+            || destination[2] > slot[2] + 1.0e-7
+            || destination[3] > slot[3] + 1.0e-7) {
+            return false;
+        }
+
+        double sourceWidth = sourceBox[2] - sourceBox[0];
+        double sourceHeight = sourceBox[3] - sourceBox[1];
+        double normalizedWidth = normalizedSourceBox[2]
+            - normalizedSourceBox[0];
+        double normalizedHeight = normalizedSourceBox[3]
+            - normalizedSourceBox[1];
+        boolean quarterTurn = rotation == 90 || rotation == 270;
+        if (!nearlyEqual(
+                normalizedWidth,
+                quarterTurn ? sourceHeight : sourceWidth
+            ) || !nearlyEqual(
+                normalizedHeight,
+                quarterTurn ? sourceWidth : sourceHeight
+            )) {
+            return false;
+        }
+
+        double a = transform[0];
+        double b = transform[1];
+        double c = transform[2];
+        double d = transform[3];
+        double determinant = a * d - b * c;
+        double firstScale = Math.hypot(a, b);
+        double secondScale = Math.hypot(c, d);
+        if (!Double.isFinite(determinant) || determinant == 0.0
+            || !nearlyEqual(firstScale, scale)
+            || !nearlyEqual(secondScale, scale)
+            || !nearlyEqual(a * c + b * d, 0.0)
+            || !nearlyEqual(Math.abs(determinant), scale * scale)) {
+            return false;
+        }
+        double[] xs = new double[] {
+            sourceBox[0], sourceBox[2], sourceBox[2], sourceBox[0]
+        };
+        double[] ys = new double[] {
+            sourceBox[1], sourceBox[1], sourceBox[3], sourceBox[3]
+        };
+        double minX = Double.POSITIVE_INFINITY;
+        double minY = Double.POSITIVE_INFINITY;
+        double maxX = Double.NEGATIVE_INFINITY;
+        double maxY = Double.NEGATIVE_INFINITY;
+        for (int index = 0; index < 4; index++) {
+            double x = a * xs[index] + c * ys[index] + transform[4];
+            double y = b * xs[index] + d * ys[index] + transform[5];
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            maxX = Math.max(maxX, x);
+            maxY = Math.max(maxY, y);
+        }
+        return rectNearlyEquals(destination, minX, minY, maxX, maxY);
+    }
+
+    private static boolean positiveRect(double[] rect) {
+        return finiteArray(rect, 4)
+            && rect[0] < rect[2] && rect[1] < rect[3];
+    }
+
+    private static boolean finiteArray(double[] values, int length) {
+        if (values == null || values.length != length) {
+            return false;
+        }
+        for (double value : values) {
+            if (!Double.isFinite(value)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean nearlyEqual(double left, double right) {
+        double magnitude = Math.max(
+            1.0,
+            Math.max(Math.abs(left), Math.abs(right))
+        );
+        return Math.abs(left - right) <= 1.0e-7 * magnitude;
+    }
+
+    private static boolean rectNearlyEquals(
+        double[] actual,
+        double left,
+        double bottom,
+        double right,
+        double top
+    ) {
+        return positiveRect(actual)
+            && nearlyEqual(actual[0], left)
+            && nearlyEqual(actual[1], bottom)
+            && nearlyEqual(actual[2], right)
+            && nearlyEqual(actual[3], top);
     }
 
     /** True only for bounded PDF geometry that survives Android floats. */

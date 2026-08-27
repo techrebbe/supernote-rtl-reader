@@ -61,7 +61,7 @@ SOURCE_AUTHORITY_MARKER = b"%SNVirtualSpreadSourceSHA256:"
 LINK_AUTHORITY_MARKER = b"%SNVirtualSpreadLinksSHA256:"
 LAYOUT_AUTHORITY_MARKER = b"%SNVirtualSpreadLayoutSHA256:"
 MAPPING_AUTHORITY_MARKER = b"%SNVirtualSpreadMappingSHA256:"
-VIEW_ID_MARKER = b"%SNVirtualSpreadViewID:"
+VIEW_AUTHORITY_MARKER = b"%SNVirtualSpreadViewSHA256:"
 PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v2"
 LEGACY_PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v1"
 SOURCE_COMMIT_SCHEMA = (
@@ -719,8 +719,8 @@ def _bind_pdf_authorities(
         + MAPPING_AUTHORITY_MARKER
         + mapping_authority_sha256.encode("ascii")
         + b"\n"
-        + VIEW_ID_MARKER
-        + spread_view_id.encode("ascii")
+        + VIEW_AUTHORITY_MARKER
+        + spread_view_id[len("inkbridge-view-v1-"):].encode("ascii")
         + b"\n"
     )
     if retained_descriptor is None:
@@ -749,7 +749,7 @@ def _bind_pdf_authorities(
             or LAYOUT_AUTHORITY_MARKER in authority_tail
             or LINK_AUTHORITY_MARKER in authority_tail
             or MAPPING_AUTHORITY_MARKER in authority_tail
-            or VIEW_ID_MARKER in authority_tail
+            or VIEW_AUTHORITY_MARKER in authority_tail
         ):
             raise VirtualSpreadError("Written PDF has an invalid authority marker")
         stream.seek(tail_start + startxref)

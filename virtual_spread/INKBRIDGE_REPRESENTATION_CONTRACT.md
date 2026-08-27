@@ -105,9 +105,9 @@ round trips, mapping digest, and view ID for both projects.
 
 Sequence:
 
-1. finish the exact v0.0.24 review and Nomad hardware gate;
-2. introduce mapping authority, view identity/naming, the golden fixture, and a
-   hardware-proven hidden cache location in a new schema/version;
+1. use the completed v0.0.24 review and Nomad hardware gate as the stable base;
+2. merge v0.0.25 mapping authority, view identity/naming, and the golden fixture,
+   then hardware-prove the hidden cache location;
 3. implement and host-test InkBridge's forward/inverse transform adapter;
 4. run page-143 ink create, sync, move, erase/tombstone, and idempotent-reimport
    end-to-end tests;
@@ -117,4 +117,4 @@ Sequence:
 
 Native text-highlight enumeration/export and existing non-link source-PDF
 annotations remain separate blockers. The earlier v0.0.18 preview and v0.0.23
-planning baseline are superseded by the schema-v2 v0.0.24 release candidate.
+planning baseline are superseded by the merged schema-v2 v0.0.24 release.

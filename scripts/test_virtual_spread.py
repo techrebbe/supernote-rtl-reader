@@ -36,7 +36,7 @@ from generate_virtual_spread import (  # noqa: E402
     MAPPING_AUTHORITY_MARKER,
     SCHEMA,
     SOURCE_AUTHORITY_MARKER,
-    VIEW_ID_MARKER,
+    VIEW_AUTHORITY_MARKER,
     MAX_MANIFEST_BYTES,
     MOVEFILE_REPLACE_EXISTING,
     MOVEFILE_WRITE_THROUGH,
@@ -1411,7 +1411,9 @@ class VirtualSpreadTests(unittest.TestCase):
                 + b"\n"
             )
             view_marker = (
-                VIEW_ID_MARKER + spread_view_id.encode("ascii") + b"\n"
+                VIEW_AUTHORITY_MARKER
+                + spread_view_id[len("inkbridge-view-v1-"):].encode("ascii")
+                + b"\n"
             )
             self.assertEqual(tail.count(source_marker), 1)
             self.assertEqual(tail.count(layout_marker), 1)

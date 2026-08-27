@@ -1439,6 +1439,12 @@ public final class VirtualSpreadNavigationTest {
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
         String linkAuthority =
             "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+        String mappingAuthority =
+            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+        String viewId = "inkbridge-view-v1-"
+            + "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+        String generatorVersion =
+            "techrebbe.supernote.virtual-spread-generator/v1";
         assertBoolean(
             "matching native document authorities are accepted",
             true,
@@ -1446,9 +1452,15 @@ public final class VirtualSpreadNavigationTest {
                 sourceAuthority,
                 layoutAuthority,
                 linkAuthority,
+                mappingAuthority,
+                viewId,
+                generatorVersion,
                 sourceAuthority.toUpperCase(),
                 layoutAuthority,
-                linkAuthority
+                linkAuthority,
+                mappingAuthority.toUpperCase(),
+                viewId,
+                generatorVersion
             )
         );
         assertBoolean(
@@ -1458,9 +1470,15 @@ public final class VirtualSpreadNavigationTest {
                 sourceAuthority,
                 layoutAuthority,
                 linkAuthority,
+                mappingAuthority,
+                viewId,
+                generatorVersion,
                 linkAuthority,
                 layoutAuthority,
-                linkAuthority
+                linkAuthority,
+                mappingAuthority,
+                viewId,
+                generatorVersion
             )
         );
         assertBoolean(
@@ -1470,9 +1488,15 @@ public final class VirtualSpreadNavigationTest {
                 sourceAuthority,
                 layoutAuthority,
                 linkAuthority,
+                mappingAuthority,
+                viewId,
+                generatorVersion,
                 sourceAuthority,
                 linkAuthority,
-                linkAuthority
+                linkAuthority,
+                mappingAuthority,
+                viewId,
+                generatorVersion
             )
         );
         assertBoolean(
@@ -1482,9 +1506,15 @@ public final class VirtualSpreadNavigationTest {
                 sourceAuthority,
                 layoutAuthority,
                 linkAuthority,
+                mappingAuthority,
+                viewId,
+                generatorVersion,
                 sourceAuthority,
                 layoutAuthority,
-                sourceAuthority
+                sourceAuthority,
+                mappingAuthority,
+                viewId,
+                generatorVersion
             )
         );
         assertBoolean(
@@ -1494,15 +1524,78 @@ public final class VirtualSpreadNavigationTest {
                 sourceAuthority,
                 layoutAuthority,
                 linkAuthority,
+                mappingAuthority,
+                viewId,
+                generatorVersion,
                 null,
                 layoutAuthority,
-                linkAuthority
+                linkAuthority,
+                mappingAuthority,
+                viewId,
+                generatorVersion
+            )
+        );
+        assertBoolean(
+            "stale native mapping fails closed",
+            false,
+            VirtualSpreadNavigation.manifestMatchesNativeSnapshot(
+                sourceAuthority,
+                layoutAuthority,
+                linkAuthority,
+                mappingAuthority,
+                viewId,
+                generatorVersion,
+                sourceAuthority,
+                layoutAuthority,
+                linkAuthority,
+                sourceAuthority,
+                viewId,
+                generatorVersion
+            )
+        );
+        assertBoolean(
+            "stale native view identity fails closed",
+            false,
+            VirtualSpreadNavigation.manifestMatchesNativeSnapshot(
+                sourceAuthority,
+                layoutAuthority,
+                linkAuthority,
+                mappingAuthority,
+                viewId,
+                generatorVersion,
+                sourceAuthority,
+                layoutAuthority,
+                linkAuthority,
+                mappingAuthority,
+                "inkbridge-view-v1-" + sourceAuthority,
+                generatorVersion
+            )
+        );
+        assertBoolean(
+            "stale native generator fails closed",
+            false,
+            VirtualSpreadNavigation.manifestMatchesNativeSnapshot(
+                sourceAuthority,
+                layoutAuthority,
+                linkAuthority,
+                mappingAuthority,
+                viewId,
+                generatorVersion,
+                sourceAuthority,
+                layoutAuthority,
+                linkAuthority,
+                mappingAuthority,
+                viewId,
+                "older-generator"
             )
         );
         assertBoolean(
             "null native metadata is ordinary",
             false,
             VirtualSpreadNavigation.nativeMetadataClaimsVirtualSpread(
+                null,
+                null,
+                null,
                 null,
                 null,
                 null
@@ -1514,7 +1607,10 @@ public final class VirtualSpreadNavigationTest {
             VirtualSpreadNavigation.nativeMetadataClaimsVirtualSpread(
                 "",
                 "   ",
-                "\t"
+                "\t",
+                "",
+                " ",
+                null
             )
         );
         assertBoolean(
@@ -1523,6 +1619,9 @@ public final class VirtualSpreadNavigationTest {
             VirtualSpreadNavigation.nativeMetadataClaimsVirtualSpread(
                 sourceAuthority,
                 "",
+                null,
+                null,
+                null,
                 null
             )
         );
@@ -1532,6 +1631,9 @@ public final class VirtualSpreadNavigationTest {
             VirtualSpreadNavigation.nativeMetadataClaimsVirtualSpread(
                 "malformed",
                 null,
+                null,
+                null,
+                null,
                 null
             )
         );
@@ -1540,6 +1642,9 @@ public final class VirtualSpreadNavigationTest {
             true,
             VirtualSpreadNavigation.nativeMetadataClaimsVirtualSpread(
                 Integer.valueOf(1),
+                null,
+                null,
+                null,
                 null,
                 null
             )

@@ -677,6 +677,58 @@ def destination_page_index(reader: PdfReader, annotation: object) -> int:
 
 
 class VirtualSpreadTests(unittest.TestCase):
+    def test_v024_r2_hardware_pass_is_recorded_in_both_release_records(
+        self,
+    ) -> None:
+        regression = (ROOT / "REGRESSION.md").read_text(encoding="utf-8")
+        hardware = (
+            ROOT / "virtual_spread" / "HARDWARE_VALIDATION.md"
+        ).read_text(encoding="utf-8")
+
+        regression_heading = (
+            "## v0.0.24-r2 mixed-menu authority and blocked-tap "
+            "consumption - LOCAL PASS / HARDWARE PASS"
+        )
+        hardware_heading = (
+            "## v0.0.24-r2 link-menu and blocked-tap correction - "
+            "HARDWARE PASS"
+        )
+
+        def release_section(document: str, heading: str) -> str:
+            self.assertIn(heading, document)
+            remainder = document.split(heading, 1)[1]
+            self.assertIn("\n## ", remainder)
+            return heading + remainder.split("\n## ", 1)[0]
+
+        regression_section = release_section(regression, regression_heading)
+        hardware_section = release_section(hardware, hardware_heading)
+        for section in (regression_section, hardware_section):
+            self.assertNotIn("HARDWARE PENDING", section)
+            self.assertNotRegex(
+                section.lower(),
+                r"(?s)hardware (?:matrix|validation|gate).*remains? pending",
+            )
+            self.assertIn("Supernote Nomad", section)
+            self.assertRegex(section, r"firmware\s+fingerprint")
+            self.assertIn(
+                "Supernote/Supernote/Supernote:11/RQ2A.210505.003/"
+                "eng.supern.20260616.100032:user/release-keys",
+                section,
+            )
+            self.assertIn("SupernoteDocument `1.02.446`", section)
+            self.assertIn(
+                "76ea0b71b518fb3c7c969fdd9bd9c1eb08dd53e6",
+                section,
+            )
+            self.assertIn(
+                "be2427543b8e41d6c4e5e42131fcfda92cbe8e82eeafa32582aa55083558fd38",
+                section,
+            )
+            self.assertIn("DocumentLinkJumpView2", section)
+            self.assertIn("link_jump_queued", section)
+            self.assertIn("`ENOENT`", section)
+            self.assertRegex(section, r"removed\s+from\s+the\s+Nomad")
+
     def test_source_pdf_version_is_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

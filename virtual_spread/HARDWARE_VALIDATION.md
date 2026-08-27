@@ -277,9 +277,12 @@ cross-language authority assertions, 8,752 exhaustive navigation assertions,
 the hook-scope guard, both native invariant suites, and signed compilation as
 v0.0.24-r2 (`versionCode=26`). The upgrade-compatible APK SHA-256 is
 `be2427543b8e41d6c4e5e42131fcfda92cbe8e82eeafa32582aa55083558fd38`.
-The focused Nomad gate passed on 2026-08-27 against reviewed code head
-`76ea0b71b518fb3c7c969fdd9bd9c1eb08dd53e6` and the upgrade-compatible
-v0.0.24-r2 APK whose SHA-256 is
+The focused gate passed on 2026-08-27 on a Supernote Nomad with firmware
+fingerprint
+`Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys`
+and SupernoteDocument `1.02.446`, against reviewed code head
+`76ea0b71b518fb3c7c969fdd9bd9c1eb08dd53e6`. The installed artifact was the
+upgrade-compatible v0.0.24-r2 APK whose SHA-256 is
 `be2427543b8e41d6c4e5e42131fcfda92cbe8e82eeafa32582aa55083558fd38`.
 Hardware evidence covered every r2-specific path:
 

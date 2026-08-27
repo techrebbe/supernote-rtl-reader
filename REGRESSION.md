@@ -1902,7 +1902,7 @@ Final local validation passes 154 generator tests (14 expected Windows skips),
 hook-scope validation, and the signed APK build. PR #16 remains draft until
 fresh exact-head CI and review complete.
 
-## v0.0.24-r2 mixed-menu authority and blocked-tap consumption - LOCAL PASS / HARDWARE PENDING
+## v0.0.24-r2 mixed-menu authority and blocked-tap consumption - LOCAL PASS / HARDWARE PASS
 
 Exact-firmware review found that `showLinkJumpView(...)` returns true whenever
 native firmware handles a tap; false means unhandled and falls through to page
@@ -1938,7 +1938,35 @@ assertions, 15 authority assertions, 8,752 exhaustive assertions, hook-scope
 validation, both native invariant suites, and signed compilation as
 v0.0.24-r2 (`versionCode=26`). The upgrade-compatible APK SHA-256 is
 `be2427543b8e41d6c4e5e42131fcfda92cbe8e82eeafa32582aa55083558fd38`.
-The fresh r2 hardware matrix remains pending and the PR stays draft.
+
+The focused hardware matrix passed on 2026-08-27 on a Supernote Nomad with
+firmware fingerprint
+`Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys`
+and SupernoteDocument `1.02.446`. The installed artifact was the exact
+v0.0.24-r2 (`versionCode=26`) APK above, built from reviewed code head
+`76ea0b71b518fb3c7c969fdd9bd9c1eb08dd53e6`.
+
+The device matrix observed all r2-specific boundaries:
+
+- a pure internal link without a sidecar stayed on `1 / 4`, was consumed, and
+  logged one `link_jump_queued`, one pending-verification block, and one
+  verification-failure discard without a page load or native page-turn
+  fallthrough;
+- the firmware's mixed `DocumentLinkJumpView2` menu kept Underline native,
+  while a later explicit Open Link action logged `mixed_link_menu_observed` and
+  reached source page 7 exactly once;
+- replacing an authenticated sidecar with an identical copy forced cold
+  verification, then produced exactly one `link_jump_queued source=3 target=1`,
+  one `link_jump_replayed`, and one target page load without reopening the
+  menu;
+- a markerless ordinary PDF created no manifest-verification, activation, or
+  blocked-turn state; and
+- both missing-sidecar fixtures rejected with `ENOENT`.
+
+The Live fixture's sidecar and `.mark` were restored to their pre-test hashes,
+and the disposable blocked-link PDF was removed from the Nomad. The r2 hardware
+gate is complete; PR readiness is governed only by the repository's final
+exact-head CI and review gates.
 
 ## Failure capture
 

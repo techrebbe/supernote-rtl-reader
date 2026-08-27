@@ -1093,8 +1093,6 @@ public final class VirtualSpreadNavigation {
         double c = transform[2];
         double d = transform[3];
         double determinant = a * d - b * c;
-        double firstScale = Math.hypot(a, b);
-        double secondScale = Math.hypot(c, d);
         double expectedA = (rotation == 0 ? scale
             : rotation == 180 ? -scale : 0.0);
         double expectedB = (rotation == 90 ? -scale
@@ -1103,15 +1101,11 @@ public final class VirtualSpreadNavigation {
             : rotation == 270 ? -scale : 0.0);
         double expectedD = (rotation == 0 ? scale
             : rotation == 180 ? -scale : 0.0);
-        if (!Double.isFinite(determinant) || determinant == 0.0
-            || !nearlyEqual(firstScale, scale)
-            || !nearlyEqual(secondScale, scale)
-            || !nearlyEqual(a * c + b * d, 0.0)
-            || !nearlyEqual(Math.abs(determinant), scale * scale)
-            || !nearlyEqual(a, expectedA)
-            || !nearlyEqual(b, expectedB)
-            || !nearlyEqual(c, expectedC)
-            || !nearlyEqual(d, expectedD)) {
+        if (!Double.isFinite(determinant) || determinant <= 0.0
+            || !sameRawDouble(a, expectedA)
+            || !sameRawDouble(b, expectedB)
+            || !sameRawDouble(c, expectedC)
+            || !sameRawDouble(d, expectedD)) {
             return false;
         }
         double[] xs = new double[] {
@@ -1135,7 +1129,108 @@ public final class VirtualSpreadNavigation {
             maxX = Math.max(maxX, x);
             maxY = Math.max(maxY, y);
         }
-        return rectNearlyEquals(destination, minX, minY, maxX, maxY);
+        return rectNearlyEquals(destination, minX, minY, maxX, maxY)
+            && mappingRoundTripsAreStable(
+                rotation,
+                sourceBox,
+                destination,
+                transform
+            );
+    }
+
+    private static boolean sameRawDouble(double left, double right) {
+        return Double.doubleToRawLongBits(left)
+            == Double.doubleToRawLongBits(right);
+    }
+
+    private static boolean mappingRoundTripsAreStable(
+        int rotation,
+        double[] sourceBox,
+        double[] destination,
+        double[] transform
+    ) {
+        double destinationWidth = destination[2] - destination[0];
+        double destinationHeight = destination[3] - destination[1];
+        double sourceWidth = sourceBox[2] - sourceBox[0];
+        double sourceHeight = sourceBox[3] - sourceBox[1];
+        double determinant = transform[0] * transform[3]
+            - transform[1] * transform[2];
+        double[][] probes = new double[][] {
+            {0.0, 0.0},
+            {0.25, 0.5},
+            {0.5, 0.5},
+            {0.75, 0.25},
+            {1.0, 1.0}
+        };
+        for (double[] probe : probes) {
+            double normalizedX = probe[0];
+            double normalizedY = probe[1];
+            double sourceX;
+            double sourceY;
+            if (rotation == 0) {
+                sourceX = sourceBox[0] + normalizedX * sourceWidth;
+                sourceY = sourceBox[3] - normalizedY * sourceHeight;
+            } else if (rotation == 90) {
+                sourceX = sourceBox[0] + normalizedY * sourceWidth;
+                sourceY = sourceBox[1] + normalizedX * sourceHeight;
+            } else if (rotation == 180) {
+                sourceX = sourceBox[2] - normalizedX * sourceWidth;
+                sourceY = sourceBox[1] + normalizedY * sourceHeight;
+            } else {
+                sourceX = sourceBox[2] - normalizedY * sourceWidth;
+                sourceY = sourceBox[3] - normalizedX * sourceHeight;
+            }
+            double spreadX = transform[0] * sourceX
+                + transform[2] * sourceY + transform[4];
+            double spreadY = transform[1] * sourceX
+                + transform[3] * sourceY + transform[5];
+            double expectedSpreadX = destination[0]
+                + normalizedX * destinationWidth;
+            double expectedSpreadY = destination[3]
+                - normalizedY * destinationHeight;
+            double deltaX = spreadX - transform[4];
+            double deltaY = spreadY - transform[5];
+            double restoredX = (
+                transform[3] * deltaX - transform[2] * deltaY
+            ) / determinant;
+            double restoredY = (
+                -transform[1] * deltaX + transform[0] * deltaY
+            ) / determinant;
+            double restoredNormalizedX;
+            double restoredNormalizedY;
+            if (rotation == 0) {
+                restoredNormalizedX = (restoredX - sourceBox[0])
+                    / sourceWidth;
+                restoredNormalizedY = (sourceBox[3] - restoredY)
+                    / sourceHeight;
+            } else if (rotation == 90) {
+                restoredNormalizedX = (restoredY - sourceBox[1])
+                    / sourceHeight;
+                restoredNormalizedY = (restoredX - sourceBox[0])
+                    / sourceWidth;
+            } else if (rotation == 180) {
+                restoredNormalizedX = (sourceBox[2] - restoredX)
+                    / sourceWidth;
+                restoredNormalizedY = (restoredY - sourceBox[1])
+                    / sourceHeight;
+            } else {
+                restoredNormalizedX = (sourceBox[3] - restoredY)
+                    / sourceHeight;
+                restoredNormalizedY = (sourceBox[2] - restoredX)
+                    / sourceWidth;
+            }
+            if (!Double.isFinite(spreadX)
+                || !Double.isFinite(spreadY)
+                || !Double.isFinite(restoredX)
+                || !Double.isFinite(restoredY)
+                || Math.abs(spreadX - expectedSpreadX) > 1.0e-12
+                || Math.abs(spreadY - expectedSpreadY) > 1.0e-12
+                || Math.abs(restoredNormalizedX - normalizedX) > 1.0e-12
+                || Math.abs(restoredNormalizedY - normalizedY) > 1.0e-12) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static boolean positiveRect(double[] rect) {

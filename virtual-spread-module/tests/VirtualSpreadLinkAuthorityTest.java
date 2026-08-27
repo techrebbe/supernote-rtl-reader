@@ -296,6 +296,80 @@ public final class VirtualSpreadLinkAuthorityTest {
             )
         );
         assertBoolean(
+            "nonzero quarter-turn residue is rejected",
+            false,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 90,
+                sourceBox, normalizedSourceBox,
+                leftSlot, leftDestination, 0.6,
+                new double[] {
+                    1.0e-15, -0.6, 0.6, 0.0, -21.6, 507.6
+                },
+                864.0, 648.0, 0.0
+            )
+        );
+        double tinyHalfWidth = (864.0 - 863.999) / 2.0;
+        double tinyScale = tinyHalfWidth / 14400.0;
+        double tinyBottom = (648.0 - tinyHalfWidth) / 2.0;
+        assertBoolean(
+            "tiny-scale reflected mapping is rejected",
+            false,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 0,
+                new double[] {0.0, 0.0, 14400.0, 14400.0},
+                new double[] {0.0, 0.0, 14400.0, 14400.0},
+                new double[] {0.0, 0.0, tinyHalfWidth, 648.0},
+                new double[] {
+                    0.0,
+                    tinyBottom,
+                    tinyHalfWidth,
+                    tinyBottom + tinyHalfWidth
+                },
+                tinyScale,
+                new double[] {
+                    -tinyScale,
+                    0.0,
+                    0.0,
+                    tinyScale,
+                    tinyHalfWidth,
+                    tinyBottom
+                },
+                864.0, 648.0, 863.999
+            )
+        );
+        double farOffset = Math.scalb(1.0, 40);
+        assertBoolean(
+            "far-offset numerically unstable mapping is rejected",
+            false,
+            VirtualSpreadNavigation.mappingGeometryIsValid(
+                "left", 0,
+                new double[] {
+                    farOffset,
+                    farOffset,
+                    farOffset + 100.0,
+                    farOffset + 200.0
+                },
+                new double[] {
+                    farOffset,
+                    farOffset,
+                    farOffset + 100.0,
+                    farOffset + 200.0
+                },
+                leftSlot,
+                new double[] {54.0, 0.0, 378.0, 648.0},
+                3.24,
+                new double[] {
+                    3.24,
+                    0.0,
+                    0.0,
+                    3.24,
+                    54.0 - 3.24 * farOffset,
+                    -3.24 * farOffset
+                },
+                864.0, 648.0, 0.0
+            )
+        );
+        assertBoolean(
             "overflowing mapping transform is rejected",
             false,
             VirtualSpreadNavigation.mappingGeometryIsValid(

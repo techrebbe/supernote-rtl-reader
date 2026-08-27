@@ -291,6 +291,31 @@ class MappingContractTest(unittest.TestCase):
                 with self.assertRaises(MappingContractError):
                     canonical_mapping_record(mapping)
 
+    def test_quarter_turn_coefficients_are_exact_binary64(self) -> None:
+        mapping = self.simple_mapping(90)
+        mapping["transform"][0] = 1.0e-15
+        with self.assertRaisesRegex(MappingContractError, "Transform"):
+            canonical_mapping_record(mapping)
+
+    def test_tiny_scale_reflection_is_rejected(self) -> None:
+        half_width = (864.0 - 863.999) / 2.0
+        scale = half_width / 14400.0
+        bottom = (648.0 - half_width) / 2.0
+        mapping = {
+            "sourcePageIndex": 0,
+            "virtualPageIndex": 0,
+            "side": "left",
+            "sourceRotation": 0,
+            "sourceBox": [0.0, 0.0, 14400.0, 14400.0],
+            "normalizedSourceBox": [0.0, 0.0, 14400.0, 14400.0],
+            "slot": [0.0, 0.0, half_width, 648.0],
+            "destination": [0.0, bottom, half_width, bottom + half_width],
+            "scale": scale,
+            "transform": [-scale, 0.0, 0.0, scale, half_width, bottom],
+        }
+        with self.assertRaisesRegex(MappingContractError, "Transform"):
+            canonical_mapping_record(mapping)
+
     def test_far_offset_mapping_is_rejected_as_numerically_unstable(
         self,
     ) -> None:

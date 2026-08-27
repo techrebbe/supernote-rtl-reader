@@ -290,13 +290,9 @@ def _require_semantic_geometry(item: Mapping[str, Any]) -> None:
     determinant = a * d - b * c
     if (
         not math.isfinite(determinant)
-        or determinant == 0.0
-        or not _nearly_equal(math.hypot(a, b), scale)
-        or not _nearly_equal(math.hypot(c, d), scale)
-        or not _nearly_equal(a * c + b * d, 0.0)
-        or not _nearly_equal(abs(determinant), scale * scale)
+        or determinant <= 0.0
         or any(
-            not _nearly_equal(actual, expected)
+            struct.pack(">d", actual) != struct.pack(">d", expected)
             for actual, expected in zip((a, b, c, d), expected_linear)
         )
     ):

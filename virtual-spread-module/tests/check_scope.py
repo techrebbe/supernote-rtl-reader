@@ -1281,6 +1281,19 @@ for required in (
             f"runtime PDF page-size validation is missing: {required}"
         )
 
+for required in (
+    "determinant <= 0.0",
+    "sameRawDouble(a, expectedA)",
+    "Double.doubleToRawLongBits(left)",
+    "mappingRoundTripsAreStable(",
+    "Math.abs(spreadX - expectedSpreadX) > 1.0e-12",
+    "Math.abs(restoredNormalizedX - normalizedX) > 1.0e-12",
+):
+    if required not in navigation:
+        raise SystemExit(
+            "runtime mapping-contract parity is missing: " + required
+        )
+
 for forbidden in (
     "optInt(",
     "optLong(",

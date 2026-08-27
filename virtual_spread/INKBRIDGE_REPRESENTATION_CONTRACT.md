@@ -1,6 +1,11 @@
 # InkBridge representation contract
 
-Status: planned next milestone after the exact v0.0.24 hardware gate.
+Status: v0.0.24 hardware gate complete; v0.0.25 wire contract frozen.
+
+The exact byte-level mapping and view-identity rules are normative in
+[`MAPPING_WIRE_CONTRACT.md`](MAPPING_WIRE_CONTRACT.md). The page-143 fixture
+referenced below is checked in at
+[`fixtures/page-143-contract-v1.json`](fixtures/page-143-contract-v1.json).
 
 ## Ownership boundary
 
@@ -40,7 +45,7 @@ is enabled.
 
 ## Authenticated mapping authority
 
-The next manifest schema must add one canonical mapping digest covering every
+Manifest schema v3 adds one canonical mapping digest covering every
 field consumed by InkBridge for every source page:
 
 - source page index and virtual page index;
@@ -49,11 +54,11 @@ field consumed by InkBridge for every source page:
 - destination rectangle and uniform scale; and
 - the six-number forward affine transform.
 
-Canonicalization must define field order, record order, integer encoding, and
-finite-number encoding. It should reuse the existing IEEE-754 bit encoding used
-by layout/link authority. The generator writes the same digest into the sidecar
-and the descriptor-verified PDF tail. The Android runtime accepts mappings only
-when both values agree with a recomputed strict sidecar digest.
+Canonicalization uses the frozen field/record order, decimal integer encoding,
+and IEEE-754 binary64 bit encoding in `MAPPING_WIRE_CONTRACT.md`. The generator
+writes the same digest into the sidecar and the descriptor-verified PDF tail.
+The Android runtime accepts mappings only when both values agree with a
+recomputed strict sidecar digest.
 
 The global layout digest remains necessary but is not a substitute for mapping
 authority. Source SHA-256, source page count, effective CropBox/rotation,

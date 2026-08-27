@@ -33,6 +33,7 @@ from pypdf.generic import (
     NameObject,
     NullObject,
     NumberObject,
+    RectangleObject,
     TextStringObject,
 )
 
@@ -40,6 +41,7 @@ if __package__:
     from .mapping_contract import (
         GENERATOR_FORMAT_VERSION,
         MANIFEST_SCHEMA,
+        MappingContractError,
         document_id,
         mapping_authority_sha256,
         output_basename,
@@ -49,6 +51,7 @@ else:  # Direct script/test import from virtual_spread/.
     from mapping_contract import (  # type: ignore[no-redef]
         GENERATOR_FORMAT_VERSION,
         MANIFEST_SCHEMA,
+        MappingContractError,
         document_id,
         mapping_authority_sha256,
         output_basename,
@@ -814,20 +817,43 @@ def _normalization_transform(page: Any) -> Transformation:
     if rotation == 0:
         return Transformation()
     box = page.mediabox
-    transform = (
-        Transformation()
-        .translate(
-            -float(box.left + box.width / 2),
-            -float(box.bottom + box.height / 2),
-        )
-        .rotate(-rotation)
+    left = float(box.left)
+    bottom = float(box.bottom)
+    right = float(box.right)
+    top = float(box.top)
+    exact_matrices = {
+        90: (0.0, -1.0, 1.0, 0.0, -bottom, right),
+        180: (-1.0, 0.0, 0.0, -1.0, right, top),
+        270: (0.0, 1.0, -1.0, 0.0, top, -left),
+    }
+    return Transformation(ctm=exact_matrices[rotation])
+
+
+def _transfer_rotation_to_content_exact(
+    page: Any, transform: Transformation
+) -> None:
+    """Transfer a quarter-turn with no trigonometric matrix residue."""
+    page[NameObject("/Rotate")] = NumberObject(0)
+    page.add_transformation(transform, False)
+    page_box_keys = (
+        "/MediaBox",
+        "/CropBox",
+        "/BleedBox",
+        "/TrimBox",
+        "/ArtBox",
     )
-    lower = transform.apply_on(box.lower_left)
-    upper = transform.apply_on(box.upper_right)
-    return transform.translate(
-        -min(lower[0], upper[0]),
-        -min(lower[1], upper[1]),
-    )
+    for key in page_box_keys:
+        if key not in page:
+            continue
+        rectangle = RectangleObject(page[key])
+        lower = transform.apply_on(rectangle.lower_left)
+        upper = transform.apply_on(rectangle.upper_right)
+        page[NameObject(key)] = RectangleObject((
+            min(lower[0], upper[0]),
+            min(lower[1], upper[1]),
+            max(lower[0], upper[0]),
+            max(lower[1], upper[1]),
+        ))
 
 
 def _normalized_page(source_page: Any) -> tuple[Any, Transformation]:
@@ -841,7 +867,7 @@ def _normalized_page(source_page: Any) -> tuple[Any, Transformation]:
     rotation = int(page.get("/Rotate", 0) or 0) % 360
     normalization = _normalization_transform(page)
     if rotation:
-        page.transfer_rotation_to_content()
+        _transfer_rotation_to_content_exact(page, normalization)
     return page, normalization
 
 
@@ -1439,6 +1465,7 @@ def _write_document_information(
             information[NameObject(key_text)] = (
                 _copy_document_information_value(value, key_text)
             )
+    information.pop(NameObject("/SNVirtualSpreadSource"), None)
     for key, value in generated_entries.items():
         information[NameObject(key)] = TextStringObject(value)
     writer._info = information
@@ -5616,9 +5643,14 @@ def _build_virtual_spread_from_snapshot(
     ordered_source_mappings = [
         source_mapping[index] for index in range(len(reader.pages))
     ]
-    mapping_authority_hash = mapping_authority_sha256(
-        ordered_source_mappings
-    )
+    try:
+        mapping_authority_hash = mapping_authority_sha256(
+            ordered_source_mappings
+        )
+    except MappingContractError as error:
+        raise VirtualSpreadError(
+            f"Generated mapping failed contract validation: {error}"
+        ) from error
     identity = {
         "source_sha256": source_hash,
         "mapping_authority_sha256": mapping_authority_hash,
@@ -5638,7 +5670,6 @@ def _build_virtual_spread_from_snapshot(
         writer,
         {
             "/SNVirtualSpreadSchema": SCHEMA,
-            "/SNVirtualSpreadSource": source_path.name,
             "/SNVirtualSpreadSourceSHA256": source_hash,
             "/SNVirtualSpreadLayoutSHA256": layout_authority_hash,
             "/SNVirtualSpreadLinksSHA256": link_authority_hash,

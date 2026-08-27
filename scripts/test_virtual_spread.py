@@ -23,6 +23,7 @@ from pypdf.generic import (
     NumberObject,
     NullObject,
     TextStringObject,
+    RectangleObject,
 )
 from reportlab.pdfgen import canvas
 
@@ -208,6 +209,22 @@ def create_rotated_link_fixture(path: Path, rotation: int = 90) -> None:
     with path.open("wb") as stream:
         writer.write(stream)
     unrotated.unlink()
+
+
+def move_first_page_boxes_to_far_offset(path: Path, offset: float) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    page = writer.pages[0]
+    page[NameObject("/MediaBox")] = RectangleObject((
+        offset,
+        offset,
+        offset + 100.0,
+        offset + 200.0,
+    ))
+    page[NameObject("/CropBox")] = RectangleObject(page["/MediaBox"])
+    with path.open("wb") as stream:
+        writer.write(stream)
 
 
 def add_outline_entry(path: Path) -> None:
@@ -406,6 +423,19 @@ def add_typed_document_information(path: Path) -> None:
         raise AssertionError("fixture custom number is not a PDF integer")
     if not isinstance(information.raw_get("/CustomFlag"), BooleanObject):
         raise AssertionError("fixture custom flag is not a PDF Boolean")
+
+
+def add_stale_virtual_source_metadata(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    if writer._info is None:
+        writer._info = DictionaryObject()
+    writer._info[NameObject("/SNVirtualSpreadSource")] = TextStringObject(
+        "stale-host-filename.pdf"
+    )
+    with path.open("wb") as stream:
+        writer.write(stream)
 
 
 def add_unsupported_document_information(path: Path) -> None:
@@ -1341,6 +1371,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 authority,
             )
             metadata = PdfReader(str(output), strict=True).metadata
+            self.assertNotIn("/SNVirtualSpreadSource", metadata)
             self.assertEqual(
                 metadata["/SNVirtualSpreadSourceSHA256"],
                 source_authority,
@@ -1489,6 +1520,56 @@ class VirtualSpreadTests(unittest.TestCase):
                 authority,
             )
             self.assertNotEqual(_link_authority_sha256([]), authority)
+
+    def test_source_filename_does_not_change_pdf_or_cache_identity(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first_source = root / "first-source-name.pdf"
+            second_source = root / "renamed-source.pdf"
+            create_odd_page_fixture(first_source)
+            add_stale_virtual_source_metadata(first_source)
+            second_source.write_bytes(first_source.read_bytes())
+            first_output = root / "first-output.pdf"
+            second_output = root / "second-output.pdf"
+            first_manifest = build_virtual_spread(
+                first_source,
+                first_output,
+                first_output.with_suffix(".pdf.json"),
+                **EXPLICIT_DEFAULT_LAYOUT,
+            )
+            second_manifest = build_virtual_spread(
+                second_source,
+                second_output,
+                second_output.with_suffix(".pdf.json"),
+                **EXPLICIT_DEFAULT_LAYOUT,
+            )
+
+            self.assertNotEqual(
+                first_manifest["source"]["name"],
+                second_manifest["source"]["name"],
+            )
+            for field in ("sha256", "documentId"):
+                self.assertEqual(
+                    first_manifest["source"][field],
+                    second_manifest["source"][field],
+                )
+            self.assertEqual(
+                first_output.read_bytes(), second_output.read_bytes()
+            )
+            for field in (
+                "sha256",
+                "mappingAuthoritySha256",
+                "viewId",
+                "cacheBasename",
+            ):
+                self.assertEqual(
+                    first_manifest["output"][field],
+                    second_manifest["output"][field],
+                )
+            metadata = PdfReader(str(first_output), strict=True).metadata
+            self.assertNotIn("/SNVirtualSpreadSource", metadata)
 
     def test_windows_namespace_changes_always_request_write_through(self) -> None:
         self.assertEqual(
@@ -3320,6 +3401,31 @@ class VirtualSpreadTests(unittest.TestCase):
                 10.0,
             )
 
+    def test_far_offset_crop_box_fails_before_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "far-offset-source.pdf"
+            output = root / "far-offset-spread.pdf"
+            manifest_path = output.with_suffix(".pdf.json")
+            create_odd_page_fixture(source)
+            move_first_page_boxes_to_far_offset(
+                source, float(2 ** 40)
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Generated mapping failed contract validation: Mapping "
+                "transform is numerically unstable",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+
     def test_visible_link_border_and_highlight_are_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -4164,6 +4270,60 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertGreaterEqual(output_rect[1], bottom - 0.001)
             self.assertLessEqual(output_rect[2], right + 0.001)
             self.assertLessEqual(output_rect[3], top + 0.001)
+
+    def test_all_page_rotations_use_exact_mapping_matrices(self) -> None:
+        expected = {
+            0: {
+                "normalizedSourceBox": [0.0, 0.0, 200.0, 100.0],
+                "destination": [432.0, 216.0, 864.0, 432.0],
+                "scale": 2.16,
+                "transform": [2.16, 0.0, 0.0, 2.16, 432.0, 216.0],
+            },
+            90: {
+                "normalizedSourceBox": [0.0, 0.0, 100.0, 200.0],
+                "destination": [486.0, 0.0, 810.0, 648.0],
+                "scale": 3.24,
+                "transform": [0.0, -3.24, 3.24, 0.0, 486.0, 648.0],
+            },
+            180: {
+                "normalizedSourceBox": [0.0, 0.0, 200.0, 100.0],
+                "destination": [432.0, 216.0, 864.0, 432.0],
+                "scale": 2.16,
+                "transform": [-2.16, 0.0, 0.0, -2.16, 864.0, 432.0],
+            },
+            270: {
+                "normalizedSourceBox": [0.0, 0.0, 100.0, 200.0],
+                "destination": [486.0, 0.0, 810.0, 648.0],
+                "scale": 3.24,
+                "transform": [0.0, 3.24, -3.24, 0.0, 810.0, 0.0],
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for rotation, expected_mapping in expected.items():
+                with self.subTest(rotation=rotation):
+                    source = root / f"rotation-{rotation}.pdf"
+                    output = root / f"rotation-{rotation}-spread.pdf"
+                    create_rotated_link_fixture(source, rotation=rotation)
+                    manifest = build_virtual_spread(
+                        source,
+                        output,
+                        output.with_suffix(".pdf.json"),
+                        direction="rtl",
+                        cover_separate=False,
+                    )
+                    mapping = manifest["sourcePages"][0]
+                    self.assertEqual(
+                        mapping["sourceRotation"], rotation
+                    )
+                    for field, value in expected_mapping.items():
+                        self.assertEqual(mapping[field], value)
+                    for matrix_index in (0, 1, 2, 3):
+                        value = mapping["transform"][matrix_index]
+                        if value == 0.0:
+                            self.assertEqual(
+                                math.copysign(1.0, value), 1.0
+                            )
 
     def test_publication_ownership_is_keyed_only_by_output_path(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -1181,6 +1181,24 @@ public final class VirtualSpreadNavigationTest {
             )
         );
 
+        assertBoolean(
+            "JSON String token is accepted",
+            true,
+            "cache-name".equals(
+                VirtualSpreadNavigation.exactJsonString("cache-name")
+            )
+        );
+        assertBoolean(
+            "non-String JSON cache basename is rejected",
+            true,
+            VirtualSpreadNavigation.exactJsonString(Integer.valueOf(17))
+                == null
+        );
+        assertBoolean(
+            "missing JSON cache basename is rejected",
+            true,
+            VirtualSpreadNavigation.exactJsonString(null) == null
+        );
         assertNullableInteger(
             "JSON Integer token is accepted",
             Integer.valueOf(17),

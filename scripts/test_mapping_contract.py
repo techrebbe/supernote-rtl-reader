@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from virtual_spread.mapping_contract import (  # noqa: E402
+    JAVA_INT32_MAX,
     MappingContractError,
     canonical_mapping_bytes,
     canonical_mapping_record,
@@ -50,6 +51,43 @@ class MappingContractTest(unittest.TestCase):
             "gutter": fixture["gutter"],
             "manifest_schema": fixture["manifestSchema"],
             "generator_version": fixture["generatorVersion"],
+        }
+
+    def simple_mapping(self, rotation: int) -> dict[str, object]:
+        source_box = [0.0, 0.0, 100.0, 200.0]
+        if rotation == 0:
+            normalized_box = source_box
+            destination = [54.0, 0.0, 378.0, 648.0]
+            scale = 3.24
+            transform = [3.24, 0.0, 0.0, 3.24, 54.0, 0.0]
+        elif rotation == 90:
+            normalized_box = [0.0, 0.0, 200.0, 100.0]
+            destination = [0.0, 216.0, 432.0, 432.0]
+            scale = 2.16
+            transform = [0.0, -2.16, 2.16, 0.0, 0.0, 432.0]
+        elif rotation == 180:
+            normalized_box = source_box
+            destination = [54.0, 0.0, 378.0, 648.0]
+            scale = 3.24
+            transform = [-3.24, 0.0, 0.0, -3.24, 378.0, 648.0]
+        elif rotation == 270:
+            normalized_box = [0.0, 0.0, 200.0, 100.0]
+            destination = [0.0, 216.0, 432.0, 432.0]
+            scale = 2.16
+            transform = [0.0, 2.16, -2.16, 0.0, 432.0, 216.0]
+        else:
+            raise AssertionError(f"unsupported test rotation: {rotation}")
+        return {
+            "sourcePageIndex": 0,
+            "virtualPageIndex": 0,
+            "side": "left",
+            "sourceRotation": rotation,
+            "sourceBox": source_box,
+            "normalizedSourceBox": normalized_box,
+            "slot": [0.0, 0.0, 432.0, 648.0],
+            "destination": destination,
+            "scale": scale,
+            "transform": transform,
         }
 
     def test_page_143_golden_bytes_and_identities(self) -> None:
@@ -190,10 +228,10 @@ class MappingContractTest(unittest.TestCase):
         with self.assertRaises(MappingContractError):
             view_id(**uppercase)
 
-    def test_singular_transform_is_rejected_on_inverse(self) -> None:
+    def test_singular_transform_is_rejected_semantically(self) -> None:
         mapping = copy.deepcopy(self.fixture["mappings"][2])
         mapping["transform"] = [1.0, 2.0, 2.0, 4.0, 0.0, 0.0]
-        with self.assertRaisesRegex(MappingContractError, "Singular"):
+        with self.assertRaisesRegex(MappingContractError, "Transform"):
             spread_to_normalized(mapping, 1.0, 1.0)
 
     def test_inverse_rejects_points_outside_mapped_destination(self) -> None:
@@ -219,16 +257,74 @@ class MappingContractTest(unittest.TestCase):
         self.assertEqual(0.0, normalized[0])
         self.assertAlmostEqual(0.5, normalized[1], delta=1.0e-12)
 
-    def test_ill_conditioned_transform_fails_round_trip(self) -> None:
-        mapping = copy.deepcopy(self.fixture["mappings"][2])
-        mapping["sourceBox"] = [0.0, 0.0, 1.0, 1.0]
-        mapping["normalizedSourceBox"] = [0.0, 0.0, 1.0, 1.0]
-        mapping["sourceRotation"] = 0
-        mapping["transform"] = [
-            1.0, 1.0, 1.0, 1.0000000000000002, 0.0, 0.0
+    def test_all_exact_quarter_turn_geometries_are_accepted(self) -> None:
+        for rotation in (0, 90, 180, 270):
+            with self.subTest(rotation=rotation):
+                mapping = self.simple_mapping(rotation)
+                canonical_mapping_record(mapping)
+                spread = normalized_to_spread(mapping, 0.25, 0.75)
+                restored = spread_to_normalized(mapping, *spread)
+                self.assertAlmostEqual(0.25, restored[0], delta=1.0e-12)
+                self.assertAlmostEqual(0.75, restored[1], delta=1.0e-12)
+
+    def test_semantic_geometry_rejects_non_generator_mappings(self) -> None:
+        valid = self.simple_mapping(0)
+        mutations = {
+            "reflection": {
+                "transform": [-3.24, 0.0, 0.0, 3.24, 378.0, 0.0]
+            },
+            "wrong rotation": {"sourceRotation": 180},
+            "non-generator fit": {
+                "destination": [66.0, 24.0, 366.0, 624.0],
+                "scale": 3.0,
+                "transform": [3.0, 0.0, 0.0, 3.0, 66.0, 24.0],
+            },
+            "off-center destination": {
+                "destination": [55.0, 0.0, 379.0, 648.0],
+                "transform": [3.24, 0.0, 0.0, 3.24, 55.0, 0.0],
+            },
+        }
+        for label, mutation in mutations.items():
+            with self.subTest(case=label):
+                mapping = copy.deepcopy(valid)
+                mapping.update(mutation)
+                with self.assertRaises(MappingContractError):
+                    canonical_mapping_record(mapping)
+
+    def test_far_offset_mapping_is_rejected_as_numerically_unstable(
+        self,
+    ) -> None:
+        mapping = self.simple_mapping(0)
+        offset = float(2 ** 40)
+        mapping["sourceBox"] = [
+            offset,
+            offset,
+            offset + 100.0,
+            offset + 200.0,
         ]
-        with self.assertRaisesRegex(MappingContractError, "round trip"):
+        mapping["normalizedSourceBox"] = list(mapping["sourceBox"])
+        mapping["transform"] = [
+            3.24,
+            0.0,
+            0.0,
+            3.24,
+            54.0 - 3.24 * offset,
+            -3.24 * offset,
+        ]
+        with self.assertRaisesRegex(MappingContractError, "unstable"):
             normalized_to_spread(mapping, 0.25, 0.75)
+
+    def test_mapping_indices_are_bounded_by_java_int32(self) -> None:
+        mapping = self.simple_mapping(0)
+        mapping["sourcePageIndex"] = JAVA_INT32_MAX
+        mapping["virtualPageIndex"] = JAVA_INT32_MAX
+        canonical_mapping_record(mapping)
+        for field in ("sourcePageIndex", "virtualPageIndex"):
+            with self.subTest(field=field):
+                overflow = copy.deepcopy(mapping)
+                overflow[field] = JAVA_INT32_MAX + 1
+                with self.assertRaises(MappingContractError):
+                    canonical_mapping_record(overflow)
 
     def test_signed_zero_mapping_and_view_vectors(self) -> None:
         vector = self.fixture["signedZeroVectors"]

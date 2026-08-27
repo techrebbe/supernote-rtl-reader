@@ -22,7 +22,9 @@ cache name.
 - A digest is 64 lowercase hexadecimal SHA-256 characters.
 - An integer is a base-10 ASCII integer with no sign, leading zeroes, decimal
   point, exponent, or surrounding whitespace. The only encoding of zero is
-  `0`. JSON Booleans and floating-point values are not integers.
+  `0`. JSON Booleans and floating-point values are not integers. Mapping page
+  indices are additionally bounded to `0..2147483647`, the nonnegative Java
+  `int` range consumed on device.
 - A Boolean is `0` or `1` in canonical records and a JSON Boolean in the
   sidecar.
 - A side is exactly `left` or `right` in lowercase ASCII.
@@ -90,6 +92,23 @@ required, have exact JSON types and lengths, and must match the spread records.
 Additional mapping fields require a new mapping domain if a consumer depends on
 them.
 
+Before canonicalization, every rectangle must have positive finite dimensions.
+The normalized CropBox dimensions must equal the source CropBox dimensions,
+swapped only for a 90/270-degree turn. `scale` must be the generator's uniform
+fit into `slot`; `destination` must be that fit centered in the slot. The linear
+transform must be exactly the declared quarter-turn orientation at that scale,
+without reflection or skew, and its transformed source corners must bound the
+declared destination. The generator emits literal zero matrix coefficients for
+quarter turns rather than trigonometric approximations.
+
+The producer also evaluates interior and boundary probes through the serialized
+forward matrix and its derived inverse. A far-offset CropBox whose large
+translation loses the contract's `1e-12` absolute placement or round-trip
+precision is rejected before either publication file is staged. Consumers must
+not rescue such a record by silently substituting a different local-coordinate
+transform, because the serialized affine remains the cross-language and PDF
+rendering authority.
+
 ## Deterministic document and view identity
 
 The canonical document ID is:
@@ -127,6 +146,12 @@ The generator-format version changes only when generated representation
 semantics change. It is deliberately distinct from the APK/plugin release
 number so a runtime-only bug fix does not invalidate an otherwise identical
 view.
+
+Source filenames and paths are diagnostics, not representation inputs. Two
+byte-identical sources supplied under different filenames therefore produce
+byte-identical Virtual Spread PDFs, output hashes, document/view IDs, and cache
+basenames. The source filename remains in the sidecar for diagnostics but is
+not written into generated PDF metadata.
 
 ## Deterministic output and cache naming
 
@@ -178,8 +203,12 @@ The generator and runtime fail closed for:
 - malformed UTF-8, duplicate JSON keys, missing/additional authoritative
   mapping fields, wrong JSON types, non-finite numbers, or invalid arrays;
 - unordered, missing, duplicate, negative, or non-integral page indices;
+- page indices above Java `Integer.MAX_VALUE` (`2147483647`);
 - a side/virtual-page relationship that disagrees with spread records;
-- a singular/non-uniform transform or inconsistent source/destination geometry;
+- a reflected, wrong-rotation, singular/non-uniform, non-centered, non-generator
+  fit, or otherwise inconsistent source/destination geometry;
+- an affine transform whose absolute offsets make contract-precision placement
+  or round trips numerically unstable;
 - a mapping digest mismatch between recomputed sidecar, declared sidecar, and
   embedded PDF authority;
 - a view ID mismatch or an identity input that disagrees with authenticated

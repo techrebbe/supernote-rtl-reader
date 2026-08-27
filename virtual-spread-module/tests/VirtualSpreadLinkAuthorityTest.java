@@ -116,13 +116,13 @@ public final class VirtualSpreadLinkAuthorityTest {
             0.0, 151.20000000000002, 432.0, 496.79999999999995
         };
         double[] rightTransform = {
-            3.6739403974420595e-17, -0.6,
-            0.6, 3.6739403974420595e-17,
+            0.0, -0.6,
+            0.6, 0.0,
             410.4, 507.6
         };
         double[] leftTransform = {
-            3.6739403974420595e-17, -0.6,
-            0.6, 3.6739403974420595e-17,
+            0.0, -0.6,
+            0.6, 0.0,
             -21.599999999999998, 507.6
         };
         String[] mappingRecords = {
@@ -147,7 +147,7 @@ public final class VirtualSpreadLinkAuthorityTest {
         );
         assertEquals(
             "page-143 mapping digest",
-            "2c9e95573ea47e7cb7bc507350f49429ec2e72b4fc1eb4cd8c19774aa110ac1f",
+            "646b905c12266774882e0c4d7ebbbca77b2f386f432979ebcbfcda1d9ace268a",
             mappingDigest
         );
         String signedZeroRecord = VirtualSpreadLinkAuthority.mapping(
@@ -164,13 +164,13 @@ public final class VirtualSpreadLinkAuthorityTest {
                 + "|8000000000000000|0000000000000000|407b000000000000"
                 + "|4084400000000000|0000000000000000|4062e66666666667"
                 + "|407b000000000000|407f0ccccccccccc|3fe3333333333333"
-                + "|3c852dc7707ed4d5|bfe3333333333333|3fe3333333333333"
-                + "|3c852dc7707ed4d5|c035999999999999|407fb9999999999a",
+                + "|0000000000000000|bfe3333333333333|3fe3333333333333"
+                + "|0000000000000000|c035999999999999|407fb9999999999a",
             signedZeroRecord
         );
         assertEquals(
             "signed-zero mapping digest",
-            "f0d4dd10f3e1a60d8060ef32f7074f30197ed05c03a3ce05547489387cd7d857",
+            "29e401f801b2c4867061385f9472dc061f3404db18427491af0dd64cca795832",
             VirtualSpreadLinkAuthority.mappingDigest(new String[] {
                 mappingRecords[0], mappingRecords[1], signedZeroRecord
             })
@@ -192,15 +192,15 @@ public final class VirtualSpreadLinkAuthorityTest {
         assertEquals(
             "page-143 view identity",
             "inkbridge-view-v1-"
-                + "7c007c46bd6dd42511429245b65d2967"
-                + "f0f05d18eaf215566a08a7149bfaf491",
+                + "43f3e4f6cafaa07589e7ea1d27ae821d"
+                + "785851a6f26ff0007f3faeb6323c6d74",
             spreadViewId
         );
         assertEquals(
             "signed-zero view identity",
             "inkbridge-view-v1-"
-                + "d8df97cac38980710edfd782072a7cdc"
-                + "072d0f2196104febdbc1773ebafe156d",
+                + "426c932db050a81ef7d10c3491e24e9c"
+                + "388b87bae25b371bfab67eacc5e2158d",
             VirtualSpreadLinkAuthority.viewId(
                 goldenSource,
                 "techrebbe.supernote.virtual-spread/v3",

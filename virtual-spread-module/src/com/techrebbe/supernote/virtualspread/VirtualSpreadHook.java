@@ -4169,8 +4169,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         JSONObject object,
         String key
     ) {
-        Object value = object == null ? null : object.opt(key);
-        return value instanceof String ? (String) value : null;
+        return VirtualSpreadNavigation.exactJsonString(
+            object == null ? null : object.opt(key)
+        );
     }
 
     private static boolean objectHasExactKeys(
@@ -4553,6 +4554,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         String expectedCacheBasename = exactManifestString(
             output, "cacheBasename"
         );
+        if (expectedCacheBasename == null) {
+            log("manifest_rejected reason=cache_basename path=" + key);
+            return null;
+        }
         requireCurrentVerification(key, owner);
         String embeddedViewDigest =
             VirtualSpreadLinkAuthority.readPdfViewDigest(pdfInput);

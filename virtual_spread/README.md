@@ -114,7 +114,11 @@ content, resources, geometry, rotation, and supported link annotations are
 consumed explicitly; ReportLab's empty transition placeholder is inert; page
 durations, meaningful transitions, additional actions, user-unit scaling, and
 every other unsupported or unknown page entry fail closed. Persisted rotation
-must be a true PDF integer divisible by 90. The document information dictionary
+must be a true PDF integer divisible by 90. Quarter-turns are transferred with
+exact `0/1/-1` matrices, so the mapping and PDF content do not contain
+trigonometric near-zero coefficients. CropBoxes with absolute offsets large
+enough to lose the mapping contract's placement or round-trip precision fail
+before staging or publication. The document information dictionary
 is copied with primitive PDF types intact; standardized text and `/Trapped`
 entries are validated, while arrays, dictionaries, streams, or other unsupported
 values fail closed rather than being stringified. Existing outputs also require
@@ -268,7 +272,12 @@ geometry. A third frozen digest authenticates every InkBridge-consumed mapping
 field for every source page, including CropBox/rotation, virtual page/side,
 destination, scale, and the authoritative forward affine transform. The same
 mapping digest is bound into the PDF tail and into a deterministic view ID and
-cache basename. Native module v0.0.25 recomputes and validates these records,
+cache basename. Page indices are capped at Java's signed 32-bit maximum, and
+both producer and runtime reject reflected or wrong-rotation matrices,
+non-generator scale/fit, and off-center placement. Source filenames and paths
+remain sidecar diagnostics only: byte-identical source PDFs under different
+names produce byte-identical generated PDFs, output hashes, and cache identity.
+Native module v0.0.25 recomputes and validates these records,
 then authenticates each internal link's target-view
 policy and the exact source snapshot. It rejects malformed UTF-8 bytes before
 decoding, non-integral manifest page indices or output sizes, numeric strings or

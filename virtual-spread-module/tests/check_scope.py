@@ -1154,6 +1154,7 @@ for required in (
     "linkEndpointMatches(",
     "exactManifestInteger(",
     "VirtualSpreadNavigation.exactJsonInteger(",
+    "VirtualSpreadNavigation.exactJsonString(",
     "exactNonnegativeJsonLong(",
     "exactFiniteJsonNumber(",
     "jsonObjectHasUniqueKeys(sidecarJson)",
@@ -1180,6 +1181,7 @@ for required in (
     "VirtualSpreadLinkAuthority.readPdfMappingDigest(pdfInput)",
     'exactManifestString(output, "viewId")',
     'exactManifestString(\n            output, "cacheBasename"',
+    'manifest_rejected reason=cache_basename',
     "VirtualSpreadLinkAuthority.readPdfViewDigest(pdfInput)",
     "VirtualSpreadLinkAuthority.mapping(",
     "VirtualSpreadLinkAuthority.mappingDigest(",
@@ -1211,6 +1213,59 @@ for required in (
     if required not in manifest_validation:
         raise SystemExit(
             f"manifest validation is missing content authority: {required}"
+        )
+
+cache_basename_read = manifest_validation.find(
+    'String expectedCacheBasename = exactManifestString('
+)
+cache_basename_guard = manifest_validation.find(
+    "if (expectedCacheBasename == null)", cache_basename_read
+)
+cache_basename_dereference = manifest_validation.find(
+    "expectedCacheBasename.", cache_basename_read
+)
+if not (
+    0 <= cache_basename_read
+    < cache_basename_guard
+    < cache_basename_dereference
+):
+    raise SystemExit(
+        "missing/non-string cacheBasename must be rejected before any "
+        "dereference"
+    )
+cache_basename_guard_region = manifest_validation[
+    cache_basename_guard:cache_basename_dereference
+]
+for required in (
+    'manifest_rejected reason=cache_basename',
+    "return null;",
+):
+    if required not in cache_basename_guard_region:
+        raise SystemExit(
+            "malformed cacheBasename guard must deterministically reject: "
+            + required
+        )
+
+sha256_start = hook.find("private static boolean isSha256(String value)")
+sha256_end = hook.find("private static boolean isPortrait", sha256_start)
+if sha256_start < 0 or sha256_end < 0:
+    raise SystemExit("missing manifest SHA-256 validator")
+sha256_validation = hook[sha256_start:sha256_end]
+for required in (
+    "value == null || value.length() != 64",
+    "current >= '0' && current <= '9'",
+    "current >= 'a' && current <= 'f'",
+):
+    if required not in sha256_validation:
+        raise SystemExit(
+            "manifest SHA-256 validation must require lowercase hex: "
+            + required
+        )
+for forbidden in ("current >= 'A'", "current <= 'F'"):
+    if forbidden in sha256_validation:
+        raise SystemExit(
+            "manifest SHA-256 validation must reject uppercase hex: "
+            + forbidden
         )
 
 for required in (

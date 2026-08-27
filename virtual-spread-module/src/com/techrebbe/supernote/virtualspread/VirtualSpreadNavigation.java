@@ -386,6 +386,11 @@ public final class VirtualSpreadNavigation {
     private VirtualSpreadNavigation() {
     }
 
+    /** Accept only an exact JSON string token. */
+    public static String exactJsonString(Object value) {
+        return value instanceof String ? (String) value : null;
+    }
+
     /** Accept only an exact JSON integer token representable by Java int. */
     public static Integer exactJsonInteger(Object value) {
         if (value instanceof Integer) {

@@ -19,6 +19,8 @@ DOCUMENT_ID_PREFIX = "inkbridge-doc-v1-"
 VIEW_ID_PREFIX = "inkbridge-view-v1-"
 NORMALIZED_EDGE_TOLERANCE = 1.0e-12
 ROUND_TRIP_TOLERANCE = 1.0e-12
+GEOMETRY_RELATIVE_TOLERANCE = 1.0e-7
+JAVA_INT32_MAX = 2_147_483_647
 
 _AUTHORITATIVE_MAPPING_FIELDS = frozenset({
     "sourcePageIndex",
@@ -64,7 +66,11 @@ def _require_sha256(value: Any, label: str) -> str:
 
 
 def _require_index(value: Any, label: str) -> int:
-    if type(value) is not int or value < 0:
+    if (
+        type(value) is not int
+        or value < 0
+        or value > JAVA_INT32_MAX
+    ):
         raise MappingContractError(f"Invalid {label}")
     return value
 
@@ -91,6 +97,239 @@ def _number_array(mapping: Mapping[str, Any], field: str) -> list[float]:
         _require_finite(value, f"{field}[{index}]")
         for index, value in enumerate(raw)
     ]
+
+
+def _nearly_equal(left: float, right: float) -> bool:
+    if not math.isfinite(left) or not math.isfinite(right):
+        return False
+    magnitude = max(1.0, abs(left), abs(right))
+    return abs(left - right) <= GEOMETRY_RELATIVE_TOLERANCE * magnitude
+
+
+def _require_positive_rectangle(values: list[float], label: str) -> None:
+    left, bottom, right, top = values
+    if left >= right or bottom >= top:
+        raise MappingContractError(f"Invalid {label}")
+
+
+def _rectangle_nearly_equals(
+    actual: list[float], expected: tuple[float, float, float, float]
+) -> bool:
+    return all(
+        _nearly_equal(actual_value, expected_value)
+        for actual_value, expected_value in zip(actual, expected)
+    )
+
+
+def _raw_normalized_to_source(
+    item: Mapping[str, Any], normalized_x: float, normalized_y: float
+) -> tuple[float, float]:
+    left, bottom, right, top = item["sourceBox"]
+    width = right - left
+    height = top - bottom
+    rotation = item["sourceRotation"]
+    if rotation == 0:
+        return left + normalized_x * width, top - normalized_y * height
+    if rotation == 90:
+        return left + normalized_y * width, bottom + normalized_x * height
+    if rotation == 180:
+        return right - normalized_x * width, bottom + normalized_y * height
+    return right - normalized_y * width, top - normalized_x * height
+
+
+def _raw_source_to_normalized(
+    item: Mapping[str, Any], source_x: float, source_y: float
+) -> tuple[float, float]:
+    left, bottom, right, top = item["sourceBox"]
+    width = right - left
+    height = top - bottom
+    rotation = item["sourceRotation"]
+    if rotation == 0:
+        return (source_x - left) / width, (top - source_y) / height
+    if rotation == 90:
+        return (source_y - bottom) / height, (source_x - left) / width
+    if rotation == 180:
+        return (right - source_x) / width, (source_y - bottom) / height
+    return (top - source_y) / height, (right - source_x) / width
+
+
+def _raw_source_to_spread(
+    item: Mapping[str, Any], source_x: float, source_y: float
+) -> tuple[float, float]:
+    a, b, c, d, e, f = item["transform"]
+    return (
+        a * source_x + c * source_y + e,
+        b * source_x + d * source_y + f,
+    )
+
+
+def _raw_spread_to_source(
+    item: Mapping[str, Any], spread_x: float, spread_y: float
+) -> tuple[float, float]:
+    a, b, c, d, e, f = item["transform"]
+    determinant = a * d - b * c
+    delta_x = spread_x - e
+    delta_y = spread_y - f
+    return (
+        (d * delta_x - c * delta_y) / determinant,
+        (-b * delta_x + a * delta_y) / determinant,
+    )
+
+
+def _require_numerically_stable_transform(item: Mapping[str, Any]) -> None:
+    destination = item["destination"]
+    destination_width = destination[2] - destination[0]
+    destination_height = destination[3] - destination[1]
+    probes = (
+        (0.0, 0.0),
+        (0.25, 0.5),
+        (0.5, 0.5),
+        (0.75, 0.25),
+        (1.0, 1.0),
+    )
+    for normalized_x, normalized_y in probes:
+        source = _raw_normalized_to_source(
+            item, normalized_x, normalized_y
+        )
+        spread = _raw_source_to_spread(item, *source)
+        expected_spread = (
+            destination[0] + normalized_x * destination_width,
+            destination[3] - normalized_y * destination_height,
+        )
+        restored_source = _raw_spread_to_source(item, *spread)
+        restored_normalized = _raw_source_to_normalized(
+            item, *restored_source
+        )
+        if (
+            any(
+                not math.isfinite(value)
+                for value in (*spread, *restored_source)
+            )
+            or any(
+                abs(actual - expected) > ROUND_TRIP_TOLERANCE
+                for actual, expected in zip(spread, expected_spread)
+            )
+            or any(
+                abs(actual - expected) > ROUND_TRIP_TOLERANCE
+                for actual, expected in zip(
+                    restored_normalized, (normalized_x, normalized_y)
+                )
+            )
+        ):
+            raise MappingContractError(
+                "Mapping transform is numerically unstable"
+            )
+
+
+def _require_semantic_geometry(item: Mapping[str, Any]) -> None:
+    source_box = item["sourceBox"]
+    normalized_box = item["normalizedSourceBox"]
+    slot = item["slot"]
+    destination = item["destination"]
+    for values, label in (
+        (source_box, "sourceBox"),
+        (normalized_box, "normalizedSourceBox"),
+        (slot, "slot"),
+        (destination, "destination"),
+    ):
+        _require_positive_rectangle(values, label)
+    if (
+        destination[0] < slot[0] - GEOMETRY_RELATIVE_TOLERANCE
+        or destination[1] < slot[1] - GEOMETRY_RELATIVE_TOLERANCE
+        or destination[2] > slot[2] + GEOMETRY_RELATIVE_TOLERANCE
+        or destination[3] > slot[3] + GEOMETRY_RELATIVE_TOLERANCE
+    ):
+        raise MappingContractError("Destination is outside slot")
+
+    source_width = source_box[2] - source_box[0]
+    source_height = source_box[3] - source_box[1]
+    normalized_width = normalized_box[2] - normalized_box[0]
+    normalized_height = normalized_box[3] - normalized_box[1]
+    quarter_turn = item["sourceRotation"] in (90, 270)
+    if not _nearly_equal(
+        normalized_width,
+        source_height if quarter_turn else source_width,
+    ) or not _nearly_equal(
+        normalized_height,
+        source_width if quarter_turn else source_height,
+    ):
+        raise MappingContractError(
+            "normalizedSourceBox disagrees with source rotation"
+        )
+
+    slot_width = slot[2] - slot[0]
+    slot_height = slot[3] - slot[1]
+    expected_scale = min(
+        slot_width / normalized_width,
+        slot_height / normalized_height,
+    )
+    expected_width = normalized_width * expected_scale
+    expected_height = normalized_height * expected_scale
+    expected_left = slot[0] + (slot_width - expected_width) / 2.0
+    expected_bottom = slot[1] + (slot_height - expected_height) / 2.0
+    expected_destination = (
+        expected_left,
+        expected_bottom,
+        expected_left + expected_width,
+        expected_bottom + expected_height,
+    )
+    if not _nearly_equal(item["scale"], expected_scale):
+        raise MappingContractError("Invalid generator scale")
+    if not _rectangle_nearly_equals(destination, expected_destination):
+        raise MappingContractError("Destination is not generator-centered")
+
+    scale = item["scale"]
+    rotation = item["sourceRotation"]
+    a, b, c, d, _, _ = item["transform"]
+    expected_linear = {
+        0: (scale, 0.0, 0.0, scale),
+        90: (0.0, -scale, scale, 0.0),
+        180: (-scale, 0.0, 0.0, -scale),
+        270: (0.0, scale, -scale, 0.0),
+    }[rotation]
+    determinant = a * d - b * c
+    if (
+        not math.isfinite(determinant)
+        or determinant == 0.0
+        or not _nearly_equal(math.hypot(a, b), scale)
+        or not _nearly_equal(math.hypot(c, d), scale)
+        or not _nearly_equal(a * c + b * d, 0.0)
+        or not _nearly_equal(abs(determinant), scale * scale)
+        or any(
+            not _nearly_equal(actual, expected)
+            for actual, expected in zip((a, b, c, d), expected_linear)
+        )
+    ):
+        raise MappingContractError(
+            "Transform disagrees with source rotation and scale"
+        )
+
+    corners = (
+        (source_box[0], source_box[1]),
+        (source_box[2], source_box[1]),
+        (source_box[2], source_box[3]),
+        (source_box[0], source_box[3]),
+    )
+    transformed = [
+        _raw_source_to_spread(item, *point) for point in corners
+    ]
+    if any(
+        not math.isfinite(value)
+        for point in transformed
+        for value in point
+    ):
+        raise MappingContractError("Non-finite transform result")
+    transformed_rectangle = (
+        min(point[0] for point in transformed),
+        min(point[1] for point in transformed),
+        max(point[0] for point in transformed),
+        max(point[1] for point in transformed),
+    )
+    if not _rectangle_nearly_equals(destination, transformed_rectangle):
+        raise MappingContractError(
+            "Transform does not map sourceBox to destination"
+        )
+    _require_numerically_stable_transform(item)
 
 
 def _validated_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
@@ -129,7 +368,7 @@ def _validated_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
     scale = _require_finite(mapping.get("scale"), "scale")
     if scale <= 0.0:
         raise MappingContractError("Invalid scale")
-    return {
+    item = {
         "sourcePageIndex": source_index,
         "virtualPageIndex": virtual_index,
         "side": side,
@@ -137,6 +376,8 @@ def _validated_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
         **values,
         "scale": scale,
     }
+    _require_semantic_geometry(item)
+    return item
 
 
 def canonical_mapping_record(mapping: Mapping[str, Any]) -> str:
@@ -263,19 +504,7 @@ def normalized_to_source(
     normalized_y = _require_finite(v, "normalized y")
     if not (0.0 <= normalized_x <= 1.0 and 0.0 <= normalized_y <= 1.0):
         raise MappingContractError("Normalized point is outside [0,1]")
-    left, bottom, right, top = item["sourceBox"]
-    width = right - left
-    height = top - bottom
-    if width <= 0.0 or height <= 0.0:
-        raise MappingContractError("Invalid sourceBox")
-    rotation = item["sourceRotation"]
-    if rotation == 0:
-        return left + normalized_x * width, top - normalized_y * height
-    if rotation == 90:
-        return left + normalized_y * width, bottom + normalized_x * height
-    if rotation == 180:
-        return right - normalized_x * width, bottom + normalized_y * height
-    return right - normalized_y * width, top - normalized_x * height
+    return _raw_normalized_to_source(item, normalized_x, normalized_y)
 
 
 def source_to_normalized(
@@ -284,20 +513,7 @@ def source_to_normalized(
     item = _validated_mapping(mapping)
     source_x = _require_finite(x, "source x")
     source_y = _require_finite(y, "source y")
-    left, bottom, right, top = item["sourceBox"]
-    width = right - left
-    height = top - bottom
-    if width <= 0.0 or height <= 0.0:
-        raise MappingContractError("Invalid sourceBox")
-    rotation = item["sourceRotation"]
-    if rotation == 0:
-        result = (source_x - left) / width, (top - source_y) / height
-    elif rotation == 90:
-        result = (source_y - bottom) / height, (source_x - left) / width
-    elif rotation == 180:
-        result = (right - source_x) / width, (source_y - bottom) / height
-    else:
-        result = (top - source_y) / height, (right - source_x) / width
+    result = _raw_source_to_normalized(item, source_x, source_y)
     bounded = []
     for label, value in zip(("x", "y"), result):
         if (
@@ -317,9 +533,7 @@ def source_to_spread(
     item = _validated_mapping(mapping)
     source_x = _require_finite(x, "source x")
     source_y = _require_finite(y, "source y")
-    a, b, c, d, e, f = item["transform"]
-    spread_x = a * source_x + c * source_y + e
-    spread_y = b * source_x + d * source_y + f
+    spread_x, spread_y = _raw_source_to_spread(item, source_x, source_y)
     if not math.isfinite(spread_x) or not math.isfinite(spread_y):
         raise MappingContractError("Non-finite forward transform result")
     return spread_x, spread_y
@@ -335,10 +549,7 @@ def spread_to_source(
     determinant = a * d - b * c
     if not math.isfinite(determinant) or determinant == 0.0:
         raise MappingContractError("Singular forward transform")
-    delta_x = spread_x - e
-    delta_y = spread_y - f
-    source_x = (d * delta_x - c * delta_y) / determinant
-    source_y = (-b * delta_x + a * delta_y) / determinant
+    source_x, source_y = _raw_spread_to_source(item, spread_x, spread_y)
     if not math.isfinite(source_x) or not math.isfinite(source_y):
         raise MappingContractError("Non-finite inverse transform result")
     return source_x, source_y

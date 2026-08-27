@@ -412,6 +412,9 @@ source-page, half, and affine-transform data needed for a later InkBridge
 conversion layer. The versioned ownership, mapping-authority, cache, and
 regeneration boundary for that work is recorded in
 [`INKBRIDGE_REPRESENTATION_CONTRACT.md`](INKBRIDGE_REPRESENTATION_CONTRACT.md).
-The v0.0.24 review and hardware gate are complete. v0.0.25 freezes and enforces
-the representation boundary without adding annotation interception to this
-companion.
+The v0.0.25 exact-head review and Nomad hardware gate are complete. It freezes
+and enforces the representation boundary without adding annotation interception
+to this companion. Hardware confirmed authenticated schema-v3 activation and
+RTL navigation from the deterministic dot-cache path, fail-closed missing and
+altered sidecars, ordinary-PDF pass-through, and absence of the cache from the
+normal Supernote Documents library.

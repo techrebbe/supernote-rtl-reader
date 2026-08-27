@@ -319,7 +319,7 @@ and its restored `.mark` SHA-256 was
 matching the pre-test backups. The disposable blocked-link PDF was removed from
 the Nomad after the gate.
 
-## v0.0.25 authenticated mapping/view contract - PENDING HARDWARE GATE
+## v0.0.25 authenticated mapping/view contract - HARDWARE VALIDATED
 
 v0.0.25 advances generated pairs to manifest schema v3. It authenticates every
 InkBridge-consumed source-page mapping field through one frozen cross-language
@@ -334,11 +334,38 @@ The local gate passes 17 page-143 Python golden/mutation tests, the matching Jav
 golden vectors, 158 generator/publication tests (14 platform skips), 41 Java
 authority assertions, 206 focused navigation assertions, 8,752 exhaustive
 navigation assertions, hook-scope validation, and signed APK compilation as
-v0.0.25 (`versionCode=27`). Exact-head review and the Nomad gate remain pending.
-The device gate must prove activation/navigation with a schema-v3 pair, fail-
-closed behavior for a missing or altered mapping authority, ordinary-PDF pass-
-through, and a shared-storage dot-cache path that the native reader can open but
-does not list in its normal library.
+v0.0.25 (`versionCode=27`). The final Ultra exact-head review of commit
+`5ff122ebdd9824d28ce1b774c9568a6678d3b9fc` reported no findings. The signed
+APK SHA-256 was
+`eeab846aa6a937d14fad0702b079ecb4d24a326d40ab64613b2f730196407b76`,
+with the existing upgrade-compatible signer SHA-256
+`a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`.
+
+The focused Nomad hardware gate passed on 2026-08-27 using a seven-page
+mixed-geometry source and a freshly generated four-spread schema-v3 pair:
+
+1. The pair opened directly from the deterministic shared-storage cache under
+   `/storage/emulated/0/.inkbridge/virtual-spread/v1/`, authenticated both the
+   sidecar and the authorities embedded in the actually open MuPDF document,
+   and logged `manifest_accepted`, `native_snapshot_accepted`, and
+   `manifest_activated`.
+2. The initial RTL spread displayed `blank | page 1`. A forward swipe displayed
+   `page 3 | page 2`, and a reverse swipe returned to `blank | page 1`.
+3. An otherwise identical PDF placed without its sidecar logged
+   `manifest_verification_failed` and did not activate Virtual Spread.
+4. A pair whose sidecar mapping digest was altered logged
+   `manifest_rejected reason=mapping_authority` and did not activate.
+5. The original source PDF opened without a sidecar remained native pass-through
+   and emitted no accepted or activated manifest event.
+6. The native reader could open the pair from the dot-cache path, while the
+   normal Supernote Documents library did not display either the `.inkbridge`
+   directory or the deterministic cache file.
+
+Android MediaStore did index files copied into the dot directory by ADB, even
+though Supernote's Documents library kept them hidden. The cache owner should
+place a `.nomedia` marker before publication if invisibility from generic Android
+media indexes is also required; that operational marker is not part of the
+authenticated view identity.
 
 ## Decision
 

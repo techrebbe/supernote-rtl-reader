@@ -169,15 +169,19 @@ verified bytes and sidecar must be published under the exact basename above.
 The Android runtime rejects an otherwise valid pair opened under any other
 basename.
 
-The initial Nomad cache candidate is:
+The hardware-validated Nomad cache location is:
 
 ```text
 /storage/emulated/0/.inkbridge/virtual-spread/v1/
   <document-id>/<view-id>/<PDF basename>
 ```
 
-This location is provisional until hardware proves that the native reader can
-open it directly while the normal document library does not enumerate it.
+The native reader can open this location directly, while the normal Supernote
+Documents library does not enumerate it. Android MediaStore may still index
+files copied there by ADB; the cache owner should create a `.nomedia` marker
+before publication when hiding the cache from generic Android media indexes is
+also required. `.nomedia` is operational cache metadata and is not an input to
+the mapping digest, view ID, or cache basename.
 
 ## Canonical InkBridge coordinates
 

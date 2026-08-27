@@ -245,7 +245,7 @@ review proved that false is not a sufficient final contract: the tap listener
 falls through into native page-turn handling. r1 is therefore superseded even
 though its focused race did not visibly trigger that fallthrough.
 
-## v0.0.24-r2 link-menu and blocked-tap correction - HARDWARE PENDING
+## v0.0.24-r2 link-menu and blocked-tap correction - HARDWARE PASS
 
 r2 returns `Boolean.TRUE` for every blocked `showLinkJumpView(...)` path. This
 both satisfies primitive unboxing and consumes the tap, so rejected, unmatched,
@@ -277,13 +277,44 @@ cross-language authority assertions, 8,752 exhaustive navigation assertions,
 the hook-scope guard, both native invariant suites, and signed compilation as
 v0.0.24-r2 (`versionCode=26`). The upgrade-compatible APK SHA-256 is
 `be2427543b8e41d6c4e5e42131fcfda92cbe8e82eeafa32582aa55083558fd38`.
-Fresh hardware evidence is still required for:
+The focused Nomad gate passed on 2026-08-27 against reviewed code head
+`76ea0b71b518fb3c7c969fdd9bd9c1eb08dd53e6` and the upgrade-compatible
+v0.0.24-r2 APK whose SHA-256 is
+`be2427543b8e41d6c4e5e42131fcfda92cbe8e82eeafa32582aa55083558fd38`.
+Hardware evidence covered every r2-specific path:
 
-1. blocked pure-link taps remaining on the same page with no fallthrough turn;
-2. a mixed link/annotation menu's non-Link actions remaining native;
-3. choosing Link from that menu navigating once to the authenticated target;
-4. cold direct-jump queue/replay without reopening the menu; and
-5. ordinary PDF pass-through plus missing-sidecar fail-closed behavior.
+1. A disposable pure internal link in a Virtual Spread PDF without a sidecar
+   remained on `1 / 4`. The exact tap logged one `link_jump_queued`,
+   `link_jump_blocked reason=manifest_verification_pending`, and
+   `link_jump_discarded reason=verification_failed`; no page load or native
+   page-turn fallthrough occurred.
+2. Highlighting `LINK TO PAGE 7` created the firmware's mixed
+   `DocumentLinkJumpView2` menu. Choosing the native Underline action left the
+   reader on page 1. Reopening the menu and choosing Open Link then reached
+   source page 7 exactly once; the module logged `mixed_link_menu_observed`
+   followed by one `page_loaded page=3 ... reason=internal_link` for that
+   action.
+3. Replacing the authenticated sidecar with an identical copy invalidated the
+   cached filesystem generation. Tapping page 4's visible internal link while
+   that generation was cold logged exactly one `link_jump_queued source=3
+   target=1`, one pending-verification block, one manifest acceptance, one
+   `page_loaded page=1 ... reason=internal_link`, one `link_jump_replayed`, and
+   activation with `queued_link=INTERNAL`. The menu was not reopened.
+4. The markerless ordinary-PDF fixture was observed but created no manifest
+   verification, activation, or blocked-turn state. Native ordinary page-turn
+   pass-through remains covered by the same v0.0.24 code-line hardware evidence
+   above; r2 changes only blocked-link and mixed-link paths and does not alter
+   markerless routing.
+5. The original missing-sidecar fixture and the disposable link fixture both
+   failed closed with `ENOENT`. The original remained on `1 / 4`; the link
+   fixture additionally proved that a rejected link tap is consumed.
+
+The disposable Live fixture was restored after the test. Its sidecar SHA-256
+was `a32596717170cfa1bc61bda9a4ddd2db4f3faaa3caadeca5c49e1cc76221a808`
+and its restored `.mark` SHA-256 was
+`bbca2313d1c7172123bbf3406951660e5888666488f1d5d7bb62834b2b26a19f`,
+matching the pre-test backups. The disposable blocked-link PDF was removed from
+the Nomad after the gate.
 
 ## Decision
 

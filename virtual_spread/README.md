@@ -412,6 +412,12 @@ source-page, half, and affine-transform data needed for a later InkBridge
 conversion layer. The versioned ownership, mapping-authority, cache, and
 regeneration boundary for that work is recorded in
 [`INKBRIDGE_REPRESENTATION_CONTRACT.md`](INKBRIDGE_REPRESENTATION_CONTRACT.md).
+The normative byte-level cross-project handoff is generated reproducibly under
+[`fixtures/page-143-v1/`](fixtures/page-143-v1/). It includes a real synthetic
+source PDF, its authenticated Virtual Spread PDF and schema-v3 sidecar, exact
+hashes and PDF-tail evidence, and page-143 forward/inverse golden vectors. Only
+the forward source-to-spread transform in that bundle is authoritative; clients
+must derive and validate the inverse locally.
 The v0.0.25 exact-head review and Nomad hardware gate are complete. It freezes
 and enforces the representation boundary without adding annotation interception
 to this companion. Hardware confirmed authenticated schema-v3 activation and

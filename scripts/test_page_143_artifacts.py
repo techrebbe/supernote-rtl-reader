@@ -69,6 +69,9 @@ def verify_bundle_semantics() -> None:
     ]
     sidecar = strict_json(sidecar_path)
     golden = strict_json(SYNTHETIC_GOLDEN)
+    native_viewport = strict_json(
+        FIXTURE_DIR / "page-143-native-viewport-v1.json"
+    )
 
     assert descriptor["schema"] == (
         "techrebbe.supernote.virtual-spread-artifacts/v1"
@@ -80,6 +83,36 @@ def verify_bundle_semantics() -> None:
     )
     assert descriptor["indexBase"] == 0
     assert descriptor["page143SourcePageIndex"] == 2
+    assert list(native_viewport) == [
+        "schemaVersion",
+        "authority",
+        "documentId",
+        "viewId",
+        "virtualPageIndex",
+        "nativePageSize",
+        "spreadToNative",
+    ]
+    assert native_viewport == {
+        "schemaVersion": 1,
+        "authority": "rtl-reader-native-viewport-v1",
+        "documentId": descriptor["output"]["documentId"],
+        "viewId": descriptor["output"]["viewId"],
+        "virtualPageIndex": 1,
+        "nativePageSize": [1872, 1404],
+        "spreadToNative": [
+            1871.0 / 864.0,
+            0.0,
+            0.0,
+            -1403.0 / 648.0,
+            0.0,
+            1403.0,
+        ],
+    }
+    assert list(native_viewport["nativePageSize"]) == [1872, 1404]
+    assert all(
+        type(value) is float
+        for value in native_viewport["spreadToNative"]
+    )
     assert descriptor["contract"]["wireContract"]["sha256"] == (
         sha256_canonical_text(WIRE_CONTRACT)
     )
@@ -114,6 +147,26 @@ def verify_bundle_semantics() -> None:
             864.0,
             648.0,
         ]
+    native_transform = native_viewport["spreadToNative"]
+    native_width, native_height = native_viewport["nativePageSize"]
+    for spread_x, spread_y in (
+        (0.0, 0.0),
+        (864.0, 0.0),
+        (0.0, 648.0),
+        (864.0, 648.0),
+    ):
+        native_x = (
+            native_transform[0] * spread_x
+            + native_transform[2] * spread_y
+            + native_transform[4]
+        )
+        native_y = (
+            native_transform[1] * spread_x
+            + native_transform[3] * spread_y
+            + native_transform[5]
+        )
+        assert -1e-9 <= native_x <= native_width - 1 + 1e-9
+        assert -1e-9 <= native_y <= native_height - 1 + 1e-9
 
     assert sidecar["schema"] == descriptor["contract"]["manifestSchema"]
     assert sidecar["generatorVersion"] == descriptor["contract"][

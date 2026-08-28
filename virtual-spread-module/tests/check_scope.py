@@ -1317,11 +1317,11 @@ if not (0 <= duplicate_guard < json_parse):
     )
 
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
-if 'android:versionCode="27"' not in manifest:
+if 'android:versionCode="28"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version code")
-if 'android:versionName="0.0.25"' not in manifest:
+if 'android:versionName="0.0.26"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
-if 'private static final String VERSION = "0.0.25"' not in hook:
+if 'private static final String VERSION = "0.0.26"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
 if (
     'android:name="xposedscope"' not in manifest
@@ -1391,6 +1391,83 @@ if scope != ["com.supernote.document"]:
     raise SystemExit(f"unexpected LSPosed scope: {scope}")
 if "android.permission" in manifest:
     raise SystemExit("navigation-only module must not request Android permissions")
+
+viewport_authority = (
+    root
+    / "src/com/techrebbe/supernote/virtualspread/NativeViewportAuthority.java"
+).read_text(encoding="utf-8")
+viewport_provider = (
+    root
+    / "src/com/techrebbe/supernote/virtualspread/NativeViewportProvider.java"
+).read_text(encoding="utf-8")
+for required in (
+    '"rtl-reader-native-viewport-v1"',
+    '\\"schemaVersion\\":1',
+    '\\"nativePageSize\\"',
+    '\\"spreadToNative\\"',
+    "positiveZero(coefficients[index])",
+    "requireStable(coefficients)",
+    "requireSpreadInsideNative(",
+):
+    if required not in viewport_authority:
+        raise SystemExit(
+            "native viewport authority is missing a frozen invariant: "
+            + required
+        )
+for forbidden in (
+    '"nativeToSpread"',
+    "invert",
+    "inverse",
+):
+    if forbidden in viewport_authority:
+        raise SystemExit(
+            "native viewport authority must publish only the forward transform: "
+            + forbidden
+        )
+for required in (
+    '"com.supernote.document"',
+    '"com.ratta.supernote.pluginhost"',
+    "Binder.getCallingUid() != Process.SYSTEM_UID",
+    "getCallingPackage()",
+    "sessionToken.linkToDeath(this, 0)",
+    'response.putString("status", "unavailable")',
+    'sidecarPath.equals(documentPath + ".json")',
+    'snapshotId.equals(pdfIdentity + ":" + sidecarIdentity)',
+    'request.getString("generatedPdfSha256")',
+    'request.getString("sidecarSha256")',
+    'request.getString("mappingAuthoritySha256")',
+):
+    if required not in viewport_provider:
+        raise SystemExit(
+            "native viewport provider is missing a fail-closed invariant: "
+            + required
+        )
+for required in (
+    'android:name="com.techrebbe.supernote.virtualspread.NativeViewportProvider"',
+    'android:authorities="com.techrebbe.supernote.virtualspread.viewport"',
+    'android:exported="true"',
+    'android:grantUriPermissions="false"',
+):
+    if required not in manifest:
+        raise SystemExit(
+            "native viewport provider manifest declaration is missing: "
+            + required
+        )
+for required in (
+    "NativeViewportAuthority.fromNativeRender(",
+    "private static volatile boolean nativeViewportMayBePublished;",
+    "nativeViewportMayBePublished = true;",
+    "activity == null || !nativeViewportMayBePublished",
+    "nativeViewportMayBePublished = false;",
+    'publication.putBinder(\n                "sessionToken", NATIVE_VIEWPORT_SESSION',
+    'clearNativeViewport(activity, "activity_destroyed")',
+    'clearNativeViewport(activeActivity.get(), reason)',
+):
+    if required not in hook:
+        raise SystemExit(
+            "runtime viewport publication lifecycle is incomplete: "
+            + required
+        )
 
 workflow = (root.parent / ".github/workflows/build.yml").read_text(
     encoding="utf-8"

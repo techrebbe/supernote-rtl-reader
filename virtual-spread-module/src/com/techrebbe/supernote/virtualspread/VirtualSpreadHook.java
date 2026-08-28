@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.res.Configuration;
 import android.graphics.RectF;
 import android.net.Uri;
+import android.os.Binder;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -75,7 +76,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         "techrebbe.supernote.virtual-spread-generator/v1";
     private static final String VIEW_ID_PREFIX = "inkbridge-view-v1-";
     private static final String TAG = "SN_VIRTUAL_SPREAD";
-    private static final String VERSION = "0.0.25";
+    private static final String VERSION = "0.0.26";
     private static final long MAX_MANIFEST_BYTES = 8L * 1024L * 1024L;
     private static final int MAX_CACHED_MANIFESTS = 4;
     private static final long PENDING_LINK_MAX_AGE_MS = 60000L;
@@ -128,18 +129,24 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final ThreadLocal<Integer> HISTORY_ACTION_LOCK_DEPTH =
         new ThreadLocal<>();
     private static volatile Class<?> backLinkClass;
+    private static final Binder NATIVE_VIEWPORT_SESSION = new Binder();
+    private static volatile boolean nativeViewportMayBePublished;
 
     private static final class Manifest {
         final String key;
         final String revision;
         final String sourceAuthority;
+        final String documentId;
+        final String outputAuthority;
         final String layoutAuthority;
         final String linkAuthority;
         final String mappingAuthority;
         final String viewId;
+        final String cacheBasename;
         final int pageCount;
         final VirtualSpreadNavigation.Spread[] spreads;
-        final float pageHeight;
+        final double pageWidth;
+        final double pageHeight;
         final VirtualSpreadNavigation.LinkTarget[] links;
         final VirtualSpreadNavigation.UriTarget[] uriLinks;
 
@@ -147,25 +154,33 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             String key,
             String revision,
             String sourceAuthority,
+            String documentId,
+            String outputAuthority,
             String layoutAuthority,
             String linkAuthority,
             String mappingAuthority,
             String viewId,
+            String cacheBasename,
             int pageCount,
             VirtualSpreadNavigation.Spread[] spreads,
-            float pageHeight,
+            double pageWidth,
+            double pageHeight,
             VirtualSpreadNavigation.LinkTarget[] links,
             VirtualSpreadNavigation.UriTarget[] uriLinks
         ) {
             this.key = key;
             this.revision = revision;
             this.sourceAuthority = sourceAuthority;
+            this.documentId = documentId;
+            this.outputAuthority = outputAuthority;
             this.layoutAuthority = layoutAuthority;
             this.linkAuthority = linkAuthority;
             this.mappingAuthority = mappingAuthority;
             this.viewId = viewId;
+            this.cacheBasename = cacheBasename;
             this.pageCount = pageCount;
             this.spreads = spreads;
+            this.pageWidth = pageWidth;
             this.pageHeight = pageHeight;
             this.links = links;
             this.uriLinks = uriLinks;
@@ -779,6 +794,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
                     Activity activity = (Activity) param.thisObject;
+                    clearNativeViewport(activity, "activity_destroyed");
                     Object viewModel = objectField(
                         activity,
                         "documentViewModel"
@@ -1697,7 +1713,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     y0,
                     x1,
                     y1,
-                    manifest.pageHeight,
+                    (float) manifest.pageHeight,
                     2.0f
                 );
             if (matched == null) {
@@ -1761,7 +1777,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     floatField(bounds, "y0", Float.NaN),
                     floatField(bounds, "x1", Float.NaN),
                     floatField(bounds, "y1", Float.NaN),
-                    manifest.pageHeight,
+                    (float) manifest.pageHeight,
                     2.0f
                 );
             if (matched == null) {
@@ -2396,6 +2412,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
         Manifest manifest = manifestFor(viewModel);
         if (manifest == null) {
+            clearNativeViewport(activeActivity.get(), "manifest_unavailable");
             return;
         }
         state = stateFor(viewModel, manifest);
@@ -2493,6 +2510,170 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             + " reason=" + targetReason
             + " reset_landscape_fit=" + resetSelectedLinkLandscapeFit
             + " preserve_link_viewport=" + preserveLinkViewport);
+        publishNativeViewport(viewModel, manifest, state, currentPage);
+    }
+
+    private static void publishNativeViewport(
+        Object viewModel,
+        Manifest manifest,
+        ReaderState state,
+        int currentPage
+    ) {
+        Activity activity = activeActivity.get();
+        if (activity == null || viewModel == null || manifest == null
+            || state == null || currentPage < 0
+            || currentPage >= manifest.pageCount) {
+            clearNativeViewport(activity, "publication_identity_unavailable");
+            return;
+        }
+        try {
+            CachedManifest cached = MANIFESTS.get(manifest.key);
+            Object nativeDocument = nativePdfDocument(viewModel);
+            if (cached == null || cached.manifest != manifest
+                || cached.nativeDocument != nativeDocument
+                || cached.pdfIdentity == null
+                || cached.sidecarIdentity == null
+                || cached.verificationGeneration
+                    != state.manifestVerificationGeneration) {
+                throw new IllegalStateException(
+                    "authenticated activation snapshot is unavailable"
+                );
+            }
+            Object pageInfo = objectField(viewModel, "pageInfo");
+            Object originBitmap = pageInfo == null ? null
+                : XposedHelpers.callMethod(pageInfo, "getOriginBitmap");
+            Object ctm = pageInfo == null ? null
+                : XposedHelpers.callMethod(pageInfo, "getCtm");
+            int loadedPage = intMethod(pageInfo, "getPage", -1);
+            if (pageInfo == null || originBitmap == null || ctm == null
+                || loadedPage != currentPage) {
+                throw new IllegalStateException(
+                    "native page geometry is not current"
+                );
+            }
+            int width = ((Number) XposedHelpers.callMethod(
+                originBitmap, "getWidth"
+            )).intValue();
+            int height = ((Number) XposedHelpers.callMethod(
+                originBitmap, "getHeight"
+            )).intValue();
+            double[] pdfToOrigin = new double[] {
+                floatField(ctm, "a", Float.NaN),
+                floatField(ctm, "b", Float.NaN),
+                floatField(ctm, "c", Float.NaN),
+                floatField(ctm, "d", Float.NaN),
+                floatField(ctm, "e", Float.NaN),
+                floatField(ctm, "f", Float.NaN)
+            };
+            NativeViewportAuthority.Descriptor descriptor =
+                NativeViewportAuthority.fromNativeRender(
+                    manifest.documentId,
+                    manifest.viewId,
+                    currentPage,
+                    manifest.pageWidth,
+                    manifest.pageHeight,
+                    width,
+                    height,
+                    width,
+                    height,
+                    pdfToOrigin,
+                    intMethod(pageInfo, "getOffsetX", 0),
+                    intMethod(pageInfo, "getOffsetY", 0)
+                );
+            Bundle publication = new Bundle();
+            publication.putString("documentId", descriptor.documentId);
+            publication.putString("viewId", descriptor.viewId);
+            publication.putInt(
+                "virtualPageIndex", descriptor.virtualPageIndex
+            );
+            publication.putInt("nativeWidth", descriptor.nativeWidth);
+            publication.putInt("nativeHeight", descriptor.nativeHeight);
+            publication.putDoubleArray(
+                "spreadToNative", descriptor.spreadToNative.clone()
+            );
+            publication.putString("documentPath", manifest.key);
+            publication.putString("sidecarPath", manifest.key + ".json");
+            publication.putString(
+                "generatedPdfSha256", manifest.outputAuthority
+            );
+            publication.putString("sidecarSha256", manifest.revision);
+            publication.putString(
+                "mappingAuthoritySha256", manifest.mappingAuthority
+            );
+            publication.putString("snapshotId", cached.snapshotId());
+            publication.putString(
+                "pdfIdentity", cached.pdfIdentity.token()
+            );
+            publication.putString(
+                "sidecarIdentity", cached.sidecarIdentity.token()
+            );
+            publication.putLong(
+                "verificationGeneration", cached.verificationGeneration
+            );
+            publication.putLong(
+                "pageLoadGeneration", state.pageLoadGeneration
+            );
+            publication.putBinder(
+                "sessionToken", NATIVE_VIEWPORT_SESSION
+            );
+            // Mark before crossing the process boundary. If the provider
+            // commits and the Binder response is lost, the failure path must
+            // still attempt to clear that possibly published record.
+            nativeViewportMayBePublished = true;
+            Bundle response = activity.getContentResolver().call(
+                NativeViewportProvider.CONTENT_URI,
+                NativeViewportProvider.METHOD_PUBLISH,
+                null,
+                publication
+            );
+            if (response == null
+                || !"published".equals(response.getString("status"))) {
+                throw new IllegalStateException(
+                    "viewport provider rejected publication"
+                );
+            }
+            log("native_viewport_published page=" + currentPage
+                + " size=" + width + "x" + height
+                + " descriptor_sha256="
+                + response.getString("descriptorSha256")
+                + " snapshot=" + cached.snapshotId()
+                + " descriptor=" + descriptor.canonicalJson());
+        } catch (Throwable throwable) {
+            clearNativeViewport(activity, "publication_failed");
+            logFailure("native_viewport_publish_failed", throwable);
+        }
+    }
+
+    private static void clearNativeViewport(
+        Activity activity,
+        String reason
+    ) {
+        if (activity == null || !nativeViewportMayBePublished) {
+            return;
+        }
+        try {
+            Bundle request = new Bundle();
+            request.putBinder("sessionToken", NATIVE_VIEWPORT_SESSION);
+            Bundle response = activity.getContentResolver().call(
+                NativeViewportProvider.CONTENT_URI,
+                NativeViewportProvider.METHOD_CLEAR,
+                null,
+                request
+            );
+            if (response == null
+                || !"cleared".equals(response.getString("status"))) {
+                throw new IllegalStateException(
+                    "viewport provider rejected clear"
+                );
+            }
+            nativeViewportMayBePublished = false;
+            log("native_viewport_cleared reason=" + reason);
+        } catch (Throwable throwable) {
+            logFailure(
+                "native_viewport_clear_failed reason=" + reason,
+                throwable
+            );
+        }
     }
 
     private static void schedulePortraitFocus(
@@ -3652,6 +3833,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             state.nativeSnapshotAccepted = false;
             clearManifestTransientState(state, true, 0L);
         }
+        clearNativeViewport(activeActivity.get(), reason);
         log("manifest_state_invalidated reason=" + reason
             + " snapshot=" + expected.snapshotId()
             + " path=" + key);
@@ -4919,13 +5101,17 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             key,
             sidecarDigest,
             expectedSourceAuthority,
+            expectedDocumentId,
+            expectedHash,
             expectedLayoutAuthority,
             expectedLinkAuthority,
             expectedMappingAuthority,
             expectedViewId,
+            expectedCacheBasename,
             pageCount,
             spreads,
-            (float) pageHeight,
+            pageWidth,
+            pageHeight,
             links.toArray(new VirtualSpreadNavigation.LinkTarget[links.size()]),
             uriLinks.toArray(
                 new VirtualSpreadNavigation.UriTarget[uriLinks.size()]

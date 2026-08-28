@@ -32,7 +32,20 @@ until every hook installs successfully; if any required hook is unavailable,
 already installed callbacks remain native pass-through for that process rather
 than leaving a partially active navigation layer.
 
-v0.0.25 retains link-authority v2 and the v0.0.24-r2 native-open snapshot
+v0.0.26 retains the schema-v3 representation contract and all v0.0.25
+navigation behavior while adding a fail-closed, memory-only native viewport
+authority for InkBridge. The document process derives the Virtual Spread
+PDF-to-native-canvas affine from Supernote's live `PageInfo` render matrix,
+offsets, and origin bitmap only after exact PDF/sidecar/native-document
+verification. It publishes the seven-field `rtl-reader-native-viewport-v1`
+descriptor through a package- and UID-restricted companion provider, bound to
+the document process lifetime and the current page/file generations. It does
+not infer from aspect ratio, does not persist an inverse, and does not alter
+ordinary PDFs or native annotation behavior. See
+[`NATIVE_VIEWPORT_V1.md`](NATIVE_VIEWPORT_V1.md) for the frozen consumer API
+and failure rules.
+
+v0.0.25 retained link-authority v2 and the v0.0.24-r2 native-open snapshot
 binding, while advancing the manifest to schema v3. Schema v3 adds the frozen
 InkBridge mapping authority, deterministic document/view identity, and
 versioned cache basename. Older companions reject newly generated v3 pairs,

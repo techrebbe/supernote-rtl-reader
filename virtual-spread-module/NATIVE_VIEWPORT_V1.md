@@ -25,6 +25,10 @@ generation synchronously invalidates the prior record. Publication is accepted
 only for that exact generation, so a late callback from the previous load
 cannot restore stale CTM or inset authority. This fence applies even when the
 same zero-based virtual page is reloaded with unchanged files and dimensions.
+The completion must also carry the exact synchronous `onPageLoaded` callback
+token: document view-model identity, live `PageInfo` object identity, and load
+generation. A delayed, replaced, or otherwise unbound completion is allowed to
+finish Supernote's normal reader work but cannot publish viewport authority.
 
 ## Descriptor wire
 

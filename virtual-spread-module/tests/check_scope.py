@@ -480,8 +480,8 @@ if not (
 if (
     "private static void handleManifestActivationInitialization("
         not in page_loaded
-    or "handlePageLoaded(viewModel, true)" not in page_loaded
-    or "handlePageLoaded(viewModel, false)" not in page_loaded
+    or "handlePageLoaded(viewModel, true, completion)" not in page_loaded
+    or "handlePageLoaded(viewModel, false, completion)" not in page_loaded
     or "pageLoadPreservesDeferredLinkIntent(" not in page_loaded
     or "clearQueuedLinkInvocation(state)" not in page_loaded
     or "state.mixedLinkCandidate = null" not in page_loaded
@@ -1407,6 +1407,10 @@ viewport_generation_fence = (
     root
     / "src/com/techrebbe/supernote/virtualspread/NativeViewportGenerationFence.java"
 ).read_text(encoding="utf-8")
+viewport_completion_authority = (
+    root
+    / "src/com/techrebbe/supernote/virtualspread/NativeViewportCompletionAuthority.java"
+).read_text(encoding="utf-8")
 for required in (
     '"rtl-reader-native-viewport-v1"',
     '\\"schemaVersion\\":1',
@@ -1420,6 +1424,15 @@ for required in (
         raise SystemExit(
             "native viewport authority is missing a frozen invariant: "
             + required
+        )
+for required in (
+    "boundViewModel == liveViewModel",
+    "boundPageInfo == livePageInfo",
+    "boundGeneration == currentGeneration",
+):
+    if required not in viewport_completion_authority:
+        raise SystemExit(
+            "native viewport completion binding is incomplete: " + required
         )
 for forbidden in (
     '"nativeToSpread"',
@@ -1483,6 +1496,11 @@ for required in (
     '"loadPage",\n            int.class,\n            Integer.class',
     '"onPageLoaded",\n            TARGET_PAGE_INFO',
     "NativeViewportProvider.METHOD_BEGIN_LOAD",
+    "NATIVE_VIEWPORT_COMPLETION = new ThreadLocal<>();",
+    "NativeViewportCompletionAuthority.isCurrent(",
+    "pageInfo != completedPageInfo",
+    '"unbound_page_load_completion"',
+    '"native_viewport_completion_rejected reason=stale "',
     'state.nativeViewportLoadPending = true;',
     'state.nativeViewportLoadPending = false;',
     'clearNativeViewport(activity, "activity_destroyed")',

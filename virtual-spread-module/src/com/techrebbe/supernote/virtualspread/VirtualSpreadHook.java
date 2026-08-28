@@ -124,6 +124,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         new ThreadLocal<>();
     private static final ThreadLocal<SaveObservation> SAVE_OBSERVATION =
         new ThreadLocal<>();
+    private static final ThreadLocal<NativeViewportCompletion>
+        NATIVE_VIEWPORT_COMPLETION = new ThreadLocal<>();
     private static final ThreadLocal<HistoryActionContext> HISTORY_ACTION =
         new ThreadLocal<>();
     private static final ReentrantLock HISTORY_SERIALIZATION =
@@ -2130,7 +2132,6 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     beginNativeViewportPageLoad(
                         param.thisObject,
                         "load_page",
-                        true,
                         false
                     );
                 }
@@ -2146,12 +2147,28 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
-                    beginNativeViewportPageLoad(
+                    NATIVE_VIEWPORT_COMPLETION.remove();
+                    long generation = beginNativeViewportPageLoad(
                         param.thisObject,
-                        "page_loaded_fallback",
-                        false,
+                        "page_loaded_completion",
                         false
                     );
+                    Object pageInfo = param.args == null
+                        || param.args.length == 0 ? null : param.args[0];
+                    if (generation >= 0L && pageInfo != null) {
+                        NATIVE_VIEWPORT_COMPLETION.set(
+                            new NativeViewportCompletion(
+                                param.thisObject,
+                                pageInfo,
+                                generation
+                            )
+                        );
+                    }
+                }
+
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    NATIVE_VIEWPORT_COMPLETION.remove();
                 }
             }
         );
@@ -2164,7 +2181,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
-                    handlePageLoaded(param.thisObject);
+                    handlePageLoaded(
+                        param.thisObject,
+                        NATIVE_VIEWPORT_COMPLETION.get()
+                    );
                 }
             }
         );
@@ -2421,26 +2441,50 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
     }
 
-    private static void handlePageLoaded(Object viewModel) {
-        handlePageLoaded(viewModel, false);
+    private static void handlePageLoaded(
+        Object viewModel,
+        NativeViewportCompletion completion
+    ) {
+        handlePageLoaded(viewModel, false, completion);
     }
 
     private static void handleManifestActivationInitialization(
         Object viewModel
     ) {
-        beginNativeViewportPageLoad(
+        long generation = beginNativeViewportPageLoad(
             viewModel,
             "manifest_activation",
-            true,
             true
         );
-        handlePageLoaded(viewModel, true);
+        Object pageInfo = objectField(viewModel, "pageInfo");
+        NativeViewportCompletion completion = generation < 0L
+            || pageInfo == null ? null : new NativeViewportCompletion(
+                viewModel,
+                pageInfo,
+                generation
+            );
+        handlePageLoaded(viewModel, true, completion);
     }
 
-    private static void beginNativeViewportPageLoad(
+    private static final class NativeViewportCompletion {
+        final Object viewModel;
+        final Object pageInfo;
+        final long pageLoadGeneration;
+
+        NativeViewportCompletion(
+            Object viewModel,
+            Object pageInfo,
+            long pageLoadGeneration
+        ) {
+            this.viewModel = viewModel;
+            this.pageInfo = pageInfo;
+            this.pageLoadGeneration = pageLoadGeneration;
+        }
+    }
+
+    private static long beginNativeViewportPageLoad(
         Object viewModel,
         String reason,
-        boolean force,
         boolean manifestActivationInitialization
     ) {
         if (viewModel == null) {
@@ -2448,15 +2492,44 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 activeActivity.get(),
                 "page_load_view_model_unavailable"
             );
-            return;
+            return -1L;
         }
-        final ReaderState state;
+        ReaderState state;
+        synchronized (STATES) {
+            state = readerStateLocked(viewModel);
+            state.pageLoadGeneration++;
+            state.nativeViewportLoadPending = true;
+            boolean preserveDeferredLinkIntent = VirtualSpreadNavigation
+                .pageLoadPreservesDeferredLinkIntent(
+                    manifestActivationInitialization
+                );
+            if (!preserveDeferredLinkIntent) {
+                clearQueuedLinkInvocation(state);
+                state.mixedLinkCandidate = null;
+            } else if (state.mixedLinkCandidate != null) {
+                state.mixedLinkCandidate = state.mixedLinkCandidate
+                    .withPageLoadGeneration(state.pageLoadGeneration);
+            }
+        }
+        Activity activity = activeActivity.get();
+        // Invalidate the provider record before manifest lookup can rebind
+        // state or wait for replacement page geometry.
+        clearNativeViewport(activity, "page_load_started");
+        Manifest manifest = manifestFor(viewModel);
+        if (manifest == null) {
+            return -1L;
+        }
+        if (activity == null) {
+            return -1L;
+        }
+        // Bind the verified manifest before choosing the publication
+        // generation. A first activation can advance state while attaching
+        // its verification generation; that intermediate value must never be
+        // sent to the provider.
+        stateFor(viewModel, manifest);
         final long generation;
         synchronized (STATES) {
             state = readerStateLocked(viewModel);
-            if (!force && state.nativeViewportLoadPending) {
-                return;
-            }
             state.pageLoadGeneration++;
             state.nativeViewportLoadPending = true;
             generation = state.pageLoadGeneration;
@@ -2471,15 +2544,6 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 state.mixedLinkCandidate = state.mixedLinkCandidate
                     .withPageLoadGeneration(generation);
             }
-        }
-        Manifest manifest = manifestFor(viewModel);
-        Activity activity = activeActivity.get();
-        if (manifest == null) {
-            clearNativeViewport(activity, "page_load_manifest_unavailable");
-            return;
-        }
-        if (activity == null) {
-            return;
         }
         try {
             Bundle request = new Bundle();
@@ -2509,18 +2573,38 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             clearNativeViewport(activity, "page_load_fence_failed");
             logFailure("native_viewport_load_begin_failed", throwable);
         }
+        return generation;
     }
 
     private static void handlePageLoaded(
         Object viewModel,
-        boolean manifestActivationInitialization
+        boolean manifestActivationInitialization,
+        NativeViewportCompletion completion
     ) {
         ReaderState state;
         final long completedPageLoadGeneration;
+        Object livePageInfo = objectField(viewModel, "pageInfo");
         synchronized (STATES) {
             state = readerStateLocked(viewModel);
+            if (completion != null
+                && !NativeViewportCompletionAuthority.isCurrent(
+                    completion.viewModel,
+                    completion.pageInfo,
+                    completion.pageLoadGeneration,
+                    viewModel,
+                    livePageInfo,
+                    state.pageLoadGeneration
+                )) {
+                log("native_viewport_completion_rejected reason=stale "
+                    + "completion_generation="
+                    + completion.pageLoadGeneration
+                    + " current_generation="
+                    + state.pageLoadGeneration);
+                return;
+            }
             state.nativeViewportLoadPending = false;
-            completedPageLoadGeneration = state.pageLoadGeneration;
+            completedPageLoadGeneration = completion == null
+                ? -1L : completion.pageLoadGeneration;
             boolean preserveDeferredLinkIntent = VirtualSpreadNavigation
                 .pageLoadPreservesDeferredLinkIntent(
                     manifestActivationInitialization
@@ -2633,12 +2717,36 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             + " reason=" + targetReason
             + " reset_landscape_fit=" + resetSelectedLinkLandscapeFit
             + " preserve_link_viewport=" + preserveLinkViewport);
+        if (completedPageLoadGeneration < 0L) {
+            clearNativeViewport(
+                activity,
+                "unbound_page_load_completion"
+            );
+            log("native_viewport_completion_rejected reason=unbound");
+            return;
+        }
+        synchronized (STATES) {
+            ReaderState currentState = readerStateLocked(viewModel);
+            if (!NativeViewportCompletionAuthority.isCurrent(
+                    completion.viewModel,
+                    completion.pageInfo,
+                    completion.pageLoadGeneration,
+                    viewModel,
+                    objectField(viewModel, "pageInfo"),
+                    currentState.pageLoadGeneration
+                )) {
+                log("native_viewport_completion_rejected "
+                    + "reason=changed_before_publication");
+                return;
+            }
+        }
         publishNativeViewport(
             viewModel,
             manifest,
             state,
             currentPage,
-            completedPageLoadGeneration
+            completedPageLoadGeneration,
+            completion.pageInfo
         );
     }
 
@@ -2647,7 +2755,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         Manifest manifest,
         ReaderState state,
         int currentPage,
-        long completedPageLoadGeneration
+        long completedPageLoadGeneration,
+        Object completedPageInfo
     ) {
         Activity activity = activeActivity.get();
         if (activity == null || viewModel == null || manifest == null
@@ -2675,7 +2784,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             Object ctm = pageInfo == null ? null
                 : XposedHelpers.callMethod(pageInfo, "getCtm");
             int loadedPage = intMethod(pageInfo, "getPage", -1);
-            if (pageInfo == null || originBitmap == null || ctm == null
+            if (pageInfo == null || pageInfo != completedPageInfo
+                || originBitmap == null || ctm == null
                 || loadedPage != currentPage) {
                 throw new IllegalStateException(
                     "native page geometry is not current"

@@ -2086,6 +2086,17 @@ touching provider authority, so an older callback cannot invalidate the newer
 load it failed to match. Pure worker-page tests and structural ordering guards
 pin both rules.
 
+The last exact-head review found the opposing first-open race: the exact
+current load could finish before asynchronous manifest verification, yet its
+generation-less completion left `nativeViewportLoadPending` set. Verified
+activation would then refuse to recover the already-loaded page indefinitely.
+The exact task/request binding now records only that its load completed when
+authority is still unavailable; it does not publish or adopt a generation.
+Manifest activation can subsequently synthesize the live exact-current
+completion, while stale, unmatched, replaced-document, and superseded-request
+callbacks retain the pending fence and remain unable to affect authority.
+Pure lifecycle tests and the runtime scope guard pin this fail-closed split.
+
 On the final artifact, a cold reopen of page 1 began generation 5 from manifest
 activation. An early unbound callback was rejected before it could change load
 or provider state. The exact later worker then cleared authority at load start,

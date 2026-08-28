@@ -6,6 +6,8 @@ public final class NativeViewportLifecycleAuthorityTest {
         replacedActivityCannotClearAuthority();
         manifestBindingPreservesPendingLoad();
         documentReplacementClearsPendingLoad();
+        exactUnpublishedCompletionClearsPendingLoad();
+        staleUnpublishedCompletionPreservesPendingLoad();
         System.out.println("NativeViewportLifecycleAuthorityTest passed");
     }
 
@@ -38,6 +40,20 @@ public final class NativeViewportLifecycleAuthorityTest {
             false,
             false
         ));
+    }
+
+    private static void exactUnpublishedCompletionClearsPendingLoad() {
+        require(!NativeViewportLifecycleAuthority
+            .pendingAfterUnpublishedCompletion(true, true));
+        require(!NativeViewportLifecycleAuthority
+            .pendingAfterUnpublishedCompletion(false, true));
+    }
+
+    private static void staleUnpublishedCompletionPreservesPendingLoad() {
+        require(NativeViewportLifecycleAuthority
+            .pendingAfterUnpublishedCompletion(true, false));
+        require(!NativeViewportLifecycleAuthority
+            .pendingAfterUnpublishedCompletion(false, false));
     }
 
     private static void require(boolean condition) {

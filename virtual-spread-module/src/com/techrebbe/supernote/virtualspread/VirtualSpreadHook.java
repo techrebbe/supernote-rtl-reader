@@ -2827,6 +2827,42 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             false
         );
         if (generation < 0L) {
+            // This callback was already proven to belong to the latest load
+            // request. If verification has not published its manifest yet,
+            // record only that this exact load finished. Do not grant provider
+            // authority here. The verified manifest activation may then
+            // synthesize one completion from the live PageInfo, while any
+            // newer request restores the pending marker before activation.
+            synchronized (STATES) {
+                ReaderState state = readerStateLocked(viewModel);
+                NativeViewportLoadBinding latest =
+                    state.nativeViewportLoadBindings.get(
+                        Integer.valueOf(binding.page)
+                    );
+                boolean exactCurrentRequest = latest != null
+                    && NativeViewportCompletionAuthority.isCurrentRequest(
+                        binding.viewModel,
+                        binding.nativeMupdf,
+                        binding.page,
+                        binding.requestSerial,
+                        viewModel,
+                        objectField(viewModel, "mupdf"),
+                        intField(viewModel, "currentPage", -1),
+                        latest.requestSerial
+                    );
+                state.nativeViewportLoadPending =
+                    NativeViewportLifecycleAuthority
+                        .pendingAfterUnpublishedCompletion(
+                            state.nativeViewportLoadPending,
+                            exactCurrentRequest
+                        );
+                if (exactCurrentRequest) {
+                    log("native_viewport_completion_deferred "
+                        + "reason=manifest_verification_pending page="
+                        + binding.page
+                        + " request=" + binding.requestSerial);
+                }
+            }
             return null;
         }
         NativeViewportLoadBinding rebound = binding.withGeneration(generation);

@@ -23,4 +23,18 @@ public final class NativeViewportLifecycleAuthority {
     ) {
         return loadPending && !documentChanged;
     }
+
+    /**
+     * An exact-current native load can finish before asynchronous manifest
+     * verification publishes authority. Its callback may not publish, but it
+     * has still completed the load that owned the pending marker. Clearing
+     * that marker lets the subsequently verified manifest synthesize one
+     * exact-current completion. An unmatched or older callback must retain it.
+     */
+    public static boolean pendingAfterUnpublishedCompletion(
+        boolean loadPending,
+        boolean exactCurrentRequest
+    ) {
+        return loadPending && !exactCurrentRequest;
+    }
 }

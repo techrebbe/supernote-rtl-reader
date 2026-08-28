@@ -1529,6 +1529,9 @@ for required in (
     '"native_viewport_completion_rejected reason=stale "',
     'state.nativeViewportLoadPending = true;',
     "NativeViewportLifecycleAuthority.pendingAfterStateBinding(",
+    "NativeViewportLifecycleAuthority\n"
+    "                        .pendingAfterUnpublishedCompletion(",
+    '"native_viewport_completion_deferred "',
     "NativeViewportLifecycleAuthority\n                        .mayClearForDestroyedActivity(",
     'clearNativeViewport(activity, "activity_destroyed")',
     'log("activity_destroyed active_owner=" + activeOwner)',

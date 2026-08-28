@@ -8,6 +8,9 @@ public final class NativeViewportCompletionAuthorityTest {
         olderPageObjectAtSameLogicalIndexIsRejected();
         unboundCompletionIsRejected();
         overlappingSamePageReloadCannotAdoptTheNewGeneration();
+        exactInitiatingLoadRequestIsAccepted();
+        olderSamePageRequestIsRejected();
+        replacedDocumentRequestIsRejected();
         System.out.println("NativeViewportCompletionAuthorityTest passed");
     }
 
@@ -66,6 +69,50 @@ public final class NativeViewportCompletionAuthorityTest {
         ));
         require(!fence.accepts(session, olderCompletionGeneration));
         require(fence.accepts(session, 21L));
+    }
+
+    private static void exactInitiatingLoadRequestIsAccepted() {
+        Object viewModel = new Object();
+        Object nativeMupdf = new Object();
+        require(NativeViewportCompletionAuthority.isCurrentRequest(
+            viewModel,
+            nativeMupdf,
+            4,
+            12L,
+            viewModel,
+            nativeMupdf,
+            4,
+            12L
+        ));
+    }
+
+    private static void olderSamePageRequestIsRejected() {
+        Object viewModel = new Object();
+        Object nativeMupdf = new Object();
+        require(!NativeViewportCompletionAuthority.isCurrentRequest(
+            viewModel,
+            nativeMupdf,
+            4,
+            11L,
+            viewModel,
+            nativeMupdf,
+            4,
+            12L
+        ));
+    }
+
+    private static void replacedDocumentRequestIsRejected() {
+        Object viewModel = new Object();
+        require(!NativeViewportCompletionAuthority.isCurrentRequest(
+            viewModel,
+            new Object(),
+            4,
+            12L,
+            viewModel,
+            new Object(),
+            4,
+            12L
+        ));
     }
 
     private static void require(boolean condition) {

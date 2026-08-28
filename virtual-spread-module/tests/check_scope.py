@@ -102,6 +102,27 @@ for expected in expected_hooks:
 if hook.count("findAndHookMethod(") != len(expected_hooks) + 1:
     raise SystemExit("unexpected extra LSPosed method hook")
 
+for required in (
+    "private static final String TARGET_LOAD_PAGE_TASK",
+    "loadPageTaskClass.getDeclaredConstructor(",
+    'loadPageTaskClass.getDeclaredMethod(\n                "mainThreadCall"',
+    "XposedBridge.hookMethod(",
+    '"this$0"',
+    'int page = intField(param.thisObject, "val$page", -1)',
+    "NATIVE_VIEWPORT_TASK_BINDINGS.put(",
+    "NATIVE_VIEWPORT_PAGE_INFO_BINDINGS.put(",
+    "Never reuse an in-flight identity.",
+    "NATIVE_VIEWPORT_LOAD_BINDING_LOCK",
+    "return latest;",
+):
+    if required not in hook:
+        raise SystemExit(
+            "native page completion lacks initiating-task binding: "
+            + required
+        )
+if hook.count("loadPageTaskClass.getDeclaredConstructor(") != 1:
+    raise SystemExit("unexpected extra LSPosed task-constructor hook")
+
 load_start = hook.find("public void handleLoadPackage(")
 load_end = hook.find("private static void hookActivity", load_start)
 if load_start < 0 or load_end < 0:

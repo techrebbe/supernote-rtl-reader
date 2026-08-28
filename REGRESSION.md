@@ -2008,7 +2008,7 @@ a Supernote Nomad (`SN078C10015092`) with firmware fingerprint
 display build `Chauvet.E103.2606161001.2393_release`, and SupernoteDocument
 `1.02.446`. The installed upgrade-compatible v0.0.26 (`versionCode=28`) APK had
 SHA-256
-`4ac0f3d3cff8ec44953978675c821bc7949744c189ba0b995c355dd42490d653`;
+`230309987d490bde919d0ba8e25530ac73825964d56e1a2a5a30971f53b86bcf`;
 its signer certificate SHA-256 remained
 `a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`.
 
@@ -2045,13 +2045,29 @@ the page is known, viewport authority is absent, and no real page load or
 pending navigation owns the state. Focused tests pin both recovery and the
 opposing active-load boundary.
 
-On the corrected artifact, a cold reopen of page 1 began generation 5 from
-manifest activation and published the measured descriptor. Supernote's
-immediately following real page load cleared that authority, began a fresh
-generation 7, and republished the same descriptor. A subsequent automated
-page 1 -> page 0 -> page 1 round trip cleared authority before each load and
-published only the exact new page: page 0 in generations 9/11 and page 1 in
-generations 13/15. No stale descriptor survived a page transition.
+The exact-head review then identified a separate same-page overlap risk: an
+older `onPageLoaded` callback could previously begin a fresh generation at
+completion time and adopt a newer load's authority. The final module instead
+binds cached synchronous loads and the exact firmware's asynchronous
+`DocumentViewModel$6` page workers to a per-page request serial when the load
+is initiated. Adjacent prefetch workers receive no provider generation; only
+the exact worker whose page and request serial still match the live reader may
+begin or complete publication. Older same-page workers, replaced native MuPDF
+instances, and unmatched callbacks fail closed. The task constructor and typed
+completion hook are exact-firmware locked and included in the narrow-hook scope
+guard.
+
+On the final artifact, a cold reopen of page 1 began generation 5 from manifest
+activation and published the measured descriptor. Supernote's immediately
+following exact bound worker completion cleared that authority, began
+generation 7, and republished the same descriptor. A device-driven page-0 load
+then synchronously cleared page 1 before beginning generation 9 and published
+only page 0; returning to page 1 cleared page 0 before generation 11 and
+republished the normative page-1 descriptor. After the ordinary-PDF control,
+a final clean page-1 cold open repeated the generation-5/7
+clear-before-republish sequence and ended with accepted freshness checks; no
+later unmatched callback cleared or replaced its descriptor. No stale
+descriptor survived a page transition or same-page reload completion.
 
 A controlled ordinary PDF copy with no authenticated sidecar opened normally
 in SupernoteDocument. It produced only the module-load and document-observation

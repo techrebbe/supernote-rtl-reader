@@ -59,6 +59,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         "com.supernote.document.document.DocumentViewModel";
     private static final String TARGET_PAGE_INFO =
         "com.supernote.document.document.PageInfo";
+    private static final String TARGET_LOAD_PAGE_TASK =
+        "com.supernote.document.document.DocumentViewModel$6";
     private static final String TARGET_PAGE_BAR =
         "com.ratta.supernote.supernotetoolbarlib.PageBarView";
     private static final String TARGET_BACK_LINK =
@@ -126,6 +128,14 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         new ThreadLocal<>();
     private static final ThreadLocal<NativeViewportCompletion>
         NATIVE_VIEWPORT_COMPLETION = new ThreadLocal<>();
+    private static final ThreadLocal<NativeViewportLoadBinding>
+        NATIVE_VIEWPORT_LOAD_INVOCATION = new ThreadLocal<>();
+    private static final Map<Object, NativeViewportLoadBinding>
+        NATIVE_VIEWPORT_TASK_BINDINGS = new WeakHashMap<>();
+    private static final Map<Object, NativeViewportLoadBinding>
+        NATIVE_VIEWPORT_PAGE_INFO_BINDINGS = new WeakHashMap<>();
+    private static final Object NATIVE_VIEWPORT_LOAD_BINDING_LOCK =
+        new Object();
     private static final ThreadLocal<HistoryActionContext> HISTORY_ACTION =
         new ThreadLocal<>();
     private static final ReentrantLock HISTORY_SERIALIZATION =
@@ -685,6 +695,12 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         VirtualSpreadNavigation.Half pendingHistoryHalf;
         long pendingHistoryAt;
         long pageLoadGeneration;
+        long nativeViewportRequestSerial;
+        final VirtualSpreadNavigation.BoundedCache<
+            Integer,
+            NativeViewportLoadBinding
+        > nativeViewportLoadBindings =
+            new VirtualSpreadNavigation.BoundedCache<>(8);
         boolean nativeViewportLoadPending;
         final VirtualSpreadNavigation.LinkHistory linkHistory =
             new VirtualSpreadNavigation.LinkHistory();
@@ -2106,7 +2122,90 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         );
     }
 
-    private static void hookViewModel(ClassLoader classLoader) {
+    private static void hookViewModel(ClassLoader classLoader)
+        throws Exception {
+        Class<?> viewModelClass = XposedHelpers.findClass(
+            TARGET_VIEW_MODEL,
+            classLoader
+        );
+        Class<?> pageInfoClass = XposedHelpers.findClass(
+            TARGET_PAGE_INFO,
+            classLoader
+        );
+        Class<?> loadPageTaskClass = XposedHelpers.findClass(
+            TARGET_LOAD_PAGE_TASK,
+            classLoader
+        );
+        XposedBridge.hookMethod(
+            loadPageTaskClass.getDeclaredConstructor(
+                viewModelClass,
+                int.class,
+                int.class
+            ),
+            new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    NativeViewportLoadBinding binding =
+                        NATIVE_VIEWPORT_LOAD_INVOCATION.get();
+                    Object viewModel = objectField(
+                        param.thisObject,
+                        "this$0"
+                    );
+                    int page = intField(param.thisObject, "val$page", -1);
+                    // Initial open and refresh can construct workers outside
+                    // DocumentViewModel.loadPage(). Bind every worker to its
+                    // own page/request serial, but do not start a provider
+                    // generation. Only a later onPageLoaded for the exact live
+                    // current page can promote that binding to authority.
+                    if (binding == null && viewModel != null && page >= 0) {
+                        binding = bindNativeViewportTask(
+                            viewModel,
+                            page
+                        );
+                    }
+                    if (binding == null
+                        || viewModel != binding.viewModel
+                        || page != binding.page) {
+                        return;
+                    }
+                    synchronized (STATES) {
+                        NATIVE_VIEWPORT_TASK_BINDINGS.put(
+                            param.thisObject,
+                            binding
+                        );
+                    }
+                }
+            }
+        );
+        XposedBridge.hookMethod(
+            loadPageTaskClass.getDeclaredMethod(
+                "mainThreadCall",
+                pageInfoClass
+            ),
+            new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    Object pageInfo = param.args == null
+                        || param.args.length == 0 ? null : param.args[0];
+                    if (pageInfo == null) {
+                        return;
+                    }
+                    synchronized (STATES) {
+                        NativeViewportLoadBinding binding =
+                            NATIVE_VIEWPORT_TASK_BINDINGS.get(
+                                param.thisObject
+                            );
+                        if (binding != null) {
+                            NATIVE_VIEWPORT_PAGE_INFO_BINDINGS.put(
+                                pageInfo,
+                                binding
+                            );
+                        }
+                    }
+                }
+            }
+        );
+
         XposedHelpers.findAndHookMethod(
             TARGET_VIEW_MODEL,
             classLoader,
@@ -2129,11 +2228,25 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
-                    beginNativeViewportPageLoad(
+                    NATIVE_VIEWPORT_LOAD_INVOCATION.remove();
+                    int requestedPage = normalizedRequestedPage(
                         param.thisObject,
-                        "load_page",
-                        false
+                        ((Integer) param.args[0]).intValue()
                     );
+                    NativeViewportLoadBinding binding =
+                        beginNativeViewportLoadInvocation(
+                            param.thisObject,
+                            requestedPage,
+                            "load_page"
+                        );
+                    if (binding != null) {
+                        NATIVE_VIEWPORT_LOAD_INVOCATION.set(binding);
+                    }
+                }
+
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    NATIVE_VIEWPORT_LOAD_INVOCATION.remove();
                 }
             }
         );
@@ -2148,19 +2261,20 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
                     NATIVE_VIEWPORT_COMPLETION.remove();
-                    long generation = beginNativeViewportPageLoad(
-                        param.thisObject,
-                        "page_loaded_completion",
-                        false
-                    );
                     Object pageInfo = param.args == null
                         || param.args.length == 0 ? null : param.args[0];
-                    if (generation >= 0L && pageInfo != null) {
+                    NativeViewportLoadBinding binding =
+                        completionBindingFor(
+                            param.thisObject,
+                            pageInfo
+                        );
+                    if (binding != null
+                        && binding.pageLoadGeneration >= 0L) {
                         NATIVE_VIEWPORT_COMPLETION.set(
                             new NativeViewportCompletion(
                                 param.thisObject,
                                 pageInfo,
-                                generation
+                                binding.pageLoadGeneration
                             )
                         );
                     }
@@ -2480,6 +2594,257 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             this.pageInfo = pageInfo;
             this.pageLoadGeneration = pageLoadGeneration;
         }
+    }
+
+    private static final class NativeViewportLoadBinding {
+        final Object viewModel;
+        final Object nativeMupdf;
+        final int page;
+        final long requestSerial;
+        final long pageLoadGeneration;
+
+        NativeViewportLoadBinding(
+            Object viewModel,
+            Object nativeMupdf,
+            int page,
+            long requestSerial,
+            long pageLoadGeneration
+        ) {
+            this.viewModel = viewModel;
+            this.nativeMupdf = nativeMupdf;
+            this.page = page;
+            this.requestSerial = requestSerial;
+            this.pageLoadGeneration = pageLoadGeneration;
+        }
+
+        NativeViewportLoadBinding withGeneration(long generation) {
+            return new NativeViewportLoadBinding(
+                viewModel,
+                nativeMupdf,
+                page,
+                requestSerial,
+                generation
+            );
+        }
+    }
+
+    private static int normalizedRequestedPage(
+        Object viewModel,
+        int requestedPage
+    ) {
+        if (viewModel == null || requestedPage < 0) {
+            return -1;
+        }
+        int pageCount = intField(viewModel, "pageCount", -1);
+        if (pageCount > 0 && requestedPage >= pageCount) {
+            return pageCount - 1;
+        }
+        return requestedPage;
+    }
+
+    private static NativeViewportLoadBinding
+        beginNativeViewportLoadInvocation(
+            Object viewModel,
+            int page,
+            String reason
+        ) {
+        synchronized (NATIVE_VIEWPORT_LOAD_BINDING_LOCK) {
+            return beginNativeViewportLoadInvocationLocked(
+                viewModel,
+                page,
+                reason
+            );
+        }
+    }
+
+    private static NativeViewportLoadBinding
+        beginNativeViewportLoadInvocationLocked(
+            Object viewModel,
+            int page,
+            String reason
+        ) {
+        if (viewModel == null || page < 0) {
+            clearNativeViewport(
+                activeActivity.get(),
+                "page_load_identity_unavailable"
+            );
+            return null;
+        }
+        Object nativeMupdf = objectField(viewModel, "mupdf");
+        if (nativeMupdf == null) {
+            clearNativeViewport(
+                activeActivity.get(),
+                "page_load_identity_unavailable"
+            );
+            return null;
+        }
+        final long requestSerial;
+        synchronized (STATES) {
+            ReaderState state = readerStateLocked(viewModel);
+            // Never reuse an in-flight identity. Two overlapping requests for
+            // the same logical page can carry different native fit/translation
+            // geometry, so only the most recently initiated request may
+            // publish its completion.
+            state.nativeViewportRequestSerial++;
+            requestSerial = state.nativeViewportRequestSerial;
+        }
+        long generation = beginNativeViewportPageLoad(
+            viewModel,
+            reason,
+            false
+        );
+        NativeViewportLoadBinding binding =
+            new NativeViewportLoadBinding(
+                viewModel,
+                nativeMupdf,
+                page,
+                requestSerial,
+                generation
+            );
+        synchronized (STATES) {
+            ReaderState state = readerStateLocked(viewModel);
+            if (state.nativeViewportRequestSerial != requestSerial
+                || objectField(viewModel, "mupdf") != nativeMupdf) {
+                return null;
+            }
+            state.nativeViewportLoadBindings.put(
+                Integer.valueOf(page),
+                binding
+            );
+        }
+        return binding;
+    }
+
+    private static NativeViewportLoadBinding bindNativeViewportTask(
+        Object viewModel,
+        int page
+    ) {
+        synchronized (NATIVE_VIEWPORT_LOAD_BINDING_LOCK) {
+            return bindNativeViewportTaskLocked(viewModel, page);
+        }
+    }
+
+    private static NativeViewportLoadBinding bindNativeViewportTaskLocked(
+        Object viewModel,
+        int page
+    ) {
+        if (viewModel == null || page < 0) {
+            return null;
+        }
+        Object nativeMupdf = objectField(viewModel, "mupdf");
+        if (nativeMupdf == null) {
+            return null;
+        }
+        synchronized (STATES) {
+            ReaderState state = readerStateLocked(viewModel);
+            state.nativeViewportRequestSerial++;
+            NativeViewportLoadBinding binding =
+                new NativeViewportLoadBinding(
+                    viewModel,
+                    nativeMupdf,
+                    page,
+                    state.nativeViewportRequestSerial,
+                    -1L
+                );
+            state.nativeViewportLoadBindings.put(
+                Integer.valueOf(page),
+                binding
+            );
+            return binding;
+        }
+    }
+
+    private static NativeViewportLoadBinding completionBindingFor(
+        Object viewModel,
+        Object pageInfo
+    ) {
+        synchronized (NATIVE_VIEWPORT_LOAD_BINDING_LOCK) {
+            return completionBindingForLocked(viewModel, pageInfo);
+        }
+    }
+
+    private static NativeViewportLoadBinding completionBindingForLocked(
+        Object viewModel,
+        Object pageInfo
+    ) {
+        if (viewModel == null || pageInfo == null) {
+            return null;
+        }
+        NativeViewportLoadBinding binding =
+            NATIVE_VIEWPORT_LOAD_INVOCATION.get();
+        synchronized (STATES) {
+            if (binding == null || binding.viewModel != viewModel) {
+                binding = NATIVE_VIEWPORT_PAGE_INFO_BINDINGS.get(pageInfo);
+            }
+            ReaderState state = readerStateLocked(viewModel);
+            Object liveNativeMupdf = objectField(viewModel, "mupdf");
+            int livePage = intField(viewModel, "currentPage", -1);
+            NativeViewportLoadBinding latest = binding == null ? null
+                : state.nativeViewportLoadBindings.get(
+                    Integer.valueOf(binding.page)
+                );
+            if (binding == null
+                || latest == null
+                || !NativeViewportCompletionAuthority.isCurrentRequest(
+                    binding.viewModel,
+                    binding.nativeMupdf,
+                    binding.page,
+                    binding.requestSerial,
+                    viewModel,
+                    liveNativeMupdf,
+                    livePage,
+                    latest.requestSerial
+                )) {
+                log("native_viewport_completion_rejected "
+                    + "reason=unmatched_load_request");
+                return null;
+            }
+            if (latest.pageLoadGeneration >= 0L) {
+                return latest;
+            }
+        }
+
+        // A load may have started before its manifest was verified. Only the
+        // exact task/request binding may acquire the first provider generation
+        // after verification; an older same-page callback cannot adopt it.
+        long generation = beginNativeViewportPageLoad(
+            viewModel,
+            "verified_load_completion",
+            false
+        );
+        if (generation < 0L) {
+            return null;
+        }
+        NativeViewportLoadBinding rebound = binding.withGeneration(generation);
+        synchronized (STATES) {
+            ReaderState state = readerStateLocked(viewModel);
+            NativeViewportLoadBinding latest =
+                state.nativeViewportLoadBindings.get(
+                    Integer.valueOf(rebound.page)
+                );
+            if (!NativeViewportCompletionAuthority.isCurrentRequest(
+                    rebound.viewModel,
+                    rebound.nativeMupdf,
+                    rebound.page,
+                    rebound.requestSerial,
+                    viewModel,
+                    objectField(viewModel, "mupdf"),
+                    intField(viewModel, "currentPage", -1),
+                    latest == null ? -1L : latest.requestSerial
+                )) {
+                clearNativeViewport(
+                    activeActivity.get(),
+                    "load_request_changed_before_binding"
+                );
+                return null;
+            }
+            state.nativeViewportLoadBindings.put(
+                Integer.valueOf(rebound.page),
+                rebound
+            );
+            NATIVE_VIEWPORT_PAGE_INFO_BINDINGS.put(pageInfo, rebound);
+        }
+        return rebound;
     }
 
     private static long beginNativeViewportPageLoad(

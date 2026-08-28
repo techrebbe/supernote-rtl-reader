@@ -2008,7 +2008,7 @@ a Supernote Nomad (`SN078C10015092`) with firmware fingerprint
 display build `Chauvet.E103.2606161001.2393_release`, and SupernoteDocument
 `1.02.446`. The installed upgrade-compatible v0.0.26 (`versionCode=28`) APK had
 SHA-256
-`3d38a1bbfb26abde05280f45f8ed3e437422461fa72a53a015158a1979857dbc`;
+`72ecc59c4702221fdec27d2173f11915e66ff168dd067197c1793a620d00300f`;
 its signer certificate SHA-256 remained
 `a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`.
 
@@ -2077,17 +2077,24 @@ requires finite numeric values; a missing accessor, non-number, NaN, or
 infinity fails closed. Focused tests and the static scope guard prevent the
 zero-offset fallback from returning.
 
+The following complete-head review found two further asynchronous lifecycle
+edges. Current-page fit/orientation workers constructed outside the hooked
+`loadPage` path now begin and clear the provider generation immediately; only
+non-current adjacent prefetch workers remain generation-less. An unmatched or
+unbound completion now returns before clearing `nativeViewportLoadPending` or
+touching provider authority, so an older callback cannot invalidate the newer
+load it failed to match. Pure worker-page tests and structural ordering guards
+pin both rules.
+
 On the final artifact, a cold reopen of page 1 began generation 5 from manifest
-activation and published the measured descriptor. Supernote's immediately
-following exact bound worker completion cleared that authority, began
-generation 7, and republished the same descriptor. A device-driven page-0 load
-then synchronously cleared page 1 before beginning generation 9 and published
-only page 0; returning to page 1 cleared page 0 before generation 11 and
-republished the normative page-1 descriptor. After the ordinary-PDF control,
-a final clean page-1 cold open repeated the generation-5/7
-clear-before-republish sequence and ended with accepted freshness checks; no
-later unmatched callback cleared or replaced its descriptor. No stale
-descriptor survived a page transition or same-page reload completion.
+activation. An early unbound callback was rejected before it could change load
+or provider state. The exact later worker then cleared authority at load start,
+began generation 7 only after its request binding and manifest were verified,
+and published the measured descriptor. Fifteen seconds of additional idle time
+produced no late clear or replacement. The same final sequence repeated after
+the ordinary-PDF control and ended with the normative page-1 descriptor
+authoritative. No stale descriptor survived a load transition or unmatched
+callback.
 
 A controlled ordinary PDF copy with no authenticated sidecar opened normally
 in SupernoteDocument. It produced only the module-load and document-observation

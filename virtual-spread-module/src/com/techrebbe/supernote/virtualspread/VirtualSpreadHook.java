@@ -2154,16 +2154,28 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                         "this$0"
                     );
                     int page = intField(param.thisObject, "val$page", -1);
-                    // Initial open and refresh can construct workers outside
-                    // DocumentViewModel.loadPage(). Bind every worker to its
-                    // own page/request serial, but do not start a provider
-                    // generation. Only a later onPageLoaded for the exact live
-                    // current page can promote that binding to authority.
+                    // Initial open and fit/orientation refresh can construct
+                    // workers outside DocumentViewModel.loadPage(). A worker
+                    // for the live page must synchronously invalidate the old
+                    // descriptor at construction; adjacent prefetch workers
+                    // receive an identity only and cannot disturb authority.
                     if (binding == null && viewModel != null && page >= 0) {
-                        binding = bindNativeViewportTask(
+                        int livePage = intField(
                             viewModel,
-                            page
+                            "currentPage",
+                            -1
                         );
+                        binding = NativeViewportCompletionAuthority
+                            .isCurrentWorkerPage(page, livePage)
+                                ? beginNativeViewportLoadInvocation(
+                                    viewModel,
+                                    page,
+                                    "current_page_worker"
+                                )
+                                : bindNativeViewportTask(
+                                    viewModel,
+                                    page
+                                );
                     }
                     if (binding == null
                         || viewModel != binding.viewModel
@@ -2948,6 +2960,14 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         boolean manifestActivationInitialization,
         NativeViewportCompletion completion
     ) {
+        // An unbound callback is either stale or from a worker whose load
+        // identity could not be proven. It must not clear a newer load's
+        // pending flag or provider generation.
+        if (completion == null) {
+            log("native_viewport_completion_rejected "
+                + "reason=unmatched_before_state");
+            return;
+        }
         ReaderState state;
         final long completedPageLoadGeneration;
         Object livePageInfo = objectField(viewModel, "pageInfo");
@@ -2970,8 +2990,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 return;
             }
             state.nativeViewportLoadPending = false;
-            completedPageLoadGeneration = completion == null
-                ? -1L : completion.pageLoadGeneration;
+            completedPageLoadGeneration = completion.pageLoadGeneration;
             boolean preserveDeferredLinkIntent = VirtualSpreadNavigation
                 .pageLoadPreservesDeferredLinkIntent(
                     manifestActivationInitialization
@@ -3084,14 +3103,6 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             + " reason=" + targetReason
             + " reset_landscape_fit=" + resetSelectedLinkLandscapeFit
             + " preserve_link_viewport=" + preserveLinkViewport);
-        if (completedPageLoadGeneration < 0L) {
-            clearNativeViewport(
-                activity,
-                "unbound_page_load_completion"
-            );
-            log("native_viewport_completion_rejected reason=unbound");
-            return;
-        }
         synchronized (STATES) {
             ReaderState currentState = readerStateLocked(viewModel);
             if (!NativeViewportCompletionAuthority.isCurrent(

@@ -45,4 +45,13 @@ public final class NativeViewportCompletionAuthority {
             && boundRequestSerial > 0L
             && boundRequestSerial == currentRequestSerial;
     }
+
+    /**
+     * A worker constructed outside the hooked loadPage call may invalidate
+     * current viewport authority only when it renders the live logical page.
+     * Adjacent prefetch workers must not disturb the active descriptor.
+     */
+    public static boolean isCurrentWorkerPage(int workerPage, int livePage) {
+        return workerPage >= 0 && workerPage == livePage;
+    }
 }

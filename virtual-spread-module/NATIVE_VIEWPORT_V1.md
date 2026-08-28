@@ -196,6 +196,11 @@ A genuine document replacement clears that pending authority. Activity teardown
 may clear the provider only when the destroyed `DocumentActivity` is still the
 active reader owner; destruction of a replaced activity cannot invalidate the
 replacement activity's record.
+Current-page fit/orientation workers created outside `loadPage` begin the same
+provider fence at construction, while adjacent prefetch workers cannot clear
+the active page. Unmatched or unbound callbacks return before changing pending
+load state or provider authority, so an older callback cannot invalidate a
+newer in-flight load.
 No descriptor is persisted or reconstructed after a restart. InkBridge's
 Virtual Spread actions must remain unavailable until a fresh matching record
 is published; ordinary PDFs remain unaffected.

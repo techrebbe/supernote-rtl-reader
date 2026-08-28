@@ -11,6 +11,7 @@ public final class NativeViewportCompletionAuthorityTest {
         exactInitiatingLoadRequestIsAccepted();
         olderSamePageRequestIsRejected();
         replacedDocumentRequestIsRejected();
+        onlyTheLivePageWorkerMayBeginARefreshGeneration();
         System.out.println("NativeViewportCompletionAuthorityTest passed");
     }
 
@@ -113,6 +114,14 @@ public final class NativeViewportCompletionAuthorityTest {
             4,
             12L
         ));
+    }
+
+    private static void onlyTheLivePageWorkerMayBeginARefreshGeneration() {
+        require(NativeViewportCompletionAuthority.isCurrentWorkerPage(4, 4));
+        require(!NativeViewportCompletionAuthority.isCurrentWorkerPage(3, 4));
+        require(!NativeViewportCompletionAuthority.isCurrentWorkerPage(5, 4));
+        require(!NativeViewportCompletionAuthority.isCurrentWorkerPage(-1, 4));
+        require(!NativeViewportCompletionAuthority.isCurrentWorkerPage(0, -1));
     }
 
     private static void require(boolean condition) {

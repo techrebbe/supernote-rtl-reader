@@ -1521,8 +1521,11 @@ for required in (
     "NativeViewportProvider.METHOD_BEGIN_LOAD",
     "NATIVE_VIEWPORT_COMPLETION = new ThreadLocal<>();",
     "NativeViewportCompletionAuthority.isCurrent(",
+    "NativeViewportCompletionAuthority\n"
+    "                            .isCurrentWorkerPage(page, livePage)",
+    '"current_page_worker"',
     "pageInfo != completedPageInfo",
-    '"unbound_page_load_completion"',
+    '"reason=unmatched_before_state"',
     '"native_viewport_completion_rejected reason=stale "',
     'state.nativeViewportLoadPending = true;',
     "NativeViewportLifecycleAuthority.pendingAfterStateBinding(",
@@ -1536,6 +1539,16 @@ for required in (
             "runtime viewport publication lifecycle is incomplete: "
             + required
         )
+unbound_guard = hook.find("if (completion == null) {")
+pending_clear = hook.find(
+    "state.nativeViewportLoadPending = false;",
+    unbound_guard + 1,
+)
+if unbound_guard < 0 or pending_clear < 0 or unbound_guard > pending_clear:
+    raise SystemExit(
+        "unbound native viewport completions must return before load state "
+        "is cleared"
+    )
 for forbidden in (
     'intMethod(pageInfo, "getOffsetX", 0)',
     'intMethod(pageInfo, "getOffsetY", 0)',

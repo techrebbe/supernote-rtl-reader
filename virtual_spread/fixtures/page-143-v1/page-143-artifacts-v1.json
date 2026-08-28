@@ -1,0 +1,218 @@
+{
+  "cache": {
+    "activation": "publish the PDF and exact .json sibling under cacheBasename; the Android verifier recomputes sidecar, PDF-tail, mapping, view, output-hash, and open-MuPDF authorities before activation",
+    "hiddenFromSupernoteDocumentsLibrary": true,
+    "locationTemplate": "/storage/emulated/0/.inkbridge/virtual-spread/v1/<document-id>/<view-id>/<cache-basename>",
+    "nativeReaderCanOpen": true,
+    "nomediaRecommendedForGenericAndroidMediaIndexes": true
+  },
+  "contract": {
+    "generatorVersion": "techrebbe.supernote.virtual-spread-generator/v1",
+    "manifestSchema": "techrebbe.supernote.virtual-spread/v3",
+    "representationContract": {
+      "path": "../../INKBRIDGE_REPRESENTATION_CONTRACT.md",
+      "sha256": "289e9d16c3b798696ddbf7c5916fec619b85c91d52ac7c4d046cefdc9dcca189"
+    },
+    "syntheticGolden": {
+      "path": "../page-143-contract-v1.json",
+      "sha256": "2a47cd7a461bacb9e0b441ca4ab0e6fc720cf927c667d68b1ad6f44a473cf539"
+    },
+    "textHashCanonicalization": "UTF-8 bytes after CRLF and CR are normalized to LF; no other normalization",
+    "v025MergeCommit": "025d870bd73f1133664aa37b8443feb7ce10d12d",
+    "wireContract": {
+      "path": "../../MAPPING_WIRE_CONTRACT.md",
+      "sha256": "bb14c9cc9babe3149d4944f36688a086e43a02f60ed570b52186fb444a4b8b5d"
+    }
+  },
+  "diagnosticPathNormalization": "source.path and output.path are non-authoritative diagnostics normalized to filenames in the distributed sidecar",
+  "indexBase": 0,
+  "output": {
+    "artifactFilename": "page-143-virtual-spread-v1.pdf",
+    "cacheBasename": "inkbridge-doc-v1-c9271098e6d98f7fff378c4d630dc9c179cf45cb5283f3559eee910e3afafeb4.inkbridge-view-v1-7cb2c2fda17d5510d33b0a97e702cbc66d5124735be45f810aef6053c1775f30.virtual-spread.pdf",
+    "documentId": "inkbridge-doc-v1-c9271098e6d98f7fff378c4d630dc9c179cf45cb5283f3559eee910e3afafeb4",
+    "mappingAuthoritySha256": "646b905c12266774882e0c4d7ebbbca77b2f386f432979ebcbfcda1d9ace268a",
+    "pageCount": 2,
+    "sha256": "0c895249809a36f382312ae42547ec2f9755e0b4095ce2b8e8a5f6145be3a32f",
+    "sidecarArtifactFilename": "page-143-virtual-spread-v1.pdf.json",
+    "sidecarSha256": "37cda3d96db8b2f8f311df60ccfbbd397bbb446b9e4a7451dcbbffc283aff9df",
+    "sidecarSize": 6371,
+    "size": 6333,
+    "viewId": "inkbridge-view-v1-7cb2c2fda17d5510d33b0a97e702cbc66d5124735be45f810aef6053c1775f30"
+  },
+  "page143Mapping": {
+    "destination": [
+      0.0,
+      151.20000000000002,
+      432.0,
+      496.79999999999995
+    ],
+    "normalizedSourceBox": [
+      36.0,
+      18.0,
+      756.0,
+      594.0
+    ],
+    "scale": 0.6,
+    "side": "left",
+    "slot": [
+      0.0,
+      0.0,
+      432.0,
+      648.0
+    ],
+    "sourceBox": [
+      18.0,
+      36.0,
+      594.0,
+      756.0
+    ],
+    "sourcePageIndex": 2,
+    "sourceRotation": 90,
+    "transform": [
+      0.0,
+      -0.6,
+      0.6,
+      0.0,
+      -21.599999999999998,
+      507.6
+    ],
+    "virtualPageIndex": 1
+  },
+  "page143SourcePageIndex": 2,
+  "pdfTailAuthorityEvidence": {
+    "authorityBlockOffset": 5844,
+    "filename": "page-143-pdf-tail-authorities-v1.txt",
+    "immediatelyBeforeStartxref": true,
+    "layoutAuthoritySha256": "5511205907d3de274d63449c9cb128300b7acbb8fa191415d387f861626fe94e",
+    "linkAuthoritySha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "mappingAuthoritySha256": "646b905c12266774882e0c4d7ebbbca77b2f386f432979ebcbfcda1d9ace268a",
+    "sha256": "c58b5a5279bca1024e6e25f6902e589fa98c08007723e8f5f7420fa6f583e89d",
+    "sourceSha256": "c9271098e6d98f7fff378c4d630dc9c179cf45cb5283f3559eee910e3afafeb4",
+    "startxrefOffset": 6312,
+    "viewSha256": "7cb2c2fda17d5510d33b0a97e702cbc66d5124735be45f810aef6053c1775f30"
+  },
+  "pointRoundTrips": [
+    {
+      "normalized": [
+        0.0,
+        0.0
+      ],
+      "normalizedAfterInverse": [
+        0.0,
+        3.0839528461809905e-17
+      ],
+      "spread": [
+        0.0,
+        496.8
+      ]
+    },
+    {
+      "normalized": [
+        0.25,
+        0.5
+      ],
+      "normalizedAfterInverse": [
+        0.24999999999999997,
+        0.5000000000000001
+      ],
+      "spread": [
+        108.0,
+        324.0
+      ]
+    },
+    {
+      "normalized": [
+        1.0,
+        1.0
+      ],
+      "normalizedAfterInverse": [
+        0.9999999999999999,
+        1.0
+      ],
+      "spread": [
+        431.99999999999994,
+        151.20000000000005
+      ]
+    }
+  ],
+  "schema": "techrebbe.supernote.virtual-spread-artifacts/v1",
+  "source": {
+    "cropBox": [
+      18.0,
+      36.0,
+      594.0,
+      756.0
+    ],
+    "filename": "page-143-source-v1.pdf",
+    "pageCount": 3,
+    "rotation": 90,
+    "sha256": "c9271098e6d98f7fff378c4d630dc9c179cf45cb5283f3559eee910e3afafeb4",
+    "size": 3768
+  },
+  "strokeRoundTrip": {
+    "normalized": [
+      [
+        0.1,
+        0.2
+      ],
+      [
+        0.5,
+        0.5
+      ],
+      [
+        0.9,
+        0.8
+      ]
+    ],
+    "normalizedAfterInverse": [
+      [
+        0.09999999999999998,
+        0.19999999999999987
+      ],
+      [
+        0.5,
+        0.5000000000000001
+      ],
+      [
+        0.9,
+        0.7999999999999998
+      ]
+    ],
+    "spread": [
+      [
+        43.2,
+        427.68000000000006
+      ],
+      [
+        216.0,
+        324.0
+      ],
+      [
+        388.79999999999995,
+        220.32000000000005
+      ]
+    ]
+  },
+  "verifierRules": {
+    "androidVerifierIncludesFarOffsetStabilityFix": true,
+    "androidVerifierIncludesTinyScaleOrientationFix": true,
+    "authoritativeTransform": "forward source-to-spread only",
+    "canonicalFloatEncoding": "lowercase hexadecimal of the exact big-endian IEEE-754 binary64 bits; signed zero is preserved",
+    "coordinateSystem": {
+      "bounds": [
+        0.0,
+        1.0
+      ],
+      "origin": "top-left",
+      "space": "displayed-cropbox-normalized",
+      "xAxis": "right",
+      "yAxis": "down"
+    },
+    "inverse": "derived locally and rejected if singular or unstable",
+    "normalizedEdgeTolerance": 1e-12,
+    "numericStability": "forward/inverse probes must remain finite and round-trip within 1e-12; far-offset unstable mappings fail closed",
+    "orientation": "forward CTM determinant must be positive",
+    "quarterTurns": "rotation is exactly 0, 90, 180, or 270 and zero CTM coefficients are exact binary64 zero",
+    "roundTripTolerance": 1e-12
+  }
+}

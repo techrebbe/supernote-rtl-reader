@@ -1,0 +1,291 @@
+{
+  "coverSeparate": true,
+  "direction": "rtl",
+  "generatorVersion": "techrebbe.supernote.virtual-spread-generator/v1",
+  "links": [],
+  "output": {
+    "cacheBasename": "inkbridge-doc-v1-c9271098e6d98f7fff378c4d630dc9c179cf45cb5283f3559eee910e3afafeb4.inkbridge-view-v1-7cb2c2fda17d5510d33b0a97e702cbc66d5124735be45f810aef6053c1775f30.virtual-spread.pdf",
+    "gutter": 0.0,
+    "layoutAuthoritySha256": "5511205907d3de274d63449c9cb128300b7acbb8fa191415d387f861626fe94e",
+    "linkAuthoritySha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "mappingAuthoritySha256": "646b905c12266774882e0c4d7ebbbca77b2f386f432979ebcbfcda1d9ace268a",
+    "name": "inkbridge-doc-v1-c9271098e6d98f7fff378c4d630dc9c179cf45cb5283f3559eee910e3afafeb4.inkbridge-view-v1-7cb2c2fda17d5510d33b0a97e702cbc66d5124735be45f810aef6053c1775f30.virtual-spread.pdf",
+    "pageCount": 2,
+    "path": "inkbridge-doc-v1-c9271098e6d98f7fff378c4d630dc9c179cf45cb5283f3559eee910e3afafeb4.inkbridge-view-v1-7cb2c2fda17d5510d33b0a97e702cbc66d5124735be45f810aef6053c1775f30.virtual-spread.pdf",
+    "sha256": "0c895249809a36f382312ae42547ec2f9755e0b4095ce2b8e8a5f6145be3a32f",
+    "size": 6333,
+    "spreadSize": [
+      864.0,
+      648.0
+    ],
+    "viewId": "inkbridge-view-v1-7cb2c2fda17d5510d33b0a97e702cbc66d5124735be45f810aef6053c1775f30"
+  },
+  "schema": "techrebbe.supernote.virtual-spread/v3",
+  "source": {
+    "documentId": "inkbridge-doc-v1-c9271098e6d98f7fff378c4d630dc9c179cf45cb5283f3559eee910e3afafeb4",
+    "name": "page-143-source-v1.pdf",
+    "pageCount": 3,
+    "path": "page-143-source-v1.pdf",
+    "sha256": "c9271098e6d98f7fff378c4d630dc9c179cf45cb5283f3559eee910e3afafeb4",
+    "size": 3768
+  },
+  "sourcePages": [
+    {
+      "destination": [
+        432.0,
+        151.20000000000002,
+        864.0,
+        496.79999999999995
+      ],
+      "normalizedSourceBox": [
+        36.0,
+        18.0,
+        756.0,
+        594.0
+      ],
+      "scale": 0.6,
+      "side": "right",
+      "slot": [
+        432.0,
+        0.0,
+        864.0,
+        648.0
+      ],
+      "sourceBox": [
+        18.0,
+        36.0,
+        594.0,
+        756.0
+      ],
+      "sourcePageIndex": 0,
+      "sourcePageNumber": 1,
+      "sourceRotation": 90,
+      "transform": [
+        0.0,
+        -0.6,
+        0.6,
+        0.0,
+        410.4,
+        507.6
+      ],
+      "virtualPageIndex": 0,
+      "virtualPageNumber": 1
+    },
+    {
+      "destination": [
+        432.0,
+        151.20000000000002,
+        864.0,
+        496.79999999999995
+      ],
+      "normalizedSourceBox": [
+        36.0,
+        18.0,
+        756.0,
+        594.0
+      ],
+      "scale": 0.6,
+      "side": "right",
+      "slot": [
+        432.0,
+        0.0,
+        864.0,
+        648.0
+      ],
+      "sourceBox": [
+        18.0,
+        36.0,
+        594.0,
+        756.0
+      ],
+      "sourcePageIndex": 1,
+      "sourcePageNumber": 2,
+      "sourceRotation": 90,
+      "transform": [
+        0.0,
+        -0.6,
+        0.6,
+        0.0,
+        410.4,
+        507.6
+      ],
+      "virtualPageIndex": 1,
+      "virtualPageNumber": 2
+    },
+    {
+      "destination": [
+        0.0,
+        151.20000000000002,
+        432.0,
+        496.79999999999995
+      ],
+      "normalizedSourceBox": [
+        36.0,
+        18.0,
+        756.0,
+        594.0
+      ],
+      "scale": 0.6,
+      "side": "left",
+      "slot": [
+        0.0,
+        0.0,
+        432.0,
+        648.0
+      ],
+      "sourceBox": [
+        18.0,
+        36.0,
+        594.0,
+        756.0
+      ],
+      "sourcePageIndex": 2,
+      "sourcePageNumber": 3,
+      "sourceRotation": 90,
+      "transform": [
+        0.0,
+        -0.6,
+        0.6,
+        0.0,
+        -21.599999999999998,
+        507.6
+      ],
+      "virtualPageIndex": 1,
+      "virtualPageNumber": 2
+    }
+  ],
+  "spreads": [
+    {
+      "left": null,
+      "right": {
+        "destination": [
+          432.0,
+          151.20000000000002,
+          864.0,
+          496.79999999999995
+        ],
+        "normalizedSourceBox": [
+          36.0,
+          18.0,
+          756.0,
+          594.0
+        ],
+        "scale": 0.6,
+        "side": "right",
+        "slot": [
+          432.0,
+          0.0,
+          864.0,
+          648.0
+        ],
+        "sourceBox": [
+          18.0,
+          36.0,
+          594.0,
+          756.0
+        ],
+        "sourcePageIndex": 0,
+        "sourcePageNumber": 1,
+        "sourceRotation": 90,
+        "transform": [
+          0.0,
+          -0.6,
+          0.6,
+          0.0,
+          410.4,
+          507.6
+        ],
+        "virtualPageIndex": 0,
+        "virtualPageNumber": 1
+      },
+      "virtualPageIndex": 0,
+      "virtualPageNumber": 1
+    },
+    {
+      "left": {
+        "destination": [
+          0.0,
+          151.20000000000002,
+          432.0,
+          496.79999999999995
+        ],
+        "normalizedSourceBox": [
+          36.0,
+          18.0,
+          756.0,
+          594.0
+        ],
+        "scale": 0.6,
+        "side": "left",
+        "slot": [
+          0.0,
+          0.0,
+          432.0,
+          648.0
+        ],
+        "sourceBox": [
+          18.0,
+          36.0,
+          594.0,
+          756.0
+        ],
+        "sourcePageIndex": 2,
+        "sourcePageNumber": 3,
+        "sourceRotation": 90,
+        "transform": [
+          0.0,
+          -0.6,
+          0.6,
+          0.0,
+          -21.599999999999998,
+          507.6
+        ],
+        "virtualPageIndex": 1,
+        "virtualPageNumber": 2
+      },
+      "right": {
+        "destination": [
+          432.0,
+          151.20000000000002,
+          864.0,
+          496.79999999999995
+        ],
+        "normalizedSourceBox": [
+          36.0,
+          18.0,
+          756.0,
+          594.0
+        ],
+        "scale": 0.6,
+        "side": "right",
+        "slot": [
+          432.0,
+          0.0,
+          864.0,
+          648.0
+        ],
+        "sourceBox": [
+          18.0,
+          36.0,
+          594.0,
+          756.0
+        ],
+        "sourcePageIndex": 1,
+        "sourcePageNumber": 2,
+        "sourceRotation": 90,
+        "transform": [
+          0.0,
+          -0.6,
+          0.6,
+          0.0,
+          410.4,
+          507.6
+        ],
+        "virtualPageIndex": 1,
+        "virtualPageNumber": 2
+      },
+      "virtualPageIndex": 1,
+      "virtualPageNumber": 2
+    }
+  ]
+}

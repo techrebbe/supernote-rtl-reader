@@ -1523,8 +1523,10 @@ for required in (
     '"unbound_page_load_completion"',
     '"native_viewport_completion_rejected reason=stale "',
     'state.nativeViewportLoadPending = true;',
-    'state.nativeViewportLoadPending = false;',
+    "NativeViewportLifecycleAuthority.pendingAfterStateBinding(",
+    "NativeViewportLifecycleAuthority\n                        .mayClearForDestroyedActivity(",
     'clearNativeViewport(activity, "activity_destroyed")',
+    'log("activity_destroyed active_owner=" + activeOwner)',
     'clearNativeViewport(activeActivity.get(), reason)',
 ):
     if required not in hook:

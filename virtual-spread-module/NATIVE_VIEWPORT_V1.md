@@ -188,6 +188,12 @@ canvas.
 Publication fails closed for missing or stale `PageInfo`, page mismatch,
 non-finite coefficients, singular/unstable transforms, render bounds outside
 the native canvas, a mismatched authenticated snapshot, or provider failure.
+Same-document manifest verification preserves any native page load already in
+flight, so older page state cannot be promoted while the real load is pending.
+A genuine document replacement clears that pending authority. Activity teardown
+may clear the provider only when the destroyed `DocumentActivity` is still the
+active reader owner; destruction of a replaced activity cannot invalidate the
+replacement activity's record.
 No descriptor is persisted or reconstructed after a restart. InkBridge's
 Virtual Spread actions must remain unavailable until a fresh matching record
 is published; ordinary PDFs remain unaffected.

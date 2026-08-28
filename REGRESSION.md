@@ -2008,7 +2008,7 @@ a Supernote Nomad (`SN078C10015092`) with firmware fingerprint
 display build `Chauvet.E103.2606161001.2393_release`, and SupernoteDocument
 `1.02.446`. The installed upgrade-compatible v0.0.26 (`versionCode=28`) APK had
 SHA-256
-`230309987d490bde919d0ba8e25530ac73825964d56e1a2a5a30971f53b86bcf`;
+`c4cc45503fb6098db3bea326ae8b350c4cc73d097edad73eb0037b6a161af543`;
 its signer certificate SHA-256 remained
 `a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`.
 
@@ -2056,6 +2056,17 @@ begin or complete publication. Older same-page workers, replaced native MuPDF
 instances, and unmatched callbacks fail closed. The task constructor and typed
 completion hook are exact-firmware locked and included in the narrow-hook scope
 guard.
+
+The final review also identified two lifecycle ownership gaps. First,
+same-document manifest binding could clear an in-flight native-load marker and
+temporarily permit a synthetic completion from older page state. Verification
+binding now preserves that marker; only a real document replacement clears it.
+Second, teardown from a replaced `DocumentActivity` could clear the viewport
+owned by the replacement activity. Destruction now clears provider and reader
+state only when the destroyed instance is still the active owner. Pure
+lifecycle regressions pin both rules, and the hardware gate exercised rapid
+ordinary/Virtual-Spread replacement before confirming that the final page-1
+record remained authoritative.
 
 On the final artifact, a cold reopen of page 1 began generation 5 from manifest
 activation and published the measured descriptor. Supernote's immediately

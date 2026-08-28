@@ -815,20 +815,22 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
                     Activity activity = (Activity) param.thisObject;
-                    clearNativeViewport(activity, "activity_destroyed");
-                    Object viewModel = objectField(
-                        activity,
-                        "documentViewModel"
-                    );
-                    synchronized (STATES) {
-                        STATES.remove(viewModel);
-                    }
                     Activity current = activeActivity.get();
-                    if (current == activity) {
+                    boolean activeOwner = NativeViewportLifecycleAuthority
+                        .mayClearForDestroyedActivity(activity, current);
+                    if (activeOwner) {
+                        clearNativeViewport(activity, "activity_destroyed");
+                        Object viewModel = objectField(
+                            activity,
+                            "documentViewModel"
+                        );
+                        synchronized (STATES) {
+                            STATES.remove(viewModel);
+                        }
                         activeActivity = new WeakReference<>(null);
                         observeDocumentKey(null);
                     }
-                    log("activity_destroyed");
+                    log("activity_destroyed active_owner=" + activeOwner);
                 }
             }
         );
@@ -3858,6 +3860,12 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 state.manifestRevision = manifest.revision;
                 state.manifestVerificationGeneration =
                     verificationGeneration;
+                state.nativeViewportLoadPending =
+                    NativeViewportLifecycleAuthority
+                        .pendingAfterStateBinding(
+                            state.nativeViewportLoadPending,
+                            false
+                        );
                 clearManifestTransientState(
                     state,
                     false,
@@ -3900,7 +3908,6 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
         state.linkHistory.clear();
         state.half = VirtualSpreadNavigation.Half.RIGHT;
-        state.nativeViewportLoadPending = false;
         // Never reset this counter: delayed work compares it to reject stale
         // callbacks, so reusing an earlier value would create an ABA window.
         state.pageLoadGeneration++;
@@ -3937,6 +3944,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             state.nativeSnapshotDocument = null;
             state.nativeSnapshotRevision = null;
             state.nativeSnapshotAccepted = false;
+            state.nativeViewportLoadPending =
+                NativeViewportLifecycleAuthority.pendingAfterStateBinding(
+                    state.nativeViewportLoadPending,
+                    true
+                );
             clearManifestTransientState(state, true, 0L);
             log("reader_state_document_changed from=" + previous
                 + " to=" + key);

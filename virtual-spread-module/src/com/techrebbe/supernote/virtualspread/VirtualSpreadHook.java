@@ -57,6 +57,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         "com.supernote.document.document.DocumentActivity";
     private static final String TARGET_VIEW_MODEL =
         "com.supernote.document.document.DocumentViewModel";
+    private static final String TARGET_PAGE_INFO =
+        "com.supernote.document.document.PageInfo";
     private static final String TARGET_PAGE_BAR =
         "com.ratta.supernote.supernotetoolbarlib.PageBarView";
     private static final String TARGET_BACK_LINK =
@@ -681,6 +683,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         VirtualSpreadNavigation.Half pendingHistoryHalf;
         long pendingHistoryAt;
         long pageLoadGeneration;
+        boolean nativeViewportLoadPending;
         final VirtualSpreadNavigation.LinkHistory linkHistory =
             new VirtualSpreadNavigation.LinkHistory();
     }
@@ -2118,6 +2121,44 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         XposedHelpers.findAndHookMethod(
             TARGET_VIEW_MODEL,
             classLoader,
+            "loadPage",
+            int.class,
+            Integer.class,
+            new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    beginNativeViewportPageLoad(
+                        param.thisObject,
+                        "load_page",
+                        true,
+                        false
+                    );
+                }
+            }
+        );
+
+        XposedHelpers.findAndHookMethod(
+            TARGET_VIEW_MODEL,
+            classLoader,
+            "onPageLoaded",
+            TARGET_PAGE_INFO,
+            Integer.class,
+            new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    beginNativeViewportPageLoad(
+                        param.thisObject,
+                        "page_loaded_fallback",
+                        false,
+                        false
+                    );
+                }
+            }
+        );
+
+        XposedHelpers.findAndHookMethod(
+            TARGET_VIEW_MODEL,
+            classLoader,
             "onPageLoadedPart2",
             Integer.class,
             new XC_MethodHook() {
@@ -2387,7 +2428,87 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static void handleManifestActivationInitialization(
         Object viewModel
     ) {
+        beginNativeViewportPageLoad(
+            viewModel,
+            "manifest_activation",
+            true,
+            true
+        );
         handlePageLoaded(viewModel, true);
+    }
+
+    private static void beginNativeViewportPageLoad(
+        Object viewModel,
+        String reason,
+        boolean force,
+        boolean manifestActivationInitialization
+    ) {
+        if (viewModel == null) {
+            clearNativeViewport(
+                activeActivity.get(),
+                "page_load_view_model_unavailable"
+            );
+            return;
+        }
+        final ReaderState state;
+        final long generation;
+        synchronized (STATES) {
+            state = readerStateLocked(viewModel);
+            if (!force && state.nativeViewportLoadPending) {
+                return;
+            }
+            state.pageLoadGeneration++;
+            state.nativeViewportLoadPending = true;
+            generation = state.pageLoadGeneration;
+            boolean preserveDeferredLinkIntent = VirtualSpreadNavigation
+                .pageLoadPreservesDeferredLinkIntent(
+                    manifestActivationInitialization
+                );
+            if (!preserveDeferredLinkIntent) {
+                clearQueuedLinkInvocation(state);
+                state.mixedLinkCandidate = null;
+            } else if (state.mixedLinkCandidate != null) {
+                state.mixedLinkCandidate = state.mixedLinkCandidate
+                    .withPageLoadGeneration(generation);
+            }
+        }
+        Manifest manifest = manifestFor(viewModel);
+        Activity activity = activeActivity.get();
+        if (manifest == null) {
+            clearNativeViewport(activity, "page_load_manifest_unavailable");
+            return;
+        }
+        if (activity == null) {
+            return;
+        }
+        try {
+            Bundle request = new Bundle();
+            request.putBinder("sessionToken", NATIVE_VIEWPORT_SESSION);
+            request.putLong("pageLoadGeneration", generation);
+            // The provider clears the prior record before acknowledging this
+            // generation. Mark first so a lost Binder response is followed by
+            // a best-effort clear instead of leaving ambiguous authority.
+            nativeViewportMayBePublished = true;
+            Bundle response = activity.getContentResolver().call(
+                NativeViewportProvider.CONTENT_URI,
+                NativeViewportProvider.METHOD_BEGIN_LOAD,
+                null,
+                request
+            );
+            if (response == null
+                || !"begun".equals(response.getString("status"))
+                || response.getLong("pageLoadGeneration", -1L)
+                    != generation) {
+                throw new IllegalStateException(
+                    "viewport provider rejected page-load fence"
+                );
+            }
+            log("native_viewport_load_begun generation=" + generation
+                + " reason=" + reason);
+        } catch (Throwable throwable) {
+            clearNativeViewport(activity, "page_load_fence_failed");
+            logFailure("native_viewport_load_begin_failed", throwable);
+        }
     }
 
     private static void handlePageLoaded(
@@ -2395,9 +2516,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         boolean manifestActivationInitialization
     ) {
         ReaderState state;
+        final long completedPageLoadGeneration;
         synchronized (STATES) {
             state = readerStateLocked(viewModel);
-            state.pageLoadGeneration++;
+            state.nativeViewportLoadPending = false;
+            completedPageLoadGeneration = state.pageLoadGeneration;
             boolean preserveDeferredLinkIntent = VirtualSpreadNavigation
                 .pageLoadPreservesDeferredLinkIntent(
                     manifestActivationInitialization
@@ -2510,14 +2633,21 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             + " reason=" + targetReason
             + " reset_landscape_fit=" + resetSelectedLinkLandscapeFit
             + " preserve_link_viewport=" + preserveLinkViewport);
-        publishNativeViewport(viewModel, manifest, state, currentPage);
+        publishNativeViewport(
+            viewModel,
+            manifest,
+            state,
+            currentPage,
+            completedPageLoadGeneration
+        );
     }
 
     private static void publishNativeViewport(
         Object viewModel,
         Manifest manifest,
         ReaderState state,
-        int currentPage
+        int currentPage,
+        long completedPageLoadGeneration
     ) {
         Activity activity = activeActivity.get();
         if (activity == null || viewModel == null || manifest == null
@@ -2611,7 +2741,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 "verificationGeneration", cached.verificationGeneration
             );
             publication.putLong(
-                "pageLoadGeneration", state.pageLoadGeneration
+                "pageLoadGeneration", completedPageLoadGeneration
             );
             publication.putBinder(
                 "sessionToken", NATIVE_VIEWPORT_SESSION
@@ -3295,6 +3425,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
         state.linkHistory.clear();
         state.half = VirtualSpreadNavigation.Half.RIGHT;
+        state.nativeViewportLoadPending = false;
         // Never reset this counter: delayed work compares it to reject stale
         // callbacks, so reusing an earlier value would create an ABA window.
         state.pageLoadGeneration++;

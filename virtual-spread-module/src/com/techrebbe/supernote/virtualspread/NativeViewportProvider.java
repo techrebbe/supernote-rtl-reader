@@ -24,6 +24,7 @@ public final class NativeViewportProvider extends ContentProvider {
         "content://" + AUTHORITY + "/v1/current"
     );
     public static final String METHOD_PUBLISH = "publish_v1";
+    public static final String METHOD_BEGIN_LOAD = "begin_load_v1";
     public static final String METHOD_CLEAR = "clear_v1";
     public static final String METHOD_GET = "get_v1";
 
@@ -31,6 +32,8 @@ public final class NativeViewportProvider extends ContentProvider {
     private static final String READER_PACKAGE =
         "com.ratta.supernote.pluginhost";
     private static final Object LOCK = new Object();
+    private static final NativeViewportGenerationFence LOAD_FENCE =
+        new NativeViewportGenerationFence();
     private static Record current;
 
     private static final class Record implements IBinder.DeathRecipient {
@@ -96,7 +99,10 @@ public final class NativeViewportProvider extends ContentProvider {
             if (request == null || !sessionToken.isBinderAlive()) {
                 return false;
             }
-            return descriptor.authority.documentId.equals(
+            return LOAD_FENCE.accepts(
+                    sessionToken, pageLoadGeneration
+                )
+                && descriptor.authority.documentId.equals(
                     request.getString("documentId")
                 )
                 && descriptor.authority.viewId.equals(
@@ -166,6 +172,7 @@ public final class NativeViewportProvider extends ContentProvider {
                 if (current == this) {
                     current = null;
                 }
+                LOAD_FENCE.clear(sessionToken);
             }
         }
     }
@@ -209,6 +216,10 @@ public final class NativeViewportProvider extends ContentProvider {
             requireCaller(WRITER_PACKAGE);
             return publish(extras);
         }
+        if (METHOD_BEGIN_LOAD.equals(method)) {
+            requireCaller(WRITER_PACKAGE);
+            return beginLoad(extras);
+        }
         if (METHOD_CLEAR.equals(method)) {
             requireCaller(WRITER_PACKAGE);
             return clear(extras);
@@ -231,6 +242,15 @@ public final class NativeViewportProvider extends ContentProvider {
             );
         }
         synchronized (LOCK) {
+            if (!LOAD_FENCE.accepts(
+                    replacement.sessionToken,
+                    replacement.pageLoadGeneration
+                )) {
+                replacement.unlink();
+                throw new IllegalStateException(
+                    "viewport publication is stale for the active page load"
+                );
+            }
             Record previous = current;
             current = replacement;
             if (previous != null) {
@@ -246,19 +266,45 @@ public final class NativeViewportProvider extends ContentProvider {
         return response;
     }
 
+    private Bundle beginLoad(Bundle extras) {
+        IBinder requestedToken = extras == null ? null
+            : extras.getBinder("sessionToken");
+        long requestedGeneration = exactNonNegativeLong(
+            extras, "pageLoadGeneration"
+        );
+        if (requestedToken == null || !requestedToken.isBinderAlive()) {
+            throw new IllegalArgumentException(
+                "live document-process session token is required"
+            );
+        }
+        synchronized (LOCK) {
+            LOAD_FENCE.begin(requestedToken, requestedGeneration);
+            Record previous = current;
+            current = null;
+            if (previous != null) {
+                previous.unlink();
+            }
+        }
+        Bundle response = new Bundle();
+        response.putInt("protocolVersion", 1);
+        response.putString("status", "begun");
+        response.putLong("pageLoadGeneration", requestedGeneration);
+        return response;
+    }
+
     private Bundle clear(Bundle extras) {
         IBinder requestedToken = extras == null ? null
             : extras.getBinder("sessionToken");
-        boolean cleared = false;
+        boolean cleared;
         synchronized (LOCK) {
+            cleared = LOAD_FENCE.clear(requestedToken);
             Record record = current;
-            if (record == null) {
-                cleared = true;
-            } else if (requestedToken != null
+            if (record != null && requestedToken != null
                 && record.sessionToken.equals(requestedToken)) {
                 current = null;
                 record.unlink();
-                cleared = true;
+            } else if (record != null) {
+                cleared = false;
             }
         }
         Bundle response = new Bundle();

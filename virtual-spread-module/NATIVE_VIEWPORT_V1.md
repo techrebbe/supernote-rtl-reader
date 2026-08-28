@@ -19,6 +19,13 @@ process dies. The hook also clears it when the activity closes or verified
 manifest authority is invalidated. A stale page, document, representation,
 filesystem generation, or canvas-size request returns `unavailable`.
 
+Every native page activation begins a new monotonic, document-session-bound
+load generation before Supernote exposes the replacement page. Beginning the
+generation synchronously invalidates the prior record. Publication is accepted
+only for that exact generation, so a late callback from the previous load
+cannot restore stale CTM or inset authority. This fence applies even when the
+same zero-based virtual page is reloaded with unchanged files and dimensions.
+
 ## Descriptor wire
 
 `descriptorJson` is UTF-8 JSON with exactly these fields in this order:
@@ -108,6 +115,11 @@ Any omission or mismatch returns:
 protocolVersion = 1
 status = unavailable
 ```
+
+Reads also require the published record to remain current under the provider's
+internal page-load generation fence. The generation is intentionally not a
+consumer-supplied authority: InkBridge cannot revive an old record by guessing
+or replaying it.
 
 An accepted response contains:
 

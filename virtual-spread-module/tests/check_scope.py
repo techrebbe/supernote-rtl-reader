@@ -81,6 +81,7 @@ expected_hooks = {
     '"onConfigurationChanged"',
     '"onDestroy"',
     '"turnPage"',
+    '"onPageLoaded"',
     '"onPageLoadedPart2"',
     '"setPageInfo"',
     '"showLinkJumpView"',
@@ -96,7 +97,9 @@ for expected in expected_hooks:
     if expected not in hook:
         raise SystemExit(f"missing expected narrow hook: {expected}")
 
-if hook.count("findAndHookMethod(") != len(expected_hooks):
+# loadPage has one narrow navigation/history guard and one private-overload
+# viewport lifecycle fence. Every other expected name is hooked once.
+if hook.count("findAndHookMethod(") != len(expected_hooks) + 1:
     raise SystemExit("unexpected extra LSPosed method hook")
 
 load_start = hook.find("public void handleLoadPackage(")
@@ -1400,6 +1403,10 @@ viewport_provider = (
     root
     / "src/com/techrebbe/supernote/virtualspread/NativeViewportProvider.java"
 ).read_text(encoding="utf-8")
+viewport_generation_fence = (
+    root
+    / "src/com/techrebbe/supernote/virtualspread/NativeViewportGenerationFence.java"
+).read_text(encoding="utf-8")
 for required in (
     '"rtl-reader-native-viewport-v1"',
     '\\"schemaVersion\\":1',
@@ -1436,11 +1443,24 @@ for required in (
     'request.getString("generatedPdfSha256")',
     'request.getString("sidecarSha256")',
     'request.getString("mappingAuthoritySha256")',
+    'METHOD_BEGIN_LOAD = "begin_load_v1"',
+    "LOAD_FENCE.accepts(",
+    "LOAD_FENCE.begin(",
+    "LOAD_FENCE.clear(",
 ):
     if required not in viewport_provider:
         raise SystemExit(
             "native viewport provider is missing a fail-closed invariant: "
             + required
+        )
+for required in (
+    "requestedGeneration <= generation",
+    "requestedGeneration == generation",
+    "session.equals(requestedSession)",
+):
+    if required not in viewport_generation_fence:
+        raise SystemExit(
+            "native viewport page-load fence is incomplete: " + required
         )
 for required in (
     'android:name="com.techrebbe.supernote.virtualspread.NativeViewportProvider"',
@@ -1460,6 +1480,11 @@ for required in (
     "activity == null || !nativeViewportMayBePublished",
     "nativeViewportMayBePublished = false;",
     'publication.putBinder(\n                "sessionToken", NATIVE_VIEWPORT_SESSION',
+    '"loadPage",\n            int.class,\n            Integer.class',
+    '"onPageLoaded",\n            TARGET_PAGE_INFO',
+    "NativeViewportProvider.METHOD_BEGIN_LOAD",
+    'state.nativeViewportLoadPending = true;',
+    'state.nativeViewportLoadPending = false;',
     'clearNativeViewport(activity, "activity_destroyed")',
     'clearNativeViewport(activeActivity.get(), reason)',
 ):

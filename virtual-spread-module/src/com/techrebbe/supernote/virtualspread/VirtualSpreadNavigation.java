@@ -799,7 +799,7 @@ public final class VirtualSpreadNavigation {
             && pendingHistoryPage < 0
             && !hasPendingHistoryHalf;
         if (lastPage < 0) {
-            return noPendingNavigation;
+            return noPendingNavigation && !nativeViewportLoadPending;
         }
         // A page callback may win the verification race before the manifest
         // is available. It initializes navigation state but must fail closed

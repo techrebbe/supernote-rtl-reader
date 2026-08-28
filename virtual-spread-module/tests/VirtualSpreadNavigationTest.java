@@ -210,6 +210,14 @@ public final class VirtualSpreadNavigationTest {
             )
         );
         assertBoolean(
+            "first-page native load blocks synthetic manifest activation",
+            false,
+            VirtualSpreadNavigation.manifestActivationRequiresInitialization(
+                true, 8L, 8L, -1, -1, false, -1, false, -1, false,
+                false, true
+            )
+        );
+        assertBoolean(
             "same key and revision from an older generation reinitializes",
             true,
             VirtualSpreadNavigation.manifestActivationRequiresInitialization(

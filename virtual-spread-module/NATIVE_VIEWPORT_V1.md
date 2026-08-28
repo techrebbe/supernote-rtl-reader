@@ -189,7 +189,8 @@ Publication fails closed for missing or stale `PageInfo`, page mismatch,
 non-finite coefficients, singular/unstable transforms, render bounds outside
 the native canvas, a mismatched authenticated snapshot, or provider failure.
 Same-document manifest verification preserves any native page load already in
-flight, so older page state cannot be promoted while the real load is pending.
+flight, so older page state cannot be promoted while the real load is pending,
+including before the first authenticated `lastPage` value exists.
 A genuine document replacement clears that pending authority. Activity teardown
 may clear the provider only when the destroyed `DocumentActivity` is still the
 active reader owner; destruction of a replaced activity cannot invalidate the

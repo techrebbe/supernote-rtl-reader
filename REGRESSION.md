@@ -2008,7 +2008,7 @@ a Supernote Nomad (`SN078C10015092`) with firmware fingerprint
 display build `Chauvet.E103.2606161001.2393_release`, and SupernoteDocument
 `1.02.446`. The installed upgrade-compatible v0.0.26 (`versionCode=28`) APK had
 SHA-256
-`c4cc45503fb6098db3bea326ae8b350c4cc73d097edad73eb0037b6a161af543`;
+`002d757d13cf1eacb04504ce64d2c138b367d985c5b3bcb0319079cc6d289ed7`;
 its signer certificate SHA-256 remained
 `a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`.
 
@@ -2060,7 +2060,9 @@ guard.
 The final review also identified two lifecycle ownership gaps. First,
 same-document manifest binding could clear an in-flight native-load marker and
 temporarily permit a synthetic completion from older page state. Verification
-binding now preserves that marker; only a real document replacement clears it.
+binding now preserves that marker, and first-page activation checks it even
+before `lastPage` has been established; only a real document replacement clears
+it.
 Second, teardown from a replaced `DocumentActivity` could clear the viewport
 owned by the replacement activity. Destruction now clears provider and reader
 state only when the destroyed instance is still the active owner. Pure

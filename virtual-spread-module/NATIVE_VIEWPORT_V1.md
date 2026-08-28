@@ -63,10 +63,18 @@ the inverse locally.
 
 The normative page-143 golden descriptor is
 [`../virtual_spread/fixtures/page-143-v1/page-143-native-viewport-v1.json`](../virtual_spread/fixtures/page-143-v1/page-143-native-viewport-v1.json).
-Its byte-level SHA-256 is:
+The provider's canonical `descriptorJson` UTF-8 bytes (with no trailing line
+feed) have SHA-256:
 
 ```text
-188db69345e2d0233fe0bf4605401b7ce60a2b9f8e6829ac29fc2bfdbcffdd1
+a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033
+```
+
+The tracked fixture file appends one LF for repository portability and has
+SHA-256:
+
+```text
+27145685a793ce2716a5da6c26db4a1fa64bac0e1ad6bc1329e0c502326a48e4
 ```
 
 That fixture is expected evidence for cross-language tests, not a substitute

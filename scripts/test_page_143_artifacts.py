@@ -14,6 +14,7 @@ from build_page_143_artifacts import (
     DESCRIPTOR_NAME,
     FIXTURE_DIR,
     MAPPING_FIELDS,
+    NOMAD_PAGE143_SPREAD_TO_NATIVE,
     REPRESENTATION_CONTRACT,
     SOURCE_NAME,
     SYNTHETIC_GOLDEN,
@@ -99,20 +100,25 @@ def verify_bundle_semantics() -> None:
         "viewId": descriptor["output"]["viewId"],
         "virtualPageIndex": 1,
         "nativePageSize": [1872, 1404],
-        "spreadToNative": [
-            1871.0 / 864.0,
-            0.0,
-            0.0,
-            -1403.0 / 648.0,
-            0.0,
-            1403.0,
-        ],
+        "spreadToNative": list(NOMAD_PAGE143_SPREAD_TO_NATIVE),
     }
     assert list(native_viewport["nativePageSize"]) == [1872, 1404]
     assert all(
         type(value) is float
         for value in native_viewport["spreadToNative"]
     )
+    canonical_native_viewport = json.dumps(
+        native_viewport,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    assert sha256_bytes(canonical_native_viewport) == (
+        "a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033"
+    )
+    assert sha256_file(
+        FIXTURE_DIR / "page-143-native-viewport-v1.json"
+    ) == "27145685a793ce2716a5da6c26db4a1fa64bac0e1ad6bc1329e0c502326a48e4"
     assert descriptor["contract"]["wireContract"]["sha256"] == (
         sha256_canonical_text(WIRE_CONTRACT)
     )

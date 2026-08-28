@@ -2000,6 +2000,71 @@ interception or conversion; InkBridge owns canonical annotation conversion using
 the authenticated schema-v3 mapping authority. Full hardware steps and hashes
 remain recorded in `virtual_spread/HARDWARE_VALIDATION.md`.
 
+## v0.0.26 authoritative native viewport - HARDWARE PASS
+
+The focused v0.0.26 publication and invalidation matrix passed on 2026-08-28 on
+a Supernote Nomad (`SN078C10015092`) with firmware fingerprint
+`Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys`,
+display build `Chauvet.E103.2606161001.2393_release`, and SupernoteDocument
+`1.02.446`. The installed upgrade-compatible v0.0.26 (`versionCode=28`) APK had
+SHA-256
+`4ac0f3d3cff8ec44953978675c821bc7949744c189ba0b995c355dd42490d653`;
+its signer certificate SHA-256 remained
+`a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`.
+
+The normative schema-v3 page-143 fixture was installed at its deterministic
+hidden cache path under
+`/storage/emulated/0/.inkbridge/virtual-spread/v1/inkbridge-doc-v1-c9271098e6d98f7fff378c4d630dc9c179cf45cb5283f3559eee910e3afafeb4/inkbridge-view-v1-7cb2c2fda17d5510d33b0a97e702cbc66d5124735be45f810aef6053c1775f30/`.
+The device-side PDF and sidecar SHA-256 values were respectively
+`0c895249809a36f382312ae42547ec2f9755e0b4095ce2b8e8a5f6145be3a32f`
+and
+`37cda3d96db8b2f8f311df60ccfbbd397bbb446b9e4a7451dcbbffc283aff9df`;
+the authenticated mapping-authority digest was
+`646b905c12266774882e0c4d7ebbbca77b2f386f432979ebcbfcda1d9ace268a`.
+
+For zero-based virtual page 1, `PluginFileAPI.getPageSize` and the native
+reader reported an `1872 x 1404` canvas. The module published this exact
+descriptor:
+
+```json
+{"schemaVersion":1,"authority":"rtl-reader-native-viewport-v1","documentId":"inkbridge-doc-v1-c9271098e6d98f7fff378c4d630dc9c179cf45cb5283f3559eee910e3afafeb4","viewId":"inkbridge-view-v1-7cb2c2fda17d5510d33b0a97e702cbc66d5124735be45f810aef6053c1775f30","virtualPageIndex":1,"nativePageSize":[1872,1404],"spreadToNative":[2.164006674264231,0.0,0.0,-2.1636211394924048,0.999465811965812,1402.0264983910781]}
+```
+
+The canonical provider payload (no terminal newline) had SHA-256
+`a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`.
+The checked-in fixture file includes one terminal LF and therefore has SHA-256
+`27145685a793ce2716a5da6c26db4a1fa64bac0e1ad6bc1329e0c502326a48e4`.
+The nonzero translation and slightly different x/y scale are measured native
+fit authority, not an aspect-ratio reconstruction.
+
+The first cold-reopen attempt found one fail-closed lifecycle defect: an
+unbound native completion could establish the page before asynchronous manifest
+activation, leaving no descriptor to publish. The corrected module synthesizes
+an exact-current completion only when manifest activation owns initialization,
+the page is known, viewport authority is absent, and no real page load or
+pending navigation owns the state. Focused tests pin both recovery and the
+opposing active-load boundary.
+
+On the corrected artifact, a cold reopen of page 1 began generation 5 from
+manifest activation and published the measured descriptor. Supernote's
+immediately following real page load cleared that authority, began a fresh
+generation 7, and republished the same descriptor. A subsequent automated
+page 1 -> page 0 -> page 1 round trip cleared authority before each load and
+published only the exact new page: page 0 in generations 9/11 and page 1 in
+generations 13/15. No stale descriptor survived a page transition.
+
+A controlled ordinary PDF copy with no authenticated sidecar opened normally
+in SupernoteDocument. It produced only the module-load and document-observation
+diagnostics: no manifest acceptance, viewport publication, landscape/portrait
+remap, or navigation-ownership event occurred. The disposable ordinary fixture
+was removed after the check, while the normative hidden-cache pair remains for
+InkBridge's shared gate.
+
+This gate proves authoritative descriptor publication, cold-reopen recovery,
+and page-load/reload invalidation on the Nomad. It does not claim that the
+InkBridge consumer read or the cross-device annotation round trip has run; that
+shared page-143 gate remains the next cross-project phase.
+
 ## Failure capture
 
 Before reproducing a failure:

@@ -782,7 +782,9 @@ public final class VirtualSpreadNavigation {
         int pendingLinkPage,
         boolean hasPendingLinkHalf,
         int pendingHistoryPage,
-        boolean hasPendingHistoryHalf
+        boolean hasPendingHistoryHalf,
+        boolean nativeViewportAuthorityAvailable,
+        boolean nativeViewportLoadPending
     ) {
         if (!sameManifestKeyAndRevision
             || boundVerificationGeneration <= 0L
@@ -790,13 +792,23 @@ public final class VirtualSpreadNavigation {
                 != activationVerificationGeneration) {
             return true;
         }
-        return lastPage < 0
-            && pendingPage < 0
+        boolean noPendingNavigation = pendingPage < 0
             && !hasPendingHalf
             && pendingLinkPage < 0
             && !hasPendingLinkHalf
             && pendingHistoryPage < 0
             && !hasPendingHistoryHalf;
+        if (lastPage < 0) {
+            return noPendingNavigation;
+        }
+        // A page callback may win the verification race before the manifest
+        // is available. It initializes navigation state but must fail closed
+        // for viewport authority because its completion is unbound. Once the
+        // manifest activates, synthesize one exact-current completion only
+        // when no newer load or navigation owns the page.
+        return noPendingNavigation
+            && !nativeViewportAuthorityAvailable
+            && !nativeViewportLoadPending;
     }
 
     /** A stale posted activation must never initialize a newer verification. */

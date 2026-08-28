@@ -47,6 +47,18 @@ DESCRIPTOR_NAME = "page-143-artifacts-v1.json"
 TAIL_NAME = "page-143-pdf-tail-authorities-v1.txt"
 NATIVE_VIEWPORT_NAME = "page-143-native-viewport-v1.json"
 README_NAME = "README.md"
+# Exact v0.0.26 hardware measurement from the Nomad native reader for
+# zero-based Virtual Spread page 1. This is deliberately not reconstructed
+# from page aspect ratio; the nonzero translation and unequal scales are the
+# native PageInfo CTM/offset evidence InkBridge needs.
+NOMAD_PAGE143_SPREAD_TO_NATIVE = (
+    2.164006674264231,
+    0.0,
+    0.0,
+    -2.1636211394924048,
+    0.999465811965812,
+    1402.0264983910781,
+)
 SYNTHETIC_GOLDEN = (
     ROOT / "virtual_spread" / "fixtures" / "page-143-contract-v1.json"
 )
@@ -417,14 +429,9 @@ def build_bundle(directory: Path) -> dict[str, Path]:
                 "viewId": descriptor["output"]["viewId"],
                 "virtualPageIndex": 1,
                 "nativePageSize": [1872, 1404],
-                "spreadToNative": [
-                    1871.0 / 864.0,
-                    0.0,
-                    0.0,
-                    -1403.0 / 648.0,
-                    0.0,
-                    1403.0,
-                ],
+                "spreadToNative": list(
+                    NOMAD_PAGE143_SPREAD_TO_NATIVE
+                ),
             },
             ensure_ascii=False,
             allow_nan=False,
@@ -453,8 +460,10 @@ def build_bundle(directory: Path) -> dict[str, Path]:
         "beginning with the five authenticated authority markers immediately "
         "before `startxref`.\n\n"
         "`page-143-native-viewport-v1.json` is the exact seven-field native "
-        "viewport descriptor expected for zero-based Virtual Spread page 1 on "
-        "the Nomad's 1872-by-1404 persistent page canvas. It is a cross-project "
+        "viewport descriptor measured by v0.0.26 for zero-based Virtual Spread "
+        "page 1 on the Nomad's 1872-by-1404 persistent page canvas. It preserves "
+        "the native PageInfo fit and translation rather than inferring them from "
+        "page aspect ratio. It is a cross-project "
         "golden vector, not runtime authority: production InkBridge must still "
         "obtain a fresh matching descriptor from the v0.0.26 companion provider "
         "and validate it against `PluginFileAPI.getPageSize` and the active "

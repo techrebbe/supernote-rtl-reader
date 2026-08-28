@@ -4498,7 +4498,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     state == null ? -1 : state.pendingLinkPage,
                     state != null && state.pendingLinkHalf != null,
                     state == null ? -1 : state.pendingHistoryPage,
-                    state != null && state.pendingHistoryHalf != null
+                    state != null && state.pendingHistoryHalf != null,
+                    nativeViewportMayBePublished,
+                    state != null && state.nativeViewportLoadPending
                 );
         }
     }

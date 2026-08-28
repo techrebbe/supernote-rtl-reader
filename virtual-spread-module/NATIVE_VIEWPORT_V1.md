@@ -186,7 +186,8 @@ canvas.
 ## Failure behavior
 
 Publication fails closed for missing or stale `PageInfo`, page mismatch,
-non-finite coefficients, singular/unstable transforms, render bounds outside
+unavailable, non-numeric, or non-finite render offsets, non-finite matrix
+coefficients, singular/unstable transforms, render bounds outside
 the native canvas, a mismatched authenticated snapshot, or provider failure.
 Same-document manifest verification preserves any native page load already in
 flight, so older page state cannot be promoted while the real load is pending,

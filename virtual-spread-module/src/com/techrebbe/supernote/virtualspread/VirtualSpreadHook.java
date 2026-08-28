@@ -3172,6 +3172,16 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 floatField(ctm, "e", Float.NaN),
                 floatField(ctm, "f", Float.NaN)
             };
+            double offsetX = NativeViewportAuthority
+                .requireNumericRenderOffset(
+                    XposedHelpers.callMethod(pageInfo, "getOffsetX"),
+                    "offsetX"
+                );
+            double offsetY = NativeViewportAuthority
+                .requireNumericRenderOffset(
+                    XposedHelpers.callMethod(pageInfo, "getOffsetY"),
+                    "offsetY"
+                );
             NativeViewportAuthority.Descriptor descriptor =
                 NativeViewportAuthority.fromNativeRender(
                     manifest.documentId,
@@ -3184,8 +3194,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     width,
                     height,
                     pdfToOrigin,
-                    intMethod(pageInfo, "getOffsetX", 0),
-                    intMethod(pageInfo, "getOffsetY", 0)
+                    offsetX,
+                    offsetY
                 );
             Bundle publication = new Bundle();
             publication.putString("documentId", descriptor.documentId);

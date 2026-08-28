@@ -1440,6 +1440,7 @@ for required in (
     "positiveZero(coefficients[index])",
     "requireStable(coefficients)",
     "requireSpreadInsideNative(",
+    "requireNumericRenderOffset(",
 ):
     if required not in viewport_authority:
         raise SystemExit(
@@ -1509,6 +1510,7 @@ for required in (
         )
 for required in (
     "NativeViewportAuthority.fromNativeRender(",
+    "NativeViewportAuthority\n                .requireNumericRenderOffset(",
     "private static volatile boolean nativeViewportMayBePublished;",
     "nativeViewportMayBePublished = true;",
     "activity == null || !nativeViewportMayBePublished",
@@ -1533,6 +1535,15 @@ for required in (
         raise SystemExit(
             "runtime viewport publication lifecycle is incomplete: "
             + required
+        )
+for forbidden in (
+    'intMethod(pageInfo, "getOffsetX", 0)',
+    'intMethod(pageInfo, "getOffsetY", 0)',
+):
+    if forbidden in hook:
+        raise SystemExit(
+            "native viewport render offsets must not use fallback values: "
+            + forbidden
         )
 
 workflow = (root.parent / ".github/workflows/build.yml").read_text(

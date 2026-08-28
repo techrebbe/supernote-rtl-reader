@@ -14,6 +14,7 @@ public final class NativeViewportAuthorityTest {
         nativeRotationIsPreserved();
         fittedGeometryGridStaysInsideTheNativeCanvas();
         tinyScaleOrientationRemainsStable();
+        nativeRenderOffsetsRequireFiniteNumbers();
         invalidOrUnstableGeometryFailsClosed();
         canonicalWireHasExactlyTheFrozenFields();
         System.out.println("NativeViewportAuthorityTest passed");
@@ -184,6 +185,41 @@ public final class NativeViewportAuthorityTest {
             throw new AssertionError(
                 "tiny stable orientation was not preserved"
             );
+        }
+    }
+
+    private static void nativeRenderOffsetsRequireFiniteNumbers() {
+        exact(
+            NativeViewportAuthority.requireNumericRenderOffset(
+                Integer.valueOf(17),
+                "offsetX"
+            ),
+            17.0d
+        );
+        exact(
+            NativeViewportAuthority.requireNumericRenderOffset(
+                Double.valueOf(-3.5d),
+                "offsetY"
+            ),
+            -3.5d
+        );
+        final Object[] invalid = new Object[] {
+            null,
+            "0",
+            Double.valueOf(Double.NaN),
+            Double.valueOf(Double.POSITIVE_INFINITY),
+            Double.valueOf(Double.NEGATIVE_INFINITY)
+        };
+        for (final Object value : invalid) {
+            expectFailure(new Runnable() {
+                @Override
+                public void run() {
+                    NativeViewportAuthority.requireNumericRenderOffset(
+                        value,
+                        "offsetX"
+                    );
+                }
+            });
         }
     }
 

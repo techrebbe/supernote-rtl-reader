@@ -196,6 +196,16 @@ public final class NativeViewportAuthority {
         );
     }
 
+    public static double requireNumericRenderOffset(
+        Object value,
+        String label
+    ) {
+        if (!(value instanceof Number)) {
+            throw new IllegalArgumentException(label + " must be numeric");
+        }
+        return finite(((Number) value).doubleValue(), label);
+    }
+
     private static double[] snapRenderBounds(
         double[] transform,
         double spreadWidth,

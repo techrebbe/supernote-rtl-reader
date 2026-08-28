@@ -2008,7 +2008,7 @@ a Supernote Nomad (`SN078C10015092`) with firmware fingerprint
 display build `Chauvet.E103.2606161001.2393_release`, and SupernoteDocument
 `1.02.446`. The installed upgrade-compatible v0.0.26 (`versionCode=28`) APK had
 SHA-256
-`002d757d13cf1eacb04504ce64d2c138b367d985c5b3bcb0319079cc6d289ed7`;
+`3d38a1bbfb26abde05280f45f8ed3e437422461fa72a53a015158a1979857dbc`;
 its signer certificate SHA-256 remained
 `a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`.
 
@@ -2069,6 +2069,13 @@ state only when the destroyed instance is still the active owner. Pure
 lifecycle regressions pin both rules, and the hardware gate exercised rapid
 ordinary/Virtual-Spread replacement before confirming that the final page-1
 record remained authoritative.
+
+The final exact-head review also found that missing native `PageInfo` render
+offset accessors were previously converted to zero by a general-purpose
+fallback helper. Viewport publication now reads both offsets directly and
+requires finite numeric values; a missing accessor, non-number, NaN, or
+infinity fails closed. Focused tests and the static scope guard prevent the
+zero-offset fallback from returning.
 
 On the final artifact, a cold reopen of page 1 began generation 5 from manifest
 activation and published the measured descriptor. Supernote's immediately

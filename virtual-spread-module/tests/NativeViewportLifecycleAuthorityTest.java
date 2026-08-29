@@ -6,6 +6,8 @@ public final class NativeViewportLifecycleAuthorityTest {
         replacedActivityCannotClearAuthority();
         activeViewModelOwnsCallbackCleanup();
         replacedViewModelCannotClearAuthority();
+        destroyedObsoleteViewModelIsReleased();
+        reusedActiveViewModelIsPreserved();
         manifestBindingPreservesPendingLoad();
         documentReplacementClearsPendingLoad();
         exactUnpublishedCompletionClearsPendingLoad();
@@ -49,6 +51,26 @@ public final class NativeViewportLifecycleAuthorityTest {
             null,
             oldViewModel
         ));
+    }
+
+    private static void destroyedObsoleteViewModelIsReleased() {
+        require(NativeViewportLifecycleAuthority
+            .mayReleaseDestroyedViewModel(
+                new Object(),
+                new Object(),
+                false
+            ));
+        Object active = new Object();
+        require(NativeViewportLifecycleAuthority
+            .mayReleaseDestroyedViewModel(active, active, true));
+    }
+
+    private static void reusedActiveViewModelIsPreserved() {
+        Object reused = new Object();
+        require(!NativeViewportLifecycleAuthority
+            .mayReleaseDestroyedViewModel(reused, reused, false));
+        require(!NativeViewportLifecycleAuthority
+            .mayReleaseDestroyedViewModel(null, reused, false));
     }
 
     private static void manifestBindingPreservesPendingLoad() {

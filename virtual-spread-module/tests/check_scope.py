@@ -1535,13 +1535,18 @@ for required in (
     "NativeViewportLifecycleAuthority\n"
     "                        .pendingAfterUnpublishedCompletion(",
     "NativeViewportLifecycleAuthority.callbackOwnsActiveReader(",
+    "NativeViewportLifecycleAuthority\n"
+    "                        .mayReleaseDestroyedViewModel(",
+    "releaseNativeViewportReaderState(viewModel)",
+    "removeNativeViewportBindingsForViewModel(",
+    '" state_released=" + stateReleased',
     "NativeViewportProvider.METHOD_CLEAR_GENERATION",
     '"not_generation_owner".equals(status)',
     '"reason=inactive_view_model"',
     '"native_viewport_completion_deferred "',
     "NativeViewportLifecycleAuthority\n                        .mayClearForDestroyedActivity(",
     'clearNativeViewport(activity, "activity_destroyed")',
-    'log("activity_destroyed active_owner=" + activeOwner)',
+    'log("activity_destroyed active_owner=" + activeOwner',
     'clearNativeViewport(activeActivity.get(), reason)',
 ):
     if required not in hook:

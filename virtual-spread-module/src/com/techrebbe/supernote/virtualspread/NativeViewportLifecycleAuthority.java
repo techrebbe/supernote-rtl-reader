@@ -27,6 +27,17 @@ public final class NativeViewportLifecycleAuthority {
             && callbackViewModel == activeViewModel;
     }
 
+    /** Release a destroyed activity's state unless its view model was reused. */
+    public static boolean mayReleaseDestroyedViewModel(
+        Object destroyedViewModel,
+        Object activeViewModel,
+        boolean destroyingActivityOwnsReader
+    ) {
+        return destroyedViewModel != null
+            && (destroyingActivityOwnsReader
+                || destroyedViewModel != activeViewModel);
+    }
+
     /**
      * Verification binding for the same document must not erase knowledge of
      * an already-started native page load. A real document replacement does.

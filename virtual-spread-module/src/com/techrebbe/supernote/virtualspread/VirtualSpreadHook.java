@@ -816,21 +816,30 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 protected void afterHookedMethod(MethodHookParam param) {
                     Activity activity = (Activity) param.thisObject;
                     Activity current = activeActivity.get();
+                    Object viewModel = objectField(
+                        activity,
+                        "documentViewModel"
+                    );
+                    Object activeViewModel = current == null ? null
+                        : objectField(current, "documentViewModel");
                     boolean activeOwner = NativeViewportLifecycleAuthority
                         .mayClearForDestroyedActivity(activity, current);
                     if (activeOwner) {
                         clearNativeViewport(activity, "activity_destroyed");
-                        Object viewModel = objectField(
-                            activity,
-                            "documentViewModel"
-                        );
-                        synchronized (STATES) {
-                            STATES.remove(viewModel);
-                        }
                         activeActivity = new WeakReference<>(null);
                         observeDocumentKey(null);
                     }
-                    log("activity_destroyed active_owner=" + activeOwner);
+                    boolean stateReleased = NativeViewportLifecycleAuthority
+                        .mayReleaseDestroyedViewModel(
+                            viewModel,
+                            activeViewModel,
+                            activeOwner
+                        );
+                    if (stateReleased) {
+                        releaseNativeViewportReaderState(viewModel);
+                    }
+                    log("activity_destroyed active_owner=" + activeOwner
+                        + " state_released=" + stateReleased);
                 }
             }
         );
@@ -2154,6 +2163,12 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                         "this$0"
                     );
                     int page = intField(param.thisObject, "val$page", -1);
+                    if (!nativeViewportCallbackOwnsActiveReader(
+                            activeActivity.get(),
+                            viewModel
+                        )) {
+                        return;
+                    }
                     // Initial open and fit/orientation refresh can construct
                     // workers outside DocumentViewModel.loadPage(). A worker
                     // for the live page must synchronously invalidate the old
@@ -2209,7 +2224,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                             NATIVE_VIEWPORT_TASK_BINDINGS.get(
                                 param.thisObject
                             );
-                        if (binding != null) {
+                        if (binding != null
+                            && nativeViewportCallbackOwnsActiveReader(
+                                activeActivity.get(),
+                                binding.viewModel
+                            )) {
                             NATIVE_VIEWPORT_PAGE_INFO_BINDINGS.put(
                                 pageInfo,
                                 binding
@@ -2782,6 +2801,12 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         Object pageInfo
     ) {
         if (viewModel == null || pageInfo == null) {
+            return null;
+        }
+        if (!nativeViewportCallbackOwnsActiveReader(
+                activeActivity.get(),
+                viewModel
+            )) {
             return null;
         }
         NativeViewportLoadBinding binding =
@@ -3358,6 +3383,49 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             activity,
             activeViewModel
         );
+    }
+
+    private static void releaseNativeViewportReaderState(Object viewModel) {
+        if (viewModel == null) {
+            return;
+        }
+        synchronized (NATIVE_VIEWPORT_LOAD_BINDING_LOCK) {
+            synchronized (STATES) {
+                STATES.remove(viewModel);
+                removeNativeViewportBindingsForViewModel(
+                    NATIVE_VIEWPORT_TASK_BINDINGS,
+                    viewModel
+                );
+                removeNativeViewportBindingsForViewModel(
+                    NATIVE_VIEWPORT_PAGE_INFO_BINDINGS,
+                    viewModel
+                );
+            }
+        }
+        NativeViewportLoadBinding invocation =
+            NATIVE_VIEWPORT_LOAD_INVOCATION.get();
+        if (invocation != null && invocation.viewModel == viewModel) {
+            NATIVE_VIEWPORT_LOAD_INVOCATION.remove();
+        }
+        NativeViewportCompletion completion =
+            NATIVE_VIEWPORT_COMPLETION.get();
+        if (completion != null && completion.viewModel == viewModel) {
+            NATIVE_VIEWPORT_COMPLETION.remove();
+        }
+    }
+
+    private static void removeNativeViewportBindingsForViewModel(
+        Map<Object, NativeViewportLoadBinding> bindings,
+        Object viewModel
+    ) {
+        Iterator<Map.Entry<Object, NativeViewportLoadBinding>> iterator =
+            bindings.entrySet().iterator();
+        while (iterator.hasNext()) {
+            NativeViewportLoadBinding binding = iterator.next().getValue();
+            if (binding != null && binding.viewModel == viewModel) {
+                iterator.remove();
+            }
+        }
     }
 
     private static void clearNativeViewportGeneration(

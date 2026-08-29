@@ -394,6 +394,25 @@ generation 11 republished the normative page-1 descriptor. A final cold process
 reopen repeated generation-5 activation followed by generation-7 exact-load
 publication with no stale descriptor surviving either boundary.
 
+The final exact-head review then found two opposing cleanup races outside that
+successful publication path. A delayed failure could clear a newer generation
+owned by the same process session, and a callback from a replaced
+`DocumentActivity` could clear the replacement activity's authority. Commit
+`53965eb06de61d581ba717cf58bd7391f1176131` adds an exact-generation conditional
+clear and requires active view-model ownership before callback cleanup. Its
+upgrade-compatible version-28 APK had SHA-256
+`cc265edda0785b0f8f317650c3ca33d53d579c07a1184d8928b42b019d0866f4`.
+
+The focused post-review Nomad gate reproduced generation-5 activation,
+generation-7 page-1 publication, generation-9 page-0 replacement, and
+generation-11 page-1 replacement with the same descriptor hashes. A disposable
+ordinary three-page PDF changed on the forward native page-bar turn and returned
+to a pixel-identical page-1 screenshot SHA-256
+`bf63f5f384743339929ce9a75d13810f099985a7bcc00e6c95fa69da3de316d4`.
+It emitted zero Virtual Spread authority or navigation events. The control was
+removed and a final normative cold open again published descriptor SHA-256
+`a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`.
+
 The first-load-before-manifest path was separately exercised by the markerless
 source control. It recorded the exact completed load without publishing any
 authority. Native forward/back page turns returned to a pixel-identical screen

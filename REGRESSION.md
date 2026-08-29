@@ -2135,6 +2135,26 @@ remap, or navigation-ownership event occurred. The disposable ordinary fixture
 was removed after the check, while the normative hidden-cache pair remains for
 InkBridge's shared gate.
 
+A final exact-head review found that publication-failure cleanup still used the
+process-wide session alone: a delayed failure or a callback from a replaced
+`DocumentActivity` could clear a newer load fence. Commit
+`53965eb06de61d581ba717cf58bd7391f1176131` scopes failure cleanup to both the
+exact page-load generation and the view model currently owned by the active
+activity. Pure tests prove that an older generation and a replaced view model
+cannot clear newer authority. Its signer-verified version-28 APK had SHA-256
+`cc265edda0785b0f8f317650c3ca33d53d579c07a1184d8928b42b019d0866f4`.
+
+The focused post-review hardware gate reproduced the same cold page-1
+descriptor, cleared it before generation 9 published page 0, and cleared page 0
+before generation 11 republished descriptor SHA-256
+`a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`.
+The ordinary three-page control changed pixels on the forward turn, returned to
+the identical page-1 screenshot SHA-256
+`bf63f5f384743339929ce9a75d13810f099985a7bcc00e6c95fa69da3de316d4`,
+and emitted zero Virtual Spread authority or navigation events. The disposable
+control was removed and a final normative cold open again published the page-1
+descriptor.
+
 This gate proves authoritative descriptor publication, cold-reopen recovery,
 and page-load/reload invalidation on the Nomad. It does not claim that the
 InkBridge consumer read or the cross-device annotation round trip has run; that

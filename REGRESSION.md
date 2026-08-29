@@ -2008,7 +2008,7 @@ a Supernote Nomad (`SN078C10015092`) with firmware fingerprint
 display build `Chauvet.E103.2606161001.2393_release`, and SupernoteDocument
 `1.02.446`. The installed upgrade-compatible v0.0.26 (`versionCode=28`) APK had
 SHA-256
-`72ecc59c4702221fdec27d2173f11915e66ff168dd067197c1793a620d00300f`;
+`95e39ce2083b3c9b40f5cbff17ce124ca79163ef01959c3a7c76c8235699a060`;
 its signer certificate SHA-256 remained
 `a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`.
 
@@ -2097,6 +2097,15 @@ completion, while stale, unmatched, replaced-document, and superseded-request
 callbacks retain the pending fence and remain unable to affect authority.
 Pure lifecycle tests and the runtime scope guard pin this fail-closed split.
 
+The final lifecycle correction was hardware-tested from code commit
+`c55ec367c7e0d3822550878601ac09786570902a`. A markerless ordinary PDF
+completed its first load before any manifest was available and logged the new
+deferred-completion path; it neither published viewport authority nor activated
+Virtual Spread. The same control advanced natively from page 1 to page 2 and
+back, returned to a pixel-identical page-1 screen, and produced zero manifest
+acceptance, activation, RTL navigation, page-loaded, orientation-remap, link,
+history, or viewport-publication events.
+
 On the final artifact, a cold reopen of page 1 began generation 5 from manifest
 activation. An early unbound callback was rejected before it could change load
 or provider state. The exact later worker then cleared authority at load start,
@@ -2106,6 +2115,18 @@ produced no late clear or replacement. The same final sequence repeated after
 the ordinary-PDF control and ended with the normative page-1 descriptor
 authoritative. No stale descriptor survived a load transition or unmatched
 callback.
+
+Native page-bar turns then exercised two complete invalidation cycles. The
+page-1 descriptor was cleared before generation 9 loaded zero-based virtual
+page 0, which published descriptor SHA-256
+`876619fb59bda77de4b728dd6b65f6359f1ae3cca3ef2a52902175526b47b4d4`.
+The return turn cleared it before generation 11 and republished the normative
+page-1 descriptor SHA-256
+`a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`.
+The final cold process reopen repeated manifest and native-snapshot acceptance,
+generation-5 activation, generation-7 exact-load publication, and the same
+page-1 descriptor. The device-side PDF and sidecar hashes remained unchanged,
+the disposable ordinary control was removed, and auto-rotation was restored.
 
 A controlled ordinary PDF copy with no authenticated sidecar opened normally
 in SupernoteDocument. It produced only the module-load and document-observation

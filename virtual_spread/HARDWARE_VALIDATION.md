@@ -367,6 +367,40 @@ place a `.nomedia` marker before publication if invisibility from generic Androi
 media indexes is also required; that operational marker is not part of the
 authenticated view identity.
 
+## v0.0.26 authoritative native viewport - HARDWARE VALIDATED
+
+The final v0.0.26 lifecycle and descriptor gate passed on 2026-08-28 on Nomad
+`SN078C10015092`, SupernoteDocument `1.02.446`, and firmware fingerprint
+`Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys`.
+The tested code commit was
+`c55ec367c7e0d3822550878601ac09786570902a`; its signed version-28 APK had
+SHA-256
+`95e39ce2083b3c9b40f5cbff17ce124ca79163ef01959c3a7c76c8235699a060`
+and retained the established upgrade-compatible signer SHA-256
+`a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`.
+
+The normative page-143 cache pair retained PDF SHA-256
+`0c895249809a36f382312ae42547ec2f9755e0b4095ce2b8e8a5f6145be3a32f`
+and sidecar SHA-256
+`37cda3d96db8b2f8f311df60ccfbbd397bbb446b9e4a7451dcbbffc283aff9df`.
+A cold native open accepted both the manifest and embedded native snapshot and
+published zero-based virtual page 1 on the exact `1872 x 1404` native canvas.
+The canonical descriptor SHA-256 was
+`a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`.
+
+Native page-bar turns proved synchronous invalidation and replacement: page 1
+was cleared before generation 9 published page 0, and page 0 was cleared before
+generation 11 republished the normative page-1 descriptor. A final cold process
+reopen repeated generation-5 activation followed by generation-7 exact-load
+publication with no stale descriptor surviving either boundary.
+
+The first-load-before-manifest path was separately exercised by the markerless
+source control. It recorded the exact completed load without publishing any
+authority. Native forward/back page turns returned to a pixel-identical screen
+and produced zero Virtual Spread navigation or publication events. The control
+was removed, the normative hidden-cache document was restored, and the device's
+auto-rotation setting was restored after the gate.
+
 ## Decision
 
 Proceed with the virtual-spread architecture. Do not port the legacy dual-page

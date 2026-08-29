@@ -2168,6 +2168,22 @@ one was destroyed; the old teardown logged
 `active_owner=false state_released=true`, and the replacement retained the
 authoritative page-1 descriptor SHA-256 `a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`.
 
+The final exact-head review then exposed the complementary startup race: a
+replacement reader could construct its first page worker synchronously inside
+`onCreate()` before the old after-hook changed process-wide ownership. Commit
+`a9853afb3fcf94b013bdc0121e9374af6e8f3b09` moves ownership and authority
+invalidation to the `onCreate()` before-hook and constrains the temporary
+pre-field view-model fallback to that exact creation scope. The signer-verified
+version-28 APK had SHA-256
+`6bf77b81c6e822656367351e0864532d643e12b71d95df670f99ceff658dec05`.
+Forced task recreation on the Nomad cleared the prior viewport with
+`reason=activity_creation_started` before the replacement claimed ownership or
+began a page-load generation. The new activity then accepted the normative
+snapshot and republished descriptor SHA-256
+`a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`;
+the old teardown released only its obsolete state. This proves fail-closed
+authority across both halves of activity replacement: startup and teardown.
+
 This gate proves authoritative descriptor publication, cold-reopen recovery,
 and page-load/reload invalidation on the Nomad. It does not claim that the
 InkBridge consumer read or the cross-device annotation round trip has run; that

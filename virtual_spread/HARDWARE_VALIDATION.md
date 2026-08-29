@@ -427,6 +427,24 @@ activity's teardown. The old hook logged
 provider record, and the replacement published the unchanged page-1 descriptor
 SHA-256 `a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`.
 
+The final exact-head review identified the inverse startup boundary: the
+replacement could synchronously construct its first page worker inside
+`onCreate()` before the former after-hook had recorded it as the active owner.
+Commit `a9853afb3fcf94b013bdc0121e9374af6e8f3b09` now claims replacement
+ownership and clears the prior provider record in the `onCreate()` before-hook;
+only that exact creation scope may use the temporary pre-field view-model
+fallback. Its signed version-28 APK had SHA-256
+`6bf77b81c6e822656367351e0864532d643e12b71d95df670f99ceff658dec05`.
+On the Nomad, forced task recreation logged
+`native_viewport_cleared reason=activity_creation_started` before
+`activity_ownership_started replacement=true`, `activity_created`, manifest
+activation, or any new page-load generation. The replacement then published
+the unchanged page-1 descriptor SHA-256
+`a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`;
+the old activity subsequently logged
+`active_owner=false state_released=true`. Thus neither the old descriptor nor
+the old activity retained authority across the replacement startup boundary.
+
 The first-load-before-manifest path was separately exercised by the markerless
 source control. It recorded the exact completed load without publishing any
 authority. Native forward/back page turns returned to a pixel-identical screen

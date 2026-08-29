@@ -2000,6 +2000,208 @@ interception or conversion; InkBridge owns canonical annotation conversion using
 the authenticated schema-v3 mapping authority. Full hardware steps and hashes
 remain recorded in `virtual_spread/HARDWARE_VALIDATION.md`.
 
+## v0.0.26 authoritative native viewport - HARDWARE PASS
+
+The focused v0.0.26 publication and invalidation matrix passed on 2026-08-28 on
+a Supernote Nomad (`SN078C10015092`) with firmware fingerprint
+`Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys`,
+display build `Chauvet.E103.2606161001.2393_release`, and SupernoteDocument
+`1.02.446`. The installed upgrade-compatible v0.0.26 (`versionCode=28`) APK had
+SHA-256
+`95e39ce2083b3c9b40f5cbff17ce124ca79163ef01959c3a7c76c8235699a060`;
+its signer certificate SHA-256 remained
+`a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`.
+
+The normative schema-v3 page-143 fixture was installed at its deterministic
+hidden cache path under
+`/storage/emulated/0/.inkbridge/virtual-spread/v1/inkbridge-doc-v1-c9271098e6d98f7fff378c4d630dc9c179cf45cb5283f3559eee910e3afafeb4/inkbridge-view-v1-7cb2c2fda17d5510d33b0a97e702cbc66d5124735be45f810aef6053c1775f30/`.
+The device-side PDF and sidecar SHA-256 values were respectively
+`0c895249809a36f382312ae42547ec2f9755e0b4095ce2b8e8a5f6145be3a32f`
+and
+`37cda3d96db8b2f8f311df60ccfbbd397bbb446b9e4a7451dcbbffc283aff9df`;
+the authenticated mapping-authority digest was
+`646b905c12266774882e0c4d7ebbbca77b2f386f432979ebcbfcda1d9ace268a`.
+
+For zero-based virtual page 1, `PluginFileAPI.getPageSize` and the native
+reader reported an `1872 x 1404` canvas. The module published this exact
+descriptor:
+
+```json
+{"schemaVersion":1,"authority":"rtl-reader-native-viewport-v1","documentId":"inkbridge-doc-v1-c9271098e6d98f7fff378c4d630dc9c179cf45cb5283f3559eee910e3afafeb4","viewId":"inkbridge-view-v1-7cb2c2fda17d5510d33b0a97e702cbc66d5124735be45f810aef6053c1775f30","virtualPageIndex":1,"nativePageSize":[1872,1404],"spreadToNative":[2.164006674264231,0.0,0.0,-2.1636211394924048,0.999465811965812,1402.0264983910781]}
+```
+
+The canonical provider payload (no terminal newline) had SHA-256
+`a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`.
+The checked-in fixture file includes one terminal LF and therefore has SHA-256
+`27145685a793ce2716a5da6c26db4a1fa64bac0e1ad6bc1329e0c502326a48e4`.
+The nonzero translation and slightly different x/y scale are measured native
+fit authority, not an aspect-ratio reconstruction.
+
+The first cold-reopen attempt found one fail-closed lifecycle defect: an
+unbound native completion could establish the page before asynchronous manifest
+activation, leaving no descriptor to publish. The corrected module synthesizes
+an exact-current completion only when manifest activation owns initialization,
+the page is known, viewport authority is absent, and no real page load or
+pending navigation owns the state. Focused tests pin both recovery and the
+opposing active-load boundary.
+
+The exact-head review then identified a separate same-page overlap risk: an
+older `onPageLoaded` callback could previously begin a fresh generation at
+completion time and adopt a newer load's authority. The final module instead
+binds cached synchronous loads and the exact firmware's asynchronous
+`DocumentViewModel$6` page workers to a per-page request serial when the load
+is initiated. Adjacent prefetch workers receive no provider generation; only
+the exact worker whose page and request serial still match the live reader may
+begin or complete publication. Older same-page workers, replaced native MuPDF
+instances, and unmatched callbacks fail closed. The task constructor and typed
+completion hook are exact-firmware locked and included in the narrow-hook scope
+guard.
+
+The final review also identified two lifecycle ownership gaps. First,
+same-document manifest binding could clear an in-flight native-load marker and
+temporarily permit a synthetic completion from older page state. Verification
+binding now preserves that marker, and first-page activation checks it even
+before `lastPage` has been established; only a real document replacement clears
+it.
+Second, teardown from a replaced `DocumentActivity` could clear the viewport
+owned by the replacement activity. Destruction now clears provider and reader
+state only when the destroyed instance is still the active owner. Pure
+lifecycle regressions pin both rules, and the hardware gate exercised rapid
+ordinary/Virtual-Spread replacement before confirming that the final page-1
+record remained authoritative.
+
+The final exact-head review also found that missing native `PageInfo` render
+offset accessors were previously converted to zero by a general-purpose
+fallback helper. Viewport publication now reads both offsets directly and
+requires finite numeric values; a missing accessor, non-number, NaN, or
+infinity fails closed. Focused tests and the static scope guard prevent the
+zero-offset fallback from returning.
+
+The following complete-head review found two further asynchronous lifecycle
+edges. Current-page fit/orientation workers constructed outside the hooked
+`loadPage` path now begin and clear the provider generation immediately; only
+non-current adjacent prefetch workers remain generation-less. An unmatched or
+unbound completion now returns before clearing `nativeViewportLoadPending` or
+touching provider authority, so an older callback cannot invalidate the newer
+load it failed to match. Pure worker-page tests and structural ordering guards
+pin both rules.
+
+The last exact-head review found the opposing first-open race: the exact
+current load could finish before asynchronous manifest verification, yet its
+generation-less completion left `nativeViewportLoadPending` set. Verified
+activation would then refuse to recover the already-loaded page indefinitely.
+The exact task/request binding now records only that its load completed when
+authority is still unavailable; it does not publish or adopt a generation.
+Manifest activation can subsequently synthesize the live exact-current
+completion, while stale, unmatched, replaced-document, and superseded-request
+callbacks retain the pending fence and remain unable to affect authority.
+Pure lifecycle tests and the runtime scope guard pin this fail-closed split.
+
+The final lifecycle correction was hardware-tested from code commit
+`c55ec367c7e0d3822550878601ac09786570902a`. A markerless ordinary PDF
+completed its first load before any manifest was available and logged the new
+deferred-completion path; it neither published viewport authority nor activated
+Virtual Spread. The same control advanced natively from page 1 to page 2 and
+back, returned to a pixel-identical page-1 screen, and produced zero manifest
+acceptance, activation, RTL navigation, page-loaded, orientation-remap, link,
+history, or viewport-publication events.
+
+On the final artifact, a cold reopen of page 1 began generation 5 from manifest
+activation. An early unbound callback was rejected before it could change load
+or provider state. The exact later worker then cleared authority at load start,
+began generation 7 only after its request binding and manifest were verified,
+and published the measured descriptor. Fifteen seconds of additional idle time
+produced no late clear or replacement. The same final sequence repeated after
+the ordinary-PDF control and ended with the normative page-1 descriptor
+authoritative. No stale descriptor survived a load transition or unmatched
+callback.
+
+Native page-bar turns then exercised two complete invalidation cycles. The
+page-1 descriptor was cleared before generation 9 loaded zero-based virtual
+page 0, which published descriptor SHA-256
+`876619fb59bda77de4b728dd6b65f6359f1ae3cca3ef2a52902175526b47b4d4`.
+The return turn cleared it before generation 11 and republished the normative
+page-1 descriptor SHA-256
+`a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`.
+The final cold process reopen repeated manifest and native-snapshot acceptance,
+generation-5 activation, generation-7 exact-load publication, and the same
+page-1 descriptor. The device-side PDF and sidecar hashes remained unchanged,
+the disposable ordinary control was removed, and auto-rotation was restored.
+
+A controlled ordinary PDF copy with no authenticated sidecar opened normally
+in SupernoteDocument. It produced only the module-load and document-observation
+diagnostics: no manifest acceptance, viewport publication, landscape/portrait
+remap, or navigation-ownership event occurred. The disposable ordinary fixture
+was removed after the check, while the normative hidden-cache pair remains for
+InkBridge's shared gate.
+
+A final exact-head review found that publication-failure cleanup still used the
+process-wide session alone: a delayed failure or a callback from a replaced
+`DocumentActivity` could clear a newer load fence. Commit
+`53965eb06de61d581ba717cf58bd7391f1176131` scopes failure cleanup to both the
+exact page-load generation and the view model currently owned by the active
+activity. Pure tests prove that an older generation and a replaced view model
+cannot clear newer authority. Its signer-verified version-28 APK had SHA-256
+`cc265edda0785b0f8f317650c3ca33d53d579c07a1184d8928b42b019d0866f4`.
+
+The focused post-review hardware gate reproduced the same cold page-1
+descriptor, cleared it before generation 9 published page 0, and cleared page 0
+before generation 11 republished descriptor SHA-256
+`a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`.
+The ordinary three-page control changed pixels on the forward turn, returned to
+the identical page-1 screenshot SHA-256
+`bf63f5f384743339929ce9a75d13810f099985a7bcc00e6c95fa69da3de316d4`,
+and emitted zero Virtual Spread authority or navigation events. The disposable
+control was removed and a final normative cold open again published the page-1
+descriptor.
+
+The next exact-head review identified a retention-only lifecycle edge: each
+`ReaderState` held load bindings that strongly referenced its own weak-map key,
+and replaced-activity teardown released state only for the active owner. Commit
+`5d970328a108013b19c97562e28d45270102ece0` always releases an obsolete destroyed
+view model and its task, page-info, and thread-local bindings, while preserving a
+view model reused by the replacement activity. Its signer-verified APK had
+SHA-256
+`393929b301eac71f4a1e61d53d162dd2c502576d1297659da29c5890aabc0825`.
+The Nomad task-recreation gate created the replacement activity before the old
+one was destroyed; the old teardown logged
+`active_owner=false state_released=true`, and the replacement retained the
+authoritative page-1 descriptor SHA-256 `a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`.
+
+The final exact-head review then exposed the complementary startup race: a
+replacement reader could construct its first page worker synchronously inside
+`onCreate()` before the old after-hook changed process-wide ownership. Commit
+`a9853afb3fcf94b013bdc0121e9374af6e8f3b09` moves ownership and authority
+invalidation to the `onCreate()` before-hook and constrains the temporary
+pre-field view-model fallback to that exact creation scope. The signer-verified
+version-28 APK had SHA-256
+`6bf77b81c6e822656367351e0864532d643e12b71d95df670f99ceff658dec05`.
+Forced task recreation on the Nomad cleared the prior viewport with
+`reason=activity_creation_started` before the replacement claimed ownership or
+began a page-load generation. The new activity then accepted the normative
+snapshot and republished descriptor SHA-256
+`a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`;
+the old teardown released only its obsolete state. This proves fail-closed
+authority across both halves of activity replacement: startup and teardown.
+
+The next exact-head review found one remaining ownership writer: late
+`screenChange()` and `onConfigurationChanged()` callbacks still reassigned the
+active activity. Commit `c41f674404f4ecf825b3d1c32f974d2b38938918`
+removes those assignments and accepts either callback only when its activity is
+already the current owner. Pure tests prove that a replaced or null activity
+cannot reclaim authority. The signer-verified version-28 APK had SHA-256
+`9a8a273a95d15e95a33b3aedeb1bb3b8e2a05749958f17ce64308d9579ed9a4a`.
+The focused Nomad gate again cleared the prior descriptor before replacement
+startup, published the unchanged normative page-1 descriptor SHA-256
+`a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`,
+and observed obsolete teardown with `active_owner=false state_released=true`;
+no stale callback reclaimed ownership or cleared the replacement.
+
+This gate proves authoritative descriptor publication, cold-reopen recovery,
+and page-load/reload invalidation on the Nomad. It does not claim that the
+InkBridge consumer read or the cross-device annotation round trip has run; that
+shared page-143 gate remains the next cross-project phase.
+
 ## Failure capture
 
 Before reproducing a failure:

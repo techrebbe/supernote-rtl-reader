@@ -367,6 +367,106 @@ place a `.nomedia` marker before publication if invisibility from generic Androi
 media indexes is also required; that operational marker is not part of the
 authenticated view identity.
 
+## v0.0.26 authoritative native viewport - HARDWARE VALIDATED
+
+The final v0.0.26 lifecycle and descriptor gate passed on 2026-08-28 on Nomad
+`SN078C10015092`, SupernoteDocument `1.02.446`, and firmware fingerprint
+`Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys`.
+The tested code commit was
+`c55ec367c7e0d3822550878601ac09786570902a`; its signed version-28 APK had
+SHA-256
+`95e39ce2083b3c9b40f5cbff17ce124ca79163ef01959c3a7c76c8235699a060`
+and retained the established upgrade-compatible signer SHA-256
+`a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`.
+
+The normative page-143 cache pair retained PDF SHA-256
+`0c895249809a36f382312ae42547ec2f9755e0b4095ce2b8e8a5f6145be3a32f`
+and sidecar SHA-256
+`37cda3d96db8b2f8f311df60ccfbbd397bbb446b9e4a7451dcbbffc283aff9df`.
+A cold native open accepted both the manifest and embedded native snapshot and
+published zero-based virtual page 1 on the exact `1872 x 1404` native canvas.
+The canonical descriptor SHA-256 was
+`a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`.
+
+Native page-bar turns proved synchronous invalidation and replacement: page 1
+was cleared before generation 9 published page 0, and page 0 was cleared before
+generation 11 republished the normative page-1 descriptor. A final cold process
+reopen repeated generation-5 activation followed by generation-7 exact-load
+publication with no stale descriptor surviving either boundary.
+
+The final exact-head review then found two opposing cleanup races outside that
+successful publication path. A delayed failure could clear a newer generation
+owned by the same process session, and a callback from a replaced
+`DocumentActivity` could clear the replacement activity's authority. Commit
+`53965eb06de61d581ba717cf58bd7391f1176131` adds an exact-generation conditional
+clear and requires active view-model ownership before callback cleanup. Its
+upgrade-compatible version-28 APK had SHA-256
+`cc265edda0785b0f8f317650c3ca33d53d579c07a1184d8928b42b019d0866f4`.
+
+The focused post-review Nomad gate reproduced generation-5 activation,
+generation-7 page-1 publication, generation-9 page-0 replacement, and
+generation-11 page-1 replacement with the same descriptor hashes. A disposable
+ordinary three-page PDF changed on the forward native page-bar turn and returned
+to a pixel-identical page-1 screenshot SHA-256
+`bf63f5f384743339929ce9a75d13810f099985a7bcc00e6c95fa69da3de316d4`.
+It emitted zero Virtual Spread authority or navigation events. The control was
+removed and a final normative cold open again published descriptor SHA-256
+`a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`.
+
+The next exact-head review identified a retention-only lifecycle edge: load
+bindings inside `ReaderState` strongly referenced the weak-map key, while a
+replaced activity's teardown did not remove obsolete state. Commit
+`5d970328a108013b19c97562e28d45270102ece0` releases destroyed obsolete state and
+every task/page-info/thread-local binding independently of provider ownership,
+but preserves a view model reused by the active replacement. Its signed APK had
+SHA-256
+`393929b301eac71f4a1e61d53d162dd2c502576d1297659da29c5890aabc0825`.
+On the Nomad, task recreation created the replacement activity before the old
+activity's teardown. The old hook logged
+`active_owner=false state_released=true`; it did not clear the replacement's
+provider record, and the replacement published the unchanged page-1 descriptor
+SHA-256 `a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`.
+
+The final exact-head review identified the inverse startup boundary: the
+replacement could synchronously construct its first page worker inside
+`onCreate()` before the former after-hook had recorded it as the active owner.
+Commit `a9853afb3fcf94b013bdc0121e9374af6e8f3b09` now claims replacement
+ownership and clears the prior provider record in the `onCreate()` before-hook;
+only that exact creation scope may use the temporary pre-field view-model
+fallback. Its signed version-28 APK had SHA-256
+`6bf77b81c6e822656367351e0864532d643e12b71d95df670f99ceff658dec05`.
+On the Nomad, forced task recreation logged
+`native_viewport_cleared reason=activity_creation_started` before
+`activity_ownership_started replacement=true`, `activity_created`, manifest
+activation, or any new page-load generation. The replacement then published
+the unchanged page-1 descriptor SHA-256
+`a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`;
+the old activity subsequently logged
+`active_owner=false state_released=true`. Thus neither the old descriptor nor
+the old activity retained authority across the replacement startup boundary.
+
+A subsequent exact-head review found that late `screenChange()` or
+`onConfigurationChanged()` callbacks still assigned process-wide activity
+ownership unconditionally. Commit
+`c41f674404f4ecf825b3d1c32f974d2b38938918` makes both callbacks read-only
+consumers of the current lifecycle owner and rejects every obsolete activity;
+pure tests cover active, replaced, and null callback owners. Its signed
+version-28 APK had SHA-256
+`9a8a273a95d15e95a33b3aedeb1bb3b8e2a05749958f17ce64308d9579ed9a4a`.
+The focused Nomad recreation gate again cleared authority at replacement
+startup, published the unchanged page-1 descriptor SHA-256
+`a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`,
+and let the obsolete activity release state with `active_owner=false` without
+reclaiming ownership or clearing the replacement. Rotation settings were
+restored after the gate.
+
+The first-load-before-manifest path was separately exercised by the markerless
+source control. It recorded the exact completed load without publishing any
+authority. Native forward/back page turns returned to a pixel-identical screen
+and produced zero Virtual Spread navigation or publication events. The control
+was removed, the normative hidden-cache document was restored, and the device's
+auto-rotation setting was restored after the gate.
+
 ## Decision
 
 Proceed with the virtual-spread architecture. Do not port the legacy dual-page

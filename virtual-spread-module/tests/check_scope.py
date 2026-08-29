@@ -81,6 +81,7 @@ expected_hooks = {
     '"onConfigurationChanged"',
     '"onDestroy"',
     '"turnPage"',
+    '"onPageLoaded"',
     '"onPageLoadedPart2"',
     '"setPageInfo"',
     '"showLinkJumpView"',
@@ -96,8 +97,31 @@ for expected in expected_hooks:
     if expected not in hook:
         raise SystemExit(f"missing expected narrow hook: {expected}")
 
-if hook.count("findAndHookMethod(") != len(expected_hooks):
+# loadPage has one narrow navigation/history guard and one private-overload
+# viewport lifecycle fence. Every other expected name is hooked once.
+if hook.count("findAndHookMethod(") != len(expected_hooks) + 1:
     raise SystemExit("unexpected extra LSPosed method hook")
+
+for required in (
+    "private static final String TARGET_LOAD_PAGE_TASK",
+    "loadPageTaskClass.getDeclaredConstructor(",
+    'loadPageTaskClass.getDeclaredMethod(\n                "mainThreadCall"',
+    "XposedBridge.hookMethod(",
+    '"this$0"',
+    'int page = intField(param.thisObject, "val$page", -1)',
+    "NATIVE_VIEWPORT_TASK_BINDINGS.put(",
+    "NATIVE_VIEWPORT_PAGE_INFO_BINDINGS.put(",
+    "Never reuse an in-flight identity.",
+    "NATIVE_VIEWPORT_LOAD_BINDING_LOCK",
+    "return latest;",
+):
+    if required not in hook:
+        raise SystemExit(
+            "native page completion lacks initiating-task binding: "
+            + required
+        )
+if hook.count("loadPageTaskClass.getDeclaredConstructor(") != 1:
+    raise SystemExit("unexpected extra LSPosed task-constructor hook")
 
 load_start = hook.find("public void handleLoadPackage(")
 load_end = hook.find("private static void hookActivity", load_start)
@@ -477,8 +501,8 @@ if not (
 if (
     "private static void handleManifestActivationInitialization("
         not in page_loaded
-    or "handlePageLoaded(viewModel, true)" not in page_loaded
-    or "handlePageLoaded(viewModel, false)" not in page_loaded
+    or "handlePageLoaded(viewModel, true, completion)" not in page_loaded
+    or "handlePageLoaded(viewModel, false, completion)" not in page_loaded
     or "pageLoadPreservesDeferredLinkIntent(" not in page_loaded
     or "clearQueuedLinkInvocation(state)" not in page_loaded
     or "state.mixedLinkCandidate = null" not in page_loaded
@@ -590,7 +614,7 @@ if lookup_start < 0 or lookup_end < 0:
 manifest_lookup = hook[lookup_start:lookup_end]
 for required in (
     'objectField(current, "documentViewModel") == null',
-    'objectField(activity, "documentViewModel") != viewModel',
+    "!nativeViewportCallbackOwnsActiveReader(\n                    activity,\n                    viewModel",
     'manifest_lookup_skipped reason=stale_view_model',
     "observeDocumentKey(null)",
     "String key = lexicalAbsolutePath(uri.getPath())",
@@ -1317,11 +1341,11 @@ if not (0 <= duplicate_guard < json_parse):
     )
 
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
-if 'android:versionCode="27"' not in manifest:
+if 'android:versionCode="28"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version code")
-if 'android:versionName="0.0.25"' not in manifest:
+if 'android:versionName="0.0.26"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
-if 'private static final String VERSION = "0.0.25"' not in hook:
+if 'private static final String VERSION = "0.0.26"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
 if (
     'android:name="xposedscope"' not in manifest
@@ -1391,6 +1415,196 @@ if scope != ["com.supernote.document"]:
     raise SystemExit(f"unexpected LSPosed scope: {scope}")
 if "android.permission" in manifest:
     raise SystemExit("navigation-only module must not request Android permissions")
+
+viewport_authority = (
+    root
+    / "src/com/techrebbe/supernote/virtualspread/NativeViewportAuthority.java"
+).read_text(encoding="utf-8")
+viewport_provider = (
+    root
+    / "src/com/techrebbe/supernote/virtualspread/NativeViewportProvider.java"
+).read_text(encoding="utf-8")
+viewport_generation_fence = (
+    root
+    / "src/com/techrebbe/supernote/virtualspread/NativeViewportGenerationFence.java"
+).read_text(encoding="utf-8")
+viewport_completion_authority = (
+    root
+    / "src/com/techrebbe/supernote/virtualspread/NativeViewportCompletionAuthority.java"
+).read_text(encoding="utf-8")
+for required in (
+    '"rtl-reader-native-viewport-v1"',
+    '\\"schemaVersion\\":1',
+    '\\"nativePageSize\\"',
+    '\\"spreadToNative\\"',
+    "positiveZero(coefficients[index])",
+    "requireStable(coefficients)",
+    "requireSpreadInsideNative(",
+    "requireNumericRenderOffset(",
+):
+    if required not in viewport_authority:
+        raise SystemExit(
+            "native viewport authority is missing a frozen invariant: "
+            + required
+        )
+for required in (
+    "boundViewModel == liveViewModel",
+    "boundPageInfo == livePageInfo",
+    "boundGeneration == currentGeneration",
+):
+    if required not in viewport_completion_authority:
+        raise SystemExit(
+            "native viewport completion binding is incomplete: " + required
+        )
+for forbidden in (
+    '"nativeToSpread"',
+    "invert",
+    "inverse",
+):
+    if forbidden in viewport_authority:
+        raise SystemExit(
+            "native viewport authority must publish only the forward transform: "
+            + forbidden
+        )
+for required in (
+    '"com.supernote.document"',
+    '"com.ratta.supernote.pluginhost"',
+    "Binder.getCallingUid() != Process.SYSTEM_UID",
+    "getCallingPackage()",
+    "sessionToken.linkToDeath(this, 0)",
+    'response.putString("status", "unavailable")',
+    'sidecarPath.equals(documentPath + ".json")',
+    'snapshotId.equals(pdfIdentity + ":" + sidecarIdentity)',
+    'request.getString("generatedPdfSha256")',
+    'request.getString("sidecarSha256")',
+    'request.getString("mappingAuthoritySha256")',
+    'METHOD_BEGIN_LOAD = "begin_load_v1"',
+    'METHOD_CLEAR_GENERATION =\n        "clear_generation_v1"',
+    "LOAD_FENCE.accepts(",
+    "LOAD_FENCE.begin(",
+    "LOAD_FENCE.clear(",
+    "LOAD_FENCE.clearIfCurrent(",
+):
+    if required not in viewport_provider:
+        raise SystemExit(
+            "native viewport provider is missing a fail-closed invariant: "
+            + required
+        )
+for required in (
+    "requestedGeneration <= generation",
+    "requestedGeneration == generation",
+    "session.equals(requestedSession)",
+    "public boolean clearIfCurrent(",
+):
+    if required not in viewport_generation_fence:
+        raise SystemExit(
+            "native viewport page-load fence is incomplete: " + required
+        )
+for required in (
+    'android:name="com.techrebbe.supernote.virtualspread.NativeViewportProvider"',
+    'android:authorities="com.techrebbe.supernote.virtualspread.viewport"',
+    'android:exported="true"',
+    'android:grantUriPermissions="false"',
+):
+    if required not in manifest:
+        raise SystemExit(
+            "native viewport provider manifest declaration is missing: "
+            + required
+        )
+for required in (
+    "NativeViewportAuthority.fromNativeRender(",
+    "NativeViewportAuthority\n                .requireNumericRenderOffset(",
+    "private static volatile boolean nativeViewportMayBePublished;",
+    "nativeViewportMayBePublished = true;",
+    "activity == null || !nativeViewportMayBePublished",
+    "nativeViewportMayBePublished = false;",
+    'publication.putBinder(\n                "sessionToken", NATIVE_VIEWPORT_SESSION',
+    '"loadPage",\n            int.class,\n            Integer.class',
+    '"onPageLoaded",\n            TARGET_PAGE_INFO',
+    "NativeViewportProvider.METHOD_BEGIN_LOAD",
+    "NATIVE_VIEWPORT_COMPLETION = new ThreadLocal<>();",
+    "NativeViewportCompletionAuthority.isCurrent(",
+    "NativeViewportCompletionAuthority\n"
+    "                            .isCurrentWorkerPage(page, livePage)",
+    '"current_page_worker"',
+    "pageInfo != completedPageInfo",
+    '"reason=unmatched_before_state"',
+    '"native_viewport_completion_rejected reason=stale "',
+    'state.nativeViewportLoadPending = true;',
+    "NativeViewportLifecycleAuthority.pendingAfterStateBinding(",
+    "NativeViewportLifecycleAuthority\n"
+    "                        .pendingAfterUnpublishedCompletion(",
+    "NativeViewportLifecycleAuthority.callbackOwnsActiveReader(",
+    "NativeViewportLifecycleAuthority\n                            .beginsReaderOwnership(activity, previous)",
+    'clearNativeViewport(\n                            activity,\n                            "activity_creation_started"',
+    "CREATING_ACTIVITY.set(activity);",
+    "CREATING_ACTIVITY.remove();",
+    'log("activity_created active_owner="',
+    "&& !nativeViewportCallbackOwnsActiveReader(\n                    activity,\n                    viewModel",
+    "NativeViewportLifecycleAuthority\n                            .activityCallbackOwnsReader(",
+    'reason=inactive_screen_change',
+    'reason=inactive_configuration_change',
+    "NativeViewportLifecycleAuthority\n"
+    "                        .mayReleaseDestroyedViewModel(",
+    "releaseNativeViewportReaderState(viewModel)",
+    "removeNativeViewportBindingsForViewModel(",
+    '" state_released=" + stateReleased',
+    "NativeViewportProvider.METHOD_CLEAR_GENERATION",
+    '"not_generation_owner".equals(status)',
+    '"reason=inactive_view_model"',
+    '"native_viewport_completion_deferred "',
+    "NativeViewportLifecycleAuthority\n                        .mayClearForDestroyedActivity(",
+    'clearNativeViewport(activity, "activity_destroyed")',
+    'log("activity_destroyed active_owner=" + activeOwner',
+    'clearNativeViewport(activeActivity.get(), reason)',
+):
+    if required not in hook:
+        raise SystemExit(
+            "runtime viewport publication lifecycle is incomplete: "
+            + required
+        )
+
+publication_failure = hook.find(
+    'clearNativeViewportGeneration(\n                activity,\n'
+    '                viewModel,\n'
+    '                completedPageLoadGeneration,\n'
+    '                "publication_failed"'
+)
+if publication_failure < 0:
+    raise SystemExit(
+        "publication failure cleanup must be scoped to its page generation"
+    )
+
+manifest_unavailable = hook.find(
+    'clearNativeViewportGeneration(\n'
+    '                callbackOwner,\n'
+    '                viewModel,\n'
+    '                completedPageLoadGeneration,\n'
+    '                "manifest_unavailable"'
+)
+if manifest_unavailable < 0:
+    raise SystemExit(
+        "callback cleanup must retain active view-model ownership and generation"
+    )
+unbound_guard = hook.find("if (completion == null) {")
+pending_clear = hook.find(
+    "state.nativeViewportLoadPending = false;",
+    unbound_guard + 1,
+)
+if unbound_guard < 0 or pending_clear < 0 or unbound_guard > pending_clear:
+    raise SystemExit(
+        "unbound native viewport completions must return before load state "
+        "is cleared"
+    )
+for forbidden in (
+    'intMethod(pageInfo, "getOffsetX", 0)',
+    'intMethod(pageInfo, "getOffsetY", 0)',
+):
+    if forbidden in hook:
+        raise SystemExit(
+            "native viewport render offsets must not use fallback values: "
+            + forbidden
+        )
 
 workflow = (root.parent / ".github/workflows/build.yml").read_text(
     encoding="utf-8"

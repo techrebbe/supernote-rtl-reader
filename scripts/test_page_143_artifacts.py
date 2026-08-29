@@ -14,6 +14,7 @@ from build_page_143_artifacts import (
     DESCRIPTOR_NAME,
     FIXTURE_DIR,
     MAPPING_FIELDS,
+    NOMAD_PAGE143_SPREAD_TO_NATIVE,
     REPRESENTATION_CONTRACT,
     SOURCE_NAME,
     SYNTHETIC_GOLDEN,
@@ -69,6 +70,9 @@ def verify_bundle_semantics() -> None:
     ]
     sidecar = strict_json(sidecar_path)
     golden = strict_json(SYNTHETIC_GOLDEN)
+    native_viewport = strict_json(
+        FIXTURE_DIR / "page-143-native-viewport-v1.json"
+    )
 
     assert descriptor["schema"] == (
         "techrebbe.supernote.virtual-spread-artifacts/v1"
@@ -80,6 +84,41 @@ def verify_bundle_semantics() -> None:
     )
     assert descriptor["indexBase"] == 0
     assert descriptor["page143SourcePageIndex"] == 2
+    assert list(native_viewport) == [
+        "schemaVersion",
+        "authority",
+        "documentId",
+        "viewId",
+        "virtualPageIndex",
+        "nativePageSize",
+        "spreadToNative",
+    ]
+    assert native_viewport == {
+        "schemaVersion": 1,
+        "authority": "rtl-reader-native-viewport-v1",
+        "documentId": descriptor["output"]["documentId"],
+        "viewId": descriptor["output"]["viewId"],
+        "virtualPageIndex": 1,
+        "nativePageSize": [1872, 1404],
+        "spreadToNative": list(NOMAD_PAGE143_SPREAD_TO_NATIVE),
+    }
+    assert list(native_viewport["nativePageSize"]) == [1872, 1404]
+    assert all(
+        type(value) is float
+        for value in native_viewport["spreadToNative"]
+    )
+    canonical_native_viewport = json.dumps(
+        native_viewport,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    assert sha256_bytes(canonical_native_viewport) == (
+        "a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033"
+    )
+    assert sha256_file(
+        FIXTURE_DIR / "page-143-native-viewport-v1.json"
+    ) == "27145685a793ce2716a5da6c26db4a1fa64bac0e1ad6bc1329e0c502326a48e4"
     assert descriptor["contract"]["wireContract"]["sha256"] == (
         sha256_canonical_text(WIRE_CONTRACT)
     )
@@ -114,6 +153,26 @@ def verify_bundle_semantics() -> None:
             864.0,
             648.0,
         ]
+    native_transform = native_viewport["spreadToNative"]
+    native_width, native_height = native_viewport["nativePageSize"]
+    for spread_x, spread_y in (
+        (0.0, 0.0),
+        (864.0, 0.0),
+        (0.0, 648.0),
+        (864.0, 648.0),
+    ):
+        native_x = (
+            native_transform[0] * spread_x
+            + native_transform[2] * spread_y
+            + native_transform[4]
+        )
+        native_y = (
+            native_transform[1] * spread_x
+            + native_transform[3] * spread_y
+            + native_transform[5]
+        )
+        assert -1e-9 <= native_x <= native_width - 1 + 1e-9
+        assert -1e-9 <= native_y <= native_height - 1 + 1e-9
 
     assert sidecar["schema"] == descriptor["contract"]["manifestSchema"]
     assert sidecar["generatorVersion"] == descriptor["contract"][

@@ -197,70 +197,104 @@ public final class VirtualSpreadNavigationTest {
             "unbound manifest activation initializes the current spread",
             true,
             VirtualSpreadNavigation.manifestActivationRequiresInitialization(
-                false, 8L, 8L, -1, -1, false, -1, false, -1, false
+                false, 8L, 8L, -1, -1, false, -1, false, -1, false,
+                false, false
             )
         );
         assertBoolean(
             "fresh bound manifest activation initializes the current spread",
             true,
             VirtualSpreadNavigation.manifestActivationRequiresInitialization(
-                true, 8L, 8L, -1, -1, false, -1, false, -1, false
+                true, 8L, 8L, -1, -1, false, -1, false, -1, false,
+                false, false
+            )
+        );
+        assertBoolean(
+            "first-page native load blocks synthetic manifest activation",
+            false,
+            VirtualSpreadNavigation.manifestActivationRequiresInitialization(
+                true, 8L, 8L, -1, -1, false, -1, false, -1, false,
+                false, true
             )
         );
         assertBoolean(
             "same key and revision from an older generation reinitializes",
             true,
             VirtualSpreadNavigation.manifestActivationRequiresInitialization(
-                true, 7L, 8L, 3, -1, false, -1, false, -1, false
+                true, 7L, 8L, 3, -1, false, -1, false, -1, false,
+                true, false
             )
         );
         assertBoolean(
             "initialized page wins the publish-to-activation race",
             false,
             VirtualSpreadNavigation.manifestActivationRequiresInitialization(
-                true, 8L, 8L, 3, -1, false, -1, false, -1, false
+                true, 8L, 8L, 3, -1, false, -1, false, -1, false,
+                true, false
+            )
+        );
+        assertBoolean(
+            "initialized page without viewport authority is recovered",
+            true,
+            VirtualSpreadNavigation.manifestActivationRequiresInitialization(
+                true, 8L, 8L, 3, -1, false, -1, false, -1, false,
+                false, false
+            )
+        );
+        assertBoolean(
+            "active viewport load owns missing authority",
+            false,
+            VirtualSpreadNavigation.manifestActivationRequiresInitialization(
+                true, 8L, 8L, 3, -1, false, -1, false, -1, false,
+                false, true
             )
         );
         assertBoolean(
             "pending manual page wins the publish-to-activation race",
             false,
             VirtualSpreadNavigation.manifestActivationRequiresInitialization(
-                true, 8L, 8L, -1, 3, true, -1, false, -1, false
+                true, 8L, 8L, -1, 3, true, -1, false, -1, false,
+                false, false
             )
         );
         assertBoolean(
             "partial manual pending state fails closed",
             false,
             VirtualSpreadNavigation.manifestActivationRequiresInitialization(
-                true, 8L, 8L, -1, -1, true, -1, false, -1, false
+                true, 8L, 8L, -1, -1, true, -1, false, -1, false,
+                false, false
             )
         );
         assertBoolean(
             "pending internal link wins the publish-to-activation race",
             false,
             VirtualSpreadNavigation.manifestActivationRequiresInitialization(
-                true, 8L, 8L, -1, -1, false, 3, true, -1, false
+                true, 8L, 8L, -1, -1, false, 3, true, -1, false,
+                false, false
             )
         );
         assertBoolean(
             "partial link pending state fails closed",
             false,
             VirtualSpreadNavigation.manifestActivationRequiresInitialization(
-                true, 8L, 8L, -1, -1, false, -1, true, -1, false
+                true, 8L, 8L, -1, -1, false, -1, true, -1, false,
+                false, false
             )
         );
         assertBoolean(
             "pending link-history load wins the publish-to-activation race",
             false,
             VirtualSpreadNavigation.manifestActivationRequiresInitialization(
-                true, 8L, 8L, -1, -1, false, -1, false, 3, true
+                true, 8L, 8L, -1, -1, false, -1, false, 3, true,
+                false, false
             )
         );
         assertBoolean(
             "partial link-history pending state fails closed",
             false,
             VirtualSpreadNavigation.manifestActivationRequiresInitialization(
-                true, 8L, 8L, -1, -1, false, -1, false, -1, true
+                true, 8L, 8L, -1, -1, false, -1, false, -1, true,
+                false, false
             )
         );
         assertBoolean(

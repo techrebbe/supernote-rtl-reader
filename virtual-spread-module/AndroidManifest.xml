@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.techrebbe.supernote.virtualspread"
-    android:versionCode="27"
-    android:versionName="0.0.25">
+    android:versionCode="28"
+    android:versionName="0.0.26">
 
     <uses-sdk
         android:minSdkVersion="27"
@@ -25,5 +25,12 @@
         <meta-data
             android:name="xposedscope"
             android:value="com.supernote.document" />
+
+        <provider
+            android:name="com.techrebbe.supernote.virtualspread.NativeViewportProvider"
+            android:authorities="com.techrebbe.supernote.virtualspread.viewport"
+            android:enabled="true"
+            android:exported="true"
+            android:grantUriPermissions="false" />
     </application>
 </manifest>

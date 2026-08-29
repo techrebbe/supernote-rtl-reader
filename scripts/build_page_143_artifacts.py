@@ -45,7 +45,20 @@ OUTPUT_ARTIFACT_NAME = "page-143-virtual-spread-v1.pdf"
 SIDECAR_ARTIFACT_NAME = "page-143-virtual-spread-v1.pdf.json"
 DESCRIPTOR_NAME = "page-143-artifacts-v1.json"
 TAIL_NAME = "page-143-pdf-tail-authorities-v1.txt"
+NATIVE_VIEWPORT_NAME = "page-143-native-viewport-v1.json"
 README_NAME = "README.md"
+# Exact v0.0.26 hardware measurement from the Nomad native reader for
+# zero-based Virtual Spread page 1. This is deliberately not reconstructed
+# from page aspect ratio; the nonzero translation and unequal scales are the
+# native PageInfo CTM/offset evidence InkBridge needs.
+NOMAD_PAGE143_SPREAD_TO_NATIVE = (
+    2.164006674264231,
+    0.0,
+    0.0,
+    -2.1636211394924048,
+    0.999465811965812,
+    1402.0264983910781,
+)
 SYNTHETIC_GOLDEN = (
     ROOT / "virtual_spread" / "fixtures" / "page-143-contract-v1.json"
 )
@@ -406,6 +419,29 @@ def build_bundle(directory: Path) -> dict[str, Path]:
         newline="\n",
     )
 
+    native_viewport_path = directory / NATIVE_VIEWPORT_NAME
+    native_viewport_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "authority": "rtl-reader-native-viewport-v1",
+                "documentId": descriptor["output"]["documentId"],
+                "viewId": descriptor["output"]["viewId"],
+                "virtualPageIndex": 1,
+                "nativePageSize": [1872, 1404],
+                "spreadToNative": list(
+                    NOMAD_PAGE143_SPREAD_TO_NATIVE
+                ),
+            },
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
     readme_path = directory / README_NAME
     readme_path.write_text(
         "# Page-143 Virtual Spread fixture v1\n\n"
@@ -423,6 +459,15 @@ def build_bundle(directory: Path) -> dict[str, Path]:
         "`page-143-pdf-tail-authorities-v1.txt` is the exact generated PDF tail "
         "beginning with the five authenticated authority markers immediately "
         "before `startxref`.\n\n"
+        "`page-143-native-viewport-v1.json` is the exact seven-field native "
+        "viewport descriptor measured by v0.0.26 for zero-based Virtual Spread "
+        "page 1 on the Nomad's 1872-by-1404 persistent page canvas. It preserves "
+        "the native PageInfo fit and translation rather than inferring them from "
+        "page aspect ratio. It is a cross-project "
+        "golden vector, not runtime authority: production InkBridge must still "
+        "obtain a fresh matching descriptor from the v0.0.26 companion provider "
+        "and validate it against `PluginFileAPI.getPageSize` and the active "
+        "schema-v3 evidence.\n\n"
         "Contract and synthetic-golden text hashes use UTF-8 bytes with CRLF "
         "and CR normalized to LF and no other normalization. "
         "Only the forward source-to-spread transform is authoritative. InkBridge "
@@ -438,6 +483,7 @@ def build_bundle(directory: Path) -> dict[str, Path]:
         "sidecar": sidecar,
         "descriptor": descriptor_path,
         "tail": tail_path,
+        "native_viewport": native_viewport_path,
         "readme": readme_path,
     }
 

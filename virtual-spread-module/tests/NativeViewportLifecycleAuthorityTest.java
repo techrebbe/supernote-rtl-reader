@@ -5,6 +5,9 @@ public final class NativeViewportLifecycleAuthorityTest {
         activeActivityMayClearAuthority();
         replacedActivityCannotClearAuthority();
         activeViewModelOwnsCallbackCleanup();
+        replacementClaimsOwnershipBeforeOnCreateBody();
+        creatingActivityMayOwnEarlyCallback();
+        creatingActivityCannotOverrideAssignedViewModel();
         replacedViewModelCannotClearAuthority();
         destroyedObsoleteViewModelIsReleased();
         reusedActiveViewModelIsPreserved();
@@ -35,6 +38,48 @@ public final class NativeViewportLifecycleAuthorityTest {
             viewModel,
             activity,
             viewModel
+        ));
+    }
+
+    private static void replacementClaimsOwnershipBeforeOnCreateBody() {
+        Object current = new Object();
+        Object replacement = new Object();
+        require(NativeViewportLifecycleAuthority.beginsReaderOwnership(
+            replacement,
+            current
+        ));
+        require(!NativeViewportLifecycleAuthority.beginsReaderOwnership(
+            current,
+            current
+        ));
+        require(!NativeViewportLifecycleAuthority.beginsReaderOwnership(
+            null,
+            current
+        ));
+    }
+
+    private static void creatingActivityMayOwnEarlyCallback() {
+        require(NativeViewportLifecycleAuthority.callbackOwnsActiveReader(
+            new Object(),
+            new Object(),
+            null,
+            true
+        ));
+    }
+
+    private static void creatingActivityCannotOverrideAssignedViewModel() {
+        Object callback = new Object();
+        require(!NativeViewportLifecycleAuthority.callbackOwnsActiveReader(
+            callback,
+            new Object(),
+            new Object(),
+            true
+        ));
+        require(!NativeViewportLifecycleAuthority.callbackOwnsActiveReader(
+            callback,
+            new Object(),
+            null,
+            false
         ));
     }
 

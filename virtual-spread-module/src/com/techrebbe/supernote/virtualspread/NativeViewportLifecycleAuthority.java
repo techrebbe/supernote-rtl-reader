@@ -22,9 +22,38 @@ public final class NativeViewportLifecycleAuthority {
         Object activeActivity,
         Object activeViewModel
     ) {
+        return callbackOwnsActiveReader(
+            callbackViewModel,
+            activeActivity,
+            activeViewModel,
+            false
+        );
+    }
+
+    /**
+     * The replacement activity owns the reader from the beginning of
+     * onCreate, before firmware necessarily assigns documentViewModel. Only a
+     * callback running inside that exact creation scope may use the temporary
+     * null-field fallback; once the field is assigned, identity remains exact.
+     */
+    public static boolean callbackOwnsActiveReader(
+        Object callbackViewModel,
+        Object activeActivity,
+        Object activeViewModel,
+        boolean activeActivityIsCreating
+    ) {
         return callbackViewModel != null
             && activeActivity != null
-            && callbackViewModel == activeViewModel;
+            && (callbackViewModel == activeViewModel
+                || (activeActivityIsCreating && activeViewModel == null));
+    }
+
+    /** A new activity must claim ownership before its onCreate body runs. */
+    public static boolean beginsReaderOwnership(
+        Object creatingActivity,
+        Object activeActivity
+    ) {
+        return creatingActivity != null && creatingActivity != activeActivity;
     }
 
     /** Release a destroyed activity's state unless its view model was reused. */

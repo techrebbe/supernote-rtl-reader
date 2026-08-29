@@ -614,7 +614,7 @@ if lookup_start < 0 or lookup_end < 0:
 manifest_lookup = hook[lookup_start:lookup_end]
 for required in (
     'objectField(current, "documentViewModel") == null',
-    'objectField(activity, "documentViewModel") != viewModel',
+    "!nativeViewportCallbackOwnsActiveReader(\n                    activity,\n                    viewModel",
     'manifest_lookup_skipped reason=stale_view_model',
     "observeDocumentKey(null)",
     "String key = lexicalAbsolutePath(uri.getPath())",
@@ -1535,6 +1535,12 @@ for required in (
     "NativeViewportLifecycleAuthority\n"
     "                        .pendingAfterUnpublishedCompletion(",
     "NativeViewportLifecycleAuthority.callbackOwnsActiveReader(",
+    "NativeViewportLifecycleAuthority\n                            .beginsReaderOwnership(activity, previous)",
+    'clearNativeViewport(\n                            activity,\n                            "activity_creation_started"',
+    "CREATING_ACTIVITY.set(activity);",
+    "CREATING_ACTIVITY.remove();",
+    'log("activity_created active_owner="',
+    "&& !nativeViewportCallbackOwnsActiveReader(\n                    activity,\n                    viewModel",
     "NativeViewportLifecycleAuthority\n"
     "                        .mayReleaseDestroyedViewModel(",
     "releaseNativeViewportReaderState(viewModel)",

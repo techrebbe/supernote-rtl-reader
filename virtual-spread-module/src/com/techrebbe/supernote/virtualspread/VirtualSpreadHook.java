@@ -90,6 +90,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
 
     private static volatile WeakReference<Activity> activeActivity =
         new WeakReference<>(null);
+    private static final ThreadLocal<Activity> CREATING_ACTIVITY =
+        new ThreadLocal<>();
     private static final Map<Object, ReaderState> STATES =
         new WeakHashMap<>();
     private static final VirtualSpreadNavigation.BoundedCache<
@@ -746,10 +748,41 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             Bundle.class,
             new XC_MethodHook() {
                 @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    Activity activity = (Activity) param.thisObject;
+                    Activity previous = activeActivity.get();
+                    if (NativeViewportLifecycleAuthority
+                            .beginsReaderOwnership(activity, previous)) {
+                        // DocumentActivity can synchronously construct its
+                        // first page worker inside onCreate. Claim ownership
+                        // and invalidate the previous descriptor before any of
+                        // that replacement activity's page work can run.
+                        clearNativeViewport(
+                            activity,
+                            "activity_creation_started"
+                        );
+                        activeActivity = new WeakReference<>(activity);
+                        observeDocumentKey(null);
+                        log("activity_ownership_started replacement="
+                            + (previous != null));
+                    }
+                    CREATING_ACTIVITY.set(activity);
+                }
+
+                @Override
                 protected void afterHookedMethod(MethodHookParam param) {
                     Activity activity = (Activity) param.thisObject;
-                    activeActivity = new WeakReference<>(activity);
-                    log("activity_created");
+                    try {
+                        // Ownership already began in the before-hook. Never let
+                        // a late/nested onCreate completion reclaim it from a
+                        // newer activity.
+                        log("activity_created active_owner="
+                            + (activeActivity.get() == activity));
+                    } finally {
+                        if (CREATING_ACTIVITY.get() == activity) {
+                            CREATING_ACTIVITY.remove();
+                        }
+                    }
                 }
             }
         );
@@ -3381,7 +3414,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         return NativeViewportLifecycleAuthority.callbackOwnsActiveReader(
             viewModel,
             activity,
-            activeViewModel
+            activeViewModel,
+            activity != null && CREATING_ACTIVITY.get() == activity
         );
     }
 
@@ -4270,7 +4304,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         try {
             Activity activity = activeActivity.get();
             if (activity != null
-                && objectField(activity, "documentViewModel") != viewModel) {
+                && !nativeViewportCallbackOwnsActiveReader(
+                    activity,
+                    viewModel
+                )) {
                 log("manifest_lookup_skipped reason=stale_view_model");
                 return supersededManifestLookup("stale_view_model");
             }

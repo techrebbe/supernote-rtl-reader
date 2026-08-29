@@ -5,6 +5,8 @@ public final class NativeViewportGenerationFenceTest {
         samePageReloadRejectsTheOldPublication();
         aNewSessionCannotReuseTheOldSessionGeneration();
         clearRequiresTheOwningSession();
+        generationScopedClearCannotEraseANewerLoad();
+        generationScopedClearRemovesOnlyTheExactLoad();
         generationsAreStrictlyMonotonicWithinASession();
         System.out.println("NativeViewportGenerationFenceTest passed");
     }
@@ -61,6 +63,28 @@ public final class NativeViewportGenerationFenceTest {
             }
         });
         require(fence.accepts(owner, 4L));
+    }
+
+    private static void generationScopedClearCannotEraseANewerLoad() {
+        NativeViewportGenerationFence fence =
+            new NativeViewportGenerationFence();
+        Object owner = new Object();
+        fence.begin(owner, 20L);
+        fence.begin(owner, 21L);
+        require(!fence.clearIfCurrent(owner, 20L));
+        require(fence.accepts(owner, 21L));
+        require(!fence.clearIfCurrent(new Object(), 21L));
+        require(fence.accepts(owner, 21L));
+    }
+
+    private static void generationScopedClearRemovesOnlyTheExactLoad() {
+        NativeViewportGenerationFence fence =
+            new NativeViewportGenerationFence();
+        Object owner = new Object();
+        fence.begin(owner, 8L);
+        require(fence.clearIfCurrent(owner, 8L));
+        require(!fence.accepts(owner, 8L));
+        require(!fence.clearIfCurrent(owner, 8L));
     }
 
     private static void require(boolean condition) {

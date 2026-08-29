@@ -2677,19 +2677,19 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             int page,
             String reason
         ) {
-        if (viewModel == null || page < 0) {
-            clearNativeViewport(
-                activeActivity.get(),
-                "page_load_identity_unavailable"
-            );
+        Activity activity = activeActivity.get();
+        if (!nativeViewportCallbackOwnsActiveReader(activity, viewModel)) {
+            log("native_viewport_load_rejected "
+                + "reason=inactive_view_model");
+            return null;
+        }
+        if (page < 0) {
+            clearNativeViewport(activity, "page_load_identity_unavailable");
             return null;
         }
         Object nativeMupdf = objectField(viewModel, "mupdf");
         if (nativeMupdf == null) {
-            clearNativeViewport(
-                activeActivity.get(),
-                "page_load_identity_unavailable"
-            );
+            clearNativeViewport(activity, "page_load_identity_unavailable");
             return null;
         }
         final long requestSerial;
@@ -2882,8 +2882,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     intField(viewModel, "currentPage", -1),
                     latest == null ? -1L : latest.requestSerial
                 )) {
-                clearNativeViewport(
+                clearNativeViewportGeneration(
                     activeActivity.get(),
+                    viewModel,
+                    rebound.pageLoadGeneration,
                     "load_request_changed_before_binding"
                 );
                 return null;
@@ -2903,10 +2905,14 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         boolean manifestActivationInitialization
     ) {
         if (viewModel == null) {
-            clearNativeViewport(
-                activeActivity.get(),
-                "page_load_view_model_unavailable"
-            );
+            log("native_viewport_load_rejected "
+                + "reason=page_load_view_model_unavailable");
+            return -1L;
+        }
+        Activity activity = activeActivity.get();
+        if (!nativeViewportCallbackOwnsActiveReader(activity, viewModel)) {
+            log("native_viewport_load_rejected "
+                + "reason=inactive_view_model");
             return -1L;
         }
         ReaderState state;
@@ -2926,7 +2932,6 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     .withPageLoadGeneration(state.pageLoadGeneration);
             }
         }
-        Activity activity = activeActivity.get();
         // Invalidate the provider record before manifest lookup can rebind
         // state or wait for replacement page geometry.
         clearNativeViewport(activity, "page_load_started");
@@ -2985,7 +2990,12 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             log("native_viewport_load_begun generation=" + generation
                 + " reason=" + reason);
         } catch (Throwable throwable) {
-            clearNativeViewport(activity, "page_load_fence_failed");
+            clearNativeViewportGeneration(
+                activity,
+                viewModel,
+                generation,
+                "page_load_fence_failed"
+            );
             logFailure("native_viewport_load_begin_failed", throwable);
         }
         return generation;
@@ -3002,6 +3012,15 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         if (completion == null) {
             log("native_viewport_completion_rejected "
                 + "reason=unmatched_before_state");
+            return;
+        }
+        Activity callbackOwner = activeActivity.get();
+        if (!nativeViewportCallbackOwnsActiveReader(
+                callbackOwner,
+                viewModel
+            )) {
+            log("native_viewport_completion_rejected "
+                + "reason=inactive_view_model");
             return;
         }
         ReaderState state;
@@ -3041,7 +3060,12 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
         Manifest manifest = manifestFor(viewModel);
         if (manifest == null) {
-            clearNativeViewport(activeActivity.get(), "manifest_unavailable");
+            clearNativeViewportGeneration(
+                callbackOwner,
+                viewModel,
+                completedPageLoadGeneration,
+                "manifest_unavailable"
+            );
             return;
         }
         state = stateFor(viewModel, manifest);
@@ -3176,7 +3200,17 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         if (activity == null || viewModel == null || manifest == null
             || state == null || currentPage < 0
             || currentPage >= manifest.pageCount) {
-            clearNativeViewport(activity, "publication_identity_unavailable");
+            clearNativeViewportGeneration(
+                activity,
+                viewModel,
+                completedPageLoadGeneration,
+                "publication_identity_unavailable"
+            );
+            return;
+        }
+        if (!nativeViewportCallbackOwnsActiveReader(activity, viewModel)) {
+            log("native_viewport_publication_rejected "
+                + "reason=inactive_view_model");
             return;
         }
         try {
@@ -3303,8 +3337,78 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 + " snapshot=" + cached.snapshotId()
                 + " descriptor=" + descriptor.canonicalJson());
         } catch (Throwable throwable) {
-            clearNativeViewport(activity, "publication_failed");
+            clearNativeViewportGeneration(
+                activity,
+                viewModel,
+                completedPageLoadGeneration,
+                "publication_failed"
+            );
             logFailure("native_viewport_publish_failed", throwable);
+        }
+    }
+
+    private static boolean nativeViewportCallbackOwnsActiveReader(
+        Activity activity,
+        Object viewModel
+    ) {
+        Object activeViewModel = activity == null ? null
+            : objectField(activity, "documentViewModel");
+        return NativeViewportLifecycleAuthority.callbackOwnsActiveReader(
+            viewModel,
+            activity,
+            activeViewModel
+        );
+    }
+
+    private static void clearNativeViewportGeneration(
+        Activity activity,
+        Object viewModel,
+        long pageLoadGeneration,
+        String reason
+    ) {
+        if (!nativeViewportCallbackOwnsActiveReader(activity, viewModel)) {
+            log("native_viewport_generation_clear_skipped reason=" + reason
+                + " ownership=inactive_view_model generation="
+                + pageLoadGeneration);
+            return;
+        }
+        if (pageLoadGeneration < 0L || !nativeViewportMayBePublished) {
+            return;
+        }
+        try {
+            Bundle request = new Bundle();
+            request.putBinder("sessionToken", NATIVE_VIEWPORT_SESSION);
+            request.putLong("pageLoadGeneration", pageLoadGeneration);
+            Bundle response = activity.getContentResolver().call(
+                NativeViewportProvider.CONTENT_URI,
+                NativeViewportProvider.METHOD_CLEAR_GENERATION,
+                null,
+                request
+            );
+            if (response == null) {
+                throw new IllegalStateException(
+                    "viewport provider returned no generation-clear result"
+                );
+            }
+            String status = response.getString("status");
+            if ("cleared".equals(status)) {
+                nativeViewportMayBePublished = false;
+                log("native_viewport_cleared reason=" + reason
+                    + " generation=" + pageLoadGeneration);
+            } else if ("not_generation_owner".equals(status)) {
+                log("native_viewport_generation_clear_skipped reason="
+                    + reason + " ownership=newer_generation generation="
+                    + pageLoadGeneration);
+            } else {
+                throw new IllegalStateException(
+                    "viewport provider rejected generation clear"
+                );
+            }
+        } catch (Throwable throwable) {
+            logFailure(
+                "native_viewport_generation_clear_failed reason=" + reason,
+                throwable
+            );
         }
     }
 

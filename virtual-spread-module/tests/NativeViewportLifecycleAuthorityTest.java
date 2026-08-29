@@ -4,6 +4,8 @@ public final class NativeViewportLifecycleAuthorityTest {
     public static void main(String[] args) {
         activeActivityMayClearAuthority();
         replacedActivityCannotClearAuthority();
+        activeViewModelOwnsCallbackCleanup();
+        replacedViewModelCannotClearAuthority();
         manifestBindingPreservesPendingLoad();
         documentReplacementClearsPendingLoad();
         exactUnpublishedCompletionClearsPendingLoad();
@@ -22,6 +24,31 @@ public final class NativeViewportLifecycleAuthorityTest {
             .mayClearForDestroyedActivity(new Object(), new Object()));
         require(!NativeViewportLifecycleAuthority
             .mayClearForDestroyedActivity(null, new Object()));
+    }
+
+    private static void activeViewModelOwnsCallbackCleanup() {
+        Object activity = new Object();
+        Object viewModel = new Object();
+        require(NativeViewportLifecycleAuthority.callbackOwnsActiveReader(
+            viewModel,
+            activity,
+            viewModel
+        ));
+    }
+
+    private static void replacedViewModelCannotClearAuthority() {
+        Object oldViewModel = new Object();
+        Object newViewModel = new Object();
+        require(!NativeViewportLifecycleAuthority.callbackOwnsActiveReader(
+            oldViewModel,
+            new Object(),
+            newViewModel
+        ));
+        require(!NativeViewportLifecycleAuthority.callbackOwnsActiveReader(
+            oldViewModel,
+            null,
+            oldViewModel
+        ));
     }
 
     private static void manifestBindingPreservesPendingLoad() {

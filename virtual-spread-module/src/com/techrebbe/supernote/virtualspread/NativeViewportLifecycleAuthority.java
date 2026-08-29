@@ -14,6 +14,20 @@ public final class NativeViewportLifecycleAuthority {
     }
 
     /**
+     * A page-load callback may mutate the process-wide provider only while
+     * its view model is still owned by the active DocumentActivity.
+     */
+    public static boolean callbackOwnsActiveReader(
+        Object callbackViewModel,
+        Object activeActivity,
+        Object activeViewModel
+    ) {
+        return callbackViewModel != null
+            && activeActivity != null
+            && callbackViewModel == activeViewModel;
+    }
+
+    /**
      * Verification binding for the same document must not erase knowledge of
      * an already-started native page load. A real document replacement does.
      */

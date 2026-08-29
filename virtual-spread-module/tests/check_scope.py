@@ -1479,9 +1479,11 @@ for required in (
     'request.getString("sidecarSha256")',
     'request.getString("mappingAuthoritySha256")',
     'METHOD_BEGIN_LOAD = "begin_load_v1"',
+    'METHOD_CLEAR_GENERATION =\n        "clear_generation_v1"',
     "LOAD_FENCE.accepts(",
     "LOAD_FENCE.begin(",
     "LOAD_FENCE.clear(",
+    "LOAD_FENCE.clearIfCurrent(",
 ):
     if required not in viewport_provider:
         raise SystemExit(
@@ -1492,6 +1494,7 @@ for required in (
     "requestedGeneration <= generation",
     "requestedGeneration == generation",
     "session.equals(requestedSession)",
+    "public boolean clearIfCurrent(",
 ):
     if required not in viewport_generation_fence:
         raise SystemExit(
@@ -1531,6 +1534,10 @@ for required in (
     "NativeViewportLifecycleAuthority.pendingAfterStateBinding(",
     "NativeViewportLifecycleAuthority\n"
     "                        .pendingAfterUnpublishedCompletion(",
+    "NativeViewportLifecycleAuthority.callbackOwnsActiveReader(",
+    "NativeViewportProvider.METHOD_CLEAR_GENERATION",
+    '"not_generation_owner".equals(status)',
+    '"reason=inactive_view_model"',
     '"native_viewport_completion_deferred "',
     "NativeViewportLifecycleAuthority\n                        .mayClearForDestroyedActivity(",
     'clearNativeViewport(activity, "activity_destroyed")',
@@ -1542,6 +1549,29 @@ for required in (
             "runtime viewport publication lifecycle is incomplete: "
             + required
         )
+
+publication_failure = hook.find(
+    'clearNativeViewportGeneration(\n                activity,\n'
+    '                viewModel,\n'
+    '                completedPageLoadGeneration,\n'
+    '                "publication_failed"'
+)
+if publication_failure < 0:
+    raise SystemExit(
+        "publication failure cleanup must be scoped to its page generation"
+    )
+
+manifest_unavailable = hook.find(
+    'clearNativeViewportGeneration(\n'
+    '                callbackOwner,\n'
+    '                viewModel,\n'
+    '                completedPageLoadGeneration,\n'
+    '                "manifest_unavailable"'
+)
+if manifest_unavailable < 0:
+    raise SystemExit(
+        "callback cleanup must retain active view-model ownership and generation"
+    )
 unbound_guard = hook.find("if (completion == null) {")
 pending_clear = hook.find(
     "state.nativeViewportLoadPending = false;",

@@ -26,6 +26,8 @@ public final class NativeViewportProvider extends ContentProvider {
     public static final String METHOD_PUBLISH = "publish_v1";
     public static final String METHOD_BEGIN_LOAD = "begin_load_v1";
     public static final String METHOD_CLEAR = "clear_v1";
+    public static final String METHOD_CLEAR_GENERATION =
+        "clear_generation_v1";
     public static final String METHOD_GET = "get_v1";
 
     private static final String WRITER_PACKAGE = "com.supernote.document";
@@ -224,6 +226,10 @@ public final class NativeViewportProvider extends ContentProvider {
             requireCaller(WRITER_PACKAGE);
             return clear(extras);
         }
+        if (METHOD_CLEAR_GENERATION.equals(method)) {
+            requireCaller(WRITER_PACKAGE);
+            return clearGeneration(extras);
+        }
         if (METHOD_GET.equals(method)) {
             requireCaller(READER_PACKAGE);
             return get(extras);
@@ -312,6 +318,39 @@ public final class NativeViewportProvider extends ContentProvider {
         response.putString(
             "status", cleared ? "cleared" : "not_owner"
         );
+        return response;
+    }
+
+    private Bundle clearGeneration(Bundle extras) {
+        IBinder requestedToken = extras == null ? null
+            : extras.getBinder("sessionToken");
+        long requestedGeneration = exactNonNegativeLong(
+            extras, "pageLoadGeneration"
+        );
+        boolean cleared = false;
+        synchronized (LOCK) {
+            Record record = current;
+            boolean recordMatches = record == null
+                || (requestedToken != null
+                    && record.sessionToken.equals(requestedToken)
+                    && record.pageLoadGeneration == requestedGeneration);
+            if (recordMatches && LOAD_FENCE.clearIfCurrent(
+                    requestedToken,
+                    requestedGeneration
+                )) {
+                cleared = true;
+                if (record != null) {
+                    current = null;
+                    record.unlink();
+                }
+            }
+        }
+        Bundle response = new Bundle();
+        response.putInt("protocolVersion", 1);
+        response.putString(
+            "status", cleared ? "cleared" : "not_generation_owner"
+        );
+        response.putLong("pageLoadGeneration", requestedGeneration);
         return response;
     }
 

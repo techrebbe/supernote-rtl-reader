@@ -55,6 +55,23 @@ public final class NativeViewportGenerationFence {
         return true;
     }
 
+    /**
+     * Clears only the exact generation that the caller attempted to publish.
+     * A delayed failure from an older publication must not erase a newer load
+     * owned by the same process session.
+     */
+    public boolean clearIfCurrent(
+        Object requestedSession,
+        long requestedGeneration
+    ) {
+        if (!accepts(requestedSession, requestedGeneration)) {
+            return false;
+        }
+        session = null;
+        generation = -1L;
+        return true;
+    }
+
     private static void requireSession(Object requestedSession) {
         if (requestedSession == null) {
             throw new IllegalArgumentException("session is required");

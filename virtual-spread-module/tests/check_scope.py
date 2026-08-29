@@ -1541,6 +1541,9 @@ for required in (
     "CREATING_ACTIVITY.remove();",
     'log("activity_created active_owner="',
     "&& !nativeViewportCallbackOwnsActiveReader(\n                    activity,\n                    viewModel",
+    "NativeViewportLifecycleAuthority\n                            .activityCallbackOwnsReader(",
+    'reason=inactive_screen_change',
+    'reason=inactive_configuration_change',
     "NativeViewportLifecycleAuthority\n"
     "                        .mayReleaseDestroyedViewModel(",
     "releaseNativeViewportReaderState(viewModel)",

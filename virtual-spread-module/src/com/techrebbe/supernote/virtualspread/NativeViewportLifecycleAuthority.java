@@ -56,6 +56,14 @@ public final class NativeViewportLifecycleAuthority {
         return creatingActivity != null && creatingActivity != activeActivity;
     }
 
+    /** Late callbacks from a replaced activity cannot reclaim ownership. */
+    public static boolean activityCallbackOwnsReader(
+        Object callbackActivity,
+        Object activeActivity
+    ) {
+        return callbackActivity != null && callbackActivity == activeActivity;
+    }
+
     /** Release a destroyed activity's state unless its view model was reused. */
     public static boolean mayReleaseDestroyedViewModel(
         Object destroyedViewModel,

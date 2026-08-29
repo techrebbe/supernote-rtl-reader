@@ -796,7 +796,15 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
                     Activity activity = (Activity) param.thisObject;
-                    activeActivity = new WeakReference<>(activity);
+                    if (!NativeViewportLifecycleAuthority
+                            .activityCallbackOwnsReader(
+                                activity,
+                                activeActivity.get()
+                            )) {
+                        log("activity_callback_rejected "
+                            + "reason=inactive_screen_change");
+                        return;
+                    }
                     Object viewModel = objectField(
                         activity,
                         "documentViewModel"
@@ -826,7 +834,15 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
                     Activity activity = (Activity) param.thisObject;
-                    activeActivity = new WeakReference<>(activity);
+                    if (!NativeViewportLifecycleAuthority
+                            .activityCallbackOwnsReader(
+                                activity,
+                                activeActivity.get()
+                            )) {
+                        log("activity_callback_rejected "
+                            + "reason=inactive_configuration_change");
+                        return;
+                    }
                     Object viewModel = objectField(
                         activity,
                         "documentViewModel"

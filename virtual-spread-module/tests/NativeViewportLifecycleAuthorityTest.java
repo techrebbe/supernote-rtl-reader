@@ -8,6 +8,8 @@ public final class NativeViewportLifecycleAuthorityTest {
         replacementClaimsOwnershipBeforeOnCreateBody();
         creatingActivityMayOwnEarlyCallback();
         creatingActivityCannotOverrideAssignedViewModel();
+        activeActivityOwnsLifecycleCallback();
+        replacedActivityCannotReclaimLifecycleCallback();
         replacedViewModelCannotClearAuthority();
         destroyedObsoleteViewModelIsReleased();
         reusedActiveViewModelIsPreserved();
@@ -80,6 +82,25 @@ public final class NativeViewportLifecycleAuthorityTest {
             new Object(),
             null,
             false
+        ));
+    }
+
+    private static void activeActivityOwnsLifecycleCallback() {
+        Object activity = new Object();
+        require(NativeViewportLifecycleAuthority.activityCallbackOwnsReader(
+            activity,
+            activity
+        ));
+    }
+
+    private static void replacedActivityCannotReclaimLifecycleCallback() {
+        require(!NativeViewportLifecycleAuthority.activityCallbackOwnsReader(
+            new Object(),
+            new Object()
+        ));
+        require(!NativeViewportLifecycleAuthority.activityCallbackOwnsReader(
+            null,
+            new Object()
         ));
     }
 

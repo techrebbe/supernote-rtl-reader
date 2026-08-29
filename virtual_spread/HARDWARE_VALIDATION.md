@@ -445,6 +445,21 @@ the old activity subsequently logged
 `active_owner=false state_released=true`. Thus neither the old descriptor nor
 the old activity retained authority across the replacement startup boundary.
 
+A subsequent exact-head review found that late `screenChange()` or
+`onConfigurationChanged()` callbacks still assigned process-wide activity
+ownership unconditionally. Commit
+`c41f674404f4ecf825b3d1c32f974d2b38938918` makes both callbacks read-only
+consumers of the current lifecycle owner and rejects every obsolete activity;
+pure tests cover active, replaced, and null callback owners. Its signed
+version-28 APK had SHA-256
+`9a8a273a95d15e95a33b3aedeb1bb3b8e2a05749958f17ce64308d9579ed9a4a`.
+The focused Nomad recreation gate again cleared authority at replacement
+startup, published the unchanged page-1 descriptor SHA-256
+`a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`,
+and let the obsolete activity release state with `active_owner=false` without
+reclaiming ownership or clearing the replacement. Rotation settings were
+restored after the gate.
+
 The first-load-before-manifest path was separately exercised by the markerless
 source control. It recorded the exact completed load without publishing any
 authority. Native forward/back page turns returned to a pixel-identical screen

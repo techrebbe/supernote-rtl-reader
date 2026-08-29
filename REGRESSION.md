@@ -2184,6 +2184,19 @@ snapshot and republished descriptor SHA-256
 the old teardown released only its obsolete state. This proves fail-closed
 authority across both halves of activity replacement: startup and teardown.
 
+The next exact-head review found one remaining ownership writer: late
+`screenChange()` and `onConfigurationChanged()` callbacks still reassigned the
+active activity. Commit `c41f674404f4ecf825b3d1c32f974d2b38938918`
+removes those assignments and accepts either callback only when its activity is
+already the current owner. Pure tests prove that a replaced or null activity
+cannot reclaim authority. The signer-verified version-28 APK had SHA-256
+`9a8a273a95d15e95a33b3aedeb1bb3b8e2a05749958f17ce64308d9579ed9a4a`.
+The focused Nomad gate again cleared the prior descriptor before replacement
+startup, published the unchanged normative page-1 descriptor SHA-256
+`a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`,
+and observed obsolete teardown with `active_owner=false state_released=true`;
+no stale callback reclaimed ownership or cleared the replacement.
+
 This gate proves authoritative descriptor publication, cold-reopen recovery,
 and page-load/reload invalidation on the Nomad. It does not claim that the
 InkBridge consumer read or the cross-device annotation round trip has run; that

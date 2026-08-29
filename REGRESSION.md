@@ -2155,6 +2155,19 @@ and emitted zero Virtual Spread authority or navigation events. The disposable
 control was removed and a final normative cold open again published the page-1
 descriptor.
 
+The next exact-head review identified a retention-only lifecycle edge: each
+`ReaderState` held load bindings that strongly referenced its own weak-map key,
+and replaced-activity teardown released state only for the active owner. Commit
+`5d970328a108013b19c97562e28d45270102ece0` always releases an obsolete destroyed
+view model and its task, page-info, and thread-local bindings, while preserving a
+view model reused by the replacement activity. Its signer-verified APK had
+SHA-256
+`393929b301eac71f4a1e61d53d162dd2c502576d1297659da29c5890aabc0825`.
+The Nomad task-recreation gate created the replacement activity before the old
+one was destroyed; the old teardown logged
+`active_owner=false state_released=true`, and the replacement retained the
+authoritative page-1 descriptor SHA-256 `a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`.
+
 This gate proves authoritative descriptor publication, cold-reopen recovery,
 and page-load/reload invalidation on the Nomad. It does not claim that the
 InkBridge consumer read or the cross-device annotation round trip has run; that

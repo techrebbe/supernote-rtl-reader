@@ -413,6 +413,20 @@ It emitted zero Virtual Spread authority or navigation events. The control was
 removed and a final normative cold open again published descriptor SHA-256
 `a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`.
 
+The next exact-head review identified a retention-only lifecycle edge: load
+bindings inside `ReaderState` strongly referenced the weak-map key, while a
+replaced activity's teardown did not remove obsolete state. Commit
+`5d970328a108013b19c97562e28d45270102ece0` releases destroyed obsolete state and
+every task/page-info/thread-local binding independently of provider ownership,
+but preserves a view model reused by the active replacement. Its signed APK had
+SHA-256
+`393929b301eac71f4a1e61d53d162dd2c502576d1297659da29c5890aabc0825`.
+On the Nomad, task recreation created the replacement activity before the old
+activity's teardown. The old hook logged
+`active_owner=false state_released=true`; it did not clear the replacement's
+provider record, and the replacement published the unchanged page-1 descriptor
+SHA-256 `a590afc7a95e92fbf7b9ac03fd949bcd6b474bcba70e06e4ec63936de937d033`.
+
 The first-load-before-manifest path was separately exercised by the markerless
 source control. It recorded the exact completed load without publishing any
 authority. Native forward/back page turns returned to a pixel-identical screen

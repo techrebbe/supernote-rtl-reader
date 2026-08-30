@@ -36,7 +36,11 @@ v0.0.27 adds the strict schema-v4 navigation extension while continuing to
 accept frozen schema-v3 documents. Schema v4 authenticates preserved outline
 hierarchy, order, style, destinations, adjacent-link filter policy, and
 removed/retained link counts. Outline selection is routed to the authenticated
-virtual page and left/right half; ambiguous or unmatched items fail closed.
+virtual page and left/right half; ambiguous or unmatched items fail closed. The
+generator rejects duplicate title/page entries that require different halves,
+and the Android verifier independently rejects such a collision. An explicitly
+disabled adjacent-link policy also uses schema v4; only an omitted policy on a
+document without outlines remains schema v3.
 Schema-v4 viewport delivery uses the separately versioned provider-v2 evidence
 handshake; provider v1 remains schema-v3-only, preventing an older InkBridge
 consumer from treating a v4 representation as v3. See

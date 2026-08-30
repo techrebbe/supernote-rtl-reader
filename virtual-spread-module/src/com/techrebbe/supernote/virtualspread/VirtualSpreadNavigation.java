@@ -1718,6 +1718,26 @@ public final class VirtualSpreadNavigation {
         return matched;
     }
 
+    /**
+     * Returns true when two native outline callbacks would have the same
+     * observable title/page identity but require different half-page routing.
+     */
+    public static boolean outlineRouteConflicts(
+        String firstTitle,
+        int firstPage,
+        Half firstHalf,
+        boolean firstResetLandscapeFit,
+        String secondTitle,
+        int secondPage,
+        Half secondHalf,
+        boolean secondResetLandscapeFit
+    ) {
+        return Objects.equals(firstTitle, secondTitle)
+            && firstPage == secondPage
+            && (firstHalf != secondHalf
+                || firstResetLandscapeFit != secondResetLandscapeFit);
+    }
+
     private static boolean finite(float value) {
         return !Float.isNaN(value) && !Float.isInfinite(value);
     }

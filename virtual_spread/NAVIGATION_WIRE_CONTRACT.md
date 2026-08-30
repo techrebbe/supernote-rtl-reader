@@ -5,8 +5,11 @@ Status: proposed schema-v4 extension; schema v3 remains frozen and unchanged.
 The generator uses manifest schema
 `techrebbe.supernote.virtual-spread/v4` and generator format
 `techrebbe.supernote.virtual-spread-generator/v2` when it preserves a document
-outline or when adjacent-page link filtering is requested. Documents with
-neither feature retain the byte-compatible schema-v3/generator-v1 identity.
+outline or when the adjacent-page link policy is explicitly supplied as either
+enabled or disabled. Documents with no outline and an omitted policy retain the
+byte-compatible schema-v3/generator-v1 identity. Thus an explicit
+`--no-remove-adjacent-page-links` is authenticated and distinguishable from a
+legacy invocation that predates the policy.
 
 ## Canonical authority
 
@@ -62,8 +65,11 @@ Source `/Fit` becomes an authenticated `/FitR` landing rectangle plus
 and the intended left/right half. Supernote's outline UI exposes only page-level
 loading, so source `/XYZ`, explicit `/FitR`, and other viewport-bearing outline
 destinations fail explicitly rather than being degraded. Unsupported actions,
-destination modes, coordinates, hierarchy links, or ambiguous companion matches fail closed
-before publication rather than silently losing or degrading a bookmark.
+destination modes, coordinates, hierarchy links, or ambiguous companion
+matches fail closed before publication rather than silently losing or degrading
+a bookmark. In particular, duplicate outline entries with the same title and
+virtual page but different target halves are rejected because Supernote's
+outline callback does not expose a stable identity that distinguishes them.
 
 Named destinations referenced by a preserved outline or link are resolved
 strictly before composition and the resulting navigation remains functional.

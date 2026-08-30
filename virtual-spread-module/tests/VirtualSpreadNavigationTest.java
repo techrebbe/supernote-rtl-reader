@@ -138,6 +138,30 @@ public final class VirtualSpreadNavigationTest {
             )
         );
         assertBoolean(
+            "opposite-half duplicate outline routes conflict",
+            true,
+            VirtualSpreadNavigation.outlineRouteConflicts(
+                "Duplicate", 4, Half.RIGHT, true,
+                "Duplicate", 4, Half.LEFT, true
+            )
+        );
+        assertBoolean(
+            "identical duplicate outline routes are harmless",
+            false,
+            VirtualSpreadNavigation.outlineRouteConflicts(
+                "Duplicate", 4, Half.RIGHT, true,
+                "Duplicate", 4, Half.RIGHT, true
+            )
+        );
+        assertBoolean(
+            "different outline titles remain distinguishable",
+            false,
+            VirtualSpreadNavigation.outlineRouteConflicts(
+                "First", 4, Half.RIGHT, true,
+                "Second", 4, Half.LEFT, true
+            )
+        );
+        assertBoolean(
             "pure link hit navigates immediately",
             true,
             VirtualSpreadNavigation.isImmediateLinkInvocation(

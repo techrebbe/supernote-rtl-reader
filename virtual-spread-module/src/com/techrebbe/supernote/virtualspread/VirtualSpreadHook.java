@@ -23,6 +23,7 @@ import java.lang.reflect.Modifier;
 import java.nio.channels.FileChannel;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -5566,6 +5567,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         }
         ArrayList<String> records = new ArrayList<>();
         ArrayList<OutlineTarget> targets = new ArrayList<>();
+        Map<String, Map<Integer, OutlineTarget>> outlineRoutes =
+            new HashMap<>();
         for (int index = 0; index < array.length(); index++) {
             JSONObject item = array.optJSONObject(index);
             if (!objectHasExactKeys(
@@ -5670,14 +5673,42 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                     )) {
                     return null;
                 }
-                targets.add(new OutlineTarget(
-                    title,
-                    virtualPage.intValue(),
+                VirtualSpreadNavigation.Half targetHalf =
                     "left".equals(side)
                         ? VirtualSpreadNavigation.Half.LEFT
-                        : VirtualSpreadNavigation.Half.RIGHT,
-                    "fit-source-page".equals(targetView)
-                ));
+                        : VirtualSpreadNavigation.Half.RIGHT;
+                boolean resetLandscapeFit =
+                    "fit-source-page".equals(targetView);
+                Map<Integer, OutlineTarget> routesForTitle =
+                    outlineRoutes.get(title);
+                if (routesForTitle == null) {
+                    routesForTitle = new HashMap<>();
+                    outlineRoutes.put(title, routesForTitle);
+                }
+                OutlineTarget existing = routesForTitle.get(virtualPage);
+                if (existing != null
+                    && VirtualSpreadNavigation.outlineRouteConflicts(
+                        existing.title,
+                        existing.virtualPage,
+                        existing.half,
+                        existing.resetLandscapeFit,
+                        title,
+                        virtualPage.intValue(),
+                        targetHalf,
+                        resetLandscapeFit
+                    )) {
+                    return null;
+                }
+                OutlineTarget target = new OutlineTarget(
+                    title,
+                    virtualPage.intValue(),
+                    targetHalf,
+                    resetLandscapeFit
+                );
+                if (existing == null) {
+                    routesForTitle.put(virtualPage, target);
+                }
+                targets.add(target);
             }
             records.add(VirtualSpreadNavigationAuthority.record(
                 index,

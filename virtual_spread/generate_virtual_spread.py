@@ -16,6 +16,7 @@ import stat
 import struct
 import sys
 import tempfile
+from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from fractions import Fraction
@@ -543,7 +544,7 @@ def _resolve_layout_options(
     spread_height: float | None,
     gutter: float | None,
     remove_adjacent_page_links: bool | None,
-) -> tuple[bool, float, float, float, bool]:
+) -> tuple[bool, float, float, float, bool, bool]:
     supplied = (
         cover_separate is not None,
         spread_width is not None,
@@ -580,12 +581,14 @@ def _resolve_layout_options(
         if remove_adjacent_page_links is None
         else remove_adjacent_page_links
     )
+    link_filter_policy_explicit = remove_adjacent_page_links is not None
     return (
         resolved_cover,
         resolved_width,
         resolved_height,
         resolved_gutter,
         resolved_link_filter,
+        link_filter_policy_explicit,
     )
 
 
@@ -2961,6 +2964,33 @@ def _copy_document_outlines(
             last,
         )
     return records
+
+
+def _require_unambiguous_outline_routes(
+    outlines: Sequence[Mapping[str, Any]],
+) -> None:
+    """Reject bookmarks the native outline callback cannot distinguish."""
+
+    routes: dict[tuple[str, int], tuple[str, str]] = {}
+    for outline in outlines:
+        destination = outline.get("destination")
+        if destination is None:
+            continue
+        key = (
+            str(outline["title"]),
+            int(destination["virtualPageIndex"]),
+        )
+        route = (
+            str(destination["side"]),
+            str(destination["targetView"]),
+        )
+        previous = routes.get(key)
+        if previous is not None and previous != route:
+            raise VirtualSpreadError(
+                "Ambiguous outline routing for duplicate title and virtual "
+                f"page: {key[0]} on virtual page {key[1]}"
+            )
+        routes[key] = route
 
 
 def _write_json(
@@ -5970,6 +6000,7 @@ def _build_virtual_spread_from_snapshot(
     spread_height: float = 648.0,
     gutter: float = 0.0,
     remove_adjacent_page_links: bool = False,
+    adjacent_link_policy_explicit: bool = False,
     force: bool = False,
     expected_output_state: PublicationTargetState,
     expected_manifest_state: PublicationTargetState,
@@ -6124,6 +6155,7 @@ def _build_virtual_spread_from_snapshot(
         spread_height=spread_height,
         referenced_named_destinations=referenced_named_destinations,
     )
+    _require_unambiguous_outline_routes(outlines)
     named_destination_names = set(reader.named_destinations)
     unreferenced_named_destinations = sorted(
         named_destination_names - referenced_named_destinations
@@ -6136,7 +6168,7 @@ def _build_virtual_spread_from_snapshot(
         )
     catalog = _dereference_pdf_object(reader.trailer.raw_get("/Root"))
     navigation_extension = bool(
-        "/Outlines" in catalog or remove_adjacent_page_links
+        "/Outlines" in catalog or adjacent_link_policy_explicit
     )
     navigation_authority_hash: str | None = None
     if navigation_extension:
@@ -6470,6 +6502,7 @@ def _build_virtual_spread_locked(
         spread_height,
         gutter,
         remove_adjacent_page_links,
+        adjacent_link_policy_explicit,
     ) = _resolve_layout_options(
         replacing=force and (
             expected_output_state.exists or expected_manifest_state.exists
@@ -6505,6 +6538,7 @@ def _build_virtual_spread_locked(
             spread_height=spread_height,
             gutter=gutter,
             remove_adjacent_page_links=remove_adjacent_page_links,
+            adjacent_link_policy_explicit=adjacent_link_policy_explicit,
             force=force,
             expected_output_state=expected_output_state,
             expected_manifest_state=expected_manifest_state,

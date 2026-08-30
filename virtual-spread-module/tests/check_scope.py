@@ -35,6 +35,10 @@ if ('private static final String SCHEMA =\n'
     raise SystemExit(
         "runtime must require the v3 authenticated-mapping manifest schema"
     )
+if "VirtualSpreadNavigation.outlineRouteConflicts(" not in hook:
+    raise SystemExit(
+        "runtime must reject ambiguous authenticated outline routes"
+    )
 
 for required in (
     "private static final Map<String, VerificationOwner> VERIFYING",
@@ -1945,6 +1949,8 @@ for required in (
     "Standalone named destinations are not yet supported",
     "Documents containing both legacy /Dests and /Names destination",
     "remove_adjacent_page_links=remove_adjacent_page_links",
+    "adjacent_link_policy_explicit=adjacent_link_policy_explicit",
+    "def _require_unambiguous_outline_routes(",
     'copied[NameObject("/Border")] = border',
     'copied_action[NameObject("/IsMap")] = BooleanObject(',
     "def _require_supported_document_catalog(",

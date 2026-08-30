@@ -127,6 +127,13 @@ EXPLICIT_DEFAULT_LAYOUT = {
     "remove_adjacent_page_links": False,
 }
 
+LEGACY_DEFAULT_LAYOUT = {
+    "cover_separate": True,
+    "spread_width": 864.0,
+    "spread_height": 648.0,
+    "gutter": 0.0,
+}
+
 
 def authorize_publication_without_source(
     output: Path,
@@ -361,6 +368,16 @@ def add_outline_hierarchy_with_named_destination(path: Path) -> None:
     child_object[NameObject("/Dest")] = TextStringObject(
         "named-child-target"
     )
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def add_ambiguous_duplicate_outlines(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    writer.add_outline_item("Duplicate", 1)
+    writer.add_outline_item("Duplicate", 2)
     with path.open("wb") as stream:
         writer.write(stream)
 
@@ -1376,6 +1393,87 @@ class VirtualSpreadTests(unittest.TestCase):
                 str(persisted_outline[1][0].title), "Named child"
             )
 
+    def test_ambiguous_duplicate_outline_routes_fail_before_publication(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "ambiguous-outlines.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_ambiguous_duplicate_outlines(source)
+            source_before = source.read_bytes()
+            output.write_bytes(b"existing-output")
+            manifest_path.write_bytes(b"existing-manifest")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Ambiguous outline routing for duplicate title",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+
+            self.assertEqual(source.read_bytes(), source_before)
+            self.assertEqual(output.read_bytes(), b"existing-output")
+            self.assertEqual(
+                manifest_path.read_bytes(), b"existing-manifest"
+            )
+
+    def test_explicit_disabled_link_filter_selects_navigation_contract(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            create_odd_page_fixture(source)
+            legacy_output = root / "legacy.pdf"
+            explicit_output = root / "explicit-disabled.pdf"
+
+            legacy = build_virtual_spread(
+                source,
+                legacy_output,
+                legacy_output.with_suffix(".pdf.json"),
+                **LEGACY_DEFAULT_LAYOUT,
+            )
+            explicit = build_virtual_spread(
+                source,
+                explicit_output,
+                explicit_output.with_suffix(".pdf.json"),
+                **EXPLICIT_DEFAULT_LAYOUT,
+            )
+
+            self.assertEqual(legacy["schema"], SCHEMA)
+            self.assertNotIn("navigation", legacy)
+            self.assertEqual(explicit["schema"], NAVIGATION_MANIFEST_SCHEMA)
+            self.assertIs(
+                explicit["navigation"]["removeAdjacentPageLinks"], False
+            )
+            self.assertEqual(
+                explicit["navigation"]["removedAdjacentPageLinkCount"], 0
+            )
+            self.assertEqual(
+                explicit["navigation"]["retainedLinkCount"],
+                len(explicit["links"]),
+            )
+            self.assertNotEqual(
+                legacy["output"]["viewId"], explicit["output"]["viewId"]
+            )
+            self.assertNotEqual(
+                legacy["output"]["cacheBasename"],
+                explicit["output"]["cacheBasename"],
+            )
+            metadata = PdfReader(explicit_output, strict=True).metadata
+            self.assertEqual(
+                metadata["/SNVirtualSpreadNavigationSHA256"],
+                explicit["output"]["navigationAuthoritySha256"],
+            )
+
     def test_adjacent_page_filter_uses_original_source_indices(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2058,13 +2156,13 @@ class VirtualSpreadTests(unittest.TestCase):
                 first_source,
                 first_output,
                 first_output.with_suffix(".pdf.json"),
-                **EXPLICIT_DEFAULT_LAYOUT,
+                **LEGACY_DEFAULT_LAYOUT,
             )
             second_manifest = build_virtual_spread(
                 second_source,
                 second_output,
                 second_output.with_suffix(".pdf.json"),
-                **EXPLICIT_DEFAULT_LAYOUT,
+                **LEGACY_DEFAULT_LAYOUT,
             )
 
             self.assertNotEqual(

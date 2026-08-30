@@ -2966,6 +2966,165 @@ def _copy_document_outlines(
     return records
 
 
+def _named_destination_array_from_raw(
+    value: Any,
+    name: str,
+) -> ArrayObject:
+    value = _dereference_pdf_object(value)
+    if isinstance(value, DictionaryObject):
+        if set(map(str, value.keys())) != {"/D"}:
+            raise VirtualSpreadError(
+                f"Invalid named destination dictionary: {name}"
+            )
+        value = _dereference_pdf_object(value.raw_get("/D"))
+    if not isinstance(value, ArrayObject):
+        raise VirtualSpreadError(
+            f"Invalid named destination array: {name}"
+        )
+    return ArrayObject(value)
+
+
+def _modern_named_destination_name(value: Any) -> str:
+    value = _dereference_pdf_object(value)
+    if not isinstance(value, TextStringObject):
+        raise VirtualSpreadError("Invalid named destination name")
+    name = str(value)
+    if not name or "\x00" in name:
+        raise VirtualSpreadError("Invalid named destination name")
+    try:
+        name.encode("utf-8", errors="strict")
+    except UnicodeEncodeError as error:
+        raise VirtualSpreadError(
+            "Named destination name is not valid UTF-8"
+        ) from error
+    return name
+
+
+def _raw_named_destinations(
+    reader: PdfReader,
+) -> tuple[dict[str, ArrayObject], bool]:
+    """Read every raw destination leaf before trusting pypdf's projection."""
+    catalog = _dereference_pdf_object(reader.trailer.raw_get("/Root"))
+    if not isinstance(catalog, DictionaryObject):
+        raise VirtualSpreadError("Source PDF catalog is not a dictionary")
+    if "/Dests" in catalog:
+        destinations = _dereference_pdf_object(catalog.raw_get("/Dests"))
+        if not isinstance(destinations, DictionaryObject):
+            raise VirtualSpreadError("Invalid document destination dictionary")
+        entries: dict[str, ArrayObject] = {}
+        for key, value in destinations.items():
+            if not isinstance(key, NameObject):
+                raise VirtualSpreadError("Invalid named destination name")
+            name = str(key)
+            if not name.startswith("/") or len(name) == 1 or "\x00" in name:
+                raise VirtualSpreadError("Invalid named destination name")
+            output_name = name[1:]
+            try:
+                output_name.encode("utf-8", errors="strict")
+            except UnicodeEncodeError as error:
+                raise VirtualSpreadError(
+                    "Named destination name is not valid UTF-8"
+                ) from error
+            if name in entries:
+                raise VirtualSpreadError("Duplicate named destination name")
+            entries[name] = _named_destination_array_from_raw(value, name)
+        return entries, True
+
+    if "/Names" not in catalog:
+        return {}, False
+    names_dictionary = _dereference_pdf_object(catalog.raw_get("/Names"))
+    if not isinstance(names_dictionary, DictionaryObject):
+        raise VirtualSpreadError("Invalid document name dictionary")
+    tree_reference = names_dictionary.raw_get("/Dests")
+    entries: dict[str, ArrayObject] = {}
+    seen_nodes: set[tuple[str, int, int] | tuple[str, int]] = set()
+
+    def walk(reference: Any) -> list[str]:
+        node = _dereference_pdf_object(reference)
+        if not isinstance(node, DictionaryObject):
+            raise VirtualSpreadError("Invalid named destination tree node")
+        indirect_key = _page_ref_key(reference)
+        node_key: tuple[str, int, int] | tuple[str, int]
+        if indirect_key is None:
+            node_key = ("direct", id(node))
+        else:
+            node_key = ("indirect", *indirect_key)
+        if node_key in seen_nodes:
+            raise VirtualSpreadError("Invalid or cyclic named destination tree")
+        seen_nodes.add(node_key)
+
+        unknown = sorted(
+            str(key)
+            for key in node.keys()
+            if str(key) not in {"/Kids", "/Limits", "/Names"}
+        )
+        if unknown:
+            raise VirtualSpreadError(
+                "Unsupported named destination tree entries: "
+                + ", ".join(unknown)
+            )
+        has_kids = "/Kids" in node
+        has_names = "/Names" in node
+        if has_kids == has_names:
+            raise VirtualSpreadError(
+                "Named destination tree node must contain exactly one of "
+                "/Kids or /Names"
+            )
+
+        ordered_names: list[str] = []
+        if has_names:
+            names = _dereference_pdf_object(node.raw_get("/Names"))
+            if not isinstance(names, ArrayObject) or len(names) % 2 != 0:
+                raise VirtualSpreadError(
+                    "Invalid named destination /Names array"
+                )
+            for index in range(0, len(names), 2):
+                name = _modern_named_destination_name(names[index])
+                if name in entries:
+                    raise VirtualSpreadError(
+                        "Duplicate named destination name"
+                    )
+                entries[name] = _named_destination_array_from_raw(
+                    names[index + 1], name
+                )
+                ordered_names.append(name)
+        else:
+            kids = _dereference_pdf_object(node.raw_get("/Kids"))
+            if not isinstance(kids, ArrayObject) or not kids:
+                raise VirtualSpreadError(
+                    "Invalid named destination /Kids array"
+                )
+            for kid in kids:
+                ordered_names.extend(walk(kid))
+
+        if any(
+            ordered_names[index - 1] >= ordered_names[index]
+            for index in range(1, len(ordered_names))
+        ):
+            raise VirtualSpreadError(
+                "Named destination tree names are not strictly ordered"
+            )
+        if "/Limits" in node:
+            limits = _dereference_pdf_object(node.raw_get("/Limits"))
+            if not isinstance(limits, ArrayObject) or len(limits) != 2:
+                raise VirtualSpreadError(
+                    "Invalid named destination /Limits array"
+                )
+            lower = _modern_named_destination_name(limits[0])
+            upper = _modern_named_destination_name(limits[1])
+            if not ordered_names or [lower, upper] != [
+                ordered_names[0],
+                ordered_names[-1],
+            ]:
+                raise VirtualSpreadError(
+                    "Invalid named destination /Limits range"
+                )
+        return ordered_names
+
+    walk(tree_reference)
+    return entries, False
+
+
 def _copy_named_destinations(
     *,
     reader: PdfReader,
@@ -2976,15 +3135,21 @@ def _copy_named_destinations(
     spread_height: float,
 ) -> list[str]:
     """Preserve every externally addressable destination after composition."""
+    raw_destinations, legacy_dictionary = _raw_named_destinations(reader)
     try:
         named_destinations = reader.named_destinations
     except Exception as error:
         raise VirtualSpreadError("Invalid named destination tree") from error
+    missing_parsed_names = sorted(
+        name for name in raw_destinations if name not in named_destinations
+    )
+    if missing_parsed_names:
+        raise VirtualSpreadError(
+            "Named destination parser omitted raw leaves: "
+            + ", ".join(missing_parsed_names)
+        )
 
-    catalog = _dereference_pdf_object(reader.trailer.raw_get("/Root"))
-    legacy_dictionary = isinstance(catalog, DictionaryObject) \
-        and "/Dests" in catalog
-    raw_names = list(named_destinations)
+    raw_names = list(raw_destinations)
     copied_names: list[str] = []
     output_name_by_raw: dict[str, str] = {}
     output_names: set[str] = set()
@@ -3008,13 +3173,7 @@ def _copy_named_destinations(
         output_names.add(output_name)
 
     for raw_name in sorted(raw_names):
-        destination_object = named_destinations[raw_name]
-        destination_array = getattr(destination_object, "dest_array", None)
-        if not isinstance(destination_array, (list, ArrayObject)):
-            raise VirtualSpreadError(
-                f"Invalid named destination array: {raw_name}"
-            )
-        destination = ArrayObject(destination_array)
+        destination = raw_destinations[raw_name]
         target_source_page = _destination_source_page(
             destination, page_ref_to_index
         )

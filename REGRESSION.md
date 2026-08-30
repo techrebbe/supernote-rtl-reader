@@ -2260,9 +2260,12 @@ catalog entry was not recreated. The final generator transforms and preserves
 every supported name-tree or legacy-dictionary destination in the output name
 tree; named destinations also select schema v4 so they cannot reuse an older
 schema-v3 cache identity. Standalone, referenced, legacy, filtered-link, and
-unsupported-mode regressions cover this correction. The complete 171-test
-generator suite and both repository invariant suites pass. This generator-only
-correction does not change the hardware-tested companion APK or runtime path.
+unsupported-mode regressions cover this correction. The generator also walks
+and validates every raw name-tree or legacy-dictionary leaf before trusting
+pypdf's parsed projection, so a malformed leaf cannot be logged, omitted, and
+silently dropped from the derived PDF. The complete 173-test generator suite
+and both repository invariant suites pass. These generator-only corrections do
+not change the hardware-tested companion APK or runtime path.
 
 ## Failure capture
 

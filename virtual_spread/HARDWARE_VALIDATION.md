@@ -513,8 +513,10 @@ and recreates every supported name-tree or legacy-dictionary destination and
 selects schema v4 whenever any named destination is present. Host regressions
 cover standalone and referenced destinations, legacy-name normalization,
 filtered adjacent links whose target name remains externally addressable, and
-fail-closed unsupported modes. The companion APK and tested runtime behavior
-are unchanged by that correction.
+fail-closed unsupported modes. Raw name-tree and legacy-dictionary leaves are
+also validated independently before pypdf's parsed projection is trusted, so a
+malformed leaf cannot be silently omitted. The companion APK and tested runtime
+behavior are unchanged by these generator-only corrections.
 
 ## Decision
 

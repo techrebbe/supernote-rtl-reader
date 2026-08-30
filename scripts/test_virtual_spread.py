@@ -300,6 +300,69 @@ def add_standalone_named_destination(
         writer.write(stream)
 
 
+def add_malformed_named_destination_leaf(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    writer.add_named_destination_array(
+        TextStringObject("valid-entry"),
+        ArrayObject([
+            writer.pages[3].indirect_reference,
+            NameObject("/Fit"),
+        ]),
+    )
+    names = writer._root_object["/Names"].get_object()
+    destination_tree = names["/Dests"].get_object()
+    destination_names = destination_tree["/Names"].get_object()
+    destination_names.extend([
+        TextStringObject("malformed-entry"),
+        DictionaryObject({
+            NameObject("/NotD"): ArrayObject([
+                writer.pages[1].indirect_reference,
+                NameObject("/Fit"),
+            ]),
+        }),
+    ])
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def add_nested_named_destination_tree(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+
+    def leaf(name: str, page_index: int) -> IndirectObject:
+        return writer._add_object(DictionaryObject({
+            NameObject("/Limits"): ArrayObject([
+                TextStringObject(name),
+                TextStringObject(name),
+            ]),
+            NameObject("/Names"): ArrayObject([
+                TextStringObject(name),
+                ArrayObject([
+                    writer.pages[page_index].indirect_reference,
+                    NameObject("/Fit"),
+                ]),
+            ]),
+        }))
+
+    first = leaf("alpha-entry", 1)
+    second = leaf("omega-entry", 4)
+    tree = writer._add_object(DictionaryObject({
+        NameObject("/Kids"): ArrayObject([first, second]),
+        NameObject("/Limits"): ArrayObject([
+            TextStringObject("alpha-entry"),
+            TextStringObject("omega-entry"),
+        ]),
+    }))
+    writer._root_object[NameObject("/Names")] = writer._add_object(
+        DictionaryObject({NameObject("/Dests"): tree})
+    )
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
 def add_legacy_standalone_named_destination(path: Path) -> None:
     source = PdfReader(str(path), strict=True)
     writer = PdfWriter()
@@ -1361,6 +1424,68 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertEqual(output.read_bytes(), b"existing-output")
             self.assertEqual(
                 manifest_path.read_bytes(), b"existing-manifest"
+            )
+
+    def test_malformed_raw_named_destination_leaf_fails_before_publication(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "malformed-named-destination.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_malformed_named_destination_leaf(source)
+            source_bytes = source.read_bytes()
+            output.write_bytes(b"existing-output")
+            manifest_path.write_bytes(b"existing-manifest")
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Invalid named destination dictionary: malformed-entry",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(output.read_bytes(), b"existing-output")
+            self.assertEqual(
+                manifest_path.read_bytes(), b"existing-manifest"
+            )
+
+    def test_nested_named_destination_tree_is_fully_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "nested-named-destinations.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_nested_named_destination_tree(source)
+            build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                **EXPLICIT_DEFAULT_LAYOUT,
+            )
+            persisted = PdfReader(output, strict=True)
+            self.assertEqual(
+                set(persisted.named_destinations),
+                {"alpha-entry", "omega-entry"},
+            )
+            self.assertEqual(
+                persisted.get_destination_page_number(
+                    persisted.named_destinations["alpha-entry"]
+                ),
+                1,
+            )
+            self.assertEqual(
+                persisted.get_destination_page_number(
+                    persisted.named_destinations["omega-entry"]
+                ),
+                2,
             )
 
     def test_legacy_named_destination_is_transformed_and_preserved(

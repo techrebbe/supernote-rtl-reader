@@ -116,6 +116,7 @@ unless explicitly authorized:
   --discard-broken-internal-links `
   --normalize-oversized-fitr-links `
   --normalize-outline-viewports `
+  --normalize-out-of-crop-outline-viewports `
   --discard-broken-outline-destinations
 ```
 
@@ -123,10 +124,13 @@ These options are not general cleanup switches. They respectively omit tagged
 PDF reading-order data that cannot be remapped to composed spreads; paint a
 strictly validated visible `/Square` appearance into derived page content;
 omit only an internal link with a literal PDF-null target; convert only a
-`/FitR` viewport that wholly contains its target source page to Fit-page;
-convert validated outline `/XYZ` or `/FitR` destinations to Supernote's
-page-level outline behavior; and retain a broken outline title/hierarchy while
-removing only its literal null target. The original PDF is never modified.
+`/FitR` viewport that wholly contains its target source page to Fit-page,
+including its named-destination definition; convert only CropBox-valid outline
+`/XYZ` or `/FitR` destinations to Supernote's page-level outline behavior;
+with the additional out-of-CropBox option, explicitly permit a structurally
+valid finite viewport outside that box before the same conversion; and retain
+a broken outline title/hierarchy while removing only its literal null target.
+The original PDF is never modified.
 See `SIDDUR_COMPATIBILITY.md` for the audited real-document policy and command.
 
 The caller-selected output above is a host staging name, not the on-device

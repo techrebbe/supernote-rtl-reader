@@ -287,6 +287,7 @@ def add_outline_action_type(path: Path) -> None:
 def add_standalone_named_destination(
     path: Path,
     mode: str = "/Fit",
+    arguments: tuple[float | None, ...] = (),
 ) -> None:
     source = PdfReader(str(path), strict=True)
     writer = PdfWriter()
@@ -296,6 +297,10 @@ def add_standalone_named_destination(
         ArrayObject([
             writer.pages[3].indirect_reference,
             NameObject(mode),
+            *(
+                NullObject() if value is None else FloatObject(value)
+                for value in arguments
+            ),
         ]),
     )
     with path.open("wb") as stream:
@@ -522,6 +527,34 @@ def add_filter_link(
     if annotations is None:
         annotations = ArrayObject()
         source_page[NameObject("/Annots")] = annotations
+    annotations.get_object().append(reference)
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def add_existing_named_destination_link(
+    path: Path,
+    source_page_index: int,
+    name: str,
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    annotation = DictionaryObject({
+        NameObject("/Type"): NameObject("/Annot"),
+        NameObject("/Subtype"): NameObject("/Link"),
+        NameObject("/Rect"): ArrayObject([
+            FloatObject(25.0), FloatObject(100.0),
+            FloatObject(125.0), FloatObject(125.0),
+        ]),
+        NameObject("/Dest"): TextStringObject(name),
+    })
+    reference = writer._add_object(annotation)
+    page = writer.pages[source_page_index]
+    annotations = page.get("/Annots")
+    if annotations is None:
+        annotations = ArrayObject()
+        page[NameObject("/Annots")] = annotations
     annotations.get_object().append(reference)
     with path.open("wb") as stream:
         writer.write(stream)
@@ -1563,6 +1596,57 @@ class VirtualSpreadTests(unittest.TestCase):
                 manifest["sourcePages"][1]["virtualPageIndex"],
             )
 
+    def test_outline_normalization_rejects_out_of_crop_viewport(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "out-of-crop-outline.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_first_outline_destination(
+                source,
+                "/XYZ",
+                (30.0, 650.0, 1.25),
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "requires --normalize-outline-viewports",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    normalize_out_of_crop_outline_viewports=True,
+                )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "internal destination /XYZ top extends outside target source /CropBox",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    normalize_outline_viewports=True,
+                )
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                normalize_outline_viewports=True,
+                normalize_out_of_crop_outline_viewports=True,
+            )
+            self.assertEqual(
+                manifest["navigation"]["outlines"][0]["destination"][
+                    "targetView"
+                ],
+                "fit-source-page",
+            )
+
     def test_broken_outline_target_requires_explicit_target_discard(
         self,
     ) -> None:
@@ -2182,6 +2266,57 @@ class VirtualSpreadTests(unittest.TestCase):
                 for item in manifest["links"]
                 if item["sourcePage"] == 1
                 and item["targetSourcePage"] == 5
+            ]
+            self.assertEqual(len(matching), 1)
+            self.assertEqual(matching[0]["targetView"], "fit-source-page")
+
+    def test_named_oversized_fitr_is_normalized_consistently(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "named-oversized-fitr.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_standalone_named_destination(
+                source,
+                "/FitR",
+                (-20.0, -20.0, 440.0, 440.0),
+            )
+            add_existing_named_destination_link(
+                source,
+                1,
+                "external-entry",
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "internal destination /FitR rectangle extends outside",
+            ):
+                build_virtual_spread(source, output, manifest_path)
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                normalize_oversized_fitr_links=True,
+            )
+            persisted = PdfReader(output, strict=True)
+            self.assertIn("external-entry", persisted.named_destinations)
+            destination = persisted.named_destinations[
+                "external-entry"
+            ].dest_array
+            self.assertEqual(str(destination[1]), "/FitR")
+            target_box = manifest["sourcePages"][3]["destination"]
+            for actual, expected in zip(destination[2:6], target_box):
+                self.assertAlmostEqual(
+                    float(actual),
+                    expected,
+                    places=6,
+                )
+            matching = [
+                item
+                for item in manifest["links"]
+                if item.get("targetSourcePage") == 3
             ]
             self.assertEqual(len(matching), 1)
             self.assertEqual(matching[0]["targetView"], "fit-source-page")
@@ -5489,6 +5624,10 @@ class VirtualSpreadTests(unittest.TestCase):
             ("discard_broken_internal_links", "broken-link discard"),
             ("normalize_oversized_fitr_links", "FitR normalization"),
             ("normalize_outline_viewports", "outline viewport normalization"),
+            (
+                "normalize_out_of_crop_outline_viewports",
+                "out-of-CropBox outline normalization",
+            ),
             ("discard_broken_outline_destinations", "broken-outline discard"),
         )
         with tempfile.TemporaryDirectory() as directory:

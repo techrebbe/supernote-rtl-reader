@@ -3,16 +3,20 @@
 The inspected source PDF is immutable and remains SHA-256
 `235140b21b941548ab817cbc2d6a5e4a733fc7028d2911668806021e40046f98`.
 It contains 663 source pages and 25 outline items (15 top-level and 10 nested).
-Nineteen items are actionable and six are structural. Six actionable entries
-use `/Fit`; thirteen use `/XYZ`.
+Eighteen items are actionable and seven are structural. Six actionable entries
+use `/Fit`; twelve use `/XYZ`.
 
 The focused compatibility path preserves the outline hierarchy, titles,
 ordering, style, and target source page. Supernote exposes outline navigation
-at page granularity, so the 13 validated `/XYZ` entries are converted to
+at page granularity, so the 12 actionable `/XYZ` entries are converted to
 authenticated fit-source-page destinations only when
-`--normalize-outline-viewports` is supplied. One structural `Sheet1` entry has
-a literal null target; `--discard-broken-outline-destinations` retains its
-title and hierarchy while removing only that unusable destination.
+`--normalize-outline-viewports` is supplied. Five actionable stored viewports
+use finite coordinates outside their target CropBox; the additional explicit
+`--normalize-out-of-crop-outline-viewports` policy permits those coordinates
+only because the derived Supernote outline is reduced to the authenticated
+target page. Seven structural entries have literal null targets;
+`--discard-broken-outline-destinations` retains their titles and hierarchy
+while removing only those unusable destinations.
 
 The source contains 1,442 `/Named /NextPage` or `/PrevPage` link actions.
 `--remove-adjacent-page-links` removes those validated previous/next actions
@@ -24,7 +28,8 @@ remain. For this source, 1,448 adjacent-page links are removed in total and
 PDF-null target; `--discard-broken-internal-links` removes only those already
 nonfunctional links. Four oversized `/FitR` destinations wholly enclose the
 target source page; `--normalize-oversized-fitr-links` converts only that exact
-case to fit-source-page. Partially out-of-bounds viewports still fail. Eighteen link
+case to fit-source-page and applies the same repair to any retained named
+destination. Partially out-of-bounds viewports still fail. Eighteen link
 rectangles exceed a CropBox by no more than 0.442 point; the generator clips
 only up-to-0.5-point rectangle bleed and continues to reject larger overflow or
 any out-of-bounds `/QuadPoints`.
@@ -73,6 +78,7 @@ python .\virtual_spread\generate_virtual_spread.py `
   --discard-broken-internal-links `
   --normalize-oversized-fitr-links `
   --normalize-outline-viewports `
+  --normalize-out-of-crop-outline-viewports `
   --discard-broken-outline-destinations
 ```
 

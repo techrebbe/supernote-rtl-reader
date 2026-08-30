@@ -2506,6 +2506,8 @@ def _validated_link_action(
 def _validate_filterable_internal_destination(
     destination: ArrayObject,
     target_mapping: dict[str, Any],
+    *,
+    allow_out_of_crop: bool = False,
 ) -> None:
     """Validate source semantics before optional adjacency classification."""
     if len(destination) < 2 or not isinstance(destination[1], NameObject):
@@ -2530,14 +2532,14 @@ def _validate_filterable_internal_destination(
         target_source_box = _destination_source_box(
             target_mapping, "/XYZ"
         )
-        if left is not None and not (
+        if not allow_out_of_crop and left is not None and not (
             target_source_box[0] <= left <= target_source_box[2]
         ):
             raise VirtualSpreadError(
                 "internal destination /XYZ left extends outside target "
                 "source /CropBox"
             )
-        if top is not None and not (
+        if not allow_out_of_crop and top is not None and not (
             target_source_box[1] <= top <= target_source_box[3]
         ):
             raise VirtualSpreadError(
@@ -2559,12 +2561,18 @@ def _validate_filterable_internal_destination(
         target_source_box = _destination_source_box(
             target_mapping, "/FitR"
         )
-        _require_rectangle_contained(
-            rectangle,
-            target_source_box,
-            "internal destination /FitR rectangle",
-            "target source /CropBox",
-        )
+        if allow_out_of_crop:
+            _require_positive_rectangle(
+                rectangle,
+                "internal destination /FitR rectangle",
+            )
+        else:
+            _require_rectangle_contained(
+                rectangle,
+                target_source_box,
+                "internal destination /FitR rectangle",
+                "target source /CropBox",
+            )
         return
     if mode in {"/FitB", "/FitH", "/FitBH", "/FitV", "/FitBV"}:
         expected_length = 2 if mode == "/FitB" else 3
@@ -3501,6 +3509,7 @@ def _copy_document_outlines(
     spread_height: float,
     referenced_named_destinations: set[str],
     normalize_outline_viewports: bool = False,
+    normalize_out_of_crop_outline_viewports: bool = False,
     discard_broken_outline_destinations: bool = False,
 ) -> list[dict[str, Any]]:
     catalog = _dereference_pdf_object(reader.trailer.raw_get("/Root"))
@@ -3634,39 +3643,12 @@ def _copy_document_outlines(
                             "--normalize-outline-viewports to use the "
                             "target source page"
                         )
-                    if source_mode == "/XYZ":
-                        if len(destination) != 5:
-                            raise VirtualSpreadError(
-                                "Invalid outline /XYZ destination parameters"
-                            )
-                        _destination_number(destination[2], "outline /XYZ left")
-                        _destination_number(destination[3], "outline /XYZ top")
-                        zoom = _destination_number(
-                            destination[4], "outline /XYZ zoom"
-                        )
-                        if zoom is not None and zoom < 0.0:
-                            raise VirtualSpreadError(
-                                "Invalid outline /XYZ zoom"
-                            )
-                    elif source_mode == "/FitR":
-                        if len(destination) != 6:
-                            raise VirtualSpreadError(
-                                "Invalid outline /FitR destination parameters"
-                            )
-                        rectangle = [
-                            _destination_number(
-                                value, "outline /FitR rectangle"
-                            )
-                            for value in destination[2:6]
-                        ]
-                        if any(value is None for value in rectangle):
-                            raise VirtualSpreadError(
-                                "Invalid outline /FitR destination rectangle"
-                            )
-                        _require_positive_rectangle(
-                            rectangle,
-                            "outline /FitR destination rectangle",
-                        )
+                    _validate_filterable_internal_destination(
+                        destination,
+                        target,
+                        allow_out_of_crop=
+                            normalize_out_of_crop_outline_viewports,
+                    )
                     destination = ArrayObject([
                         destination[0],
                         NameObject("/Fit"),
@@ -3931,6 +3913,7 @@ def _copy_named_destinations(
     page_ref_to_index: dict[tuple[int, int], int],
     spread_width: float,
     spread_height: float,
+    normalize_oversized_fitr_links: bool = False,
 ) -> list[str]:
     """Preserve every externally addressable destination after composition."""
     raw_destinations, legacy_dictionary = _raw_named_destinations(reader)
@@ -3983,6 +3966,11 @@ def _copy_named_destinations(
                 f"Cannot resolve named destination: {raw_name}"
             )
         target = source_mapping[target_source_page]
+        destination = _normalize_oversized_fitr_destination(
+            destination,
+            target,
+            allow_normalization=normalize_oversized_fitr_links,
+        )
         _validate_filterable_internal_destination(destination, target)
         target_output_page = int(target["virtualPageIndex"])
         target_reference = writer.pages[
@@ -7046,6 +7034,7 @@ def _build_virtual_spread_from_snapshot(
     discard_broken_internal_links: bool = False,
     normalize_oversized_fitr_links: bool = False,
     normalize_outline_viewports: bool = False,
+    normalize_out_of_crop_outline_viewports: bool = False,
     discard_broken_outline_destinations: bool = False,
     force: bool = False,
     expected_output_state: PublicationTargetState,
@@ -7254,6 +7243,8 @@ def _build_virtual_spread_from_snapshot(
         spread_height=spread_height,
         referenced_named_destinations=referenced_named_destinations,
         normalize_outline_viewports=normalize_outline_viewports,
+        normalize_out_of_crop_outline_viewports=
+            normalize_out_of_crop_outline_viewports,
         discard_broken_outline_destinations=
             discard_broken_outline_destinations,
     )
@@ -7265,6 +7256,7 @@ def _build_virtual_spread_from_snapshot(
         page_ref_to_index=page_ref_to_index,
         spread_width=spread_width,
         spread_height=spread_height,
+        normalize_oversized_fitr_links=normalize_oversized_fitr_links,
     )
     if not referenced_named_destinations.issubset(
         set(copied_named_destinations)
@@ -7572,6 +7564,7 @@ def _build_virtual_spread_locked(
     discard_broken_internal_links: bool = False,
     normalize_oversized_fitr_links: bool = False,
     normalize_outline_viewports: bool = False,
+    normalize_out_of_crop_outline_viewports: bool = False,
     discard_broken_outline_destinations: bool = False,
     force: bool = False,
 ) -> dict[str, Any]:
@@ -7658,6 +7651,8 @@ def _build_virtual_spread_locked(
             discard_broken_internal_links=discard_broken_internal_links,
             normalize_oversized_fitr_links=normalize_oversized_fitr_links,
             normalize_outline_viewports=normalize_outline_viewports,
+            normalize_out_of_crop_outline_viewports=
+                normalize_out_of_crop_outline_viewports,
             discard_broken_outline_destinations=
                 discard_broken_outline_destinations,
             force=force,
@@ -7682,6 +7677,7 @@ def build_virtual_spread(
     discard_broken_internal_links: bool = False,
     normalize_oversized_fitr_links: bool = False,
     normalize_outline_viewports: bool = False,
+    normalize_out_of_crop_outline_viewports: bool = False,
     discard_broken_outline_destinations: bool = False,
     force: bool = False,
 ) -> dict[str, Any]:
@@ -7701,6 +7697,18 @@ def build_virtual_spread(
         raise VirtualSpreadError("Invalid oversized /FitR normalization setting")
     if type(normalize_outline_viewports) is not bool:
         raise VirtualSpreadError("Invalid outline viewport normalization setting")
+    if type(normalize_out_of_crop_outline_viewports) is not bool:
+        raise VirtualSpreadError(
+            "Invalid out-of-CropBox outline normalization setting"
+        )
+    if (
+        normalize_out_of_crop_outline_viewports
+        and not normalize_outline_viewports
+    ):
+        raise VirtualSpreadError(
+            "Out-of-CropBox outline normalization requires "
+            "--normalize-outline-viewports"
+        )
     if type(discard_broken_outline_destinations) is not bool:
         raise VirtualSpreadError("Invalid broken-outline discard setting")
     resolved_source = source_path.resolve()
@@ -7736,6 +7744,8 @@ def build_virtual_spread(
             discard_broken_internal_links=discard_broken_internal_links,
             normalize_oversized_fitr_links=normalize_oversized_fitr_links,
             normalize_outline_viewports=normalize_outline_viewports,
+            normalize_out_of_crop_outline_viewports=
+                normalize_out_of_crop_outline_viewports,
             discard_broken_outline_destinations=
                 discard_broken_outline_destinations,
             force=force,
@@ -7811,6 +7821,15 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--normalize-out-of-crop-outline-viewports",
+        action="store_true",
+        help=(
+            "with --normalize-outline-viewports, explicitly permit a finite "
+            "outline viewport outside its target CropBox before reducing it "
+            "to page-level navigation"
+        ),
+    )
+    parser.add_argument(
         "--discard-broken-outline-destinations",
         action="store_true",
         help=(
@@ -7842,6 +7861,8 @@ def main() -> int:
         discard_broken_internal_links=args.discard_broken_internal_links,
         normalize_oversized_fitr_links=args.normalize_oversized_fitr_links,
         normalize_outline_viewports=args.normalize_outline_viewports,
+        normalize_out_of_crop_outline_viewports=
+            args.normalize_out_of_crop_outline_viewports,
         discard_broken_outline_destinations=
             args.discard_broken_outline_destinations,
         force=args.force,

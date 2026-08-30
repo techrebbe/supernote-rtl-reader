@@ -107,6 +107,28 @@ Explicitly supplying `--no-remove-adjacent-page-links` also selects schema v4
 and authenticates the disabled policy; omitting the option retains schema v3
 only when the source has no outline or named destination.
 
+Some PDFs need narrowly scoped compatibility repairs that remain fail-closed
+unless explicitly authorized:
+
+```powershell
+  --discard-structure-tags `
+  --flatten-square-annotations `
+  --discard-broken-internal-links `
+  --normalize-oversized-fitr-links `
+  --normalize-outline-viewports `
+  --discard-broken-outline-destinations
+```
+
+These options are not general cleanup switches. They respectively omit tagged
+PDF reading-order data that cannot be remapped to composed spreads; paint a
+strictly validated visible `/Square` appearance into derived page content;
+omit only an internal link with a literal PDF-null target; convert only a
+`/FitR` viewport that wholly contains its target source page to Fit-page;
+convert validated outline `/XYZ` or `/FitR` destinations to Supernote's
+page-level outline behavior; and retain a broken outline title/hierarchy while
+removing only its literal null target. The original PDF is never modified.
+See `SIDDUR_COMPATIBILITY.md` for the audited real-document policy and command.
+
 The caller-selected output above is a host staging name, not the on-device
 cache identity. Read `output.cacheBasename` from the generated JSON, then
 publish the unchanged PDF to that exact basename and its JSON sibling to
@@ -126,15 +148,21 @@ external `#nameddest` navigation; unsupported modes fail before publication.
 Unsupported outline actions or viewports fail closed. Duplicate outline entries
 that share a native-visible title and virtual page but require opposite target
 halves also fail before publication because the native callback cannot
-distinguish them safely. Opening actions,
-optional-content layer configuration, viewer preferences, and every other
-unsupported or unknown catalog entry fail closed
-before staging or publication rather than being
-silently discarded. Source page dictionaries use the same complete contract:
+distinguish them safely. Opening actions, optional-content layer configuration,
+unsupported viewer preferences, and every other unsupported or unknown catalog
+entry fail closed before staging or publication rather than being silently
+discarded. Exact XMP XML metadata and
+`/ViewerPreferences /Direction /R2L` are preserved. An empty AcroForm resource
+shell is safely omitted; any field or unsupported form entry fails closed.
+Source page dictionaries use the same complete contract:
 content, resources, geometry, rotation, and supported link annotations are
 consumed explicitly; ReportLab's empty transition placeholder is inert; page
 durations, meaningful transitions, additional actions, user-unit scaling, and
-every other unsupported or unknown page entry fail closed. Persisted rotation
+every other unsupported or unknown page entry fail closed. Valid page thumbnail
+streams are treated as disposable caches, while the exact supported RGB
+transparency group is retained. Tagged page/catalog structure is omitted only
+with `--discard-structure-tags`, because composing two pages makes the original
+structure tree false; visible content remains unchanged. Persisted rotation
 must be a true PDF integer divisible by 90. Quarter-turns are transferred with
 exact `0/1/-1` matrices, so the mapping and PDF content do not contain
 trigonometric near-zero coefficients. CropBoxes with absolute offsets large

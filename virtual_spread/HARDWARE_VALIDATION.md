@@ -506,6 +506,16 @@ ordinary source PDF produced only `manifest_document_observed` and no accepted
 or activated manifest event. Thus the new schema-v4 navigation authority and
 runtime outline-half recovery do not change schema-v3 or ordinary-PDF routing.
 
+After this device gate, exact-head review identified a generator-only omission:
+referenced named destinations were resolved for copied links/outlines but were
+not retained for external `#nameddest` access. The final generator transforms
+and recreates every supported name-tree or legacy-dictionary destination and
+selects schema v4 whenever any named destination is present. Host regressions
+cover standalone and referenced destinations, legacy-name normalization,
+filtered adjacent links whose target name remains externally addressable, and
+fail-closed unsupported modes. The companion APK and tested runtime behavior
+are unchanged by that correction.
+
 ## Decision
 
 Proceed with the virtual-spread architecture. Do not port the legacy dual-page

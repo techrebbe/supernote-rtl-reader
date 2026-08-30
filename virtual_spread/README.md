@@ -105,7 +105,7 @@ reference. It leaves same-page, distant, URI, and outline navigation intact.
 See `NAVIGATION_WIRE_CONTRACT.md` for the authenticated schema-v4 contract.
 Explicitly supplying `--no-remove-adjacent-page-links` also selects schema v4
 and authenticates the disabled policy; omitting the option retains schema v3
-only when the source has no outline.
+only when the source has no outline or named destination.
 
 The caller-selected output above is a host staging name, not the on-device
 cache identity. Read `output.cacheBasename` from the generated JSON, then
@@ -120,8 +120,10 @@ regenerates the structural `/Type` and `/Pages` entries and preserves validated
 `/PageMode` names plus compatible `/SinglePage` and `/OneColumn` page layouts.
 Source `/TwoPage*` and `/TwoColumn*` layouts fail closed because applying them
 after composition would display two virtual spreads—up to four source pages—at
-once. Supported outlines are preserved with authenticated target-half routing;
-unsupported outline actions or viewports fail closed. Duplicate outline entries
+once. Supported outlines are preserved with authenticated target-half routing.
+Supported named destinations are transformed and retained for both internal and
+external `#nameddest` navigation; unsupported modes fail before publication.
+Unsupported outline actions or viewports fail closed. Duplicate outline entries
 that share a native-visible title and virtual page but require opposite target
 halves also fail before publication because the native callback cannot
 distinguish them safely. Opening actions,

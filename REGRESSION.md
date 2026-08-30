@@ -2254,6 +2254,16 @@ logged only document observation: no manifest acceptance or activation event
 occurred. This confirms that schema-v4 navigation authority is additive and
 that ordinary PDFs and existing schema-v3 representations remain unaffected.
 
+The post-gate exact-head review found that a named destination referenced by a
+copied link or outline was resolved and inlined, but its externally addressable
+catalog entry was not recreated. The final generator transforms and preserves
+every supported name-tree or legacy-dictionary destination in the output name
+tree; named destinations also select schema v4 so they cannot reuse an older
+schema-v3 cache identity. Standalone, referenced, legacy, filtered-link, and
+unsupported-mode regressions cover this correction. The complete 171-test
+generator suite and both repository invariant suites pass. This generator-only
+correction does not change the hardware-tested companion APK or runtime path.
+
 ## Failure capture
 
 Before reproducing a failure:

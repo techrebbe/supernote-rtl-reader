@@ -282,7 +282,10 @@ def add_outline_action_type(path: Path) -> None:
         writer.write(stream)
 
 
-def add_standalone_named_destination(path: Path) -> None:
+def add_standalone_named_destination(
+    path: Path,
+    mode: str = "/Fit",
+) -> None:
     source = PdfReader(str(path), strict=True)
     writer = PdfWriter()
     writer.clone_document_from_reader(source)
@@ -290,9 +293,23 @@ def add_standalone_named_destination(path: Path) -> None:
         TextStringObject("external-entry"),
         ArrayObject([
             writer.pages[3].indirect_reference,
-            NameObject("/Fit"),
+            NameObject(mode),
         ]),
     )
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def add_legacy_standalone_named_destination(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    writer._root_object[NameObject("/Dests")] = DictionaryObject({
+        NameObject("/legacy-entry"): ArrayObject([
+            writer.pages[1].indirect_reference,
+            NameObject("/Fit"),
+        ]),
+    })
     with path.open("wb") as stream:
         writer.write(stream)
 
@@ -1285,7 +1302,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 "Chapter 2",
             )
 
-    def test_standalone_named_destination_fails_before_publication(
+    def test_standalone_named_destination_is_transformed_and_preserved(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1295,12 +1312,43 @@ class VirtualSpreadTests(unittest.TestCase):
             manifest_path = root / "spread.pdf.json"
             create_odd_page_fixture(source)
             add_standalone_named_destination(source)
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                **EXPLICIT_DEFAULT_LAYOUT,
+            )
+            self.assertEqual(manifest["schema"], NAVIGATION_MANIFEST_SCHEMA)
+            self.assertIn("navigation", manifest)
+            persisted = PdfReader(output, strict=True)
+            destination = persisted.named_destinations["external-entry"]
+            self.assertEqual(
+                persisted.get_destination_page_number(destination), 2
+            )
+            self.assertEqual(str(destination.dest_array[1]), "/FitR")
+            for actual, expected in zip(
+                [float(value) for value in destination.dest_array[2:]],
+                manifest["sourcePages"][3]["destination"],
+                strict=True,
+            ):
+                self.assertAlmostEqual(actual, expected, places=9)
+
+    def test_unsupported_standalone_named_destination_fails_before_publication(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "unsupported-named-destination.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_standalone_named_destination(source, "/FitB")
             source_bytes = source.read_bytes()
             output.write_bytes(b"existing-output")
             manifest_path.write_bytes(b"existing-manifest")
             with self.assertRaisesRegex(
                 VirtualSpreadError,
-                "Standalone named destinations are not yet supported",
+                "Cannot preserve internal destination mode /FitB",
             ):
                 build_virtual_spread(
                     source,
@@ -1314,6 +1362,30 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertEqual(
                 manifest_path.read_bytes(), b"existing-manifest"
             )
+
+    def test_legacy_named_destination_is_transformed_and_preserved(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "legacy-named-destination.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_legacy_standalone_named_destination(source)
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                **EXPLICIT_DEFAULT_LAYOUT,
+            )
+            self.assertEqual(manifest["schema"], NAVIGATION_MANIFEST_SCHEMA)
+            persisted = PdfReader(output, strict=True)
+            destination = persisted.named_destinations["legacy-entry"]
+            self.assertEqual(
+                persisted.get_destination_page_number(destination), 1
+            )
+            self.assertEqual(str(destination.dest_array[1]), "/FitR")
 
     def test_dual_named_destination_containers_fail_before_publication(
         self,
@@ -1386,12 +1458,26 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertEqual(
                 outlines[2]["destination"]["sourcePageIndex"], 4
             )
-            persisted_outline = PdfReader(output, strict=True).outline
+            persisted_reader = PdfReader(output, strict=True)
+            persisted_outline = persisted_reader.outline
             self.assertEqual(len(persisted_outline), 3)
             self.assertIsInstance(persisted_outline[1], list)
             self.assertEqual(
                 str(persisted_outline[1][0].title), "Named child"
             )
+            named_target = persisted_reader.named_destinations[
+                "named-child-target"
+            ]
+            self.assertEqual(
+                persisted_reader.get_destination_page_number(named_target), 1
+            )
+            self.assertEqual(str(named_target.dest_array[1]), "/FitR")
+            for actual, expected in zip(
+                [float(value) for value in named_target.dest_array[2:]],
+                manifest["sourcePages"][1]["destination"],
+                strict=True,
+            ):
+                self.assertAlmostEqual(actual, expected, places=9)
 
     def test_ambiguous_duplicate_outline_routes_fail_before_publication(
         self,
@@ -1531,6 +1617,10 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertNotEqual(
                 manifest["output"]["cacheBasename"],
                 unfiltered["output"]["cacheBasename"],
+            )
+            self.assertIn(
+                "adjacent-target",
+                PdfReader(output, strict=True).named_destinations,
             )
 
     def test_adjacent_named_actions_are_removed_only_when_opted_in(self) -> None:

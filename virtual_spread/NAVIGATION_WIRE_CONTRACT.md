@@ -5,9 +5,10 @@ Status: proposed schema-v4 extension; schema v3 remains frozen and unchanged.
 The generator uses manifest schema
 `techrebbe.supernote.virtual-spread/v4` and generator format
 `techrebbe.supernote.virtual-spread-generator/v2` when it preserves a document
-outline or when the adjacent-page link policy is explicitly supplied as either
-enabled or disabled. Documents with no outline and an omitted policy retain the
-byte-compatible schema-v3/generator-v1 identity. Thus an explicit
+outline or named destination, or when the adjacent-page link policy is
+explicitly supplied as either enabled or disabled. Documents with no outline,
+no named destination, and an omitted policy retain the byte-compatible
+schema-v3/generator-v1 identity. Thus an explicit
 `--no-remove-adjacent-page-links` is authenticated and distinguishable from a
 legacy invocation that predates the policy.
 
@@ -71,11 +72,14 @@ a bookmark. In particular, duplicate outline entries with the same title and
 virtual page but different target halves are rejected because Supernote's
 outline callback does not expose a stable identity that distinguishes them.
 
-Named destinations referenced by a preserved outline or link are resolved
-strictly before composition and the resulting navigation remains functional.
-Standalone named destinations are not yet representable in the authenticated
-navigation contract and therefore fail explicitly before publication rather
-than silently disappearing from the derived PDF.
+All named destinations are resolved strictly, transformed into Virtual Spread
+coordinates, and retained in the generated PDF's destination name tree. This
+preserves both references from copied outlines/links and externally addressable
+navigation such as `#nameddest=...`. Unsupported destination modes or invalid
+destination trees still fail explicitly before publication rather than being
+silently dropped or degraded. The complete generated PDF is authenticated by
+its manifest SHA-256, while the immutable source SHA-256 and generator version
+bind deterministic reconstruction and view identity.
 Documents containing both a legacy catalog `/Dests` dictionary and a
 `/Names/Dests` name tree also fail closed: their independent namespaces must
 not be partially enumerated or silently merged.

@@ -2966,6 +2966,89 @@ def _copy_document_outlines(
     return records
 
 
+def _copy_named_destinations(
+    *,
+    reader: PdfReader,
+    writer: PdfWriter,
+    source_mapping: dict[int, dict[str, Any]],
+    page_ref_to_index: dict[tuple[int, int], int],
+    spread_width: float,
+    spread_height: float,
+) -> list[str]:
+    """Preserve every externally addressable destination after composition."""
+    try:
+        named_destinations = reader.named_destinations
+    except Exception as error:
+        raise VirtualSpreadError("Invalid named destination tree") from error
+
+    catalog = _dereference_pdf_object(reader.trailer.raw_get("/Root"))
+    legacy_dictionary = isinstance(catalog, DictionaryObject) \
+        and "/Dests" in catalog
+    raw_names = list(named_destinations)
+    copied_names: list[str] = []
+    output_name_by_raw: dict[str, str] = {}
+    output_names: set[str] = set()
+    for raw_name in raw_names:
+        if not isinstance(raw_name, str) or not raw_name:
+            raise VirtualSpreadError("Invalid named destination name")
+        output_name = (
+            raw_name[1:]
+            if legacy_dictionary and raw_name.startswith("/")
+            else raw_name
+        )
+        if not output_name or output_name in output_names:
+            raise VirtualSpreadError("Invalid named destination name")
+        try:
+            output_name.encode("utf-8", errors="strict")
+        except UnicodeEncodeError as error:
+            raise VirtualSpreadError(
+                "Named destination name is not valid UTF-8"
+            ) from error
+        output_name_by_raw[raw_name] = output_name
+        output_names.add(output_name)
+
+    for raw_name in sorted(raw_names):
+        destination_object = named_destinations[raw_name]
+        destination_array = getattr(destination_object, "dest_array", None)
+        if not isinstance(destination_array, (list, ArrayObject)):
+            raise VirtualSpreadError(
+                f"Invalid named destination array: {raw_name}"
+            )
+        destination = ArrayObject(destination_array)
+        target_source_page = _destination_source_page(
+            destination, page_ref_to_index
+        )
+        if (
+            target_source_page is None
+            or target_source_page not in source_mapping
+        ):
+            raise VirtualSpreadError(
+                f"Cannot resolve named destination: {raw_name}"
+            )
+        target = source_mapping[target_source_page]
+        _validate_filterable_internal_destination(destination, target)
+        target_output_page = int(target["virtualPageIndex"])
+        target_reference = writer.pages[
+            target_output_page
+        ].indirect_reference
+        if target_reference is None:
+            raise VirtualSpreadError("Output page has no indirect reference")
+        transformed = _transformed_internal_destination(
+            destination,
+            target_reference,
+            target,
+            target,
+            spread_width,
+            spread_height,
+        )
+        writer.add_named_destination_array(
+            TextStringObject(output_name_by_raw[raw_name]),
+            transformed,
+        )
+        copied_names.append(raw_name)
+    return copied_names
+
+
 def _require_unambiguous_outline_routes(
     outlines: Sequence[Mapping[str, Any]],
 ) -> None:
@@ -6156,19 +6239,25 @@ def _build_virtual_spread_from_snapshot(
         referenced_named_destinations=referenced_named_destinations,
     )
     _require_unambiguous_outline_routes(outlines)
-    named_destination_names = set(reader.named_destinations)
-    unreferenced_named_destinations = sorted(
-        named_destination_names - referenced_named_destinations
+    copied_named_destinations = _copy_named_destinations(
+        reader=reader,
+        writer=writer,
+        source_mapping=source_mapping,
+        page_ref_to_index=page_ref_to_index,
+        spread_width=spread_width,
+        spread_height=spread_height,
     )
-    if unreferenced_named_destinations:
+    if not referenced_named_destinations.issubset(
+        set(copied_named_destinations)
+    ):
         raise VirtualSpreadError(
-            "Standalone named destinations are not yet supported; "
-            "generation would discard externally addressable navigation: "
-            + ", ".join(unreferenced_named_destinations)
+            "Referenced named destination was not preserved"
         )
     catalog = _dereference_pdf_object(reader.trailer.raw_get("/Root"))
     navigation_extension = bool(
-        "/Outlines" in catalog or adjacent_link_policy_explicit
+        "/Outlines" in catalog
+        or adjacent_link_policy_explicit
+        or copied_named_destinations
     )
     navigation_authority_hash: str | None = None
     if navigation_extension:

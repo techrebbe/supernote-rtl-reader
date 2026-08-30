@@ -2473,7 +2473,15 @@ class VirtualSpreadTests(unittest.TestCase):
             page = persisted.pages[
                 manifest["sourcePages"][1]["virtualPageIndex"]
             ]
-            group = page["/Group"].get_object()
+            self.assertNotIn("/Group", page)
+            xobjects = page["/Resources"]["/XObject"].get_object()
+            grouped_forms = [
+                value.get_object()
+                for value in xobjects.values()
+                if "/Group" in value.get_object()
+            ]
+            self.assertEqual(len(grouped_forms), 1)
+            group = grouped_forms[0]["/Group"].get_object()
             self.assertEqual(str(group["/Type"]), "/Group")
             self.assertEqual(str(group["/S"]), "/Transparency")
             self.assertEqual(str(group["/CS"]), "/DeviceRGB")

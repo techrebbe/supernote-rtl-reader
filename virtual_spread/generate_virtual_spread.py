@@ -2029,6 +2029,68 @@ def _validated_source_page_group(
     })
 
 
+def _merge_transformed_grouped_page(
+    writer: PdfWriter,
+    output_page: Any,
+    source_page: Any,
+    transform: list[float],
+    group: DictionaryObject,
+    object_name: str,
+) -> None:
+    """Place one source page in a Form so its transparency group stays local."""
+    source_resources = _dereference_pdf_object(
+        source_page.raw_get("/Resources")
+    )
+    if not isinstance(source_resources, DictionaryObject):
+        raise VirtualSpreadError("Invalid grouped source page /Resources")
+    content = source_page.get_contents()
+    form = DecodedStreamObject()
+    form.set_data(b"" if content is None else content.get_data())
+    form[NameObject("/Type")] = NameObject("/XObject")
+    form[NameObject("/Subtype")] = NameObject("/Form")
+    form[NameObject("/FormType")] = NumberObject(1)
+    form[NameObject("/BBox")] = RectangleObject(_page_box_values(
+        source_page,
+        "cropbox",
+        "grouped source page effective /CropBox",
+    ))
+    form[NameObject("/Resources")] = source_resources.clone(
+        writer,
+        force_duplicate=True,
+    )
+    form[NameObject("/Group")] = group.clone(
+        writer,
+        force_duplicate=True,
+    )
+    form_reference = writer._add_object(form)
+
+    output_resources = _dereference_pdf_object(
+        output_page.raw_get("/Resources")
+    )
+    if not isinstance(output_resources, DictionaryObject):
+        raise VirtualSpreadError("Invalid output page /Resources")
+    if "/XObject" not in output_resources:
+        output_resources[NameObject("/XObject")] = DictionaryObject()
+    output_xobjects = _dereference_pdf_object(
+        output_resources.raw_get("/XObject")
+    )
+    if not isinstance(output_xobjects, DictionaryObject):
+        raise VirtualSpreadError("Invalid output page /XObject resources")
+    xobject_name = NameObject(f"/SNVS_{object_name}")
+    if xobject_name in output_xobjects:
+        raise VirtualSpreadError("Duplicate grouped source page XObject")
+    output_xobjects[xobject_name] = form_reference
+
+    commands = ContentStream(None, writer)
+    commands.operations = [
+        ([], b"q"),
+        ([FloatObject(value) for value in transform], b"cm"),
+        ([xobject_name], b"Do"),
+        ([], b"Q"),
+    ]
+    writer._merge_content_stream_to_page(output_page, commands.get_data())
+
+
 def _require_supported_source_pages(
     reader: PdfReader,
     *,
@@ -7223,7 +7285,6 @@ def _build_virtual_spread_from_snapshot(
             "left": None,
             "right": None,
         }
-        output_groups: list[DictionaryObject] = []
         for source_page_index, slot in (
             (left_source, left_slot),
             (right_source, right_slot),
@@ -7235,8 +7296,6 @@ def _build_virtual_spread_from_snapshot(
                 reader.pages[source_page_index],
                 source_page_index + 1,
             )
-            if source_group is not None:
-                output_groups.append(source_group)
             layout = _layout_for_page(page, slot, source_transform)
             layout["sourceRotation"] = int(
                 reader.pages[source_page_index].get("/Rotate", 0) or 0
@@ -7248,12 +7307,22 @@ def _build_virtual_spread_from_snapshot(
                 float(original_box.right),
                 float(original_box.top),
             ]
-            output_page.merge_transformed_page(
-                page,
-                Transformation(ctm=tuple(layout["contentTransform"])),
-                over=True,
-                expand=False,
-            )
+            if source_group is None:
+                output_page.merge_transformed_page(
+                    page,
+                    Transformation(ctm=tuple(layout["contentTransform"])),
+                    over=True,
+                    expand=False,
+                )
+            else:
+                _merge_transformed_grouped_page(
+                    writer,
+                    output_page,
+                    page,
+                    layout["contentTransform"],
+                    source_group,
+                    f"{virtual_page_index}_{source_page_index}",
+                )
             layout.pop("contentTransform")
             mapping = {
                 **layout,
@@ -7264,13 +7333,6 @@ def _build_virtual_spread_from_snapshot(
             }
             source_mapping[source_page_index] = mapping
             record[slot.side] = mapping
-        if output_groups:
-            first_group = output_groups[0]
-            if any(group != first_group for group in output_groups[1:]):
-                raise VirtualSpreadError(
-                    "Paired source pages use incompatible transparency groups"
-                )
-            output_page[NameObject("/Group")] = first_group
         spread_records.append(record)
 
     page_ref_to_index = {

@@ -10,10 +10,17 @@ from typing import Any
 
 
 MANIFEST_SCHEMA = "techrebbe.supernote.virtual-spread/v3"
+NAVIGATION_MANIFEST_SCHEMA = "techrebbe.supernote.virtual-spread/v4"
 MAPPING_AUTHORITY_DOMAIN = "techrebbe.supernote.virtual-spread-mapping/v1"
 VIEW_IDENTITY_DOMAIN = "techrebbe.supernote.virtual-spread-view/v1"
 GENERATOR_FORMAT_VERSION = (
     "techrebbe.supernote.virtual-spread-generator/v1"
+)
+NAVIGATION_GENERATOR_FORMAT_VERSION = (
+    "techrebbe.supernote.virtual-spread-generator/v2"
+)
+NAVIGATION_VIEW_IDENTITY_DOMAIN = (
+    "techrebbe.supernote.virtual-spread-view/v2"
 )
 DOCUMENT_ID_PREFIX = "inkbridge-doc-v1-"
 VIEW_ID_PREFIX = "inkbridge-view-v1-"
@@ -434,15 +441,23 @@ def canonical_view_bytes(
     gutter: Any,
     manifest_schema: str = MANIFEST_SCHEMA,
     generator_version: str = GENERATOR_FORMAT_VERSION,
+    navigation_authority_sha256: str | None = None,
+    remove_adjacent_page_links: bool = False,
 ) -> bytes:
     source_hash = _require_sha256(source_sha256, "source SHA-256")
     mapping_hash = _require_sha256(
         mapping_authority_sha256, "mapping authority SHA-256"
     )
-    if manifest_schema != MANIFEST_SCHEMA:
-        raise MappingContractError("Invalid manifest schema")
-    if generator_version != GENERATOR_FORMAT_VERSION:
-        raise MappingContractError("Invalid generator version")
+    legacy = (
+        manifest_schema == MANIFEST_SCHEMA
+        and generator_version == GENERATOR_FORMAT_VERSION
+    )
+    navigation = (
+        manifest_schema == NAVIGATION_MANIFEST_SCHEMA
+        and generator_version == NAVIGATION_GENERATOR_FORMAT_VERSION
+    )
+    if not (legacy or navigation):
+        raise MappingContractError("Invalid manifest/generator version pair")
     if direction != "rtl":
         raise MappingContractError("Invalid direction")
     if type(cover_separate) is not bool:
@@ -452,8 +467,33 @@ def canonical_view_bytes(
         _float_bits(spread_height, "spread height"),
         _float_bits(gutter, "gutter"),
     ))
+    if type(remove_adjacent_page_links) is not bool:
+        raise MappingContractError("Invalid adjacent-link policy")
+    if legacy:
+        if navigation_authority_sha256 is not None:
+            raise MappingContractError(
+                "Legacy view identity cannot include navigation authority"
+            )
+        if remove_adjacent_page_links:
+            raise MappingContractError(
+                "Legacy view identity cannot filter adjacent-page links"
+            )
+        domain = VIEW_IDENTITY_DOMAIN
+        navigation_suffix = ""
+    else:
+        navigation_hash = _require_sha256(
+            navigation_authority_sha256,
+            "navigation authority SHA-256",
+        )
+        domain = NAVIGATION_VIEW_IDENTITY_DOMAIN
+        navigation_suffix = (
+            "\nnavigation|"
+            + navigation_hash
+            + "\nremove-adjacent-page-links|"
+            + ("1" if remove_adjacent_page_links else "0")
+        )
     return (
-        VIEW_IDENTITY_DOMAIN
+        domain
         + "\nsource|"
         + source_hash
         + "\nschema|"
@@ -468,6 +508,7 @@ def canonical_view_bytes(
         + spread
         + "\nmapping|"
         + mapping_hash
+        + navigation_suffix
         + "\n"
     ).encode("ascii")
 

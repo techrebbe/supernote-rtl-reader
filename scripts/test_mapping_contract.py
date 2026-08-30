@@ -17,6 +17,8 @@ sys.path.insert(0, str(ROOT))
 from virtual_spread.mapping_contract import (  # noqa: E402
     JAVA_INT32_MAX,
     MappingContractError,
+    NAVIGATION_GENERATOR_FORMAT_VERSION,
+    NAVIGATION_MANIFEST_SCHEMA,
     canonical_mapping_bytes,
     canonical_mapping_record,
     canonical_view_bytes,
@@ -112,6 +114,28 @@ class MappingContractTest(unittest.TestCase):
         self.assertEqual(
             output_basename(**identity),
             fixture["outputBasename"],
+        )
+
+    def test_navigation_view_identity_cross_language_vector(self) -> None:
+        identity = {
+            "source_sha256": "0123456789abcdef" * 4,
+            "mapping_authority_sha256":
+                "646b905c12266774882e0c4d7ebbbca77b2f386f432979ebcbfcda1d9ace268a",
+            "direction": "rtl",
+            "cover_separate": True,
+            "spread_width": 864.0,
+            "spread_height": 648.0,
+            "gutter": 0.0,
+            "manifest_schema": NAVIGATION_MANIFEST_SCHEMA,
+            "generator_version": NAVIGATION_GENERATOR_FORMAT_VERSION,
+            "navigation_authority_sha256":
+                "7fbaa18d9b6c14ac6e1d5ea3062dccdb82c4092de9b56150676d19cc9695c172",
+            "remove_adjacent_page_links": True,
+        }
+        self.assertEqual(
+            view_id(**identity),
+            "inkbridge-view-v1-"
+            "9c6d77c84ef97e7f73aa40156a78ef7248b3ce1bca39d71eb2cda5341b040d2f",
         )
 
     def test_page_143_point_and_stroke_round_trips(self) -> None:

@@ -124,6 +124,9 @@ mappingAuthoritySha256 String (64 lowercase hex)
 `nativeWidth` and `nativeHeight` are the exact values returned by
 `PluginFileAPI.getPageSize` for the same active page. The other evidence comes
 from InkBridge's independently verified schema-v3 manifest and current file.
+Provider v1 is deliberately schema-v3-only. A schema-v4 representation is
+unavailable through `get_v1`; consumers must use the separately versioned
+[`get_v2` handshake](NATIVE_VIEWPORT_V2.md).
 Any omission or mismatch returns:
 
 ```text

@@ -23,7 +23,11 @@ New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
     (Join-Path $projectRoot `
         'src/com/techrebbe/supernote/virtualspread/VirtualSpreadLinkAuthority.java') `
     (Join-Path $projectRoot `
+        'src/com/techrebbe/supernote/virtualspread/VirtualSpreadNavigationAuthority.java') `
+    (Join-Path $projectRoot `
         'src/com/techrebbe/supernote/virtualspread/NativeViewportAuthority.java') `
+    (Join-Path $projectRoot `
+        'src/com/techrebbe/supernote/virtualspread/NativeViewportProtocol.java') `
     (Join-Path $projectRoot `
         'src/com/techrebbe/supernote/virtualspread/NativeViewportGenerationFence.java') `
     (Join-Path $projectRoot `
@@ -38,9 +42,13 @@ New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
         'tests/NativeViewportCompletionAuthorityTest.java') `
     (Join-Path $projectRoot `
         'tests/NativeViewportLifecycleAuthorityTest.java') `
+    (Join-Path $projectRoot `
+        'tests/NativeViewportProtocolTest.java') `
     (Join-Path $projectRoot 'tests/VirtualSpreadNavigationTest.java') `
     (Join-Path $projectRoot `
-        'tests/VirtualSpreadNavigationExhaustiveTest.java')
+        'tests/VirtualSpreadNavigationExhaustiveTest.java') `
+    (Join-Path $projectRoot `
+        'tests/VirtualSpreadNavigationAuthorityTest.java')
 if ($LASTEXITCODE -ne 0) {
     throw "navigation test compilation failed with exit code $LASTEXITCODE"
 }
@@ -58,6 +66,11 @@ if ($LASTEXITCODE -ne 0) {
 & java -cp $testRoot VirtualSpreadNavigationExhaustiveTest
 if ($LASTEXITCODE -ne 0) {
     throw "exhaustive navigation tests failed with exit code $LASTEXITCODE"
+}
+
+& java -cp $testRoot VirtualSpreadNavigationAuthorityTest
+if ($LASTEXITCODE -ne 0) {
+    throw "navigation-authority tests failed with exit code $LASTEXITCODE"
 }
 
 & java -cp $testRoot NativeViewportAuthorityTest
@@ -78,6 +91,11 @@ if ($LASTEXITCODE -ne 0) {
 & java -cp $testRoot NativeViewportLifecycleAuthorityTest
 if ($LASTEXITCODE -ne 0) {
     throw "native viewport lifecycle-authority tests failed with exit code $LASTEXITCODE"
+}
+
+& java -cp $testRoot NativeViewportProtocolTest
+if ($LASTEXITCODE -ne 0) {
+    throw "native viewport protocol tests failed with exit code $LASTEXITCODE"
 }
 
 & python (Join-Path $projectRoot 'tests/check_scope.py')

@@ -35,6 +35,10 @@ if ('private static final String SCHEMA =\n'
     raise SystemExit(
         "runtime must require the v3 authenticated-mapping manifest schema"
     )
+if "VirtualSpreadNavigation.outlineRouteConflicts(" not in hook:
+    raise SystemExit(
+        "runtime must reject ambiguous authenticated outline routes"
+    )
 
 for required in (
     "private static final Map<String, VerificationOwner> VERIFYING",
@@ -97,9 +101,10 @@ for expected in expected_hooks:
     if expected not in hook:
         raise SystemExit(f"missing expected narrow hook: {expected}")
 
-# loadPage has one narrow navigation/history guard and one private-overload
-# viewport lifecycle fence. Every other expected name is hooked once.
-if hook.count("findAndHookMethod(") != len(expected_hooks) + 1:
+# loadPage has one narrow navigation/history guard, one outline-target guard,
+# and one private-overload viewport lifecycle fence. Every other expected name
+# is hooked once.
+if hook.count("findAndHookMethod(") != len(expected_hooks) + 2:
     raise SystemExit("unexpected extra LSPosed method hook")
 
 for required in (
@@ -137,6 +142,7 @@ required_hook_order = (
     "hookLinkTarget(loadPackageParam.classLoader);",
     "hookLinkHistory(loadPackageParam.classLoader);",
     "hookLinkHistoryActions(loadPackageParam.classLoader);",
+    "hookOutlineTarget(loadPackageParam.classLoader);",
     "hookNativeSaveAcknowledgement(loadPackageParam.classLoader);",
     'logFailure("disabled reason=required_hook_failed", throwable);',
     "return;",
@@ -799,16 +805,20 @@ for required in (
     'native_snapshot_metadata_probe_failed',
     "manifestMatchesNativeSnapshot(",
     '"info:" + key',
+    '"SNVirtualSpreadSchema"',
     '"SNVirtualSpreadSourceSHA256"',
     '"SNVirtualSpreadLayoutSHA256"',
     '"SNVirtualSpreadLinksSHA256"',
     '"SNVirtualSpreadMappingSHA256"',
+    '"SNVirtualSpreadNavigationSHA256"',
     '"SNVirtualSpreadViewID"',
     '"SNVirtualSpreadGeneratorVersion"',
     "!isSha256(nativeSource)",
     "!isSha256(nativeMapping)",
+    "manifest.navigationAuthority.equals(nativeNavigation)",
+    "manifest.schema.equals(nativeSchema)",
     "manifest.viewId.equals(nativeViewId)",
-    "GENERATOR_VERSION.equals(nativeGenerator)",
+    "manifest.generatorVersion.equals(nativeGenerator)",
     'manifest_rejected reason=native_snapshot_metadata',
     'objectField(currentPdfMupdf, "document") != nativeDocument',
     "state.nativeSnapshotDocument = nativeDocument",
@@ -820,6 +830,7 @@ for required in (
 
 for required in (
     "public static boolean nativeMetadataClaimsVirtualSpread(",
+    "public static boolean outlineTargetMatchesMapping(",
     "return !((String) value).trim().isEmpty();",
     "if (!(value instanceof String))",
 ):
@@ -1341,11 +1352,11 @@ if not (0 <= duplicate_guard < json_parse):
     )
 
 manifest = (root / "AndroidManifest.xml").read_text(encoding="utf-8")
-if 'android:versionCode="28"' not in manifest:
+if 'android:versionCode="29"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version code")
-if 'android:versionName="0.0.26"' not in manifest:
+if 'android:versionName="0.0.27"' not in manifest:
     raise SystemExit("unexpected virtual-spread package version name")
-if 'private static final String VERSION = "0.0.26"' not in hook:
+if 'private static final String VERSION = "0.0.27"' not in hook:
     raise SystemExit("runtime and package versions must remain aligned")
 if (
     'android:name="xposedscope"' not in manifest
@@ -1424,6 +1435,18 @@ viewport_provider = (
     root
     / "src/com/techrebbe/supernote/virtualspread/NativeViewportProvider.java"
 ).read_text(encoding="utf-8")
+
+if (
+    "sourcePage == null || sourcePage.intValue() < 0" not in hook
+    or "virtualPage.intValue() < 0" not in hook
+):
+    raise SystemExit(
+        "schema-v4 outline targets must reject negative page indices before lookup"
+    )
+viewport_protocol = (
+    root
+    / "src/com/techrebbe/supernote/virtualspread/NativeViewportProtocol.java"
+).read_text(encoding="utf-8")
 viewport_generation_fence = (
     root
     / "src/com/techrebbe/supernote/virtualspread/NativeViewportGenerationFence.java"
@@ -1478,6 +1501,13 @@ for required in (
     'request.getString("generatedPdfSha256")',
     'request.getString("sidecarSha256")',
     'request.getString("mappingAuthoritySha256")',
+    'METHOD_PUBLISH_V2 = "publish_v2"',
+    'METHOD_GET_V2 = "get_v2"',
+    'request.getString("manifestSchema")',
+    'request.getString("generatorVersion")',
+    'request.getString("navigationAuthoritySha256")',
+    'NativeViewportProtocol.exactRequestFields(',
+    'request.keySet()',
     'METHOD_BEGIN_LOAD = "begin_load_v1"',
     'METHOD_CLEAR_GENERATION =\n        "clear_generation_v1"',
     "LOAD_FENCE.accepts(",
@@ -1490,6 +1520,30 @@ for required in (
             "native viewport provider is missing a fail-closed invariant: "
             + required
         )
+for required in (
+    'SCHEMA_V3 =\n        "techrebbe.supernote.virtual-spread/v3"',
+    'SCHEMA_V4 =\n        "techrebbe.supernote.virtual-spread/v4"',
+    "public static int versionForRepresentation(",
+    "public static boolean v2EvidenceMatches(",
+):
+    if required not in viewport_protocol:
+        raise SystemExit(
+            "native viewport protocol versioning is incomplete: " + required
+        )
+
+outline_hook = hook.find("private static void hookOutlineTarget(")
+outline_lookup = hook.find("ManifestLookup lookup = manifestLookupFor", outline_hook)
+outline_end = hook.find("private static ", outline_hook + 1)
+outline_clear = hook.find("clearQueuedLinkInvocation(viewModel)", outline_hook)
+outline_mixed = hook.find("clearMixedLinkCandidate(viewModel)", outline_hook)
+outline_intent = hook.find("noteReaderIntent(viewModel)", outline_lookup)
+if not (
+    0 <= outline_hook < outline_clear < outline_lookup < outline_intent < outline_end
+    and outline_hook < outline_mixed < outline_lookup
+):
+    raise SystemExit(
+        "outline intent must supersede queued/mixed links across verification"
+    )
 for required in (
     "requestedGeneration <= generation",
     "requestedGeneration == generation",
@@ -1615,6 +1669,8 @@ if "run: ./virtual-spread-module/test.ps1" not in workflow:
     )
 if "run: python scripts/test_mapping_contract.py" not in workflow:
     raise SystemExit("CI must run the frozen mapping contract tests")
+if "run: python scripts/test_navigation_contract.py" not in workflow:
+    raise SystemExit("CI must run the navigation authority contract tests")
 if (
     "./virtual-spread-module/build.ps1" not in workflow
     or "-DebugKeystore $env:VIRTUAL_SPREAD_KEYSTORE" not in workflow
@@ -1846,6 +1902,8 @@ for required in (
     'SOURCE_AUTHORITY_MARKER = b"%SNVirtualSpreadSourceSHA256:"',
     'MAPPING_AUTHORITY_MARKER = b"%SNVirtualSpreadMappingSHA256:"',
     'VIEW_AUTHORITY_MARKER = b"%SNVirtualSpreadViewSHA256:"',
+    'NAVIGATION_AUTHORITY_MARKER = b"%SNVirtualSpreadNavigationSHA256:"',
+    '"/SNVirtualSpreadNavigationSHA256",',
     "source_hash,",
     'LEGACY_PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v1"',
     "class AmbiguousPublicationMarkerError(",
@@ -1886,6 +1944,20 @@ for required in (
     "def _transform_link_border_style(",
     "def _copy_link_highlight_mode(",
     "def _validated_link_action(",
+    "def _validate_filterable_internal_destination(",
+    "def _copy_document_outlines(",
+    "def _copy_named_destinations(",
+    "def _raw_named_destinations(",
+    "Named destination parser omitted raw leaves",
+    "Invalid or cyclic named destination tree",
+    "writer.add_named_destination_array(",
+    "output_name_by_raw",
+    "Referenced named destination was not preserved",
+    "or copied_named_destinations",
+    "Documents containing both legacy /Dests and /Names destination",
+    "remove_adjacent_page_links=remove_adjacent_page_links",
+    "adjacent_link_policy_explicit=adjacent_link_policy_explicit",
+    "def _require_unambiguous_outline_routes(",
     'copied[NameObject("/Border")] = border',
     'copied_action[NameObject("/IsMap")] = BooleanObject(',
     "def _require_supported_document_catalog(",
@@ -2124,7 +2196,15 @@ for required in (
     "test_relative_uri_action_fails_closed",
     "test_uri_action_operands_and_chains_fail_closed",
     "test_unsupported_link_semantics_fail_closed",
-    "test_document_outlines_fail_closed_before_publication",
+    "test_unsupported_document_outline_fails_closed_before_publication",
+    "test_outline_goto_action_allows_standard_action_type",
+    "test_standalone_named_destination_is_transformed_and_preserved",
+    "test_unsupported_standalone_named_destination_fails_before_publication",
+    "test_malformed_raw_named_destination_leaf_fails_before_publication",
+    "test_nested_named_destination_tree_is_fully_preserved",
+    "test_legacy_named_destination_is_transformed_and_preserved",
+    "test_outline_hierarchy_style_order_and_named_destination_survive",
+    "test_dual_named_destination_containers_fail_before_publication",
     "test_document_open_action_fails_closed_before_publication",
     "test_supported_catalog_view_settings_are_preserved",
     "test_optional_content_catalog_fails_closed_before_publication",

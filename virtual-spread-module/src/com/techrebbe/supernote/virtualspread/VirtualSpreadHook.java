@@ -23,6 +23,7 @@ import java.lang.reflect.Modifier;
 import java.nio.channels.FileChannel;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -76,11 +77,15 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final long TARGET_DOCUMENT_APK_LENGTH = 138486560L;
     private static final String SCHEMA =
         "techrebbe.supernote.virtual-spread/v3";
+    private static final String NAVIGATION_SCHEMA =
+        "techrebbe.supernote.virtual-spread/v4";
     private static final String GENERATOR_VERSION =
         "techrebbe.supernote.virtual-spread-generator/v1";
+    private static final String NAVIGATION_GENERATOR_VERSION =
+        "techrebbe.supernote.virtual-spread-generator/v2";
     private static final String VIEW_ID_PREFIX = "inkbridge-view-v1-";
     private static final String TAG = "SN_VIRTUAL_SPREAD";
-    private static final String VERSION = "0.0.26";
+    private static final String VERSION = "0.0.27";
     private static final long MAX_MANIFEST_BYTES = 8L * 1024L * 1024L;
     private static final int MAX_CACHED_MANIFESTS = 4;
     private static final long PENDING_LINK_MAX_AGE_MS = 60000L;
@@ -151,55 +156,108 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
     private static final class Manifest {
         final String key;
         final String revision;
+        final String schema;
         final String sourceAuthority;
         final String documentId;
         final String outputAuthority;
         final String layoutAuthority;
         final String linkAuthority;
         final String mappingAuthority;
+        final String navigationAuthority;
         final String viewId;
         final String cacheBasename;
+        final String generatorVersion;
         final int pageCount;
         final VirtualSpreadNavigation.Spread[] spreads;
         final double pageWidth;
         final double pageHeight;
         final VirtualSpreadNavigation.LinkTarget[] links;
         final VirtualSpreadNavigation.UriTarget[] uriLinks;
+        final OutlineTarget[] outlines;
 
         Manifest(
             String key,
             String revision,
+            String schema,
             String sourceAuthority,
             String documentId,
             String outputAuthority,
             String layoutAuthority,
             String linkAuthority,
             String mappingAuthority,
+            String navigationAuthority,
             String viewId,
             String cacheBasename,
+            String generatorVersion,
             int pageCount,
             VirtualSpreadNavigation.Spread[] spreads,
             double pageWidth,
             double pageHeight,
             VirtualSpreadNavigation.LinkTarget[] links,
-            VirtualSpreadNavigation.UriTarget[] uriLinks
+            VirtualSpreadNavigation.UriTarget[] uriLinks,
+            OutlineTarget[] outlines
         ) {
             this.key = key;
             this.revision = revision;
+            this.schema = schema;
             this.sourceAuthority = sourceAuthority;
             this.documentId = documentId;
             this.outputAuthority = outputAuthority;
             this.layoutAuthority = layoutAuthority;
             this.linkAuthority = linkAuthority;
             this.mappingAuthority = mappingAuthority;
+            this.navigationAuthority = navigationAuthority;
             this.viewId = viewId;
             this.cacheBasename = cacheBasename;
+            this.generatorVersion = generatorVersion;
             this.pageCount = pageCount;
             this.spreads = spreads;
             this.pageWidth = pageWidth;
             this.pageHeight = pageHeight;
             this.links = links;
             this.uriLinks = uriLinks;
+            this.outlines = outlines;
+        }
+    }
+
+    private static final class OutlineTarget {
+        final String title;
+        final int virtualPage;
+        final VirtualSpreadNavigation.Half half;
+        final boolean resetLandscapeFit;
+
+        OutlineTarget(
+            String title,
+            int virtualPage,
+            VirtualSpreadNavigation.Half half,
+            boolean resetLandscapeFit
+        ) {
+            this.title = title;
+            this.virtualPage = virtualPage;
+            this.half = half;
+            this.resetLandscapeFit = resetLandscapeFit;
+        }
+    }
+
+    private static final class NavigationData {
+        final String authority;
+        final boolean removeAdjacentPageLinks;
+        final int removedLinkCount;
+        final int retainedLinkCount;
+        final OutlineTarget[] outlines;
+
+        NavigationData(
+            String authority,
+            boolean removeAdjacentPageLinks,
+            int removedLinkCount,
+            int retainedLinkCount,
+            OutlineTarget[] outlines
+        ) {
+            this.authority = authority;
+            this.removeAdjacentPageLinks = removeAdjacentPageLinks;
+            this.removedLinkCount = removedLinkCount;
+            this.retainedLinkCount = retainedLinkCount;
+            this.outlines = outlines;
         }
     }
 
@@ -207,17 +265,20 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         final int sourcePageIndex;
         final int virtualPageIndex;
         final String side;
+        final double[] destination;
         final String canonical;
 
         MappingRecord(
             int sourcePageIndex,
             int virtualPageIndex,
             String side,
+            double[] destination,
             String canonical
         ) {
             this.sourcePageIndex = sourcePageIndex;
             this.virtualPageIndex = virtualPageIndex;
             this.side = side;
+            this.destination = destination.clone();
             this.canonical = canonical;
         }
     }
@@ -730,6 +791,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             hookLinkTarget(loadPackageParam.classLoader);
             hookLinkHistory(loadPackageParam.classLoader);
             hookLinkHistoryActions(loadPackageParam.classLoader);
+            hookOutlineTarget(loadPackageParam.classLoader);
             hookNativeSaveAcknowledgement(loadPackageParam.classLoader);
         } catch (Throwable throwable) {
             hooksReady = false;
@@ -1923,7 +1985,9 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             || !isSha256(nativeMappingAuthority)
             || nativeViewId == null
             || !nativeViewId.startsWith(VIEW_ID_PREFIX)
-            || !GENERATOR_VERSION.equals(nativeGeneratorVersion)) {
+            || !(GENERATOR_VERSION.equals(nativeGeneratorVersion)
+                || NAVIGATION_GENERATOR_VERSION.equals(
+                    nativeGeneratorVersion))) {
             clearQueuedLinkInvocation(viewModel);
             log("link_jump_not_queued reason=missing_native_source_state");
             return;
@@ -3372,6 +3436,28 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             publication.putString(
                 "mappingAuthoritySha256", manifest.mappingAuthority
             );
+            int viewportProtocol = NativeViewportProtocol
+                .versionForRepresentation(
+                    manifest.schema,
+                    manifest.generatorVersion,
+                    manifest.navigationAuthority
+                );
+            if (viewportProtocol < 0) {
+                throw new IllegalStateException(
+                    "verified manifest has no viewport protocol"
+                );
+            }
+            boolean navigationViewport = viewportProtocol == 2;
+            if (navigationViewport) {
+                publication.putString("manifestSchema", manifest.schema);
+                publication.putString(
+                    "generatorVersion", manifest.generatorVersion
+                );
+                publication.putString(
+                    "navigationAuthoritySha256",
+                    manifest.navigationAuthority
+                );
+            }
             publication.putString("snapshotId", cached.snapshotId());
             publication.putString(
                 "pdfIdentity", cached.pdfIdentity.token()
@@ -3393,12 +3479,18 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             // still attempt to clear that possibly published record.
             nativeViewportMayBePublished = true;
             Bundle response = activity.getContentResolver().call(
-                NativeViewportProvider.CONTENT_URI,
-                NativeViewportProvider.METHOD_PUBLISH,
+                navigationViewport
+                    ? NativeViewportProvider.CONTENT_URI_V2
+                    : NativeViewportProvider.CONTENT_URI,
+                navigationViewport
+                    ? NativeViewportProvider.METHOD_PUBLISH_V2
+                    : NativeViewportProvider.METHOD_PUBLISH,
                 null,
                 publication
             );
             if (response == null
+                || response.getInt("protocolVersion", -1)
+                    != viewportProtocol
                 || !"published".equals(response.getString("status"))) {
                 throw new IllegalStateException(
                     "viewport provider rejected publication"
@@ -3980,6 +4072,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             return null;
         }
         try {
+            Object nativeSchema = XposedHelpers.callMethod(
+                nativeDocument,
+                "getMetaData",
+                "info:SNVirtualSpreadSchema"
+            );
             Object nativeSource = XposedHelpers.callMethod(
                 nativeDocument,
                 "getMetaData",
@@ -4000,6 +4097,11 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 "getMetaData",
                 "info:SNVirtualSpreadMappingSHA256"
             );
+            Object nativeNavigation = XposedHelpers.callMethod(
+                nativeDocument,
+                "getMetaData",
+                "info:SNVirtualSpreadNavigationSHA256"
+            );
             Object nativeViewId = XposedHelpers.callMethod(
                 nativeDocument,
                 "getMetaData",
@@ -4012,10 +4114,12 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             );
             return Boolean.valueOf(
                 VirtualSpreadNavigation.nativeMetadataClaimsVirtualSpread(
+                    nativeSchema,
                     nativeSource,
                     nativeLayout,
                     nativeLinks,
                     nativeMapping,
+                    nativeNavigation,
                     nativeViewId,
                     nativeGenerator
                 )
@@ -4052,6 +4156,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             }
         }
 
+        String nativeSchema = nativePdfMetadata(
+            nativeDocument,
+            "SNVirtualSpreadSchema"
+        );
         String nativeSource = nativePdfMetadata(
             nativeDocument,
             "SNVirtualSpreadSourceSHA256"
@@ -4068,6 +4176,10 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             nativeDocument,
             "SNVirtualSpreadMappingSHA256"
         );
+        String nativeNavigation = nativePdfMetadata(
+            nativeDocument,
+            "SNVirtualSpreadNavigationSHA256"
+        );
         String nativeViewId = nativePdfMetadata(
             nativeDocument,
             "SNVirtualSpreadViewID"
@@ -4076,28 +4188,37 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             nativeDocument,
             "SNVirtualSpreadGeneratorVersion"
         );
-        if (!isSha256(nativeSource)
+        if (!manifest.schema.equals(nativeSchema)
+            || !isSha256(nativeSource)
             || !isSha256(nativeLayout)
             || !isSha256(nativeLinks)
             || !isSha256(nativeMapping)
+            || (manifest.navigationAuthority == null
+                ? (nativeNavigation != null
+                    && !nativeNavigation.trim().isEmpty())
+                : !manifest.navigationAuthority.equals(nativeNavigation))
             || !manifest.viewId.equals(nativeViewId)
-            || !GENERATOR_VERSION.equals(nativeGenerator)) {
+            || !manifest.generatorVersion.equals(nativeGenerator)) {
             log("manifest_rejected reason=native_snapshot_metadata path="
                 + manifest.key);
             return null;
         }
         boolean accepted = VirtualSpreadNavigation
             .manifestMatchesNativeSnapshot(
+                manifest.schema,
                 manifest.sourceAuthority,
                 manifest.layoutAuthority,
                 manifest.linkAuthority,
                 manifest.mappingAuthority,
+                manifest.navigationAuthority,
                 manifest.viewId,
-                GENERATOR_VERSION,
+                manifest.generatorVersion,
+                nativeSchema,
                 nativeSource,
                 nativeLayout,
                 nativeLinks,
                 nativeMapping,
+                nativeNavigation,
                 nativeViewId,
                 nativeGenerator
             );
@@ -5303,6 +5424,325 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         return result;
     }
 
+    private static boolean unitColor(double[] values) {
+        if (values == null || values.length != 3) {
+            return false;
+        }
+        for (double value : values) {
+            if (!Double.isFinite(value) || value < 0.0 || value > 1.0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static void hookOutlineTarget(ClassLoader classLoader) {
+        Class<?> outlineItemClass = XposedHelpers.findClass(
+            "com.supernote.document.document.DocumentOutlineItem",
+            classLoader
+        );
+        XposedHelpers.findAndHookMethod(
+            TARGET_VIEW_MODEL,
+            classLoader,
+            "loadPage",
+            outlineItemClass,
+            new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    Object viewModel = param.thisObject;
+                    Object item = param.args[0];
+                    if (item == null) {
+                        return;
+                    }
+                    // The outline tap is newer user intent than any link that
+                    // was queued while manifest verification was cold. Clear
+                    // those older actions before the lookup captures an
+                    // invalidation token, then advance intent generation after
+                    // lookup so a pending worker cannot erase this decision.
+                    clearQueuedLinkInvocation(viewModel);
+                    clearMixedLinkCandidate(viewModel);
+                    ManifestLookup lookup = manifestLookupFor(viewModel);
+                    if (lookup.manifest != null
+                        || lookup.navigationBlocked()) {
+                        noteReaderIntent(viewModel);
+                    }
+                    if (lookup.manifest == null) {
+                        if (lookup.navigationBlocked()) {
+                            param.setResult(null);
+                            log("outline_jump_blocked reason=manifest_unavailable");
+                        }
+                        return;
+                    }
+                    int page = intMethod(item, "getPage", -1);
+                    Object nativeOutline = XposedHelpers.callMethod(
+                        item, "getOutline"
+                    );
+                    Object titleValue = nativeOutline == null ? null
+                        : objectField(nativeOutline, "title");
+                    String title = titleValue instanceof String
+                        ? (String) titleValue : null;
+                    OutlineTarget selected = null;
+                    for (OutlineTarget target : lookup.manifest.outlines) {
+                        if (target.virtualPage != page
+                            || !sameText(target.title, title)) {
+                            continue;
+                        }
+                        if (selected != null
+                            && (selected.half != target.half
+                                || selected.resetLandscapeFit
+                                    != target.resetLandscapeFit)) {
+                            param.setResult(null);
+                            log("outline_jump_blocked reason=ambiguous_target"
+                                + " page=" + page);
+                            return;
+                        }
+                        selected = target;
+                    }
+                    if (selected == null) {
+                        param.setResult(null);
+                        log("outline_jump_blocked reason=unmatched_target"
+                            + " page=" + page);
+                        return;
+                    }
+                    ReaderState state = stateFor(viewModel, lookup.manifest);
+                    clearPendingLink(state);
+                    state.pendingLinkPage = selected.virtualPage;
+                    state.pendingLinkHalf = selected.half;
+                    state.pendingLinkResetLandscapeFit =
+                        selected.resetLandscapeFit;
+                    state.pendingLinkAt = System.currentTimeMillis();
+                    noteReaderIntent(state);
+                    log("outline_jump_captured page=" + selected.virtualPage
+                        + " half=" + selected.half
+                        + " fit=" + selected.resetLandscapeFit);
+                }
+            }
+        );
+    }
+
+    private static NavigationData parseNavigation(
+        JSONObject navigation,
+        JSONObject output,
+        int sourcePageCount,
+        int outputPageCount,
+        int retainedLinks,
+        MappingRecord[] sourceMappings
+    ) throws Exception {
+        if (!objectHasExactKeys(
+                navigation,
+                "authority",
+                "authoritySha256",
+                "removeAdjacentPageLinks",
+                "removedAdjacentPageLinkCount",
+                "retainedLinkCount",
+                "outlines"
+            )
+            || !"techrebbe.supernote.virtual-spread-navigation/v1".equals(
+                exactManifestString(navigation, "authority")
+            )) {
+            return null;
+        }
+        String expected = exactManifestString(
+            navigation, "authoritySha256"
+        );
+        String outputExpected = exactManifestString(
+            output, "navigationAuthoritySha256"
+        );
+        Object removeValue = navigation.opt("removeAdjacentPageLinks");
+        Integer removed = exactManifestInteger(
+            navigation, "removedAdjacentPageLinkCount"
+        );
+        Integer retained = exactManifestInteger(
+            navigation, "retainedLinkCount"
+        );
+        JSONArray array = navigation.optJSONArray("outlines");
+        if (!isSha256(expected) || !expected.equals(outputExpected)
+            || !(removeValue instanceof Boolean)
+            || removed == null || retained == null || array == null
+            || removed.intValue() < 0 || retained.intValue() < 0
+            || (!((Boolean) removeValue).booleanValue()
+                && removed.intValue() != 0)
+            || retained.intValue() != retainedLinks) {
+            return null;
+        }
+        ArrayList<String> records = new ArrayList<>();
+        ArrayList<OutlineTarget> targets = new ArrayList<>();
+        Map<String, Map<Integer, OutlineTarget>> outlineRoutes =
+            new HashMap<>();
+        for (int index = 0; index < array.length(); index++) {
+            JSONObject item = array.optJSONObject(index);
+            if (!objectHasExactKeys(
+                    item,
+                    "outlineIndex", "parentOutlineIndex", "title", "isOpen",
+                    "bold", "italic", "color", "destination"
+                )) {
+                return null;
+            }
+            Integer outlineIndex = exactManifestInteger(item, "outlineIndex");
+            Object parentValue = item.opt("parentOutlineIndex");
+            Integer parent = parentValue == JSONObject.NULL
+                ? null : VirtualSpreadNavigation.exactJsonInteger(parentValue);
+            String title = exactManifestString(item, "title");
+            Object openValue = item.opt("isOpen");
+            Object boldValue = item.opt("bold");
+            Object italicValue = item.opt("italic");
+            double[] color = exactFiniteArray(item, "color", 3);
+            if (outlineIndex == null || outlineIndex.intValue() != index
+                || (parentValue != JSONObject.NULL && parent == null)
+                || title == null || title.indexOf('\0') >= 0
+                || !(openValue instanceof Boolean)
+                || !(boldValue instanceof Boolean)
+                || !(italicValue instanceof Boolean)
+                || color == null
+                || !unitColor(color)
+                || (parent != null
+                    && (parent.intValue() < 0
+                        || parent.intValue() >= index))) {
+                return null;
+            }
+            Object destinationValue = item.opt("destination");
+            Integer sourcePage = null;
+            Integer virtualPage = null;
+            String side = null;
+            String targetView = null;
+            String mode = null;
+            Double[] operands = null;
+            if (destinationValue != JSONObject.NULL) {
+                JSONObject destination = item.optJSONObject("destination");
+                if (!objectHasExactKeys(
+                        destination,
+                        "sourcePageIndex", "virtualPageIndex", "side",
+                        "targetView", "mode", "operands"
+                    )) {
+                    return null;
+                }
+                sourcePage = exactManifestInteger(
+                    destination, "sourcePageIndex"
+                );
+                virtualPage = exactManifestInteger(
+                    destination, "virtualPageIndex"
+                );
+                side = exactManifestString(destination, "side");
+                targetView = exactManifestString(
+                    destination, "targetView"
+                );
+                mode = exactManifestString(destination, "mode");
+                JSONArray operandArray = destination.optJSONArray("operands");
+                if (sourcePage == null || sourcePage.intValue() < 0
+                    || sourcePage.intValue() >= sourcePageCount
+                    || virtualPage == null
+                    || virtualPage.intValue() < 0
+                    || virtualPage.intValue() >= outputPageCount
+                    || !("left".equals(side) || "right".equals(side))
+                    || !"fit-source-page".equals(targetView)
+                    || !"/FitR".equals(mode)
+                    || operandArray == null) {
+                    return null;
+                }
+                operands = new Double[operandArray.length()];
+                for (int operand = 0; operand < operands.length; operand++) {
+                    Object raw = operandArray.opt(operand);
+                    if (raw == JSONObject.NULL) {
+                        return null;
+                    }
+                    operands[operand] = VirtualSpreadNavigation
+                        .exactFiniteJsonNumber(raw);
+                    if (operands[operand] == null) {
+                        return null;
+                    }
+                }
+                if (operands.length != 4) {
+                    return null;
+                }
+                if (sourcePage.intValue() >= sourceMappings.length) {
+                    return null;
+                }
+                MappingRecord mapping = sourceMappings[
+                    sourcePage.intValue()
+                ];
+                if (mapping == null
+                    || !VirtualSpreadNavigation.outlineTargetMatchesMapping(
+                        mapping.sourcePageIndex,
+                        mapping.virtualPageIndex,
+                        mapping.side,
+                        mapping.destination,
+                        sourcePage.intValue(),
+                        virtualPage.intValue(),
+                        side,
+                        operands
+                    )) {
+                    return null;
+                }
+                VirtualSpreadNavigation.Half targetHalf =
+                    "left".equals(side)
+                        ? VirtualSpreadNavigation.Half.LEFT
+                        : VirtualSpreadNavigation.Half.RIGHT;
+                boolean resetLandscapeFit =
+                    "fit-source-page".equals(targetView);
+                Map<Integer, OutlineTarget> routesForTitle =
+                    outlineRoutes.get(title);
+                if (routesForTitle == null) {
+                    routesForTitle = new HashMap<>();
+                    outlineRoutes.put(title, routesForTitle);
+                }
+                OutlineTarget existing = routesForTitle.get(virtualPage);
+                if (existing != null
+                    && VirtualSpreadNavigation.outlineRouteConflicts(
+                        existing.title,
+                        existing.virtualPage,
+                        existing.half,
+                        existing.resetLandscapeFit,
+                        title,
+                        virtualPage.intValue(),
+                        targetHalf,
+                        resetLandscapeFit
+                    )) {
+                    return null;
+                }
+                OutlineTarget target = new OutlineTarget(
+                    title,
+                    virtualPage.intValue(),
+                    targetHalf,
+                    resetLandscapeFit
+                );
+                if (existing == null) {
+                    routesForTitle.put(virtualPage, target);
+                }
+                targets.add(target);
+            }
+            records.add(VirtualSpreadNavigationAuthority.record(
+                index,
+                parent,
+                title,
+                ((Boolean) openValue).booleanValue(),
+                ((Boolean) boldValue).booleanValue(),
+                ((Boolean) italicValue).booleanValue(),
+                color,
+                sourcePage,
+                virtualPage,
+                side,
+                targetView,
+                mode,
+                operands
+            ));
+        }
+        if (!expected.equals(VirtualSpreadNavigationAuthority.digest(
+            records.toArray(new String[records.size()]),
+            ((Boolean) removeValue).booleanValue(),
+            removed.intValue(),
+            retained.intValue()
+        ))) {
+            return null;
+        }
+        return new NavigationData(
+            expected,
+            ((Boolean) removeValue).booleanValue(),
+            removed.intValue(),
+            retained.intValue(),
+            targets.toArray(new OutlineTarget[targets.size()])
+        );
+    }
+
     private static boolean mappingHasFrozenFieldSet(JSONObject mapping) {
         String[] required = new String[] {
             "sourcePageIndex",
@@ -5453,7 +5893,7 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             return null;
         }
         return new MappingRecord(
-            sourcePage, virtualPage, side, canonical
+            sourcePage, virtualPage, side, destination, canonical
         );
     }
 
@@ -5526,11 +5966,25 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             return null;
         }
         JSONObject root = new JSONObject(sidecarJson);
-        if (!SCHEMA.equals(exactManifestString(root, "schema"))
-            || !GENERATOR_VERSION.equals(
-                exactManifestString(root, "generatorVersion")
-            )
+        String manifestSchema = exactManifestString(root, "schema");
+        String manifestGenerator = exactManifestString(
+            root, "generatorVersion"
+        );
+        boolean navigationFormat = NAVIGATION_SCHEMA.equals(manifestSchema)
+            && NAVIGATION_GENERATOR_VERSION.equals(manifestGenerator);
+        boolean legacyFormat = SCHEMA.equals(manifestSchema)
+            && GENERATOR_VERSION.equals(manifestGenerator);
+        if (!(legacyFormat || navigationFormat)
             || !"rtl".equals(exactManifestString(root, "direction"))) {
+            return null;
+        }
+        if (navigationFormat && !objectHasExactKeys(
+                root,
+                "schema", "source", "output", "generatorVersion",
+                "direction", "coverSeparate", "spreads", "sourcePages",
+                "links", "navigation"
+            )) {
+            log("manifest_rejected reason=navigation_root_fields path=" + key);
             return null;
         }
         Object coverValue = root.opt("coverSeparate");
@@ -5634,6 +6088,44 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             log("manifest_rejected reason=mapping_authority path=" + key);
             return null;
         }
+        if (navigationFormat && (
+                !objectHasExactKeys(
+                    source,
+                    "name", "path", "size", "sha256", "pageCount",
+                    "documentId"
+                )
+                || !objectHasExactKeys(
+                    output,
+                    "name", "path", "size", "sha256", "pageCount",
+                    "spreadSize", "gutter", "layoutAuthoritySha256",
+                    "linkAuthoritySha256", "mappingAuthoritySha256",
+                    "navigationAuthoritySha256", "viewId", "cacheBasename"
+                ))) {
+            log("manifest_rejected reason=navigation_identity_fields path="
+                + key);
+            return null;
+        }
+        JSONObject navigationJson = root.optJSONObject("navigation");
+        String expectedNavigationAuthority = navigationFormat
+            ? exactManifestString(output, "navigationAuthoritySha256")
+            : null;
+        requireCurrentVerification(key, owner);
+        String embeddedNavigationAuthority =
+            VirtualSpreadLinkAuthority.readPdfNavigationDigest(pdfInput);
+        if (navigationFormat) {
+            if (!isSha256(expectedNavigationAuthority)
+                || !expectedNavigationAuthority.equals(
+                    embeddedNavigationAuthority
+                ) || navigationJson == null) {
+                log("manifest_rejected reason=navigation_authority path=" + key);
+                return null;
+            }
+        } else if (navigationJson != null
+            || embeddedNavigationAuthority != null
+            || output.has("navigationAuthoritySha256")) {
+            log("manifest_rejected reason=legacy_navigation_state path=" + key);
+            return null;
+        }
         String expectedViewId = exactManifestString(output, "viewId");
         String expectedCacheBasename = exactManifestString(
             output, "cacheBasename"
@@ -5732,20 +6224,53 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
                 + key);
             return null;
         }
+        NavigationData navigationData = navigationFormat
+            ? parseNavigation(
+                navigationJson,
+                output,
+                sourcePageCount,
+                pageCount,
+                linksJson.length(),
+                sourceMappings
+            )
+            : new NavigationData(
+                null, false, 0, linksJson.length(), new OutlineTarget[0]
+            );
+        if (navigationData == null
+            || (navigationFormat && !expectedNavigationAuthority.equals(
+                navigationData.authority
+            ))) {
+            log("manifest_rejected reason=navigation_records path=" + key);
+            return null;
+        }
         String actualViewId;
         String actualCacheBasename;
         try {
-            actualViewId = VirtualSpreadLinkAuthority.viewId(
-                expectedSourceAuthority,
-                SCHEMA,
-                GENERATOR_VERSION,
-                "rtl",
-                coverSeparate,
-                pageWidth,
-                pageHeight,
-                gutter,
-                actualMappingAuthority
-            );
+            actualViewId = navigationFormat
+                ? VirtualSpreadLinkAuthority.navigationViewId(
+                    expectedSourceAuthority,
+                    NAVIGATION_SCHEMA,
+                    NAVIGATION_GENERATOR_VERSION,
+                    "rtl",
+                    coverSeparate,
+                    pageWidth,
+                    pageHeight,
+                    gutter,
+                    actualMappingAuthority,
+                    navigationData.authority,
+                    navigationData.removeAdjacentPageLinks
+                )
+                : VirtualSpreadLinkAuthority.viewId(
+                    expectedSourceAuthority,
+                    SCHEMA,
+                    GENERATOR_VERSION,
+                    "rtl",
+                    coverSeparate,
+                    pageWidth,
+                    pageHeight,
+                    gutter,
+                    actualMappingAuthority
+                );
             actualCacheBasename = VirtualSpreadLinkAuthority.outputBasename(
                 expectedSourceAuthority,
                 actualViewId
@@ -6002,14 +6527,17 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
         return new Manifest(
             key,
             sidecarDigest,
+            manifestSchema,
             expectedSourceAuthority,
             expectedDocumentId,
             expectedHash,
             expectedLayoutAuthority,
             expectedLinkAuthority,
             expectedMappingAuthority,
+            navigationData.authority,
             expectedViewId,
             expectedCacheBasename,
+            manifestGenerator,
             pageCount,
             spreads,
             pageWidth,
@@ -6017,7 +6545,8 @@ public final class VirtualSpreadHook implements IXposedHookLoadPackage {
             links.toArray(new VirtualSpreadNavigation.LinkTarget[links.size()]),
             uriLinks.toArray(
                 new VirtualSpreadNavigation.UriTarget[uriLinks.size()]
-            )
+            ),
+            navigationData.outlines
         );
     }
 

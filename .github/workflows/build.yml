@@ -81,6 +81,9 @@ jobs:
       - name: Test mapping wire contract
         run: python scripts/test_mapping_contract.py
 
+      - name: Test navigation wire contract
+        run: python scripts/test_navigation_contract.py
+
       - name: Verify page-143 cross-project artifacts
         run: python scripts/test_page_143_artifacts.py
 

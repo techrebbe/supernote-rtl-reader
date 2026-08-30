@@ -16,6 +16,7 @@ import stat
 import struct
 import sys
 import tempfile
+from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from fractions import Fraction
@@ -35,12 +36,15 @@ from pypdf.generic import (
     NumberObject,
     RectangleObject,
     TextStringObject,
+    TreeObject,
 )
 
 if __package__:
     from .mapping_contract import (
         GENERATOR_FORMAT_VERSION,
         MANIFEST_SCHEMA,
+        NAVIGATION_GENERATOR_FORMAT_VERSION,
+        NAVIGATION_MANIFEST_SCHEMA,
         MappingContractError,
         document_id,
         mapping_authority_sha256,
@@ -51,11 +55,24 @@ else:  # Direct script/test import from virtual_spread/.
     from mapping_contract import (  # type: ignore[no-redef]
         GENERATOR_FORMAT_VERSION,
         MANIFEST_SCHEMA,
+        NAVIGATION_GENERATOR_FORMAT_VERSION,
+        NAVIGATION_MANIFEST_SCHEMA,
         MappingContractError,
         document_id,
         mapping_authority_sha256,
         output_basename,
         view_id,
+    )
+
+if __package__:
+    from .navigation_contract import (
+        NavigationContractError,
+        navigation_authority_sha256,
+    )
+else:
+    from navigation_contract import (  # type: ignore[no-redef]
+        NavigationContractError,
+        navigation_authority_sha256,
     )
 
 
@@ -65,6 +82,7 @@ LINK_AUTHORITY_MARKER = b"%SNVirtualSpreadLinksSHA256:"
 LAYOUT_AUTHORITY_MARKER = b"%SNVirtualSpreadLayoutSHA256:"
 MAPPING_AUTHORITY_MARKER = b"%SNVirtualSpreadMappingSHA256:"
 VIEW_AUTHORITY_MARKER = b"%SNVirtualSpreadViewSHA256:"
+NAVIGATION_AUTHORITY_MARKER = b"%SNVirtualSpreadNavigationSHA256:"
 PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v2"
 LEGACY_PUBLICATION_SCHEMA = "techrebbe.supernote.virtual-spread-publication/v1"
 SOURCE_COMMIT_SCHEMA = (
@@ -107,6 +125,9 @@ SUPPORTED_LINK_ANNOTATION_KEYS = frozenset({
 SUPPORTED_LINK_HIGHLIGHT_MODES = frozenset({"/N", "/I", "/O", "/P"})
 SUPPORTED_BORDER_STYLES = frozenset({"/S", "/D", "/B", "/I", "/U"})
 SUPPORTED_DOCUMENT_CATALOG_KEYS = frozenset({
+    "/Dests",
+    "/Names",
+    "/Outlines",
     "/PageLayout",
     "/PageMode",
     "/Pages",
@@ -522,17 +543,19 @@ def _resolve_layout_options(
     spread_width: float | None,
     spread_height: float | None,
     gutter: float | None,
-) -> tuple[bool, float, float, float]:
+    remove_adjacent_page_links: bool | None,
+) -> tuple[bool, float, float, float, bool, bool]:
     supplied = (
         cover_separate is not None,
         spread_width is not None,
         spread_height is not None,
         gutter is not None,
+        remove_adjacent_page_links is not None,
     )
     if replacing and not all(supplied):
         raise VirtualSpreadError(
             "Forced replacement requires explicit cover, spread width, "
-            "spread height, and gutter options"
+            "spread height, gutter, and adjacent-page link filter options"
         )
     if cover_separate is not None and type(cover_separate) is not bool:
         raise VirtualSpreadError("Cover-separate must be a boolean")
@@ -548,11 +571,24 @@ def _resolve_layout_options(
         DEFAULT_SPREAD_HEIGHT if spread_height is None else spread_height
     )
     resolved_gutter = DEFAULT_GUTTER if gutter is None else gutter
+    if (
+        remove_adjacent_page_links is not None
+        and type(remove_adjacent_page_links) is not bool
+    ):
+        raise VirtualSpreadError("Invalid adjacent-page link filter setting")
+    resolved_link_filter = (
+        False
+        if remove_adjacent_page_links is None
+        else remove_adjacent_page_links
+    )
+    link_filter_policy_explicit = remove_adjacent_page_links is not None
     return (
         resolved_cover,
         resolved_width,
         resolved_height,
         resolved_gutter,
+        resolved_link_filter,
+        link_filter_policy_explicit,
     )
 
 
@@ -687,6 +723,7 @@ def _bind_pdf_authorities(
     link_authority_sha256: str,
     mapping_authority_sha256: str,
     spread_view_id: str,
+    navigation_authority_sha256: str | None = None,
     ownership_guard: PublicationOwnershipGuard | None = None,
     retained_descriptor: int | None = None,
 ) -> None:
@@ -726,6 +763,17 @@ def _bind_pdf_authorities(
         + spread_view_id[len("inkbridge-view-v1-"):].encode("ascii")
         + b"\n"
     )
+    if navigation_authority_sha256 is not None:
+        if len(navigation_authority_sha256) != 64 or any(
+            character not in "0123456789abcdef"
+            for character in navigation_authority_sha256
+        ):
+            raise VirtualSpreadError("Invalid navigation authority digest")
+        marker += (
+            NAVIGATION_AUTHORITY_MARKER
+            + navigation_authority_sha256.encode("ascii")
+            + b"\n"
+        )
     if retained_descriptor is None:
         flags = os.O_RDWR
         flags |= getattr(os, "O_BINARY", 0)
@@ -753,6 +801,7 @@ def _bind_pdf_authorities(
             or LINK_AUTHORITY_MARKER in authority_tail
             or MAPPING_AUTHORITY_MARKER in authority_tail
             or VIEW_AUTHORITY_MARKER in authority_tail
+            or NAVIGATION_AUTHORITY_MARKER in authority_tail
         ):
             raise VirtualSpreadError("Written PDF has an invalid authority marker")
         stream.seek(tail_start + startxref)
@@ -1274,11 +1323,6 @@ def _require_supported_document_catalog(
         raise VirtualSpreadError(
             "Source PDF /Pages tree has an invalid /Type"
         )
-    if "/Outlines" in catalog:
-        raise VirtualSpreadError(
-            "Document outlines are not supported by this prototype; "
-            "generation would discard native table-of-contents navigation"
-        )
     if "/OpenAction" in catalog:
         raise VirtualSpreadError(
             "Document open actions are not supported by this prototype; "
@@ -1289,6 +1333,27 @@ def _require_supported_document_catalog(
             "Optional-content catalogs are not supported by this prototype; "
             "generation would discard persisted layer visibility"
         )
+    if "/Dests" in catalog and "/Names" in catalog:
+        raise VirtualSpreadError(
+            "Documents containing both legacy /Dests and /Names destination "
+            "containers are not yet supported"
+        )
+    if "/Names" in catalog:
+        names = _dereference_pdf_object(catalog.raw_get("/Names"))
+        if not isinstance(names, DictionaryObject) or set(
+            map(str, names.keys())
+        ) != {"/Dests"}:
+            raise VirtualSpreadError(
+                "Only a destination name tree is supported in /Names"
+            )
+    if "/Dests" in catalog:
+        destinations = _dereference_pdf_object(catalog.raw_get("/Dests"))
+        if not isinstance(destinations, DictionaryObject):
+            raise VirtualSpreadError("Invalid document destination dictionary")
+    try:
+        reader.named_destinations
+    except Exception as error:
+        raise VirtualSpreadError("Invalid named destination tree") from error
     unsupported = sorted(
         str(key)
         for key in catalog.keys()
@@ -1465,7 +1530,23 @@ def _write_document_information(
             information[NameObject(key_text)] = (
                 _copy_document_information_value(value, key_text)
             )
-    information.pop(NameObject("/SNVirtualSpreadSource"), None)
+    # Generated authority is derived exclusively from the current immutable
+    # source snapshot. A source may itself be an older generated PDF; never
+    # inherit any of its representation metadata into the new output when a
+    # field is absent from this generation (notably navigation authority on a
+    # schema-v3 output).
+    for generated_key in (
+        "/SNVirtualSpreadSource",
+        "/SNVirtualSpreadSchema",
+        "/SNVirtualSpreadSourceSHA256",
+        "/SNVirtualSpreadLayoutSHA256",
+        "/SNVirtualSpreadLinksSHA256",
+        "/SNVirtualSpreadMappingSHA256",
+        "/SNVirtualSpreadViewID",
+        "/SNVirtualSpreadGeneratorVersion",
+        "/SNVirtualSpreadNavigationSHA256",
+    ):
+        information.pop(NameObject(generated_key), None)
     for key, value in generated_entries.items():
         information[NameObject(key)] = TextStringObject(value)
     writer._info = information
@@ -1787,6 +1868,8 @@ def _copy_link_highlight_mode(
 
 def _validated_link_action(
     action: Any,
+    *,
+    allow_adjacent_named_action: bool = False,
 ) -> tuple[DictionaryObject, NameObject]:
     action = _dereference_pdf_object(action)
     if not isinstance(action, DictionaryObject):
@@ -1800,17 +1883,21 @@ def _validated_link_action(
             "link action /Type",
             frozenset({"/Action"}),
         )
+    supported_types = {"/GoTo", "/URI"}
+    if allow_adjacent_named_action:
+        supported_types.add("/Named")
     action_type = _required_pdf_name(
         action,
         "/S",
         "link action /S",
-        frozenset({"/GoTo", "/URI"}),
+        frozenset(supported_types),
     )
-    allowed = (
-        {"/Type", "/S", "/D"}
-        if action_type == "/GoTo"
-        else {"/Type", "/S", "/URI", "/IsMap"}
-    )
+    if action_type == "/GoTo":
+        allowed = {"/Type", "/S", "/D"}
+    elif action_type == "/URI":
+        allowed = {"/Type", "/S", "/URI", "/IsMap"}
+    else:
+        allowed = {"/Type", "/S", "/N"}
     unknown = sorted(
         str(key) for key in action.keys() if str(key) not in allowed
     )
@@ -1821,9 +1908,90 @@ def _validated_link_action(
     return action, action_type
 
 
+def _validate_filterable_internal_destination(
+    destination: ArrayObject,
+    target_mapping: dict[str, Any],
+) -> None:
+    """Validate source semantics before optional adjacency classification."""
+    if len(destination) < 2 or not isinstance(destination[1], NameObject):
+        raise VirtualSpreadError("Invalid internal destination mode object")
+    mode = str(destination[1])
+    if mode == "/Fit":
+        if len(destination) != 2:
+            raise VirtualSpreadError(
+                "Invalid internal destination parameters for /Fit"
+            )
+        return
+    if mode == "/XYZ":
+        if len(destination) != 5:
+            raise VirtualSpreadError(
+                "Invalid internal destination parameters for /XYZ"
+            )
+        left = _destination_number(destination[2], "/XYZ left")
+        top = _destination_number(destination[3], "/XYZ top")
+        zoom = _destination_number(destination[4], "/XYZ zoom")
+        if zoom is not None and zoom < 0.0:
+            raise VirtualSpreadError("Invalid internal destination /XYZ zoom")
+        target_source_box = _destination_source_box(
+            target_mapping, "/XYZ"
+        )
+        if left is not None and not (
+            target_source_box[0] <= left <= target_source_box[2]
+        ):
+            raise VirtualSpreadError(
+                "internal destination /XYZ left extends outside target "
+                "source /CropBox"
+            )
+        if top is not None and not (
+            target_source_box[1] <= top <= target_source_box[3]
+        ):
+            raise VirtualSpreadError(
+                "internal destination /XYZ top extends outside target "
+                "source /CropBox"
+            )
+        return
+    if mode == "/FitR":
+        if len(destination) != 6:
+            raise VirtualSpreadError(
+                "Invalid internal destination parameters for /FitR"
+            )
+        rectangle = [
+            _destination_number(value, "/FitR rectangle")
+            for value in destination[2:6]
+        ]
+        if any(value is None for value in rectangle):
+            raise VirtualSpreadError("Invalid /FitR destination rectangle")
+        target_source_box = _destination_source_box(
+            target_mapping, "/FitR"
+        )
+        _require_rectangle_contained(
+            rectangle,
+            target_source_box,
+            "internal destination /FitR rectangle",
+            "target source /CropBox",
+        )
+        return
+    if mode in {"/FitB", "/FitH", "/FitBH", "/FitV", "/FitBV"}:
+        expected_length = 2 if mode == "/FitB" else 3
+        if len(destination) != expected_length:
+            raise VirtualSpreadError(
+                f"Invalid internal destination parameters for {mode}"
+            )
+        if expected_length == 3:
+            _destination_number(destination[2], f"{mode} coordinate")
+        raise VirtualSpreadError(
+            f"Cannot preserve internal destination mode {mode} "
+            "after composing source pages"
+        )
+    raise VirtualSpreadError(
+        f"Unsupported internal destination mode: {mode}"
+    )
+
+
 def _resolved_destination_array(
     reader: PdfReader,
     destination: Any,
+    referenced_named_destinations: set[str] | None = None,
 ) -> ArrayObject:
     if isinstance(destination, IndirectObject):
         destination = destination.get_object()
@@ -1832,6 +2000,8 @@ def _resolved_destination_array(
         named = reader.named_destinations
         for name in names:
             if name in named:
+                if referenced_named_destinations is not None:
+                    referenced_named_destinations.add(name)
                 return named[name].dest_array
         raise VirtualSpreadError(
             f"Cannot resolve named internal destination: {destination}"
@@ -2331,7 +2501,9 @@ def _copy_link_annotation(
     page_ref_to_index: dict[tuple[int, int], int],
     page_width: float,
     page_height: float,
-) -> dict[str, Any]:
+    remove_adjacent_page_links: bool = False,
+    referenced_named_destinations: set[str] | None = None,
+) -> dict[str, Any] | None:
     original = _validate_link_annotation(annotation.get_object())
     mapping = source_mapping[source_page_index]
     _require_link_geometry_inside_source_crop(
@@ -2392,12 +2564,15 @@ def _copy_link_annotation(
     if destination is not None and action is not None:
         raise VirtualSpreadError("Link annotation has both /Dest and /A")
     if destination is None and action is not None:
-        action_object, action_type = _validated_link_action(action)
+        action_object, action_type = _validated_link_action(
+            action,
+            allow_adjacent_named_action=remove_adjacent_page_links,
+        )
         if action_type == "/GoTo":
             if "/D" not in action_object:
                 raise VirtualSpreadError("GoTo link action has no /D value")
             destination = action_object.raw_get("/D")
-        else:
+        elif action_type == "/URI":
             if "/URI" not in action_object:
                 raise VirtualSpreadError("URI link has no /URI value")
             uri_object = _dereference_pdf_object(
@@ -2436,10 +2611,30 @@ def _copy_link_annotation(
                 "uri": str(uri),
                 "rect": runtime_rect,
             }
+        else:
+            named_action = _required_pdf_name(
+                action_object,
+                "/N",
+                "named adjacent-page link action /N",
+                frozenset({"/NextPage", "/PrevPage"}),
+            )
+            target_source_page = source_page_index + (
+                1 if str(named_action) == "/NextPage" else -1
+            )
+            if target_source_page not in source_mapping:
+                raise VirtualSpreadError(
+                    "Cannot resolve named adjacent-page link action on "
+                    f"source page {source_page_index + 1}"
+                )
+            return None
 
     if destination is None:
         raise VirtualSpreadError("Link annotation has neither /Dest nor /A")
-    resolved_destination = _resolved_destination_array(reader, destination)
+    resolved_destination = _resolved_destination_array(
+        reader,
+        destination,
+        referenced_named_destinations,
+    )
     target_source_page = _destination_source_page(
         resolved_destination, page_ref_to_index
     )
@@ -2448,6 +2643,14 @@ def _copy_link_annotation(
             f"Cannot resolve internal link on source page {source_page_index + 1}"
         )
     target = source_mapping[target_source_page]
+    _validate_filterable_internal_destination(
+        resolved_destination, target
+    )
+    if (
+        remove_adjacent_page_links
+        and abs(target_source_page - source_page_index) == 1
+    ):
+        return None
     target_output_page = int(target["virtualPageIndex"])
     target_reference = writer.pages[target_output_page].indirect_reference
     if target_reference is None:
@@ -2467,8 +2670,7 @@ def _copy_link_annotation(
     copied[NameObject("/SNTargetSide")] = NameObject(
         "/Left" if target["side"] == "left" else "/Right"
     )
-    _attach_annotation(writer, output_page_index, copied)
-    return {
+    record = {
         "sourcePage": source_page_index,
         "sourceSide": source_mapping[source_page_index]["side"],
         "outputPage": output_page_index,
@@ -2482,6 +2684,555 @@ def _copy_link_annotation(
         ),
         "rect": runtime_rect,
     }
+    _attach_annotation(writer, output_page_index, copied)
+    return record
+
+
+SUPPORTED_OUTLINE_ITEM_KEYS = frozenset({
+    "/A", "/C", "/Count", "/Dest", "/F", "/First", "/Last",
+    "/Next", "/Parent", "/Prev", "/Title",
+})
+
+
+def _outline_style(node: DictionaryObject) -> tuple[bool, bool, list[float]]:
+    flags_object = _dereference_pdf_object(node.raw_get("/F")) \
+        if "/F" in node else NumberObject(0)
+    if isinstance(flags_object, bool) or not isinstance(
+        flags_object, (NumberObject, int)
+    ):
+        raise VirtualSpreadError("Invalid outline style flags")
+    flags = int(flags_object)
+    if flags < 0 or flags & ~3:
+        raise VirtualSpreadError("Unsupported outline style flags")
+    color = [0.0, 0.0, 0.0]
+    if "/C" in node:
+        color_object = _dereference_pdf_object(node.raw_get("/C"))
+        if not isinstance(color_object, ArrayObject) or len(color_object) != 3:
+            raise VirtualSpreadError("Invalid outline color")
+        color = []
+        for component in color_object:
+            value = _finite_pdf_number(component, "outline color")
+            if value is None or not 0.0 <= value <= 1.0:
+                raise VirtualSpreadError("Invalid outline color")
+            color.append(value)
+    return bool(flags & 2), bool(flags & 1), color
+
+
+def _outline_destination(
+    node: DictionaryObject,
+    reader: PdfReader,
+    referenced_named_destinations: set[str],
+) -> ArrayObject | None:
+    direct = node.raw_get("/Dest") if "/Dest" in node else None
+    action = _dereference_pdf_object(node.raw_get("/A")) \
+        if "/A" in node else None
+    if direct is not None and action is not None:
+        raise VirtualSpreadError("Outline item has both /Dest and /A")
+    if action is not None:
+        if not isinstance(action, DictionaryObject):
+            raise VirtualSpreadError("Outline action is not a dictionary")
+        allowed = {"/D", "/S", "/Type"}
+        unknown = sorted(
+            str(key) for key in action.keys() if str(key) not in allowed
+        )
+        if unknown:
+            raise VirtualSpreadError("Unsupported outline action entries")
+        if "/Type" in action:
+            action_object_type = _dereference_pdf_object(
+                action.raw_get("/Type")
+            )
+            if (
+                not isinstance(action_object_type, NameObject)
+                or str(action_object_type) != "/Action"
+            ):
+                raise VirtualSpreadError("Invalid outline action /Type")
+        action_type = _dereference_pdf_object(action.raw_get("/S"))
+        if not isinstance(action_type, NameObject) or str(action_type) != "/GoTo":
+            raise VirtualSpreadError("Unsupported outline action type")
+        direct = action.raw_get("/D")
+    if direct is None:
+        return None
+    return _resolved_destination_array(
+        reader,
+        direct,
+        referenced_named_destinations,
+    )
+
+
+def _copy_document_outlines(
+    *,
+    reader: PdfReader,
+    writer: PdfWriter,
+    source_mapping: dict[int, dict[str, Any]],
+    page_ref_to_index: dict[tuple[int, int], int],
+    spread_width: float,
+    spread_height: float,
+    referenced_named_destinations: set[str],
+) -> list[dict[str, Any]]:
+    catalog = _dereference_pdf_object(reader.trailer.raw_get("/Root"))
+    outlines_reference = catalog.raw_get("/Outlines") \
+        if "/Outlines" in catalog else None
+    outlines_root = _dereference_pdf_object(outlines_reference) \
+        if outlines_reference is not None else None
+    if outlines_root is None:
+        return []
+    if not isinstance(outlines_root, DictionaryObject):
+        raise VirtualSpreadError("Source document /Outlines is not a dictionary")
+    allowed_root_keys = {"/Count", "/First", "/Last", "/Type"}
+    unknown_root = sorted(
+        str(key) for key in outlines_root if str(key) not in allowed_root_keys
+    )
+    if unknown_root:
+        raise VirtualSpreadError(
+            "Unsupported document outline root entries: "
+            + ", ".join(unknown_root)
+        )
+    if "/Type" in outlines_root:
+        outline_type = _dereference_pdf_object(
+            outlines_root.raw_get("/Type")
+        )
+        if not isinstance(outline_type, NameObject) or str(
+            outline_type
+        ) != "/Outlines":
+            raise VirtualSpreadError("Invalid document outline root /Type")
+    records: list[dict[str, Any]] = []
+    seen: set[tuple[int, int]] = set()
+
+    def copy_siblings(
+        reference: Any,
+        parent_output: IndirectObject | None,
+        parent_index: int | None,
+        source_parent: Any,
+        expected_last: Any,
+    ) -> None:
+        previous_reference: Any = None
+        while reference is not None:
+            key = _page_ref_key(reference)
+            if key is None or key in seen:
+                raise VirtualSpreadError("Invalid or cyclic document outline tree")
+            seen.add(key)
+            node = _dereference_pdf_object(reference)
+            if not isinstance(node, DictionaryObject):
+                raise VirtualSpreadError("Outline item is not a dictionary")
+            unknown = sorted(
+                str(item) for item in node
+                if str(item) not in SUPPORTED_OUTLINE_ITEM_KEYS
+            )
+            if unknown:
+                raise VirtualSpreadError(
+                    "Unsupported outline item entries: " + ", ".join(unknown)
+                )
+            actual_parent = node.raw_get("/Parent") \
+                if "/Parent" in node else None
+            if _page_ref_key(actual_parent) != _page_ref_key(source_parent):
+                raise VirtualSpreadError("Invalid outline parent linkage")
+            actual_previous = node.raw_get("/Prev") \
+                if "/Prev" in node else None
+            if _page_ref_key(actual_previous) != _page_ref_key(
+                previous_reference
+            ):
+                raise VirtualSpreadError("Invalid outline sibling ordering")
+            title = _dereference_pdf_object(node.raw_get("/Title")) \
+                if "/Title" in node else None
+            if not isinstance(title, TextStringObject) or "\x00" in str(title):
+                raise VirtualSpreadError("Invalid outline title")
+            bold, italic, color = _outline_style(node)
+            is_open = True
+            if "/Count" in node:
+                count = _dereference_pdf_object(node.raw_get("/Count"))
+                if isinstance(count, bool) or not isinstance(
+                    count, (NumberObject, int)
+                ):
+                    raise VirtualSpreadError("Invalid outline child count")
+                is_open = int(count) >= 0
+            destination = _outline_destination(
+                node,
+                reader,
+                referenced_named_destinations,
+            )
+            record_destination: dict[str, Any] | None = None
+            output_action: DictionaryObject | None = None
+            if destination is not None:
+                source_mode = (
+                    str(destination[1])
+                    if len(destination) >= 2
+                    and isinstance(destination[1], NameObject)
+                    else None
+                )
+                if source_mode != "/Fit":
+                    raise VirtualSpreadError(
+                        "Cannot preserve outline destination mode "
+                        f"{source_mode or '<invalid>'}; Supernote outline "
+                        "navigation exposes only page-level Fit behavior"
+                    )
+                source_page = _destination_source_page(
+                    destination, page_ref_to_index
+                )
+                if source_page is None or source_page not in source_mapping:
+                    raise VirtualSpreadError(
+                        f"Cannot resolve outline destination: {title}"
+                    )
+                target = source_mapping[source_page]
+                target_output_page = int(target["virtualPageIndex"])
+                target_reference = writer.pages[
+                    target_output_page
+                ].indirect_reference
+                if target_reference is None:
+                    raise VirtualSpreadError("Output page has no indirect reference")
+                transformed = _transformed_internal_destination(
+                    destination,
+                    target_reference,
+                    target,
+                    target,
+                    spread_width,
+                    spread_height,
+                )
+                target_view = "fit-source-page"
+                record_destination = {
+                    "sourcePageIndex": source_page,
+                    "virtualPageIndex": target_output_page,
+                    "side": target["side"],
+                    "targetView": target_view,
+                    "mode": str(transformed[1]),
+                    "operands": [
+                        None if isinstance(value, NullObject) else float(value)
+                        for value in transformed[2:]
+                    ],
+                }
+                output_action = DictionaryObject({
+                    NameObject("/S"): NameObject("/GoTo"),
+                    NameObject("/D"): transformed,
+                })
+            index = len(records)
+            record = {
+                "outlineIndex": index,
+                "parentOutlineIndex": parent_index,
+                "title": str(title),
+                "isOpen": is_open,
+                "bold": bold,
+                "italic": italic,
+                "color": color,
+                "destination": record_destination,
+            }
+            records.append(record)
+            output_item = TreeObject({
+                NameObject("/Title"): TextStringObject(str(title)),
+                NameObject("/SNOutlineIndex"): NumberObject(index),
+            })
+            if output_action is not None:
+                output_item[NameObject("/A")] = output_action
+            if bold or italic:
+                output_item[NameObject("/F")] = NumberObject(
+                    (2 if bold else 0) | (1 if italic else 0)
+                )
+            if any(component != 0.0 for component in color):
+                output_item[NameObject("/C")] = ArrayObject([
+                    FloatObject(component) for component in color
+                ])
+            output_reference = writer.add_outline_item_dict(
+                output_item,
+                parent=parent_output,
+                is_open=is_open,
+            )
+            child = node.raw_get("/First") if "/First" in node else None
+            child_last = node.raw_get("/Last") if "/Last" in node else None
+            if (child is None) != (child_last is None):
+                raise VirtualSpreadError("Invalid outline child range")
+            if child is not None:
+                copy_siblings(
+                    child,
+                    output_reference,
+                    index,
+                    reference,
+                    child_last,
+                )
+            previous_reference = reference
+            reference = node.raw_get("/Next") if "/Next" in node else None
+        if _page_ref_key(previous_reference) != _page_ref_key(expected_last):
+            raise VirtualSpreadError("Invalid outline final sibling")
+
+    first = outlines_root.raw_get("/First") if "/First" in outlines_root else None
+    last = outlines_root.raw_get("/Last") if "/Last" in outlines_root else None
+    if (first is None) != (last is None):
+        raise VirtualSpreadError("Invalid document outline root range")
+    if first is not None:
+        copy_siblings(
+            first,
+            None,
+            None,
+            outlines_reference,
+            last,
+        )
+    return records
+
+
+def _named_destination_array_from_raw(
+    value: Any,
+    name: str,
+) -> ArrayObject:
+    value = _dereference_pdf_object(value)
+    if isinstance(value, DictionaryObject):
+        if set(map(str, value.keys())) != {"/D"}:
+            raise VirtualSpreadError(
+                f"Invalid named destination dictionary: {name}"
+            )
+        value = _dereference_pdf_object(value.raw_get("/D"))
+    if not isinstance(value, ArrayObject):
+        raise VirtualSpreadError(
+            f"Invalid named destination array: {name}"
+        )
+    return ArrayObject(value)
+
+
+def _modern_named_destination_name(value: Any) -> str:
+    value = _dereference_pdf_object(value)
+    if not isinstance(value, TextStringObject):
+        raise VirtualSpreadError("Invalid named destination name")
+    name = str(value)
+    if not name or "\x00" in name:
+        raise VirtualSpreadError("Invalid named destination name")
+    try:
+        name.encode("utf-8", errors="strict")
+    except UnicodeEncodeError as error:
+        raise VirtualSpreadError(
+            "Named destination name is not valid UTF-8"
+        ) from error
+    return name
+
+
+def _raw_named_destinations(
+    reader: PdfReader,
+) -> tuple[dict[str, ArrayObject], bool]:
+    """Read every raw destination leaf before trusting pypdf's projection."""
+    catalog = _dereference_pdf_object(reader.trailer.raw_get("/Root"))
+    if not isinstance(catalog, DictionaryObject):
+        raise VirtualSpreadError("Source PDF catalog is not a dictionary")
+    if "/Dests" in catalog:
+        destinations = _dereference_pdf_object(catalog.raw_get("/Dests"))
+        if not isinstance(destinations, DictionaryObject):
+            raise VirtualSpreadError("Invalid document destination dictionary")
+        entries: dict[str, ArrayObject] = {}
+        for key, value in destinations.items():
+            if not isinstance(key, NameObject):
+                raise VirtualSpreadError("Invalid named destination name")
+            name = str(key)
+            if not name.startswith("/") or len(name) == 1 or "\x00" in name:
+                raise VirtualSpreadError("Invalid named destination name")
+            output_name = name[1:]
+            try:
+                output_name.encode("utf-8", errors="strict")
+            except UnicodeEncodeError as error:
+                raise VirtualSpreadError(
+                    "Named destination name is not valid UTF-8"
+                ) from error
+            if name in entries:
+                raise VirtualSpreadError("Duplicate named destination name")
+            entries[name] = _named_destination_array_from_raw(value, name)
+        return entries, True
+
+    if "/Names" not in catalog:
+        return {}, False
+    names_dictionary = _dereference_pdf_object(catalog.raw_get("/Names"))
+    if not isinstance(names_dictionary, DictionaryObject):
+        raise VirtualSpreadError("Invalid document name dictionary")
+    tree_reference = names_dictionary.raw_get("/Dests")
+    entries: dict[str, ArrayObject] = {}
+    seen_nodes: set[tuple[str, int, int] | tuple[str, int]] = set()
+
+    def walk(reference: Any) -> list[str]:
+        node = _dereference_pdf_object(reference)
+        if not isinstance(node, DictionaryObject):
+            raise VirtualSpreadError("Invalid named destination tree node")
+        indirect_key = _page_ref_key(reference)
+        node_key: tuple[str, int, int] | tuple[str, int]
+        if indirect_key is None:
+            node_key = ("direct", id(node))
+        else:
+            node_key = ("indirect", *indirect_key)
+        if node_key in seen_nodes:
+            raise VirtualSpreadError("Invalid or cyclic named destination tree")
+        seen_nodes.add(node_key)
+
+        unknown = sorted(
+            str(key)
+            for key in node.keys()
+            if str(key) not in {"/Kids", "/Limits", "/Names"}
+        )
+        if unknown:
+            raise VirtualSpreadError(
+                "Unsupported named destination tree entries: "
+                + ", ".join(unknown)
+            )
+        has_kids = "/Kids" in node
+        has_names = "/Names" in node
+        if has_kids == has_names:
+            raise VirtualSpreadError(
+                "Named destination tree node must contain exactly one of "
+                "/Kids or /Names"
+            )
+
+        ordered_names: list[str] = []
+        if has_names:
+            names = _dereference_pdf_object(node.raw_get("/Names"))
+            if not isinstance(names, ArrayObject) or len(names) % 2 != 0:
+                raise VirtualSpreadError(
+                    "Invalid named destination /Names array"
+                )
+            for index in range(0, len(names), 2):
+                name = _modern_named_destination_name(names[index])
+                if name in entries:
+                    raise VirtualSpreadError(
+                        "Duplicate named destination name"
+                    )
+                entries[name] = _named_destination_array_from_raw(
+                    names[index + 1], name
+                )
+                ordered_names.append(name)
+        else:
+            kids = _dereference_pdf_object(node.raw_get("/Kids"))
+            if not isinstance(kids, ArrayObject) or not kids:
+                raise VirtualSpreadError(
+                    "Invalid named destination /Kids array"
+                )
+            for kid in kids:
+                ordered_names.extend(walk(kid))
+
+        if any(
+            ordered_names[index - 1] >= ordered_names[index]
+            for index in range(1, len(ordered_names))
+        ):
+            raise VirtualSpreadError(
+                "Named destination tree names are not strictly ordered"
+            )
+        if "/Limits" in node:
+            limits = _dereference_pdf_object(node.raw_get("/Limits"))
+            if not isinstance(limits, ArrayObject) or len(limits) != 2:
+                raise VirtualSpreadError(
+                    "Invalid named destination /Limits array"
+                )
+            lower = _modern_named_destination_name(limits[0])
+            upper = _modern_named_destination_name(limits[1])
+            if not ordered_names or [lower, upper] != [
+                ordered_names[0],
+                ordered_names[-1],
+            ]:
+                raise VirtualSpreadError(
+                    "Invalid named destination /Limits range"
+                )
+        return ordered_names
+
+    walk(tree_reference)
+    return entries, False
+
+
+def _copy_named_destinations(
+    *,
+    reader: PdfReader,
+    writer: PdfWriter,
+    source_mapping: dict[int, dict[str, Any]],
+    page_ref_to_index: dict[tuple[int, int], int],
+    spread_width: float,
+    spread_height: float,
+) -> list[str]:
+    """Preserve every externally addressable destination after composition."""
+    raw_destinations, legacy_dictionary = _raw_named_destinations(reader)
+    try:
+        named_destinations = reader.named_destinations
+    except Exception as error:
+        raise VirtualSpreadError("Invalid named destination tree") from error
+    missing_parsed_names = sorted(
+        name for name in raw_destinations if name not in named_destinations
+    )
+    if missing_parsed_names:
+        raise VirtualSpreadError(
+            "Named destination parser omitted raw leaves: "
+            + ", ".join(missing_parsed_names)
+        )
+
+    raw_names = list(raw_destinations)
+    copied_names: list[str] = []
+    output_name_by_raw: dict[str, str] = {}
+    output_names: set[str] = set()
+    for raw_name in raw_names:
+        if not isinstance(raw_name, str) or not raw_name:
+            raise VirtualSpreadError("Invalid named destination name")
+        output_name = (
+            raw_name[1:]
+            if legacy_dictionary and raw_name.startswith("/")
+            else raw_name
+        )
+        if not output_name or output_name in output_names:
+            raise VirtualSpreadError("Invalid named destination name")
+        try:
+            output_name.encode("utf-8", errors="strict")
+        except UnicodeEncodeError as error:
+            raise VirtualSpreadError(
+                "Named destination name is not valid UTF-8"
+            ) from error
+        output_name_by_raw[raw_name] = output_name
+        output_names.add(output_name)
+
+    for raw_name in sorted(raw_names):
+        destination = raw_destinations[raw_name]
+        target_source_page = _destination_source_page(
+            destination, page_ref_to_index
+        )
+        if (
+            target_source_page is None
+            or target_source_page not in source_mapping
+        ):
+            raise VirtualSpreadError(
+                f"Cannot resolve named destination: {raw_name}"
+            )
+        target = source_mapping[target_source_page]
+        _validate_filterable_internal_destination(destination, target)
+        target_output_page = int(target["virtualPageIndex"])
+        target_reference = writer.pages[
+            target_output_page
+        ].indirect_reference
+        if target_reference is None:
+            raise VirtualSpreadError("Output page has no indirect reference")
+        transformed = _transformed_internal_destination(
+            destination,
+            target_reference,
+            target,
+            target,
+            spread_width,
+            spread_height,
+        )
+        writer.add_named_destination_array(
+            TextStringObject(output_name_by_raw[raw_name]),
+            transformed,
+        )
+        copied_names.append(raw_name)
+    return copied_names
+
+
+def _require_unambiguous_outline_routes(
+    outlines: Sequence[Mapping[str, Any]],
+) -> None:
+    """Reject bookmarks the native outline callback cannot distinguish."""
+
+    routes: dict[tuple[str, int], tuple[str, str]] = {}
+    for outline in outlines:
+        destination = outline.get("destination")
+        if destination is None:
+            continue
+        key = (
+            str(outline["title"]),
+            int(destination["virtualPageIndex"]),
+        )
+        route = (
+            str(destination["side"]),
+            str(destination["targetView"]),
+        )
+        previous = routes.get(key)
+        if previous is not None and previous != route:
+            raise VirtualSpreadError(
+                "Ambiguous outline routing for duplicate title and virtual "
+                f"page: {key[0]} on virtual page {key[1]}"
+            )
+        routes[key] = route
 
 
 def _write_json(
@@ -5490,6 +6241,8 @@ def _build_virtual_spread_from_snapshot(
     spread_width: float = 864.0,
     spread_height: float = 648.0,
     gutter: float = 0.0,
+    remove_adjacent_page_links: bool = False,
+    adjacent_link_policy_explicit: bool = False,
     force: bool = False,
     expected_output_state: PublicationTargetState,
     expected_manifest_state: PublicationTargetState,
@@ -5601,6 +6354,8 @@ def _build_virtual_spread_from_snapshot(
         if (key := _page_ref_key(page)) is not None
     }
     links: list[dict[str, Any]] = []
+    removed_adjacent_page_links = 0
+    referenced_named_destinations: set[str] = set()
     for source_page_index, source_page in enumerate(reader.pages):
         output_page_index = int(
             source_mapping[source_page_index]["virtualPageIndex"]
@@ -5615,20 +6370,68 @@ def _build_virtual_spread_from_snapshot(
                 f"source page {source_page_index + 1}"
             )
         for annotation in annotation_array:
-            annotation_object = annotation.get_object()
-            links.append(
-                _copy_link_annotation(
-                    reader=reader,
-                    writer=writer,
-                    annotation=annotation,
-                    output_page_index=output_page_index,
-                    source_page_index=source_page_index,
-                    source_mapping=source_mapping,
-                    page_ref_to_index=page_ref_to_index,
-                    page_width=spread_width,
-                    page_height=spread_height,
-                )
+            link = _copy_link_annotation(
+                reader=reader,
+                writer=writer,
+                annotation=annotation,
+                output_page_index=output_page_index,
+                source_page_index=source_page_index,
+                source_mapping=source_mapping,
+                page_ref_to_index=page_ref_to_index,
+                page_width=spread_width,
+                page_height=spread_height,
+                remove_adjacent_page_links=remove_adjacent_page_links,
+                referenced_named_destinations=referenced_named_destinations,
             )
+            if link is None:
+                removed_adjacent_page_links += 1
+            else:
+                links.append(link)
+
+    outlines = _copy_document_outlines(
+        reader=reader,
+        writer=writer,
+        source_mapping=source_mapping,
+        page_ref_to_index=page_ref_to_index,
+        spread_width=spread_width,
+        spread_height=spread_height,
+        referenced_named_destinations=referenced_named_destinations,
+    )
+    _require_unambiguous_outline_routes(outlines)
+    copied_named_destinations = _copy_named_destinations(
+        reader=reader,
+        writer=writer,
+        source_mapping=source_mapping,
+        page_ref_to_index=page_ref_to_index,
+        spread_width=spread_width,
+        spread_height=spread_height,
+    )
+    if not referenced_named_destinations.issubset(
+        set(copied_named_destinations)
+    ):
+        raise VirtualSpreadError(
+            "Referenced named destination was not preserved"
+        )
+    catalog = _dereference_pdf_object(reader.trailer.raw_get("/Root"))
+    navigation_extension = bool(
+        "/Outlines" in catalog
+        or adjacent_link_policy_explicit
+        or copied_named_destinations
+    )
+    navigation_authority_hash: str | None = None
+    if navigation_extension:
+        try:
+            navigation_authority_hash = navigation_authority_sha256(
+                outlines,
+                remove_adjacent_page_links=remove_adjacent_page_links,
+                removed_adjacent_page_link_count=
+                    removed_adjacent_page_links,
+                retained_link_count=len(links),
+            )
+        except NavigationContractError as error:
+            raise VirtualSpreadError(
+                f"Generated outlines failed contract validation: {error}"
+            ) from error
 
     link_authority_hash = _link_authority_sha256(links)
     layout_authority_hash = _layout_authority_sha256(
@@ -5651,6 +6454,13 @@ def _build_virtual_spread_from_snapshot(
         raise VirtualSpreadError(
             f"Generated mapping failed contract validation: {error}"
         ) from error
+    manifest_schema = (
+        NAVIGATION_MANIFEST_SCHEMA if navigation_extension else SCHEMA
+    )
+    generator_version = (
+        NAVIGATION_GENERATOR_FORMAT_VERSION
+        if navigation_extension else GENERATOR_FORMAT_VERSION
+    )
     identity = {
         "source_sha256": source_hash,
         "mapping_authority_sha256": mapping_authority_hash,
@@ -5659,8 +6469,10 @@ def _build_virtual_spread_from_snapshot(
         "spread_width": spread_width,
         "spread_height": spread_height,
         "gutter": gutter,
-        "manifest_schema": SCHEMA,
-        "generator_version": GENERATOR_FORMAT_VERSION,
+        "manifest_schema": manifest_schema,
+        "generator_version": generator_version,
+        "navigation_authority_sha256": navigation_authority_hash,
+        "remove_adjacent_page_links": remove_adjacent_page_links,
     }
     spread_document_id = document_id(source_hash)
     spread_view_id = view_id(**identity)
@@ -5669,13 +6481,17 @@ def _build_virtual_spread_from_snapshot(
         reader,
         writer,
         {
-            "/SNVirtualSpreadSchema": SCHEMA,
+            "/SNVirtualSpreadSchema": manifest_schema,
             "/SNVirtualSpreadSourceSHA256": source_hash,
             "/SNVirtualSpreadLayoutSHA256": layout_authority_hash,
             "/SNVirtualSpreadLinksSHA256": link_authority_hash,
             "/SNVirtualSpreadMappingSHA256": mapping_authority_hash,
             "/SNVirtualSpreadViewID": spread_view_id,
-            "/SNVirtualSpreadGeneratorVersion": GENERATOR_FORMAT_VERSION,
+            "/SNVirtualSpreadGeneratorVersion": generator_version,
+            **({
+                "/SNVirtualSpreadNavigationSHA256":
+                    navigation_authority_hash,
+            } if navigation_authority_hash is not None else {}),
         },
     )
 
@@ -5703,6 +6519,7 @@ def _build_virtual_spread_from_snapshot(
             link_authority_hash,
             mapping_authority_hash,
             spread_view_id,
+            navigation_authority_hash,
             ownership_guard,
             retained_descriptor=temporary_output.descriptor,
         )
@@ -5754,7 +6571,7 @@ def _build_virtual_spread_from_snapshot(
         )
 
         manifest: dict[str, Any] = {
-            "schema": SCHEMA,
+            "schema": manifest_schema,
             "source": {
                 "name": source_path.name,
                 "path": str(source_path),
@@ -5774,15 +6591,32 @@ def _build_virtual_spread_from_snapshot(
                 "layoutAuthoritySha256": layout_authority_hash,
                 "linkAuthoritySha256": link_authority_hash,
                 "mappingAuthoritySha256": mapping_authority_hash,
+                **({
+                    "navigationAuthoritySha256":
+                        navigation_authority_hash,
+                } if navigation_authority_hash is not None else {}),
                 "viewId": spread_view_id,
                 "cacheBasename": cache_basename,
             },
-            "generatorVersion": GENERATOR_FORMAT_VERSION,
+            "generatorVersion": generator_version,
             "direction": direction,
             "coverSeparate": cover_separate,
             "spreads": spread_records,
             "sourcePages": ordered_source_mappings,
             "links": links,
+            **({
+                "navigation": {
+                    "authority":
+                        "techrebbe.supernote.virtual-spread-navigation/v1",
+                    "authoritySha256": navigation_authority_hash,
+                    "removeAdjacentPageLinks":
+                        remove_adjacent_page_links,
+                    "removedAdjacentPageLinkCount":
+                        removed_adjacent_page_links,
+                    "retainedLinkCount": len(links),
+                    "outlines": outlines,
+                },
+            } if navigation_extension else {}),
         }
         temporary_manifest = _temporary_neighbor(
             manifest_path,
@@ -5872,6 +6706,7 @@ def _build_virtual_spread_locked(
     spread_width: float | None = None,
     spread_height: float | None = None,
     gutter: float | None = None,
+    remove_adjacent_page_links: bool | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     source_path = source_path.resolve()
@@ -5914,6 +6749,8 @@ def _build_virtual_spread_locked(
         spread_width,
         spread_height,
         gutter,
+        remove_adjacent_page_links,
+        adjacent_link_policy_explicit,
     ) = _resolve_layout_options(
         replacing=force and (
             expected_output_state.exists or expected_manifest_state.exists
@@ -5922,6 +6759,7 @@ def _build_virtual_spread_locked(
         spread_width=spread_width,
         spread_height=spread_height,
         gutter=gutter,
+        remove_adjacent_page_links=remove_adjacent_page_links,
     )
     _require_runtime_float_geometry(spread_width, spread_height, gutter)
 
@@ -5947,6 +6785,8 @@ def _build_virtual_spread_locked(
             spread_width=spread_width,
             spread_height=spread_height,
             gutter=gutter,
+            remove_adjacent_page_links=remove_adjacent_page_links,
+            adjacent_link_policy_explicit=adjacent_link_policy_explicit,
             force=force,
             expected_output_state=expected_output_state,
             expected_manifest_state=expected_manifest_state,
@@ -5963,9 +6803,15 @@ def build_virtual_spread(
     spread_width: float | None = None,
     spread_height: float | None = None,
     gutter: float | None = None,
+    remove_adjacent_page_links: bool | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     direction = _require_supported_direction(direction)
+    if (
+        remove_adjacent_page_links is not None
+        and type(remove_adjacent_page_links) is not bool
+    ):
+        raise VirtualSpreadError("Invalid adjacent-page link filter setting")
     resolved_source = source_path.resolve()
     lexical_output = _require_unaliased_output_path(output_path)
     lexical_manifest = _lexical_absolute(manifest_path)
@@ -5993,6 +6839,7 @@ def build_virtual_spread(
             spread_width=spread_width,
             spread_height=spread_height,
             gutter=gutter,
+            remove_adjacent_page_links=remove_adjacent_page_links,
             force=force,
         )
 
@@ -6015,6 +6862,15 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--spread-width", type=float, default=None)
     parser.add_argument("--spread-height", type=float, default=None)
     parser.add_argument("--gutter", type=float, default=None)
+    parser.add_argument(
+        "--remove-adjacent-page-links",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "remove validated internal links targeting exactly the previous "
+            "or next original source page"
+        ),
+    )
     parser.add_argument("--force", action="store_true")
     return parser
 
@@ -6033,6 +6889,7 @@ def main() -> int:
         spread_width=args.spread_width,
         spread_height=args.spread_height,
         gutter=args.gutter,
+        remove_adjacent_page_links=args.remove_adjacent_page_links,
         force=args.force,
     )
     print(f"Virtual spread PDF: {manifest['output']['path']}")

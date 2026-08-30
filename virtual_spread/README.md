@@ -93,6 +93,20 @@ python .\virtual_spread\generate_virtual_spread.py `
   --cover-separate
 ```
 
+To preserve supported PDF bookmarks while removing only validated links to
+the immediately previous/next original source page, add:
+
+```powershell
+  --remove-adjacent-page-links
+```
+
+This is intentionally opt-in because it also removes a genuine adjacent-page
+reference. It leaves same-page, distant, URI, and outline navigation intact.
+See `NAVIGATION_WIRE_CONTRACT.md` for the authenticated schema-v4 contract.
+Explicitly supplying `--no-remove-adjacent-page-links` also selects schema v4
+and authenticates the disabled policy; omitting the option retains schema v3
+only when the source has no outline or named destination.
+
 The caller-selected output above is a host staging name, not the on-device
 cache identity. Read `output.cacheBasename` from the generated JSON, then
 publish the unchanged PDF to that exact basename and its JSON sibling to
@@ -106,8 +120,15 @@ regenerates the structural `/Type` and `/Pages` entries and preserves validated
 `/PageMode` names plus compatible `/SinglePage` and `/OneColumn` page layouts.
 Source `/TwoPage*` and `/TwoColumn*` layouts fail closed because applying them
 after composition would display two virtual spreads—up to four source pages—at
-once. Outlines, opening actions, optional-content layer configuration, viewer
-preferences, and every other unsupported or unknown catalog entry fail closed
+once. Supported outlines are preserved with authenticated target-half routing.
+Supported named destinations are transformed and retained for both internal and
+external `#nameddest` navigation; unsupported modes fail before publication.
+Unsupported outline actions or viewports fail closed. Duplicate outline entries
+that share a native-visible title and virtual page but require opposite target
+halves also fail before publication because the native callback cannot
+distinguish them safely. Opening actions,
+optional-content layer configuration, viewer preferences, and every other
+unsupported or unknown catalog entry fail closed
 before staging or publication rather than being
 silently discarded. Source page dictionaries use the same complete contract:
 content, resources, geometry, rotation, and supported link annotations are
@@ -124,8 +145,10 @@ entries are validated, while arrays, dictionaries, streams, or other unsupported
 values fail closed rather than being stringified. Existing outputs also require
 `--force`. A forced replacement must also state every persisted layout choice
 explicitly: `--cover-separate` or `--no-cover-separate`, `--spread-width`,
-`--spread-height`, and `--gutter`. This prevents an unattended regeneration from
-silently resetting a document's cover parity or spread geometry to defaults.
+`--spread-height`, `--gutter`, and either `--remove-adjacent-page-links` or
+`--no-remove-adjacent-page-links`. This prevents an unattended regeneration from
+silently resetting a document's cover parity, spread geometry, or authenticated
+link-filter policy to defaults.
 The command rejects a source path that collides with its output's
 deterministic marker, backup, retirement, or lock artifacts before recovery or
 lock acquisition. It copies and hashes the source through one file snapshot,

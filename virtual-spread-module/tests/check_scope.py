@@ -2153,6 +2153,7 @@ for required in (
     "test_supported_siddur_catalog_features_are_preserved",
     "test_structure_tags_require_explicit_discard",
     "test_square_and_popup_require_explicit_appearance_flattening",
+    "test_square_embedded_opacity_is_preserved",
     "test_unsafe_square_or_popup_semantics_fail_closed",
     "test_broken_internal_link_requires_explicit_discard",
     "test_unsupported_null_link_semantics_are_not_discarded",

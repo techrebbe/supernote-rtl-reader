@@ -28,6 +28,7 @@ from pypdf.generic import (
     ArrayObject,
     BooleanObject,
     ByteStringObject,
+    ContentStream,
     DecodedStreamObject,
     DictionaryObject,
     FloatObject,
@@ -971,6 +972,81 @@ def _appearance_number_array(
     ]
 
 
+def _require_embedded_square_opacity(
+    normal: StreamObject,
+    resources: DictionaryObject,
+    opacity: float,
+    page_number: int,
+) -> None:
+    """Accept transparency only when the audited AP encodes it itself."""
+    error_message = (
+        "Square annotation /CA is not preserved by its normal appearance; "
+        f"source page {page_number}"
+    )
+    try:
+        ext_gstates = _dereference_pdf_object(
+            resources.raw_get("/ExtGState")
+        )
+        operations = ContentStream(normal, None).operations
+    except (KeyError, TypeError, ValueError) as error:
+        raise VirtualSpreadError(error_message) from error
+    if not isinstance(ext_gstates, DictionaryObject):
+        raise VirtualSpreadError(error_message)
+    # This intentionally recognizes only the exact, self-contained appearance
+    # shape emitted by the audited Siddur authoring tool. Broader appearance
+    # interpretation would risk accepting a graphics state that is restored or
+    # overridden before the square is painted.
+    if tuple(operator for _, operator in operations) != (
+        b"G",
+        b"g",
+        b"gs",
+        b"re",
+        b"B",
+    ):
+        raise VirtualSpreadError(error_message)
+    gs_operands = operations[2][0]
+    if len(gs_operands) != 1 or not isinstance(gs_operands[0], NameObject):
+        raise VirtualSpreadError(error_message)
+    try:
+        graphics_state = _dereference_pdf_object(
+            ext_gstates.raw_get(gs_operands[0])
+        )
+    except KeyError as error:
+        raise VirtualSpreadError(error_message) from error
+    if (
+        not isinstance(graphics_state, DictionaryObject)
+        or set(map(str, graphics_state.keys()))
+        != {"/AIS", "/CA", "/Type", "/ca"}
+    ):
+        raise VirtualSpreadError(error_message)
+    try:
+        state_type = _dereference_pdf_object(
+            graphics_state.raw_get("/Type")
+        )
+        alpha_is_shape = _dereference_pdf_object(
+            graphics_state.raw_get("/AIS")
+        )
+        stroke_opacity = _finite_pdf_number(
+            _dereference_pdf_object(graphics_state.raw_get("/CA")),
+            "square appearance graphics-state /CA",
+        )
+        fill_opacity = _finite_pdf_number(
+            _dereference_pdf_object(graphics_state.raw_get("/ca")),
+            "square appearance graphics-state /ca",
+        )
+    except KeyError as error:
+        raise VirtualSpreadError(error_message) from error
+    if (
+        not isinstance(state_type, NameObject)
+        or str(state_type) != "/ExtGState"
+        or not isinstance(alpha_is_shape, BooleanObject)
+        or alpha_is_shape.value
+        or stroke_opacity != opacity
+        or fill_opacity != opacity
+    ):
+        raise VirtualSpreadError(error_message)
+
+
 def _flatten_square_appearances(
     page_writer: PdfWriter | None,
     page: Any,
@@ -1063,6 +1139,25 @@ def _flatten_square_appearances(
                 "Hidden square annotations cannot be flattened; source page "
                 f"{page_number}"
             )
+        geometry_locked_mask = (
+            ANNOTATION_FLAG_NO_ZOOM | ANNOTATION_FLAG_NO_ROTATE
+        )
+        if flags & geometry_locked_mask:
+            raise VirtualSpreadError(
+                "NoZoom or NoRotate square annotations cannot be flattened; "
+                f"source page {page_number}"
+            )
+        opacity: float | None = None
+        if "/CA" in annotation:
+            opacity = _finite_pdf_number(
+                _dereference_pdf_object(annotation.raw_get("/CA")),
+                f"square annotation /CA on source page {page_number}",
+            )
+            if opacity < 0.0 or opacity > 1.0:
+                raise VirtualSpreadError(
+                    "Invalid square annotation /CA on source page "
+                    f"{page_number}"
+                )
         rect = _appearance_number_array(
             annotation,
             "/Rect",
@@ -1117,6 +1212,13 @@ def _flatten_square_appearances(
         ):
             raise VirtualSpreadError(
                 f"Unsupported square annotation appearance on source page {page_number}"
+            )
+        if opacity is not None and opacity != 1.0:
+            _require_embedded_square_opacity(
+                normal,
+                form_resources,
+                opacity,
+                page_number,
             )
         bbox = _appearance_number_array(
             normal,

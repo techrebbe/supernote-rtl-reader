@@ -816,6 +816,36 @@ def set_first_annotation_value(
         writer.write(stream)
 
 
+def encode_first_square_opacity(path: Path, opacity: float) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    for reference in writer.pages[1].get("/Annots", []):
+        annotation = reference.get_object()
+        if str(annotation.get("/Subtype")) != "/Square":
+            continue
+        annotation[NameObject("/CA")] = FloatObject(opacity)
+        normal = annotation["/AP"]["/N"].get_object()
+        normal.set_data(
+            b"1 G\n0.5 g\n/R0 gs\n20 30 100 30 re\nB\n"
+        )
+        normal[NameObject("/Resources")] = DictionaryObject({
+            NameObject("/ExtGState"): DictionaryObject({
+                NameObject("/R0"): DictionaryObject({
+                    NameObject("/AIS"): BooleanObject(False),
+                    NameObject("/CA"): FloatObject(opacity),
+                    NameObject("/Type"): NameObject("/ExtGState"),
+                    NameObject("/ca"): FloatObject(opacity),
+                }),
+            }),
+        })
+        break
+    else:
+        raise AssertionError("fixture has no /Square annotation")
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
 def add_page_behavior(path: Path, behavior: str) -> str:
     source = PdfReader(str(path), strict=True)
     writer = PdfWriter()
@@ -2530,6 +2560,36 @@ class VirtualSpreadTests(unittest.TestCase):
                 "Hidden square annotations cannot be flattened",
             ),
             (
+                "/Square",
+                "/F",
+                NumberObject(12),
+                "NoZoom or NoRotate square annotations cannot be flattened",
+            ),
+            (
+                "/Square",
+                "/F",
+                NumberObject(20),
+                "NoZoom or NoRotate square annotations cannot be flattened",
+            ),
+            (
+                "/Square",
+                "/CA",
+                FloatObject(0.5),
+                "Square annotation /CA is not preserved by its normal appearance",
+            ),
+            (
+                "/Square",
+                "/CA",
+                FloatObject(1.5),
+                "Invalid square annotation /CA",
+            ),
+            (
+                "/Square",
+                "/CA",
+                TextStringObject("1"),
+                "Invalid square annotation /CA",
+            ),
+            (
                 "/Popup",
                 "/Open",
                 BooleanObject(True),
@@ -2570,6 +2630,40 @@ class VirtualSpreadTests(unittest.TestCase):
                         )
                     self.assertFalse(output.exists())
                     self.assertFalse(manifest_path.exists())
+
+    def test_square_embedded_opacity_is_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "transparent-square-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_square_with_empty_popup(source)
+            encode_first_square_opacity(source, 0.5)
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                flatten_square_annotations=True,
+            )
+
+            persisted = PdfReader(str(output), strict=True)
+            output_page = persisted.pages[
+                manifest["sourcePages"][1]["virtualPageIndex"]
+            ]
+            xobjects = output_page["/Resources"]["/XObject"].get_object()
+            appearance = next(
+                value.get_object()
+                for key, value in xobjects.items()
+                if str(key).startswith("/Fm_square_2_")
+            )
+            self.assertIn(b"/R0 gs", appearance.get_data())
+            graphics_state = appearance["/Resources"]["/ExtGState"][
+                "/R0"
+            ].get_object()
+            self.assertEqual(float(graphics_state["/CA"]), 0.5)
+            self.assertEqual(float(graphics_state["/ca"]), 0.5)
 
     def test_multi_page_catalog_layouts_fail_closed_before_publication(
         self,

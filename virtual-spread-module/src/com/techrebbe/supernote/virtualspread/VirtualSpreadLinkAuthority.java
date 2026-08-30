@@ -21,10 +21,14 @@ public final class VirtualSpreadLinkAuthority {
         "%SNVirtualSpreadMappingSHA256:";
     private static final String VIEW_PDF_MARKER =
         "%SNVirtualSpreadViewSHA256:";
+    private static final String NAVIGATION_PDF_MARKER =
+        "%SNVirtualSpreadNavigationSHA256:";
     private static final String MAPPING_DOMAIN =
         "techrebbe.supernote.virtual-spread-mapping/v1";
     private static final String VIEW_DOMAIN =
         "techrebbe.supernote.virtual-spread-view/v1";
+    private static final String NAVIGATION_VIEW_DOMAIN =
+        "techrebbe.supernote.virtual-spread-view/v2";
     private static final String VIEW_PREFIX = "inkbridge-view-v1-";
     private static final String DOCUMENT_PREFIX = "inkbridge-doc-v1-";
 
@@ -137,6 +141,49 @@ public final class VirtualSpreadLinkAuthority {
             + "|" + doubleBits(spreadHeight)
             + "|" + doubleBits(gutter)
             + "\nmapping|" + mappingSha256
+            + "\n";
+        return VIEW_PREFIX + sha256(strictUtf8(canonical));
+    }
+
+    public static String navigationViewId(
+        String sourceSha256,
+        String manifestSchema,
+        String generatorVersion,
+        String direction,
+        boolean coverSeparate,
+        double spreadWidth,
+        double spreadHeight,
+        double gutter,
+        String mappingSha256,
+        String navigationSha256,
+        boolean removeAdjacentPageLinks
+    ) throws Exception {
+        if (!isLowerSha256(sourceSha256)
+            || !isLowerSha256(mappingSha256)
+            || !isLowerSha256(navigationSha256)
+            || !"techrebbe.supernote.virtual-spread/v4".equals(
+                manifestSchema)
+            || !"techrebbe.supernote.virtual-spread-generator/v2".equals(
+                generatorVersion)
+            || !"rtl".equals(direction)
+            || !Double.isFinite(spreadWidth)
+            || !Double.isFinite(spreadHeight)
+            || !Double.isFinite(gutter)) {
+            throw new IllegalArgumentException("Invalid navigation view identity");
+        }
+        String canonical = NAVIGATION_VIEW_DOMAIN
+            + "\nsource|" + sourceSha256
+            + "\nschema|" + manifestSchema
+            + "\ngenerator|" + generatorVersion
+            + "\ndirection|" + direction
+            + "\ncover|" + (coverSeparate ? "1" : "0")
+            + "\nspread|" + doubleBits(spreadWidth)
+            + "|" + doubleBits(spreadHeight)
+            + "|" + doubleBits(gutter)
+            + "\nmapping|" + mappingSha256
+            + "\nnavigation|" + navigationSha256
+            + "\nremove-adjacent-page-links|"
+            + (removeAdjacentPageLinks ? "1" : "0")
             + "\n";
         return VIEW_PREFIX + sha256(strictUtf8(canonical));
     }
@@ -328,13 +375,42 @@ public final class VirtualSpreadLinkAuthority {
     public static String readPdfViewDigest(
         RandomAccessFile input
     ) throws Exception {
-        return readPdfMarker(input, VIEW_PDF_MARKER, null, true);
+        String value = readPdfMarker(
+            input, VIEW_PDF_MARKER, NAVIGATION_PDF_MARKER, false
+        );
+        return value != null ? value
+            : readPdfMarker(input, VIEW_PDF_MARKER, null, true);
     }
 
     public static String readPdfViewDigest(
         FileInputStream input
     ) throws Exception {
-        return readPdfMarker(input, VIEW_PDF_MARKER, null, true);
+        String value = readPdfMarker(
+            input, VIEW_PDF_MARKER, NAVIGATION_PDF_MARKER, false
+        );
+        return value != null ? value
+            : readPdfMarker(input, VIEW_PDF_MARKER, null, true);
+    }
+
+    public static String readPdfNavigationDigest(
+        FileInputStream input
+    ) throws Exception {
+        return readPdfMarker(input, NAVIGATION_PDF_MARKER, null, true);
+    }
+
+    public static String readPdfNavigationDigest(File pdf) throws Exception {
+        RandomAccessFile input = new RandomAccessFile(pdf, "r");
+        try {
+            return readPdfNavigationDigest(input);
+        } finally {
+            input.close();
+        }
+    }
+
+    public static String readPdfNavigationDigest(
+        RandomAccessFile input
+    ) throws Exception {
+        return readPdfMarker(input, NAVIGATION_PDF_MARKER, null, true);
     }
 
     private static String readPdfMarker(
@@ -410,8 +486,22 @@ public final class VirtualSpreadLinkAuthority {
         if (startxref < 0) {
             return null;
         }
-        int marker = tail.lastIndexOf(markerText, startxref);
-        if (marker < 0) {
+        int authorityStart = tail.lastIndexOf(
+            SOURCE_PDF_MARKER,
+            startxref - 1
+        );
+        if (authorityStart < 0) {
+            return null;
+        }
+        int marker = tail.indexOf(markerText, authorityStart);
+        if (marker < authorityStart || marker >= startxref) {
+            return null;
+        }
+        int duplicate = tail.indexOf(
+            markerText,
+            marker + markerText.length()
+        );
+        if (duplicate >= 0 && duplicate < startxref) {
             return null;
         }
         int digestStart = marker + markerText.length();

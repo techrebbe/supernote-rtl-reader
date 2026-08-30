@@ -8,8 +8,8 @@ untouched.
 It activates only when all of these are true:
 
 - the open file has a sibling `<pdf>.json` manifest;
-- the manifest schema is `techrebbe.supernote.virtual-spread/v3` and its
-  generator format is the frozen v1 format;
+- the manifest is either the frozen schema-v3/generator-v1 mapping format or
+  the authenticated schema-v4/generator-v2 navigation extension;
 - the manifest direction is `rtl`;
 - the PDF byte length, page count, and full SHA-256 match the manifest;
 - every strict source-page mapping matches its spread duplicate, expected RTL
@@ -31,6 +31,17 @@ The module keeps virtual-spread behavior disabled
 until every hook installs successfully; if any required hook is unavailable,
 already installed callbacks remain native pass-through for that process rather
 than leaving a partially active navigation layer.
+
+v0.0.27 adds the strict schema-v4 navigation extension while continuing to
+accept frozen schema-v3 documents. Schema v4 authenticates preserved outline
+hierarchy, order, style, destinations, adjacent-link filter policy, and
+removed/retained link counts. Outline selection is routed to the authenticated
+virtual page and left/right half; ambiguous or unmatched items fail closed.
+Schema-v4 viewport delivery uses the separately versioned provider-v2 evidence
+handshake; provider v1 remains schema-v3-only, preventing an older InkBridge
+consumer from treating a v4 representation as v3. See
+`../virtual_spread/NAVIGATION_WIRE_CONTRACT.md` and
+[`NATIVE_VIEWPORT_V2.md`](NATIVE_VIEWPORT_V2.md).
 
 v0.0.26 retains the schema-v3 representation contract and all v0.0.25
 navigation behavior while adding a fail-closed, memory-only native viewport

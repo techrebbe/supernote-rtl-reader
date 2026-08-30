@@ -33,6 +33,8 @@ sys.path.insert(0, str(ROOT / "virtual_spread"))
 
 from mapping_contract import (  # noqa: E402
     GENERATOR_FORMAT_VERSION,
+    NAVIGATION_GENERATOR_FORMAT_VERSION,
+    NAVIGATION_MANIFEST_SCHEMA,
     document_id,
     output_basename,
     view_id,
@@ -122,6 +124,7 @@ EXPLICIT_DEFAULT_LAYOUT = {
     "spread_width": 864.0,
     "spread_height": 648.0,
     "gutter": 0.0,
+    "remove_adjacent_page_links": False,
 }
 
 
@@ -241,6 +244,188 @@ def add_outline_entry(path: Path) -> None:
         raise AssertionError("fixture document outline was not persisted")
     if not persisted.outline:
         raise AssertionError("fixture document outline is empty")
+
+
+def add_unsupported_outline_entry(path: Path) -> None:
+    add_outline_entry(path)
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    outlines = writer._root_object["/Outlines"].get_object()
+    first = outlines["/First"].get_object()
+    action = first["/A"].get_object()
+    action[NameObject("/D")] = ArrayObject([
+        writer.pages[1].indirect_reference,
+        NameObject("/FitB"),
+    ])
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def add_outline_action_type(path: Path) -> None:
+    add_outline_entry(path)
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    outlines = writer._root_object["/Outlines"].get_object()
+    first = outlines["/First"].get_object()
+    action = first["/A"].get_object()
+    action[NameObject("/Type")] = NameObject("/Action")
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def add_standalone_named_destination(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    writer.add_named_destination_array(
+        TextStringObject("external-entry"),
+        ArrayObject([
+            writer.pages[3].indirect_reference,
+            NameObject("/Fit"),
+        ]),
+    )
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def add_dual_named_destination_containers(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    writer.add_named_destination_array(
+        TextStringObject("name-tree-entry"),
+        ArrayObject([
+            writer.pages[3].indirect_reference,
+            NameObject("/Fit"),
+        ]),
+    )
+    writer._root_object[NameObject("/Dests")] = DictionaryObject({
+        NameObject("/legacy-entry"): ArrayObject([
+            writer.pages[1].indirect_reference,
+            NameObject("/Fit"),
+        ]),
+    })
+    annotation = DictionaryObject({
+        NameObject("/Type"): NameObject("/Annot"),
+        NameObject("/Subtype"): NameObject("/Link"),
+        NameObject("/Rect"): ArrayObject([
+            FloatObject(25.0), FloatObject(100.0),
+            FloatObject(125.0), FloatObject(125.0),
+        ]),
+        NameObject("/Dest"): NameObject("/legacy-entry"),
+    })
+    reference = writer._add_object(annotation)
+    annotations = writer.pages[0].get("/Annots")
+    if annotations is None:
+        annotations = ArrayObject()
+        writer.pages[0][NameObject("/Annots")] = annotations
+    annotations.get_object().append(reference)
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+    persisted = PdfReader(str(path), strict=True)
+    catalog = persisted.trailer["/Root"]
+    if "/Dests" not in catalog or "/Names" not in catalog:
+        raise AssertionError("dual named-destination fixture was not persisted")
+
+
+def add_outline_hierarchy_with_named_destination(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    parent = writer.add_outline_item(
+        "Parent",
+        None,
+        color=(0.25, 0.5, 0.75),
+        bold=True,
+        is_open=False,
+    )
+    child = writer.add_outline_item(
+        "Named child",
+        1,
+        parent=parent,
+        italic=True,
+    )
+    writer.add_outline_item("Sibling", 4)
+    writer.add_named_destination_array(
+        TextStringObject("named-child-target"),
+        ArrayObject([
+            writer.pages[1].indirect_reference,
+            NameObject("/Fit"),
+        ]),
+    )
+    child_object = child.get_object()
+    child_object.pop("/A", None)
+    child_object[NameObject("/Dest")] = TextStringObject(
+        "named-child-target"
+    )
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def add_filter_link(
+    path: Path,
+    source_page_index: int,
+    target_page_index: int | None,
+    *,
+    named: str | None = None,
+    uri: str | None = None,
+    named_action: str | None = None,
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    source_page = writer.pages[source_page_index]
+    annotation = DictionaryObject({
+        NameObject("/Type"): NameObject("/Annot"),
+        NameObject("/Subtype"): NameObject("/Link"),
+        NameObject("/Rect"): ArrayObject([
+            FloatObject(25.0), FloatObject(100.0),
+            FloatObject(125.0), FloatObject(125.0),
+        ]),
+    })
+    option_count = sum(
+        value is not None for value in (named, uri, named_action)
+    )
+    if option_count > 1:
+        raise AssertionError("fixture link options are mutually exclusive")
+    if uri is not None:
+        annotation[NameObject("/A")] = DictionaryObject({
+            NameObject("/S"): NameObject("/URI"),
+            NameObject("/URI"): TextStringObject(uri),
+        })
+    elif named_action is not None:
+        annotation[NameObject("/A")] = DictionaryObject({
+            NameObject("/S"): NameObject("/Named"),
+            NameObject("/N"): NameObject(named_action),
+        })
+    else:
+        if target_page_index is None:
+            raise AssertionError("internal fixture link requires a target")
+        if named is not None:
+            writer.add_named_destination_array(
+                TextStringObject(named),
+                ArrayObject([
+                    writer.pages[target_page_index].indirect_reference,
+                    NameObject("/Fit"),
+                ]),
+            )
+            annotation[NameObject("/Dest")] = TextStringObject(named)
+        else:
+            annotation[NameObject("/Dest")] = ArrayObject([
+                writer.pages[target_page_index].indirect_reference,
+                NameObject("/Fit"),
+            ])
+    reference = writer._add_object(annotation)
+    annotations = source_page.get("/Annots")
+    if annotations is None:
+        annotations = ArrayObject()
+        source_page[NameObject("/Annots")] = annotations
+    annotations.get_object().append(reference)
+    with path.open("wb") as stream:
+        writer.write(stream)
 
 
 def add_document_open_action(path: Path) -> None:
@@ -433,6 +618,22 @@ def add_stale_virtual_source_metadata(path: Path) -> None:
         writer._info = DictionaryObject()
     writer._info[NameObject("/SNVirtualSpreadSource")] = TextStringObject(
         "stale-host-filename.pdf"
+    )
+    writer._info[
+        NameObject("/SNVirtualSpreadNavigationSHA256")
+    ] = TextStringObject("f" * 64)
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def add_reserved_marker_document_title(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    if writer._info is None:
+        writer._info = DictionaryObject()
+    writer._info[NameObject("/Title")] = TextStringObject(
+        "Copied payload %SNVirtualSpreadNavigationSHA256: marker"
     )
     with path.open("wb") as stream:
         writer.write(stream)
@@ -835,6 +1036,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 spread_width=1200.0,
                 spread_height=900.0,
                 gutter=12.0,
+                remove_adjacent_page_links=True,
             )
             output_before = output.read_bytes()
             manifest_before = manifest_path.read_bytes()
@@ -842,7 +1044,7 @@ class VirtualSpreadTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 VirtualSpreadError,
                 "Forced replacement requires explicit cover, spread width, "
-                "spread height, and gutter options",
+                "spread height, gutter, and adjacent-page link filter options",
             ):
                 build_virtual_spread(
                     source,
@@ -862,11 +1064,16 @@ class VirtualSpreadTests(unittest.TestCase):
                 spread_width=1200.0,
                 spread_height=900.0,
                 gutter=12.0,
+                remove_adjacent_page_links=True,
                 force=True,
             )
             self.assertIs(regenerated["coverSeparate"], False)
             self.assertEqual(regenerated["output"]["spreadSize"], [1200.0, 900.0])
             self.assertEqual(regenerated["output"]["gutter"], 12.0)
+            self.assertIs(
+                regenerated["navigation"]["removeAdjacentPageLinks"],
+                True,
+            )
 
     def test_odd_pages_text_and_links_survive(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -970,7 +1177,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 self.assertLessEqual(right, slot_right + 0.001)
                 self.assertLessEqual(top, slot_top + 0.001)
 
-    def test_document_outlines_fail_closed_before_publication(self) -> None:
+    def test_document_outlines_are_preserved_with_authenticated_half(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "outlined-source.pdf"
@@ -979,12 +1186,55 @@ class VirtualSpreadTests(unittest.TestCase):
             create_odd_page_fixture(source)
             add_outline_entry(source)
             source_bytes = source.read_bytes()
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                **EXPLICIT_DEFAULT_LAYOUT,
+            )
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(manifest["schema"], NAVIGATION_MANIFEST_SCHEMA)
+            self.assertEqual(
+                manifest["generatorVersion"],
+                NAVIGATION_GENERATOR_FORMAT_VERSION,
+            )
+            self.assertEqual(len(manifest["navigation"]["outlines"]), 1)
+            bookmark = manifest["navigation"]["outlines"][0]
+            self.assertEqual(bookmark["title"], "Chapter 2")
+            self.assertEqual(bookmark["destination"]["sourcePageIndex"], 1)
+            self.assertEqual(bookmark["destination"]["virtualPageIndex"], 1)
+            self.assertEqual(bookmark["destination"]["side"], "right")
+            self.assertEqual(
+                bookmark["destination"]["targetView"], "fit-source-page"
+            )
+            persisted = PdfReader(output, strict=True)
+            self.assertEqual(str(persisted.outline[0].title), "Chapter 2")
+            self.assertEqual(
+                persisted.get_destination_page_number(persisted.outline[0]),
+                1,
+            )
+            self.assertTrue(
+                manifest["output"]["cacheBasename"].startswith(
+                    manifest["source"]["documentId"] + "."
+                )
+            )
+
+    def test_unsupported_document_outline_fails_closed_before_publication(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "unsupported-outline.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_unsupported_outline_entry(source)
+            source_bytes = source.read_bytes()
             output.write_bytes(b"existing-output")
             manifest_path.write_bytes(b"existing-manifest")
-
             with self.assertRaisesRegex(
                 VirtualSpreadError,
-                "Document outlines are not supported",
+                "Cannot preserve outline destination mode /FitB",
             ):
                 build_virtual_spread(
                     source,
@@ -993,12 +1243,266 @@ class VirtualSpreadTests(unittest.TestCase):
                     force=True,
                     **EXPLICIT_DEFAULT_LAYOUT,
                 )
-
             self.assertEqual(source.read_bytes(), source_bytes)
             self.assertEqual(output.read_bytes(), b"existing-output")
             self.assertEqual(
                 manifest_path.read_bytes(), b"existing-manifest"
             )
+
+    def test_outline_goto_action_allows_standard_action_type(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "typed-outline.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_outline_action_type(source)
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                **EXPLICIT_DEFAULT_LAYOUT,
+            )
+            self.assertEqual(
+                manifest["navigation"]["outlines"][0]["title"],
+                "Chapter 2",
+            )
+
+    def test_standalone_named_destination_fails_before_publication(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "standalone-named-destination.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_standalone_named_destination(source)
+            source_bytes = source.read_bytes()
+            output.write_bytes(b"existing-output")
+            manifest_path.write_bytes(b"existing-manifest")
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Standalone named destinations are not yet supported",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(output.read_bytes(), b"existing-output")
+            self.assertEqual(
+                manifest_path.read_bytes(), b"existing-manifest"
+            )
+
+    def test_dual_named_destination_containers_fail_before_publication(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "dual-named-destinations.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_dual_named_destination_containers(source)
+            source_bytes = source.read_bytes()
+            output.write_bytes(b"existing-output")
+            manifest_path.write_bytes(b"existing-manifest")
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "both legacy /Dests and /Names destination containers",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    force=True,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(output.read_bytes(), b"existing-output")
+            self.assertEqual(
+                manifest_path.read_bytes(), b"existing-manifest"
+            )
+
+    def test_outline_hierarchy_style_order_and_named_destination_survive(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "outline-hierarchy.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_outline_hierarchy_with_named_destination(source)
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                **{
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                    "remove_adjacent_page_links": True,
+                },
+            )
+            outlines = manifest["navigation"]["outlines"]
+            self.assertEqual(
+                [item["title"] for item in outlines],
+                ["Parent", "Named child", "Sibling"],
+            )
+            self.assertEqual(
+                [item["parentOutlineIndex"] for item in outlines],
+                [None, 0, None],
+            )
+            self.assertFalse(outlines[0]["isOpen"])
+            self.assertTrue(outlines[0]["bold"])
+            self.assertEqual(outlines[0]["color"], [0.25, 0.5, 0.75])
+            self.assertTrue(outlines[1]["italic"])
+            self.assertEqual(
+                outlines[1]["destination"]["sourcePageIndex"], 1
+            )
+            self.assertEqual(
+                outlines[1]["destination"]["side"], "right"
+            )
+            self.assertEqual(
+                outlines[2]["destination"]["sourcePageIndex"], 4
+            )
+            persisted_outline = PdfReader(output, strict=True).outline
+            self.assertEqual(len(persisted_outline), 3)
+            self.assertIsInstance(persisted_outline[1], list)
+            self.assertEqual(
+                str(persisted_outline[1][0].title), "Named child"
+            )
+
+    def test_adjacent_page_filter_uses_original_source_indices(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "filter-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_filter_link(source, 0, 1)
+            add_filter_link(source, 1, 0)
+            add_filter_link(source, 0, 0)
+            add_filter_link(source, 0, 4)
+            add_filter_link(source, 0, 1, named="adjacent-target")
+            add_filter_link(
+                source, 0, None, uri="https://example.test/reference"
+            )
+            unfiltered_output = root / "unfiltered.pdf"
+            unfiltered_manifest_path = root / "unfiltered.pdf.json"
+            unfiltered = build_virtual_spread(
+                source,
+                unfiltered_output,
+                unfiltered_manifest_path,
+                **EXPLICIT_DEFAULT_LAYOUT,
+            )
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                **{
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                    "remove_adjacent_page_links": True,
+                },
+            )
+            navigation = manifest["navigation"]
+            self.assertEqual(navigation["removedAdjacentPageLinkCount"], 3)
+            self.assertEqual(
+                navigation["retainedLinkCount"], len(manifest["links"])
+            )
+            self.assertEqual(
+                len(unfiltered["links"]) - len(manifest["links"]), 3
+            )
+            retained_internal = {
+                (link["sourcePage"], link["targetSourcePage"])
+                for link in manifest["links"]
+                if link["kind"] == "internal"
+            }
+            self.assertIn((0, 0), retained_internal)
+            self.assertIn((0, 4), retained_internal)
+            self.assertTrue(any(
+                link["kind"] == "uri" for link in manifest["links"]
+            ))
+            self.assertNotEqual(
+                manifest["output"]["viewId"],
+                unfiltered["output"]["viewId"],
+            )
+            self.assertNotEqual(
+                manifest["output"]["cacheBasename"],
+                unfiltered["output"]["cacheBasename"],
+            )
+
+    def test_adjacent_named_actions_are_removed_only_when_opted_in(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "named-actions.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_filter_link(
+                source, 1, None, named_action="/PrevPage"
+            )
+            add_filter_link(
+                source, 1, None, named_action="/NextPage"
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError, "link action /S"
+            ):
+                build_virtual_spread(
+                    source,
+                    root / "without-filter.pdf",
+                    root / "without-filter.pdf.json",
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                **{
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                    "remove_adjacent_page_links": True,
+                },
+            )
+            self.assertEqual(
+                manifest["navigation"]["removedAdjacentPageLinkCount"], 2
+            )
+            self.assertEqual(manifest["navigation"]["retainedLinkCount"], 4)
+            self.assertEqual(len(manifest["links"]), 4)
+            persisted = PdfReader(output, strict=True)
+            for page in persisted.pages:
+                for annotation in page.get("/Annots", []):
+                    action = annotation.get_object().get("/A")
+                    self.assertFalse(
+                        isinstance(action, DictionaryObject)
+                        and action.get("/S") == "/Named"
+                    )
+
+    def test_boundary_named_action_fails_instead_of_silent_removal(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "boundary-action.pdf"
+            create_odd_page_fixture(source)
+            add_filter_link(
+                source, 0, None, named_action="/PrevPage"
+            )
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot resolve named adjacent-page link action",
+            ):
+                build_virtual_spread(
+                    source,
+                    root / "spread.pdf",
+                    root / "spread.pdf.json",
+                    **{
+                        **EXPLICIT_DEFAULT_LAYOUT,
+                        "remove_adjacent_page_links": True,
+                    },
+                )
 
     def test_document_open_action_fails_closed_before_publication(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1274,6 +1778,23 @@ class VirtualSpreadTests(unittest.TestCase):
             self.assertEqual(number, 7)
             self.assertIsInstance(flag, BooleanObject)
             self.assertTrue(flag.value)
+
+    def test_reserved_authority_marker_text_in_title_is_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "reserved-marker-title-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_reserved_marker_document_title(source)
+
+            build_virtual_spread(source, output, manifest_path)
+
+            metadata = PdfReader(str(output), strict=True).metadata
+            self.assertEqual(
+                metadata["/Title"],
+                "Copied payload %SNVirtualSpreadNavigationSHA256: marker",
+            )
 
     def test_unsupported_document_information_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1570,6 +2091,11 @@ class VirtualSpreadTests(unittest.TestCase):
                 )
             metadata = PdfReader(str(first_output), strict=True).metadata
             self.assertNotIn("/SNVirtualSpreadSource", metadata)
+            self.assertNotIn(
+                "/SNVirtualSpreadNavigationSHA256",
+                metadata,
+                "legacy output must not inherit navigation authority",
+            )
 
     def test_windows_namespace_changes_always_request_write_through(self) -> None:
         self.assertEqual(
@@ -6066,7 +6592,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 with self.assertRaisesRegex(
                     VirtualSpreadError,
                     "Forced replacement requires explicit cover, spread width, "
-                    "spread height, and gutter options",
+                    "spread height, gutter, and adjacent-page link filter options",
                 ):
                     build_virtual_spread(
                         source,

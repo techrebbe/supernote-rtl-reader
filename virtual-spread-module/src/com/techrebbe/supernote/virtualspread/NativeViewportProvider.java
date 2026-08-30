@@ -23,12 +23,17 @@ public final class NativeViewportProvider extends ContentProvider {
     public static final Uri CONTENT_URI = Uri.parse(
         "content://" + AUTHORITY + "/v1/current"
     );
+    public static final Uri CONTENT_URI_V2 = Uri.parse(
+        "content://" + AUTHORITY + "/v2/current"
+    );
     public static final String METHOD_PUBLISH = "publish_v1";
+    public static final String METHOD_PUBLISH_V2 = "publish_v2";
     public static final String METHOD_BEGIN_LOAD = "begin_load_v1";
     public static final String METHOD_CLEAR = "clear_v1";
     public static final String METHOD_CLEAR_GENERATION =
         "clear_generation_v1";
     public static final String METHOD_GET = "get_v1";
+    public static final String METHOD_GET_V2 = "get_v2";
 
     private static final String WRITER_PACKAGE = "com.supernote.document";
     private static final String READER_PACKAGE =
@@ -47,6 +52,10 @@ public final class NativeViewportProvider extends ContentProvider {
         final String generatedPdfSha256;
         final String sidecarSha256;
         final String mappingAuthoritySha256;
+        final int protocolVersion;
+        final String manifestSchema;
+        final String generatorVersion;
+        final String navigationAuthoritySha256;
         final String snapshotId;
         final String pdfIdentity;
         final String sidecarIdentity;
@@ -55,7 +64,14 @@ public final class NativeViewportProvider extends ContentProvider {
         final long publishedAtElapsedRealtime;
         final IBinder sessionToken;
 
-        Record(Bundle input) {
+        Record(Bundle input, int requestedProtocolVersion) {
+            if (requestedProtocolVersion != 1
+                && requestedProtocolVersion != 2) {
+                throw new IllegalArgumentException(
+                    "unsupported viewport protocol version"
+                );
+            }
+            protocolVersion = requestedProtocolVersion;
             descriptor = NativeViewportDescriptor.fromBundle(input);
             descriptorJson = descriptor.authority.canonicalJson();
             descriptorSha256 = sha256(descriptorJson);
@@ -68,6 +84,33 @@ public final class NativeViewportProvider extends ContentProvider {
             mappingAuthoritySha256 = exactSha256(
                 input, "mappingAuthoritySha256"
             );
+            if (protocolVersion == 2) {
+                manifestSchema = exactString(input, "manifestSchema");
+                generatorVersion = exactString(input, "generatorVersion");
+                navigationAuthoritySha256 = exactSha256(
+                    input, "navigationAuthoritySha256"
+                );
+                if (NativeViewportProtocol.versionForRepresentation(
+                        manifestSchema,
+                        generatorVersion,
+                        navigationAuthoritySha256
+                    ) != 2) {
+                    throw new IllegalArgumentException(
+                        "viewport v2 requires schema-v4 representation evidence"
+                    );
+                }
+            } else {
+                manifestSchema = null;
+                generatorVersion = null;
+                navigationAuthoritySha256 = null;
+                if (input.containsKey("manifestSchema")
+                    || input.containsKey("generatorVersion")
+                    || input.containsKey("navigationAuthoritySha256")) {
+                    throw new IllegalArgumentException(
+                        "viewport v1 cannot publish schema-v4 evidence"
+                    );
+                }
+            }
             snapshotId = exactString(input, "snapshotId");
             pdfIdentity = exactString(input, "pdfIdentity");
             sidecarIdentity = exactString(input, "sidecarIdentity");
@@ -97,11 +140,15 @@ public final class NativeViewportProvider extends ContentProvider {
             publishedAtElapsedRealtime = SystemClock.elapsedRealtime();
         }
 
-        boolean matchesRequest(Bundle request) {
-            if (request == null || !sessionToken.isBinderAlive()) {
+        boolean matchesRequest(Bundle request, int requestedProtocolVersion) {
+            if (request == null || !sessionToken.isBinderAlive()
+                || protocolVersion != requestedProtocolVersion
+                || !NativeViewportProtocol.exactRequestFields(
+                    request.keySet(), requestedProtocolVersion
+                )) {
                 return false;
             }
-            return LOAD_FENCE.accepts(
+            boolean common = LOAD_FENCE.accepts(
                     sessionToken, pageLoadGeneration
                 )
                 && descriptor.authority.documentId.equals(
@@ -129,11 +176,27 @@ public final class NativeViewportProvider extends ContentProvider {
                 && mappingAuthoritySha256.equals(
                     request.getString("mappingAuthoritySha256")
                 );
+            if (!common) {
+                return false;
+            }
+            if (protocolVersion == 1) {
+                return !request.containsKey("manifestSchema")
+                    && !request.containsKey("generatorVersion")
+                    && !request.containsKey("navigationAuthoritySha256");
+            }
+            return NativeViewportProtocol.v2EvidenceMatches(
+                manifestSchema,
+                generatorVersion,
+                navigationAuthoritySha256,
+                request.getString("manifestSchema"),
+                request.getString("generatorVersion"),
+                request.getString("navigationAuthoritySha256")
+            );
         }
 
         Bundle response() {
             Bundle response = new Bundle();
-            response.putInt("protocolVersion", 1);
+            response.putInt("protocolVersion", protocolVersion);
             response.putString("status", "ok");
             response.putString("descriptorJson", descriptorJson);
             response.putString("descriptorSha256", descriptorSha256);
@@ -146,6 +209,14 @@ public final class NativeViewportProvider extends ContentProvider {
             response.putString(
                 "mappingAuthoritySha256", mappingAuthoritySha256
             );
+            if (protocolVersion == 2) {
+                response.putString("manifestSchema", manifestSchema);
+                response.putString("generatorVersion", generatorVersion);
+                response.putString(
+                    "navigationAuthoritySha256",
+                    navigationAuthoritySha256
+                );
+            }
             response.putString("snapshotId", snapshotId);
             response.putString("pdfIdentity", pdfIdentity);
             response.putString("sidecarIdentity", sidecarIdentity);
@@ -216,7 +287,11 @@ public final class NativeViewportProvider extends ContentProvider {
     public Bundle call(String method, String arg, Bundle extras) {
         if (METHOD_PUBLISH.equals(method)) {
             requireCaller(WRITER_PACKAGE);
-            return publish(extras);
+            return publish(extras, 1);
+        }
+        if (METHOD_PUBLISH_V2.equals(method)) {
+            requireCaller(WRITER_PACKAGE);
+            return publish(extras, 2);
         }
         if (METHOD_BEGIN_LOAD.equals(method)) {
             requireCaller(WRITER_PACKAGE);
@@ -232,13 +307,17 @@ public final class NativeViewportProvider extends ContentProvider {
         }
         if (METHOD_GET.equals(method)) {
             requireCaller(READER_PACKAGE);
-            return get(extras);
+            return get(extras, 1);
+        }
+        if (METHOD_GET_V2.equals(method)) {
+            requireCaller(READER_PACKAGE);
+            return get(extras, 2);
         }
         throw new IllegalArgumentException("unsupported viewport API method");
     }
 
-    private Bundle publish(Bundle extras) {
-        Record replacement = new Record(extras);
+    private Bundle publish(Bundle extras, int protocolVersion) {
+        Record replacement = new Record(extras, protocolVersion);
         try {
             replacement.link();
         } catch (android.os.RemoteException error) {
@@ -264,7 +343,7 @@ public final class NativeViewportProvider extends ContentProvider {
             }
         }
         Bundle response = new Bundle();
-        response.putInt("protocolVersion", 1);
+        response.putInt("protocolVersion", protocolVersion);
         response.putString("status", "published");
         response.putString(
             "descriptorSha256", replacement.descriptorSha256
@@ -354,15 +433,16 @@ public final class NativeViewportProvider extends ContentProvider {
         return response;
     }
 
-    private Bundle get(Bundle extras) {
+    private Bundle get(Bundle extras, int protocolVersion) {
         synchronized (LOCK) {
             Record record = current;
-            if (record != null && record.matchesRequest(extras)) {
+            if (record != null
+                && record.matchesRequest(extras, protocolVersion)) {
                 return record.response();
             }
         }
         Bundle response = new Bundle();
-        response.putInt("protocolVersion", 1);
+        response.putInt("protocolVersion", protocolVersion);
         response.putString("status", "unavailable");
         return response;
     }

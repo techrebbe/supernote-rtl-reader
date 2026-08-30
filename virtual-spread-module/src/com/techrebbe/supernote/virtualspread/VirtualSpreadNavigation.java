@@ -945,13 +945,124 @@ public final class VirtualSpreadNavigation {
         String nativeViewId,
         String nativeGenerator
     ) {
-        return sameAuthority(expectedSource, nativeSource)
+        return manifestMatchesNativeSnapshot(
+            null,
+            expectedSource,
+            expectedLayout,
+            expectedLinks,
+            expectedMapping,
+            null,
+            expectedViewId,
+            expectedGenerator,
+            null,
+            nativeSource,
+            nativeLayout,
+            nativeLinks,
+            nativeMapping,
+            null,
+            nativeViewId,
+            nativeGenerator
+        );
+    }
+
+    public static boolean manifestMatchesNativeSnapshot(
+        String expectedSource,
+        String expectedLayout,
+        String expectedLinks,
+        String expectedMapping,
+        String expectedNavigation,
+        String expectedViewId,
+        String expectedGenerator,
+        String nativeSource,
+        String nativeLayout,
+        String nativeLinks,
+        String nativeMapping,
+        String nativeNavigation,
+        String nativeViewId,
+        String nativeGenerator
+    ) {
+        return manifestMatchesNativeSnapshot(
+            null,
+            expectedSource,
+            expectedLayout,
+            expectedLinks,
+            expectedMapping,
+            expectedNavigation,
+            expectedViewId,
+            expectedGenerator,
+            null,
+            nativeSource,
+            nativeLayout,
+            nativeLinks,
+            nativeMapping,
+            nativeNavigation,
+            nativeViewId,
+            nativeGenerator
+        );
+    }
+
+    public static boolean manifestMatchesNativeSnapshot(
+        String expectedSchema,
+        String expectedSource,
+        String expectedLayout,
+        String expectedLinks,
+        String expectedMapping,
+        String expectedNavigation,
+        String expectedViewId,
+        String expectedGenerator,
+        String nativeSchema,
+        String nativeSource,
+        String nativeLayout,
+        String nativeLinks,
+        String nativeMapping,
+        String nativeNavigation,
+        String nativeViewId,
+        String nativeGenerator
+    ) {
+        return (expectedSchema == null
+                ? nativeSchema == null
+                : expectedSchema.equals(nativeSchema))
+            && sameAuthority(expectedSource, nativeSource)
             && sameAuthority(expectedLayout, nativeLayout)
             && sameAuthority(expectedLinks, nativeLinks)
             && sameAuthority(expectedMapping, nativeMapping)
+            && (expectedNavigation == null
+                ? nativeNavigation == null || nativeNavigation.trim().isEmpty()
+                : sameAuthority(expectedNavigation, nativeNavigation))
             && sameViewId(expectedViewId, nativeViewId)
             && expectedGenerator != null
             && expectedGenerator.equals(nativeGenerator);
+    }
+
+    /** Bind a bookmark landing record to its authenticated page mapping. */
+    public static boolean outlineTargetMatchesMapping(
+        int mappingSourcePage,
+        int mappingVirtualPage,
+        String mappingSide,
+        double[] mappingDestination,
+        int targetSourcePage,
+        int targetVirtualPage,
+        String targetSide,
+        Double[] targetOperands
+    ) {
+        if (mappingSourcePage != targetSourcePage
+            || mappingVirtualPage != targetVirtualPage
+            || mappingSide == null || !mappingSide.equals(targetSide)
+            || mappingDestination == null || mappingDestination.length != 4
+            || targetOperands == null || targetOperands.length != 4) {
+            return false;
+        }
+        for (int index = 0; index < 4; index++) {
+            if (!Double.isFinite(mappingDestination[index])
+                || targetOperands[index] == null
+                || !Double.isFinite(targetOperands[index].doubleValue())
+                || Double.doubleToRawLongBits(mappingDestination[index])
+                    != Double.doubleToRawLongBits(
+                        targetOperands[index].doubleValue())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -969,10 +1080,55 @@ public final class VirtualSpreadNavigation {
         Object viewId,
         Object generator
     ) {
-        return nativeAuthorityValuePresent(source)
+        return nativeMetadataClaimsVirtualSpread(
+            null,
+            source,
+            layout,
+            links,
+            mapping,
+            null,
+            viewId,
+            generator
+        );
+    }
+
+    public static boolean nativeMetadataClaimsVirtualSpread(
+        Object source,
+        Object layout,
+        Object links,
+        Object mapping,
+        Object navigation,
+        Object viewId,
+        Object generator
+    ) {
+        return nativeMetadataClaimsVirtualSpread(
+            null,
+            source,
+            layout,
+            links,
+            mapping,
+            navigation,
+            viewId,
+            generator
+        );
+    }
+
+    public static boolean nativeMetadataClaimsVirtualSpread(
+        Object schema,
+        Object source,
+        Object layout,
+        Object links,
+        Object mapping,
+        Object navigation,
+        Object viewId,
+        Object generator
+    ) {
+        return nativeAuthorityValuePresent(schema)
+            || nativeAuthorityValuePresent(source)
             || nativeAuthorityValuePresent(layout)
             || nativeAuthorityValuePresent(links)
             || nativeAuthorityValuePresent(mapping)
+            || nativeAuthorityValuePresent(navigation)
             || nativeAuthorityValuePresent(viewId)
             || nativeAuthorityValuePresent(generator);
     }

@@ -221,6 +221,26 @@ public final class VirtualSpreadLinkAuthorityTest {
                 goldenSource, spreadViewId
             )
         );
+        assertEquals(
+            "navigation view identity",
+            "inkbridge-view-v1-"
+                + "9c6d77c84ef97e7f73aa40156a78ef72"
+                + "48b3ce1bca39d71eb2cda5341b040d2f",
+            VirtualSpreadLinkAuthority.navigationViewId(
+                goldenSource,
+                "techrebbe.supernote.virtual-spread/v4",
+                "techrebbe.supernote.virtual-spread-generator/v2",
+                "rtl",
+                true,
+                864.0,
+                648.0,
+                0.0,
+                mappingDigest,
+                "7fbaa18d9b6c14ac6e1d5ea3062dccdb"
+                    + "82c4092de9b56150676d19cc9695c172",
+                true
+            )
+        );
         assertBoolean(
             "page-143 left mapping geometry",
             true,
@@ -482,6 +502,89 @@ public final class VirtualSpreadLinkAuthorityTest {
                 "PDF-bound view authority digest",
                 spreadViewId.substring("inkbridge-view-v1-".length()),
                 VirtualSpreadLinkAuthority.readPdfViewDigest(fixture.toFile())
+            );
+            String navigationDigest =
+                "7fbaa18d9b6c14ac6e1d5ea3062dccdb"
+                    + "82c4092de9b56150676d19cc9695c172";
+            String navigationBound = bound.replace(
+                "\nstartxref",
+                "\n%SNVirtualSpreadNavigationSHA256:"
+                    + navigationDigest + "\nstartxref"
+            );
+            Files.write(
+                fixture,
+                navigationBound.getBytes(StandardCharsets.ISO_8859_1)
+            );
+            assertEquals(
+                "PDF-bound v4 view authority digest",
+                spreadViewId.substring("inkbridge-view-v1-".length()),
+                VirtualSpreadLinkAuthority.readPdfViewDigest(fixture.toFile())
+            );
+            assertEquals(
+                "PDF-bound navigation authority digest",
+                navigationDigest,
+                VirtualSpreadLinkAuthority.readPdfNavigationDigest(
+                    fixture.toFile()
+                )
+            );
+            String payloadMarkers = "%PDF-1.7\n"
+                + "%SNVirtualSpreadSourceSHA256:"
+                + "11111111111111111111111111111111"
+                + "11111111111111111111111111111111\n"
+                + "%SNVirtualSpreadNavigationSHA256:"
+                + "22222222222222222222222222222222"
+                + "22222222222222222222222222222222\n"
+                + "% copied source payload ends here\n"
+                + navigationBound.substring("%PDF-1.7\n".length());
+            Files.write(
+                fixture,
+                payloadMarkers.getBytes(StandardCharsets.ISO_8859_1)
+            );
+            assertEquals(
+                "reserved source marker in copied payload is ignored",
+                sourceDigest,
+                VirtualSpreadLinkAuthority.readPdfSourceDigest(
+                    fixture.toFile()
+                )
+            );
+            assertEquals(
+                "reserved navigation marker in copied payload is ignored",
+                navigationDigest,
+                VirtualSpreadLinkAuthority.readPdfNavigationDigest(
+                    fixture.toFile()
+                )
+            );
+            String duplicateNavigation = navigationBound.replace(
+                "\nstartxref",
+                "\n%SNVirtualSpreadNavigationSHA256:"
+                    + "11111111111111111111111111111111"
+                    + "11111111111111111111111111111111"
+                    + "\nstartxref"
+            );
+            Files.write(
+                fixture,
+                duplicateNavigation.getBytes(StandardCharsets.ISO_8859_1)
+            );
+            assertEquals(
+                "duplicate navigation authority markers are rejected",
+                null,
+                VirtualSpreadLinkAuthority.readPdfNavigationDigest(
+                    fixture.toFile()
+                )
+            );
+            String displacedNavigation = navigationBound.replace(
+                "\nstartxref", "\n\nstartxref"
+            );
+            Files.write(
+                fixture,
+                displacedNavigation.getBytes(StandardCharsets.ISO_8859_1)
+            );
+            assertEquals(
+                "displaced navigation authority marker is rejected",
+                null,
+                VirtualSpreadLinkAuthority.readPdfNavigationDigest(
+                    fixture.toFile()
+                )
             );
             String uppercaseMapping = bound.replace(
                 mappingDigest,

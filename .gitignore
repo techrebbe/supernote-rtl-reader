@@ -4,3 +4,4 @@ __pycache__/
 tmp/
 output/
 virtual-spread-module/build/
+artifacts/

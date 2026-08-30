@@ -1493,6 +1493,8 @@ public final class VirtualSpreadNavigationTest {
             "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
         String mappingAuthority =
             "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+        String navigationAuthority =
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
         String viewId = "inkbridge-view-v1-"
             + "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
         String generatorVersion =
@@ -1531,6 +1533,110 @@ public final class VirtualSpreadNavigationTest {
                 mappingAuthority.toUpperCase(),
                 viewId,
                 generatorVersion
+            )
+        );
+        assertBoolean(
+            "matching navigation authority is accepted",
+            true,
+            VirtualSpreadNavigation.manifestMatchesNativeSnapshot(
+                sourceAuthority,
+                layoutAuthority,
+                linkAuthority,
+                mappingAuthority,
+                navigationAuthority,
+                viewId,
+                "techrebbe.supernote.virtual-spread-generator/v2",
+                sourceAuthority,
+                layoutAuthority,
+                linkAuthority,
+                mappingAuthority,
+                navigationAuthority,
+                viewId,
+                "techrebbe.supernote.virtual-spread-generator/v2"
+            )
+        );
+        assertBoolean(
+            "stale navigation authority fails closed",
+            false,
+            VirtualSpreadNavigation.manifestMatchesNativeSnapshot(
+                sourceAuthority,
+                layoutAuthority,
+                linkAuthority,
+                mappingAuthority,
+                navigationAuthority,
+                viewId,
+                "techrebbe.supernote.virtual-spread-generator/v2",
+                sourceAuthority,
+                layoutAuthority,
+                linkAuthority,
+                mappingAuthority,
+                sourceAuthority,
+                viewId,
+                "techrebbe.supernote.virtual-spread-generator/v2"
+            )
+        );
+        assertBoolean(
+            "stale native schema fails closed",
+            false,
+            VirtualSpreadNavigation.manifestMatchesNativeSnapshot(
+                "techrebbe.supernote.virtual-spread/v4",
+                sourceAuthority,
+                layoutAuthority,
+                linkAuthority,
+                mappingAuthority,
+                navigationAuthority,
+                viewId,
+                "techrebbe.supernote.virtual-spread-generator/v2",
+                "techrebbe.supernote.virtual-spread/v3",
+                sourceAuthority,
+                layoutAuthority,
+                linkAuthority,
+                mappingAuthority,
+                navigationAuthority,
+                viewId,
+                "techrebbe.supernote.virtual-spread-generator/v2"
+            )
+        );
+        assertBoolean(
+            "bookmark target matches exact mapping",
+            true,
+            VirtualSpreadNavigation.outlineTargetMatchesMapping(
+                142,
+                71,
+                "right",
+                new double[] {432.0, 0.0, 864.0, 648.0},
+                142,
+                71,
+                "right",
+                new Double[] {432.0, 0.0, 864.0, 648.0}
+            )
+        );
+        assertBoolean(
+            "bookmark target cannot disagree with mapping half",
+            false,
+            VirtualSpreadNavigation.outlineTargetMatchesMapping(
+                142,
+                71,
+                "right",
+                new double[] {432.0, 0.0, 864.0, 648.0},
+                142,
+                71,
+                "left",
+                new Double[] {432.0, 0.0, 864.0, 648.0}
+            )
+        );
+        assertBoolean(
+            "bookmark target cannot disagree with mapping rectangle",
+            false,
+            VirtualSpreadNavigation.outlineTargetMatchesMapping(
+                142,
+                71,
+                "right",
+                new double[] {432.0, 0.0, 864.0, 648.0},
+                142,
+                71,
+                "right",
+                new Double[] {431.0, 0.0, 864.0, 648.0}
             )
         );
         assertBoolean(
@@ -1691,6 +1797,33 @@ public final class VirtualSpreadNavigationTest {
                 "",
                 null,
                 null,
+                null,
+                null
+            )
+        );
+        assertBoolean(
+            "schema metadata alone claims Virtual Spread",
+            true,
+            VirtualSpreadNavigation.nativeMetadataClaimsVirtualSpread(
+                "techrebbe.supernote.virtual-spread/v4",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+            )
+        );
+        assertBoolean(
+            "navigation authority alone claims Virtual Spread",
+            true,
+            VirtualSpreadNavigation.nativeMetadataClaimsVirtualSpread(
+                null,
+                null,
+                null,
+                null,
+                navigationAuthority,
                 null,
                 null
             )

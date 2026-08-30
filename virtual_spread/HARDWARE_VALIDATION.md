@@ -467,6 +467,45 @@ and produced zero Virtual Spread navigation or publication events. The control
 was removed, the normative hidden-cache document was restored, and the device's
 auto-rotation setting was restored after the gate.
 
+## v0.0.27 outline preservation and opt-in adjacent-link filtering
+
+The focused bookmark/link gate passed on 2026-08-30 on Nomad
+`SN078C10015092` using the exact behavior head
+`759b4586e561b5958d1d9462750129e901bb8d74`. The upgrade-compatible
+v0.0.27 (`versionCode=29`) APK SHA-256 was
+`c4c6792614d296cc42371effa71c5e52c777649d4be2d68056b45f5beb258977`;
+the signer certificate remained
+`a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`.
+
+The disposable seven-page source had SHA-256
+`6ba6f40126c55c61dd0f61474f4944579f9270e2b2e48318b98075132bca948f`.
+Its schema-v4 Virtual Spread PDF and sidecar had SHA-256 values
+`0dd5a24c24af5cf6b7a8ad4bf60e6f9cf69688e37370b1d7319170bb22cc23ef`
+and
+`0145cd78ad9202b59a4b73619824d683e32f5c000ad1676f3132bd448b5a4e60`.
+The view ID was
+`inkbridge-view-v1-9b9235712e21f7304b968332b770b0056cb2a64572d0c35a17d1944086510917`,
+and the navigation-authority SHA-256 was
+`2bee6d4654af04dd47ae613df874fe4a3260bd8697fa5df1b5c1dc5f7d42fb7a`.
+The authenticated policy recorded one removed adjacent-page link and three
+retained links.
+
+Supernote's native bookmark menu preserved the fixture's structural entry and
+destination titles. Landscape bookmark jumps placed source page 2 on the right,
+source page 3 on the left of the same spread, and source page 6 on the right of
+the final spread. The page-2 and page-3 bookmarks each produced a full native
+page in portrait. The removed adjacent-page link was inert. The retained
+distant link reached source page 6/right, and the retained same-page link
+reasserted source page 2/right without leaving the spread. The authenticated
+external URI record was retained but was not launched during the device gate.
+
+The existing normative schema-v3 page-143 pair was then copied under its exact
+cache basename. v0.0.27 logged `manifest_accepted`, `manifest_activated`, a
+normal first page load, and repeated freshness acceptance. A sidecar-free
+ordinary source PDF produced only `manifest_document_observed` and no accepted
+or activated manifest event. Thus the new schema-v4 navigation authority and
+runtime outline-half recovery do not change schema-v3 or ordinary-PDF routing.
+
 ## Decision
 
 Proceed with the virtual-spread architecture. Do not port the legacy dual-page

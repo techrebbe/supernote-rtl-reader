@@ -2202,6 +2202,58 @@ and page-load/reload invalidation on the Nomad. It does not claim that the
 InkBridge consumer read or the cross-device annotation round trip has run; that
 shared page-143 gate remains the next cross-project phase.
 
+## v0.0.27 bookmarks and adjacent-link filtering - HARDWARE PASS
+
+The focused v0.0.27 gate passed on 2026-08-30 on Supernote Nomad
+`SN078C10015092`, firmware fingerprint
+`Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys`,
+display build `Chauvet.E103.2606161001.2393_release`, and SupernoteDocument
+`1.02.446`. The tested behavior head was
+`759b4586e561b5958d1d9462750129e901bb8d74`. The installed
+upgrade-compatible v0.0.27 (`versionCode=29`) APK had SHA-256
+`c4c6792614d296cc42371effa71c5e52c777649d4be2d68056b45f5beb258977`
+and retained signer-certificate SHA-256
+`a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`.
+
+A disposable seven-page schema-v4 fixture exercised one structural outline,
+three outline destinations, and four page-2 link annotations. Its source PDF
+SHA-256 was
+`6ba6f40126c55c61dd0f61474f4944579f9270e2b2e48318b98075132bca948f`.
+The generated PDF and sidecar SHA-256 values were respectively
+`0dd5a24c24af5cf6b7a8ad4bf60e6f9cf69688e37370b1d7319170bb22cc23ef`
+and
+`0145cd78ad9202b59a4b73619824d683e32f5c000ad1676f3132bd448b5a4e60`.
+The representation view ID was
+`inkbridge-view-v1-9b9235712e21f7304b968332b770b0056cb2a64572d0c35a17d1944086510917`,
+and its authenticated navigation-authority SHA-256 was
+`2bee6d4654af04dd47ae613df874fe4a3260bd8697fa5df1b5c1dc5f7d42fb7a`.
+Generation reported one removed adjacent-page link and three retained links.
+
+The native reader authenticated and activated the four-page representation.
+In landscape, the `RIGHT - source page 2` bookmark opened source page 2 on the
+right half, `LEFT - source page 3` targeted source page 3 on the left half of
+the same spread, and `DISTANT - source page 6` opened source page 6 on the
+right half of the final spread. In portrait, the page-2 and page-3 bookmarks
+each opened their source page as a normal full page. The hierarchy and titles
+remained available through Supernote's native bookmark menu.
+
+On source page 2, tapping the printed box whose adjacent-page link had been
+filtered caused no visible change and produced no page-load event. The retained
+distant link opened source page 6 on the right half and logged
+`page_loaded page=3 ... target_half=RIGHT reason=internal_link`. The retained
+same-page link stayed on source page 2/right and logged
+`page_loaded page=1 ... target_half=RIGHT reason=internal_link`. The external
+URI record remained authenticated in the generated PDF and manifest; the gate
+did not launch an external browser.
+
+Backward compatibility was checked with the checked-in normative schema-v3
+page-143 fixture. v0.0.27 accepted and activated its exact PDF/sidecar pair,
+loaded it normally, and repeatedly accepted its freshness snapshot. Finally,
+the sidecar-free source PDF opened through the ordinary native-reader path and
+logged only document observation: no manifest acceptance or activation event
+occurred. This confirms that schema-v4 navigation authority is additive and
+that ordinary PDFs and existing schema-v3 representations remain unaffected.
+
 ## Failure capture
 
 Before reproducing a failure:

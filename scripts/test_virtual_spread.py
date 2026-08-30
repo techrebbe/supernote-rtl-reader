@@ -2562,6 +2562,12 @@ class VirtualSpreadTests(unittest.TestCase):
             (
                 "/Square",
                 "/F",
+                NumberObject(0),
+                "Non-printing square annotations cannot be flattened",
+            ),
+            (
+                "/Square",
+                "/F",
                 NumberObject(12),
                 "NoZoom or NoRotate square annotations cannot be flattened",
             ),

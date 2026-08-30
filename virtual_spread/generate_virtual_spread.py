@@ -156,6 +156,7 @@ SUPPORTED_FLATTENABLE_POPUP_KEYS = frozenset({
 })
 ANNOTATION_FLAG_INVISIBLE = 0x0001
 ANNOTATION_FLAG_HIDDEN = 0x0002
+ANNOTATION_FLAG_PRINT = 0x0004
 ANNOTATION_FLAG_NO_VIEW = 0x0020
 ANNOTATION_FLAG_TOGGLE_NO_VIEW = 0x0100
 SUPPORTED_DOCUMENT_CATALOG_KEYS = frozenset({
@@ -1138,6 +1139,11 @@ def _flatten_square_appearances(
             raise VirtualSpreadError(
                 "Hidden square annotations cannot be flattened; source page "
                 f"{page_number}"
+            )
+        if not flags & ANNOTATION_FLAG_PRINT:
+            raise VirtualSpreadError(
+                "Non-printing square annotations cannot be flattened; "
+                f"source page {page_number}"
             )
         geometry_locked_mask = (
             ANNOTATION_FLAG_NO_ZOOM | ANNOTATION_FLAG_NO_ROTATE

@@ -28,6 +28,8 @@ from pypdf.generic import (
     ArrayObject,
     BooleanObject,
     ByteStringObject,
+    ContentStream,
+    DecodedStreamObject,
     DictionaryObject,
     FloatObject,
     IndirectObject,
@@ -35,6 +37,7 @@ from pypdf.generic import (
     NullObject,
     NumberObject,
     RectangleObject,
+    StreamObject,
     TextStringObject,
     TreeObject,
 )
@@ -100,6 +103,7 @@ DEFAULT_SPREAD_HEIGHT = 648.0
 DEFAULT_GUTTER = 0.0
 PDF_MIN_PAGE_DIMENSION = 3.0
 PDF_MAX_PAGE_DIMENSION = 14400.0
+MAX_LINK_CROP_BLEED = 0.5
 RETIREMENT_TOKEN_BYTES = 16
 SUPPORTED_ANNOTATION_FLAGS_MASK = 0x03FF
 ANNOTATION_FLAG_NO_ZOOM = 0x0008
@@ -124,6 +128,37 @@ SUPPORTED_LINK_ANNOTATION_KEYS = frozenset({
 })
 SUPPORTED_LINK_HIGHLIGHT_MODES = frozenset({"/N", "/I", "/O", "/P"})
 SUPPORTED_BORDER_STYLES = frozenset({"/S", "/D", "/B", "/I", "/U"})
+SUPPORTED_FLATTENABLE_SQUARE_KEYS = frozenset({
+    "/AP",
+    "/C",
+    "/CA",
+    "/CreationDate",
+    "/F",
+    "/IC",
+    "/M",
+    "/NM",
+    "/P",
+    "/Popup",
+    "/RD",
+    "/Rect",
+    "/Subj",
+    "/Subtype",
+    "/T",
+    "/Type",
+})
+SUPPORTED_FLATTENABLE_POPUP_KEYS = frozenset({
+    "/F",
+    "/Open",
+    "/Parent",
+    "/Rect",
+    "/Subtype",
+    "/Type",
+})
+ANNOTATION_FLAG_INVISIBLE = 0x0001
+ANNOTATION_FLAG_HIDDEN = 0x0002
+ANNOTATION_FLAG_PRINT = 0x0004
+ANNOTATION_FLAG_NO_VIEW = 0x0020
+ANNOTATION_FLAG_TOGGLE_NO_VIEW = 0x0100
 SUPPORTED_DOCUMENT_CATALOG_KEYS = frozenset({
     "/Dests",
     "/Names",
@@ -235,6 +270,8 @@ class StagedPublicationFile:
 class DocumentCatalogSettings:
     page_mode: NameObject | None
     page_layout: NameObject | None
+    metadata_xml: bytes | None
+    viewer_direction: NameObject | None
 
 
 def _sha256_open_file(stream: BinaryIO) -> str:
@@ -905,10 +942,421 @@ def _transfer_rotation_to_content_exact(
         ))
 
 
-def _normalized_page(source_page: Any) -> tuple[Any, Transformation]:
+def _required_annotation_subtype(
+    annotation: DictionaryObject,
+    label: str,
+) -> str:
+    try:
+        subtype = _dereference_pdf_object(annotation.raw_get("/Subtype"))
+    except KeyError as error:
+        raise VirtualSpreadError(f"Invalid {label} /Subtype") from error
+    if not isinstance(subtype, NameObject):
+        raise VirtualSpreadError(f"Invalid {label} /Subtype")
+    return str(subtype)
+
+
+def _appearance_number_array(
+    dictionary: DictionaryObject,
+    key: str,
+    expected_length: int,
+    label: str,
+) -> list[float]:
+    try:
+        value = _dereference_pdf_object(dictionary.raw_get(key))
+    except KeyError as error:
+        raise VirtualSpreadError(f"Invalid {label}") from error
+    if not isinstance(value, ArrayObject) or len(value) != expected_length:
+        raise VirtualSpreadError(f"Invalid {label}")
+    return [
+        _finite_pdf_number(item, f"{label} coordinate")
+        for item in value
+    ]
+
+
+def _require_embedded_square_opacity(
+    normal: StreamObject,
+    resources: DictionaryObject,
+    opacity: float,
+    page_number: int,
+) -> None:
+    """Accept transparency only when the audited AP encodes it itself."""
+    error_message = (
+        "Square annotation /CA is not preserved by its normal appearance; "
+        f"source page {page_number}"
+    )
+    try:
+        ext_gstates = _dereference_pdf_object(
+            resources.raw_get("/ExtGState")
+        )
+        operations = ContentStream(normal, None).operations
+    except (KeyError, TypeError, ValueError) as error:
+        raise VirtualSpreadError(error_message) from error
+    if not isinstance(ext_gstates, DictionaryObject):
+        raise VirtualSpreadError(error_message)
+    # This intentionally recognizes only the exact, self-contained appearance
+    # shape emitted by the audited Siddur authoring tool. Broader appearance
+    # interpretation would risk accepting a graphics state that is restored or
+    # overridden before the square is painted.
+    if tuple(operator for _, operator in operations) != (
+        b"G",
+        b"g",
+        b"gs",
+        b"re",
+        b"B",
+    ):
+        raise VirtualSpreadError(error_message)
+    gs_operands = operations[2][0]
+    if len(gs_operands) != 1 or not isinstance(gs_operands[0], NameObject):
+        raise VirtualSpreadError(error_message)
+    try:
+        graphics_state = _dereference_pdf_object(
+            ext_gstates.raw_get(gs_operands[0])
+        )
+    except KeyError as error:
+        raise VirtualSpreadError(error_message) from error
+    if (
+        not isinstance(graphics_state, DictionaryObject)
+        or set(map(str, graphics_state.keys()))
+        != {"/AIS", "/CA", "/Type", "/ca"}
+    ):
+        raise VirtualSpreadError(error_message)
+    try:
+        state_type = _dereference_pdf_object(
+            graphics_state.raw_get("/Type")
+        )
+        alpha_is_shape = _dereference_pdf_object(
+            graphics_state.raw_get("/AIS")
+        )
+        stroke_opacity = _finite_pdf_number(
+            _dereference_pdf_object(graphics_state.raw_get("/CA")),
+            "square appearance graphics-state /CA",
+        )
+        fill_opacity = _finite_pdf_number(
+            _dereference_pdf_object(graphics_state.raw_get("/ca")),
+            "square appearance graphics-state /ca",
+        )
+    except KeyError as error:
+        raise VirtualSpreadError(error_message) from error
+    if (
+        not isinstance(state_type, NameObject)
+        or str(state_type) != "/ExtGState"
+        or not isinstance(alpha_is_shape, BooleanObject)
+        or alpha_is_shape.value
+        or stroke_opacity != opacity
+        or fill_opacity != opacity
+    ):
+        raise VirtualSpreadError(error_message)
+
+
+def _flatten_square_appearances(
+    page_writer: PdfWriter | None,
+    page: Any,
+    page_number: int,
+    *,
+    validate_popup_relationships: bool = True,
+) -> int:
+    annotations = page.get("/Annots")
+    if annotations is None:
+        return 0
+    annotation_array = annotations.get_object()
+    if not isinstance(annotation_array, ArrayObject):
+        raise VirtualSpreadError(
+            f"Source page /Annots is not an array; source page {page_number}"
+        )
+    square_entries: list[
+        tuple[IndirectObject, DictionaryObject, StreamObject, list[float]]
+    ] = []
+    popup_references: set[tuple[int, int]] = set()
+    all_popup_references: set[tuple[int, int]] = set()
+    crop_box = _page_box_values(
+        page,
+        "cropbox",
+        f"source page {page_number} effective /CropBox",
+    )
+    for reference in annotation_array:
+        annotation = _dereference_pdf_object(reference)
+        if not isinstance(annotation, DictionaryObject):
+            raise VirtualSpreadError(
+                f"Source page annotation is not a dictionary; source page {page_number}"
+            )
+        subtype = _required_annotation_subtype(
+            annotation,
+            f"source page {page_number} annotation",
+        )
+        if subtype == "/Popup":
+            reference_key = _page_ref_key(reference)
+            if reference_key is None:
+                raise VirtualSpreadError(
+                    f"Direct popup annotations are unsupported; source page {page_number}"
+                )
+            all_popup_references.add(reference_key)
+            continue
+        if subtype != "/Square":
+            continue
+        unknown = sorted(
+            str(key)
+            for key in annotation.keys()
+            if str(key) not in SUPPORTED_FLATTENABLE_SQUARE_KEYS
+        )
+        if unknown:
+            raise VirtualSpreadError(
+                "Unsupported square annotation entries on source page "
+                f"{page_number}: " + ", ".join(unknown)
+            )
+        try:
+            annotation_type = _dereference_pdf_object(
+                annotation.raw_get("/Type")
+            )
+            flags_object = _dereference_pdf_object(annotation.raw_get("/F"))
+            appearance = _dereference_pdf_object(annotation.raw_get("/AP"))
+            popup_reference = annotation.raw_get("/Popup")
+        except KeyError as error:
+            raise VirtualSpreadError(
+                f"Incomplete square annotation on source page {page_number}"
+            ) from error
+        if not isinstance(annotation_type, NameObject) or str(
+            annotation_type
+        ) != "/Annot":
+            raise VirtualSpreadError(
+                f"Invalid square annotation /Type on source page {page_number}"
+            )
+        if not isinstance(flags_object, NumberObject):
+            raise VirtualSpreadError(
+                f"Invalid square annotation /F on source page {page_number}"
+            )
+        flags = int(flags_object)
+        if flags < 0 or flags & ~SUPPORTED_ANNOTATION_FLAGS_MASK:
+            raise VirtualSpreadError(
+                f"Unsupported square annotation /F on source page {page_number}"
+            )
+        hidden_mask = (
+            ANNOTATION_FLAG_INVISIBLE
+            | ANNOTATION_FLAG_HIDDEN
+            | ANNOTATION_FLAG_NO_VIEW
+            | ANNOTATION_FLAG_TOGGLE_NO_VIEW
+        )
+        if flags & hidden_mask:
+            raise VirtualSpreadError(
+                "Hidden square annotations cannot be flattened; source page "
+                f"{page_number}"
+            )
+        if not flags & ANNOTATION_FLAG_PRINT:
+            raise VirtualSpreadError(
+                "Non-printing square annotations cannot be flattened; "
+                f"source page {page_number}"
+            )
+        geometry_locked_mask = (
+            ANNOTATION_FLAG_NO_ZOOM | ANNOTATION_FLAG_NO_ROTATE
+        )
+        if flags & geometry_locked_mask:
+            raise VirtualSpreadError(
+                "NoZoom or NoRotate square annotations cannot be flattened; "
+                f"source page {page_number}"
+            )
+        opacity: float | None = None
+        if "/CA" in annotation:
+            opacity = _finite_pdf_number(
+                _dereference_pdf_object(annotation.raw_get("/CA")),
+                f"square annotation /CA on source page {page_number}",
+            )
+            if opacity < 0.0 or opacity > 1.0:
+                raise VirtualSpreadError(
+                    "Invalid square annotation /CA on source page "
+                    f"{page_number}"
+                )
+        rect = _appearance_number_array(
+            annotation,
+            "/Rect",
+            4,
+            f"square annotation /Rect on source page {page_number}",
+        )
+        _require_rectangle_contained(
+            rect,
+            crop_box,
+            f"square annotation /Rect on source page {page_number}",
+            "effective /CropBox",
+        )
+        if not isinstance(appearance, DictionaryObject) or set(
+            map(str, appearance.keys())
+        ) != {"/N"}:
+            raise VirtualSpreadError(
+                f"Unsupported square annotation /AP on source page {page_number}"
+            )
+        normal = _dereference_pdf_object(appearance.raw_get("/N"))
+        if not isinstance(normal, StreamObject):
+            raise VirtualSpreadError(
+                f"Invalid square annotation normal appearance on source page {page_number}"
+            )
+        supported_appearance_keys = {
+            "/BBox", "/FormType", "/Matrix", "/Resources", "/Subtype",
+            "/Type",
+        }
+        if set(map(str, normal.keys())) != supported_appearance_keys:
+            raise VirtualSpreadError(
+                "Unsupported square annotation appearance entries on source "
+                f"page {page_number}"
+            )
+        try:
+            form_type = _dereference_pdf_object(normal.raw_get("/FormType"))
+            form_subtype = _dereference_pdf_object(normal.raw_get("/Subtype"))
+            form_object_type = _dereference_pdf_object(normal.raw_get("/Type"))
+            form_resources = _dereference_pdf_object(
+                normal.raw_get("/Resources")
+            )
+        except KeyError as error:
+            raise VirtualSpreadError(
+                f"Incomplete square annotation appearance on source page {page_number}"
+            ) from error
+        if (
+            not isinstance(form_type, NumberObject)
+            or int(form_type) != 1
+            or not isinstance(form_subtype, NameObject)
+            or str(form_subtype) != "/Form"
+            or not isinstance(form_object_type, NameObject)
+            or str(form_object_type) != "/XObject"
+            or not isinstance(form_resources, DictionaryObject)
+        ):
+            raise VirtualSpreadError(
+                f"Unsupported square annotation appearance on source page {page_number}"
+            )
+        if opacity is not None and opacity != 1.0:
+            _require_embedded_square_opacity(
+                normal,
+                form_resources,
+                opacity,
+                page_number,
+            )
+        bbox = _appearance_number_array(
+            normal,
+            "/BBox",
+            4,
+            f"square appearance /BBox on source page {page_number}",
+        )
+        matrix = _appearance_number_array(
+            normal,
+            "/Matrix",
+            6,
+            f"square appearance /Matrix on source page {page_number}",
+        )
+        expected_matrix = [1.0, 0.0, 0.0, 1.0, -rect[0], -rect[1]]
+        if any(
+            not math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-6)
+            for actual, expected in zip(bbox, rect)
+        ) or any(
+            not math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-6)
+            for actual, expected in zip(matrix, expected_matrix)
+        ):
+            raise VirtualSpreadError(
+                "Square annotation appearance does not map exactly to its /Rect; "
+                f"source page {page_number}"
+            )
+        popup_key = _page_ref_key(popup_reference)
+        popup = _dereference_pdf_object(popup_reference)
+        if popup_key is None or not isinstance(popup, DictionaryObject):
+            raise VirtualSpreadError(
+                f"Square annotation has no indirect popup on source page {page_number}"
+            )
+        if set(map(str, popup.keys())) - SUPPORTED_FLATTENABLE_POPUP_KEYS:
+            raise VirtualSpreadError(
+                f"Unsupported square popup entries on source page {page_number}"
+            )
+        if _required_annotation_subtype(popup, "square popup") != "/Popup":
+            raise VirtualSpreadError(
+                f"Invalid square popup subtype on source page {page_number}"
+            )
+        if validate_popup_relationships:
+            if "/Parent" not in popup:
+                raise VirtualSpreadError(
+                    f"Square popup has no parent on source page {page_number}"
+                )
+            popup_parent_key = _page_ref_key(popup.raw_get("/Parent"))
+            square_key = _page_ref_key(reference)
+            if square_key is None or popup_parent_key != square_key:
+                raise VirtualSpreadError(
+                    f"Square popup parent mismatch on source page {page_number}"
+                )
+        try:
+            popup_type = _dereference_pdf_object(popup.raw_get("/Type"))
+            popup_flags = _dereference_pdf_object(popup.raw_get("/F"))
+            popup_open = _dereference_pdf_object(popup.raw_get("/Open"))
+        except KeyError as error:
+            raise VirtualSpreadError(
+                f"Incomplete square popup on source page {page_number}"
+            ) from error
+        if not isinstance(popup_type, NameObject) or str(
+            popup_type
+        ) != "/Annot":
+            raise VirtualSpreadError(
+                f"Invalid square popup /Type on source page {page_number}"
+            )
+        if (
+            not isinstance(popup_flags, NumberObject)
+            or int(popup_flags) < 0
+            or int(popup_flags) & ~SUPPORTED_ANNOTATION_FLAGS_MASK
+        ):
+            raise VirtualSpreadError(
+                f"Invalid square popup /F on source page {page_number}"
+            )
+        _require_positive_rectangle(
+            _appearance_number_array(
+                popup,
+                "/Rect",
+                4,
+                f"square popup /Rect on source page {page_number}",
+            ),
+            f"square popup /Rect on source page {page_number}",
+        )
+        if not isinstance(popup_open, BooleanObject) or popup_open.value:
+            raise VirtualSpreadError(
+                f"Open square popups cannot be flattened on source page {page_number}"
+            )
+        popup_references.add(popup_key)
+        square_entries.append((reference, annotation, normal, rect))
+    if all_popup_references != popup_references:
+        raise VirtualSpreadError(
+            f"Orphan popup annotation on source page {page_number}"
+        )
+    if page_writer is not None:
+        for index, (_, _, appearance, rect) in enumerate(square_entries):
+            page_writer._add_apstream_object(
+                page,
+                appearance,
+                f"square_{page_number}_{index}",
+                rect[0],
+                rect[1],
+            )
+    return len(square_entries)
+
+
+def _normalized_page(
+    source_page: Any,
+    *,
+    source_page_index: int,
+    flatten_square_annotations: bool,
+) -> tuple[Any, Transformation]:
     # Assign the clone to a writer before replacing its content stream. pypdf
     # 7 removes support for mutating detached PageObject clones.
-    page = PdfWriter().add_page(source_page)
+    validated_square_count = 0
+    if flatten_square_annotations:
+        validated_square_count = _flatten_square_appearances(
+            None,
+            source_page,
+            source_page_index + 1,
+        )
+    page_writer = PdfWriter()
+    page = page_writer.add_page(source_page)
+    if flatten_square_annotations:
+        flattened_square_count = _flatten_square_appearances(
+            page_writer,
+            page,
+            source_page_index + 1,
+            validate_popup_relationships=False,
+        )
+        if flattened_square_count != validated_square_count:
+            raise VirtualSpreadError(
+                "Square annotation clone changed before appearance flattening; "
+                f"source page {source_page_index + 1}"
+            )
     # merge_transformed_page also merges /Annots. Links are copied separately
     # after every source-to-spread mapping is known, so the content clone must
     # not carry stale source destinations into the output page.
@@ -1187,8 +1635,8 @@ def _transform_rect(rect: Any, transform: list[float]) -> ArrayObject:
 def _require_link_geometry_inside_source_crop(
     annotation: DictionaryObject,
     source_crop: list[float],
-) -> None:
-    """Reject links whose interactive geometry is hidden by the source crop."""
+) -> ArrayObject:
+    """Return the visible link rectangle, clipping only sub-point edge bleed."""
     if len(source_crop) != 4 or any(
         not math.isfinite(value) for value in source_crop
     ):
@@ -1207,13 +1655,27 @@ def _require_link_geometry_inside_source_crop(
     x1, y1, x2, y2 = rect_values
     if x1 >= x2 or y1 >= y2:
         raise VirtualSpreadError("Invalid link annotation /Rect ordering")
-    if x1 < left or y1 < bottom or x2 > right or y2 > top:
+    overflow = max(
+        left - x1,
+        bottom - y1,
+        x2 - right,
+        y2 - top,
+        0.0,
+    )
+    if overflow > MAX_LINK_CROP_BLEED:
         raise VirtualSpreadError(
             "Link annotation /Rect lies outside source page effective /CropBox"
         )
+    clipped_rect = [
+        max(x1, left),
+        max(y1, bottom),
+        min(x2, right),
+        min(y2, top),
+    ]
+    _require_positive_rectangle(clipped_rect, "visible link annotation /Rect")
 
     if "/QuadPoints" not in annotation:
-        return
+        return ArrayObject(FloatObject(value) for value in clipped_rect)
     quad_points = _dereference_pdf_object(
         annotation.raw_get("/QuadPoints")
     )
@@ -1237,6 +1699,7 @@ def _require_link_geometry_inside_source_crop(
                 "Link annotation /QuadPoints lies outside source page "
                 "effective /CropBox"
             )
+    return ArrayObject(FloatObject(value) for value in clipped_rect)
 
 
 def _link_annotation_flags(
@@ -1293,8 +1756,135 @@ def _optional_document_catalog_name(
     return NameObject(str(value))
 
 
+def _require_empty_acroform(catalog: DictionaryObject) -> None:
+    if "/AcroForm" not in catalog:
+        return
+    acroform = _dereference_pdf_object(catalog.raw_get("/AcroForm"))
+    if not isinstance(acroform, DictionaryObject):
+        raise VirtualSpreadError("Invalid document /AcroForm dictionary")
+    unknown = sorted(
+        str(key)
+        for key in acroform.keys()
+        if str(key) not in {"/DA", "/DR", "/Fields"}
+    )
+    if unknown:
+        raise VirtualSpreadError(
+            "Non-empty or unsupported document /AcroForm entries: "
+            + ", ".join(unknown)
+        )
+    try:
+        fields = _dereference_pdf_object(acroform.raw_get("/Fields"))
+    except KeyError as error:
+        raise VirtualSpreadError(
+            "Empty document /AcroForm has no /Fields array"
+        ) from error
+    if not isinstance(fields, ArrayObject) or fields:
+        raise VirtualSpreadError(
+            "Interactive form fields cannot be preserved in virtual spreads"
+        )
+    if "/DA" in acroform and not isinstance(
+        _dereference_pdf_object(acroform.raw_get("/DA")),
+        (TextStringObject, ByteStringObject),
+    ):
+        raise VirtualSpreadError("Invalid empty document /AcroForm /DA")
+    if "/DR" in acroform and not isinstance(
+        _dereference_pdf_object(acroform.raw_get("/DR")),
+        DictionaryObject,
+    ):
+        raise VirtualSpreadError("Invalid empty document /AcroForm /DR")
+
+
+def _validated_metadata_xml(catalog: DictionaryObject) -> bytes | None:
+    if "/Metadata" not in catalog:
+        return None
+    metadata = _dereference_pdf_object(catalog.raw_get("/Metadata"))
+    if not isinstance(metadata, StreamObject):
+        raise VirtualSpreadError("Invalid document /Metadata stream")
+    unknown = sorted(
+        str(key)
+        for key in metadata.keys()
+        if str(key) not in {"/Type", "/Subtype"}
+    )
+    if unknown:
+        raise VirtualSpreadError(
+            "Unsupported document /Metadata entries: " + ", ".join(unknown)
+        )
+    try:
+        metadata_type = _dereference_pdf_object(metadata.raw_get("/Type"))
+        metadata_subtype = _dereference_pdf_object(
+            metadata.raw_get("/Subtype")
+        )
+    except KeyError as error:
+        raise VirtualSpreadError(
+            "Unsupported document /Metadata stream type"
+        ) from error
+    if (
+        not isinstance(metadata_type, NameObject)
+        or str(metadata_type) != "/Metadata"
+        or not isinstance(metadata_subtype, NameObject)
+        or str(metadata_subtype) != "/XML"
+    ):
+        raise VirtualSpreadError("Unsupported document /Metadata stream type")
+    try:
+        return bytes(metadata.get_data())
+    except Exception as error:
+        raise VirtualSpreadError("Cannot decode document /Metadata stream") from error
+
+
+def _validated_viewer_direction(
+    catalog: DictionaryObject,
+) -> NameObject | None:
+    if "/ViewerPreferences" not in catalog:
+        return None
+    preferences = _dereference_pdf_object(
+        catalog.raw_get("/ViewerPreferences")
+    )
+    if not isinstance(preferences, DictionaryObject):
+        raise VirtualSpreadError("Invalid document /ViewerPreferences")
+    if set(map(str, preferences.keys())) != {"/Direction"}:
+        raise VirtualSpreadError(
+            "Only RTL document /ViewerPreferences /Direction is supported"
+        )
+    direction = _dereference_pdf_object(preferences.raw_get("/Direction"))
+    if not isinstance(direction, NameObject) or str(direction) != "/R2L":
+        raise VirtualSpreadError(
+            "Only RTL document /ViewerPreferences /Direction is supported"
+        )
+    return NameObject("/R2L")
+
+
+def _require_discardable_structure_tree(
+    catalog: DictionaryObject,
+    discard_structure_tags: bool,
+) -> None:
+    if "/StructTreeRoot" not in catalog:
+        return
+    if not discard_structure_tags:
+        raise VirtualSpreadError(
+            "Tagged PDF structure cannot be remapped to composed spreads; "
+            "pass --discard-structure-tags to omit it from the derived copy"
+        )
+    structure = _dereference_pdf_object(catalog.raw_get("/StructTreeRoot"))
+    if not isinstance(structure, DictionaryObject):
+        raise VirtualSpreadError("Invalid document /StructTreeRoot")
+    try:
+        structure_type = _dereference_pdf_object(
+            structure.raw_get("/Type")
+        )
+    except KeyError as error:
+        raise VirtualSpreadError(
+            "Invalid document /StructTreeRoot /Type"
+        ) from error
+    if not isinstance(structure_type, NameObject) or str(
+        structure_type
+    ) != "/StructTreeRoot":
+        raise VirtualSpreadError("Invalid document /StructTreeRoot /Type")
+
+
 def _require_supported_document_catalog(
     reader: PdfReader,
+    *,
+    discard_structure_tags: bool = False,
 ) -> DocumentCatalogSettings:
     try:
         catalog = _dereference_pdf_object(
@@ -1354,10 +1944,21 @@ def _require_supported_document_catalog(
         reader.named_destinations
     except Exception as error:
         raise VirtualSpreadError("Invalid named destination tree") from error
+    _require_empty_acroform(catalog)
+    metadata_xml = _validated_metadata_xml(catalog)
+    viewer_direction = _validated_viewer_direction(catalog)
+    _require_discardable_structure_tree(catalog, discard_structure_tags)
+    accepted_catalog_keys = SUPPORTED_DOCUMENT_CATALOG_KEYS | {
+        "/AcroForm",
+        "/Metadata",
+        "/ViewerPreferences",
+    }
+    if discard_structure_tags:
+        accepted_catalog_keys = accepted_catalog_keys | {"/StructTreeRoot"}
     unsupported = sorted(
         str(key)
         for key in catalog.keys()
-        if str(key) not in SUPPORTED_DOCUMENT_CATALOG_KEYS
+        if str(key) not in accepted_catalog_keys
     )
     if unsupported:
         raise VirtualSpreadError(
@@ -1390,10 +1991,111 @@ def _require_supported_document_catalog(
     return DocumentCatalogSettings(
         page_mode=page_mode,
         page_layout=page_layout,
+        metadata_xml=metadata_xml,
+        viewer_direction=viewer_direction,
     )
 
 
-def _require_supported_source_pages(reader: PdfReader) -> None:
+def _validated_source_page_group(
+    page: Any,
+    page_number: int,
+) -> DictionaryObject | None:
+    if "/Group" not in page:
+        return None
+    group = _dereference_pdf_object(page.raw_get("/Group"))
+    if not isinstance(group, DictionaryObject):
+        raise VirtualSpreadError(
+            f"Invalid source page /Group on page {page_number}"
+        )
+    if set(map(str, group.keys())) != {"/Type", "/S", "/CS"}:
+        raise VirtualSpreadError(
+            f"Unsupported source page /Group on page {page_number}"
+        )
+    expected = {
+        "/Type": "/Group",
+        "/S": "/Transparency",
+        "/CS": "/DeviceRGB",
+    }
+    for key, value in expected.items():
+        actual = _dereference_pdf_object(group.raw_get(key))
+        if not isinstance(actual, NameObject) or str(actual) != value:
+            raise VirtualSpreadError(
+                f"Unsupported source page /Group {key} on page {page_number}"
+            )
+    return DictionaryObject({
+        NameObject("/Type"): NameObject("/Group"),
+        NameObject("/S"): NameObject("/Transparency"),
+        NameObject("/CS"): NameObject("/DeviceRGB"),
+    })
+
+
+def _merge_transformed_grouped_page(
+    writer: PdfWriter,
+    output_page: Any,
+    source_page: Any,
+    transform: list[float],
+    group: DictionaryObject,
+    object_name: str,
+) -> None:
+    """Place one source page in a Form so its transparency group stays local."""
+    source_resources = _dereference_pdf_object(
+        source_page.raw_get("/Resources")
+    )
+    if not isinstance(source_resources, DictionaryObject):
+        raise VirtualSpreadError("Invalid grouped source page /Resources")
+    content = source_page.get_contents()
+    form = DecodedStreamObject()
+    form.set_data(b"" if content is None else content.get_data())
+    form[NameObject("/Type")] = NameObject("/XObject")
+    form[NameObject("/Subtype")] = NameObject("/Form")
+    form[NameObject("/FormType")] = NumberObject(1)
+    form[NameObject("/BBox")] = RectangleObject(_page_box_values(
+        source_page,
+        "cropbox",
+        "grouped source page effective /CropBox",
+    ))
+    form[NameObject("/Resources")] = source_resources.clone(
+        writer,
+        force_duplicate=True,
+    )
+    form[NameObject("/Group")] = group.clone(
+        writer,
+        force_duplicate=True,
+    )
+    form_reference = writer._add_object(form)
+
+    output_resources = _dereference_pdf_object(
+        output_page.raw_get("/Resources")
+    )
+    if not isinstance(output_resources, DictionaryObject):
+        raise VirtualSpreadError("Invalid output page /Resources")
+    if "/XObject" not in output_resources:
+        output_resources[NameObject("/XObject")] = DictionaryObject()
+    output_xobjects = _dereference_pdf_object(
+        output_resources.raw_get("/XObject")
+    )
+    if not isinstance(output_xobjects, DictionaryObject):
+        raise VirtualSpreadError("Invalid output page /XObject resources")
+    xobject_name = NameObject(f"/SNVS_{object_name}")
+    if xobject_name in output_xobjects:
+        raise VirtualSpreadError("Duplicate grouped source page XObject")
+    output_xobjects[xobject_name] = form_reference
+
+    commands = ContentStream(None, writer)
+    commands.operations = [
+        ([], b"q"),
+        ([FloatObject(value) for value in transform], b"cm"),
+        ([xobject_name], b"Do"),
+        ([], b"Q"),
+    ]
+    writer._merge_content_stream_to_page(output_page, commands.get_data())
+
+
+def _require_supported_source_pages(
+    reader: PdfReader,
+    *,
+    discard_structure_tags: bool = False,
+) -> None:
     for page_index, page in enumerate(reader.pages):
         page_number = page_index + 1
         raw_media_box = _raw_page_box_values(
@@ -1451,16 +2153,79 @@ def _require_supported_source_pages(reader: PdfReader) -> None:
                     "Page transitions are not supported by this prototype; "
                     f"source page {page_number}"
                 )
+        if "/Thumb" in page and not isinstance(
+            _dereference_pdf_object(page.raw_get("/Thumb")),
+            StreamObject,
+        ):
+            raise VirtualSpreadError(
+                f"Invalid source page /Thumb on page {page_number}"
+            )
+        _validated_source_page_group(page, page_number)
+        has_struct_parent = "/StructParents" in page
+        has_struct_tabs = "/Tabs" in page
+        if has_struct_parent or has_struct_tabs:
+            if not discard_structure_tags:
+                raise VirtualSpreadError(
+                    "Tagged source page structure cannot be remapped; "
+                    "pass --discard-structure-tags; source page "
+                    f"{page_number}"
+                )
+            if has_struct_parent:
+                parent_index = _dereference_pdf_object(
+                    page.raw_get("/StructParents")
+                )
+                if not isinstance(parent_index, NumberObject) or int(
+                    parent_index
+                ) < 0:
+                    raise VirtualSpreadError(
+                        f"Invalid source page /StructParents on page {page_number}"
+                    )
+            if has_struct_tabs:
+                tabs = _dereference_pdf_object(page.raw_get("/Tabs"))
+                if not isinstance(tabs, NameObject) or str(tabs) != "/S":
+                    raise VirtualSpreadError(
+                        f"Unsupported source page /Tabs on page {page_number}"
+                    )
+        accepted_page_keys = SUPPORTED_SOURCE_PAGE_KEYS | {"/Thumb", "/Group"}
+        if discard_structure_tags:
+            accepted_page_keys = accepted_page_keys | {
+                "/StructParents",
+                "/Tabs",
+            }
         unsupported = sorted(
             str(key)
             for key in page.keys()
-            if str(key) not in SUPPORTED_SOURCE_PAGE_KEYS
+            if str(key) not in accepted_page_keys
         )
         if unsupported:
             raise VirtualSpreadError(
                 "Unsupported source page entries on page "
                 f"{page_number}: " + ", ".join(unsupported)
             )
+
+
+def _apply_document_catalog_settings(
+    writer: PdfWriter,
+    settings: DocumentCatalogSettings,
+) -> None:
+    if settings.page_mode is not None:
+        writer.page_mode = str(settings.page_mode)
+    if settings.page_layout is not None:
+        writer.page_layout = str(settings.page_layout)
+    if settings.metadata_xml is not None:
+        metadata = DecodedStreamObject()
+        metadata.set_data(settings.metadata_xml)
+        metadata[NameObject("/Type")] = NameObject("/Metadata")
+        metadata[NameObject("/Subtype")] = NameObject("/XML")
+        writer._root_object[NameObject("/Metadata")] = writer._add_object(
+            metadata
+        )
+    if settings.viewer_direction is not None:
+        writer._root_object[NameObject("/ViewerPreferences")] = DictionaryObject({
+            NameObject("/Direction"): NameObject(
+                str(settings.viewer_direction)
+            ),
+        })
 
 
 def _copy_document_information_value(value: Any, label: str) -> Any:
@@ -1911,6 +2676,8 @@ def _validated_link_action(
 def _validate_filterable_internal_destination(
     destination: ArrayObject,
     target_mapping: dict[str, Any],
+    *,
+    allow_out_of_crop: bool = False,
 ) -> None:
     """Validate source semantics before optional adjacency classification."""
     if len(destination) < 2 or not isinstance(destination[1], NameObject):
@@ -1935,14 +2702,14 @@ def _validate_filterable_internal_destination(
         target_source_box = _destination_source_box(
             target_mapping, "/XYZ"
         )
-        if left is not None and not (
+        if not allow_out_of_crop and left is not None and not (
             target_source_box[0] <= left <= target_source_box[2]
         ):
             raise VirtualSpreadError(
                 "internal destination /XYZ left extends outside target "
                 "source /CropBox"
             )
-        if top is not None and not (
+        if not allow_out_of_crop and top is not None and not (
             target_source_box[1] <= top <= target_source_box[3]
         ):
             raise VirtualSpreadError(
@@ -1964,12 +2731,18 @@ def _validate_filterable_internal_destination(
         target_source_box = _destination_source_box(
             target_mapping, "/FitR"
         )
-        _require_rectangle_contained(
-            rectangle,
-            target_source_box,
-            "internal destination /FitR rectangle",
-            "target source /CropBox",
-        )
+        if allow_out_of_crop:
+            _require_positive_rectangle(
+                rectangle,
+                "internal destination /FitR rectangle",
+            )
+        else:
+            _require_rectangle_contained(
+                rectangle,
+                target_source_box,
+                "internal destination /FitR rectangle",
+                "target source /CropBox",
+            )
         return
     if mode in {"/FitB", "/FitH", "/FitBH", "/FitV", "/FitBV"}:
         expected_length = 2 if mode == "/FitB" else 3
@@ -1986,6 +2759,50 @@ def _validate_filterable_internal_destination(
     raise VirtualSpreadError(
         f"Unsupported internal destination mode: {mode}"
     )
+
+
+def _normalize_oversized_fitr_destination(
+    destination: ArrayObject,
+    target_mapping: dict[str, Any],
+    *,
+    allow_normalization: bool,
+) -> ArrayObject:
+    if (
+        len(destination) < 2
+        or not isinstance(destination[1], NameObject)
+        or str(destination[1]) != "/FitR"
+    ):
+        return destination
+    if len(destination) != 6:
+        return destination
+    rectangle = [
+        _destination_number(value, "/FitR rectangle")
+        for value in destination[2:6]
+    ]
+    if any(value is None for value in rectangle):
+        return destination
+    source_box = _destination_source_box(target_mapping, "/FitR")
+    inside = (
+        rectangle[0] >= source_box[0]
+        and rectangle[1] >= source_box[1]
+        and rectangle[2] <= source_box[2]
+        and rectangle[3] <= source_box[3]
+    )
+    if inside:
+        return destination
+    if not allow_normalization:
+        return destination
+    contains_entire_source_page = (
+        rectangle[0] <= source_box[0]
+        and rectangle[1] <= source_box[1]
+        and rectangle[2] >= source_box[2]
+        and rectangle[3] >= source_box[3]
+    )
+    if not contains_entire_source_page:
+        raise VirtualSpreadError(
+            "Partially out-of-bounds /FitR destination cannot be normalized"
+        )
+    return ArrayObject([destination[0], NameObject("/Fit")])
 
 
 def _resolved_destination_array(
@@ -2502,11 +3319,12 @@ def _copy_link_annotation(
     page_width: float,
     page_height: float,
     remove_adjacent_page_links: bool = False,
+    normalize_oversized_fitr_links: bool = False,
     referenced_named_destinations: set[str] | None = None,
 ) -> dict[str, Any] | None:
     original = _validate_link_annotation(annotation.get_object())
     mapping = source_mapping[source_page_index]
-    _require_link_geometry_inside_source_crop(
+    visible_rect = _require_link_geometry_inside_source_crop(
         original,
         [float(value) for value in mapping["sourceBox"]],
     )
@@ -2523,7 +3341,7 @@ def _copy_link_annotation(
             NameObject("/Type"): NameObject("/Annot"),
             NameObject("/Subtype"): NameObject("/Link"),
             NameObject("/Rect"): _transform_rect(
-                original.raw_get("/Rect"), mapping["transform"]
+                visible_rect, mapping["transform"]
             ),
             NameObject("/SNSourcePage"): NumberObject(source_page_index),
         }
@@ -2643,6 +3461,11 @@ def _copy_link_annotation(
             f"Cannot resolve internal link on source page {source_page_index + 1}"
         )
     target = source_mapping[target_source_page]
+    resolved_destination = _normalize_oversized_fitr_destination(
+        resolved_destination,
+        target,
+        allow_normalization=normalize_oversized_fitr_links,
+    )
     _validate_filterable_internal_destination(
         resolved_destination, target
     )
@@ -2686,6 +3509,51 @@ def _copy_link_annotation(
     }
     _attach_annotation(writer, output_page_index, copied)
     return record
+
+
+def _has_null_internal_link_target(annotation: DictionaryObject) -> bool:
+    annotation = _validate_link_annotation(annotation)
+    destination = annotation.raw_get("/Dest") if "/Dest" in annotation else None
+    if destination is not None and "/A" in annotation:
+        return False
+    if destination is None and "/A" in annotation:
+        action, action_type = _validated_link_action(
+            annotation.raw_get("/A"),
+            allow_adjacent_named_action=True,
+        )
+        if str(action_type) != "/GoTo":
+            return False
+        if "/D" not in action:
+            raise VirtualSpreadError("GoTo link action has no /D value")
+        destination = action.raw_get("/D")
+    destination = _dereference_pdf_object(destination)
+    if (
+        not isinstance(destination, ArrayObject)
+        or len(destination) < 2
+        or not isinstance(_dereference_pdf_object(destination[0]), NullObject)
+        or not isinstance(destination[1], NameObject)
+    ):
+        return False
+    mode = str(destination[1])
+    if mode == "/Fit":
+        return len(destination) == 2
+    if mode == "/XYZ" and len(destination) == 5:
+        _destination_number(destination[2], "/XYZ left")
+        _destination_number(destination[3], "/XYZ top")
+        zoom = _destination_number(destination[4], "/XYZ zoom")
+        if zoom is not None and zoom < 0.0:
+            raise VirtualSpreadError("Invalid internal destination /XYZ zoom")
+        return True
+    if mode == "/FitR" and len(destination) == 6:
+        rectangle = [
+            _destination_number(value, "/FitR rectangle")
+            for value in destination[2:6]
+        ]
+        if any(value is None for value in rectangle):
+            raise VirtualSpreadError("Invalid /FitR destination rectangle")
+        _require_positive_rectangle(rectangle, "/FitR destination rectangle")
+        return True
+    return False
 
 
 SUPPORTED_OUTLINE_ITEM_KEYS = frozenset({
@@ -2759,6 +3627,48 @@ def _outline_destination(
     )
 
 
+def _validate_null_outline_destination(destination: ArrayObject) -> None:
+    if len(destination) < 2 or not isinstance(destination[1], NameObject):
+        raise VirtualSpreadError("Invalid null outline destination")
+    mode = str(destination[1])
+    if mode == "/Fit":
+        if len(destination) != 2:
+            raise VirtualSpreadError("Invalid outline /Fit destination")
+        return
+    if mode == "/XYZ":
+        if len(destination) != 5:
+            raise VirtualSpreadError(
+                "Invalid outline /XYZ destination parameters"
+            )
+        _destination_number(destination[2], "outline /XYZ left")
+        _destination_number(destination[3], "outline /XYZ top")
+        zoom = _destination_number(destination[4], "outline /XYZ zoom")
+        if zoom is not None and zoom < 0.0:
+            raise VirtualSpreadError("Invalid outline /XYZ zoom")
+        return
+    if mode == "/FitR":
+        if len(destination) != 6:
+            raise VirtualSpreadError(
+                "Invalid outline /FitR destination parameters"
+            )
+        rectangle = [
+            _destination_number(value, "outline /FitR rectangle")
+            for value in destination[2:6]
+        ]
+        if any(value is None for value in rectangle):
+            raise VirtualSpreadError(
+                "Invalid outline /FitR destination rectangle"
+            )
+        _require_positive_rectangle(
+            rectangle,
+            "outline /FitR destination rectangle",
+        )
+        return
+    raise VirtualSpreadError(
+        "Cannot discard unsupported null outline destination mode " + mode
+    )
+
+
 def _copy_document_outlines(
     *,
     reader: PdfReader,
@@ -2768,6 +3678,9 @@ def _copy_document_outlines(
     spread_width: float,
     spread_height: float,
     referenced_named_destinations: set[str],
+    normalize_outline_viewports: bool = False,
+    normalize_out_of_crop_outline_viewports: bool = False,
+    discard_broken_outline_destinations: bool = False,
 ) -> list[dict[str, Any]]:
     catalog = _dereference_pdf_object(reader.trailer.raw_get("/Root"))
     outlines_reference = catalog.raw_get("/Outlines") \
@@ -2850,6 +3763,20 @@ def _copy_document_outlines(
                 reader,
                 referenced_named_destinations,
             )
+            if (
+                destination is not None
+                and bool(destination)
+                and isinstance(
+                    _dereference_pdf_object(destination[0]),
+                    NullObject,
+                )
+            ):
+                _validate_null_outline_destination(destination)
+                if not discard_broken_outline_destinations:
+                    raise VirtualSpreadError(
+                        f"Cannot resolve outline destination: {title}"
+                    )
+                destination = None
             record_destination: dict[str, Any] | None = None
             output_action: DictionaryObject | None = None
             if destination is not None:
@@ -2859,7 +3786,7 @@ def _copy_document_outlines(
                     and isinstance(destination[1], NameObject)
                     else None
                 )
-                if source_mode != "/Fit":
+                if source_mode not in {"/Fit", "/XYZ", "/FitR"}:
                     raise VirtualSpreadError(
                         "Cannot preserve outline destination mode "
                         f"{source_mode or '<invalid>'}; Supernote outline "
@@ -2873,6 +3800,29 @@ def _copy_document_outlines(
                         f"Cannot resolve outline destination: {title}"
                     )
                 target = source_mapping[source_page]
+                if source_mode != "/Fit":
+                    if not normalize_outline_viewports:
+                        _validate_filterable_internal_destination(
+                            destination,
+                            target,
+                        )
+                        raise VirtualSpreadError(
+                            "Cannot preserve outline destination mode "
+                            f"{source_mode}; Supernote outline navigation "
+                            "exposes only page-level Fit behavior; pass "
+                            "--normalize-outline-viewports to use the "
+                            "target source page"
+                        )
+                    _validate_filterable_internal_destination(
+                        destination,
+                        target,
+                        allow_out_of_crop=
+                            normalize_out_of_crop_outline_viewports,
+                    )
+                    destination = ArrayObject([
+                        destination[0],
+                        NameObject("/Fit"),
+                    ])
                 target_output_page = int(target["virtualPageIndex"])
                 target_reference = writer.pages[
                     target_output_page
@@ -3133,6 +4083,7 @@ def _copy_named_destinations(
     page_ref_to_index: dict[tuple[int, int], int],
     spread_width: float,
     spread_height: float,
+    normalize_oversized_fitr_links: bool = False,
 ) -> list[str]:
     """Preserve every externally addressable destination after composition."""
     raw_destinations, legacy_dictionary = _raw_named_destinations(reader)
@@ -3185,6 +4136,11 @@ def _copy_named_destinations(
                 f"Cannot resolve named destination: {raw_name}"
             )
         target = source_mapping[target_source_page]
+        destination = _normalize_oversized_fitr_destination(
+            destination,
+            target,
+            allow_normalization=normalize_oversized_fitr_links,
+        )
         _validate_filterable_internal_destination(destination, target)
         target_output_page = int(target["virtualPageIndex"])
         target_reference = writer.pages[
@@ -6243,6 +7199,13 @@ def _build_virtual_spread_from_snapshot(
     gutter: float = 0.0,
     remove_adjacent_page_links: bool = False,
     adjacent_link_policy_explicit: bool = False,
+    discard_structure_tags: bool = False,
+    flatten_square_annotations: bool = False,
+    discard_broken_internal_links: bool = False,
+    normalize_oversized_fitr_links: bool = False,
+    normalize_outline_viewports: bool = False,
+    normalize_out_of_crop_outline_viewports: bool = False,
+    discard_broken_outline_destinations: bool = False,
     force: bool = False,
     expected_output_state: PublicationTargetState,
     expected_manifest_state: PublicationTargetState,
@@ -6284,10 +7247,23 @@ def _build_virtual_spread_from_snapshot(
     reader = PdfReader(source_snapshot, strict=True)
     if reader.is_encrypted:
         raise VirtualSpreadError("Encrypted PDFs are not supported by this prototype")
-    document_catalog = _require_supported_document_catalog(reader)
-    _require_supported_source_pages(reader)
+    document_catalog = _require_supported_document_catalog(
+        reader,
+        discard_structure_tags=discard_structure_tags,
+    )
+    _require_supported_source_pages(
+        reader,
+        discard_structure_tags=discard_structure_tags,
+    )
     pairs = build_pairs(len(reader.pages), direction, cover_separate)
-    normalized_pages = [_normalized_page(page) for page in reader.pages]
+    normalized_pages = [
+        _normalized_page(
+            page,
+            source_page_index=index,
+            flatten_square_annotations=flatten_square_annotations,
+        )
+        for index, page in enumerate(reader.pages)
+    ]
     left_slot = Slot("left", 0.0, 0.0, slot_width, spread_height)
     right_slot = Slot(
         "right", slot_width + gutter, 0.0, slot_width, spread_height
@@ -6298,10 +7274,7 @@ def _build_virtual_spread_from_snapshot(
     # Retain the source declaration so copied resources and annotations are
     # never advertised as belonging to an older PDF language version.
     writer.pdf_header = reader.pdf_header
-    if document_catalog.page_mode is not None:
-        writer.page_mode = str(document_catalog.page_mode)
-    if document_catalog.page_layout is not None:
-        writer.page_layout = str(document_catalog.page_layout)
+    _apply_document_catalog_settings(writer, document_catalog)
     source_mapping: dict[int, dict[str, Any]] = {}
     spread_records: list[dict[str, Any]] = []
     for virtual_page_index, (left_source, right_source) in enumerate(pairs):
@@ -6319,6 +7292,10 @@ def _build_virtual_spread_from_snapshot(
             if source_page_index is None:
                 continue
             page, source_transform = normalized_pages[source_page_index]
+            source_group = _validated_source_page_group(
+                reader.pages[source_page_index],
+                source_page_index + 1,
+            )
             layout = _layout_for_page(page, slot, source_transform)
             layout["sourceRotation"] = int(
                 reader.pages[source_page_index].get("/Rotate", 0) or 0
@@ -6330,12 +7307,22 @@ def _build_virtual_spread_from_snapshot(
                 float(original_box.right),
                 float(original_box.top),
             ]
-            output_page.merge_transformed_page(
-                page,
-                Transformation(ctm=tuple(layout["contentTransform"])),
-                over=True,
-                expand=False,
-            )
+            if source_group is None:
+                output_page.merge_transformed_page(
+                    page,
+                    Transformation(ctm=tuple(layout["contentTransform"])),
+                    over=True,
+                    expand=False,
+                )
+            else:
+                _merge_transformed_grouped_page(
+                    writer,
+                    output_page,
+                    page,
+                    layout["contentTransform"],
+                    source_group,
+                    f"{virtual_page_index}_{source_page_index}",
+                )
             layout.pop("contentTransform")
             mapping = {
                 **layout,
@@ -6370,6 +7357,34 @@ def _build_virtual_spread_from_snapshot(
                 f"source page {source_page_index + 1}"
             )
         for annotation in annotation_array:
+            annotation_object = _dereference_pdf_object(annotation)
+            if not isinstance(annotation_object, DictionaryObject):
+                raise VirtualSpreadError(
+                    "Source page annotation is not a dictionary; "
+                    f"source page {source_page_index + 1}"
+                )
+            annotation_subtype = _required_annotation_subtype(
+                annotation_object,
+                f"source page {source_page_index + 1} annotation",
+            )
+            if annotation_subtype in {"/Square", "/Popup"}:
+                if not flatten_square_annotations:
+                    raise VirtualSpreadError(
+                        "Square annotations require "
+                        "--flatten-square-annotations; source page "
+                        f"{source_page_index + 1}"
+                    )
+                continue
+            if annotation_subtype != "/Link":
+                raise VirtualSpreadError(
+                    "Unsupported annotation subtype "
+                    f"{annotation_subtype}; source page {source_page_index + 1}"
+                )
+            if (
+                discard_broken_internal_links
+                and _has_null_internal_link_target(annotation_object)
+            ):
+                continue
             link = _copy_link_annotation(
                 reader=reader,
                 writer=writer,
@@ -6381,6 +7396,7 @@ def _build_virtual_spread_from_snapshot(
                 page_width=spread_width,
                 page_height=spread_height,
                 remove_adjacent_page_links=remove_adjacent_page_links,
+                normalize_oversized_fitr_links=normalize_oversized_fitr_links,
                 referenced_named_destinations=referenced_named_destinations,
             )
             if link is None:
@@ -6396,6 +7412,11 @@ def _build_virtual_spread_from_snapshot(
         spread_width=spread_width,
         spread_height=spread_height,
         referenced_named_destinations=referenced_named_destinations,
+        normalize_outline_viewports=normalize_outline_viewports,
+        normalize_out_of_crop_outline_viewports=
+            normalize_out_of_crop_outline_viewports,
+        discard_broken_outline_destinations=
+            discard_broken_outline_destinations,
     )
     _require_unambiguous_outline_routes(outlines)
     copied_named_destinations = _copy_named_destinations(
@@ -6405,6 +7426,7 @@ def _build_virtual_spread_from_snapshot(
         page_ref_to_index=page_ref_to_index,
         spread_width=spread_width,
         spread_height=spread_height,
+        normalize_oversized_fitr_links=normalize_oversized_fitr_links,
     )
     if not referenced_named_destinations.issubset(
         set(copied_named_destinations)
@@ -6707,6 +7729,13 @@ def _build_virtual_spread_locked(
     spread_height: float | None = None,
     gutter: float | None = None,
     remove_adjacent_page_links: bool | None = None,
+    discard_structure_tags: bool = False,
+    flatten_square_annotations: bool = False,
+    discard_broken_internal_links: bool = False,
+    normalize_oversized_fitr_links: bool = False,
+    normalize_outline_viewports: bool = False,
+    normalize_out_of_crop_outline_viewports: bool = False,
+    discard_broken_outline_destinations: bool = False,
     force: bool = False,
 ) -> dict[str, Any]:
     source_path = source_path.resolve()
@@ -6787,6 +7816,15 @@ def _build_virtual_spread_locked(
             gutter=gutter,
             remove_adjacent_page_links=remove_adjacent_page_links,
             adjacent_link_policy_explicit=adjacent_link_policy_explicit,
+            discard_structure_tags=discard_structure_tags,
+            flatten_square_annotations=flatten_square_annotations,
+            discard_broken_internal_links=discard_broken_internal_links,
+            normalize_oversized_fitr_links=normalize_oversized_fitr_links,
+            normalize_outline_viewports=normalize_outline_viewports,
+            normalize_out_of_crop_outline_viewports=
+                normalize_out_of_crop_outline_viewports,
+            discard_broken_outline_destinations=
+                discard_broken_outline_destinations,
             force=force,
             expected_output_state=expected_output_state,
             expected_manifest_state=expected_manifest_state,
@@ -6804,6 +7842,13 @@ def build_virtual_spread(
     spread_height: float | None = None,
     gutter: float | None = None,
     remove_adjacent_page_links: bool | None = None,
+    discard_structure_tags: bool = False,
+    flatten_square_annotations: bool = False,
+    discard_broken_internal_links: bool = False,
+    normalize_oversized_fitr_links: bool = False,
+    normalize_outline_viewports: bool = False,
+    normalize_out_of_crop_outline_viewports: bool = False,
+    discard_broken_outline_destinations: bool = False,
     force: bool = False,
 ) -> dict[str, Any]:
     direction = _require_supported_direction(direction)
@@ -6812,6 +7857,30 @@ def build_virtual_spread(
         and type(remove_adjacent_page_links) is not bool
     ):
         raise VirtualSpreadError("Invalid adjacent-page link filter setting")
+    if type(discard_structure_tags) is not bool:
+        raise VirtualSpreadError("Invalid structure-tag discard setting")
+    if type(flatten_square_annotations) is not bool:
+        raise VirtualSpreadError("Invalid square-annotation flatten setting")
+    if type(discard_broken_internal_links) is not bool:
+        raise VirtualSpreadError("Invalid broken-link discard setting")
+    if type(normalize_oversized_fitr_links) is not bool:
+        raise VirtualSpreadError("Invalid oversized /FitR normalization setting")
+    if type(normalize_outline_viewports) is not bool:
+        raise VirtualSpreadError("Invalid outline viewport normalization setting")
+    if type(normalize_out_of_crop_outline_viewports) is not bool:
+        raise VirtualSpreadError(
+            "Invalid out-of-CropBox outline normalization setting"
+        )
+    if (
+        normalize_out_of_crop_outline_viewports
+        and not normalize_outline_viewports
+    ):
+        raise VirtualSpreadError(
+            "Out-of-CropBox outline normalization requires "
+            "--normalize-outline-viewports"
+        )
+    if type(discard_broken_outline_destinations) is not bool:
+        raise VirtualSpreadError("Invalid broken-outline discard setting")
     resolved_source = source_path.resolve()
     lexical_output = _require_unaliased_output_path(output_path)
     lexical_manifest = _lexical_absolute(manifest_path)
@@ -6840,6 +7909,15 @@ def build_virtual_spread(
             spread_height=spread_height,
             gutter=gutter,
             remove_adjacent_page_links=remove_adjacent_page_links,
+            discard_structure_tags=discard_structure_tags,
+            flatten_square_annotations=flatten_square_annotations,
+            discard_broken_internal_links=discard_broken_internal_links,
+            normalize_oversized_fitr_links=normalize_oversized_fitr_links,
+            normalize_outline_viewports=normalize_outline_viewports,
+            normalize_out_of_crop_outline_viewports=
+                normalize_out_of_crop_outline_viewports,
+            discard_broken_outline_destinations=
+                discard_broken_outline_destinations,
             force=force,
         )
 
@@ -6871,6 +7949,64 @@ def _parser() -> argparse.ArgumentParser:
             "or next original source page"
         ),
     )
+    parser.add_argument(
+        "--discard-structure-tags",
+        action="store_true",
+        help=(
+            "explicitly omit source accessibility tags that cannot be "
+            "remapped after two pages are composed"
+        ),
+    )
+    parser.add_argument(
+        "--flatten-square-annotations",
+        action="store_true",
+        help=(
+            "bake supported visible square appearances into derived page "
+            "content and omit their empty popups"
+        ),
+    )
+    parser.add_argument(
+        "--discard-broken-internal-links",
+        action="store_true",
+        help=(
+            "omit internal GoTo links whose stored target is the PDF null "
+            "object and therefore cannot navigate in the source"
+        ),
+    )
+    parser.add_argument(
+        "--normalize-oversized-fitr-links",
+        action="store_true",
+        help=(
+            "convert a /FitR link viewport that wholly contains its target "
+            "source page into an authenticated fit-source-page destination"
+        ),
+    )
+    parser.add_argument(
+        "--normalize-outline-viewports",
+        action="store_true",
+        help=(
+            "convert validated outline /XYZ or /FitR destinations to the "
+            "target source page because Supernote exposes page-level outline "
+            "navigation only"
+        ),
+    )
+    parser.add_argument(
+        "--normalize-out-of-crop-outline-viewports",
+        action="store_true",
+        help=(
+            "with --normalize-outline-viewports, explicitly permit a finite "
+            "outline viewport outside its target CropBox before reducing it "
+            "to page-level navigation"
+        ),
+    )
+    parser.add_argument(
+        "--discard-broken-outline-destinations",
+        action="store_true",
+        help=(
+            "retain an outline title and hierarchy while omitting only a "
+            "literal null destination that cannot navigate in the source"
+        ),
+    )
     parser.add_argument("--force", action="store_true")
     return parser
 
@@ -6890,6 +8026,15 @@ def main() -> int:
         spread_height=args.spread_height,
         gutter=args.gutter,
         remove_adjacent_page_links=args.remove_adjacent_page_links,
+        discard_structure_tags=args.discard_structure_tags,
+        flatten_square_annotations=args.flatten_square_annotations,
+        discard_broken_internal_links=args.discard_broken_internal_links,
+        normalize_oversized_fitr_links=args.normalize_oversized_fitr_links,
+        normalize_outline_viewports=args.normalize_outline_viewports,
+        normalize_out_of_crop_outline_viewports=
+            args.normalize_out_of_crop_outline_viewports,
+        discard_broken_outline_destinations=
+            args.discard_broken_outline_destinations,
         force=args.force,
     )
     print(f"Virtual spread PDF: {manifest['output']['path']}")

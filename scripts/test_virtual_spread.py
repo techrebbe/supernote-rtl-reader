@@ -16,6 +16,7 @@ from pypdf import PdfReader, PdfWriter, Transformation
 from pypdf.generic import (
     ArrayObject,
     BooleanObject,
+    DecodedStreamObject,
     DictionaryObject,
     FloatObject,
     IndirectObject,
@@ -24,6 +25,7 @@ from pypdf.generic import (
     NullObject,
     TextStringObject,
     RectangleObject,
+    StreamObject,
 )
 from reportlab.pdfgen import canvas
 
@@ -285,6 +287,7 @@ def add_outline_action_type(path: Path) -> None:
 def add_standalone_named_destination(
     path: Path,
     mode: str = "/Fit",
+    arguments: tuple[float | None, ...] = (),
 ) -> None:
     source = PdfReader(str(path), strict=True)
     writer = PdfWriter()
@@ -294,6 +297,10 @@ def add_standalone_named_destination(
         ArrayObject([
             writer.pages[3].indirect_reference,
             NameObject(mode),
+            *(
+                NullObject() if value is None else FloatObject(value)
+                for value in arguments
+            ),
         ]),
     )
     with path.open("wb") as stream:
@@ -525,6 +532,34 @@ def add_filter_link(
         writer.write(stream)
 
 
+def add_existing_named_destination_link(
+    path: Path,
+    source_page_index: int,
+    name: str,
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    annotation = DictionaryObject({
+        NameObject("/Type"): NameObject("/Annot"),
+        NameObject("/Subtype"): NameObject("/Link"),
+        NameObject("/Rect"): ArrayObject([
+            FloatObject(25.0), FloatObject(100.0),
+            FloatObject(125.0), FloatObject(125.0),
+        ]),
+        NameObject("/Dest"): TextStringObject(name),
+    })
+    reference = writer._add_object(annotation)
+    page = writer.pages[source_page_index]
+    annotations = page.get("/Annots")
+    if annotations is None:
+        annotations = ArrayObject()
+        page[NameObject("/Annots")] = annotations
+    annotations.get_object().append(reference)
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
 def add_document_open_action(path: Path) -> None:
     source = PdfReader(str(path), strict=True)
     writer = PdfWriter()
@@ -602,6 +637,213 @@ def add_viewer_preferences(path: Path) -> None:
     hide_toolbar = preferences.raw_get("/HideToolbar")
     if not isinstance(hide_toolbar, BooleanObject) or not hide_toolbar.value:
         raise AssertionError("fixture viewer preference was not persisted")
+
+
+def add_supported_document_features(path: Path) -> bytes:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    metadata_bytes = b"<x:xmpmeta xmlns:x='adobe:ns:meta/'>fixture</x:xmpmeta>"
+    metadata = DecodedStreamObject()
+    metadata.set_data(metadata_bytes)
+    metadata[NameObject("/Type")] = NameObject("/Metadata")
+    metadata[NameObject("/Subtype")] = NameObject("/XML")
+    writer._root_object[NameObject("/Metadata")] = writer._add_object(metadata)
+    writer._root_object[NameObject("/ViewerPreferences")] = DictionaryObject({
+        NameObject("/Direction"): NameObject("/R2L"),
+    })
+    writer._root_object[NameObject("/AcroForm")] = DictionaryObject({
+        NameObject("/DA"): TextStringObject("/Helv 0 Tf 0 g "),
+        NameObject("/DR"): DictionaryObject(),
+        NameObject("/Fields"): ArrayObject(),
+    })
+    with path.open("wb") as stream:
+        writer.write(stream)
+    return metadata_bytes
+
+
+def add_tagged_page_features(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    writer._root_object[NameObject("/StructTreeRoot")] = DictionaryObject({
+        NameObject("/Type"): NameObject("/StructTreeRoot"),
+    })
+    writer.pages[1][NameObject("/StructParents")] = NumberObject(0)
+    writer.pages[1][NameObject("/Tabs")] = NameObject("/S")
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def add_thumbnail_and_transparency_group(path: Path) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    thumbnail = DecodedStreamObject()
+    thumbnail.set_data(b"thumbnail")
+    writer.pages[1][NameObject("/Thumb")] = writer._add_object(thumbnail)
+    writer.pages[1][NameObject("/Group")] = DictionaryObject({
+        NameObject("/Type"): NameObject("/Group"),
+        NameObject("/S"): NameObject("/Transparency"),
+        NameObject("/CS"): NameObject("/DeviceRGB"),
+    })
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def add_square_with_empty_popup(path: Path, page_index: int = 1) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    page = writer.pages[page_index]
+    appearance = DecodedStreamObject()
+    appearance.set_data(b"1 0 0 rg\n20 30 100 30 re\nf\n")
+    appearance[NameObject("/Type")] = NameObject("/XObject")
+    appearance[NameObject("/Subtype")] = NameObject("/Form")
+    appearance[NameObject("/FormType")] = NumberObject(1)
+    appearance[NameObject("/BBox")] = RectangleObject((20, 30, 120, 60))
+    appearance[NameObject("/Matrix")] = ArrayObject([
+        NumberObject(1), NumberObject(0), NumberObject(0), NumberObject(1),
+        NumberObject(-20), NumberObject(-30),
+    ])
+    appearance[NameObject("/Resources")] = DictionaryObject()
+    normal_reference = writer._add_object(appearance)
+    square = DictionaryObject({
+        NameObject("/Type"): NameObject("/Annot"),
+        NameObject("/Subtype"): NameObject("/Square"),
+        NameObject("/Rect"): RectangleObject((20, 30, 120, 60)),
+        NameObject("/F"): NumberObject(4),
+        NameObject("/NM"): TextStringObject("fixture-square"),
+        NameObject("/AP"): DictionaryObject({
+            NameObject("/N"): normal_reference,
+        }),
+    })
+    square_reference = writer._add_object(square)
+    popup = DictionaryObject({
+        NameObject("/Type"): NameObject("/Annot"),
+        NameObject("/Subtype"): NameObject("/Popup"),
+        NameObject("/Rect"): RectangleObject((120, 60, 180, 100)),
+        NameObject("/F"): NumberObject(28),
+        NameObject("/Open"): BooleanObject(False),
+        NameObject("/Parent"): square_reference,
+    })
+    popup_reference = writer._add_object(popup)
+    square[NameObject("/Popup")] = popup_reference
+    annotations = page.get("/Annots")
+    if annotations is None:
+        annotations = ArrayObject()
+        page[NameObject("/Annots")] = annotations
+    annotations.get_object().extend((square_reference, popup_reference))
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def set_link_destination_to_null(
+    path: Path,
+    source_page_index: int,
+    annotation_index: int,
+    mode: str = "/Fit",
+    arguments: tuple[float | None, ...] = (),
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    annotation = writer.pages[source_page_index]["/Annots"].get_object()[
+        annotation_index
+    ].get_object()
+    annotation.pop("/A", None)
+    annotation[NameObject("/Dest")] = ArrayObject([
+        NullObject(),
+        NameObject(mode),
+        *(
+            NullObject() if value is None else FloatObject(value)
+            for value in arguments
+        ),
+    ])
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def set_first_outline_destination(
+    path: Path,
+    mode: str,
+    arguments: tuple[float | None, ...] = (),
+    *,
+    null_target: bool = False,
+) -> None:
+    add_outline_entry(path)
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    outlines = writer._root_object["/Outlines"].get_object()
+    first = outlines["/First"].get_object()
+    action = first["/A"].get_object()
+    target = (
+        NullObject()
+        if null_target
+        else writer.pages[1].indirect_reference
+    )
+    action[NameObject("/D")] = ArrayObject([
+        target,
+        NameObject(mode),
+        *(
+            NullObject() if value is None else FloatObject(value)
+            for value in arguments
+        ),
+    ])
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def set_first_annotation_value(
+    path: Path,
+    page_index: int,
+    subtype: str,
+    key: str,
+    value: object,
+) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    for reference in writer.pages[page_index].get("/Annots", []):
+        annotation = reference.get_object()
+        if str(annotation.get("/Subtype")) == subtype:
+            annotation[NameObject(key)] = value
+            break
+    else:
+        raise AssertionError(f"fixture has no {subtype} annotation")
+    with path.open("wb") as stream:
+        writer.write(stream)
+
+
+def encode_first_square_opacity(path: Path, opacity: float) -> None:
+    source = PdfReader(str(path), strict=True)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(source)
+    for reference in writer.pages[1].get("/Annots", []):
+        annotation = reference.get_object()
+        if str(annotation.get("/Subtype")) != "/Square":
+            continue
+        annotation[NameObject("/CA")] = FloatObject(opacity)
+        normal = annotation["/AP"]["/N"].get_object()
+        normal.set_data(
+            b"1 G\n0.5 g\n/R0 gs\n20 30 100 30 re\nB\n"
+        )
+        normal[NameObject("/Resources")] = DictionaryObject({
+            NameObject("/ExtGState"): DictionaryObject({
+                NameObject("/R0"): DictionaryObject({
+                    NameObject("/AIS"): BooleanObject(False),
+                    NameObject("/CA"): FloatObject(opacity),
+                    NameObject("/Type"): NameObject("/ExtGState"),
+                    NameObject("/ca"): FloatObject(opacity),
+                }),
+            }),
+        })
+        break
+    else:
+        raise AssertionError("fixture has no /Square annotation")
+    with path.open("wb") as stream:
+        writer.write(stream)
 
 
 def add_page_behavior(path: Path, behavior: str) -> str:
@@ -1346,6 +1588,154 @@ class VirtualSpreadTests(unittest.TestCase):
                 manifest_path.read_bytes(), b"existing-manifest"
             )
 
+    def test_outline_viewport_requires_explicit_page_level_normalization(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "xyz-outline.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_first_outline_destination(
+                source,
+                "/XYZ",
+                (30.0, 500.0, 1.25),
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "pass --normalize-outline-viewports",
+            ):
+                build_virtual_spread(source, output, manifest_path)
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                normalize_outline_viewports=True,
+            )
+            outline = manifest["navigation"]["outlines"][0]
+            self.assertEqual(
+                outline["destination"]["targetView"],
+                "fit-source-page",
+            )
+            persisted = PdfReader(str(output), strict=True)
+            self.assertEqual(
+                persisted.get_destination_page_number(persisted.outline[0]),
+                manifest["sourcePages"][1]["virtualPageIndex"],
+            )
+
+    def test_outline_normalization_rejects_out_of_crop_viewport(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "out-of-crop-outline.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_first_outline_destination(
+                source,
+                "/XYZ",
+                (30.0, 650.0, 1.25),
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "requires --normalize-outline-viewports",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    normalize_out_of_crop_outline_viewports=True,
+                )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "internal destination /XYZ top extends outside target source /CropBox",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    normalize_outline_viewports=True,
+                )
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                normalize_outline_viewports=True,
+                normalize_out_of_crop_outline_viewports=True,
+            )
+            self.assertEqual(
+                manifest["navigation"]["outlines"][0]["destination"][
+                    "targetView"
+                ],
+                "fit-source-page",
+            )
+
+    def test_broken_outline_target_requires_explicit_target_discard(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "broken-outline.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_first_outline_destination(
+                source,
+                "/Fit",
+                null_target=True,
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot resolve outline destination",
+            ):
+                build_virtual_spread(source, output, manifest_path)
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                discard_broken_outline_destinations=True,
+            )
+            outline = manifest["navigation"]["outlines"][0]
+            self.assertEqual(outline["title"], "Chapter 2")
+            self.assertIsNone(outline["destination"])
+            persisted = PdfReader(str(output), strict=True)
+            self.assertEqual(str(persisted.outline[0].title), "Chapter 2")
+
+    def test_unsupported_null_outline_semantics_are_not_discarded(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "unsupported-null-outline.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_first_outline_destination(
+                source,
+                "/FitB",
+                null_target=True,
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "unsupported null outline destination mode /FitB",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    discard_broken_outline_destinations=True,
+                )
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+
     def test_outline_goto_action_allows_standard_action_type(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1779,6 +2169,7 @@ class VirtualSpreadTests(unittest.TestCase):
                 **{
                     **EXPLICIT_DEFAULT_LAYOUT,
                     "remove_adjacent_page_links": True,
+                    "discard_broken_internal_links": True,
                 },
             )
             self.assertEqual(
@@ -1816,6 +2207,149 @@ class VirtualSpreadTests(unittest.TestCase):
                         "remove_adjacent_page_links": True,
                     },
                 )
+
+    def test_broken_internal_link_requires_explicit_discard(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "broken-link.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_destination_to_null(source, 1, 0)
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot resolve internal link",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    **EXPLICIT_DEFAULT_LAYOUT,
+                )
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                discard_broken_internal_links=True,
+                **EXPLICIT_DEFAULT_LAYOUT,
+            )
+            self.assertEqual(
+                manifest["navigation"]["retainedLinkCount"],
+                3,
+            )
+            self.assertEqual(len(manifest["links"]), 3)
+
+    def test_unsupported_null_link_semantics_are_not_discarded(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "unsupported-null-link.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_destination_to_null(source, 1, 0, "/FitB")
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Cannot resolve internal link",
+            ):
+                build_virtual_spread(
+                    source,
+                    output,
+                    manifest_path,
+                    discard_broken_internal_links=True,
+                )
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+
+    def test_oversized_fitr_requires_explicit_fit_normalization(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "oversized-fitr.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_link_destination_mode(
+                source,
+                source_page_index=1,
+                annotation_index=0,
+                target_page_index=5,
+                mode="/FitR",
+                arguments=(-20.0, -20.0, 720.0, 220.0),
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "internal destination /FitR rectangle extends outside",
+            ):
+                build_virtual_spread(source, output, manifest_path)
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                normalize_oversized_fitr_links=True,
+            )
+            matching = [
+                item
+                for item in manifest["links"]
+                if item["sourcePage"] == 1
+                and item["targetSourcePage"] == 5
+            ]
+            self.assertEqual(len(matching), 1)
+            self.assertEqual(matching[0]["targetView"], "fit-source-page")
+
+    def test_named_oversized_fitr_is_normalized_consistently(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "named-oversized-fitr.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_standalone_named_destination(
+                source,
+                "/FitR",
+                (-20.0, -20.0, 440.0, 440.0),
+            )
+            add_existing_named_destination_link(
+                source,
+                1,
+                "external-entry",
+            )
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "internal destination /FitR rectangle extends outside",
+            ):
+                build_virtual_spread(source, output, manifest_path)
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                normalize_oversized_fitr_links=True,
+            )
+            persisted = PdfReader(output, strict=True)
+            self.assertIn("external-entry", persisted.named_destinations)
+            destination = persisted.named_destinations[
+                "external-entry"
+            ].dest_array
+            self.assertEqual(str(destination[1]), "/FitR")
+            target_box = manifest["sourcePages"][3]["destination"]
+            for actual, expected in zip(destination[2:6], target_box):
+                self.assertAlmostEqual(
+                    float(actual),
+                    expected,
+                    places=6,
+                )
+            matching = [
+                item
+                for item in manifest["links"]
+                if item.get("targetSourcePage") == 3
+            ]
+            self.assertEqual(len(matching), 1)
+            self.assertEqual(matching[0]["targetView"], "fit-source-page")
 
     def test_document_open_action_fails_closed_before_publication(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1863,6 +2397,287 @@ class VirtualSpreadTests(unittest.TestCase):
                     ).trailer["/Root"]
                     self.assertEqual(catalog.get("/PageMode"), "/FullScreen")
                     self.assertEqual(catalog.get("/PageLayout"), page_layout)
+
+    def test_supported_siddur_catalog_features_are_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "supported-catalog-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            expected_metadata = add_supported_document_features(source)
+            source_before = source.read_bytes()
+
+            build_virtual_spread(source, output, manifest_path)
+
+            self.assertEqual(source.read_bytes(), source_before)
+            persisted = PdfReader(str(output), strict=True)
+            catalog = persisted.trailer["/Root"]
+            self.assertEqual(
+                catalog["/Metadata"].get_object().get_data(),
+                expected_metadata,
+            )
+            self.assertEqual(
+                str(catalog["/ViewerPreferences"]["/Direction"]),
+                "/R2L",
+            )
+            self.assertNotIn("/AcroForm", catalog)
+
+    def test_structure_tags_require_explicit_discard(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "tagged-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_tagged_page_features(source)
+            source_before = source.read_bytes()
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "pass --discard-structure-tags",
+            ):
+                build_virtual_spread(source, output, manifest_path)
+            self.assertFalse(output.exists())
+            self.assertFalse(manifest_path.exists())
+
+            build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                discard_structure_tags=True,
+            )
+            self.assertEqual(source.read_bytes(), source_before)
+            persisted = PdfReader(str(output), strict=True)
+            self.assertNotIn("/StructTreeRoot", persisted.trailer["/Root"])
+            for page in persisted.pages:
+                self.assertNotIn("/StructParents", page)
+                self.assertNotIn("/Tabs", page)
+
+    def test_thumbnail_is_discarded_and_transparency_group_is_preserved(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "page-features-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_thumbnail_and_transparency_group(source)
+
+            manifest = build_virtual_spread(source, output, manifest_path)
+
+            persisted = PdfReader(str(output), strict=True)
+            for page in persisted.pages:
+                self.assertNotIn("/Thumb", page)
+            page = persisted.pages[
+                manifest["sourcePages"][1]["virtualPageIndex"]
+            ]
+            self.assertNotIn("/Group", page)
+            xobjects = page["/Resources"]["/XObject"].get_object()
+            grouped_forms = [
+                value.get_object()
+                for value in xobjects.values()
+                if "/Group" in value.get_object()
+            ]
+            self.assertEqual(len(grouped_forms), 1)
+            group = grouped_forms[0]["/Group"].get_object()
+            self.assertEqual(str(group["/Type"]), "/Group")
+            self.assertEqual(str(group["/S"]), "/Transparency")
+            self.assertEqual(str(group["/CS"]), "/DeviceRGB")
+
+    def test_square_and_popup_require_explicit_appearance_flattening(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "square-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_square_with_empty_popup(source)
+            source_before = source.read_bytes()
+
+            with self.assertRaisesRegex(
+                VirtualSpreadError,
+                "Square annotations require --flatten-square-annotations",
+            ):
+                build_virtual_spread(source, output, manifest_path)
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                flatten_square_annotations=True,
+            )
+            self.assertEqual(source.read_bytes(), source_before)
+            persisted = PdfReader(str(output), strict=True)
+            output_page = persisted.pages[
+                manifest["sourcePages"][1]["virtualPageIndex"]
+            ]
+            subtypes = [
+                str(reference.get_object()["/Subtype"])
+                for reference in output_page.get("/Annots", [])
+            ]
+            self.assertNotIn("/Square", subtypes)
+            self.assertNotIn("/Popup", subtypes)
+
+            def appearance_payloads(value: object) -> list[bytes]:
+                seen: set[tuple[int, int] | int] = set()
+                payloads: list[bytes] = []
+
+                def visit(item: object) -> None:
+                    if isinstance(item, IndirectObject):
+                        key: tuple[int, int] | int = (
+                            item.idnum,
+                            item.generation,
+                        )
+                        if key in seen:
+                            return
+                        seen.add(key)
+                        visit(item.get_object())
+                        return
+                    key = id(item)
+                    if key in seen:
+                        return
+                    seen.add(key)
+                    if isinstance(item, StreamObject):
+                        payloads.append(item.get_data())
+                    if isinstance(item, DictionaryObject):
+                        for child in item.values():
+                            visit(child)
+                    elif isinstance(item, ArrayObject):
+                        for child in item:
+                            visit(child)
+
+                visit(value)
+                return payloads
+
+            resources = output_page["/Resources"].get_object()
+            self.assertTrue(any(
+                b"1 0 0 rg" in payload and b"20 30 100 30 re" in payload
+                for payload in appearance_payloads(resources)
+            ))
+
+    def test_unsafe_square_or_popup_semantics_fail_closed(self) -> None:
+        cases = (
+            (
+                "/Square",
+                "/F",
+                NumberObject(5),
+                "Hidden square annotations cannot be flattened",
+            ),
+            (
+                "/Square",
+                "/F",
+                NumberObject(0),
+                "Non-printing square annotations cannot be flattened",
+            ),
+            (
+                "/Square",
+                "/F",
+                NumberObject(12),
+                "NoZoom or NoRotate square annotations cannot be flattened",
+            ),
+            (
+                "/Square",
+                "/F",
+                NumberObject(20),
+                "NoZoom or NoRotate square annotations cannot be flattened",
+            ),
+            (
+                "/Square",
+                "/CA",
+                FloatObject(0.5),
+                "Square annotation /CA is not preserved by its normal appearance",
+            ),
+            (
+                "/Square",
+                "/CA",
+                FloatObject(1.5),
+                "Invalid square annotation /CA",
+            ),
+            (
+                "/Square",
+                "/CA",
+                TextStringObject("1"),
+                "Invalid square annotation /CA",
+            ),
+            (
+                "/Popup",
+                "/Open",
+                BooleanObject(True),
+                "Open square popups cannot be flattened",
+            ),
+            (
+                "/Popup",
+                "/Rect",
+                RectangleObject((180, 100, 120, 60)),
+                "square popup /Rect.*ordering",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, (subtype, key, value, message) in enumerate(cases):
+                with self.subTest(subtype=subtype, key=key):
+                    source = root / f"unsafe-square-{index}.pdf"
+                    output = root / f"unsafe-spread-{index}.pdf"
+                    manifest_path = output.with_suffix(".pdf.json")
+                    create_odd_page_fixture(source)
+                    add_square_with_empty_popup(source)
+                    set_first_annotation_value(
+                        source,
+                        1,
+                        subtype,
+                        key,
+                        value,
+                    )
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        message,
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest_path,
+                            flatten_square_annotations=True,
+                        )
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest_path.exists())
+
+    def test_square_embedded_opacity_is_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "transparent-square-source.pdf"
+            output = root / "spread.pdf"
+            manifest_path = root / "spread.pdf.json"
+            create_odd_page_fixture(source)
+            add_square_with_empty_popup(source)
+            encode_first_square_opacity(source, 0.5)
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                flatten_square_annotations=True,
+            )
+
+            persisted = PdfReader(str(output), strict=True)
+            output_page = persisted.pages[
+                manifest["sourcePages"][1]["virtualPageIndex"]
+            ]
+            xobjects = output_page["/Resources"]["/XObject"].get_object()
+            appearance = next(
+                value.get_object()
+                for key, value in xobjects.items()
+                if str(key).startswith("/Fm_square_2_")
+            )
+            self.assertIn(b"/R0 gs", appearance.get_data())
+            graphics_state = appearance["/Resources"]["/ExtGState"][
+                "/R0"
+            ].get_object()
+            self.assertEqual(float(graphics_state["/CA"]), 0.5)
+            self.assertEqual(float(graphics_state["/ca"]), 0.5)
 
     def test_multi_page_catalog_layouts_fail_closed_before_publication(
         self,
@@ -1950,7 +2765,7 @@ class VirtualSpreadTests(unittest.TestCase):
 
             with self.assertRaisesRegex(
                 VirtualSpreadError,
-                "Unsupported document catalog entries: /ViewerPreferences",
+                "Only RTL document /ViewerPreferences /Direction is supported",
             ):
                 build_virtual_spread(
                     source,
@@ -3864,6 +4679,43 @@ class VirtualSpreadTests(unittest.TestCase):
                     self.assertFalse(output.exists())
                     self.assertFalse(manifest_path.exists())
 
+    def test_tiny_link_rect_crop_bleed_is_clipped_deterministically(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "tiny-crop-bleed-source.pdf"
+            output = root / "tiny-crop-bleed-spread.pdf"
+            manifest_path = root / "tiny-crop-bleed-spread.pdf.json"
+            create_odd_page_fixture(source)
+            set_page_crop_box(source, 1, (15.25, 15.0, 180.0, 93.0))
+
+            manifest = build_virtual_spread(
+                source,
+                output,
+                manifest_path,
+                direction="rtl",
+            )
+
+            mapping = manifest["sourcePages"][1]
+            persisted = PdfReader(str(output), strict=True)
+            annotations = persisted.pages[
+                mapping["virtualPageIndex"]
+            ]["/Annots"].get_object()
+            actual = [
+                float(value)
+                for value in annotations[0].get_object()["/Rect"]
+            ]
+            expected = _transform_rect(
+                ArrayObject(
+                    FloatObject(value)
+                    for value in (15.25, 15.0, 180.0, 48.0)
+                ),
+                mapping["transform"],
+            )
+            for actual_value, expected_value in zip(
+                actual, expected, strict=True
+            ):
+                self.assertAlmostEqual(actual_value, expected_value, places=4)
+
     def test_malformed_link_quad_points_fail_closed(self) -> None:
         cases = (
             tuple(FloatObject(value) for value in range(6)),
@@ -4869,6 +5721,40 @@ class VirtualSpreadTests(unittest.TestCase):
                             output,
                             manifest,
                             **values,
+                        )
+                    self.assertFalse(output.exists())
+                    self.assertFalse(manifest.exists())
+
+    def test_compatibility_policy_flags_require_exact_booleans(self) -> None:
+        cases = (
+            ("discard_structure_tags", "structure-tag discard"),
+            ("flatten_square_annotations", "square-annotation flatten"),
+            ("discard_broken_internal_links", "broken-link discard"),
+            ("normalize_oversized_fitr_links", "FitR normalization"),
+            ("normalize_outline_viewports", "outline viewport normalization"),
+            (
+                "normalize_out_of_crop_outline_viewports",
+                "out-of-CropBox outline normalization",
+            ),
+            ("discard_broken_outline_destinations", "broken-outline discard"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            create_odd_page_fixture(source)
+            for index, (name, message) in enumerate(cases):
+                with self.subTest(name=name):
+                    output = root / f"spread-{index}.pdf"
+                    manifest = output.with_suffix(".pdf.json")
+                    with self.assertRaisesRegex(
+                        VirtualSpreadError,
+                        message,
+                    ):
+                        build_virtual_spread(
+                            source,
+                            output,
+                            manifest,
+                            **{name: 1},
                         )
                     self.assertFalse(output.exists())
                     self.assertFalse(manifest.exists())

@@ -42,6 +42,32 @@ MUTATIONS = (
         "canonical config boolean",
     ),
     (
+        "NativeReaderV2StrictProperties.java",
+        "if (!keys.add(key)) {",
+        "if (false) {",
+        "duplicate marker key rejection",
+    ),
+    (
+        "NativeReaderV2MarkerClaim.java",
+        "if (properties.containsKey(key)) {",
+        "if (false) {",
+        "committed marker rejects pending authority",
+    ),
+    (
+        "NativeReaderV2MarkerClaim.java",
+        "if (claimedLength != observedDocumentLength\n"
+        "            || !isCanonicalSha256(claimedSha256)",
+        "if (claimedLength == observedDocumentLength\n"
+        "            || !isCanonicalSha256(claimedSha256)",
+        "marker document length authority",
+    ),
+    (
+        "NativeReaderV2MarkerClaim.java",
+        "|| !claimedSha256.equals(observedDocumentSha256)) {",
+        "|| false && !claimedSha256.equals(observedDocumentSha256)) {",
+        "marker document digest authority",
+    ),
+    (
         "SpreadSnapshot.java",
         "if (writerAuthority == null || !writerAuthority.matches(",
         "if (writerAuthority == null || false && !writerAuthority.matches(",

@@ -17,6 +17,8 @@ public final class NativeReaderV2CoreTests {
         testNativeReaderV2LayoutFactory();
         testPairingMatrix();
         testV2ConfigAdmission();
+        testStrictMarkerProperties();
+        testV2CommittedMarkerClaim();
         testSnapshotAuthority();
         testGestureRouting();
         testGestureBuffer();
@@ -109,6 +111,162 @@ public final class NativeReaderV2CoreTests {
         invalidSizing.setProperty("spreadSizing", "fill");
         expectThrows(() -> NativeReaderV2Config.from(invalidSizing),
             "unknown sizing rejected");
+    }
+
+    private static void testV2CommittedMarkerClaim() {
+        String hash = repeat("ab", 32);
+        java.util.Properties properties = committedV2Marker(hash);
+        NativeReaderV2MarkerClaim claim = NativeReaderV2MarkerClaim.admit(
+            properties,
+            "/storage/emulated/0/Document/book.pdf",
+            123456L,
+            hash
+        );
+        equal("sha256:" + hash, claim.documentId,
+            "claim uses immutable original PDF identity");
+        check(claim.config.enabled, "committed marker enables v2");
+
+        for (String key : new String[] {
+            NativeReaderV2Config.ENGINE_KEY,
+            "editable",
+            "disposable",
+            "managedBy",
+            "mode",
+            "transactionProtocol",
+            "activationState",
+            "backupVerified",
+            "minimumModuleVersionCode",
+            "documentPath",
+            "documentLength",
+            "documentSha256"
+        }) {
+            java.util.Properties missing = committedV2Marker(hash);
+            missing.remove(key);
+            expectThrows(() -> NativeReaderV2MarkerClaim.admit(
+                missing,
+                "/storage/emulated/0/Document/book.pdf",
+                123456L,
+                hash
+            ), "missing committed marker authority rejected for " + key);
+        }
+
+        for (String pending : new String[] {
+            "pendingIntent",
+            "previousMarkerPresent",
+            "previousMarkerProtected",
+            "previousMarkerLength",
+            "previousMarkerSha256",
+            "previousMarkerBase64"
+        }) {
+            java.util.Properties invalid = committedV2Marker(hash);
+            invalid.setProperty(pending, "false");
+            expectThrows(() -> NativeReaderV2MarkerClaim.admit(
+                invalid,
+                "/storage/emulated/0/Document/book.pdf",
+                123456L,
+                hash
+            ), "pending activation authority rejected for " + pending);
+        }
+
+        java.util.Properties leadingZero = committedV2Marker(hash);
+        leadingZero.setProperty("documentLength", "0123456");
+        expectThrows(() -> NativeReaderV2MarkerClaim.admit(
+            leadingZero,
+            "/storage/emulated/0/Document/book.pdf",
+            123456L,
+            hash
+        ), "noncanonical document length rejected");
+        expectThrows(() -> NativeReaderV2MarkerClaim.admit(
+            committedV2Marker(hash),
+            "/storage/emulated/0/Document/book.pdf",
+            123457L,
+            hash
+        ), "changed document length rejected");
+        expectThrows(() -> NativeReaderV2MarkerClaim.admit(
+            committedV2Marker(hash),
+            "/storage/emulated/0/Document/book.pdf",
+            123456L,
+            repeat("cd", 32)
+        ), "changed document digest rejected");
+        expectThrows(() -> NativeReaderV2MarkerClaim.admit(
+            committedV2Marker(hash.toUpperCase(java.util.Locale.ROOT)),
+            "/storage/emulated/0/Document/book.pdf",
+            123456L,
+            hash.toUpperCase(java.util.Locale.ROOT)
+        ), "noncanonical uppercase digest rejected");
+    }
+
+    private static void testStrictMarkerProperties() {
+        java.util.Properties parsed = NativeReaderV2StrictProperties.parse(
+            ("# generated\n"
+                + "nativeReaderEngine=native-reader-v2\n"
+                + "document\\ Path=/storage/emulated/0/Document/book.pdf\n"
+                + "wrapped=first\\\n    second\n")
+                .getBytes(java.nio.charset.StandardCharsets.ISO_8859_1)
+        );
+        equal("native-reader-v2", parsed.getProperty("nativeReaderEngine"),
+            "strict properties parse ordinary key");
+        equal("/storage/emulated/0/Document/book.pdf",
+            parsed.getProperty("document Path"),
+            "strict properties decode escaped key");
+        equal("firstsecond", parsed.getProperty("wrapped"),
+            "strict properties decode continuation");
+
+        expectThrows(() -> NativeReaderV2StrictProperties.parse(
+            "enabled=true\nenabled=false\n".getBytes(
+                java.nio.charset.StandardCharsets.ISO_8859_1
+            )
+        ), "duplicate property rejected");
+        expectThrows(() -> NativeReaderV2StrictProperties.parse(
+            "document\\ Path=a\ndocument\\u0020Path=b\n".getBytes(
+                java.nio.charset.StandardCharsets.ISO_8859_1
+            )
+        ), "escaped duplicate property rejected");
+        expectThrows(() -> NativeReaderV2StrictProperties.parse(
+            new byte[] { 'a', '=', 'b', 0, 'c' }
+        ), "NUL property marker rejected");
+        expectThrows(() -> NativeReaderV2StrictProperties.parse(new byte[0]),
+            "empty marker rejected");
+        expectThrows(() -> NativeReaderV2StrictProperties.parse(
+            "key=value\\".getBytes(
+                java.nio.charset.StandardCharsets.ISO_8859_1
+            )
+        ), "unterminated continuation rejected");
+    }
+
+    private static java.util.Properties committedV2Marker(String hash) {
+        java.util.Properties properties = new java.util.Properties();
+        properties.setProperty(
+            NativeReaderV2Config.ENGINE_KEY,
+            NativeReaderV2Config.ENGINE_VALUE
+        );
+        properties.setProperty("enabled", "true");
+        properties.setProperty("direction", "rtl");
+        properties.setProperty("coverSeparate", "false");
+        properties.setProperty("showDivider", "false");
+        properties.setProperty("showHeader", "false");
+        properties.setProperty("spreadSizing", "fit");
+        properties.setProperty("editable", "true");
+        properties.setProperty("disposable", "false");
+        properties.setProperty("managedBy", "supernote-rtl-reader");
+        properties.setProperty("mode", NativeReaderV2MarkerClaim.MODE);
+        properties.setProperty("transactionProtocol", "2");
+        properties.setProperty("minimumModuleVersionCode", "135");
+        properties.setProperty("activationState", "committed");
+        properties.setProperty("backupVerified", "true");
+        properties.setProperty(
+            "documentPath",
+            "/storage/emulated/0/Document/book.pdf"
+        );
+        properties.setProperty("documentLength", "123456");
+        properties.setProperty("documentSha256", hash);
+        return properties;
+    }
+
+    private static String repeat(String value, int count) {
+        StringBuilder result = new StringBuilder(value.length() * count);
+        for (int index = 0; index < count; index++) result.append(value);
+        return result.toString();
     }
 
     private static void testAffineRoundTrips() {

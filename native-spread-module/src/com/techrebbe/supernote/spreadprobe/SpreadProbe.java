@@ -31,11 +31,13 @@ import android.system.Os;
 import android.system.OsConstants;
 import android.system.StructStat;
 import android.util.Log;
+import android.util.Pair;
 import android.util.Size;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -44,6 +46,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.lang.ref.WeakReference;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
@@ -121,7 +124,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int TRACE_FINAL_SNAPSHOT_ATTEMPTS = 5;
     private static final long TRACE_FINAL_SNAPSHOT_RETRY_MS = 120L;
     private static final int HANDSHAKE_PROTOCOL = 2;
-    private static final long MODULE_VERSION_CODE = 120L;
+    private static final long MODULE_VERSION_CODE = 135L;
     private static final long TRANSACTIONAL_MIN_MODULE_VERSION_CODE = 118L;
     private static final int EDITABLE_MARKER_PROTOCOL = 2;
     private static final String EDITABLE_MARKER_MODE =
@@ -133,9 +136,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int DOCUMENT_PAGE_HEIGHT = 1872;
     private static final int SPREAD_PAGE_WIDTH = 932;
     private static final int SPREAD_PAGE_HEIGHT = 1243;
+    private static final int LASSO_MIN_UI_FRAME_SIZE = 180;
     private static final float SPREAD_OUTER_EDGE_FRACTION = 0.14f;
-    private static final int NATIVE_TOP_CHROME_TOUCH_EXCLUSION_PX = 112;
-    private static final int NATIVE_BOTTOM_CHROME_TOUCH_EXCLUSION_PX = 96;
+    private static final int NATIVE_CHROME_MAX_DECOR_AREA_PERCENT = 45;
     private static final long NON_EDGE_TAP_SUPPRESSION_MS = 400L;
     private static final long PAGE_ACTIVATION_TIMEOUT_MS = 3000L;
     private static final long PAGE_ACTIVATION_COMPLETION_DEADLINE_MS = 15000L;
@@ -155,6 +158,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final int PEN_CONTACT_PHASE_AWAITING_RECEIVE = 2;
     private static final int PEN_CONTACT_PHASE_RECEIVING = 3;
     private static final int PEN_CONTACT_PHASE_EXPIRED = 4;
+    private static final int NATIVE_CHROME_ROUTE_DOCUMENT = 0;
+    private static final int NATIVE_CHROME_ROUTE_PASS = 1;
+    private static final int NATIVE_CHROME_ROUTE_BLOCK = 2;
     private static final long TRACE_SNAPSHOT_DEBOUNCE_MS = 80L;
     private static final AtomicLong TRACE_TRANSACTION_COUNTER =
         new AtomicLong();
@@ -163,6 +169,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final AtomicLong PAGE_LOAD_GENERATION_COUNTER =
         new AtomicLong();
     private static final AtomicLong PEN_CONTACT_GENERATION_COUNTER =
+        new AtomicLong();
+    private static final AtomicLong NATIVE_CHROME_GENERATION_COUNTER =
+        new AtomicLong();
+    private static final AtomicLong TEXT_SELECTION_GENERATION_COUNTER =
+        new AtomicLong();
+    private static final AtomicLong RECOGNIZED_LINE_GENERATION_COUNTER =
+        new AtomicLong();
+    private static final AtomicLong LASSO_TRANSACTION_COUNTER =
         new AtomicLong();
     private static final AtomicLong DEFERRED_SPREAD_TURN_COUNTER =
         new AtomicLong();
@@ -323,6 +337,16 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         new ConcurrentHashMap<>();
     private static final Map<Activity, SpreadConfig> SPREAD_CONFIGS =
         new ConcurrentHashMap<>();
+    /*
+     * Process-wide Xposed hooks must be behaviorally inert until an exact,
+     * verified document config has opted into Native Spread.  A claim remains
+     * published while that document is changing page/orientation/identity so
+     * the transactional fail-closed rules still protect its writer.  A
+     * verified disabled/ordinary config releases the claim and every hook
+     * must then pass firmware calls through unchanged.
+     */
+    private static final Map<Activity, String>
+        NATIVE_SPREAD_CONTROL_CLAIMS = new ConcurrentHashMap<>();
     private static final Map<Activity, Long> CONFIG_LOAD_GENERATIONS =
         new ConcurrentHashMap<>();
     private static final Map<Activity, Long> CONFIG_AUTHORITY_GENERATIONS =
@@ -339,6 +363,23 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         DOCUMENT_RECEIVE_IDENTITIES = new ConcurrentHashMap<>();
     private static final Map<Activity, Boolean> PEN_PHYSICAL_CONTACT_DOWNS =
         new ConcurrentHashMap<>();
+    private static final Map<Activity, Boolean> LASSO_UI_CONTACT_DOWNS =
+        new ConcurrentHashMap<>();
+    private static final Map<Activity, NativeChromeTracker>
+        NATIVE_CHROME_TRACKERS =
+            Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<Activity, NativeChromeSnapshot>
+        NATIVE_CHROME_SNAPSHOTS = new ConcurrentHashMap<>();
+    private static final Map<Activity, NativeChromePassThrough>
+        NATIVE_CHROME_PEN_PASSTHROUGHS = new ConcurrentHashMap<>();
+    private static final Map<Activity, TextSelectionPenContact>
+        TEXT_SELECTION_PEN_CONTACTS = new ConcurrentHashMap<>();
+    private static final Map<Activity, RecognizedLineTransaction>
+        RECOGNIZED_LINE_TRANSACTIONS = new ConcurrentHashMap<>();
+    private static final Map<Activity, Integer> TEXT_SELECTION_MODES =
+        new ConcurrentHashMap<>();
+    private static final Map<Activity, LassoMutationAuthority>
+        LASSO_MUTATION_AUTHORITIES = new ConcurrentHashMap<>();
     private static final Map<Activity, DocumentIdentityFence>
         DOCUMENT_IDENTITY_ADMISSIONS = new ConcurrentHashMap<>();
     private static final Map<Activity, String>
@@ -365,6 +406,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         PAGE_SAVE_ADMISSIONS = new ThreadLocal<>();
     private static final ThreadLocal<ArrayDeque<ReceiveTrialsScope>>
         RECEIVE_TRIALS_OWNERSHIP_SCOPES = new ThreadLocal<>();
+    private static final ThreadLocal<ArrayDeque<RecognizedLineCommitScope>>
+        RECOGNIZED_LINE_COMMIT_SCOPES = new ThreadLocal<>();
     private static final ThreadLocal<Boolean>
         PAGE_ACTIVATION_HISTORY_BLOCKED = new ThreadLocal<>();
     private static final ThreadLocal<ArrayDeque<HistoryMutationScope>>
@@ -394,6 +437,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static volatile boolean nativeBridgeLoaded;
     private static volatile boolean nativeHookReady;
     private static volatile boolean hooksReady;
+    private static volatile Object windowManagerGlobal;
+    private static volatile Method windowManagerGetWindowViews;
+    private static volatile Field windowManagerViewsField;
+    private static volatile boolean windowRootDiscoveryUnavailable;
     private static BroadcastReceiver handshakeReceiver;
     private static boolean handshakeReceiverRegistered;
     private static BroadcastReceiver traceControlReceiver;
@@ -408,6 +455,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static boolean spreadLassoOperationOriginZero;
     private static boolean spreadLassoToolArmed;
     private static Bitmap spreadLassoCorrectedPreview;
+    private static Rect spreadLassoCanonicalSelectionRect;
+    private static Rect spreadLassoDisplaySelectionRect;
     private static volatile Activity spreadLassoStateOwner;
     private static volatile LassoOperationScope spreadLassoOperationScope;
 
@@ -534,7 +583,93 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static final class ReceiveTrialsScope {
         PenContactOwnership contactOwnership;
         boolean activationGestureBlocked;
+        boolean recognizedStraightLine;
+        boolean recognizedLineTransactionStarted;
         String ownershipFailure;
+    }
+
+    /**
+     * Authority retained only while Supernote's native EditLineView owns a
+     * recognized straight-line contact. The writer emits receiveTrials()
+     * before the user lifts the pen, so the ordinary save/reload boundary
+     * would otherwise replace the coordinate frame beneath EditLineView.
+     */
+    private static final class RecognizedLineTransaction {
+        final long generation;
+        final Activity activity;
+        final String documentPath;
+        final long documentContextGeneration;
+        final SpreadConfig config;
+        final long configAuthorityGeneration;
+        final Object presenter;
+        final Object note;
+        final Object client;
+        final Object handWriteView;
+        final Object viewModel;
+        final Object nativeCallback;
+        final String markPath;
+        final int documentPage;
+        final int markPage;
+        final RectF destination;
+        final boolean nativeSplit;
+        final int nativeSplitOffsetX;
+        final int nativeSplitOffsetY;
+        volatile boolean displayRemapLogged;
+
+        RecognizedLineTransaction(
+            long generation,
+            Activity activity,
+            String documentPath,
+            long documentContextGeneration,
+            SpreadConfig config,
+            long configAuthorityGeneration,
+            Object presenter,
+            Object note,
+            Object client,
+            Object handWriteView,
+            Object viewModel,
+            Object nativeCallback,
+            String markPath,
+            int documentPage,
+            int markPage,
+            RectF destination,
+            boolean nativeSplit,
+            int nativeSplitOffsetX,
+            int nativeSplitOffsetY
+        ) {
+            this.generation = generation;
+            this.activity = activity;
+            this.documentPath = documentPath;
+            this.documentContextGeneration = documentContextGeneration;
+            this.config = config;
+            this.configAuthorityGeneration = configAuthorityGeneration;
+            this.presenter = presenter;
+            this.note = note;
+            this.client = client;
+            this.handWriteView = handWriteView;
+            this.viewModel = viewModel;
+            this.nativeCallback = nativeCallback;
+            this.markPath = markPath;
+            this.documentPage = documentPage;
+            this.markPage = markPage;
+            this.destination = new RectF(destination);
+            this.nativeSplit = nativeSplit;
+            this.nativeSplitOffsetX = nativeSplitOffsetX;
+            this.nativeSplitOffsetY = nativeSplitOffsetY;
+        }
+    }
+
+    private static final class RecognizedLineCommitScope {
+        final RecognizedLineTransaction transaction;
+        final boolean admitted;
+
+        RecognizedLineCommitScope(
+            RecognizedLineTransaction transaction,
+            boolean admitted
+        ) {
+            this.transaction = transaction;
+            this.admitted = admitted;
+        }
     }
 
     private static final class LinkCheckScope {
@@ -589,6 +724,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         final Activity activity;
         final Object presenter;
         final Object superNoteNote;
+        final LassoMutationAuthority mutationAuthority;
         final int rotation;
         final int restoreOriginX;
         final boolean originChanged;
@@ -597,6 +733,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             Activity activity,
             Object presenter,
             Object superNoteNote,
+            LassoMutationAuthority mutationAuthority,
             int rotation,
             int restoreOriginX,
             boolean originChanged
@@ -604,9 +741,35 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             this.activity = activity;
             this.presenter = presenter;
             this.superNoteNote = superNoteNote;
+            this.mutationAuthority = mutationAuthority;
             this.rotation = rotation;
             this.restoreOriginX = restoreOriginX;
             this.originChanged = originChanged;
+        }
+    }
+
+    /**
+     * Immutable authority for one accepted native lasso selection.  UI drags
+     * and dismissal taps are not handwriting contacts, but their eventual
+     * areaSelectionTransition()/reWriteTrails() callbacks still mutate the
+     * exact document, page, presenter, and writer epoch captured here.
+     */
+    private static final class LassoMutationAuthority {
+        final long generation;
+        final Activity activity;
+        final Object presenter;
+        final PenContactIdentityCapture writerAuthority;
+
+        LassoMutationAuthority(
+            long generation,
+            Activity activity,
+            Object presenter,
+            PenContactIdentityCapture writerAuthority
+        ) {
+            this.generation = generation;
+            this.activity = activity;
+            this.presenter = presenter;
+            this.writerAuthority = writerAuthority;
         }
     }
 
@@ -1558,6 +1721,154 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
     }
 
+    /** One actually visible native-reader control in global screen space. */
+    private static final class NativeChromeRect {
+        final Rect bounds;
+        final String source;
+
+        NativeChromeRect(Rect bounds, String source) {
+            this.bounds = new Rect(bounds);
+            this.source = source;
+        }
+
+        boolean contains(float rawX, float rawY) {
+            return bounds.contains(Math.round(rawX), Math.round(rawY));
+        }
+    }
+
+    /**
+     * Immutable UI-thread publication consumed by the native pen callback.
+     * It deliberately contains rectangles rather than view references: the
+     * low-latency callback must never traverse or reflect over Android views.
+     */
+    private static final class NativeChromeSnapshot {
+        final long generation;
+        final List<NativeChromeRect> visibleRects;
+        final String signature;
+
+        NativeChromeSnapshot(
+            long generation,
+            List<NativeChromeRect> visibleRects,
+            String signature
+        ) {
+            this.generation = generation;
+            this.visibleRects = Collections.unmodifiableList(
+                new ArrayList<>(visibleRects)
+            );
+            this.signature = signature;
+        }
+
+        NativeChromeRect hit(float rawX, float rawY) {
+            for (NativeChromeRect candidate : visibleRects) {
+                if (candidate.contains(rawX, rawY)) {
+                    return candidate;
+                }
+            }
+            return null;
+        }
+    }
+
+    /** Owns the one global-layout listener installed for a DocumentActivity. */
+    private static final class NativeChromeTracker {
+        final WeakReference<Activity> activity;
+        final WeakReference<View> decor;
+        final ViewTreeObserver.OnGlobalLayoutListener listener;
+
+        NativeChromeTracker(
+            Activity activity,
+            View decor,
+            ViewTreeObserver.OnGlobalLayoutListener listener
+        ) {
+            this.activity = new WeakReference<>(activity);
+            this.decor = new WeakReference<>(decor);
+            this.listener = listener;
+        }
+    }
+
+    /**
+     * Classification for one exact physical stylus contact. Routing is fixed
+     * at DOWN and retained through UP/CANCEL even when the point later crosses
+     * between document content and chrome.
+     */
+    private static final class NativeChromePassThrough {
+        final long generation;
+        final int toolType;
+        final Rect downBounds;
+        final String source;
+        volatile long activityDownTime;
+
+        NativeChromePassThrough(
+            long generation,
+            int toolType,
+            Rect downBounds,
+            String source,
+            long activityDownTime
+        ) {
+            this.generation = generation;
+            this.toolType = toolType;
+            this.downBounds = new Rect(downBounds);
+            this.source = source;
+            this.activityDownTime = activityDownTime;
+        }
+
+        boolean matches(MotionEvent event) {
+            if (event == null || event.getPointerCount() <= 0) {
+                return false;
+            }
+            int eventTool = event.getToolType(0);
+            if (toolType != 0 && eventTool != toolType) {
+                return false;
+            }
+            long observedDownTime = activityDownTime;
+            return observedDownTime < 0L
+                || observedDownTime == event.getDownTime();
+        }
+    }
+
+    /**
+     * Owns one exact native PDF text-selection contact. The token is published
+     * before either handwriting ownership path can observe the contact, then
+     * retained for the entire gesture so Supernote's native selection engine
+     * receives an unmodified DOWN/MOVE/UP stream.
+     */
+    private static final class TextSelectionPenContact {
+        final long generation;
+        final int toolType;
+        final int page;
+        volatile long activityDownTime;
+        volatile boolean activityGateApplied;
+        volatile boolean previousAllowTurnPage;
+        volatile boolean terminalFallbackScheduled;
+
+        TextSelectionPenContact(
+            long generation,
+            int toolType,
+            int page,
+            long activityDownTime
+        ) {
+            this.generation = generation;
+            this.toolType = toolType;
+            this.page = page;
+            this.activityDownTime = activityDownTime;
+            this.activityGateApplied = false;
+            this.previousAllowTurnPage = true;
+            this.terminalFallbackScheduled = false;
+        }
+
+        boolean matches(MotionEvent event) {
+            if (event == null || event.getPointerCount() <= 0) {
+                return false;
+            }
+            int eventTool = event.getToolType(0);
+            if (toolType != 0 && eventTool != toolType) {
+                return false;
+            }
+            long observedDownTime = activityDownTime;
+            return observedDownTime < 0L
+                || observedDownTime == event.getDownTime();
+        }
+    }
+
     /**
      * Immutable, UI-thread-published state used by the native pen callback.
      *
@@ -1621,12 +1932,6 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             return -1;
         }
 
-        boolean isNativeChromeTouch(float y) {
-            return y <= NATIVE_TOP_CHROME_TOUCH_EXCLUSION_PX
-                || (chromeOutputHeight > 0
-                    && y >= chromeOutputHeight
-                        - NATIVE_BOTTOM_CHROME_TOUCH_EXCLUSION_PX);
-        }
     }
 
     /**
@@ -1917,12 +2222,17 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
                     Activity createdActivity = (Activity) param.thisObject;
-                    OWNER_LIFETIME_LOCK.writeLock().lock();
-                    ACTIVITY_CREATE_WRITE_HELD.set(Boolean.TRUE);
+                    Activity previous = activeActivity;
+                    boolean previousControlClaimed =
+                        nativeSpreadControlClaimed(previous);
+                    if (previousControlClaimed) {
+                        OWNER_LIFETIME_LOCK.writeLock().lock();
+                        ACTIVITY_CREATE_WRITE_HELD.set(Boolean.TRUE);
+                    } else {
+                        ACTIVITY_CREATE_WRITE_HELD.remove();
+                    }
                     try {
-                        Activity previous;
                         synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
-                            previous = activeActivity;
                             if (previous != null) {
                                 DOCUMENT_CONTEXT_GENERATIONS.put(
                                     previous,
@@ -1961,11 +2271,13 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                                 createdActivity,
                                 Boolean.TRUE
                             );
-                            disableNativeGateForOwnershipHandoffLocked(
-                                "activity_create_pending"
-                            );
+                            if (previousControlClaimed) {
+                                disableNativeGateForOwnershipHandoffLocked(
+                                    "activity_create_pending"
+                                );
+                            }
                         }
-                        if (previous != null
+                        if (previousControlClaimed && previous != null
                             && previous != createdActivity) {
                             // OWNER write has drained all mutation barriers and
                             // the predecessor is already unpublished. Restore
@@ -1975,8 +2287,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                             );
                         }
                     } catch (Throwable throwable) {
-                        ACTIVITY_CREATE_WRITE_HELD.remove();
-                        OWNER_LIFETIME_LOCK.writeLock().unlock();
+                        if (Boolean.TRUE.equals(
+                                ACTIVITY_CREATE_WRITE_HELD.get()
+                            )) {
+                            ACTIVITY_CREATE_WRITE_HELD.remove();
+                            OWNER_LIFETIME_LOCK.writeLock().unlock();
+                        }
                         throw throwable;
                     }
                 }
@@ -2011,12 +2327,19 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                                 + " reason=component_binding_unavailable");
                             return;
                         }
+                        installNativeChromeTracker(createdActivity);
                         registerHandshakeReceiver(createdActivity);
                         registerTraceControlReceiver(createdActivity);
-                        updateNativeEraserGate(
-                            createdActivity,
-                            "activity_created"
+                        SpreadConfig createdConfig = spreadConfig(
+                            createdActivity
                         );
+                        if (createdConfig != null
+                            && nativeSpreadControlClaimed(createdActivity)) {
+                            updateNativeEraserGate(
+                                createdActivity,
+                                "activity_created"
+                            );
+                        }
                         log("activity_created");
                     } finally {
                         if (Boolean.TRUE.equals(
@@ -2040,7 +2363,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 protected void beforeHookedMethod(MethodHookParam param) {
                     Activity activity = (Activity) param.thisObject;
                     if (!isCurrentOrPendingActivityOwner(activity)) {
-                        param.setResult(null);
+                        if (nativeSpreadControlClaimed(activity)) {
+                            param.setResult(null);
+                        }
+                        return;
+                    }
+                    if (!nativeSpreadControlClaimed(activity)) {
                         return;
                     }
                     // The immutable pen snapshot describes the old orientation.
@@ -2063,6 +2391,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
                     Activity activity = (Activity) param.thisObject;
+                    if (!nativeSpreadControlClaimed(activity)) {
+                        return;
+                    }
                     if (param.getThrowable() != null) {
                         log("configuration_change_failed_closed throwable="
                             + param.getThrowable());
@@ -2115,10 +2446,39 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 protected void beforeHookedMethod(MethodHookParam param) {
                     Activity activity = (Activity) param.thisObject;
                     if (!isActiveActivityOwner(activity)) {
-                        param.setResult(Boolean.FALSE);
+                        if (nativeSpreadControlClaimed(activity)) {
+                            param.setResult(Boolean.FALSE);
+                        }
+                        return;
+                    }
+                    if (!nativeSpreadControlClaimed(activity)) {
                         return;
                     }
                     MotionEvent event = (MotionEvent) param.args[0];
+                    int nativeChromeRoute =
+                        routeNativeChromeActivityStylus(activity, event);
+                    if (nativeChromeRoute == NATIVE_CHROME_ROUTE_PASS) {
+                        // This exact contact began on an actually visible
+                        // native control. Firmware owns the complete stream;
+                        // no module trace/ownership/activation/save path may
+                        // observe or rewrite it.
+                        return;
+                    }
+                    if (nativeChromeRoute == NATIVE_CHROME_ROUTE_BLOCK) {
+                        param.setResult(true);
+                        return;
+                    }
+                    int textSelectionRoute =
+                        routeTextSelectionActivityStylus(activity, event);
+                    if (textSelectionRoute == NATIVE_CHROME_ROUTE_PASS) {
+                        // Firmware owns this exact text-selection contact. It
+                        // must never become handwriting/page-activation input.
+                        return;
+                    }
+                    if (textSelectionRoute == NATIVE_CHROME_ROUTE_BLOCK) {
+                        param.setResult(true);
+                        return;
+                    }
                     trackFingerTouchStream(activity, event);
                     traceTouchEvent(activity, event);
                     SpreadConfig config = SPREAD_CONFIGS.get(activity);
@@ -2146,18 +2506,6 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         param.setResult(true);
                         return;
                     }
-                    if (cachedEditableSpreadLandscape
-                        && event != null
-                        && event.getPointerCount() > 0
-                        && event.getToolType(0) == MotionEvent.TOOL_TYPE_STYLUS
-                        && event.getActionMasked() == MotionEvent.ACTION_DOWN
-                        && XposedHelpers.getIntField(activity, "selectModel") >= 0) {
-                        setTextSelectionHardwareGate(
-                            activity,
-                            true,
-                            "stylus_down"
-                        );
-                    }
                     trackFingerTapNavigation(
                         activity,
                         event,
@@ -2176,8 +2524,29 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
                     Activity activity = (Activity) param.thisObject;
-                    if (isActiveActivityOwner(activity)) {
+                    if (nativeSpreadControlClaimed(activity)
+                        && isActiveActivityOwner(activity)) {
                         MotionEvent event = (MotionEvent) param.args[0];
+                        if (nativeChromeActivityContactCurrent(
+                                activity,
+                                event
+                            )) {
+                            finishNativeChromeActivityContact(
+                                activity,
+                                event
+                            );
+                            return;
+                        }
+                        if (textSelectionActivityContactCurrent(
+                                activity,
+                                event
+                            )) {
+                            finishTextSelectionActivityContact(
+                                activity,
+                                event
+                            );
+                            return;
+                        }
                         finishFingerTouchStream(
                             activity,
                             event
@@ -2212,7 +2581,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         param.thisObject
                     );
                     if (activity == null) {
-                        param.setResult(null);
+                        if (knownNativeEventCallback(param.thisObject)
+                            || mustBlockUnboundModuleComponent()) {
+                            param.setResult(null);
+                        }
                         return;
                     }
                     int pressure = -1;
@@ -2232,6 +2604,49 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         queueLowLatencyLog(
                             "pen_contact_rejected reason=pressure_unavailable"
                         );
+                        param.setResult(null);
+                        return;
+                    }
+                    int nativeChromeRoute = routeNativeChromeNativePen(
+                        activity,
+                        ((Integer) param.args[0]).intValue(),
+                        ((Integer) param.args[1]).intValue(),
+                        pressure
+                    );
+                    if (nativeChromeRoute == NATIVE_CHROME_ROUTE_PASS) {
+                        return;
+                    }
+                    if (nativeChromeRoute == NATIVE_CHROME_ROUTE_BLOCK) {
+                        param.setResult(null);
+                        return;
+                    }
+                    int textSelectionRoute = routeTextSelectionNativePen(
+                        activity,
+                        ((Integer) param.args[0]).intValue(),
+                        ((Integer) param.args[1]).intValue(),
+                        pressure
+                    );
+                    if (textSelectionRoute == NATIVE_CHROME_ROUTE_PASS) {
+                        return;
+                    }
+                    if (textSelectionRoute == NATIVE_CHROME_ROUTE_BLOCK) {
+                        param.setResult(null);
+                        return;
+                    }
+                    if (canonicalLassoUiOwnsPenContact(activity)) {
+                        boolean first = pressure > 0
+                            && LASSO_UI_CONTACT_DOWNS.putIfAbsent(
+                                activity,
+                                Boolean.TRUE
+                            ) == null;
+                        boolean terminal = pressure <= 0
+                            && LASSO_UI_CONTACT_DOWNS.remove(activity) != null;
+                        if (first || terminal) {
+                            queueLowLatencyLog(
+                                "lasso_ui_native_pen_bypassed phase="
+                                    + (first ? "start" : "end")
+                            );
+                        }
                         param.setResult(null);
                         return;
                     }
@@ -2370,39 +2785,25 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                                 int startPage;
                                 int sourcePage = -1;
                                 String guardReason = null;
-                                if (inputSnapshot.isNativeChromeTouch(
-                                        contactY
-                                    )) {
-                                    // A toolbar/page-bar contact belongs to
-                                    // native chrome, not DrawPath. Keep its
-                                    // complete physical gesture, including any
-                                    // drag into the page and pen-up, out of the
-                                    // low-latency writer.
-                                    startPage = PEN_CONTACT_BLOCKED_PAGE;
-                                    guardReason = "blocked_native_chrome";
-                                } else {
-                                    int mappedContactPage = pageAt(
-                                        inputSnapshot,
-                                        ((Integer) param.args[0]).intValue(),
-                                        contactY
-                                    );
-                                    // A contact begun in the divider or a
-                                    // cropped margin has no safe page owner.
-                                    // Latch the complete physical gesture as
-                                    // blocked so a deferred activation cannot
-                                    // start while the pen remains down and no
-                                    // mid-stroke tail can later enter a writer.
-                                    if (mappedContactPage >= 0) {
-                                        startPage = mappedContactPage;
-                                        if (mappedContactPage
-                                                == inputSnapshot.currentPage) {
-                                            sourcePage =
-                                                inputSnapshot.currentPage;
-                                        }
-                                    } else {
-                                        startPage = PEN_CONTACT_BLOCKED_PAGE;
-                                        guardReason = "blocked_unmapped";
+                                int mappedContactPage = pageAt(
+                                    inputSnapshot,
+                                    ((Integer) param.args[0]).intValue(),
+                                    contactY
+                                );
+                                // A contact begun in the divider or a cropped
+                                // margin has no safe page owner. Visible native
+                                // chrome was classified before this ownership
+                                // path and never publishes a handwriting owner.
+                                if (mappedContactPage >= 0) {
+                                    startPage = mappedContactPage;
+                                    if (mappedContactPage
+                                            == inputSnapshot.currentPage) {
+                                        sourcePage =
+                                            inputSnapshot.currentPage;
                                     }
+                                } else {
+                                    startPage = PEN_CONTACT_BLOCKED_PAGE;
+                                    guardReason = "blocked_unmapped";
                                 }
                                 if (!publishPenContactOwnershipLocked(
                                         activity,
@@ -2567,8 +2968,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
-                    if (activityForNativeEventCallback(param.thisObject)
-                            == null) {
+                    Activity activity = activityForNativeEventCallback(
+                        param.thisObject
+                    );
+                    if (activity == null
+                        && (knownNativeEventCallback(param.thisObject)
+                            || mustBlockUnboundModuleComponent())) {
                         param.setResult(null);
                     }
                 }
@@ -2579,13 +2984,61 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     Activity activity = activityForNativeEventCallback(
                         param.thisObject
                     );
+                    if (activity == null) {
+                        return;
+                    }
+                    NativeChromePassThrough nativeChromeContact =
+                        NATIVE_CHROME_PEN_PASSTHROUGHS.get(activity);
+                    if (nativeChromeContact != null) {
+                        // onDigital is part of the same native contact stream.
+                        // Keep module physical-contact bookkeeping completely
+                        // untouched while firmware owns a chrome gesture.
+                        return;
+                    }
+                    TextSelectionPenContact textSelectionContact =
+                        TEXT_SELECTION_PEN_CONTACTS.get(activity);
+                    if (textSelectionContact != null) {
+                        // The native selection engine owns this contact. Never
+                        // publish ordinary writer bookkeeping or a receive
+                        // fallback for it. Once Activity DOWN has installed
+                        // Supernote's isAllowTurnPage gate, Activity UP owns
+                        // the normal restore/retire sequence. A bounded native
+                        // fallback exists only for a missing Activity terminal.
+                        if (state != 1) {
+                            if (textSelectionContact.activityDownTime >= 0L
+                                || textSelectionContact.activityGateApplied) {
+                                scheduleTextSelectionTerminalFallback(
+                                    activity,
+                                    textSelectionContact,
+                                    state
+                                );
+                            } else if (TEXT_SELECTION_PEN_CONTACTS.remove(
+                                    activity,
+                                    textSelectionContact
+                                )) {
+                                queueLowLatencyLog(
+                                    "text_selection_contact_finished generation="
+                                        + textSelectionContact.generation
+                                        + " source=native state=" + state
+                                );
+                            }
+                        }
+                        return;
+                    }
                     if (state == 1) {
                         if (activity != null) {
                             synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
-                                PEN_PHYSICAL_CONTACT_DOWNS.put(
-                                    activity,
-                                    Boolean.TRUE
-                                );
+                                // Recheck under the same lock used to publish
+                                // a text-selection token. If ACTION_DOWN won
+                                // the race, do not leave an ordinary writer
+                                // contact flag behind the selection gesture.
+                                if (TEXT_SELECTION_PEN_CONTACTS.get(activity)
+                                        == null) {
+                                    PEN_PHYSICAL_CONTACT_DOWNS.put(
+                                        activity,
+                                        Boolean.TRUE
+                                    );
+                                }
                             }
                         }
                         return;
@@ -2680,12 +3133,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         );
 
         /*
-         * A full-screen disabled rectangle is normally enough to suppress the
-         * low-latency pen trail while selecting PDF text. In the probe's
-         * half-page DrawPath geometry that rectangle is interpreted in the
-         * virtual page coordinate space, leaving part of the physical screen
-         * writable. Suspend the hardware writer outright during text
-         * selection; the correctly mapped Java overlay remains available.
+         * Native PDF text selection depends on Supernote's handwriting
+         * hardware to emit handWriteSelectText(). Keep the writer configured
+         * for the active page; the exact-contact selection route above keeps
+         * the same gesture out of ordinary handwriting ownership.
          */
         XposedHelpers.findAndHookMethod(
             TARGET_ACTIVITY,
@@ -2695,8 +3146,15 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
-                    if (!isActiveActivityOwner((Activity) param.thisObject)) {
-                        param.setResult(null);
+                    Activity activity = (Activity) param.thisObject;
+                    if (!isActiveActivityOwner(activity)) {
+                        if (nativeSpreadControlClaimed(activity)) {
+                            param.setResult(null);
+                        }
+                        return;
+                    }
+                    if (!nativeSpreadControlClaimed(activity)) {
+                        return;
                     }
                 }
 
@@ -2706,13 +3164,17 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     if (!isActiveActivityOwner(activity)) {
                         return;
                     }
+                    int model = ((Integer) param.args[0]).intValue();
+                    if (model >= 0) {
+                        TEXT_SELECTION_MODES.put(activity, model);
+                    } else {
+                        TEXT_SELECTION_MODES.remove(activity);
+                    }
                     if (!isEditableSpreadLandscape(activity)) {
                         return;
                     }
-                    int model = ((Integer) param.args[0]).intValue();
-                    setTextSelectionHardwareGate(
+                    configureTextSelectionHardware(
                         activity,
-                        model >= 0,
                         "model_changed:" + model
                     );
                 }
@@ -3181,7 +3643,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 protected void beforeHookedMethod(MethodHookParam param) {
                     Activity activity = (Activity) param.thisObject;
                     if (!isActiveActivityOwner(activity)) {
-                        param.setResult(null);
+                        if (nativeSpreadControlClaimed(activity)) {
+                            param.setResult(null);
+                        }
+                        return;
+                    }
+                    if (!nativeSpreadControlClaimed(activity)) {
                         return;
                     }
                     int state = ((Integer) param.args[0]).intValue();
@@ -3291,22 +3758,6 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     }
                 }
 
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) {
-                    Activity activity = (Activity) param.thisObject;
-                    if (!isActiveActivityOwner(activity)) {
-                        return;
-                    }
-                    int state = ((Integer) param.args[0]).intValue();
-                    if (state == 0 && isEditableSpreadLandscape(activity)
-                        && XposedHelpers.getIntField(activity, "selectModel") >= 0) {
-                        setTextSelectionHardwareGate(
-                            activity,
-                            true,
-                            "selection_down"
-                        );
-                    }
-                }
             }
         );
 
@@ -3326,7 +3777,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 protected void beforeHookedMethod(MethodHookParam param) {
                     Activity activity = (Activity) param.thisObject;
                     if (!isActiveActivityOwner(activity)) {
-                        param.setResult(null);
+                        if (nativeSpreadControlClaimed(activity)) {
+                            param.setResult(null);
+                        }
+                        return;
+                    }
+                    if (!nativeSpreadControlClaimed(activity)) {
                         return;
                     }
                     if (!isEditableSpreadLandscape(activity)) {
@@ -3435,7 +3891,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 protected void beforeHookedMethod(MethodHookParam param) {
                     Activity activity = (Activity) param.thisObject;
                     if (!isActiveActivityOwner(activity)) {
-                        param.setResult(null);
+                        if (nativeSpreadControlClaimed(activity)) {
+                            param.setResult(null);
+                        }
+                        return;
+                    }
+                    if (!nativeSpreadControlClaimed(activity)) {
                         return;
                     }
                     if (!isCurrentOrPendingActivityOwner(activity)) {
@@ -3446,10 +3907,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
                     Activity activity = (Activity) param.thisObject;
-                    if (!isActiveActivityOwner(activity)) {
-                        return;
-                    }
-                    if (!isActiveActivityOwner(activity)) {
+                    if (!nativeSpreadControlClaimed(activity)
+                        || !isActiveActivityOwner(activity)) {
                         return;
                     }
                     if (!isCalibrationLandscape(activity)) {
@@ -3492,7 +3951,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     // an inactive A.setImage from popping active B's scope.
                     pushSetImageScope(scope);
                     if (!activeOwner) {
-                        param.setResult(null);
+                        if (nativeSpreadControlClaimed(activity)) {
+                            param.setResult(null);
+                        }
+                        return;
+                    }
+                    if (!nativeSpreadControlClaimed(activity)) {
                         return;
                     }
                     // setImage is the page/document presentation boundary. Do
@@ -3532,6 +3996,13 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         || !scope.activeOwner
                         || !isActiveActivityOwner(activity)) {
                         return;
+                    }
+                    if (!nativeSpreadControlClaimed(activity)) {
+                        SpreadConfig discovered = spreadConfig(activity);
+                        if (discovered == null || !discovered.enabled
+                            || !nativeSpreadControlClaimed(activity)) {
+                            return;
+                        }
                     }
                     if (param.getThrowable() != null) {
                         PageActivationTransaction transaction =
@@ -3609,17 +4080,29 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
                     Activity activity = (Activity) param.thisObject;
-                    OWNER_LIFETIME_LOCK.writeLock().lock();
-                    ACTIVITY_DESTROY_WRITE_HELD.set(Boolean.TRUE);
-                    try {
-                        updateNativeEraserGate(
-                            activity,
-                            "activity_destroyed",
-                            false
-                        );
-                    } catch (Throwable throwable) {
+                    boolean destroyControlClaimed =
+                        nativeSpreadControlClaimed(activity);
+                    if (destroyControlClaimed) {
+                        OWNER_LIFETIME_LOCK.writeLock().lock();
+                        ACTIVITY_DESTROY_WRITE_HELD.set(Boolean.TRUE);
+                    } else {
                         ACTIVITY_DESTROY_WRITE_HELD.remove();
-                        OWNER_LIFETIME_LOCK.writeLock().unlock();
+                    }
+                    try {
+                        if (destroyControlClaimed) {
+                            updateNativeEraserGate(
+                                activity,
+                                "activity_destroyed",
+                                false
+                            );
+                        }
+                    } catch (Throwable throwable) {
+                        if (Boolean.TRUE.equals(
+                                ACTIVITY_DESTROY_WRITE_HELD.get()
+                            )) {
+                            ACTIVITY_DESTROY_WRITE_HELD.remove();
+                            OWNER_LIFETIME_LOCK.writeLock().unlock();
+                        }
                         throw throwable;
                     }
                 }
@@ -3824,7 +4307,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         return;
                     }
                     Activity activity = scope.activity;
-                    if (!documentMutationAuthorityCurrent(
+                    boolean nativeChromeSetterPassThrough =
+                        nativeChromeSetterPassThroughCurrent(activity);
+                    if (!nativeChromeSetterPassThrough
+                        && !documentMutationAuthorityCurrent(
                             activity,
                             param.thisObject
                         )) {
@@ -3834,6 +4320,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         return;
                     }
                     scope.mutationAdmitted = true;
+                    if (nativeChromeSetterPassThrough) {
+                        log("native_chrome_setter_passthrough"
+                            + " setter=setAreaSelection");
+                    }
+                    retireCanonicalLassoMutationAuthority(
+                        activity,
+                        "area_selection_rearmed"
+                    );
                     claimSpreadLassoState(activity, "area_selection");
                     TRACE_TOOLS.put(activity, "lasso");
                     setReplaceActiveInkMode(
@@ -3916,6 +4410,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         )) {
                         return;
                     }
+                    retireCanonicalLassoMutationAuthority(
+                        activity,
+                        "pen_selected"
+                    );
                     TRACE_TOOLS.put(
                         activity,
                         "pen:" + param.args[0] + ":" + param.args[2]
@@ -3958,6 +4456,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         return;
                     }
                     Activity activity = scope.activity;
+                    retireCanonicalLassoMutationAuthority(
+                        activity,
+                        "eraser_selected"
+                    );
                     int eraserType = (Integer) param.args[0];
                     TRACE_TOOLS.put(
                         activity,
@@ -4289,6 +4791,33 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         );
                     Activity activity = scope == null
                         ? null : scope.activity;
+                    Object result = param.getResult();
+                    ReceiveTrialsScope receiveScope =
+                        currentReceiveTrialsScope();
+                    if (receiveScope != null
+                        && scope != null
+                        && scope.activeOwner
+                        && nativeNoteScopeStillActive(
+                            scope,
+                            param.thisObject
+                        )
+                        && isEditableSpreadLandscape(activity)
+                        && result instanceof List
+                        && containsRecognizedStraightLine(
+                            (List<?>) result
+                        )) {
+                        receiveScope.recognizedStraightLine = true;
+                        receiveScope.recognizedLineTransactionStarted =
+                            beginRecognizedLineTransaction(
+                                activity,
+                                scope.presenter,
+                                receiveScope.contactOwnership
+                            );
+                        log("recognized_line_receive_classified page="
+                            + currentDocumentPage(activity)
+                            + " transaction_started="
+                            + receiveScope.recognizedLineTransactionStarted);
+                    }
                     if (!nativeNoteScopeStillActive(
                             scope,
                             param.thisObject
@@ -4297,7 +4826,6 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         || !isEditableSpreadLandscape(activity)) {
                         return;
                     }
-                    Object result = param.getResult();
                     boolean prepared = false;
                     if (result instanceof List) {
                         prepared = prepareNativeSpreadLasso(
@@ -4483,6 +5011,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     if (display == null) {
                         return;
                     }
+                    spreadLassoCanonicalSelectionRect = new Rect(original);
+                    spreadLassoDisplaySelectionRect = new Rect(display);
                     Bitmap nativePreview = (Bitmap) param.args[0];
                     Bitmap correctedPreview = usable(
                         spreadLassoCorrectedPreview
@@ -4513,6 +5043,62 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         + bitmapDescription(nativePreview)
                         + " corrected_bitmap="
                         + bitmapDescription((Bitmap) param.args[0]));
+                }
+            }
+        );
+
+        XposedHelpers.findAndHookMethod(
+            "com.supernote.document.areaselection.AreaSelectionView",
+            loadPackageParam.classLoader,
+            "setAreaSelection",
+            Bitmap.class,
+            Rect.class,
+            int.class,
+            new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    Activity activity = activeActivity;
+                    if (activity == null
+                        || spreadLassoStateOwner != activity
+                        || !spreadLassoCanonicalSelection
+                        || !isEditableSpreadLandscape(activity)) {
+                        return;
+                    }
+                    try {
+                        Bitmap stationary = (Bitmap) XposedHelpers.getObjectField(
+                            param.thisObject,
+                            "bitmap"
+                        );
+                        if (!usable(stationary)) {
+                            return;
+                        }
+                        Bitmap previousMove = (Bitmap) XposedHelpers.getObjectField(
+                            param.thisObject,
+                            "moveBitmap"
+                        );
+                        Bitmap preservedMove = stationary.copy(
+                            Bitmap.Config.ARGB_8888,
+                            true
+                        );
+                        if (!usable(preservedMove)) {
+                            return;
+                        }
+                        XposedHelpers.setObjectField(
+                            param.thisObject,
+                            "moveBitmap",
+                            preservedMove
+                        );
+                        if (previousMove != null && previousMove != stationary
+                            && previousMove != preservedMove
+                            && !previousMove.isRecycled()) {
+                            previousMove.recycle();
+                        }
+                        log("lasso_move_preview_preserved bitmap="
+                            + bitmapDescription(preservedMove));
+                    } catch (Throwable throwable) {
+                        log("lasso_move_preview_preserve_failed " + throwable);
+                        XposedBridge.log(throwable);
+                    }
                 }
             }
         );
@@ -4848,10 +5434,24 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                                 "receive_trials_fallback"
                             );
                         }
-                        persistActiveMutationBeforeCanonicalRefresh(
-                            activity,
-                            param.thisObject
-                        );
+                        if (receiveScope != null
+                            && receiveScope.recognizedStraightLine) {
+                            log("recognized_line_canonical_reload_deferred"
+                                + " page="
+                                + currentDocumentPage(activity)
+                                + " transaction_started="
+                                + receiveScope
+                                    .recognizedLineTransactionStarted);
+                        } else {
+                            retireAbandonedRecognizedLineTransaction(
+                                activity,
+                                "later_non_line_receive"
+                            );
+                            persistActiveMutationBeforeCanonicalRefresh(
+                                activity,
+                                param.thisObject
+                            );
+                        }
                         traceAnnotationBoundary(
                             activity,
                             param.thisObject,
@@ -4928,6 +5528,234 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             }
         );
 
+        /*
+         * A held pen stroke that Supernote recognizes as a straight line is
+         * promoted into EditLineView before the physical pen-up. Present only
+         * that exact editor in the active spread destination. Its later touch
+         * events can then remain in physical screen coordinates, and the final
+         * endpoints are mapped back to Supernote's native split-local space at
+         * the commit boundary below.
+         */
+        XposedHelpers.findAndHookMethod(
+            "com.supernote.document.handwrite.HandWriteView",
+            loadPackageParam.classLoader,
+            "onEditLineMode",
+            List.class,
+            List.class,
+            "com.example.libsupernote.JniTrailContainer",
+            boolean.class,
+            int.class,
+            int.class,
+            new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    Activity activity = activeActivityForHandWriteView(
+                        param.thisObject
+                    );
+                    if (activity == null
+                        || !isEditableSpreadLandscape(activity)) {
+                        return;
+                    }
+                    ReceiveTrialsScope receiveScope =
+                        currentReceiveTrialsScope();
+                    RecognizedLineTransaction transaction = activity == null
+                        ? null : RECOGNIZED_LINE_TRANSACTIONS.get(activity);
+                    boolean admitted = receiveScope != null
+                        && receiveScope.recognizedStraightLine
+                        && receiveScope.recognizedLineTransactionStarted
+                        && transaction != null
+                        && recognizedLineTransactionCurrent(
+                            activity,
+                            transaction,
+                            param.thisObject
+                        );
+                    if (!admitted) {
+                        if (transaction != null) {
+                            RECOGNIZED_LINE_TRANSACTIONS.remove(
+                                activity,
+                                transaction
+                            );
+                        }
+                        param.setResult(null);
+                        log("recognized_line_editor_blocked generation="
+                            + (transaction == null
+                                ? -1L : transaction.generation)
+                            + " reason="
+                            + (receiveScope == null
+                                ? "missing_receive_scope"
+                                : (!receiveScope.recognizedStraightLine
+                                    ? "unclassified_receive"
+                                    : (!receiveScope
+                                        .recognizedLineTransactionStarted
+                                        ? "transaction_not_started"
+                                        : "writer_authority_changed"))));
+                        return;
+                    }
+                    List<Point> displayPoints =
+                        mapRecognizedLinePointsToSpread(
+                            transaction,
+                            param.args[0]
+                        );
+                    List<Pair<Point, Point>> displayLayerPoints =
+                        mapRecognizedLineLayerPointsToSpread(
+                            transaction,
+                            param.args[1]
+                        );
+                    if (displayPoints == null || displayPoints.size() != 2
+                        || displayLayerPoints == null) {
+                        RECOGNIZED_LINE_TRANSACTIONS.remove(
+                            activity,
+                            transaction
+                        );
+                        param.setResult(null);
+                        log("recognized_line_editor_blocked generation="
+                            + transaction.generation
+                            + " reason=invalid_native_geometry");
+                        return;
+                    }
+                    param.args[0] = displayPoints;
+                    param.args[1] = displayLayerPoints;
+                    View handWriteView = (View) param.thisObject;
+                    param.args[4] = Math.max(1, handWriteView.getWidth());
+                    param.args[5] = Math.max(1, handWriteView.getHeight());
+                    if (!transaction.displayRemapLogged) {
+                        transaction.displayRemapLogged = true;
+                        log("recognized_line_editor_mapped_to_spread generation="
+                            + transaction.generation
+                            + " points=" + displayPoints
+                            + " split=" + transaction.nativeSplit
+                            + " split_offset="
+                            + transaction.nativeSplitOffsetX + ","
+                            + transaction.nativeSplitOffsetY
+                            + " destination="
+                            + rectDescription(transaction.destination));
+                    }
+                }
+            }
+        );
+
+        /*
+         * receiveTrials() is only the beginning of a recognized-line edit.
+         * Publish its canonical save/reload after Supernote commits the final
+         * two endpoints, never while EditLineView still owns the held pen.
+         */
+        XposedHelpers.findAndHookMethod(
+            "com.supernote.document.handwrite.HandWritePresenter",
+            loadPackageParam.classLoader,
+            "onEditLineTransition",
+            int.class,
+            int.class,
+            int.class,
+            List.class,
+            new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    Activity activity = activityForHandWritePresenter(
+                        param.thisObject
+                    );
+                    RecognizedLineTransaction transaction = activity == null
+                        ? null : RECOGNIZED_LINE_TRANSACTIONS.get(activity);
+                    boolean editableSpreadWithoutTransaction = activity != null
+                        && isEditableSpreadLandscape(activity)
+                        && transaction == null;
+                    boolean admitted = transaction != null
+                        && recognizedLineTransactionCurrent(
+                            activity,
+                            transaction,
+                            transaction.handWriteView
+                        )
+                        && transaction.presenter == param.thisObject;
+                    if (admitted) {
+                        List<Point> nativePoints =
+                            mapRecognizedLinePointsToNative(
+                                transaction,
+                                param.args[3]
+                            );
+                        if (nativePoints == null
+                            || nativePoints.size() != 2) {
+                            admitted = false;
+                            log("recognized_line_commit_geometry_rejected"
+                                + " generation=" + transaction.generation);
+                        } else {
+                            param.args[3] = nativePoints;
+                            log("recognized_line_commit_geometry_mapped"
+                                + " generation=" + transaction.generation
+                                + " points=" + nativePoints);
+                        }
+                    }
+                    pushRecognizedLineCommitScope(
+                        new RecognizedLineCommitScope(
+                            transaction,
+                            admitted
+                        )
+                    );
+                    if (editableSpreadWithoutTransaction
+                        || (transaction != null && !admitted)) {
+                        if (transaction != null) {
+                            RECOGNIZED_LINE_TRANSACTIONS.remove(
+                                activity,
+                                transaction
+                            );
+                        }
+                        param.setResult(null);
+                        log("recognized_line_commit_blocked generation="
+                            + (transaction == null
+                                ? -1L : transaction.generation)
+                            + " reason="
+                            + (editableSpreadWithoutTransaction
+                                ? "missing_transaction"
+                                : "writer_authority_changed"));
+                    } else if (admitted) {
+                        log("recognized_line_commit_started generation="
+                            + transaction.generation
+                            + " page=" + transaction.documentPage);
+                    }
+                }
+
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    RecognizedLineCommitScope scope =
+                        popRecognizedLineCommitScope();
+                    if (scope == null || scope.transaction == null
+                        || !scope.admitted) {
+                        return;
+                    }
+                    RecognizedLineTransaction transaction = scope.transaction;
+                    Activity activity = transaction.activity;
+                    try {
+                        if (param.getThrowable() != null) {
+                            log("recognized_line_commit_failed generation="
+                                + transaction.generation
+                                + " throwable=" + param.getThrowable());
+                            return;
+                        }
+                        if (!recognizedLineTransactionCurrent(
+                                activity,
+                                transaction,
+                                transaction.handWriteView
+                            )) {
+                            log("recognized_line_commit_reload_skipped"
+                                + " generation=" + transaction.generation
+                                + " reason=writer_authority_changed_after_commit");
+                            return;
+                        }
+                        persistActiveMutationBeforeCanonicalRefresh(
+                            activity,
+                            param.thisObject
+                        );
+                        log("recognized_line_commit_persisted generation="
+                            + transaction.generation
+                            + " page=" + transaction.documentPage);
+                    } finally {
+                        RECOGNIZED_LINE_TRANSACTIONS.remove(
+                            activity,
+                            transaction
+                        );
+                    }
+                }
+            }
+        );
+
         XposedHelpers.findAndHookMethod(
             "com.supernote.document.handwrite.HandWritePresenter",
             loadPackageParam.classLoader,
@@ -4954,6 +5782,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                             presenterScope.activity,
                             presenterScope.presenter,
                             null,
+                            null,
                             0,
                             0,
                             false
@@ -4963,13 +5792,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         }
                         return;
                     }
-                    if (!documentMutationAuthorityCurrent(
+                    if (canonicalLassoMutationAuthority(
                             presenterScope.activity,
                             param.thisObject
-                        )) {
+                        ) == null) {
                         pushLassoOperationScope(new LassoOperationScope(
                             presenterScope.activity,
                             presenterScope.presenter,
+                            null,
                             null,
                             0,
                             0,
@@ -4977,15 +5807,23 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         ));
                         param.setResult(null);
                         log("lasso_transition_blocked"
-                            + " reason=writer_authority_unavailable");
+                            + " reason=selection_authority_unavailable");
                         return;
                     }
-                    pushLassoOperationScope(
+                    LassoOperationScope operation =
                         beginCanonicalLassoOperation(
                             presenterScope,
                             "transition"
-                        )
-                    );
+                        );
+                    pushLassoOperationScope(operation);
+                    if (spreadLassoStateOwner == presenterScope.activity
+                        && spreadLassoCanonicalSelection
+                        && operation.mutationAuthority == null) {
+                        param.setResult(null);
+                        log("lasso_transition_blocked"
+                            + " reason=selection_authority_unavailable");
+                        return;
+                    }
                     repairSpreadLassoTransition(
                         presenterScope.activity,
                         param.thisObject,
@@ -4995,11 +5833,38 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
 
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
+                    LassoOperationScope operation = popLassoOperationScope();
                     try {
+                        boolean moveCommitCompleted = true;
+                        if (operation != null
+                            && operation.mutationAuthority != null
+                            && param.getThrowable() == null
+                            && ((Integer) param.args[5]) == 1) {
+                            moveCommitCompleted =
+                                commitCanonicalLassoMove(operation);
+                        }
                         endCanonicalLassoOperation(
-                            popLassoOperationScope(),
+                            operation,
                             "transition"
                         );
+                        if (operation != null
+                            && operation.mutationAuthority != null
+                            && param.getThrowable() == null
+                            && ((Integer) param.args[5]) == 1
+                            && moveCommitCompleted) {
+                            scheduleCanonicalLassoCompletion(
+                                operation.mutationAuthority,
+                                "transition_move"
+                            );
+                        } else if (operation != null
+                            && operation.mutationAuthority != null
+                            && ((Integer) param.args[5]) == 1
+                            && !moveCommitCompleted) {
+                            retireCanonicalLassoMutationAuthority(
+                                operation.activity,
+                                "transition_move_commit_failed"
+                            );
+                        }
                     } finally {
                         finishTraceMutationAdmission(
                             popTraceMutationAdmission()
@@ -5029,6 +5894,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                             presenterScope.activity,
                             presenterScope.presenter,
                             null,
+                            null,
                             0,
                             0,
                             false
@@ -5038,13 +5904,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         }
                         return;
                     }
-                    if (!documentMutationAuthorityCurrent(
+                    if (canonicalLassoMutationAuthority(
                             presenterScope.activity,
                             param.thisObject
-                        )) {
+                        ) == null) {
                         pushLassoOperationScope(new LassoOperationScope(
                             presenterScope.activity,
                             presenterScope.presenter,
+                            null,
                             null,
                             0,
                             0,
@@ -5052,24 +5919,41 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         ));
                         param.setResult(null);
                         log("lasso_rewrite_blocked"
-                            + " reason=writer_authority_unavailable");
+                            + " reason=selection_authority_unavailable");
                         return;
                     }
-                    pushLassoOperationScope(
+                    LassoOperationScope operation =
                         beginCanonicalLassoOperation(
                             presenterScope,
                             "rewrite"
-                        )
-                    );
+                        );
+                    pushLassoOperationScope(operation);
+                    if (spreadLassoStateOwner == presenterScope.activity
+                        && spreadLassoCanonicalSelection
+                        && operation.mutationAuthority == null) {
+                        param.setResult(null);
+                        log("lasso_rewrite_blocked"
+                            + " reason=selection_authority_unavailable");
+                        return;
+                    }
                 }
 
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
+                    LassoOperationScope operation = popLassoOperationScope();
                     try {
                         endCanonicalLassoOperation(
-                            popLassoOperationScope(),
+                            operation,
                             "rewrite"
                         );
+                        if (operation != null
+                            && operation.mutationAuthority != null
+                            && param.getThrowable() == null) {
+                            scheduleCanonicalLassoCompletion(
+                                operation.mutationAuthority,
+                                "rewrite"
+                            );
+                        }
                     } finally {
                         finishTraceMutationAdmission(
                             popTraceMutationAdmission()
@@ -6198,6 +7082,77 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             + " lateMutationObserved=" + session.lateMutationObserved
             + " eventLogComplete=" + eventLogComplete
             + " publicationFailure=" + String.valueOf(publicationFailure));
+        refreshStatusOverlayAfterTraceStop(
+            activity,
+            completed && publicationFailure == null
+        );
+    }
+
+    private static void refreshStatusOverlayAfterTraceStop(
+        final Activity activity,
+        final boolean completed
+    ) {
+        if (activity == null) {
+            return;
+        }
+        new Handler(activity.getMainLooper()).post(new Runnable() {
+            @Override
+            public void run() {
+                synchronized (TRACE_LOCK) {
+                    if (traceSession != null || traceStartPending) {
+                        return;
+                    }
+                }
+                if (activity.isFinishing() || activity.isDestroyed()
+                    || !isActiveActivityOwner(activity)) {
+                    return;
+                }
+                PenInputSnapshot snapshot = PEN_INPUT_SNAPSHOTS.get(activity);
+                SpreadConfig config = snapshot == null
+                    ? SPREAD_CONFIGS.get(activity) : snapshot.config;
+                if (config == null || !config.enabled || !config.showHeader) {
+                    removeOverlay(activity);
+                    return;
+                }
+                if (!completed) {
+                    showCachedTraceStatusOverlay(
+                        activity,
+                        config,
+                        "SPREAD TRACE: stopped incompletely - recovery required"
+                    );
+                    log("trace_status_overlay_restored state=incomplete");
+                    return;
+                }
+                if (snapshot == null || !snapshot.editable
+                    || !snapshot.geometryReady) {
+                    removeOverlay(activity);
+                    log("trace_status_overlay_restored state=hidden"
+                        + " reason=geometry_not_ready");
+                    return;
+                }
+                String activeSide;
+                if (snapshot.currentPage == snapshot.leftPage) {
+                    activeSide = "LEFT";
+                } else if (snapshot.currentPage == snapshot.rightPage) {
+                    activeSide = "RIGHT";
+                } else {
+                    removeOverlay(activity);
+                    log("trace_status_overlay_restored state=hidden"
+                        + " reason=active_page_not_in_spread");
+                    return;
+                }
+                showCachedTraceStatusOverlay(
+                    activity,
+                    config,
+                    "RTL SPREAD: ACTIVE " + activeSide
+                        + " page " + (snapshot.currentPage + 1)
+                        + " - tap or hover over the other page to activate it"
+                );
+                log("trace_status_overlay_restored state=active"
+                    + " side=" + activeSide
+                    + " page=" + snapshot.currentPage);
+            }
+        });
     }
 
     private static boolean isTraceInputQuiescent(Activity activity) {
@@ -8667,15 +9622,18 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         Properties properties
     ) {
         try {
+            long minimumModuleVersionCode = Long.parseLong(
+                properties.getProperty("minimumModuleVersionCode", "-1")
+            );
             return EDITABLE_MARKER_MODE.equals(
                     properties.getProperty("mode", "")
                 )
                 && Integer.toString(EDITABLE_MARKER_PROTOCOL).equals(
                     properties.getProperty("transactionProtocol", "")
                 )
-                && Long.toString(TRANSACTIONAL_MIN_MODULE_VERSION_CODE).equals(
-                    properties.getProperty("minimumModuleVersionCode", "")
-                )
+                && minimumModuleVersionCode
+                    >= TRANSACTIONAL_MIN_MODULE_VERSION_CODE
+                && minimumModuleVersionCode <= MODULE_VERSION_CODE
                 && "committed".equals(
                     properties.getProperty("activationState", "")
                 )
@@ -9439,15 +10397,27 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 spreadLassoToolArmed = false;
                 spreadLassoActive = accepted;
                 spreadLassoCanonicalSelection = accepted;
-                if (!accepted) {
+                boolean authorityPublished = accepted
+                    && publishCanonicalLassoMutationAuthority(
+                        scope.activity,
+                        scope.presenter,
+                        "native_resubmit"
+                    );
+                spreadLassoActive = accepted && authorityPublished;
+                spreadLassoCanonicalSelection =
+                    accepted && authorityPublished;
+                if (!accepted || !authorityPublished) {
                     restoreSpreadLassoOrigin(
                         scope.activity,
                         scope.presenter,
                         superNoteNote,
-                        "lasso_native_resubmit_rejected"
+                        accepted
+                            ? "lasso_native_authority_rejected"
+                            : "lasso_native_resubmit_rejected"
                     );
                 }
                 log("lasso_native_resubmitted accepted=" + accepted
+                    + " authority=" + authorityPublished
                     + " redraw=" + redrawWidth + "x" + redrawHeight
                     + "->" + CANONICAL_PAGE_WIDTH + "x"
                     + CANONICAL_PAGE_HEIGHT + " rrd="
@@ -9457,7 +10427,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     + originalMaxY + "->" + pageGeometry.maxX + "x"
                     + pageGeometry.maxY + " origin_zero="
                     + spreadLassoOriginZero);
-                return accepted;
+                return accepted && authorityPublished;
             } catch (Throwable throwable) {
                 log("lasso_native_prepare_failed " + throwable);
                 XposedBridge.log(throwable);
@@ -9800,14 +10770,26 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         originalMaxY
                     );
                 }
-                spreadLassoActive = Boolean.TRUE.equals(result);
-                spreadLassoCanonicalSelection = spreadLassoActive;
-                if (!spreadLassoActive) {
+                boolean accepted = Boolean.TRUE.equals(result);
+                spreadLassoActive = accepted;
+                spreadLassoCanonicalSelection = accepted;
+                boolean authorityPublished = accepted
+                    && publishCanonicalLassoMutationAuthority(
+                        activity,
+                        presenter,
+                        "plugin_geometry"
+                    );
+                spreadLassoActive = accepted && authorityPublished;
+                spreadLassoCanonicalSelection =
+                    accepted && authorityPublished;
+                if (!accepted || !authorityPublished) {
                     restoreSpreadLassoOrigin(
                         activity,
                         presenter,
                         superNoteNote,
-                        "lasso_rejected"
+                        accepted
+                            ? "lasso_authority_rejected"
+                            : "lasso_rejected"
                     );
                 }
                 log("lasso_geometry_repaired redraw="
@@ -9821,7 +10803,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     + rectDescription(pluginGeometry.pageBounds)
                     + " orientation=" + pluginGeometry.orientation
                     + " device=" + pluginGeometry.device
-                    + " accepted=" + result);
+                    + " accepted=" + result
+                    + " authority=" + authorityPublished);
             } catch (Throwable throwable) {
                 log("lasso_geometry_repair_failed " + throwable);
                 XposedBridge.log(throwable);
@@ -10002,6 +10985,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         Object lassoInfo,
         Bitmap nativePreview
     ) {
+        spreadLassoCanonicalSelectionRect = null;
+        spreadLassoDisplaySelectionRect = null;
         if (spreadLassoCorrectedPreview != null
             && !spreadLassoCorrectedPreview.isRecycled()) {
             spreadLassoCorrectedPreview.recycle();
@@ -10069,7 +11054,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 + callInt(lassoInfo, "getQuotetextboxnum")
                 + callInt(lassoInfo, "getCreatetextboxnum")
                 + callInt(lassoInfo, "getGeometrynum");
-            boolean trailsOnly = callInt(lassoInfo, "getTrailnum") > 0
+            int selectedTrailCount = callInt(lassoInfo, "getTrailnum");
+            boolean trailsOnly = selectedTrailCount > 0
                 && nonTrailSelections == 0;
             Bitmap corrected = trailsOnly
                 ? Bitmap.createBitmap(
@@ -10146,10 +11132,23 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 }
             }
 
-            if (drawnTrails > 0) {
+            if (trailsOnly && drawnTrails != selectedTrailCount) {
+                corrected.recycle();
+                spreadLassoCorrectedPreview = Bitmap.createBitmap(
+                    nativePreview
+                );
+                log("lasso_preview_rebuild_incomplete_fallback controls="
+                    + controlNumbers
+                    + " selected=" + selectedTrailCount
+                    + " reconstructed=" + drawnTrails
+                    + " native=" + bitmapDescription(nativePreview)
+                    + " fallback="
+                    + bitmapDescription(spreadLassoCorrectedPreview));
+            } else if (drawnTrails > 0 || !trailsOnly) {
                 spreadLassoCorrectedPreview = corrected;
                 log("lasso_preview_rebuilt controls=" + controlNumbers
                     + " trails=" + drawnTrails
+                    + " selected=" + selectedTrailCount
                     + " trails_only=" + trailsOnly
                     + " shift=" + shiftX + "," + shiftY
                     + " bitmap=" + bitmapDescription(corrected));
@@ -10287,6 +11286,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             return;
         }
         try {
+            int rotation = (Integer) param.args[0];
             int x = (Integer) param.args[1];
             int y = (Integer) param.args[2];
             int width = (Integer) param.args[3];
@@ -10308,22 +11308,48 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             int slotOffset = Math.round(outputWidth - writable.right);
             float scaleX = writable.width() / CANONICAL_PAGE_WIDTH;
             float scaleY = writable.height() / CANONICAL_PAGE_HEIGHT;
+            Rect canonicalSelection = spreadLassoCanonicalSelectionRect;
+            Rect displaySelection = spreadLassoDisplaySelectionRect;
+            int expectedFrameWidth = displaySelection == null
+                ? 0 : Math.max(
+                    LASSO_MIN_UI_FRAME_SIZE,
+                    displaySelection.width()
+                );
+            int expectedFrameHeight = displaySelection == null
+                ? 0 : Math.max(
+                    LASSO_MIN_UI_FRAME_SIZE,
+                    displaySelection.height()
+                );
+            boolean pureCanonicalMove = spreadLassoCanonicalSelection
+                && mode == 1 && rotation == 0
+                && canonicalSelection != null && displaySelection != null
+                && width == expectedFrameWidth
+                && height == expectedFrameHeight;
+            int contentPaddingX = pureCanonicalMove
+                ? Math.max(0, (expectedFrameWidth
+                    - displaySelection.width()) / 2)
+                : 0;
+            int contentPaddingY = pureCanonicalMove
+                ? Math.max(0, (expectedFrameHeight
+                    - displaySelection.height()) / 2)
+                : 0;
             int nativeX = Math.round(
-                (x - writable.left) / scaleX
+                (x + contentPaddingX - writable.left) / scaleX
             ) - (spreadLassoCanonicalSelection ? 0 : slotOffset);
-            int nativeY = Math.round((y - writable.top) / scaleY);
-            // The native selection model keeps its canonical dimensions while
-            // AreaSelectionView reports a move using the padded native preview
-            // size. Only the translated origin is in spread-display space.
-            // Applying the inverse half-page scale to the width and height a
-            // second time makes a pure move enlarge the selected trails ~2x.
-            boolean preserveCanonicalSize =
-                spreadLassoCanonicalSelection && mode == 1;
+            int nativeY = Math.round(
+                (y + contentPaddingY - writable.top) / scaleY
+            );
+            // AreaSelectionView centers small selections in a 180 px frame.
+            // A pure move reports that padded frame, not the actual ink bounds.
+            // Map the centered content origin and retain the exact original
+            // canonical dimensions; otherwise the committed ink shifts toward
+            // the frame's top-left and is resized to the padded frame.
+            boolean preserveCanonicalSize = pureCanonicalMove;
             int nativeWidth = preserveCanonicalSize
-                ? width
+                ? canonicalSelection.width()
                 : Math.max(1, Math.round(width / scaleX));
             int nativeHeight = preserveCanonicalSize
-                ? height
+                ? canonicalSelection.height()
                 : Math.max(1, Math.round(height / scaleY));
 
             param.args[1] = nativeX;
@@ -10338,6 +11364,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 + " slot_offset=" + slotOffset
                 + " canonical=" + spreadLassoCanonicalSelection
                 + " preserve_size=" + preserveCanonicalSize
+                + " content_padding=" + contentPaddingX + ","
+                + contentPaddingY
+                + " canonical_selection="
+                + rectDescription(canonicalSelection)
                 + " scale=" + scaleX + "," + scaleY);
         } catch (Throwable throwable) {
             log("lasso_transition_repair_failed " + throwable);
@@ -10357,6 +11387,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             activity,
             presenter,
             null,
+            null,
             0,
             0,
             false
@@ -10366,10 +11397,24 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             || !spreadLassoCanonicalSelection) {
             return skipped;
         }
+        LassoMutationAuthority mutationAuthority =
+            canonicalLassoMutationAuthority(activity, presenter);
+        if (mutationAuthority == null) {
+            return skipped;
+        }
+        LassoOperationScope authorizedNested = new LassoOperationScope(
+            activity,
+            presenter,
+            null,
+            mutationAuthority,
+            0,
+            0,
+            false
+        );
         LassoOperationScope current = spreadLassoOperationScope;
         if (current != null && current.activity == activity
             && current.presenter == presenter && current.originChanged) {
-            return skipped;
+            return authorizedNested;
         }
         try {
             Object superNoteNote =
@@ -10401,6 +11446,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 activity,
                 presenter,
                 superNoteNote,
+                mutationAuthority,
                 rotation,
                 restoreOriginX,
                 originChanged
@@ -10418,6 +11464,248 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 + " " + throwable);
             XposedBridge.log(throwable);
             return skipped;
+        }
+    }
+
+    private static boolean publishCanonicalLassoMutationAuthority(
+        Activity activity,
+        Object presenter,
+        String reason
+    ) {
+        if (activity == null || presenter == null) {
+            return false;
+        }
+        final LassoMutationAuthority published;
+        synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+            PenInputSnapshot snapshot = PEN_INPUT_SNAPSHOTS.get(activity);
+            PenContactIdentityCapture authority = snapshot == null
+                ? null : snapshot.writerAuthority;
+            if (activity != activeActivity
+                || spreadLassoStateOwner != activity
+                || !spreadLassoActive
+                || !spreadLassoCanonicalSelection
+                || HANDWRITE_PRESENTERS.get(activity) != presenter
+                || snapshot == null || !snapshot.editable
+                || !snapshot.geometryReady || authority == null
+                || snapshot.currentPage != authority.readerPage
+                || authority.presenterMarkPage != authority.readerPage + 1
+                || authority.presenter != presenter
+                || !penWriterAuthorityCurrentLocked(activity, authority)) {
+                return false;
+            }
+            published = new LassoMutationAuthority(
+                LASSO_TRANSACTION_COUNTER.incrementAndGet(),
+                activity,
+                presenter,
+                authority
+            );
+            LASSO_MUTATION_AUTHORITIES.put(activity, published);
+        }
+        log("lasso_mutation_authority_published generation="
+            + published.generation + " page="
+            + (published.writerAuthority.readerPage + 1)
+            + " reason=" + reason);
+        return true;
+    }
+
+    /** Caller holds PAGE_ACTIVATION_OWNERSHIP_LOCK. */
+    private static boolean canonicalLassoMutationAuthorityCurrentLocked(
+        Activity activity,
+        Object presenter,
+        LassoMutationAuthority authority
+    ) {
+        if (activity == null || presenter == null || authority == null
+            || authority.activity != activity
+            || authority.presenter != presenter
+            || LASSO_MUTATION_AUTHORITIES.get(activity) != authority
+            || activity != activeActivity
+            || spreadLassoStateOwner != activity
+            || !spreadLassoActive || !spreadLassoCanonicalSelection
+            || DOCUMENT_IDENTITY_ADMISSIONS.get(activity) != null
+            || NAVIGATION_FAIL_CLOSED_DOCUMENTS.get(activity) != null
+            || PAGE_ACTIVATION_TRANSACTIONS.get(activity) != null
+            || PAGE_ACTIVATION_ROLLBACK_RECOVERIES.get(activity) != null
+            || PEN_CONTACT_OWNERSHIPS.get(activity) != null
+            || PEN_CONTACT_START_PAGES.get(activity) != null
+            || Boolean.TRUE.equals(PEN_INPUT_EDITABLE_GUARDS.get(activity))) {
+            return false;
+        }
+        PenInputSnapshot snapshot = PEN_INPUT_SNAPSHOTS.get(activity);
+        PenContactIdentityCapture current = snapshot == null
+            ? null : snapshot.writerAuthority;
+        return snapshot != null && snapshot.editable && snapshot.geometryReady
+            && current != null
+            && snapshot.currentPage == authority.writerAuthority.readerPage
+            && current.readerPage == authority.writerAuthority.readerPage
+            && current.presenterMarkPage
+                == authority.writerAuthority.presenterMarkPage
+            && samePenWriterDocumentAuthority(
+                authority.writerAuthority,
+                current
+            )
+            && penWriterAuthorityCurrentLocked(activity, current);
+    }
+
+    private static LassoMutationAuthority canonicalLassoMutationAuthority(
+        Activity activity,
+        Object presenter
+    ) {
+        synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+            LassoMutationAuthority authority =
+                LASSO_MUTATION_AUTHORITIES.get(activity);
+            return canonicalLassoMutationAuthorityCurrentLocked(
+                activity,
+                presenter,
+                authority
+            ) ? authority : null;
+        }
+    }
+
+    private static boolean canonicalLassoUiOwnsPenContact(
+        Activity activity
+    ) {
+        if (activity == null) {
+            return false;
+        }
+        synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+            LassoMutationAuthority authority =
+                LASSO_MUTATION_AUTHORITIES.get(activity);
+            return authority != null
+                && canonicalLassoMutationAuthorityCurrentLocked(
+                    activity,
+                    authority.presenter,
+                    authority
+                );
+        }
+    }
+
+    private static void scheduleCanonicalLassoCompletion(
+        final LassoMutationAuthority authority,
+        final String reason
+    ) {
+        if (authority == null || authority.activity == null) {
+            return;
+        }
+        new Handler(authority.activity.getMainLooper()).post(new Runnable() {
+            @Override
+            public void run() {
+                boolean completed = false;
+                synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+                    if (LASSO_MUTATION_AUTHORITIES.remove(
+                            authority.activity,
+                            authority
+                        )) {
+                        LASSO_UI_CONTACT_DOWNS.remove(authority.activity);
+                        if (spreadLassoStateOwner == authority.activity) {
+                            spreadLassoActive = false;
+                            spreadLassoCanonicalSelection = false;
+                            spreadLassoOperationOriginZero = false;
+                            spreadLassoToolArmed = true;
+                            spreadLassoCanonicalSelectionRect = null;
+                            spreadLassoDisplaySelectionRect = null;
+                        }
+                        completed = true;
+                    }
+                }
+                if (completed) {
+                    log("lasso_mutation_authority_completed generation="
+                        + authority.generation + " reason=" + reason);
+                }
+            }
+        });
+    }
+
+    private static void retireCanonicalLassoMutationAuthority(
+        Activity activity,
+        String reason
+    ) {
+        if (activity == null) {
+            return;
+        }
+        LassoMutationAuthority retired;
+        synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+            retired = retireCanonicalLassoMutationAuthorityLocked(activity);
+        }
+        if (retired != null) {
+            log("lasso_mutation_authority_retired generation="
+                + retired.generation + " reason=" + reason);
+        }
+    }
+
+    /** Caller holds PAGE_ACTIVATION_OWNERSHIP_LOCK. */
+    private static LassoMutationAuthority
+        retireCanonicalLassoMutationAuthorityLocked(
+            Activity activity
+        ) {
+        LassoMutationAuthority retired =
+            LASSO_MUTATION_AUTHORITIES.remove(activity);
+        LASSO_UI_CONTACT_DOWNS.remove(activity);
+        if (spreadLassoStateOwner == activity) {
+            spreadLassoActive = false;
+            spreadLassoCanonicalSelection = false;
+            spreadLassoOperationOriginZero = false;
+            spreadLassoCanonicalSelectionRect = null;
+            spreadLassoDisplaySelectionRect = null;
+        }
+        return retired;
+    }
+
+    /**
+     * Firmware's move transition writes the .mark container before its
+     * refreshed layer bitmap has been folded back into the page record. In a
+     * native single-page layout the later selection-end callback repairs that
+     * ordering. Native Spread's canonical selection path may finish directly
+     * from the move callback, so perform the same native finalization while
+     * the mark origin is still canonical and the exact lasso authority is
+     * still published.
+     */
+    private static boolean commitCanonicalLassoMove(
+        LassoOperationScope operation
+    ) {
+        if (operation == null || operation.activity == null
+            || operation.presenter == null
+            || operation.mutationAuthority == null) {
+            return false;
+        }
+        if (canonicalLassoMutationAuthority(
+                operation.activity,
+                operation.presenter
+            ) != operation.mutationAuthority) {
+            log("lasso_transition_canonical_commit_blocked"
+                + " reason=authority_changed");
+            return false;
+        }
+        try {
+            // Keep operation.originChanged active across every native call.
+            // The nested reWriteTrails hook recognizes this exact scope and
+            // therefore reuses its authority/origin rather than restoring the
+            // spread offset between serialization and bitmap refresh.
+            XposedHelpers.callMethod(
+                operation.presenter,
+                "reWriteTrails"
+            );
+            XposedHelpers.callMethod(
+                operation.presenter,
+                "setOnGlobalLayout",
+                Boolean.TRUE
+            );
+            XposedHelpers.callMethod(
+                operation.presenter,
+                "refreshBitmap"
+            );
+            XposedHelpers.callMethod(
+                operation.presenter,
+                "sendClearAll"
+            );
+            log("lasso_transition_canonical_commit generation="
+                + operation.mutationAuthority.generation + " page="
+                + (operation.mutationAuthority.writerAuthority.readerPage
+                    + 1));
+            return true;
+        } catch (Throwable throwable) {
+            log("lasso_transition_canonical_commit_failed " + throwable);
+            XposedBridge.log(throwable);
+            return false;
         }
     }
 
@@ -10479,6 +11767,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         if (activity == null || spreadLassoStateOwner == activity) {
             return;
         }
+        retireCanonicalLassoMutationAuthority(
+            spreadLassoStateOwner,
+            "owner_handoff_" + reason
+        );
         restoreOwnedSpreadLassoOrigin(
             spreadLassoStateOwner,
             "owner_handoff_" + reason
@@ -10857,7 +12149,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     }
 
     private static boolean isCalibrationLandscape(Activity activity) {
-        return activity.getResources().getConfiguration().orientation
+        return nativeSpreadControlClaimed(activity)
+            && activity.getResources().getConfiguration().orientation
             == Configuration.ORIENTATION_LANDSCAPE
             && isCalibrationFile(activity);
     }
@@ -10867,7 +12160,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             return false;
         }
         SpreadConfig config = SPREAD_CONFIGS.get(activity);
-        return config != null && config.enabled
+        return nativeSpreadControlClaimed(activity)
+            && config != null && config.enabled
             && (!config.editable || !nativeBridgeLoaded || !nativeHookReady);
     }
 
@@ -10904,6 +12198,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         SpreadConfig config
     ) {
         return activity != null
+            && nativeSpreadControlClaimed(activity)
             && activity.getResources().getConfiguration().orientation
                 == Configuration.ORIENTATION_LANDSCAPE
             && config != null
@@ -11048,9 +12343,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 "setUri", "resetShowRect", "setHandWriteRotation",
                 "setAreaSelection", "setPen", "sendEraserInfo", "undo",
                 "redo", "loadHandWrite", "saveTrails", "receiveTrials",
-                "areaSelectionTransition", "reWriteTrails"},
+                "onEditLineTransition", "areaSelectionTransition",
+                "reWriteTrails"},
             {"com.supernote.document.handwrite.HandWriteView",
-                "setBitmap", "showAreaSelection"},
+                "setBitmap", "showAreaSelection",
+                "onEditLineMode"},
             {"com.example.libsupernote.SuperNoteNote",
                 "loadMarkData", "getTrailContainer",
                 "modifyPageTrailsFromFile", "getRegionTrailRect",
@@ -11107,6 +12404,20 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         protected void beforeHookedMethod(
                             MethodHookParam param
                         ) {
+                            if (!hasAnyNativeSpreadControlClaim()) {
+                                ArrayDeque<Integer> scopes =
+                                    barrierScopes.get();
+                                if (scopes == null) {
+                                    scopes = new ArrayDeque<>();
+                                    barrierScopes.set(scopes);
+                                }
+                                // Zero denotes an intentionally inert hook,
+                                // not a failed acquisition. Ordinary reader
+                                // calls must never be suppressed merely
+                                // because this LSPosed module is installed.
+                                scopes.push(Integer.valueOf(0));
+                                return;
+                            }
                             boolean ownerAcquired = false;
                             boolean documentAcquired =
                                 !documentMutationBoundary;
@@ -11373,11 +12684,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         PersistedConfigWatch retiredWatch;
         PageActivationTransaction retiredTransaction;
         DeferredSpreadTurn retiredDeferred;
+        LassoMutationAuthority retiredLasso;
         DocumentIdentityAdmission admission;
         synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
             if (activity == null || activity != activeActivity) {
                 return null;
             }
+            retiredLasso =
+                retireCanonicalLassoMutationAuthorityLocked(activity);
             long documentContextGeneration =
                 DOCUMENT_CONTEXT_GENERATION_COUNTER.incrementAndGet();
             DocumentIdentityFence fence =
@@ -11473,6 +12787,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         stopPersistedConfigWatch(retiredWatch);
         releasePageActivationConfigGuard(retiredTransaction);
         releaseDeferredConfigWatch(retiredDeferred);
+        if (retiredLasso != null) {
+            log("lasso_mutation_authority_retired generation="
+                + retiredLasso.generation
+                + " reason=document_identity_admission:" + reason);
+        }
         log("document_identity_invalidated reason=" + reason
             + " context_generation="
             + admission.documentContextGeneration);
@@ -12020,7 +13339,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             return null;
         }
         Activity activity = activeActivity;
-        if (activity == null) {
+        if (activity == null || !nativeSpreadControlClaimed(activity)) {
             return null;
         }
         synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
@@ -12038,17 +13357,43 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             )
             && activeActivity == null && pendingActivity != null;
         return !exactCreateInitialization
-            && (activeActivity != null || pendingActivity != null);
+            && hasAnyNativeSpreadControlClaim();
+    }
+
+    private static boolean nativeSpreadControlClaimed(Activity activity) {
+        return activity != null
+            && NATIVE_SPREAD_CONTROL_CLAIMS.get(activity) != null;
+    }
+
+    private static boolean hasAnyNativeSpreadControlClaim() {
+        Activity current = activeActivity;
+        Activity pending = pendingActivity;
+        return nativeSpreadControlClaimed(current)
+            || nativeSpreadControlClaimed(pending);
+    }
+
+    private static Activity claimedActivityForComponent(
+        Map<Activity, Object> bindings,
+        Object component
+    ) {
+        if (component == null) {
+            return null;
+        }
+        for (Map.Entry<Activity, Object> entry : bindings.entrySet()) {
+            Activity owner = entry.getKey();
+            if (entry.getValue() == component
+                && nativeSpreadControlClaimed(owner)) {
+                return owner;
+            }
+        }
+        return null;
     }
 
     private static boolean knownNativeEventCallback(Object callback) {
-        if (callback == null) {
-            return false;
-        }
-        if (RETIRED_NATIVE_CALLBACKS.containsKey(callback)) {
-            return true;
-        }
-        return NATIVE_EVENT_CALLBACKS.containsValue(callback);
+        return claimedActivityForComponent(
+            NATIVE_EVENT_CALLBACKS,
+            callback
+        ) != null;
     }
 
     private static Activity activeActivityForDocumentViewModel(
@@ -12058,7 +13403,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             return null;
         }
         Activity candidate = activeActivity;
-        if (candidate == null) {
+        if (candidate == null || !nativeSpreadControlClaimed(candidate)) {
             return null;
         }
         refreshActivityComponentBindings(candidate);
@@ -12095,13 +13440,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     }
 
     private static boolean knownDocumentViewModel(Object viewModel) {
-        if (viewModel == null) {
-            return false;
-        }
-        if (RETIRED_DOCUMENT_VIEW_MODELS.containsKey(viewModel)) {
-            return true;
-        }
-        return DOCUMENT_VIEW_MODELS.containsValue(viewModel);
+        return claimedActivityForComponent(
+            DOCUMENT_VIEW_MODELS,
+            viewModel
+        ) != null;
     }
 
     private static void pushSetImageScope(SetImageScope scope) {
@@ -12158,7 +13500,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             return null;
         }
         Activity candidate = activeActivity;
-        if (candidate == null) {
+        if (candidate == null || !nativeSpreadControlClaimed(candidate)) {
             return null;
         }
         refreshActivityComponentBindings(candidate);
@@ -12194,13 +13536,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     }
 
     private static boolean knownHandWriteClient(Object client) {
-        if (client == null) {
-            return false;
-        }
-        if (RETIRED_HANDWRITE_CLIENTS.containsKey(client)) {
-            return true;
-        }
-        return HANDWRITE_CLIENTS.containsValue(client);
+        return claimedActivityForComponent(
+            HANDWRITE_CLIENTS,
+            client
+        ) != null;
     }
 
     private static Activity activeActivityForHandWriteView(Object view) {
@@ -12208,7 +13547,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             return null;
         }
         Activity candidate = activeActivity;
-        if (candidate == null) {
+        if (candidate == null || !nativeSpreadControlClaimed(candidate)) {
             return null;
         }
         refreshActivityComponentBindings(candidate);
@@ -12230,13 +13569,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     }
 
     private static boolean knownHandWriteView(Object view) {
-        if (view == null) {
-            return false;
-        }
-        if (RETIRED_HANDWRITE_VIEWS.containsKey(view)) {
-            return true;
-        }
-        return HANDWRITE_VIEWS.containsValue(view);
+        return claimedActivityForComponent(
+            HANDWRITE_VIEWS,
+            view
+        ) != null;
     }
 
     private static Activity activityForHandWritePresenter(Object presenter) {
@@ -12244,7 +13580,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             return null;
         }
         Activity candidate = activeActivity;
-        if (candidate == null) {
+        if (candidate == null || !nativeSpreadControlClaimed(candidate)) {
             return null;
         }
         refreshActivityComponentBindings(candidate);
@@ -12281,8 +13617,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             activity,
             presenter,
             activity != null
-                || HANDWRITE_PRESENTERS.containsValue(presenter)
-                || RETIRED_HANDWRITE_PRESENTERS.containsKey(presenter)
+                || claimedActivityForComponent(
+                    HANDWRITE_PRESENTERS,
+                    presenter
+                ) != null
                 || mustBlockUnboundModuleComponent(),
             isActiveHandWritePresenterOwner(activity, presenter)
         );
@@ -12345,6 +13683,32 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         return scope;
     }
 
+    private static void pushRecognizedLineCommitScope(
+        RecognizedLineCommitScope scope
+    ) {
+        ArrayDeque<RecognizedLineCommitScope> scopes =
+            RECOGNIZED_LINE_COMMIT_SCOPES.get();
+        if (scopes == null) {
+            scopes = new ArrayDeque<>();
+            RECOGNIZED_LINE_COMMIT_SCOPES.set(scopes);
+        }
+        scopes.push(scope);
+    }
+
+    private static RecognizedLineCommitScope popRecognizedLineCommitScope() {
+        ArrayDeque<RecognizedLineCommitScope> scopes =
+            RECOGNIZED_LINE_COMMIT_SCOPES.get();
+        if (scopes == null || scopes.isEmpty()) {
+            RECOGNIZED_LINE_COMMIT_SCOPES.remove();
+            return null;
+        }
+        RecognizedLineCommitScope scope = scopes.pop();
+        if (scopes.isEmpty()) {
+            RECOGNIZED_LINE_COMMIT_SCOPES.remove();
+        }
+        return scope;
+    }
+
     private static boolean presenterCallbackScopeStillActive(
         PresenterCallbackScope scope,
         Object presenter
@@ -12403,7 +13767,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             return null;
         }
         Activity candidate = activeActivity;
-        if (candidate == null) {
+        if (candidate == null || !nativeSpreadControlClaimed(candidate)) {
             return null;
         }
         refreshActivityComponentBindings(candidate);
@@ -12431,13 +13795,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     }
 
     private static boolean knownSuperNoteNote(Object superNoteNote) {
-        if (superNoteNote == null) {
-            return false;
-        }
-        if (RETIRED_SUPER_NOTE_NOTES.containsKey(superNoteNote)) {
-            return true;
-        }
-        return SUPER_NOTE_NOTES.containsValue(superNoteNote);
+        return claimedActivityForComponent(
+            SUPER_NOTE_NOTES,
+            superNoteNote
+        ) != null;
     }
 
     private static boolean isActiveSuperNoteNoteOwner(
@@ -12516,6 +13877,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         if (activity == null) {
             return;
         }
+        boolean controlClaimed = nativeSpreadControlClaimed(activity);
+        removeNativeChromeTracker(activity);
         stopAnnotationTrace(activity, "activity_destroyed");
         // Each binding refresh is independently guarded, so one inaccessible
         // field cannot prevent the other exact component identities from being
@@ -12558,7 +13921,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 activeActivity = null;
             }
         }
-        if (activeCleared) {
+        if (activeCleared && controlClaimed) {
             // onDestroy retains OWNER write, so no successor can publish while
             // app/native lasso restoration runs outside the PAGE monitor.
             resetSpreadEditingState("activity_destroyed");
@@ -12612,10 +13975,19 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         DOCUMENT_RECEIVE_DISCARDED_GENERATIONS.remove(activity);
         DOCUMENT_RECEIVE_IDENTITIES.remove(activity);
         PEN_PHYSICAL_CONTACT_DOWNS.remove(activity);
+        LASSO_UI_CONTACT_DOWNS.remove(activity);
+        clearTextSelectionContact(activity, "activity_release");
+        retireAbandonedRecognizedLineTransaction(
+            activity,
+            "activity_release"
+        );
+        TEXT_SELECTION_MODES.remove(activity);
+        LASSO_MUTATION_AUTHORITIES.remove(activity);
         clearPenInputSnapshot(activity);
         PEN_INPUT_EDITABLE_GUARDS.remove(activity);
         PEN_INPUT_BLOCK_LOG_STATES.remove(activity);
         SPREAD_CONFIGS.remove(activity);
+        NATIVE_SPREAD_CONTROL_CLAIMS.remove(activity);
         CONFIG_LOAD_GENERATIONS.remove(activity);
         CONFIG_AUTHORITY_GENERATIONS.remove(activity);
         NAVIGATION_FAIL_CLOSED_DOCUMENTS.remove(activity);
@@ -12651,6 +14023,25 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     }
 
     private static void resetSpreadEditingState(String reason) {
+        LASSO_MUTATION_AUTHORITIES.clear();
+        LASSO_UI_CONTACT_DOWNS.clear();
+        for (Activity activity : new ArrayList<>(
+                RECOGNIZED_LINE_TRANSACTIONS.keySet()
+            )) {
+            retireAbandonedRecognizedLineTransaction(
+                activity,
+                "editing_reset_" + reason
+            );
+        }
+        for (Activity activity : new ArrayList<>(
+                TEXT_SELECTION_PEN_CONTACTS.keySet()
+            )) {
+            clearTextSelectionContact(
+                activity,
+                "editing_reset_" + reason
+            );
+        }
+        TEXT_SELECTION_MODES.clear();
         restoreOwnedSpreadLassoOrigin(
             spreadLassoStateOwner,
             "reset_" + reason
@@ -12662,6 +14053,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         spreadLassoToolArmed = false;
         spreadLassoStateOwner = null;
         spreadLassoOperationScope = null;
+        spreadLassoCanonicalSelectionRect = null;
+        spreadLassoDisplaySelectionRect = null;
         if (spreadLassoCorrectedPreview != null
             && !spreadLassoCorrectedPreview.isRecycled()) {
             spreadLassoCorrectedPreview.recycle();
@@ -12673,7 +14066,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static boolean isCalibrationFile(Activity activity) {
         SpreadConfig config = activity == null
             ? null : SPREAD_CONFIGS.get(activity);
-        return config != null && config.enabled;
+        return nativeSpreadControlClaimed(activity)
+            && config != null && config.enabled;
     }
 
     private static boolean shouldSuppressFailClosedNavigation(
@@ -12851,11 +14245,11 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             FileIdentity retiringSnapshotIdentity = FileIdentity.capture(
                 retiringBackupSnapshot
             );
-            if (TARGET_FILE.equals(path)) {
-                boolean authorityArtifactsAbsent = markerIdentity.isMissing()
-                    && backupIdentity.isMissing()
-                    && snapshotIdentity.isMissing()
-                    && retiringSnapshotIdentity.isMissing();
+            boolean authorityArtifactsAbsent = markerIdentity.isMissing()
+                && backupIdentity.isMissing()
+                && snapshotIdentity.isMissing()
+                && retiringSnapshotIdentity.isMissing();
+            if (TARGET_FILE.equals(path) && authorityArtifactsAbsent) {
                 SpreadConfig calibration = new SpreadConfig(
                     path,
                     documentModified,
@@ -13128,19 +14522,29 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     }
                     SpreadConfig previous = SPREAD_CONFIGS.remove(activity);
                     PROTECTED_VERIFICATIONS.remove(activity);
+                    boolean controlClaimed =
+                        nativeSpreadControlClaimed(activity);
                     String guardedPath = attemptedPath != null
                         ? attemptedPath
                         : previous == null ? null : previous.documentPath;
-                    if (guardedPath != null) {
+                    if (controlClaimed && guardedPath != null) {
                         NAVIGATION_FAIL_CLOSED_DOCUMENTS.put(
                             activity,
                             guardedPath
                         );
                     }
-                    PEN_INPUT_EDITABLE_GUARDS.put(activity, Boolean.TRUE);
+                    if (controlClaimed) {
+                        PEN_INPUT_EDITABLE_GUARDS.put(
+                            activity,
+                            Boolean.TRUE
+                        );
+                    } else {
+                        PEN_INPUT_EDITABLE_GUARDS.remove(activity);
+                        NAVIGATION_FAIL_CLOSED_DOCUMENTS.remove(activity);
+                    }
                     PEN_INPUT_SNAPSHOTS.remove(activity);
                     retiredWatch = PERSISTED_CONFIG_WATCHES.remove(activity);
-                    owned = true;
+                    owned = controlClaimed;
                 }
             }
         } finally {
@@ -13206,16 +14610,26 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                             config.documentPath,
                             currentDocumentPath(activity)
                         )) {
-                        NAVIGATION_FAIL_CLOSED_DOCUMENTS.put(
-                            activity,
-                            config.documentPath
-                        );
+                        boolean controlClaimed =
+                            nativeSpreadControlClaimed(activity);
+                        if (controlClaimed) {
+                            NAVIGATION_FAIL_CLOSED_DOCUMENTS.put(
+                                activity,
+                                config.documentPath
+                            );
+                        }
                         SPREAD_CONFIGS.remove(activity);
-                        withdrawFailClosedPenInputAuthorityLocked(
-                            activity,
-                            "persisted_config_watch_unavailable_or_stale"
-                        );
-                        withdrewAuthority = true;
+                        if (controlClaimed) {
+                            withdrawFailClosedPenInputAuthorityLocked(
+                                activity,
+                                "persisted_config_watch_unavailable_or_stale"
+                            );
+                            withdrewAuthority = true;
+                        } else {
+                            PEN_INPUT_EDITABLE_GUARDS.remove(activity);
+                            PEN_INPUT_SNAPSHOTS.remove(activity);
+                            NAVIGATION_FAIL_CLOSED_DOCUMENTS.remove(activity);
+                        }
                     }
                 }
                 if (watch != null) {
@@ -13230,6 +14644,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         synchronized (PERSISTED_CONFIG_OPERATION_LOCK) {
         boolean published = false;
         boolean watchChanged = false;
+        boolean acquiredControlClaim = false;
+        boolean releasedControlClaim = false;
         synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
             if (activity == activeActivity
                 && DOCUMENT_IDENTITY_ADMISSIONS.get(activity) == null
@@ -13242,7 +14658,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     currentDocumentPath(activity)
                 )) {
                 SpreadConfig previousConfig = SPREAD_CONFIGS.get(activity);
-                if (previousConfig != config) {
+                boolean controlClaimed =
+                    nativeSpreadControlClaimed(activity);
+                if (previousConfig != config
+                    && (controlClaimed || config.enabled)) {
                     // Persisted authority changed.  Withdraw the old Java
                     // snapshot and native gate in the same PAGE commit before
                     // publishing/rebinding the replacement config.
@@ -13279,6 +14698,28 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         config
                     )) {
                     clearFailClosedNavigation(activity, config.documentPath);
+                    if (config.enabled) {
+                        acquiredControlClaim =
+                            NATIVE_SPREAD_CONTROL_CLAIMS.put(
+                                activity,
+                                config.documentPath
+                            ) == null;
+                    } else if (PAGE_ACTIVATION_TRANSACTIONS.get(activity)
+                            == null
+                        && PAGE_ACTIVATION_ROLLBACK_RECOVERIES.get(activity)
+                            == null
+                        && DEFERRED_SPREAD_TURNS.get(activity) == null) {
+                        releasedControlClaim =
+                            NATIVE_SPREAD_CONTROL_CLAIMS.remove(activity)
+                                != null;
+                        PEN_INPUT_EDITABLE_GUARDS.remove(activity);
+                        PEN_INPUT_SNAPSHOTS.remove(activity);
+                        DOCUMENT_RECEIVE_IDENTITIES.remove(activity);
+                        DOCUMENT_RECEIVE_TOMBSTONES.remove(activity);
+                        DOCUMENT_RECEIVE_DISCARDED_GENERATIONS.remove(
+                            activity
+                        );
+                    }
                     published = true;
                 } else {
                     // A recovery fence from another document must never become
@@ -13310,8 +14751,65 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             }
             return null;
         }
+        if (acquiredControlClaim) {
+            log("native_spread_control_claimed path="
+                + config.documentPath);
+        }
+        if (releasedControlClaim) {
+            log("native_spread_control_released path="
+                + config.documentPath);
+            scheduleOrdinaryReaderHardwareRestore(
+                activity,
+                "verified_native_spread_off"
+            );
+        }
         return config;
         }
+    }
+
+    private static void scheduleOrdinaryReaderHardwareRestore(
+        final Activity activity,
+        final String reason
+    ) {
+        if (activity == null) {
+            return;
+        }
+        new Handler(activity.getMainLooper()).post(new Runnable() {
+            @Override
+            public void run() {
+                if (!isActiveActivityOwner(activity)
+                    || nativeSpreadControlClaimed(activity)
+                    || activity.isFinishing()
+                    || (Build.VERSION.SDK_INT
+                        >= Build.VERSION_CODES.JELLY_BEAN_MR1
+                        && activity.isDestroyed())) {
+                    return;
+                }
+                try {
+                    updateNativeEraserGate(
+                        activity,
+                        "ordinary_reader_restore_" + reason,
+                        false
+                    );
+                    /*
+                     * Re-establish the firmware's own writable/selection
+                     * areas after a claimed document returns to ordinary
+                     * mode.  This deliberately calls the native reader's
+                     * public activity boundary only after our claim has been
+                     * removed, so every nested module hook is inert.
+                     */
+                    XposedHelpers.callMethod(
+                        activity,
+                        "sendDisableWriteArea"
+                    );
+                    log("ordinary_reader_hardware_restored reason=" + reason);
+                } catch (Throwable throwable) {
+                    log("ordinary_reader_hardware_restore_failed reason="
+                        + reason + " " + throwable);
+                    XposedBridge.log(throwable);
+                }
+            }
+        });
     }
 
     private static boolean rebindRollbackRecoveryToValidatedConfigLocked(
@@ -13886,6 +15384,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             } catch (Throwable throwable) {
                 return false;
             }
+            LassoMutationAuthority retiredLasso;
             synchronized (watch.operationLock) {
                 synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
                     if (activity != activeActivity
@@ -13903,7 +15402,14 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     PROTECTED_VERIFICATIONS.remove(activity);
                     PEN_INPUT_EDITABLE_GUARDS.put(activity, Boolean.TRUE);
                     PEN_INPUT_SNAPSHOTS.remove(activity);
+                    retiredLasso =
+                        retireCanonicalLassoMutationAuthorityLocked(activity);
                 }
+            }
+            if (retiredLasso != null) {
+                log("lasso_mutation_authority_retired generation="
+                    + retiredLasso.generation
+                    + " reason=persisted_config_watch:" + reason);
             }
             // No config/watch/PAGE monitor is held across app or JNI calls.
             XposedHelpers.callMethod(
@@ -14217,6 +15723,335 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
         View decor = activity.getWindow().getDecorView();
         return decor == null ? 0 : decor.getHeight();
+    }
+
+    private static void installNativeChromeTracker(final Activity activity) {
+        if (activity == null || activity.getWindow() == null) {
+            return;
+        }
+        final View decor = activity.getWindow().getDecorView();
+        if (decor == null) {
+            return;
+        }
+        removeNativeChromeTracker(activity);
+        final WeakReference<Activity> activityReference =
+            new WeakReference<>(activity);
+        ViewTreeObserver.OnGlobalLayoutListener listener =
+            new ViewTreeObserver.OnGlobalLayoutListener() {
+                @Override
+                public void onGlobalLayout() {
+                    Activity owner = activityReference.get();
+                    if (owner != null && isCurrentOrPendingActivityOwner(owner)) {
+                        refreshNativeChromeSnapshot(
+                            owner,
+                            "global_layout"
+                        );
+                    }
+                }
+            };
+        decor.getViewTreeObserver().addOnGlobalLayoutListener(listener);
+        NATIVE_CHROME_TRACKERS.put(
+            activity,
+            new NativeChromeTracker(activity, decor, listener)
+        );
+        decor.post(new Runnable() {
+            @Override
+            public void run() {
+                Activity owner = activityReference.get();
+                if (owner != null && isCurrentOrPendingActivityOwner(owner)) {
+                    refreshNativeChromeSnapshot(owner, "tracker_installed");
+                }
+            }
+        });
+    }
+
+    private static void removeNativeChromeTracker(Activity activity) {
+        NativeChromeTracker tracker = NATIVE_CHROME_TRACKERS.remove(activity);
+        NATIVE_CHROME_SNAPSHOTS.remove(activity);
+        NATIVE_CHROME_PEN_PASSTHROUGHS.remove(activity);
+        if (tracker == null) {
+            return;
+        }
+        View decor = tracker.decor.get();
+        if (decor == null) {
+            return;
+        }
+        try {
+            ViewTreeObserver observer = decor.getViewTreeObserver();
+            if (observer.isAlive()) {
+                observer.removeOnGlobalLayoutListener(tracker.listener);
+            }
+        } catch (Throwable throwable) {
+            queueLowLatencyLog(
+                "native_chrome_tracker_remove_failed " + throwable
+            );
+        }
+    }
+
+    private static NativeChromeSnapshot refreshNativeChromeSnapshot(
+        Activity activity,
+        String reason
+    ) {
+        if (activity == null || activity.getWindow() == null
+            || Looper.myLooper() != activity.getMainLooper()) {
+            return activity == null
+                ? null : NATIVE_CHROME_SNAPSHOTS.get(activity);
+        }
+        View decor = activity.getWindow().getDecorView();
+        if (decor == null || decor.getWidth() <= 0 || decor.getHeight() <= 0) {
+            return NATIVE_CHROME_SNAPSHOTS.get(activity);
+        }
+        TreeMap<String, NativeChromeRect> captured = new TreeMap<>();
+        collectNativeChromeRects(
+            decor,
+            false,
+            (long) decor.getWidth() * (long) decor.getHeight(),
+            captured
+        );
+        collectAdditionalWindowChromeRects(
+            decor,
+            (long) decor.getWidth() * (long) decor.getHeight(),
+            captured
+        );
+        ArrayList<NativeChromeRect> rects = new ArrayList<>(
+            captured.values()
+        );
+        StringBuilder signatureBuilder = new StringBuilder();
+        for (Map.Entry<String, NativeChromeRect> entry
+                : captured.entrySet()) {
+            signatureBuilder.append(entry.getKey()).append(';');
+        }
+        String signature = signatureBuilder.toString();
+        NativeChromeSnapshot previous = NATIVE_CHROME_SNAPSHOTS.get(
+            activity
+        );
+        if (previous != null && previous.signature.equals(signature)) {
+            return previous;
+        }
+        NativeChromeSnapshot next = new NativeChromeSnapshot(
+            NATIVE_CHROME_GENERATION_COUNTER.incrementAndGet(),
+            rects,
+            signature
+        );
+        NATIVE_CHROME_SNAPSHOTS.put(activity, next);
+        if (nativeSpreadControlClaimed(activity)) {
+            queueLowLatencyLog(
+                "native_chrome_snapshot_published generation="
+                    + next.generation + " count=" + rects.size()
+                    + " reason=" + reason
+            );
+        }
+        return next;
+    }
+
+    private static void collectAdditionalWindowChromeRects(
+        View activityDecor,
+        long decorArea,
+        TreeMap<String, NativeChromeRect> captured
+    ) {
+        if (windowRootDiscoveryUnavailable) {
+            return;
+        }
+        try {
+            Object global = windowManagerGlobal;
+            Method viewsMethod = windowManagerGetWindowViews;
+            Field viewsField = windowManagerViewsField;
+            if (global == null || (viewsMethod == null && viewsField == null)) {
+                synchronized (SpreadProbe.class) {
+                    global = windowManagerGlobal;
+                    viewsMethod = windowManagerGetWindowViews;
+                    viewsField = windowManagerViewsField;
+                    if (global == null
+                        || (viewsMethod == null && viewsField == null)) {
+                        Class<?> globalClass = Class.forName(
+                            "android.view.WindowManagerGlobal"
+                        );
+                        Method getInstance = globalClass.getDeclaredMethod(
+                            "getInstance"
+                        );
+                        getInstance.setAccessible(true);
+                        global = getInstance.invoke(null);
+                        try {
+                            viewsMethod = globalClass.getDeclaredMethod(
+                                "getWindowViews"
+                            );
+                            viewsMethod.setAccessible(true);
+                        } catch (NoSuchMethodException missingMethod) {
+                            viewsField = globalClass.getDeclaredField("mViews");
+                            viewsField.setAccessible(true);
+                        }
+                        windowManagerGlobal = global;
+                        windowManagerGetWindowViews = viewsMethod;
+                        windowManagerViewsField = viewsField;
+                        queueLowLatencyLog(
+                            "native_chrome_window_discovery_ready source="
+                                + (viewsMethod != null
+                                    ? "getWindowViews" : "mViews")
+                        );
+                    }
+                }
+            }
+            Object windows = viewsMethod != null
+                ? viewsMethod.invoke(global) : viewsField.get(global);
+            if (!(windows instanceof Iterable<?>)) {
+                return;
+            }
+            for (Object root : (Iterable<?>) windows) {
+                if (!(root instanceof View) || root == activityDecor) {
+                    continue;
+                }
+                View rootView = (View) root;
+                String resourceName = nativeChromeResourceName(rootView);
+                String description = rootView.getContentDescription() == null
+                    ? "" : rootView.getContentDescription().toString();
+                boolean chromeWindow = nativeChromeContainerMarker(
+                    resourceName,
+                    description,
+                    rootView.getClass().getName()
+                );
+                collectNativeChromeRects(
+                    rootView,
+                    chromeWindow,
+                    decorArea,
+                    captured
+                );
+            }
+        } catch (Throwable throwable) {
+            windowRootDiscoveryUnavailable = true;
+            queueLowLatencyLog(
+                "native_chrome_window_discovery_unavailable " + throwable
+            );
+        }
+    }
+
+    private static void collectNativeChromeRects(
+        View view,
+        boolean insideChromeContainer,
+        long decorArea,
+        TreeMap<String, NativeChromeRect> captured
+    ) {
+        if (view == null || view.getVisibility() != View.VISIBLE
+            || !view.isShown() || view.getAlpha() <= 0.0f
+            || OVERLAY_TAG.equals(view.getTag())) {
+            return;
+        }
+        String resourceName = nativeChromeResourceName(view);
+        String description = view.getContentDescription() == null
+            ? "" : view.getContentDescription().toString().trim();
+        String className = view.getClass().getName();
+        boolean container = insideChromeContainer
+            || nativeChromeContainerMarker(
+                resourceName,
+                description,
+                className
+            );
+        Rect visible = new Rect();
+        boolean hasVisibleRect = view.getGlobalVisibleRect(visible)
+            && visible.width() > 0 && visible.height() > 0;
+        long visibleArea = hasVisibleRect
+            ? (long) visible.width() * (long) visible.height() : 0L;
+        boolean bounded = decorArea > 0L
+            && visibleArea * 100L
+                <= decorArea * NATIVE_CHROME_MAX_DECOR_AREA_PERCENT;
+        boolean describedControl = !description.isEmpty()
+            && !"TODO".equalsIgnoreCase(description)
+            && !"pageBar".equalsIgnoreCase(description);
+        boolean resourceControl = nativeChromeResourceMarker(resourceName);
+        boolean classControl = nativeChromeClassMarker(className);
+        if (hasVisibleRect && bounded && container
+            && (describedControl || resourceControl || classControl)) {
+            String source = !resourceName.isEmpty()
+                ? resourceName
+                : (!description.isEmpty() ? "desc:" + description
+                    : "class:" + className);
+            String key = visible.left + "," + visible.top + ","
+                + visible.right + "," + visible.bottom + ":" + source;
+            captured.put(key, new NativeChromeRect(visible, source));
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int index = 0; index < group.getChildCount(); index++) {
+                collectNativeChromeRects(
+                    group.getChildAt(index),
+                    container,
+                    decorArea,
+                    captured
+                );
+            }
+        }
+    }
+
+    private static String nativeChromeResourceName(View view) {
+        if (view == null || view.getId() == View.NO_ID) {
+            return "";
+        }
+        try {
+            return view.getResources().getResourceEntryName(view.getId());
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    private static boolean nativeChromeContainerMarker(
+        String resourceName,
+        String description,
+        String className
+    ) {
+        String resource = resourceName == null
+            ? "" : resourceName.toLowerCase(Locale.ROOT);
+        String desc = description == null
+            ? "" : description.toLowerCase(Locale.ROOT);
+        return resource.contains("tool_bar")
+            || resource.contains("toolbar")
+            || resource.contains("pagebar")
+            || resource.contains("page_bar")
+            || resource.contains("menu")
+            || resource.contains("popup")
+            || resource.contains("popover")
+            || resource.contains("selection")
+            || resource.contains("select_panel")
+            || resource.contains("lasso")
+            || nativeChromeClassMarker(className)
+            || "pagebar".equals(desc);
+    }
+
+    private static boolean nativeChromeClassMarker(String className) {
+        String type = className == null
+            ? "" : className.toLowerCase(Locale.ROOT);
+        return type.contains("toolbar")
+            || type.contains("menuview")
+            || type.contains("popup")
+            || type.contains("popover");
+    }
+
+    private static boolean nativeChromeResourceMarker(String resourceName) {
+        String resource = resourceName == null
+            ? "" : resourceName.toLowerCase(Locale.ROOT);
+        return resource.contains("tool_bar")
+            || resource.contains("toolbar")
+            || resource.contains("pagebar")
+            || resource.contains("page_bar")
+            || resource.contains("menu")
+            || resource.contains("popup")
+            || resource.contains("popover")
+            || resource.contains("selection")
+            || resource.contains("select_panel")
+            || resource.contains("lasso")
+            || resource.equals("side_pagebar")
+            || resource.startsWith("btn_")
+            || resource.startsWith("btv_");
+    }
+
+    private static NativeChromeRect nativeChromeHit(
+        Activity activity,
+        float rawX,
+        float rawY,
+        boolean refresh
+    ) {
+        NativeChromeSnapshot snapshot = refresh
+            ? refreshNativeChromeSnapshot(activity, "contact_down")
+            : NATIVE_CHROME_SNAPSHOTS.get(activity);
+        return snapshot == null ? null : snapshot.hit(rawX, rawY);
     }
 
     private static void publishPendingPenInputSnapshot(
@@ -14701,6 +16536,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             }
         }
         SpreadConfig config = spreadConfig(activity);
+        if (!nativeSpreadControlClaimed(activity)) {
+            return;
+        }
         int orientation = activity.getResources()
             .getConfiguration().orientation;
         boolean landscape = orientation
@@ -16074,6 +17912,689 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         );
     }
 
+    /** Caller holds PAGE_ACTIVATION_OWNERSHIP_LOCK. */
+    private static boolean nativeChromeNativeFirstMayClassifyLocked(
+        Activity activity
+    ) {
+        return activity != null
+            && TEXT_SELECTION_PEN_CONTACTS.get(activity) == null
+            && PEN_CONTACT_OWNERSHIPS.get(activity) == null
+            && PEN_CONTACT_START_PAGES.get(activity) == null
+            && !Boolean.TRUE.equals(PEN_PHYSICAL_CONTACT_DOWNS.get(activity));
+    }
+
+    private static int routeNativeChromeActivityStylus(
+        Activity activity,
+        MotionEvent event
+    ) {
+        if (activity == null || event == null
+            || event.getPointerCount() <= 0) {
+            return NATIVE_CHROME_ROUTE_DOCUMENT;
+        }
+        int toolType = event.getToolType(0);
+        if (toolType != MotionEvent.TOOL_TYPE_STYLUS
+            && toolType != MotionEvent.TOOL_TYPE_ERASER) {
+            return NATIVE_CHROME_ROUTE_DOCUMENT;
+        }
+        int action = event.getActionMasked();
+        NativeChromePassThrough existing =
+            NATIVE_CHROME_PEN_PASSTHROUGHS.get(activity);
+        if (action != MotionEvent.ACTION_DOWN) {
+            if (existing == null) {
+                return NATIVE_CHROME_ROUTE_DOCUMENT;
+            }
+            if (!existing.matches(event)) {
+                queueLowLatencyLog(
+                    "native_chrome_contact_blocked reason=stream_mismatch"
+                        + " generation=" + existing.generation
+                );
+                return NATIVE_CHROME_ROUTE_BLOCK;
+            }
+            return NATIVE_CHROME_ROUTE_PASS;
+        }
+
+        float rawX = event.getRawX();
+        float rawY = event.getRawY();
+        // Android ACTION_DOWN is the authoritative classification boundary.
+        // Re-read live geometry even when a lower-level native callback
+        // provisionally published a token first; translation-only toolbar
+        // moves need not have emitted a global-layout callback.
+        NativeChromeRect refreshedHit = nativeChromeHit(
+            activity,
+            rawX,
+            rawY,
+            true
+        );
+        if (existing != null) {
+            if (existing.activityDownTime < 0L && refreshedHit == null) {
+                NATIVE_CHROME_PEN_PASSTHROUGHS.remove(activity, existing);
+                queueLowLatencyLog(
+                    "native_chrome_contact_reclassified_document"
+                        + " generation=" + existing.generation
+                );
+                return NATIVE_CHROME_ROUTE_DOCUMENT;
+            }
+            if (adoptNativeChromeActivityDown(
+                    existing,
+                    event,
+                    rawX,
+                    rawY
+                )) {
+                queueLowLatencyLog(
+                    "native_chrome_contact_adopted generation="
+                        + existing.generation + " source="
+                        + existing.source
+                );
+                return NATIVE_CHROME_ROUTE_PASS;
+            }
+            queueLowLatencyLog(
+                "native_chrome_contact_blocked reason=prior_stream_active"
+                    + " generation=" + existing.generation
+            );
+            return NATIVE_CHROME_ROUTE_BLOCK;
+        }
+
+        NativeChromeRect hit = refreshedHit;
+        if (hit == null) {
+            return NATIVE_CHROME_ROUTE_DOCUMENT;
+        }
+        NativeChromePassThrough token = new NativeChromePassThrough(
+            NATIVE_CHROME_GENERATION_COUNTER.incrementAndGet(),
+            toolType,
+            hit.bounds,
+            hit.source,
+            event.getDownTime()
+        );
+        NativeChromePassThrough raced =
+            NATIVE_CHROME_PEN_PASSTHROUGHS.putIfAbsent(activity, token);
+        NativeChromePassThrough published = raced == null ? token : raced;
+        if (raced != null && !adoptNativeChromeActivityDown(
+                raced,
+                event,
+                rawX,
+                rawY
+            )) {
+            queueLowLatencyLog(
+                "native_chrome_contact_blocked reason=publication_race"
+                    + " generation=" + raced.generation
+            );
+            return NATIVE_CHROME_ROUTE_BLOCK;
+        }
+        queueLowLatencyLog(
+            "native_chrome_contact_classified generation="
+                + published.generation + " route=pass"
+                + " source=" + published.source + " point="
+                + Math.round(rawX) + "," + Math.round(rawY)
+        );
+        return NATIVE_CHROME_ROUTE_PASS;
+    }
+
+    private static int routeNativeChromeNativePen(
+        Activity activity,
+        int x,
+        int y,
+        int pressure
+    ) {
+        if (activity == null) {
+            return NATIVE_CHROME_ROUTE_DOCUMENT;
+        }
+        NativeChromePassThrough existing =
+            NATIVE_CHROME_PEN_PASSTHROUGHS.get(activity);
+        if (existing != null) {
+            return NATIVE_CHROME_ROUTE_PASS;
+        }
+        if (pressure <= 0) {
+            return NATIVE_CHROME_ROUTE_DOCUMENT;
+        }
+        synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+            if (!nativeChromeNativeFirstMayClassifyLocked(activity)) {
+                return NATIVE_CHROME_ROUTE_DOCUMENT;
+            }
+        }
+        NativeChromeRect hit = nativeChromeHit(activity, x, y, true);
+        if (hit == null) {
+            return NATIVE_CHROME_ROUTE_DOCUMENT;
+        }
+        NativeChromePassThrough token = new NativeChromePassThrough(
+            NATIVE_CHROME_GENERATION_COUNTER.incrementAndGet(),
+            0,
+            hit.bounds,
+            hit.source,
+            -1L
+        );
+        NativeChromePassThrough raced =
+            NATIVE_CHROME_PEN_PASSTHROUGHS.putIfAbsent(activity, token);
+        NativeChromePassThrough published = raced == null ? token : raced;
+        if (raced != null && !raced.downBounds.contains(x, y)) {
+            queueLowLatencyLog(
+                "native_chrome_contact_blocked"
+                    + " reason=native_publication_race"
+                    + " generation=" + raced.generation
+            );
+            return NATIVE_CHROME_ROUTE_BLOCK;
+        }
+        queueLowLatencyLog(
+            "native_chrome_contact_native_first generation="
+                + published.generation + " route=pass"
+                + " source=" + published.source + " point="
+                + x + "," + y
+        );
+        return NATIVE_CHROME_ROUTE_PASS;
+    }
+
+    private static boolean adoptNativeChromeActivityDown(
+        NativeChromePassThrough token,
+        MotionEvent event,
+        float rawX,
+        float rawY
+    ) {
+        if (token == null || event == null || event.getPointerCount() <= 0
+            || (token.toolType != 0
+                && token.toolType != event.getToolType(0))
+            || !token.downBounds.contains(
+                Math.round(rawX),
+                Math.round(rawY)
+            )) {
+            return false;
+        }
+        long downTime = token.activityDownTime;
+        if (downTime >= 0L) {
+            return downTime == event.getDownTime();
+        }
+        token.activityDownTime = event.getDownTime();
+        return true;
+    }
+
+    private static boolean nativeChromeSetterPassThroughCurrent(
+        Activity activity
+    ) {
+        NativeChromePassThrough token = activity == null
+            ? null : NATIVE_CHROME_PEN_PASSTHROUGHS.get(activity);
+        return token != null;
+    }
+
+    private static boolean nativeChromeActivityContactCurrent(
+        Activity activity,
+        MotionEvent event
+    ) {
+        NativeChromePassThrough token = activity == null
+            ? null : NATIVE_CHROME_PEN_PASSTHROUGHS.get(activity);
+        return token != null && token.matches(event);
+    }
+
+    private static void finishNativeChromeActivityContact(
+        Activity activity,
+        MotionEvent event
+    ) {
+        if (activity == null || event == null
+            || event.getPointerCount() <= 0) {
+            return;
+        }
+        int action = event.getActionMasked();
+        if (action != MotionEvent.ACTION_UP
+            && action != MotionEvent.ACTION_CANCEL) {
+            return;
+        }
+        NativeChromePassThrough token =
+            NATIVE_CHROME_PEN_PASSTHROUGHS.get(activity);
+        if (token == null || !token.matches(event)
+            || !NATIVE_CHROME_PEN_PASSTHROUGHS.remove(activity, token)) {
+            return;
+        }
+        queueLowLatencyLog(
+            "native_chrome_contact_finished generation="
+                + token.generation + " action=" + action
+                + " source=" + token.source
+        );
+    }
+
+    private static boolean textSelectionModeActive(Activity activity) {
+        if (activity == null) {
+            return false;
+        }
+        Integer published = TEXT_SELECTION_MODES.get(activity);
+        if (published != null) {
+            return published.intValue() >= 0;
+        }
+        try {
+            int observed = XposedHelpers.getIntField(activity, "selectModel");
+            if (observed >= 0) {
+                TEXT_SELECTION_MODES.put(activity, observed);
+                return true;
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
+
+    /** Caller holds PAGE_ACTIVATION_OWNERSHIP_LOCK. */
+    private static String textSelectionClassificationBlockReasonLocked(
+        Activity activity,
+        boolean authoritativeActivityDown
+    ) {
+        if (activity == null) {
+            return "activity_missing";
+        }
+        if (NATIVE_CHROME_PEN_PASSTHROUGHS.get(activity) != null) {
+            return "native_chrome_contact";
+        }
+        if (PEN_CONTACT_OWNERSHIPS.get(activity) != null) {
+            return "handwriting_contact";
+        }
+        if (PEN_CONTACT_START_PAGES.get(activity) != null) {
+            return "handwriting_start_page";
+        }
+        if (Boolean.TRUE.equals(PEN_PHYSICAL_CONTACT_DOWNS.get(activity))
+            && !authoritativeActivityDown) {
+            // Firmware may publish onDigital(state=1) just before Android
+            // dispatches ACTION_DOWN for the same physical contact. Native-
+            // first classification must still reject an already-down stream,
+            // but ACTION_DOWN is the authoritative gesture boundary and may
+            // adopt that otherwise-unowned early digital-down signal.
+            return "physical_contact_down";
+        }
+        if (PAGE_ACTIVATION_TRANSACTIONS.get(activity) != null) {
+            return "page_activation";
+        }
+        if (canonicalLassoUiOwnsPenContact(activity)) {
+            return "lasso_contact";
+        }
+        return null;
+    }
+
+    /** Caller holds PAGE_ACTIVATION_OWNERSHIP_LOCK. */
+    private static void adoptTextSelectionPreclassifiedDigitalDownLocked(
+        Activity activity,
+        TextSelectionPenContact token
+    ) {
+        if (activity == null || token == null
+            || TEXT_SELECTION_PEN_CONTACTS.get(activity) != token
+            || PEN_CONTACT_OWNERSHIPS.get(activity) != null
+            || PEN_CONTACT_START_PAGES.get(activity) != null
+            || !PEN_PHYSICAL_CONTACT_DOWNS.remove(activity, Boolean.TRUE)) {
+            return;
+        }
+        queueLowLatencyLog(
+            "text_selection_preclassified_digital_down_adopted generation="
+                + token.generation
+        );
+    }
+
+    private static int routeTextSelectionActivityStylus(
+        Activity activity,
+        MotionEvent event
+    ) {
+        if (activity == null || event == null
+            || event.getPointerCount() <= 0) {
+            return NATIVE_CHROME_ROUTE_DOCUMENT;
+        }
+        int toolType = event.getToolType(0);
+        if (toolType != MotionEvent.TOOL_TYPE_STYLUS
+            && toolType != MotionEvent.TOOL_TYPE_ERASER) {
+            return NATIVE_CHROME_ROUTE_DOCUMENT;
+        }
+        int action = event.getActionMasked();
+        TextSelectionPenContact existing =
+            TEXT_SELECTION_PEN_CONTACTS.get(activity);
+        if (action != MotionEvent.ACTION_DOWN) {
+            if (existing == null) {
+                return NATIVE_CHROME_ROUTE_DOCUMENT;
+            }
+            return existing.matches(event) && existing.activityGateApplied
+                ? NATIVE_CHROME_ROUTE_PASS : NATIVE_CHROME_ROUTE_BLOCK;
+        }
+
+        PenInputSnapshot snapshot = penInputSnapshot(activity);
+        int mappedPage = snapshot == null ? -1 : pageAt(
+            snapshot,
+            Math.round(event.getX()),
+            Math.round(event.getY())
+        );
+        if (existing != null) {
+            if (mappedPage == existing.page
+                && adoptTextSelectionActivityDown(existing, event)
+                && applyTextSelectionActivityGate(activity, existing)) {
+                synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+                    adoptTextSelectionPreclassifiedDigitalDownLocked(
+                        activity,
+                        existing
+                    );
+                }
+                queueLowLatencyLog(
+                    "text_selection_contact_adopted generation="
+                        + existing.generation + " page=" + existing.page
+                );
+                return NATIVE_CHROME_ROUTE_PASS;
+            }
+            retireTextSelectionContact(
+                activity,
+                existing,
+                "activity_adoption_failed"
+            );
+            return NATIVE_CHROME_ROUTE_BLOCK;
+        }
+        if (!textSelectionModeActive(activity)
+            || snapshot == null || !snapshot.editable
+            || !snapshot.geometryReady
+            || mappedPage < 0 || mappedPage != snapshot.currentPage) {
+            return NATIVE_CHROME_ROUTE_DOCUMENT;
+        }
+
+        TextSelectionPenContact token = new TextSelectionPenContact(
+            TEXT_SELECTION_GENERATION_COUNTER.incrementAndGet(),
+            toolType,
+            mappedPage,
+            event.getDownTime()
+        );
+        synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+            String blockReason =
+                textSelectionClassificationBlockReasonLocked(
+                    activity,
+                    true
+                );
+            if (PEN_INPUT_SNAPSHOTS.get(activity) != snapshot
+                || SPREAD_CONFIGS.get(activity) != snapshot.config
+                || blockReason != null) {
+                queueLowLatencyLog(
+                    "text_selection_contact_rejected source=activity reason="
+                        + (blockReason == null
+                            ? "snapshot_changed" : blockReason)
+                );
+                return NATIVE_CHROME_ROUTE_BLOCK;
+            }
+            TextSelectionPenContact raced =
+                TEXT_SELECTION_PEN_CONTACTS.putIfAbsent(activity, token);
+            if (raced != null) {
+                if (raced.page == mappedPage
+                    && adoptTextSelectionActivityDown(raced, event)
+                    && applyTextSelectionActivityGate(activity, raced)) {
+                    adoptTextSelectionPreclassifiedDigitalDownLocked(
+                        activity,
+                        raced
+                    );
+                    return NATIVE_CHROME_ROUTE_PASS;
+                }
+                retireTextSelectionContact(
+                    activity,
+                    raced,
+                    "activity_race_adoption_failed"
+                );
+                return NATIVE_CHROME_ROUTE_BLOCK;
+            }
+            adoptTextSelectionPreclassifiedDigitalDownLocked(
+                activity,
+                token
+            );
+        }
+        if (!applyTextSelectionActivityGate(activity, token)) {
+            retireTextSelectionContact(
+                activity,
+                token,
+                "activity_gate_failed"
+            );
+            return NATIVE_CHROME_ROUTE_BLOCK;
+        }
+        queueLowLatencyLog(
+            "text_selection_contact_classified generation="
+                + token.generation + " source=activity page=" + mappedPage
+        );
+        return NATIVE_CHROME_ROUTE_PASS;
+    }
+
+    private static int routeTextSelectionNativePen(
+        Activity activity,
+        int x,
+        int y,
+        int pressure
+    ) {
+        if (activity == null) {
+            return NATIVE_CHROME_ROUTE_DOCUMENT;
+        }
+        TextSelectionPenContact existing =
+            TEXT_SELECTION_PEN_CONTACTS.get(activity);
+        if (existing != null) {
+            return NATIVE_CHROME_ROUTE_PASS;
+        }
+        if (pressure <= 0 || !textSelectionModeActive(activity)) {
+            return NATIVE_CHROME_ROUTE_DOCUMENT;
+        }
+        PenInputSnapshot snapshot = penInputSnapshot(activity);
+        int mappedPage = snapshot == null ? -1 : pageAt(snapshot, x, y);
+        if (snapshot == null || !snapshot.editable
+            || !snapshot.geometryReady || mappedPage < 0
+            || mappedPage != snapshot.currentPage) {
+            return NATIVE_CHROME_ROUTE_DOCUMENT;
+        }
+        TextSelectionPenContact token = new TextSelectionPenContact(
+            TEXT_SELECTION_GENERATION_COUNTER.incrementAndGet(),
+            0,
+            mappedPage,
+            -1L
+        );
+        synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+            String blockReason =
+                textSelectionClassificationBlockReasonLocked(
+                    activity,
+                    false
+                );
+            if (PEN_INPUT_SNAPSHOTS.get(activity) != snapshot
+                || SPREAD_CONFIGS.get(activity) != snapshot.config
+                || blockReason != null) {
+                queueLowLatencyLog(
+                    "text_selection_contact_rejected source=native reason="
+                        + (blockReason == null
+                            ? "snapshot_changed" : blockReason)
+                );
+                return NATIVE_CHROME_ROUTE_DOCUMENT;
+            }
+            TextSelectionPenContact raced =
+                TEXT_SELECTION_PEN_CONTACTS.putIfAbsent(activity, token);
+            if (raced != null) {
+                return raced.page == mappedPage
+                    ? NATIVE_CHROME_ROUTE_PASS : NATIVE_CHROME_ROUTE_BLOCK;
+            }
+        }
+        queueLowLatencyLog(
+            "text_selection_contact_classified generation="
+                + token.generation + " source=native page=" + mappedPage
+                + " point=" + x + "," + y
+        );
+        return NATIVE_CHROME_ROUTE_PASS;
+    }
+
+    private static boolean adoptTextSelectionActivityDown(
+        TextSelectionPenContact token,
+        MotionEvent event
+    ) {
+        if (token == null || event == null || event.getPointerCount() <= 0
+            || (token.toolType != 0
+                && token.toolType != event.getToolType(0))) {
+            return false;
+        }
+        long downTime = token.activityDownTime;
+        if (downTime >= 0L) {
+            return downTime == event.getDownTime();
+        }
+        token.activityDownTime = event.getDownTime();
+        return true;
+    }
+
+    private static boolean applyTextSelectionActivityGate(
+        Activity activity,
+        TextSelectionPenContact token
+    ) {
+        if (activity == null || token == null) {
+            return false;
+        }
+        boolean previous;
+        synchronized (token) {
+            if (TEXT_SELECTION_PEN_CONTACTS.get(activity) != token
+                || token.activityDownTime < 0L) {
+                return false;
+            }
+            if (token.activityGateApplied) {
+                return true;
+            }
+            try {
+                previous = XposedHelpers.getBooleanField(
+                    activity,
+                    "isAllowTurnPage"
+                );
+                XposedHelpers.setBooleanField(
+                    activity,
+                    "isAllowTurnPage",
+                    false
+                );
+                token.previousAllowTurnPage = previous;
+                token.activityGateApplied = true;
+            } catch (Throwable error) {
+                queueLowLatencyLog(
+                    "text_selection_activity_gate_failed generation="
+                    + token.generation + " phase=apply error=" + error);
+                return false;
+            }
+        }
+        queueLowLatencyLog(
+            "text_selection_activity_gate_applied generation="
+                + token.generation + " previous_allow_turn_page=" + previous
+        );
+        return true;
+    }
+
+    private static boolean restoreTextSelectionActivityGate(
+        Activity activity,
+        TextSelectionPenContact token,
+        String reason
+    ) {
+        if (activity == null || token == null) {
+            return false;
+        }
+        boolean previous;
+        synchronized (token) {
+            if (!token.activityGateApplied) {
+                return true;
+            }
+            previous = token.previousAllowTurnPage;
+            try {
+                XposedHelpers.setBooleanField(
+                    activity,
+                    "isAllowTurnPage",
+                    previous
+                );
+                token.activityGateApplied = false;
+            } catch (Throwable error) {
+                queueLowLatencyLog(
+                    "text_selection_activity_gate_failed generation="
+                    + token.generation + " phase=restore reason=" + reason
+                    + " error=" + error);
+                return false;
+            }
+        }
+        queueLowLatencyLog(
+            "text_selection_activity_gate_restored generation="
+                + token.generation + " reason=" + reason
+                + " allow_turn_page=" + previous
+        );
+        return true;
+    }
+
+    private static boolean retireTextSelectionContact(
+        Activity activity,
+        TextSelectionPenContact token,
+        String reason
+    ) {
+        if (activity == null || token == null
+            || TEXT_SELECTION_PEN_CONTACTS.get(activity) != token) {
+            return false;
+        }
+        if (!restoreTextSelectionActivityGate(activity, token, reason)) {
+            return false;
+        }
+        if (!TEXT_SELECTION_PEN_CONTACTS.remove(activity, token)) {
+            return false;
+        }
+        queueLowLatencyLog(
+            "text_selection_contact_finished generation=" + token.generation
+                + " source=" + reason + " page=" + token.page
+        );
+        return true;
+    }
+
+    private static void clearTextSelectionContact(
+        Activity activity,
+        String reason
+    ) {
+        TextSelectionPenContact token = activity == null
+            ? null : TEXT_SELECTION_PEN_CONTACTS.get(activity);
+        if (token != null) {
+            retireTextSelectionContact(activity, token, reason);
+        }
+    }
+
+    private static void scheduleTextSelectionTerminalFallback(
+        Activity activity,
+        TextSelectionPenContact token,
+        int state
+    ) {
+        if (activity == null || token == null) {
+            return;
+        }
+        synchronized (token) {
+            if (TEXT_SELECTION_PEN_CONTACTS.get(activity) != token
+                || token.terminalFallbackScheduled) {
+                return;
+            }
+            token.terminalFallbackScheduled = true;
+        }
+        new Handler(activity.getMainLooper()).postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (TEXT_SELECTION_PEN_CONTACTS.get(activity) != token) {
+                    return;
+                }
+                retireTextSelectionContact(
+                    activity,
+                    token,
+                    "native_terminal_fallback_state_" + state
+                );
+            }
+        }, 500L);
+    }
+
+    private static boolean textSelectionActivityContactCurrent(
+        Activity activity,
+        MotionEvent event
+    ) {
+        TextSelectionPenContact token = activity == null
+            ? null : TEXT_SELECTION_PEN_CONTACTS.get(activity);
+        return token != null && token.matches(event);
+    }
+
+    private static void finishTextSelectionActivityContact(
+        Activity activity,
+        MotionEvent event
+    ) {
+        if (activity == null || event == null
+            || event.getPointerCount() <= 0) {
+            return;
+        }
+        int action = event.getActionMasked();
+        if (action != MotionEvent.ACTION_UP
+            && action != MotionEvent.ACTION_CANCEL) {
+            return;
+        }
+        TextSelectionPenContact token =
+            TEXT_SELECTION_PEN_CONTACTS.get(activity);
+        if (token == null || !token.matches(event)) {
+            return;
+        }
+        retireTextSelectionContact(
+            activity,
+            token,
+            "activity_action_" + action
+        );
+    }
+
     /**
      * Establishes the same immutable contact owner from Android's stylus
      * ACTION_DOWN when this firmware does not deliver the first native
@@ -16096,6 +18617,18 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         int toolType = event.getToolType(0);
         if (toolType != MotionEvent.TOOL_TYPE_STYLUS
             && toolType != MotionEvent.TOOL_TYPE_ERASER) {
+            return;
+        }
+        if (canonicalLassoUiOwnsPenContact(activity)) {
+            queueLowLatencyLog(
+                "lasso_ui_activity_pen_bypassed phase=start"
+            );
+            traceEvent(
+                activity,
+                "lasso_ui_activity_pen_bypassed",
+                "phase",
+                "start"
+            );
             return;
         }
         PenInputSnapshot snapshot = penInputSnapshot(activity);
@@ -16123,25 +18656,21 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 publishAmbiguousPenContactLocked(activity);
             } else {
                 int touchY = Math.round(event.getY());
-                if (snapshot.isNativeChromeTouch(touchY)) {
-                    reason = "blocked_native_chrome_activity_touch";
-                } else {
-                    int mappedPage = pageAt(
-                        snapshot,
-                        Math.round(event.getX()),
-                        touchY
-                    );
-                    if (mappedPage >= 0) {
-                        startPage = mappedPage;
-                        if (mappedPage == snapshot.currentPage) {
-                            sourcePage = snapshot.currentPage;
-                            reason = "active_page_activity_touch";
-                        } else {
-                            reason = "inactive_page_activity_touch";
-                        }
+                int mappedPage = pageAt(
+                    snapshot,
+                    Math.round(event.getX()),
+                    touchY
+                );
+                if (mappedPage >= 0) {
+                    startPage = mappedPage;
+                    if (mappedPage == snapshot.currentPage) {
+                        sourcePage = snapshot.currentPage;
+                        reason = "active_page_activity_touch";
                     } else {
-                        reason = "blocked_unmapped_activity_touch";
+                        reason = "inactive_page_activity_touch";
                     }
+                } else {
+                    reason = "blocked_unmapped_activity_touch";
                 }
                 published = publishPenContactOwnershipLocked(
                     activity,
@@ -16208,6 +18737,18 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         int toolType = event.getToolType(0);
         if (toolType != MotionEvent.TOOL_TYPE_STYLUS
             && toolType != MotionEvent.TOOL_TYPE_ERASER) {
+            return;
+        }
+        if (canonicalLassoUiOwnsPenContact(activity)) {
+            queueLowLatencyLog(
+                "lasso_ui_activity_pen_bypassed phase=end"
+            );
+            traceEvent(
+                activity,
+                "lasso_ui_activity_pen_bypassed",
+                "phase",
+                "end"
+            );
             return;
         }
         synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
@@ -16323,7 +18864,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 )) {
                 return false;
             }
-            if (isNativeChromeTouch(activity, event.getY())) {
+            if (nativeChromeHit(
+                    activity,
+                    event.getRawX(),
+                    event.getRawY(),
+                    true
+                ) != null) {
                 log("activation_touch_ignored_native_chrome point="
                     + Math.round(event.getX()) + ","
                     + Math.round(event.getY()));
@@ -16378,7 +18924,12 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             return false;
         }
 
-        if (isNativeChromeTouch(activity, event.getY())) {
+        if (nativeChromeHit(
+                activity,
+                event.getRawX(),
+                event.getRawY(),
+                false
+            ) != null) {
             ACTIVATION_TOUCH_TARGETS.remove(activity);
             ACTIVATION_TOUCH_STARTS.remove(activity);
             ACTIVATION_TOUCH_IDENTITIES.remove(activity);
@@ -16522,25 +19073,6 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             return false;
         } finally {
             cancelEvent.recycle();
-        }
-    }
-
-    private static boolean isNativeChromeTouch(Activity activity, float y) {
-        if (y <= NATIVE_TOP_CHROME_TOUCH_EXCLUSION_PX) {
-            return true;
-        }
-        try {
-            View decor = activity == null || activity.getWindow() == null
-                ? null
-                : activity.getWindow().getDecorView();
-            int height = decor == null ? 0 : decor.getHeight();
-            return height > 0
-                && y >= height - NATIVE_BOTTOM_CHROME_TOUCH_EXCLUSION_PX;
-        } catch (Throwable throwable) {
-            queueLowLatencyLog(
-                "native_chrome_touch_check_failed " + throwable
-            );
-            return false;
         }
     }
 
@@ -17313,12 +19845,6 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                     );
                     return;
                 }
-                if (inputSnapshot.isNativeChromeTouch(requestedY)) {
-                    log("page_activation_pen_ignored_native_chrome point="
-                        + requestedX + "," + requestedY
-                        + " pressure=" + requestedPressure);
-                    return;
-                }
                 int current = inputSnapshot.currentPage;
                 Integer contactStartPage =
                     PEN_CONTACT_START_PAGES.get(activity);
@@ -17464,27 +19990,6 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 -1L,
                 inputSnapshot.currentPage,
                 -1,
-                capturedContactStart
-            );
-            return true;
-        }
-        if (inputSnapshot.isNativeChromeTouch(y)) {
-            if (completingActivePageStroke) {
-                return false;
-            }
-            // The toolbar and bottom page bar consume ordinary Android stylus
-            // events.  Suppress only the parallel low-latency DrawPath point,
-            // so selecting a native control with the pen cannot ink or activate
-            // the page visually underneath that control.
-            notePenInputBlock(
-                activity,
-                "native_chrome",
-                x,
-                y,
-                pressure,
-                -1L,
-                inputSnapshot.currentPage,
-                pageAt(inputSnapshot, x, y),
                 capturedContactStart
             );
             return true;
@@ -17757,6 +20262,13 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                         != activationSnapshot
                     || SPREAD_CONFIGS.get(activity) != activationConfig) {
                     log("page_activation_rejected reason=owner_changed"
+                        + " requested_target=" + targetPage
+                        + " trigger=" + trigger);
+                    return false;
+                }
+                if (LASSO_MUTATION_AUTHORITIES.get(activity) != null) {
+                    log("page_activation_rejected"
+                        + " reason=lasso_transaction_active"
                         + " requested_target=" + targetPage
                         + " trigger=" + trigger);
                     return false;
@@ -19746,11 +22258,428 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         return writerDisabled;
     }
 
+    private static boolean containsRecognizedStraightLine(
+        List<?> trails
+    ) {
+        if (trails == null || trails.isEmpty()) {
+            return false;
+        }
+        for (Object trail : trails) {
+            if (trail == null) {
+                continue;
+            }
+            try {
+                Object rrd = XposedHelpers.callMethod(trail, "get_rrd");
+                Object predictName = rrd == null ? null
+                    : XposedHelpers.callMethod(rrd, "get_predict_name");
+                if (!"straightLine".equals(String.valueOf(predictName))
+                    || callInt(trail, "get_process_mod") != 0) {
+                    continue;
+                }
+                Object geometry = XposedHelpers.callMethod(
+                    trail,
+                    "get_geometry_info"
+                );
+                Object points = geometry == null ? null
+                    : XposedHelpers.callMethod(
+                        geometry,
+                        "get_geometry_points"
+                    );
+                if (points instanceof List
+                    && ((List<?>) points).size() == 2) {
+                    return true;
+                }
+            } catch (Throwable throwable) {
+                log("recognized_line_classification_failed " + throwable);
+                XposedBridge.log(throwable);
+            }
+        }
+        return false;
+    }
+
+    private static Point mapRecognizedLinePointToSpread(
+        RecognizedLineTransaction transaction,
+        Point nativePoint
+    ) {
+        if (transaction == null || nativePoint == null) {
+            return null;
+        }
+        RectF destination = transaction.destination;
+        int canonicalX = Math.max(0, Math.min(
+            CANONICAL_PAGE_WIDTH - 1,
+            nativePoint.x + transaction.nativeSplitOffsetX
+        ));
+        int canonicalY = Math.max(0, Math.min(
+            CANONICAL_PAGE_HEIGHT - 1,
+            nativePoint.y + transaction.nativeSplitOffsetY
+        ));
+        return new Point(
+            Math.round(
+                destination.left
+                    + canonicalX * destination.width()
+                        / CANONICAL_PAGE_WIDTH
+            ),
+            Math.round(
+                destination.top
+                    + canonicalY * destination.height()
+                        / CANONICAL_PAGE_HEIGHT
+            )
+        );
+    }
+
+    private static List<Point> mapRecognizedLinePointsToSpread(
+        RecognizedLineTransaction transaction,
+        Object value
+    ) {
+        if (!(value instanceof List)) {
+            return null;
+        }
+        List<?> source = (List<?>) value;
+        List<Point> mapped = new ArrayList<>(source.size());
+        for (Object item : source) {
+            if (!(item instanceof Point)) {
+                return null;
+            }
+            Point point = mapRecognizedLinePointToSpread(
+                transaction,
+                (Point) item
+            );
+            if (point == null) {
+                return null;
+            }
+            mapped.add(point);
+        }
+        return mapped;
+    }
+
+    private static List<Pair<Point, Point>>
+        mapRecognizedLineLayerPointsToSpread(
+            RecognizedLineTransaction transaction,
+            Object value
+        ) {
+        if (!(value instanceof List)) {
+            return null;
+        }
+        List<?> source = (List<?>) value;
+        List<Pair<Point, Point>> mapped = new ArrayList<>(source.size());
+        for (Object item : source) {
+            if (!(item instanceof Pair)) {
+                return null;
+            }
+            Pair<?, ?> pair = (Pair<?, ?>) item;
+            if (!(pair.first instanceof Point)
+                || !(pair.second instanceof Point)) {
+                return null;
+            }
+            Point first = mapRecognizedLinePointToSpread(
+                transaction,
+                (Point) pair.first
+            );
+            Point second = mapRecognizedLinePointToSpread(
+                transaction,
+                (Point) pair.second
+            );
+            if (first == null || second == null) {
+                return null;
+            }
+            mapped.add(new Pair<>(first, second));
+        }
+        return mapped;
+    }
+
+    private static List<Point> mapRecognizedLinePointsToNative(
+        RecognizedLineTransaction transaction,
+        Object value
+    ) {
+        if (transaction == null || !(value instanceof List)) {
+            return null;
+        }
+        List<?> source = (List<?>) value;
+        if (source.size() != 2) {
+            return null;
+        }
+        RectF destination = transaction.destination;
+        List<Point> mapped = new ArrayList<>(2);
+        for (Object item : source) {
+            if (!(item instanceof Point)) {
+                return null;
+            }
+            Point displayPoint = (Point) item;
+            int canonicalX = Math.round(
+                (displayPoint.x - destination.left)
+                    * CANONICAL_PAGE_WIDTH / destination.width()
+            );
+            int canonicalY = Math.round(
+                (displayPoint.y - destination.top)
+                    * CANONICAL_PAGE_HEIGHT / destination.height()
+            );
+            canonicalX = Math.max(0, Math.min(
+                CANONICAL_PAGE_WIDTH - 1,
+                canonicalX
+            ));
+            canonicalY = Math.max(0, Math.min(
+                CANONICAL_PAGE_HEIGHT - 1,
+                canonicalY
+            ));
+            mapped.add(new Point(
+                canonicalX - transaction.nativeSplitOffsetX,
+                canonicalY - transaction.nativeSplitOffsetY
+            ));
+        }
+        return mapped;
+    }
+
+    private static boolean beginRecognizedLineTransaction(
+        Activity activity,
+        Object presenter,
+        PenContactOwnership contact
+    ) {
+        RectF destination = activePageDestination(activity);
+        if (activity == null || presenter == null || contact == null
+            || destination == null || destination.width() <= 0.0f
+            || destination.height() <= 0.0f) {
+            log("recognized_line_transaction_rejected"
+                + " reason=missing_authority_or_destination");
+            return false;
+        }
+        RecognizedLineTransaction transaction;
+        try {
+            Class<?> baseApplication = Class.forName(
+                "com.supernote.document.BaseApplication",
+                false,
+                activity.getClassLoader()
+            );
+            Field splitField = baseApplication.getDeclaredField("isSplit");
+            splitField.setAccessible(true);
+            boolean nativeSplit = splitField.getBoolean(null);
+            Point nativeSplitOffset = new Point(0, 0);
+            if (nativeSplit) {
+                Object offset = XposedHelpers.callMethod(
+                    presenter,
+                    "getShowRectOffset"
+                );
+                if (!(offset instanceof Point)) {
+                    log("recognized_line_transaction_rejected"
+                        + " reason=missing_native_split_offset");
+                    return false;
+                }
+                Point splitOffset = (Point) offset;
+                nativeSplitOffset.set(splitOffset.x, splitOffset.y);
+            }
+            synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK) {
+                if (activity != activeActivity
+                || contact.presenter != presenter
+                || PEN_CONTACT_OWNERSHIPS.get(activity) != contact
+                || contact.phase != PEN_CONTACT_PHASE_RECEIVING
+                || HANDWRITE_PRESENTERS.get(activity) != presenter
+                || SUPER_NOTE_NOTES.get(activity) != contact.note
+                || HANDWRITE_CLIENTS.get(activity) != contact.client
+                || HANDWRITE_VIEWS.get(activity) != contact.view
+                || DOCUMENT_VIEW_MODELS.get(activity) != contact.viewModel
+                || NATIVE_EVENT_CALLBACKS.get(activity)
+                    != contact.nativeCallback
+                || !Objects.equals(
+                    DOCUMENT_CONTEXT_GENERATIONS.get(activity),
+                    Long.valueOf(contact.documentContextGeneration)
+                )
+                || !Objects.equals(
+                    CONFIG_AUTHORITY_GENERATIONS.get(activity),
+                    Long.valueOf(contact.configAuthorityGeneration)
+                )
+                || !Objects.equals(
+                    contact.documentPath,
+                    currentDocumentPath(activity)
+                )
+                || !Objects.equals(
+                    contact.markPath,
+                    XposedHelpers.getObjectField(presenter, "markPath")
+                )
+                || currentDocumentPage(activity) != contact.sourcePage
+                || XposedHelpers.getIntField(presenter, "currentPage")
+                    != contact.presenterMarkPage
+                    || !isCachedSpreadConfigCurrent(
+                        activity,
+                        contact.config
+                    )) {
+                    log("recognized_line_transaction_rejected"
+                        + " reason=writer_authority_changed");
+                    return false;
+                }
+                transaction = new RecognizedLineTransaction(
+                    RECOGNIZED_LINE_GENERATION_COUNTER.incrementAndGet(),
+                    activity,
+                    contact.documentPath,
+                    contact.documentContextGeneration,
+                    contact.config,
+                    contact.configAuthorityGeneration,
+                    presenter,
+                    contact.note,
+                    contact.client,
+                    contact.view,
+                    contact.viewModel,
+                    contact.nativeCallback,
+                    contact.markPath,
+                    contact.sourcePage,
+                    contact.presenterMarkPage,
+                    destination,
+                    nativeSplit,
+                    nativeSplitOffset.x,
+                    nativeSplitOffset.y
+                );
+                RecognizedLineTransaction previous =
+                    RECOGNIZED_LINE_TRANSACTIONS.put(activity, transaction);
+                if (previous != null) {
+                    log("recognized_line_transaction_replaced old_generation="
+                        + previous.generation);
+                }
+            }
+        } catch (Throwable throwable) {
+            log("recognized_line_transaction_rejected reason=exception "
+                + throwable);
+            XposedBridge.log(throwable);
+            return false;
+        }
+        log("recognized_line_transaction_started generation="
+            + transaction.generation
+            + " page=" + transaction.documentPage
+            + " mark_page=" + transaction.markPage
+            + " split=" + transaction.nativeSplit
+            + " split_offset=" + transaction.nativeSplitOffsetX + ","
+            + transaction.nativeSplitOffsetY
+            + " destination=" + rectDescription(destination));
+        return true;
+    }
+
+    private static boolean recognizedLineTransactionCurrent(
+        Activity activity,
+        RecognizedLineTransaction transaction,
+        Object handWriteView
+    ) {
+        if (activity == null || transaction == null
+            || transaction.activity != activity
+            || transaction.handWriteView != handWriteView
+            || RECOGNIZED_LINE_TRANSACTIONS.get(activity) != transaction
+            || !isEditableSpreadLandscape(activity)
+            || !isCachedSpreadConfigCurrent(activity, transaction.config)
+            || !documentMutationAuthorityCurrent(
+                activity,
+                transaction.presenter
+            )) {
+            return false;
+        }
+        try {
+            Class<?> baseApplication = Class.forName(
+                "com.supernote.document.BaseApplication",
+                false,
+                activity.getClassLoader()
+            );
+            Field splitField = baseApplication.getDeclaredField("isSplit");
+            splitField.setAccessible(true);
+            boolean nativeSplit = splitField.getBoolean(null);
+            Point nativeSplitOffset = new Point(0, 0);
+            if (nativeSplit) {
+                Object offset = XposedHelpers.callMethod(
+                    transaction.presenter,
+                    "getShowRectOffset"
+                );
+                if (!(offset instanceof Point)) {
+                    return false;
+                }
+                Point splitOffset = (Point) offset;
+                nativeSplitOffset.set(splitOffset.x, splitOffset.y);
+            }
+            RectF currentDestination = activePageDestination(activity);
+            return nativeSplit == transaction.nativeSplit
+                && nativeSplitOffset.x == transaction.nativeSplitOffsetX
+                && nativeSplitOffset.y == transaction.nativeSplitOffsetY
+                && currentDestination != null
+                && Math.abs(
+                    currentDestination.left - transaction.destination.left
+                ) < 0.5f
+                && Math.abs(
+                    currentDestination.top - transaction.destination.top
+                ) < 0.5f
+                && Math.abs(
+                    currentDestination.right - transaction.destination.right
+                ) < 0.5f
+                && Math.abs(
+                    currentDestination.bottom - transaction.destination.bottom
+                ) < 0.5f
+                && HANDWRITE_PRESENTERS.get(activity)
+                    == transaction.presenter
+                && SUPER_NOTE_NOTES.get(activity) == transaction.note
+                && HANDWRITE_CLIENTS.get(activity) == transaction.client
+                && HANDWRITE_VIEWS.get(activity)
+                    == transaction.handWriteView
+                && DOCUMENT_VIEW_MODELS.get(activity)
+                    == transaction.viewModel
+                && NATIVE_EVENT_CALLBACKS.get(activity)
+                    == transaction.nativeCallback
+                && Objects.equals(
+                    DOCUMENT_CONTEXT_GENERATIONS.get(activity),
+                    Long.valueOf(transaction.documentContextGeneration)
+                )
+                && Objects.equals(
+                    CONFIG_AUTHORITY_GENERATIONS.get(activity),
+                    Long.valueOf(transaction.configAuthorityGeneration)
+                )
+                && Objects.equals(
+                    transaction.documentPath,
+                    currentDocumentPath(activity)
+                )
+                && Objects.equals(
+                    transaction.markPath,
+                    XposedHelpers.getObjectField(
+                        transaction.presenter,
+                        "markPath"
+                    )
+                )
+                && currentDocumentPage(activity)
+                    == transaction.documentPage
+                && XposedHelpers.getIntField(
+                    transaction.presenter,
+                    "currentPage"
+                ) == transaction.markPage;
+        } catch (Throwable throwable) {
+            return false;
+        }
+    }
+
+    private static void retireAbandonedRecognizedLineTransaction(
+        Activity activity,
+        String reason
+    ) {
+        RecognizedLineTransaction retired = activity == null ? null
+            : RECOGNIZED_LINE_TRANSACTIONS.remove(activity);
+        if (retired != null) {
+            log("recognized_line_transaction_retired generation="
+                + retired.generation + " reason=" + reason);
+        }
+    }
+
     private static void persistActiveMutationBeforeCanonicalRefresh(
         Activity activity,
         Object presenter
     ) {
         if (!isEditableSpreadLandscape(activity)) {
+            return;
+        }
+        if ("lasso".equals(TRACE_TOOLS.get(activity))) {
+            /*
+             * The lasso polygon reaches receiveTrials(), but it is a selection
+             * command rather than document ink.  Native begin2ShiftTrails()
+             * has already removed the selected trails from its live mark
+             * buffer and posts the authoritative refresh which backs the
+             * floating selection.  Flushing and reloading the on-disk mark at
+             * this point resurrects the selected trails underneath that
+             * floating bitmap, producing a visual duplicate and rewriting the
+             * mark before the user commits the move.  Leave this exact refresh
+             * to the native selection transaction; areaSelectionTransition()
+             * and reWriteTrails() remain the mutation boundaries for the
+             * eventual lasso operation.
+             */
+            log("active_mutation_canonical_reload_skipped kind="
+                + "lasso_selection reason=native_selection_buffer_owns_refresh");
             return;
         }
         try {
@@ -21504,9 +24433,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         }
     }
 
-    private static void setTextSelectionHardwareGate(
+    private static void configureTextSelectionHardware(
         Activity activity,
-        boolean disabled,
         String reason
     ) {
         try {
@@ -21520,17 +24448,6 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 return;
             }
 
-            if (disabled) {
-                XposedHelpers.callMethod(
-                    presenter,
-                    "disableHandWrite",
-                    "SN_SPREAD_PROBE text-selection hardware trail"
-                );
-                log("text_selection_hardware_disabled reason=" + reason
-                    + " page=" + currentDocumentPage(activity));
-                return;
-            }
-
             RectF writable = resolveActivePageDestination(activity, presenter);
             ImageView imageView = (ImageView) XposedHelpers.getObjectField(
                 activity,
@@ -21540,7 +24457,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             int outputHeight = imageView == null ? 0 : imageView.getHeight();
             if (writable == null || outputWidth <= outputHeight
                 || outputHeight <= 0) {
-                log("text_selection_hardware_restore_skipped reason=" + reason
+                log("text_selection_hardware_config_skipped reason=" + reason
                     + " destination=" + rectDescription(writable)
                     + " output=" + outputWidth + "x" + outputHeight);
                 return;
@@ -21554,22 +24471,22 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             XposedHelpers.callMethod(
                 presenter,
                 "setDisableAreaList",
-                "SN_SPREAD_PROBE restore active page after text selection",
+                "SN_SPREAD_PROBE configure active text-selection page",
                 disabledAreas
             );
             XposedHelpers.callMethod(presenter, "sendWriteInfo");
             boolean geometryRestored = applySpreadMarkGeometry(
                 activity,
                 presenter,
-                "text_selection_closed"
+                "text_selection_configured"
             );
-            log("text_selection_hardware_restored reason=" + reason
+            log("text_selection_hardware_configured reason=" + reason
                 + " page=" + currentDocumentPage(activity)
                 + " geometry=" + geometryRestored
                 + " destination=" + rectDescription(writable));
         } catch (Throwable throwable) {
-            log("text_selection_hardware_gate_failed reason=" + reason
-                + " disabled=" + disabled + " " + throwable);
+            log("text_selection_hardware_config_failed reason=" + reason
+                + " " + throwable);
             XposedBridge.log(throwable);
         }
     }

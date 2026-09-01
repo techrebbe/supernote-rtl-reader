@@ -521,6 +521,48 @@ Automated and build evidence:
   non-null original functions; ambiguous hook results cannot be installed a
   second time. The v2/v3-signed local APK is 168,622 bytes with SHA-256
   `4e03659bbd5d01861fd41982c1913689728f81da4e03e21f3261d7a6b0e3982e`.
+- [x] Native Spread v0.0.123 compiles, is v2/v3 signed, and reports matching
+  manifest and runtime handshake version 123. The installed APK is 185,004
+  bytes with SHA-256
+  `fe39832044eef51851c9aa4b3815e856959a0df3fc0609f5ba6d987f83b0761f`.
+- [x] A real Nomad interrupted-trace cycle atomically archived the exact
+  abandoned `active.txt` file under its session-specific recovery directory,
+  retained the partial trace, did not publish stale `last.txt`, and removed
+  only the verified empty recovery guard. A subsequent normal trace completed,
+  pulled, and produced a verified ZIP. After Stop, v0.0.123 restored the normal
+  `RTL SPREAD: ACTIVE RIGHT page 1` header instead of leaving a stale
+  `SPREAD TRACE: recording` banner.
+- [x] The v0.0.123 lasso failure was captured without changing the canonical
+  `.mark`: the moved preview remained correct until dismissal, where the stale
+  generic pen-contact timer rejected `areaSelectionTransition`. Native Spread
+  v0.0.124 gives the accepted selection its own immutable writer transaction,
+  bypasses generic handwriting contact/fallback admission for lasso UI pen
+  gestures, revalidates exact document/page/component identity at transition
+  and rewrite, and retires authority only after the final rewrite callback.
+  Document-identity resets and persisted-config reloads now also retire the
+  exact lasso authority so an interrupted transaction cannot block later page
+  activation.
+- [x] Native Spread v0.0.124 compiles, is v2/v3 signed, and reports matching
+  manifest and runtime handshake version 124. The local APK is 185,007 bytes
+  with SHA-256
+  `b02646ab4515d2e32c1df282fc75ae6197165328c98a575fe7ab271beff9b63c`.
+- [x] The focused v0.0.124 hardware trace proved that moved ink now survives a
+  delayed pen dismissal. It also isolated three follow-up defects: Supernote's
+  180-pixel lasso padding shifted the finalized ink up and left and reduced its
+  size; the native thinning pass made the floating ink disappear during the
+  drag; and a moved selection finalized at `areaSelectionTransition` without
+  reaching `reWriteTrails`, leaving its immutable authority active.
+- [x] Native Spread v0.0.125 maps the centered bitmap content rather than the
+  padded interaction frame, retains the original canonical selection bounds,
+  supplies an unthinned move bitmap, and retires a successful move transaction
+  from the transition callback. The checker structurally protects all four
+  behaviors. The APK compiles, is v2/v3 signed, reports version 125, is 185,005
+  bytes, and has SHA-256
+  `683f4d3f869b23da7852dc3d4d9b6136690803c40bded796cea0a218ca1499b4`.
+- [ ] On v0.0.125, select a short line, drag it to a different calibration box,
+  wait at least 20 seconds, and dismiss the selection with the pen. The ink must
+  remain visible throughout the drag, keep its original size, settle exactly at
+  the preview location, and leave page activation/navigation usable afterward.
 - [x] Canonical reloads after pen, eraser, Undo, and Redo require the exact root
   `saveTrails()` hook to have been admitted, counted, and completed without a
   throwable. The final writer proof and `loadHandWrite()` are linearized in
@@ -537,6 +579,39 @@ Automated and build evidence:
   Failure-injection tests reject missing/corrupt native payloads and softened
   packager paths. A digest-advanced mutation audit rejected all eight targeted
   authority, lock, hook, workflow, and package-verifier regressions.
+
+### Native Spread v0.0.126 ordinary-reader containment audit
+
+- [x] Every Java hook that can suppress a firmware call, alter arguments,
+  change page/selection geometry, or enter the writer lifecycle requires an
+  exact verified activity/document control claim.
+- [x] Ordinary activity startup and teardown do not enter Native Spread's
+  owner write lock, JNI eraser gate, or spread editing-state restoration.
+- [x] Missing, stale, or not-yet-bound presenter, view-model, handwriting view,
+  native callback, and native-note identities delegate to firmware when no
+  current/pending activity owns a control claim.
+- [x] Text selection, highlight creation, highlight overlay, digest rendering,
+  pen input, touch input, lasso, Undo/Redo, page turns, and embedded-link hooks
+  are inert without a claim.
+- [x] A verified transition to Off removes the claim before disabling the JNI
+  gate and asking the firmware to restore its writable/selection areas.
+- [x] Native C++ inspection confirms that the only detours are the two
+  firmware-specific eraser functions. With the Java gate false, they pass
+  unchanged arguments to the original exactly once and preserve its result.
+- [x] Both invariant suites and trace-helper regressions pass. Fourteen
+  digest-advanced adversarial mutations of claim, lifecycle, resolver,
+  highlighter, setImage, JNI, and publication guards were all rejected.
+- [x] The locally signed APK reports v0.0.126 / versionCode 126, verifies under
+  APK Signature Schemes v2 and v3, is 185,007 bytes, and has SHA-256
+  `c91d55613ceabb6b72c3c5240494373255e97eb1d55e92dd4748750465752b0f`.
+- [ ] With the module installed and LSPosed enabled, cold-open an ordinary PDF
+  with no `.snspread.properties` authority and verify native highlighter,
+  underline, pen, eraser, lasso, Undo/Redo, links, taps, and swipes.
+- [ ] Reboot and repeat highlighter creation/persistence before opening any
+  Native Spread document.
+- [ ] Open an enabled RTL editable document and verify spread navigation and
+  native tools, then switch it Off and immediately repeat the ordinary native
+  highlighter test without uninstalling or disabling LSPosed.
 
 Nomad hardware gate (in progress):
 
@@ -567,7 +642,15 @@ Nomad hardware gate (in progress):
   process restart was intentionally discarded by the pre-existing
   document-context receive quarantine; a subsequent fresh contact retired the
   quarantine and persisted normally. The opposite side and remaining tools are
-  still open.
+  still open. A v0.0.121 lasso trace isolated one remaining defect: the lasso
+  polygon reached the ordinary active-pen settled-ink save/reload path, which
+  resurrected the selected source trail beneath Supernote's floating selection.
+  v0.0.125 leaves that refresh under the native selection buffer, carries exact
+  selection authority through the real lasso transition/rewrite boundary,
+  accounts for Supernote's padded lasso frame, and completes moved selections
+  at their actual transition boundary. Static invariants and compilation pass;
+  the select-drag-pen-dismiss round trip remains the only required stylus
+  validation for this correction.
 - [ ] Advance and reverse spreads with taps and swipes. Every turn saves the
   source, lands on the expected RTL spread, and leaves writing enabled only for
   the focused page.
@@ -705,6 +788,199 @@ in a half-page landscape spread initially appears thicker than the settled
 stroke after Supernote commits and redraws it. The saved `.mark` retains the
 canonical Supernote thickness and remains portable through InkBridge; matching
 the transient preview to the half-page scale is tracked as post-v0.4.10 polish.
+
+### Native Spread v0.0.130 native-control and lasso-persistence regression
+
+Automated pre-device checks:
+
+- [x] Visible native chrome is published from current global view rectangles,
+  including separate popup-window roots, and is refreshed on layout changes
+  and synchronously at stylus DOWN.
+- [x] A chrome-origin stylus contact receives one exact gesture token; the
+  Activity and low-latency native callbacks bypass handwriting ownership,
+  activation, remapping, trace mutation, and save/reload until its matching
+  UP/CANCEL.
+- [x] A document-origin contact is never reclassified when it crosses visible
+  chrome, and hiding or moving a toolbar invalidates its former rectangle on
+  the next DOWN.
+- [x] A verified visible-chrome DOWN is passed to firmware regardless of page
+  or writer authority; only malformed, mismatched, or raced gesture streams
+  are blocked. Native-first callbacks cannot reclassify an already-started
+  document contact.
+- [x] A canonical lasso move invokes Supernote's region rewrite, global-layout
+  flag, bitmap refresh, and writer clear before restoring the spread mark
+  origin or completing the exact lasso authority.
+- [x] Java compilation, native PDF invariants, Native Spread safety invariants,
+  trace-helper failure tests, and whitespace validation pass.
+
+Focused Nomad checks:
+
+- [ ] Select Pen, regular Eraser, Highlighter, and Lasso with the stylus; each
+  native control arms exactly as it does with a finger and creates no ink mark.
+- [ ] Move the native toolbar, repeat stylus selection, then hide it and verify
+  its former rectangle accepts ordinary document ink.
+- [ ] Start a document stroke and cross into the visible toolbar; it remains a
+  document gesture and does not activate a control.
+- [ ] Select and move a lassoed stroke, dismiss the floating selection, turn
+  away and back, and cold-reopen the document. The moved ink remains visible,
+  singular, correctly sized, and at the released location.
+- [ ] Undo and redo the lasso move affect only that selection; companion-page
+  ink remains unchanged.
+- [ ] Ordinary non-Native-Spread highlighting still works, and Close returns
+  the native reader to the correct active page.
+
+### Native Spread v0.0.131 text-selection contact regression
+
+Automated pre-device checks:
+
+- [x] Active-page text-selection DOWN is classified before Activity and native
+  handwriting ownership, and the exact contact remains firmware-owned through
+  UP/CANCEL.
+- [x] Native text-selection hardware is configured for the active page and is
+  never disabled by model change, stylus DOWN, or `handWriteSelectText` state 0.
+- [x] Text-selection contacts cannot publish ordinary pen ownership, start page
+  activation, or be reclassified as native chrome while crossing a toolbar.
+- [x] Native-only and Activity-routed terminal states retire the selection
+  token, and activity/global lifecycle reset clears all selection state.
+- [x] v0.0.131 compiles, verifies under APK Signature Schemes v2/v3, reports
+  matching manifest/runtime version 131, is 185,006 bytes, and has SHA-256
+  `89f2188fa04e5cb3e9e24d0aa90ec8a1d66b774565949cd1717413943d7a2237`.
+
+Focused Nomad checks:
+
+- [ ] Select Highlighter with the pen, highlight active-left text, and confirm
+  the live preview, final selection/menu, and persisted highlight are aligned.
+- [ ] Confirm the selection logs native `handWriteSelectText` states without
+  `pen_contact_activity_touch_latched` for the same gesture.
+- [ ] Close the selection, activate the right page immediately, and confirm no
+  `page activation waiting for pen/page state` banner appears.
+- [ ] Highlight active-right text, turn away/back, and confirm both pages retain
+  their annotations; repeat once outside Native Spread.
+
+Initial v0.0.131 hardware result:
+
+- [x] The failed active-left highlight no longer entered ordinary handwriting
+  ownership and no longer left page activation permanently waiting.
+- [x] The exact contact classified and retired cleanly, but Supernote emitted no
+  `handWriteSelectText` state because its native `isAllowTurnPage` prerequisite
+  remained true; the firmware gesture listener handled the contact instead.
+
+### Native Spread v0.0.132 native text-selection gate regression
+
+Automated pre-device checks:
+
+- [x] Activity DOWN applies the native `isAllowTurnPage=false` gate only after
+  exact active-page selection ownership is published/adopted and before the
+  unmodified event reaches Supernote.
+- [x] Exact Activity UP/CANCEL restores the prior native page-turn value only
+  after the firmware dispatch completes, then retires the selection token.
+- [x] A native terminal cannot prematurely remove an Activity-owned selection;
+  a bounded main-thread fallback restores and retires it only if Activity UP is
+  missing.
+- [x] Activity/global lifecycle cleanup restores any applied gate instead of
+  discarding the token, and structural invariants enforce these orderings.
+- [x] v0.0.132 compiles, verifies under APK Signature Schemes v2/v3, reports
+  matching manifest/runtime version 132, is 185,004 bytes, and has SHA-256
+  `ac200814f85ae091b1cf83438d62e3e6a983ac28f0cda675963329a45b7b5bc8`.
+
+Focused Nomad checks:
+
+- [x] Pen-select Highlighter, draw across active-left text, and confirm native
+  `handWriteSelectText` states plus an aligned live/final highlight.
+- [x] Confirm `text_selection_activity_gate_applied` precedes native selection
+  and `text_selection_activity_gate_restored` follows its terminal dispatch.
+- [x] Immediately activate the right page with a finger and confirm navigation
+  is not stuck or suppressed.
+- [x] Highlight active-right text, turn away/back, and confirm both pages retain
+  their annotations.
+- [ ] Repeat text selection and choose **Underline** from Supernote's result
+  menu; confirm alignment and persistence on both active sides.
+
+### Native Spread v0.0.135 early digital-down text-selection regression
+
+Automated pre-device checks:
+
+- [x] The Activity `ACTION_DOWN` classifier is authoritative and may adopt only
+  the exact otherwise-unowned physical digital-down emitted immediately before
+  that same text-selection gesture.
+- [x] The native-first classifier remains unable to adopt an already-down pen,
+  and competing handwriting, activation, lasso, page, or chrome ownership
+  rejects the selection fail closed.
+- [x] A rejected Activity selection returns the blocking route before ordinary
+  handwriting publication, while `onDigital(1)` rechecks text-selection
+  ownership under the same lock before publishing physical-contact state.
+- [x] Structural invariants enforce the classifier roles, atomic adoption,
+  rejection ordering, and digital-down recheck. Native PDF invariants, Native
+  Spread invariants, packaging failure tests, trace-helper tests, compilation,
+  signing verification, and whitespace validation pass.
+- [x] The locally signed APK reports v0.0.135 / versionCode 135, is 201,389
+  bytes, and has SHA-256
+  `d8ae6261d281e56851cf8af68548f91658041c7df4d244e3ee0cef8c69809b32`.
+
+Focused Nomad checks:
+
+- [x] Draw and settle ordinary ink on active left, then pen-select Supernote's
+  text-selection tool without creating stray ink or retaining handwriting
+  ownership.
+- [x] Underline active-left text. The trace records
+  `text_selection_preclassified_digital_down_adopted`, followed by gate apply,
+  Activity classification, gate restore, and exact contact retirement.
+- [x] Activate the right page immediately, pen-select the same native tool, and
+  apply Highlight with correct live/final alignment and no stuck page state.
+- [x] Both active sides retired their selection and result-menu contacts. No
+  `pen_contact_receive_expired` event occurred, and the finalized trace reports
+  zero potential failures with four changed `.mark` snapshots.
+- [x] Trace archive SHA-256:
+  `20b5462b58b46f4923d43c119867c8951b4bfe8dba174098a546831c569a7cb1`.
+
+### Native Spread v0.0.134 recognized-straight-line transaction
+
+Automated pre-device checks:
+
+- [x] Exact `straightLine` / two-point recognition begins an authority token
+  while the original receive contact, active writer, page, document, layout,
+  and native split offset are still current.
+- [x] The recognized-line `receiveTrials` branch defers the ordinary canonical
+  save/reload instead of replacing Supernote's live editor coordinate frame.
+- [x] `onEditLineMode` maps the native split-local editor geometry into the
+  active physical page slot and rejects invalid, missing, unclassified, or
+  stale transaction authority before Supernote can show its native editor.
+- [x] `onEditLineTransition` revalidates exact authority, maps final physical
+  endpoints back to Supernote's native split-local frame, lets the native
+  commit succeed, and only then performs the canonical save/reload.
+- [x] A recognized-line editor or commit in editable spread mode cannot fall
+  through to native coordinates when its exact transaction is absent; the
+  structural checker rejects both editor and commit fail-open regressions.
+- [x] Activity release, global editing reset, and a later ordinary receive
+  retire abandoned line authority; raw edit-line touch rewriting is forbidden.
+- [x] Native Spread safety invariants and the full native build pass. The
+  locally signed APK reports v0.0.134 / versionCode 134, verifies under APK
+  Signature Schemes v2/v3, is 185,004 bytes, and has SHA-256
+  `d27686f73729ae51f33a809ccdf32ba328b343a822a5dcde144c5f7778e783c7`.
+
+Focused Nomad checks:
+
+- [x] On active-right Box G, draw a short horizontal line and hold its endpoint
+  for about 1.5 seconds. Confirm the live editor remains horizontal/aligned and
+  does not jump into a large diagonal before or after pen lift.
+- [x] Turn away/back and cold-restart the document reader; confirm the line
+  remains horizontal, correctly placed, and singular.
+- [x] Repeat the held-line test on active left, then draw ordinary unheld lines
+  on both pages to confirm their existing path is unchanged.
+- [x] Repeat one highlight and the pending Underline selection to confirm the
+  v0.0.132 text-selection path remains aligned and persistent.
+
+Focused v0.0.135 hardware result:
+
+- [x] Seven recognized-line transactions across the right and left active
+  pages entered the remapped native editor, deferred canonical reload until
+  native commit, and logged `recognized_line_commit_persisted`.
+- [x] The first right-page line showed only a small native straightening snap;
+  no line became the former large diagonal or left its intended area. Later
+  right-page lines and every left-page line remained visually stable.
+- [x] A cold document-process reopen preserved every tested line in its
+  original position without duplication. Trace archive SHA-256:
+  `d857f14b7f41c5d482e027f2e7e26110f2f9090562c922b815837c1f4752fc96`.
 
 ## Failure capture
 

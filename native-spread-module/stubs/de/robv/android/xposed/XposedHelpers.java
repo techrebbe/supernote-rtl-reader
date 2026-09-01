@@ -17,6 +17,13 @@ public final class XposedHelpers {
         return null;
     }
 
+    public static void setObjectField(
+        Object object,
+        String fieldName,
+        Object value
+    ) {
+    }
+
     public static int getIntField(Object object, String fieldName) {
         return 0;
     }
@@ -25,6 +32,17 @@ public final class XposedHelpers {
         Object object,
         String fieldName,
         int value
+    ) {
+    }
+
+    public static boolean getBooleanField(Object object, String fieldName) {
+        return false;
+    }
+
+    public static void setBooleanField(
+        Object object,
+        String fieldName,
+        boolean value
     ) {
     }
 

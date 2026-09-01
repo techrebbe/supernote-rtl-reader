@@ -381,6 +381,24 @@ def extract_cpp_function(text: str, signature: str, label: str) -> tuple[str, st
     return text[start:end], masked[start:end]
 
 
+def extract_java_method(text: str, signature: str, label: str) -> str:
+    """Return one comment-masked Java method definition by signature prefix."""
+
+    masked = mask_comments_preserve_literals(text)
+    starts = [
+        match.start()
+        for match in re.finditer(re.escape(signature), masked)
+    ]
+    if len(starts) != 1:
+        fail(f"expected exactly one {label}, found {len(starts)}")
+    start = starts[0]
+    body_start = masked.find("{", start + len(signature))
+    if body_start < 0:
+        fail(f"could not locate {label} body")
+    body_end = matching_brace(masked, body_start, label) + 1
+    return masked[start:body_end]
+
+
 def matching_brace(text: str, opening: int, label: str) -> int:
     if opening < 0 or opening >= len(text) or text[opening] != "{":
         fail(f"could not locate {label} opening brace")
@@ -544,22 +562,22 @@ def check(repo_root: Path) -> None:
         ),
         (
             module_path,
-            "81c619556396e921bf19032a92a4d6dd0a2db0dc39edf85758267509ffc329c4",
+            "7089e303fa926487b9b0b27d6d2698d5358c7f0239668457b55e25805a52c619",
             "SpreadProbe.java",
         ),
         (
             native_build_path,
-            "d1e16bc0e3b8d608d068d7926566641f9d5d5557016fc88541e9f69d964d1f9b",
+            "e6e2ff9dcd9e562551e34ec9589da384235b031176154ee58b6eace8cdc10d80",
             "native build script",
         ),
         (
             trace_script_path,
-            "1d75e574776b3e90dc04ae42ab6685623324734dae4dad16ac10888005229d6a",
+            "adead52df5ace68ee59949501ae764aefe338dc6feac1aacd0259f05da8c9e06",
             "Native Spread trace helper",
         ),
         (
             trace_helper_test_path,
-            "224ba08b5d9a8252ed67f785448e65f3d7efd1c86527a4e0f109bc241172d358",
+            "bb35e8e149ab47b5e28fc2dcd1b7bccc9542666c8a52c00d59676317387d125d",
             "Native Spread trace-helper test",
         ),
         (
@@ -3020,6 +3038,7 @@ def check(repo_root: Path) -> None:
             "HANDSHAKE_REQUEST_ACTION",
             "HANDSHAKE_RESPONSE_ACTION",
             "private static final int HANDSHAKE_PROTOCOL = 2;",
+            "private static final long MODULE_VERSION_CODE = 135L;",
             "private static final long TRANSACTIONAL_MIN_MODULE_VERSION_CODE = 118L;",
             "private static final int EDITABLE_MARKER_PROTOCOL = 2;",
             '"protected-editable-transactional-v1"',
@@ -3061,13 +3080,385 @@ def check(repo_root: Path) -> None:
             "protected_editable_backup_verified",
             "cached.backupIdentity.sameAs(backupIdentity)",
             "cached.snapshotIdentity.sameAs(snapshotIdentity)",
-            "spreadLassoCanonicalSelection && mode == 1",
+            "spreadLassoCanonicalSelection",
+            "pureCanonicalMove",
             '" preserve_size=" + preserveCanonicalSize',
+            '" content_padding=" + contentPaddingX',
         ),
         "companion handshake/lifecycle",
     )
     if '"protected-editable-pilot"' in module:
         fail("companion module still accepts the legacy editable pilot marker")
+
+    # LSPosed loads this class into the document process, so installation by
+    # itself must not change an ordinary document.  Only a successfully
+    # published, enabled sidecar may arm behavior-changing hooks.  Keep these
+    # structural checks in addition to the frozen digest so an intentional
+    # source review cannot accidentally bless a fail-open containment change.
+    module_compact = compact_code(module)
+    if module_compact.count(
+        "privatestaticfinalMap<Activity,String>"
+        "NATIVE_SPREAD_CONTROL_CLAIMS=newConcurrentHashMap<>();"
+    ) != 1:
+        fail("Native Spread must have one explicit per-activity control claim")
+    claim_method = compact_code(
+        extract_java_method(
+            module,
+            "private static boolean nativeSpreadControlClaimed(",
+            "Native Spread control-claim predicate",
+        )
+    )
+    if (
+        "returnactivity!=null&&NATIVE_SPREAD_CONTROL_CLAIMS.get(activity)"
+        "!=null;"
+    ) not in claim_method:
+        fail("Native Spread control claims are not exact per-activity claims")
+    any_claim_method = compact_code(
+        extract_java_method(
+            module,
+            "private static boolean hasAnyNativeSpreadControlClaim(",
+            "current-owner Native Spread claim predicate",
+        )
+    )
+    if (
+        "Activitycurrent=activeActivity;Activitypending=pendingActivity;"
+        "returnnativeSpreadControlClaimed(current)||"
+        "nativeSpreadControlClaimed(pending);"
+    ) not in any_claim_method:
+        fail("unbound-hook blocking is not limited to the current/pending claim")
+    unbound_method = compact_code(
+        extract_java_method(
+            module,
+            "private static boolean mustBlockUnboundModuleComponent(",
+            "unbound component containment predicate",
+        )
+    )
+    if "&&hasAnyNativeSpreadControlClaim();" not in unbound_method:
+        fail("unbound ordinary-reader components can be blocked without a claim")
+    if "activeActivity!=null||pendingActivity!=null" in unbound_method:
+        fail("mere activity existence still arms behavior-changing hooks")
+
+    claimed_component_method = compact_code(
+        extract_java_method(
+            module,
+            "private static Activity claimedActivityForComponent(",
+            "claimed component identity resolver",
+        )
+    )
+    require_markers(
+        claimed_component_method,
+        (
+            "for(Map.Entry<Activity,Object>entry:bindings.entrySet())",
+            "entry.getValue()==component",
+            "nativeSpreadControlClaimed(owner)",
+        ),
+        "claimed component identity resolver",
+    )
+    for signature, owner_name, label in (
+        (
+            "private static Activity activityForNativeEventCallback(",
+            "activity",
+            "native pen callback resolver",
+        ),
+        (
+            "private static Activity activeActivityForDocumentViewModel(",
+            "candidate",
+            "document view-model resolver",
+        ),
+        (
+            "private static Activity activityForHandWriteClient(",
+            "candidate",
+            "handwriting client resolver",
+        ),
+        (
+            "private static Activity activeActivityForHandWriteView(",
+            "candidate",
+            "handwriting view resolver",
+        ),
+        (
+            "private static Activity activityForHandWritePresenter(",
+            "candidate",
+            "handwriting presenter resolver",
+        ),
+        (
+            "private static Activity activityForSuperNoteNote(",
+            "candidate",
+            "native note resolver",
+        ),
+    ):
+        resolver = compact_code(extract_java_method(module, signature, label))
+        if (
+            f"!nativeSpreadControlClaimed({owner_name})" not in resolver
+            or resolver.find(f"!nativeSpreadControlClaimed({owner_name})")
+            > resolver.find("synchronized(PAGE_ACTIVATION_OWNERSHIP_LOCK)")
+        ):
+            fail(f"{label} can bind an ordinary-reader component")
+
+    for signature, binding, label in (
+        (
+            "private static boolean knownNativeEventCallback(",
+            "NATIVE_EVENT_CALLBACKS",
+            "known native callback",
+        ),
+        (
+            "private static boolean knownDocumentViewModel(",
+            "DOCUMENT_VIEW_MODELS",
+            "known document view model",
+        ),
+        (
+            "private static boolean knownHandWriteClient(",
+            "HANDWRITE_CLIENTS",
+            "known handwriting client",
+        ),
+        (
+            "private static boolean knownHandWriteView(",
+            "HANDWRITE_VIEWS",
+            "known handwriting view",
+        ),
+        (
+            "private static boolean knownSuperNoteNote(",
+            "SUPER_NOTE_NOTES",
+            "known native note",
+        ),
+    ):
+        known_method = compact_code(
+            extract_java_method(module, signature, label)
+        )
+        if f"claimedActivityForComponent({binding}," not in known_method:
+            fail(f"{label} is not constrained by an enabled-document claim")
+
+    owner_barrier = compact_code(
+        extract_java_method(
+            module,
+            "private static void installOwnerLifetimeBarriers(",
+            "owner-lifetime barrier installer",
+        )
+    )
+    inert_barrier = owner_barrier.find(
+        "if(!hasAnyNativeSpreadControlClaim()){"
+    )
+    first_lock = owner_barrier.find("booleanownerAcquired=false;")
+    if not 0 <= inert_barrier < first_lock:
+        fail("ordinary-reader callbacks enter Native Spread lifetime locks")
+    inert_return = owner_barrier.find("return;", inert_barrier, first_lock)
+    if inert_return < 0 or "param.setResult" in owner_barrier[
+        inert_barrier:inert_return
+    ]:
+        fail("ordinary-reader lifetime-barrier bypass can suppress firmware")
+
+    ordinary_activity_guards = (
+        (
+            '"onConfigurationChanged",Configuration.class,',
+            "if(!nativeSpreadControlClaimed(activity)){return;}",
+        ),
+        (
+            '"dispatchTouchEvent",MotionEvent.class,',
+            "if(!nativeSpreadControlClaimed(activity)){return;}",
+        ),
+        (
+            '"changeSelectTextModel",int.class,',
+            "if(!nativeSpreadControlClaimed(activity)){return;}",
+        ),
+        (
+            '"handWriteSelectText",int.class,List.class,',
+            "if(!nativeSpreadControlClaimed(activity)){return;}",
+        ),
+        (
+            '"showSelectTextPopView",newXC_MethodHook()',
+            "if(!nativeSpreadControlClaimed(activity)){return;}",
+        ),
+        (
+            '"setDigestImage",Bitmap.class,',
+            "if(!nativeSpreadControlClaimed(activity)){return;}",
+        ),
+    )
+    for hook_signature, guard in ordinary_activity_guards:
+        hook_start = module_compact.find(hook_signature)
+        guard_start = module_compact.find(guard, hook_start)
+        next_hook = module_compact.find(
+            "XposedHelpers.findAndHookMethod(", hook_start + 1
+        )
+        if not (
+            hook_start >= 0
+            and guard_start > hook_start
+            and (next_hook < 0 or guard_start < next_hook)
+        ):
+            fail(
+                "ordinary-reader direct hook lacks an inert control-claim "
+                f"guard: {hook_signature}"
+            )
+
+    set_image_guard = (
+        "pushSetImageScope(scope);if(!activeOwner){"
+        "if(nativeSpreadControlClaimed(activity)){param.setResult(null);}"
+        "return;}if(!nativeSpreadControlClaimed(activity)){return;}"
+    )
+    if set_image_guard not in module_compact:
+        fail("ordinary setImage can withdraw or suppress native presentation")
+
+    activity_create_hook = compact_code(
+        module[
+            module.find(
+                'XposedHelpers.findAndHookMethod(\n            TARGET_ACTIVITY,\n'
+                '            loadPackageParam.classLoader,\n            "onCreate"'
+            ) : module.find(
+                'XposedHelpers.findAndHookMethod(\n            TARGET_ACTIVITY,\n'
+                '            loadPackageParam.classLoader,\n'
+                '            "onConfigurationChanged"'
+            )
+        ]
+    )
+    create_claim = activity_create_hook.find(
+        "booleanpreviousControlClaimed="
+        "nativeSpreadControlClaimed(previous);"
+    )
+    create_lock_guard = activity_create_hook.find(
+        "if(previousControlClaimed){"
+        "OWNER_LIFETIME_LOCK.writeLock().lock();"
+        "ACTIVITY_CREATE_WRITE_HELD.set(Boolean.TRUE);"
+        "}else{ACTIVITY_CREATE_WRITE_HELD.remove();}"
+    )
+    create_native_withdraw = activity_create_hook.find(
+        "if(previousControlClaimed){"
+        'disableNativeGateForOwnershipHandoffLocked("activity_create_pending");'
+        "}"
+    )
+    create_config = activity_create_hook.find(
+        "SpreadConfigcreatedConfig=spreadConfig(createdActivity);"
+    )
+    create_new_claim_guard = activity_create_hook.find(
+        "if(createdConfig!=null&&"
+        "nativeSpreadControlClaimed(createdActivity)){"
+        'updateNativeEraserGate(createdActivity,"activity_created");'
+        "}"
+    )
+    if not (
+        0 <= create_claim < create_lock_guard < create_native_withdraw
+        < create_config < create_new_claim_guard
+    ):
+        fail("ordinary DocumentActivity startup can enter Native Spread hardware state")
+
+    on_destroy_start = module_compact.find(
+        '"onDestroy",newXC_MethodHook()'
+    )
+    on_destroy_end = module_compact.find(
+        "XposedHelpers.findAndHookMethod(", on_destroy_start + 1
+    )
+    on_destroy_hook = module_compact[on_destroy_start:on_destroy_end]
+    if (
+        "booleandestroyControlClaimed="
+        "nativeSpreadControlClaimed(activity);"
+        "if(destroyControlClaimed){"
+        "OWNER_LIFETIME_LOCK.writeLock().lock();"
+        "ACTIVITY_DESTROY_WRITE_HELD.set(Boolean.TRUE);"
+        "}else{ACTIVITY_DESTROY_WRITE_HELD.remove();}"
+    ) not in on_destroy_hook or (
+        "if(destroyControlClaimed){"
+        'updateNativeEraserGate(activity,"activity_destroyed",false);'
+        "}"
+    ) not in on_destroy_hook:
+        fail("ordinary DocumentActivity teardown can enter Native Spread locks or JNI")
+
+    for signature, required, label in (
+        (
+            "private static boolean isCalibrationLandscape(",
+            "returnnativeSpreadControlClaimed(activity)&&",
+            "spread-landscape predicate",
+        ),
+        (
+            "private static boolean isReadOnlyNativeMode(",
+            "returnnativeSpreadControlClaimed(activity)&&",
+            "read-only predicate",
+        ),
+        (
+            "private static boolean isCachedSpreadLandscape(",
+            "&&nativeSpreadControlClaimed(activity)&&",
+            "cached spread predicate",
+        ),
+        (
+            "private static boolean isCalibrationFile(",
+            "returnnativeSpreadControlClaimed(activity)&&",
+            "enabled-document predicate",
+        ),
+    ):
+        predicate = compact_code(extract_java_method(module, signature, label))
+        if required not in predicate:
+            fail(f"{label} can arm without an exact Native Spread claim")
+
+    gate_update = compact_code(
+        extract_java_method(
+            module,
+            "private static void updateNativeEraserGate(\n"
+            "        Activity activity,\n        String reason\n    )",
+            "native eraser discovery gate",
+        )
+    )
+    gate_config = gate_update.find("SpreadConfigconfig=spreadConfig(activity);")
+    gate_claim = gate_update.find(
+        "if(!nativeSpreadControlClaimed(activity)){return;}", gate_config
+    )
+    gate_orientation = gate_update.find(
+        "intorientation=activity.getResources()", gate_claim
+    )
+    if not 0 <= gate_config < gate_claim < gate_orientation:
+        fail("ordinary config discovery can mutate the JNI/writer gate")
+
+    cache_config = compact_code(
+        extract_java_method(
+            module,
+            "private static SpreadConfig cacheSpreadConfig(",
+            "spread config publication",
+        )
+    )
+    claim_publish = cache_config.find(
+        "if(config.enabled){acquiredControlClaim="
+        "NATIVE_SPREAD_CONTROL_CLAIMS.put(activity,config.documentPath)==null;"
+    )
+    claim_release = cache_config.find(
+        "elseif(PAGE_ACTIVATION_TRANSACTIONS.get(activity)==null&&"
+        "PAGE_ACTIVATION_ROLLBACK_RECOVERIES.get(activity)==null&&"
+        "DEFERRED_SPREAD_TURNS.get(activity)==null){"
+    )
+    claim_remove = cache_config.find(
+        "NATIVE_SPREAD_CONTROL_CLAIMS.remove(activity)", claim_release
+    )
+    hardware_restore = cache_config.find(
+        "scheduleOrdinaryReaderHardwareRestore(activity,"
+        '"verified_native_spread_off")',
+        claim_remove,
+    )
+    if not 0 <= claim_publish < claim_release < claim_remove < hardware_restore:
+        fail("Native Spread claim publication/release is not transactional")
+    if cache_config.count("NATIVE_SPREAD_CONTROL_CLAIMS.put(") != 1:
+        fail("Native Spread control may be claimed outside enabled publication")
+
+    hardware_restore_method = compact_code(
+        extract_java_method(
+            module,
+            "private static void scheduleOrdinaryReaderHardwareRestore(",
+            "ordinary reader hardware restore",
+        )
+    )
+    restore_claim_guard = hardware_restore_method.find(
+        "nativeSpreadControlClaimed(activity)"
+    )
+    native_gate_off = hardware_restore_method.find(
+        'updateNativeEraserGate(activity,"ordinary_reader_restore_"+reason,false)'
+    )
+    firmware_restore = hardware_restore_method.find(
+        'XposedHelpers.callMethod(activity,"sendDisableWriteArea")'
+    )
+    if not 0 <= restore_claim_guard < native_gate_off < firmware_restore:
+        fail("ordinary-reader hardware state is not restored after claim release")
+    release_resources = compact_code(
+        extract_java_method(
+            module,
+            "private static void releaseActivityResources(",
+            "activity resource release",
+        )
+    )
+    if "NATIVE_SPREAD_CONTROL_CLAIMS.remove(activity);" not in release_resources:
+        fail("destroyed activities can retain a Native Spread control claim")
 
     protected_backup_start = module.find(
         "private static boolean protectedEditableBackupValid("
@@ -3103,6 +3494,79 @@ def check(repo_root: Path) -> None:
         ),
         "companion versioned editable marker attestation",
     )
+    committed_candidate_start = module.find(
+        "private static boolean committedTransactionalMarkerCandidate("
+    )
+    committed_candidate_end = module.find(
+        "private static boolean transactionalMarkerAuthorityPresent(",
+        committed_candidate_start,
+    )
+    if committed_candidate_start < 0 or committed_candidate_end < 0:
+        fail("could not isolate committed transactional marker classification")
+    committed_candidate = mask_comments_preserve_literals(
+        module[committed_candidate_start:committed_candidate_end]
+    )
+    require_markers(
+        committed_candidate,
+        (
+            "Long.parseLong(",
+            'properties.getProperty("minimumModuleVersionCode", "-1")',
+            ">= TRANSACTIONAL_MIN_MODULE_VERSION_CODE",
+            "<= MODULE_VERSION_CODE",
+        ),
+        "companion committed-marker version range",
+    )
+    if "Long.toString(TRANSACTIONAL_MIN_MODULE_VERSION_CODE).equals(" in (
+        committed_candidate
+    ):
+        fail(
+            "committed marker classification requires one historical minimum "
+            "exactly instead of accepting the supported version range"
+        )
+
+    spread_config_start = module.find(
+        "private static SpreadConfig spreadConfig(Activity activity)"
+    )
+    spread_config_end = module.find(
+        "private static void publishSpreadConfigLoadFailure(",
+        spread_config_start,
+    )
+    if spread_config_start < 0 or spread_config_end < 0:
+        fail("could not isolate spread config loading")
+    spread_config_loader = mask_comments_preserve_literals(
+        module[spread_config_start:spread_config_end]
+    )
+    require_markers(
+        spread_config_loader,
+        (
+            "boolean authorityArtifactsAbsent = markerIdentity.isMissing()",
+            "if (TARGET_FILE.equals(path) && authorityArtifactsAbsent)",
+            "Properties properties = new Properties();",
+        ),
+        "calibration/protected-authority routing",
+    )
+    if re.search(
+        r"if\s*\(\s*TARGET_FILE\.equals\(path\)\s*\)",
+        spread_config_loader,
+    ):
+        fail(
+            "the reserved calibration path unconditionally bypasses protected "
+            "transactional marker validation"
+        )
+    calibration_absent = spread_config_loader.find(
+        "boolean authorityArtifactsAbsent = markerIdentity.isMissing()"
+    )
+    calibration_branch = spread_config_loader.find(
+        "if (TARGET_FILE.equals(path) && authorityArtifactsAbsent)"
+    )
+    protected_properties = spread_config_loader.find(
+        "Properties properties = new Properties();"
+    )
+    if not 0 <= calibration_absent < calibration_branch < protected_properties:
+        fail(
+            "calibration authority routing does not fall through to protected "
+            "marker validation when authority artifacts exist"
+        )
     protected_backup = module[protected_backup_start:protected_backup_end]
     if '.trim()' in protected_backup:
         fail(
@@ -3323,7 +3787,7 @@ def check(repo_root: Path) -> None:
     weak_map_declarations = tuple(
         re.finditer(r"new\s+WeakHashMap\s*<\s*>\s*\(\s*\)", module)
     )
-    if len(weak_map_declarations) != 22:
+    if len(weak_map_declarations) != 23:
         fail(
             "per-activity weak-map inventory changed without an explicit "
             f"concurrency review: found {len(weak_map_declarations)}"
@@ -3479,15 +3943,24 @@ def check(repo_root: Path) -> None:
         "activeActivity = createdActivity;", startup_guard
     )
     startup_config = activity_create.find(
-        'updateNativeEraserGate(\n'
-        '                            createdActivity,\n'
-        '                            "activity_created"',
-        startup_publish,
+        "SpreadConfig createdConfig = spreadConfig(", startup_publish
     )
-    if not 0 <= startup_guard < startup_publish < startup_config:
+    startup_claim = activity_create.find(
+        "nativeSpreadControlClaimed(createdActivity)", startup_config
+    )
+    startup_gate = activity_create.find(
+        'updateNativeEraserGate(\n'
+        '                                createdActivity,\n'
+        '                                "activity_created"',
+        startup_claim,
+    )
+    if not (
+        0 <= startup_guard < startup_publish < startup_config
+        < startup_claim < startup_gate
+    ):
         fail(
             "DocumentActivity startup exposes pen callbacks before publishing "
-            "a fail-closed editable guard"
+            "a fail-closed editable guard or arms hardware without a claim"
         )
     if "PEN_INPUT_EDITABLE_GUARDS.remove(createdActivity)" in activity_create:
         fail("DocumentActivity startup clears its pen guard before config authority")
@@ -3545,10 +4018,9 @@ def check(repo_root: Path) -> None:
         "finishPenInputBlock(",
         '"activation_trigger"',
         '"transaction"',
-        '"native_chrome"',
         '"nonwritable_contact"',
         '"active_stroke_cross_page"',
-        '"page_activation_pen_ignored_native_chrome point="',
+        '"native_chrome_contact_classified generation="',
         '"page_activation_active_stroke_terminal_preserved"',
         '"page_activation_ignored_cross_page_stroke current="',
         '"page_activation_rejected reason=pen_contact_active"',
@@ -3837,8 +4309,47 @@ def check(repo_root: Path) -> None:
     pressure_capture = digital_position_hook.find(
         'XposedHelpers.getIntField(', callback_owner_reject
     )
+    native_chrome_route = digital_position_hook.find(
+        "routeNativeChromeNativePen(", pressure_capture
+    )
+    native_chrome_pass = digital_position_hook.find(
+        "nativeChromeRoute == NATIVE_CHROME_ROUTE_PASS", native_chrome_route
+    )
+    native_chrome_pass_return = digital_position_hook.find(
+        "return;", native_chrome_pass
+    )
+    native_chrome_block = digital_position_hook.find(
+        "nativeChromeRoute == NATIVE_CHROME_ROUTE_BLOCK",
+        native_chrome_pass_return,
+    )
+    native_chrome_block_result = digital_position_hook.find(
+        "param.setResult(null);", native_chrome_block
+    )
+    native_chrome_block_return = digital_position_hook.find(
+        "return;", native_chrome_block_result
+    )
+    text_selection_route = digital_position_hook.find(
+        "routeTextSelectionNativePen(", native_chrome_block_return
+    )
+    text_selection_pass = digital_position_hook.find(
+        "textSelectionRoute == NATIVE_CHROME_ROUTE_PASS",
+        text_selection_route,
+    )
+    text_selection_pass_return = digital_position_hook.find(
+        "return;", text_selection_pass
+    )
+    text_selection_block = digital_position_hook.find(
+        "textSelectionRoute == NATIVE_CHROME_ROUTE_BLOCK",
+        text_selection_pass_return,
+    )
+    text_selection_block_result = digital_position_hook.find(
+        "param.setResult(null);", text_selection_block
+    )
+    text_selection_block_return = digital_position_hook.find(
+        "return;", text_selection_block_result
+    )
     pen_snapshot_lookup = digital_position_hook.find(
-        "PenInputSnapshot inputSnapshot =", pressure_capture
+        "PenInputSnapshot inputSnapshot =", text_selection_block_return
     )
     pen_snapshot_read = digital_position_hook.find(
         "penInputSnapshot(activity)",
@@ -3877,11 +4388,8 @@ def check(repo_root: Path) -> None:
     contact_geometry_ready = digital_position_hook.find(
         "inputSnapshot.geometryReady", atomic_contact_generation
     )
-    contact_chrome_origin = digital_position_hook.find(
-        "inputSnapshot.isNativeChromeTouch(", contact_geometry_ready
-    )
     contact_page_mapping = digital_position_hook.find(
-        "int mappedContactPage = pageAt(", contact_chrome_origin
+        "int mappedContactPage = pageAt(", contact_geometry_ready
     )
     contact_page_valid = digital_position_hook.find(
         "if (mappedContactPage >= 0)", contact_page_mapping
@@ -3905,7 +4413,13 @@ def check(repo_root: Path) -> None:
     )
     if not (
         0 <= before_native_callback < callback_owner_resolution
-        < callback_owner_reject < pressure_capture < pen_snapshot_lookup
+        < callback_owner_reject < pressure_capture < native_chrome_route
+        < native_chrome_pass < native_chrome_pass_return
+        < native_chrome_block < native_chrome_block_result
+        < native_chrome_block_return < text_selection_route
+        < text_selection_pass < text_selection_pass_return
+        < text_selection_block < text_selection_block_result
+        < text_selection_block_return < pen_snapshot_lookup
         < pen_snapshot_read < contact_identity_capture
         < positive_contact_branch < contact_ownership_lock
         < prior_contact_phase_guard
@@ -3913,7 +4427,7 @@ def check(repo_root: Path) -> None:
         < editable_guard_reject < contact_transaction_lookup
         < atomic_contact_generation
         < contact_geometry_ready
-        < contact_chrome_origin < contact_page_mapping < contact_page_valid
+        < contact_page_mapping < contact_page_valid
         < unmapped_contact_reason < contact_ownership_publish
         < quarantine_retire
         < pending_snapshot_guard
@@ -3921,8 +4435,18 @@ def check(repo_root: Path) -> None:
     ):
         fail(
             "contact start is not atomically latched against transaction "
-            "commit, exact writer identity, native chrome, quarantine, or an "
+            "commit, exact writer identity, native-chrome/text-selection "
+            "pass-through, "
+            "quarantine, or an "
             "unmapped held gesture before page ownership"
+        )
+    if (
+        "isNativeChromeTouch(" in digital_position_hook
+        or "blocked_native_chrome" in digital_position_hook
+    ):
+        fail(
+            "native chrome is still converted into handwriting ownership "
+            "inside the low-latency contact publisher"
         )
     if "Integer.valueOf(pageAt(" in digital_position_hook:
         fail("the pen-contact guard can still permanently latch page -1")
@@ -4232,14 +4756,11 @@ def check(repo_root: Path) -> None:
     transaction_return = live_pen_activation.find(
         "return;", transaction_lift
     )
-    chrome_guard = live_pen_activation.find(
-        "inputSnapshot.isNativeChromeTouch(requestedY)", transaction_return
-    )
     snapshot_validation = live_pen_activation.find(
         "currentSnapshot != inputSnapshot", transaction_return
     )
     current_mapping = live_pen_activation.find(
-        "int current = inputSnapshot.currentPage;", chrome_guard
+        "int current = inputSnapshot.currentPage;", snapshot_validation
     )
     blocked_contact_guard = live_pen_activation.find(
         "== PEN_CONTACT_BLOCKED_PAGE", current_mapping
@@ -4254,7 +4775,6 @@ def check(repo_root: Path) -> None:
         < pre_dispatch_snapshot_guard < pre_dispatch_active_page_filter
         < ui_dispatch < transaction_lookup_for_lift
         < transaction_lift < transaction_return < snapshot_validation
-        < chrome_guard
         < current_mapping < blocked_contact_guard < blocked_contact_return
     ):
         fail(
@@ -4305,21 +4825,8 @@ def check(repo_root: Path) -> None:
         '"geometry_pending"',
         pending_geometry_preserve,
     )
-    intercept_chrome = intercept_method.find(
-        "inputSnapshot.isNativeChromeTouch(y)", pending_geometry_block
-    )
-    intercept_chrome_terminal = intercept_method.find(
-        "if (completingActivePageStroke)", intercept_chrome
-    )
-    intercept_chrome_preserve = intercept_method.find(
-        "return false;", intercept_chrome_terminal
-    )
-    intercept_chrome_discard = intercept_method.find(
-        "return true;", intercept_chrome_preserve
-    )
     intercept_page_mapping = intercept_method.find(
-        "int target = pageAt(inputSnapshot, x, y);",
-        intercept_chrome_discard,
+        "int target = pageAt(inputSnapshot, x, y);", pending_geometry_block
     )
     nonwritable_start_guard = intercept_method.find(
         "contactStartPage.intValue() != current",
@@ -4337,15 +4844,23 @@ def check(repo_root: Path) -> None:
         < null_snapshot_guard < null_snapshot_terminal
         < null_snapshot_preserve < pending_geometry_guard
         < pending_geometry_terminal
-        < pending_geometry_preserve < pending_geometry_block < intercept_chrome
-        < intercept_chrome_terminal < intercept_chrome_preserve
-        < intercept_chrome_discard < intercept_page_mapping
+        < pending_geometry_preserve < pending_geometry_block
+        < intercept_page_mapping
         < nonwritable_start_guard
         < nonwritable_start_discard < current_page_passthrough
     ):
         fail(
             "pen interception does not preserve source terminal callbacks and "
             "discard a non-writable-start gesture before current-page input"
+        )
+    if (
+        "isNativeChromeTouch(" in live_pen_activation
+        or "isNativeChromeTouch(" in intercept_method
+        or '"native_chrome"' in intercept_method
+    ):
+        fail(
+            "document-origin pen contacts can still be reclassified as "
+            "native chrome after ACTION_DOWN"
         )
     nonwritable_guard_prefix = intercept_method[
         intercept_page_mapping:nonwritable_start_guard
@@ -4560,9 +5075,7 @@ def check(repo_root: Path) -> None:
             "this.editable = config.enabled && config.editable",
             "&& nativeBridgeLoaded && nativeHookReady;",
             "this.writerAuthority = writerAuthority;",
-            "boolean isNativeChromeTouch(float y)",
             "chromeOutputHeight",
-            "NATIVE_BOTTOM_CHROME_TOUCH_EXCLUSION_PX",
         ),
         "immutable pen-input config/page-geometry snapshot",
     )
@@ -5212,7 +5725,7 @@ def check(repo_root: Path) -> None:
         activity_contact_terminal_start,
     )
     native_chrome_start = module.find(
-        "private static boolean isNativeChromeTouch(", activation_touch_start
+        "private static void queueLowLatencyLog(", activation_touch_start
     )
     if (ui_block_start < 0 or activity_contact_latch_start < 0
             or activity_contact_terminal_start < 0
@@ -5261,7 +5774,6 @@ def check(repo_root: Path) -> None:
             "PEN_INPUT_SNAPSHOTS.get(activity) != snapshot",
             "SPREAD_CONFIGS.get(activity) != snapshot.config",
             "publishAmbiguousPenContactLocked(activity)",
-            "snapshot.isNativeChromeTouch(touchY)",
             "int mappedPage = pageAt(",
             "mappedPage == snapshot.currentPage",
             "publishPenContactOwnershipLocked(",
@@ -5313,6 +5825,11 @@ def check(repo_root: Path) -> None:
         fail(
             "Android stylus fallback performs blocking or synchronous work: "
             f"{fallback_blocking_hits}"
+        )
+    if "blocked_native_chrome" in activity_contact_latch:
+        fail(
+            "Android stylus fallback still converts a native-control contact "
+            "into blocked handwriting ownership"
         )
     activity_contact_terminal = module[
         activity_contact_terminal_start:activation_touch_start
@@ -5574,7 +6091,7 @@ def check(repo_root: Path) -> None:
         "private static boolean cancelNativeFingerTouchStream("
     )
     native_chrome_helper_start = module.find(
-        "private static boolean isNativeChromeTouch(", cancel_helper_start
+        "private static void queueLowLatencyLog(", cancel_helper_start
     )
     if cancel_helper_start < 0 or native_chrome_helper_start < 0:
         fail("could not isolate native finger-stream cancellation")
@@ -6394,14 +6911,14 @@ def check(repo_root: Path) -> None:
             "revalidated through pen lift"
         )
 
-    receive_hook_start_transactional = module.find('"receiveTrials",')
+    save_hook_start_transactional = module.find('"saveTrails",')
+    receive_hook_start_transactional = module.find(
+        '"receiveTrials",', save_hook_start_transactional
+    )
     receive_hook_end_transactional = module.find(
         '"areaSelectionTransition",', receive_hook_start_transactional
     )
-    save_hook_start_transactional = module.find('"saveTrails",')
-    save_hook_end_transactional = module.find(
-        '"receiveTrials",', save_hook_start_transactional
-    )
+    save_hook_end_transactional = receive_hook_start_transactional
     if (
         receive_hook_start_transactional < 0
         or receive_hook_end_transactional < 0
@@ -6490,6 +7007,342 @@ def check(repo_root: Path) -> None:
         or "scopes.pop()" in receive_scope_helper
     ):
         fail("terminal receive-scope lookup can consume or lose ownership")
+
+    # A recognized straight line is a two-stage native edit. Supernote emits
+    # receiveTrials() while the pen is still held, then commits the adjusted
+    # endpoints through onEditLineTransition(). The spread module must retain
+    # exact writer/page/layout authority across that interval, keep the live
+    # editor in physical spread coordinates, and publish the canonical reload
+    # only after the native commit succeeds.
+    trail_hook_start = module.find('"getTrailContainer",')
+    trail_hook_end = module.find(
+        '"modifyPageTrailsFromFile",', trail_hook_start
+    )
+    if trail_hook_start < 0 or trail_hook_end < 0:
+        fail("could not isolate recognized-line trail classification")
+    trail_hook = mask_comments_preserve_literals(
+        module[trail_hook_start:trail_hook_end]
+    )
+    trail_receive_scope = trail_hook.find(
+        "ReceiveTrialsScope receiveScope ="
+    )
+    trail_owner = trail_hook.find("scope.activeOwner", trail_receive_scope)
+    trail_current = trail_hook.find(
+        "nativeNoteScopeStillActive(", trail_owner
+    )
+    trail_editable = trail_hook.find(
+        "isEditableSpreadLandscape(activity)", trail_current
+    )
+    trail_classifier = trail_hook.find(
+        "containsRecognizedStraightLine(", trail_editable
+    )
+    trail_classified = trail_hook.find(
+        "receiveScope.recognizedStraightLine = true", trail_classifier
+    )
+    trail_transaction_flag = trail_hook.find(
+        "receiveScope.recognizedLineTransactionStarted =",
+        trail_classified,
+    )
+    trail_transaction_begin = trail_hook.find(
+        "beginRecognizedLineTransaction(", trail_transaction_flag
+    )
+    if not (
+        0 <= trail_receive_scope < trail_owner < trail_current < trail_editable
+        < trail_classifier < trail_classified < trail_transaction_flag
+        < trail_transaction_begin
+    ):
+        fail(
+            "recognized-line classification can escape the exact active "
+            "receive/note/editable authority or fail to start its transaction"
+        )
+
+    receive_masked = mask_comments_preserve_literals(transaction_receive_hook)
+    recognized_condition = receive_masked.find(
+        "receiveScope.recognizedStraightLine"
+    )
+    recognized_open = receive_masked.find("{", recognized_condition)
+    if recognized_condition < 0 or recognized_open < 0:
+        fail("receiveTrials lacks an exact recognized-line deferred branch")
+    recognized_close = matching_brace(
+        receive_masked,
+        recognized_open,
+        "recognized-line receive branch",
+    )
+    recognized_branch = receive_masked[recognized_open:recognized_close + 1]
+    recognized_deferred = recognized_branch.find(
+        '"recognized_line_canonical_reload_deferred"'
+    )
+    if recognized_deferred < 0:
+        fail("recognized-line receive branch does not record its deferred reload")
+    if (
+        "persistActiveMutationBeforeCanonicalRefresh(" in recognized_branch
+        or "beginRecognizedLineTransaction(" in recognized_branch
+    ):
+        fail(
+            "recognized-line receive branch can save/reload or begin authority "
+            "after Supernote has already entered its live editor"
+        )
+    recognized_else = receive_masked.find("else", recognized_close)
+    ordinary_retire = receive_masked.find(
+        "retireAbandonedRecognizedLineTransaction(", recognized_else
+    )
+    ordinary_persist = receive_masked.find(
+        "persistActiveMutationBeforeCanonicalRefresh(", ordinary_retire
+    )
+    if not (
+        recognized_close < recognized_else < ordinary_retire < ordinary_persist
+    ):
+        fail(
+            "ordinary receiveTrials mutations no longer retire stale line "
+            "authority before their canonical save/reload"
+        )
+
+    editor_hook_start = module.find('"onEditLineMode",', receive_hook_start_transactional)
+    line_commit_hook_start = module.find(
+        '"onEditLineTransition",', editor_hook_start
+    )
+    line_commit_hook_end = module.find(
+        '"areaSelectionTransition",', line_commit_hook_start
+    )
+    if (
+        editor_hook_start < 0
+        or line_commit_hook_start < 0
+        or line_commit_hook_end < 0
+    ):
+        fail("could not isolate recognized-line editor/commit hooks")
+    editor_hook = mask_comments_preserve_literals(
+        module[editor_hook_start:line_commit_hook_start]
+    )
+    editor_landscape_gate = editor_hook.find(
+        "!isEditableSpreadLandscape(activity)"
+    )
+    editor_receive_scope = editor_hook.find(
+        "ReceiveTrialsScope receiveScope =", editor_landscape_gate
+    )
+    editor_recognized = editor_hook.find(
+        "receiveScope.recognizedStraightLine", editor_receive_scope
+    )
+    editor_started = editor_hook.find(
+        "receiveScope.recognizedLineTransactionStarted", editor_recognized
+    )
+    editor_transaction_present = editor_hook.find(
+        "transaction != null", editor_started
+    )
+    editor_authority = editor_hook.find(
+        "recognizedLineTransactionCurrent(", editor_transaction_present
+    )
+    editor_admission_block = editor_hook.find(
+        "if (!admitted)", editor_authority
+    )
+    editor_admission_retire = editor_hook.find(
+        "RECOGNIZED_LINE_TRANSACTIONS.remove(", editor_admission_block
+    )
+    editor_admission_result = editor_hook.find(
+        "param.setResult(null);", editor_admission_retire
+    )
+    editor_points = editor_hook.find(
+        "mapRecognizedLinePointsToSpread(", editor_admission_result
+    )
+    editor_layers = editor_hook.find(
+        "mapRecognizedLineLayerPointsToSpread(", editor_points
+    )
+    editor_invalid = editor_hook.find(
+        "if (displayPoints == null || displayPoints.size() != 2",
+        editor_layers,
+    )
+    editor_retire = editor_hook.find(
+        "RECOGNIZED_LINE_TRANSACTIONS.remove(", editor_invalid
+    )
+    editor_block = editor_hook.find("param.setResult(null);", editor_retire)
+    editor_points_publish = editor_hook.find(
+        "param.args[0] = displayPoints", editor_block
+    )
+    editor_layers_publish = editor_hook.find(
+        "param.args[1] = displayLayerPoints", editor_points_publish
+    )
+    editor_width = editor_hook.find(
+        "param.args[4] = Math.max(1, handWriteView.getWidth())",
+        editor_layers_publish,
+    )
+    editor_height = editor_hook.find(
+        "param.args[5] = Math.max(1, handWriteView.getHeight())",
+        editor_width,
+    )
+    if not (
+        0 <= editor_landscape_gate < editor_receive_scope < editor_recognized
+        < editor_started < editor_transaction_present < editor_authority
+        < editor_admission_block < editor_admission_retire
+        < editor_admission_result < editor_points < editor_layers < editor_invalid
+        < editor_retire < editor_block < editor_points_publish
+        < editor_layers_publish < editor_width < editor_height
+    ):
+        fail(
+            "recognized-line editor can run without exact receive/transaction "
+            "authority or is not mapped into the active spread destination "
+            "before Supernote displays it"
+        )
+    if "if (!recognizedLineTransactionCurrent(" in editor_hook:
+        fail(
+            "recognized-line editor still returns to the unsafe native editor "
+            "when its transaction authority is stale"
+        )
+    if '"setEditLineViewOnTouchEvent"' in module:
+        fail(
+            "recognized-line support still rewrites raw stylus events instead "
+            "of mapping the bounded native editor transaction"
+        )
+
+    line_commit_hook = mask_comments_preserve_literals(
+        module[line_commit_hook_start:line_commit_hook_end]
+    )
+    commit_missing_transaction = line_commit_hook.find(
+        "boolean editableSpreadWithoutTransaction ="
+    )
+    commit_missing_landscape = line_commit_hook.find(
+        "isEditableSpreadLandscape(activity)", commit_missing_transaction
+    )
+    commit_missing_null = line_commit_hook.find(
+        "transaction == null", commit_missing_landscape
+    )
+    commit_authority = line_commit_hook.find(
+        "recognizedLineTransactionCurrent(", commit_missing_null
+    )
+    commit_presenter = line_commit_hook.find(
+        "transaction.presenter == param.thisObject", commit_authority
+    )
+    commit_geometry = line_commit_hook.find(
+        "mapRecognizedLinePointsToNative(", commit_presenter
+    )
+    commit_geometry_guard = line_commit_hook.find(
+        "if (nativePoints == null", commit_geometry
+    )
+    commit_geometry_publish = line_commit_hook.find(
+        "param.args[3] = nativePoints", commit_geometry_guard
+    )
+    commit_scope = line_commit_hook.find(
+        "pushRecognizedLineCommitScope(", commit_geometry_publish
+    )
+    commit_missing_block = line_commit_hook.find(
+        "if (editableSpreadWithoutTransaction", commit_scope
+    )
+    commit_block = line_commit_hook.find(
+        "param.setResult(null);", commit_missing_block
+    )
+    commit_throwable = line_commit_hook.find(
+        "if (param.getThrowable() != null)", commit_block
+    )
+    commit_revalidate = line_commit_hook.find(
+        "if (!recognizedLineTransactionCurrent(", commit_throwable
+    )
+    commit_persist = line_commit_hook.find(
+        "persistActiveMutationBeforeCanonicalRefresh(", commit_revalidate
+    )
+    commit_finally = line_commit_hook.find("finally", commit_persist)
+    commit_retire = line_commit_hook.find(
+        "RECOGNIZED_LINE_TRANSACTIONS.remove(", commit_finally
+    )
+    if not (
+        0 <= commit_missing_transaction < commit_missing_landscape
+        < commit_missing_null < commit_authority < commit_presenter < commit_geometry
+        < commit_geometry_guard < commit_geometry_publish < commit_scope
+        < commit_missing_block < commit_block < commit_throwable
+        < commit_revalidate < commit_persist
+        < commit_finally < commit_retire
+    ):
+        fail(
+            "recognized-line commit can run without a transaction, publish "
+            "invalid geometry, skip its post-commit authority check, save "
+            "early, or leak authority"
+        )
+
+    point_to_spread, point_to_spread_masked = extract_cpp_function(
+        module,
+        "private static Point mapRecognizedLinePointToSpread(",
+        "recognized-line display point mapper",
+    )
+    points_to_native, points_to_native_masked = extract_cpp_function(
+        module,
+        "private static List<Point> mapRecognizedLinePointsToNative(",
+        "recognized-line native point mapper",
+    )
+    require_markers(
+        point_to_spread_masked,
+        (
+            "nativePoint.x + transaction.nativeSplitOffsetX",
+            "nativePoint.y + transaction.nativeSplitOffsetY",
+            "destination.left",
+            "destination.top",
+            "CANONICAL_PAGE_WIDTH",
+            "CANONICAL_PAGE_HEIGHT",
+        ),
+        "recognized-line display point mapper",
+    )
+    require_markers(
+        points_to_native_masked,
+        (
+            "source.size() != 2",
+            "displayPoint.x - destination.left",
+            "displayPoint.y - destination.top",
+            "canonicalX - transaction.nativeSplitOffsetX",
+            "canonicalY - transaction.nativeSplitOffsetY",
+        ),
+        "recognized-line native point mapper",
+    )
+    line_begin, _ = extract_cpp_function(
+        module,
+        "private static boolean beginRecognizedLineTransaction(",
+        "recognized-line authority publisher",
+    )
+    line_current, _ = extract_cpp_function(
+        module,
+        "private static boolean recognizedLineTransactionCurrent(",
+        "recognized-line authority validator",
+    )
+    line_begin_masked = mask_comments_preserve_literals(line_begin)
+    line_current_masked = mask_comments_preserve_literals(line_current)
+    require_markers(
+        line_begin_masked,
+        (
+            'getDeclaredField("isSplit")',
+            '"getShowRectOffset"',
+            "contact.phase != PEN_CONTACT_PHASE_RECEIVING",
+            "PEN_CONTACT_OWNERSHIPS.get(activity) != contact",
+            "DOCUMENT_CONTEXT_GENERATIONS.get(activity)",
+            "CONFIG_AUTHORITY_GENERATIONS.get(activity)",
+            "RECOGNIZED_LINE_TRANSACTIONS.put(activity, transaction)",
+        ),
+        "recognized-line authority publisher",
+    )
+    require_markers(
+        line_current_masked,
+        (
+            "RECOGNIZED_LINE_TRANSACTIONS.get(activity) != transaction",
+            "documentMutationAuthorityCurrent(",
+            'getDeclaredField("isSplit")',
+            '"getShowRectOffset"',
+            "activePageDestination(activity)",
+            "transaction.documentContextGeneration",
+            "transaction.configAuthorityGeneration",
+            "transaction.markPath",
+            "transaction.documentPage",
+            "transaction.markPage",
+        ),
+        "recognized-line authority validator",
+    )
+    require_markers(
+        module,
+        (
+            'retireAbandonedRecognizedLineTransaction(\n'
+            '            activity,\n'
+            '            "activity_release"',
+            '"editing_reset_" + reason',
+            '"onEditLineTransition", "areaSelectionTransition"',
+            '"setBitmap", "showAreaSelection",\n'
+            '                "onEditLineMode"',
+        ),
+        "recognized-line lifecycle cleanup/barriers",
+    )
+
     require_markers(
         transaction_save_hook,
         (
@@ -7809,12 +8662,12 @@ def check(repo_root: Path) -> None:
         "currentSnapshot != inputSnapshot",
         queued_transaction,
     )
-    queued_chrome = handle_pen.find(
-        "inputSnapshot.isNativeChromeTouch(requestedY)",
+    queued_current = handle_pen.find(
+        "int current = inputSnapshot.currentPage;",
         queued_snapshot_validation,
     )
     if not (
-        0 <= queued_transaction < queued_snapshot_validation < queued_chrome
+        0 <= queued_transaction < queued_snapshot_validation < queued_current
     ):
         fail(
             "queued transaction input is not guarded by the immutable "
@@ -7829,19 +8682,20 @@ def check(repo_root: Path) -> None:
         "if (!inputSnapshot.geometryReady)",
         synchronous_missing_snapshot,
     )
-    synchronous_chrome = intercept_pen.find(
-        "if (inputSnapshot.isNativeChromeTouch(y))",
+    synchronous_mapping = intercept_pen.find(
+        "int target = pageAt(inputSnapshot, x, y);",
         synchronous_pending_geometry,
     )
     if not (
         0 <= synchronous_transaction < synchronous_missing_snapshot
-        < synchronous_pending_geometry
-        < synchronous_chrome
+        < synchronous_pending_geometry < synchronous_mapping
     ):
         fail(
             "synchronous transaction input is not guarded by the immutable "
-            "snapshot before native chrome checks"
+            "snapshot before document-page routing"
         )
+    if "isNativeChromeTouch(" in handle_pen or "isNativeChromeTouch(" in intercept_pen:
+        fail("pen routing still reclassifies a contact after its DOWN boundary")
     for label, method in (
         ("queued", handle_pen),
         ("synchronous", intercept_pen),
@@ -8008,8 +8862,32 @@ def check(repo_root: Path) -> None:
     active_mutation_refresh = module[
         active_mutation_start:canonical_save_start
     ]
+    active_mutation_masked = mask_comments_preserve_literals(
+        active_mutation_refresh
+    )
+    if active_mutation_masked.count(
+        'if ("lasso".equals(TRACE_TOOLS.get(activity)))'
+    ) != 1:
+        fail("active mutation refresh must have one exact lasso-command guard")
+    lasso_refresh_guard = active_mutation_masked.find(
+        'if ("lasso".equals(TRACE_TOOLS.get(activity)))'
+    )
+    lasso_refresh_open = active_mutation_masked.find(
+        "{", lasso_refresh_guard
+    )
+    lasso_refresh_close = matching_brace(
+        active_mutation_masked,
+        lasso_refresh_open,
+        "lasso native-buffer refresh guard",
+    )
+    lasso_refresh_reason = active_mutation_masked.find(
+        'reason=native_selection_buffer_owns_refresh', lasso_refresh_guard
+    )
+    lasso_refresh_return = active_mutation_masked.find(
+        "return;", lasso_refresh_reason
+    )
     mutation_kind = active_mutation_refresh.find(
-        'String mutationKind = eraserMutation'
+        'String mutationKind = eraserMutation', lasso_refresh_return
     )
     mutation_save = active_mutation_refresh.find(
         "saveTrailsForCanonicalReload(", mutation_kind
@@ -8036,13 +8914,254 @@ def check(repo_root: Path) -> None:
         '"active_mutation_canonical_reload"', mutation_restore
     )
     if not (
-        0 <= mutation_kind < mutation_save < mutation_save_guard
+        0 <= lasso_refresh_guard < lasso_refresh_open < lasso_refresh_reason
+        < lasso_refresh_return < lasso_refresh_close < mutation_kind
+        < mutation_save
+        < mutation_save_guard
         < mutation_save_return < mutation_force < mutation_reload_guard
         < mutation_authority_reason < mutation_restore < mutation_trace
     ):
         fail(
+            "lasso selection must retain its native live buffer, while a real "
             "active-page mutation must prove its exact save and current writer "
             "authority before forcing a canonical-only reload"
+        )
+    if (
+        brace_depth_at(active_mutation_masked, lasso_refresh_reason) != 2
+        or brace_depth_at(active_mutation_masked, lasso_refresh_return) != 2
+    ):
+        fail(
+            "lasso native-buffer guard can bypass its diagnostic or immediate "
+            "return"
+        )
+
+    lasso_publish, lasso_publish_masked = extract_cpp_function(
+        module,
+        "private static boolean publishCanonicalLassoMutationAuthority(",
+        "canonical lasso mutation-authority publisher",
+    )
+    lasso_authority_current, lasso_authority_current_masked = extract_cpp_function(
+        module,
+        "private static boolean canonicalLassoMutationAuthorityCurrentLocked(",
+        "canonical lasso mutation-authority validator",
+    )
+    lasso_completion, lasso_completion_masked = extract_cpp_function(
+        module,
+        "private static void scheduleCanonicalLassoCompletion(",
+        "canonical lasso completion",
+    )
+    lasso_locked_retirement, _lasso_locked_retirement_masked = (
+        extract_cpp_function(
+            module,
+            "retireCanonicalLassoMutationAuthorityLocked(",
+            "locked canonical lasso retirement",
+        )
+    )
+    require_markers(
+        lasso_publish,
+        (
+            "LASSO_TRANSACTION_COUNTER.incrementAndGet()",
+            "penWriterAuthorityCurrentLocked(activity, authority)",
+            "LASSO_MUTATION_AUTHORITIES.put(activity, published)",
+            "lasso_mutation_authority_published",
+        ),
+        "canonical lasso transaction publication",
+    )
+    require_markers(
+        lasso_authority_current,
+        (
+            "LASSO_MUTATION_AUTHORITIES.get(activity) != authority",
+            "DOCUMENT_IDENTITY_ADMISSIONS.get(activity) != null",
+            "NAVIGATION_FAIL_CLOSED_DOCUMENTS.get(activity) != null",
+            "PAGE_ACTIVATION_TRANSACTIONS.get(activity) != null",
+            "PAGE_ACTIVATION_ROLLBACK_RECOVERIES.get(activity) != null",
+            "PEN_CONTACT_OWNERSHIPS.get(activity) != null",
+            "PEN_CONTACT_START_PAGES.get(activity) != null",
+            "samePenWriterDocumentAuthority(",
+            "penWriterAuthorityCurrentLocked(activity, current)",
+        ),
+        "canonical lasso transaction revalidation",
+    )
+    require_markers(
+        lasso_completion,
+        (
+            "LASSO_MUTATION_AUTHORITIES.remove(",
+            "LASSO_UI_CONTACT_DOWNS.remove(authority.activity)",
+            "spreadLassoCanonicalSelection = false",
+            "spreadLassoToolArmed = true",
+            "lasso_mutation_authority_completed",
+        ),
+        "canonical lasso completion retirement",
+    )
+    lasso_transition_repair, lasso_transition_repair_masked = extract_cpp_function(
+        module,
+        "private static void repairSpreadLassoTransition(",
+        "spread lasso transition repair",
+    )
+    require_markers(
+        lasso_transition_repair_masked,
+        (
+            "Rect canonicalSelection = spreadLassoCanonicalSelectionRect;",
+            "Rect displaySelection = spreadLassoDisplaySelectionRect;",
+            "Math.max(\n                    LASSO_MIN_UI_FRAME_SIZE,",
+            "boolean pureCanonicalMove = spreadLassoCanonicalSelection",
+            "&& mode == 1 && rotation == 0",
+            "int contentPaddingX = pureCanonicalMove",
+            "int contentPaddingY = pureCanonicalMove",
+            "x + contentPaddingX - writable.left",
+            "y + contentPaddingY - writable.top",
+            "boolean preserveCanonicalSize = pureCanonicalMove;",
+            "? canonicalSelection.width()",
+            "? canonicalSelection.height()",
+        ),
+        "padded lasso-content transition mapping",
+    )
+    if (
+        "? width\n                : Math.max(1, Math.round(width / scaleX))"
+        in lasso_transition_repair_masked
+        or "? height\n                : Math.max(1, Math.round(height / scaleY))"
+        in lasso_transition_repair_masked
+    ):
+        fail("pure lasso moves still commit the padded UI frame dimensions")
+
+    area_selection_hook_start = module.find(
+        '"com.supernote.document.areaselection.AreaSelectionView"'
+    )
+    area_selection_hook_end = module.find(
+        '"com.example.libsupernote.SuperNoteNote"',
+        area_selection_hook_start,
+    )
+    if min(area_selection_hook_start, area_selection_hook_end) < 0:
+        fail("could not isolate the native lasso move-preview hook")
+    area_selection_hook = module[
+        area_selection_hook_start:area_selection_hook_end
+    ]
+    area_selection_hook_masked = mask_cpp_comments_and_literals(
+        area_selection_hook
+    )
+    require_markers(
+        area_selection_hook_masked,
+        (
+            "protected void afterHookedMethod(MethodHookParam param)",
+            "spreadLassoStateOwner != activity",
+            "!spreadLassoCanonicalSelection",
+            'XposedHelpers.getObjectField(\n                            param.thisObject,\n                            ',
+            "Bitmap preservedMove = stationary.copy(",
+            "Bitmap.Config.ARGB_8888",
+            "XposedHelpers.setObjectField(",
+            "previousMove.recycle();",
+        ),
+        "lossless native lasso move preview",
+    )
+    if "removeAntiAliasingFillPoints" in area_selection_hook:
+        fail("lasso move preview still applies the destructive native thinning pass")
+    require_markers(
+        lasso_locked_retirement,
+        (
+            "LASSO_MUTATION_AUTHORITIES.remove(activity)",
+            "LASSO_UI_CONTACT_DOWNS.remove(activity)",
+            "spreadLassoActive = false",
+            "spreadLassoCanonicalSelection = false",
+        ),
+        "locked canonical lasso retirement",
+    )
+    document_admission, _document_admission_masked = extract_cpp_function(
+        module,
+        "private static DocumentIdentityAdmission "
+        "invalidateDocumentIdentityAdmission(",
+        "document-identity admission invalidation",
+    )
+    persisted_watch_disable, _persisted_watch_disable_masked = (
+        extract_cpp_function(
+            module,
+            "private static boolean disableWriterForPersistedConfigWatch(",
+            "persisted-config writer disable",
+        )
+    )
+    require_markers(
+        document_admission,
+        (
+            "retireCanonicalLassoMutationAuthorityLocked(activity)",
+            "reason=document_identity_admission:",
+        ),
+        "document reset lasso retirement",
+    )
+    require_markers(
+        persisted_watch_disable,
+        (
+            "retireCanonicalLassoMutationAuthorityLocked(activity)",
+            "reason=persisted_config_watch:",
+        ),
+        "persisted-config reload lasso retirement",
+    )
+    lasso_publish_compact = compact_code(lasso_publish)
+    publish_store = lasso_publish_compact.find(
+        "LASSO_MUTATION_AUTHORITIES.put(activity,published);"
+    )
+    publish_success = lasso_publish_compact.find("returntrue;", publish_store)
+    if not 0 <= publish_store < publish_success:
+        fail("canonical lasso authority may succeed before publication")
+    if "LASSO_MUTATION_AUTHORITIES.clear()" not in module:
+        fail("lasso transaction authority is not retired on lifecycle reset")
+
+    digital_position_start = module.find('"onDigitalPosition",')
+    digital_position_end = module.find('"onDigital",', digital_position_start)
+    if digital_position_start < 0 or digital_position_end < 0:
+        fail("could not isolate native digital-position hook")
+    digital_position_hook = mask_comments_preserve_literals(
+        module[digital_position_start:digital_position_end]
+    )
+    lasso_native_bypass = digital_position_hook.find(
+        "if (canonicalLassoUiOwnsPenContact(activity))"
+    )
+    lasso_native_result = digital_position_hook.find(
+        "param.setResult(null);", lasso_native_bypass
+    )
+    ordinary_pressure_path = digital_position_hook.find(
+        "if (pressure <= 0)", lasso_native_result
+    )
+    if not (
+        0 <= lasso_native_bypass < lasso_native_result < ordinary_pressure_path
+    ):
+        fail(
+            "canonical lasso UI contacts must be removed before the native "
+            "handwriting contact path"
+        )
+
+    activity_latch, _activity_latch_masked = extract_cpp_function(
+        module,
+        "private static void latchPenContactFromActivityTouch(",
+        "activity stylus contact latch",
+    )
+    activity_latch_code = mask_comments_preserve_literals(activity_latch)
+    activity_lasso_bypass = activity_latch_code.find(
+        "if (canonicalLassoUiOwnsPenContact(activity))"
+    )
+    activity_snapshot = activity_latch_code.find(
+        "PenInputSnapshot snapshot", activity_lasso_bypass
+    )
+    if not 0 <= activity_lasso_bypass < activity_snapshot:
+        fail(
+            "canonical lasso UI contacts must bypass the Android handwriting "
+            "contact latch"
+        )
+
+    activity_fallback, _activity_fallback_masked = extract_cpp_function(
+        module,
+        "private static void schedulePenContactFallbackFromActivityTouch(",
+        "activity stylus terminal fallback",
+    )
+    fallback_code = mask_comments_preserve_literals(activity_fallback)
+    fallback_lasso_bypass = fallback_code.find(
+        "if (canonicalLassoUiOwnsPenContact(activity))"
+    )
+    fallback_owner = fallback_code.find(
+        "PEN_CONTACT_OWNERSHIPS.get(activity)", fallback_lasso_bypass
+    )
+    if not 0 <= fallback_lasso_bypass < fallback_owner:
+        fail(
+            "canonical lasso UI terminal events must not schedule a handwriting "
+            "receive fallback"
         )
 
     canonical_reload_start = module.find(
@@ -8285,17 +9404,821 @@ def check(repo_root: Path) -> None:
         "native-reader-equivalent spread trimming",
     )
 
+    native_chrome_code = mask_comments_preserve_literals(module)
     require_markers(
-        module,
+        native_chrome_code,
         (
-            "NATIVE_TOP_CHROME_TOUCH_EXCLUSION_PX",
-            "NATIVE_BOTTOM_CHROME_TOUCH_EXCLUSION_PX",
-            "isNativeChromeTouch(activity, event.getY())",
+            "private static final class NativeChromeRect",
+            "private static final class NativeChromeSnapshot",
+            "private static final class NativeChromeTracker",
+            "private static final class NativeChromePassThrough",
+            "NATIVE_CHROME_TRACKERS",
+            "NATIVE_CHROME_SNAPSHOTS",
+            "NATIVE_CHROME_PEN_PASSTHROUGHS",
+            "private static final class TextSelectionPenContact",
+            "TEXT_SELECTION_PEN_CONTACTS",
+            "TEXT_SELECTION_MODES",
+            "ViewTreeObserver.OnGlobalLayoutListener",
+            "installNativeChromeTracker(createdActivity);",
+            "removeNativeChromeTracker(activity);",
+            "view.getGlobalVisibleRect(visible)",
+            "collectAdditionalWindowChromeRects(",
+            '"android.view.WindowManagerGlobal"',
+            '"getWindowViews"',
+            'getDeclaredField("mViews")',
+            'native_chrome_window_discovery_ready source=',
+            "view.isShown()",
+            "view.getAlpha() <= 0.0f",
+            "OVERLAY_TAG.equals(view.getTag())",
+            'refreshNativeChromeSnapshot(activity, "contact_down")',
+            "routeNativeChromeActivityStylus(activity, event)",
+            "routeNativeChromeNativePen(",
+            "adoptNativeChromeActivityDown(",
+            "nativeChromeSetterPassThroughCurrent(",
+            "finishNativeChromeActivityContact(",
+            "routeTextSelectionActivityStylus(activity, event)",
+            "routeTextSelectionNativePen(",
+            "finishTextSelectionActivityContact(",
+            '"native_chrome_contact_classified generation="',
+            '"native_chrome_contact_finished generation="',
             "activation_touch_ignored_native_chrome",
             "activation_touch_cancelled_native_chrome",
         ),
-        "native chrome activation exclusion",
+        "dynamic native-chrome contact routing",
     )
+    if (
+        "NATIVE_TOP_CHROME_TOUCH_EXCLUSION_PX" in native_chrome_code
+        or "NATIVE_BOTTOM_CHROME_TOUCH_EXCLUSION_PX" in native_chrome_code
+        or "isNativeChromeTouch(" in native_chrome_code
+    ):
+        fail("native chrome still relies on a fixed top/bottom exclusion band")
+
+    chrome_native_first_guard_start = native_chrome_code.find(
+        "private static boolean nativeChromeNativeFirstMayClassifyLocked("
+    )
+    chrome_activity_route_start = native_chrome_code.find(
+        "private static int routeNativeChromeActivityStylus(",
+        chrome_native_first_guard_start,
+    )
+    chrome_native_route_start = native_chrome_code.find(
+        "private static int routeNativeChromeNativePen(",
+        chrome_activity_route_start,
+    )
+    chrome_current_start = native_chrome_code.find(
+        "private static boolean nativeChromeActivityContactCurrent(",
+        chrome_native_route_start,
+    )
+    chrome_finish_start = native_chrome_code.find(
+        "private static void finishNativeChromeActivityContact(",
+        chrome_current_start,
+    )
+    chrome_latch_start = native_chrome_code.find(
+        "private static void latchPenContactFromActivityTouch(",
+        chrome_finish_start,
+    )
+    if min(
+        chrome_native_first_guard_start,
+        chrome_activity_route_start,
+        chrome_native_route_start,
+        chrome_current_start,
+        chrome_finish_start,
+        chrome_latch_start,
+    ) < 0:
+        fail("could not isolate gesture-scoped native-chrome routing")
+    chrome_native_first_guard = native_chrome_code[
+        chrome_native_first_guard_start:chrome_activity_route_start
+    ]
+    require_markers(
+        chrome_native_first_guard,
+        (
+            "PEN_CONTACT_OWNERSHIPS.get(activity) == null",
+            "PEN_CONTACT_START_PAGES.get(activity) == null",
+            "!Boolean.TRUE.equals(PEN_PHYSICAL_CONTACT_DOWNS.get(activity))",
+            "TEXT_SELECTION_PEN_CONTACTS.get(activity) == null",
+        ),
+        "document-origin contact exclusion from native-first chrome routing",
+    )
+    for forbidden in (
+        "SPREAD_CONFIGS",
+        "PERSISTED_CONFIG_WATCHES",
+        "PEN_INPUT_EDITABLE_GUARDS",
+        "PAGE_ACTIVATION_TRANSACTIONS",
+        "PAGE_SAVE_IN_FLIGHT_COUNTS",
+    ):
+        if forbidden in chrome_native_first_guard:
+            fail(
+                "native-first chrome classification is incorrectly vetoed "
+                f"by {forbidden} instead of only preserving an existing "
+                "document-origin contact"
+            )
+    if (
+        "allowNative" in native_chrome_code
+        or "nativeChromePassThroughSafeLocked" in native_chrome_code
+    ):
+        fail(
+            "a visible native-chrome DOWN can still be downgraded to a "
+            "blocked route by module authority state"
+        )
+    chrome_activity_route = native_chrome_code[
+        chrome_activity_route_start:chrome_native_route_start
+    ]
+    activity_existing_branch = chrome_activity_route.find(
+        "if (action != MotionEvent.ACTION_DOWN)"
+    )
+    activity_down_refresh = chrome_activity_route.find(
+        "NativeChromeRect refreshedHit = nativeChromeHit(",
+        activity_existing_branch,
+    )
+    activity_down_refresh_flag = chrome_activity_route.find(
+        "true", activity_down_refresh
+    )
+    activity_hit_guard = chrome_activity_route.find(
+        "if (hit == null)",
+        activity_down_refresh_flag,
+    )
+    activity_token_construct = chrome_activity_route.find(
+        "NativeChromePassThrough token = new NativeChromePassThrough(",
+        activity_hit_guard,
+    )
+    activity_token_publish = chrome_activity_route.find(
+        "NATIVE_CHROME_PEN_PASSTHROUGHS.putIfAbsent(",
+        activity_token_construct,
+    )
+    activity_pass_log = chrome_activity_route.find(
+        '"native_chrome_contact_classified generation="',
+        activity_token_publish,
+    )
+    activity_pass_literal = chrome_activity_route.find(
+        '" route=pass"', activity_pass_log
+    )
+    activity_pass_return = chrome_activity_route.find(
+        "return NATIVE_CHROME_ROUTE_PASS;", activity_pass_literal
+    )
+    if not (
+        0 <= activity_existing_branch < activity_down_refresh
+        < activity_down_refresh_flag < activity_hit_guard
+        < activity_token_construct < activity_token_publish
+        < activity_pass_log < activity_pass_literal < activity_pass_return
+    ):
+        fail(
+            "stylus chrome routing is not classified once from refreshed "
+            "visible geometry at ACTION_DOWN and passed to firmware"
+        )
+    if "PAGE_ACTIVATION_OWNERSHIP_LOCK" in chrome_activity_route:
+        fail(
+            "Activity-confirmed native chrome is still conditioned on module "
+            "page/writer authority"
+        )
+    if "PEN_CONTACT_OWNERSHIPS.put" in chrome_activity_route:
+        fail("native-chrome pass-through publishes handwriting ownership")
+    require_markers(
+        chrome_activity_route,
+        (
+            'native_chrome_contact_reclassified_document',
+            "adoptNativeChromeActivityDown(",
+            'reason=publication_race',
+            "return NATIVE_CHROME_ROUTE_BLOCK;",
+        ),
+        "race-safe Activity native-chrome publication",
+    )
+
+    chrome_native_route = native_chrome_code[
+        chrome_native_route_start:chrome_current_start
+    ]
+    native_existing = chrome_native_route.find(
+        "NATIVE_CHROME_PEN_PASSTHROUGHS.get(activity)"
+    )
+    native_existing_pass = chrome_native_route.find(
+        "return NATIVE_CHROME_ROUTE_PASS;", native_existing
+    )
+    native_positive = chrome_native_route.find(
+        "if (pressure <= 0)", native_existing_pass
+    )
+    native_document_guard_lock = chrome_native_route.find(
+        "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)", native_positive
+    )
+    native_document_guard = chrome_native_route.find(
+        "!nativeChromeNativeFirstMayClassifyLocked(activity)",
+        native_document_guard_lock,
+    )
+    native_document_return = chrome_native_route.find(
+        "return NATIVE_CHROME_ROUTE_DOCUMENT;", native_document_guard
+    )
+    native_cached_hit = chrome_native_route.find(
+        "nativeChromeHit(activity, x, y, true)", native_document_return
+    )
+    native_token_publish = chrome_native_route.find(
+        "NATIVE_CHROME_PEN_PASSTHROUGHS.putIfAbsent(", native_cached_hit
+    )
+    if not (
+        0 <= native_existing < native_existing_pass < native_positive
+        < native_document_guard_lock < native_document_guard
+        < native_document_return < native_cached_hit < native_token_publish
+    ):
+        fail(
+            "native-first chrome DOWN does not preserve document-origin "
+            "classification before adopting cached UI geometry"
+        )
+    native_pass_log = chrome_native_route.find(
+        '"native_chrome_contact_native_first generation="',
+        native_token_publish,
+    )
+    native_pass_literal = chrome_native_route.find(
+        '" route=pass"', native_pass_log
+    )
+    native_pass_return = chrome_native_route.find(
+        "return NATIVE_CHROME_ROUTE_PASS;", native_pass_literal
+    )
+    if not (
+        0 <= native_token_publish < native_pass_log
+        < native_pass_literal < native_pass_return
+    ):
+        fail("native-first visible chrome is not unconditionally passed")
+    require_markers(
+        chrome_native_route,
+        (
+            "raced.downBounds.contains(x, y)",
+            'reason=native_publication_race',
+            "return NATIVE_CHROME_ROUTE_BLOCK;",
+        ),
+        "race-safe native-first chrome publication",
+    )
+
+    handwrite_area_selection_start = native_chrome_code.find(
+        '"setAreaSelection"'
+    )
+    handwrite_set_pen_start = native_chrome_code.find(
+        '"setPen"', handwrite_area_selection_start
+    )
+    if min(handwrite_area_selection_start, handwrite_set_pen_start) < 0:
+        fail("could not isolate the handwriting lasso setter hook")
+    handwrite_area_selection = native_chrome_code[
+        handwrite_area_selection_start:handwrite_set_pen_start
+    ]
+    setter_pass = handwrite_area_selection.find(
+        "nativeChromeSetterPassThroughCurrent(activity)"
+    )
+    writer_check = handwrite_area_selection.find(
+        "documentMutationAuthorityCurrent(", setter_pass
+    )
+    setter_admitted = handwrite_area_selection.find(
+        "scope.mutationAdmitted = true;", writer_check
+    )
+    setter_log = handwrite_area_selection.find(
+        'native_chrome_setter_passthrough', setter_admitted
+    )
+    if not 0 <= setter_pass < writer_check < setter_admitted < setter_log:
+        fail(
+            "native-chrome lasso setter is not admitted by its exact-contact "
+            "token before writer-authority rejection"
+        )
+
+    chrome_finish = native_chrome_code[chrome_finish_start:chrome_latch_start]
+    finish_up = chrome_finish.find("action != MotionEvent.ACTION_UP")
+    finish_cancel = chrome_finish.find("action != MotionEvent.ACTION_CANCEL")
+    finish_exact = chrome_finish.find("token.matches(event)", finish_cancel)
+    finish_remove = chrome_finish.find(
+        "NATIVE_CHROME_PEN_PASSTHROUGHS.remove(activity, token)", finish_exact
+    )
+    if not 0 <= finish_up < finish_cancel < finish_exact < finish_remove:
+        fail("native-chrome token is not cleared only by its exact UP/CANCEL")
+
+    dispatch_chrome_route = dispatch_touch_hook.find(
+        "routeNativeChromeActivityStylus(activity, event)"
+    )
+    dispatch_chrome_pass = dispatch_touch_hook.find(
+        "nativeChromeRoute == NATIVE_CHROME_ROUTE_PASS", dispatch_chrome_route
+    )
+    dispatch_chrome_pass_return = dispatch_touch_hook.find(
+        "return;", dispatch_chrome_pass
+    )
+    dispatch_chrome_block = dispatch_touch_hook.find(
+        "nativeChromeRoute == NATIVE_CHROME_ROUTE_BLOCK",
+        dispatch_chrome_pass_return,
+    )
+    dispatch_chrome_block_result = dispatch_touch_hook.find(
+        "param.setResult(true);", dispatch_chrome_block
+    )
+    dispatch_tracking = dispatch_touch_hook.find(
+        "trackFingerTouchStream(activity, event)", dispatch_chrome_block_result
+    )
+    dispatch_contact_latch = dispatch_touch_hook.find(
+        "latchPenContactFromActivityTouch(", dispatch_tracking
+    )
+    if not (
+        0 <= dispatch_chrome_route < dispatch_chrome_pass
+        < dispatch_chrome_pass_return < dispatch_chrome_block
+        < dispatch_chrome_block_result
+        < dispatch_contact_latch
+    ):
+        fail(
+            "Activity stylus chrome pass-through does not precede every "
+            "trace/ownership/activation path"
+        )
+
+    text_mode_start = native_chrome_code.find(
+        "private static boolean textSelectionModeActive("
+    )
+    text_guard_start = native_chrome_code.find(
+        "private static String textSelectionClassificationBlockReasonLocked(",
+        text_mode_start,
+    )
+    text_preclassified_adopt_start = native_chrome_code.find(
+        "private static void adoptTextSelectionPreclassifiedDigitalDownLocked(",
+        text_guard_start,
+    )
+    text_activity_route_start = native_chrome_code.find(
+        "private static int routeTextSelectionActivityStylus(",
+        text_preclassified_adopt_start,
+    )
+    text_native_route_start = native_chrome_code.find(
+        "private static int routeTextSelectionNativePen(",
+        text_activity_route_start,
+    )
+    text_adopt_start = native_chrome_code.find(
+        "private static boolean adoptTextSelectionActivityDown(",
+        text_native_route_start,
+    )
+    text_apply_gate_start = native_chrome_code.find(
+        "private static boolean applyTextSelectionActivityGate(",
+        text_adopt_start,
+    )
+    text_restore_gate_start = native_chrome_code.find(
+        "private static boolean restoreTextSelectionActivityGate(",
+        text_apply_gate_start,
+    )
+    text_retire_start = native_chrome_code.find(
+        "private static boolean retireTextSelectionContact(",
+        text_restore_gate_start,
+    )
+    text_clear_start = native_chrome_code.find(
+        "private static void clearTextSelectionContact(",
+        text_retire_start,
+    )
+    text_fallback_start = native_chrome_code.find(
+        "private static void scheduleTextSelectionTerminalFallback(",
+        text_clear_start,
+    )
+    text_current_start = native_chrome_code.find(
+        "private static boolean textSelectionActivityContactCurrent(",
+        text_fallback_start,
+    )
+    text_finish_start = native_chrome_code.find(
+        "private static void finishTextSelectionActivityContact(",
+        text_current_start,
+    )
+    if not (
+        0 <= text_mode_start < text_guard_start
+        < text_preclassified_adopt_start < text_activity_route_start
+        < text_native_route_start < text_adopt_start < text_apply_gate_start
+        < text_restore_gate_start < text_retire_start < text_clear_start
+        < text_fallback_start < text_current_start < text_finish_start
+        < chrome_latch_start
+    ):
+        fail("could not isolate gesture-scoped text-selection routing")
+
+    text_guard = native_chrome_code[
+        text_guard_start:text_preclassified_adopt_start
+    ]
+    require_markers(
+        text_guard,
+        (
+            "NATIVE_CHROME_PEN_PASSTHROUGHS.get(activity) != null",
+            "PEN_CONTACT_OWNERSHIPS.get(activity) != null",
+            "PEN_CONTACT_START_PAGES.get(activity) != null",
+            "Boolean.TRUE.equals(PEN_PHYSICAL_CONTACT_DOWNS.get(activity))",
+            "&& !authoritativeActivityDown",
+            'return "physical_contact_down";',
+            "PAGE_ACTIVATION_TRANSACTIONS.get(activity) != null",
+            "canonicalLassoUiOwnsPenContact(activity)",
+        ),
+        "text-selection classification of every competing contact owner",
+    )
+    if "TEXT_SELECTION_PEN_CONTACTS.get(activity)" in text_guard:
+        fail(
+            "the shared text-selection guard rejects a same-subsystem "
+            "publication race before putIfAbsent can adopt it"
+        )
+    physical_gate = text_guard.find(
+        "Boolean.TRUE.equals(PEN_PHYSICAL_CONTACT_DOWNS.get(activity))"
+    )
+    authoritative_exception = text_guard.find(
+        "&& !authoritativeActivityDown", physical_gate
+    )
+    physical_reason = text_guard.find(
+        'return "physical_contact_down";', authoritative_exception
+    )
+    if not (0 <= physical_gate < authoritative_exception < physical_reason):
+        fail(
+            "native-first text selection no longer rejects an already-down "
+            "physical contact while authoritative Activity DOWN may adopt it"
+        )
+
+    text_preclassified_adopt = native_chrome_code[
+        text_preclassified_adopt_start:text_activity_route_start
+    ]
+    require_markers(
+        text_preclassified_adopt,
+        (
+            "TEXT_SELECTION_PEN_CONTACTS.get(activity) != token",
+            "PEN_CONTACT_OWNERSHIPS.get(activity) != null",
+            "PEN_CONTACT_START_PAGES.get(activity) != null",
+            "!PEN_PHYSICAL_CONTACT_DOWNS.remove(activity, Boolean.TRUE)",
+            '"text_selection_preclassified_digital_down_adopted generation="',
+        ),
+        "atomic adoption of the preclassified digital-down signal",
+    )
+    if "PEN_PHYSICAL_CONTACT_DOWNS.put" in text_preclassified_adopt:
+        fail("text-selection digital-down adoption can publish writer state")
+
+    text_activity_route = native_chrome_code[
+        text_activity_route_start:text_native_route_start
+    ]
+    require_markers(
+        text_activity_route,
+        (
+            "event.getActionMasked()",
+            "textSelectionModeActive(activity)",
+            "snapshot.editable",
+            "snapshot.geometryReady",
+            "mappedPage != snapshot.currentPage",
+            "PEN_INPUT_SNAPSHOTS.get(activity) != snapshot",
+            "SPREAD_CONFIGS.get(activity) != snapshot.config",
+            "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+            "textSelectionClassificationBlockReasonLocked(",
+            "TEXT_SELECTION_PEN_CONTACTS.putIfAbsent(activity, token)",
+            "adoptTextSelectionPreclassifiedDigitalDownLocked(",
+            '"text_selection_contact_rejected source=activity reason="',
+            "return NATIVE_CHROME_ROUTE_BLOCK;",
+            "applyTextSelectionActivityGate(activity, existing)",
+            "applyTextSelectionActivityGate(activity, raced)",
+            "applyTextSelectionActivityGate(activity, token)",
+            '"text_selection_contact_classified generation="',
+            '" source=activity page="',
+            "return NATIVE_CHROME_ROUTE_PASS;",
+        ),
+        "Activity text-selection exact-contact publication",
+    )
+    if re.search(
+        r"textSelectionClassificationBlockReasonLocked\s*\(\s*"
+        r"activity\s*,\s*true\s*\)",
+        text_activity_route,
+    ) is None:
+        fail("Activity text selection is not the authoritative DOWN classifier")
+    if text_activity_route.count(
+        "adoptTextSelectionPreclassifiedDigitalDownLocked("
+    ) != 3:
+        fail(
+            "Activity text selection does not adopt the early digital-down "
+            "signal on existing, raced, and newly published token paths"
+        )
+    activity_reject = text_activity_route.find(
+        '"text_selection_contact_rejected source=activity reason="'
+    )
+    activity_block = text_activity_route.find(
+        "return NATIVE_CHROME_ROUTE_BLOCK;", activity_reject
+    )
+    activity_publish = text_activity_route.find(
+        "TEXT_SELECTION_PEN_CONTACTS.putIfAbsent(activity, token)"
+    )
+    if not (0 <= activity_reject < activity_block < activity_publish):
+        fail("rejected Activity text selection can fall through as handwriting")
+    if (
+        "PEN_CONTACT_OWNERSHIPS.put" in text_activity_route
+        or "PEN_PHYSICAL_CONTACT_DOWNS.put" in text_activity_route
+        or "beginPageActivationTransaction(" in text_activity_route
+    ):
+        fail("Activity text selection still publishes handwriting/activation")
+    text_non_down_gate = text_activity_route.find(
+        "existing.matches(event) && existing.activityGateApplied"
+    )
+    text_new_gate = text_activity_route.find(
+        "if (!applyTextSelectionActivityGate(activity, token))"
+    )
+    text_new_classified = text_activity_route.find(
+        '"text_selection_contact_classified generation="', text_new_gate
+    )
+    if not (0 <= text_non_down_gate < text_new_gate < text_new_classified):
+        fail(
+            "Activity text selection can pass without the exact native "
+            "page-turn gate"
+        )
+
+    text_native_route = native_chrome_code[
+        text_native_route_start:text_adopt_start
+    ]
+    require_markers(
+        text_native_route,
+        (
+            "TEXT_SELECTION_PEN_CONTACTS.get(activity)",
+            "pressure <= 0",
+            "textSelectionModeActive(activity)",
+            "mappedPage != snapshot.currentPage",
+            "PEN_INPUT_SNAPSHOTS.get(activity) != snapshot",
+            "SPREAD_CONFIGS.get(activity) != snapshot.config",
+            "synchronized (PAGE_ACTIVATION_OWNERSHIP_LOCK)",
+            "textSelectionClassificationBlockReasonLocked(",
+            "TEXT_SELECTION_PEN_CONTACTS.putIfAbsent(activity, token)",
+            '"text_selection_contact_rejected source=native reason="',
+            "return NATIVE_CHROME_ROUTE_DOCUMENT;",
+            '" source=native page="',
+            "return NATIVE_CHROME_ROUTE_PASS;",
+        ),
+        "native-first text-selection exact-contact publication",
+    )
+    if re.search(
+        r"textSelectionClassificationBlockReasonLocked\s*\(\s*"
+        r"activity\s*,\s*false\s*\)",
+        text_native_route,
+    ) is None:
+        fail(
+            "native-first text selection can adopt an already-down physical "
+            "contact"
+        )
+    if (
+        "PEN_CONTACT_OWNERSHIPS.put" in text_native_route
+        or "PEN_PHYSICAL_CONTACT_DOWNS.put" in text_native_route
+        or "beginPageActivationTransaction(" in text_native_route
+    ):
+        fail("native text selection still publishes handwriting/activation")
+
+    text_apply_gate = native_chrome_code[
+        text_apply_gate_start:text_restore_gate_start
+    ]
+    require_markers(
+        text_apply_gate,
+        (
+            "synchronized (token)",
+            "TEXT_SELECTION_PEN_CONTACTS.get(activity) != token",
+            "token.activityDownTime < 0L",
+            "token.activityGateApplied",
+            "XposedHelpers.getBooleanField(",
+            '"isAllowTurnPage"',
+            "XposedHelpers.setBooleanField(",
+            "false",
+            "token.previousAllowTurnPage = previous",
+            "token.activityGateApplied = true",
+            '"text_selection_activity_gate_applied generation="',
+        ),
+        "text-selection native page-turn gate application",
+    )
+
+    text_restore_gate = native_chrome_code[
+        text_restore_gate_start:text_retire_start
+    ]
+    require_markers(
+        text_restore_gate,
+        (
+            "synchronized (token)",
+            "!token.activityGateApplied",
+            "previous = token.previousAllowTurnPage",
+            "XposedHelpers.setBooleanField(",
+            '"isAllowTurnPage"',
+            "previous",
+            "token.activityGateApplied = false",
+            '"text_selection_activity_gate_restored generation="',
+        ),
+        "text-selection native page-turn gate restoration",
+    )
+
+    text_retire = native_chrome_code[text_retire_start:text_clear_start]
+    retire_restore = text_retire.find(
+        "restoreTextSelectionActivityGate(activity, token, reason)"
+    )
+    retire_remove = text_retire.find(
+        "TEXT_SELECTION_PEN_CONTACTS.remove(activity, token)",
+        retire_restore,
+    )
+    if not (0 <= retire_restore < retire_remove):
+        fail("text-selection contact can retire before restoring page turns")
+
+    text_fallback = native_chrome_code[
+        text_fallback_start:text_current_start
+    ]
+    require_markers(
+        text_fallback,
+        (
+            "token.terminalFallbackScheduled",
+            "new Handler(activity.getMainLooper()).postDelayed",
+            "TEXT_SELECTION_PEN_CONTACTS.get(activity) != token",
+            "retireTextSelectionContact(",
+            '"native_terminal_fallback_state_" + state',
+        ),
+        "bounded text-selection missing-Activity-terminal recovery",
+    )
+
+    text_finish = native_chrome_code[text_finish_start:chrome_latch_start]
+    text_finish_up = text_finish.find("action != MotionEvent.ACTION_UP")
+    text_finish_cancel = text_finish.find("action != MotionEvent.ACTION_CANCEL")
+    text_finish_exact = text_finish.find("token.matches(event)", text_finish_cancel)
+    text_finish_retire = text_finish.find(
+        "retireTextSelectionContact(",
+        text_finish_exact,
+    )
+    if not (
+        0 <= text_finish_up < text_finish_cancel < text_finish_exact
+        < text_finish_retire
+    ):
+        fail(
+            "text-selection token/gate is not retired by its exact "
+            "post-dispatch UP/CANCEL"
+        )
+
+    dispatch_text_route = dispatch_touch_hook.find(
+        "routeTextSelectionActivityStylus(activity, event)",
+        dispatch_chrome_block_result,
+    )
+    dispatch_text_pass = dispatch_touch_hook.find(
+        "textSelectionRoute == NATIVE_CHROME_ROUTE_PASS",
+        dispatch_text_route,
+    )
+    dispatch_text_pass_return = dispatch_touch_hook.find(
+        "return;", dispatch_text_pass
+    )
+    dispatch_text_block = dispatch_touch_hook.find(
+        "textSelectionRoute == NATIVE_CHROME_ROUTE_BLOCK",
+        dispatch_text_pass_return,
+    )
+    dispatch_text_block_result = dispatch_touch_hook.find(
+        "param.setResult(true);", dispatch_text_block
+    )
+    dispatch_tracking = dispatch_touch_hook.find(
+        "trackFingerTouchStream(activity, event)", dispatch_text_block_result
+    )
+    dispatch_text_finish = dispatch_touch_hook.find(
+        "finishTextSelectionActivityContact(", dispatch_after
+    )
+    if not (
+        0 <= dispatch_chrome_block_result < dispatch_text_route
+        < dispatch_text_pass < dispatch_text_pass_return
+        < dispatch_text_block < dispatch_text_block_result < dispatch_tracking
+        < dispatch_contact_latch < dispatch_after < dispatch_text_finish
+        < dispatch_finger_finish
+    ):
+        fail(
+            "Activity text selection does not bypass every ordinary touch, "
+            "handwriting, activation, and terminal-fallback path"
+        )
+
+    digital_state_end = module.find(
+        "XposedHelpers.findAndHookMethod(", digital_state_start + 1
+    )
+    if digital_state_end < 0:
+        fail("could not isolate native digital-state contact bookkeeping")
+    digital_state_hook = mask_comments_preserve_literals(
+        module[digital_state_start:digital_state_end]
+    )
+    state_text_lookup = digital_state_hook.find(
+        "TEXT_SELECTION_PEN_CONTACTS.get(activity)"
+    )
+    state_text_terminal = digital_state_hook.find(
+        "if (state != 1", state_text_lookup
+    )
+    state_text_activity_owned = digital_state_hook.find(
+        "textSelectionContact.activityDownTime >= 0L",
+        state_text_terminal,
+    )
+    state_text_fallback = digital_state_hook.find(
+        "scheduleTextSelectionTerminalFallback(",
+        state_text_activity_owned,
+    )
+    state_text_remove = digital_state_hook.find(
+        "TEXT_SELECTION_PEN_CONTACTS.remove(", state_text_fallback
+    )
+    state_text_return = digital_state_hook.find("return;", state_text_remove)
+    state_writer_state_one = digital_state_hook.find(
+        "if (state == 1)", state_text_return
+    )
+    state_writer_text_recheck = digital_state_hook.find(
+        "if (TEXT_SELECTION_PEN_CONTACTS.get(activity)",
+        state_writer_state_one,
+    )
+    state_writer_down = digital_state_hook.find(
+        "PEN_PHYSICAL_CONTACT_DOWNS.put(", state_writer_text_recheck
+    )
+    state_writer_lift = digital_state_hook.find(
+        "PEN_PHYSICAL_CONTACT_DOWNS.remove(", state_writer_down
+    )
+    if not (
+        0 <= state_text_lookup < state_text_terminal
+        < state_text_activity_owned < state_text_fallback < state_text_remove
+        < state_text_return < state_writer_state_one
+        < state_writer_text_recheck < state_writer_down < state_writer_lift
+    ):
+        fail(
+            "native text-selection terminal handling can enter ordinary "
+            "physical-contact bookkeeping"
+        )
+
+    change_select_start = native_chrome_code.find('"changeSelectTextModel"')
+    change_select_end = native_chrome_code.find(
+        "XposedHelpers.findAndHookMethod(", change_select_start + 1
+    )
+    handwrite_select_start = native_chrome_code.find('"handWriteSelectText"')
+    handwrite_select_end = native_chrome_code.find(
+        "XposedHelpers.findAndHookMethod(", handwrite_select_start + 1
+    )
+    configure_select_start = native_chrome_code.find(
+        "private static void configureTextSelectionHardware("
+    )
+    configure_select_end = native_chrome_code.find(
+        "private static boolean applySpreadMarkGeometry(",
+        configure_select_start,
+    )
+    if min(
+        change_select_start,
+        change_select_end,
+        handwrite_select_start,
+        handwrite_select_end,
+        configure_select_start,
+        configure_select_end,
+    ) < 0:
+        fail("could not isolate native text-selection hardware configuration")
+    change_select = native_chrome_code[change_select_start:change_select_end]
+    configure_select = native_chrome_code[
+        configure_select_start:configure_select_end
+    ]
+    require_markers(
+        change_select,
+        (
+            "TEXT_SELECTION_MODES.put(activity, model)",
+            "TEXT_SELECTION_MODES.remove(activity)",
+            "configureTextSelectionHardware(",
+            '"model_changed:" + model',
+        ),
+        "text-selection mode publication and native hardware configuration",
+    )
+    require_markers(
+        configure_select,
+        (
+            "resolveActivePageDestination(activity, presenter)",
+            "activePageDisabledAreas(",
+            '"setDisableAreaList"',
+            '"sendWriteInfo"',
+            "applySpreadMarkGeometry(",
+            '"text_selection_hardware_configured reason="',
+        ),
+        "active-page native text-selection hardware configuration",
+    )
+    forbidden_text_selection_disable = (
+        "setTextSelectionHardwareGate(",
+        '"SN_SPREAD_PROBE text-selection hardware trail"',
+        '"text_selection_hardware_disabled reason="',
+    )
+    for forbidden in forbidden_text_selection_disable:
+        if forbidden in native_chrome_code:
+            fail(
+                "native text-selection hardware is still disabled by "
+                + forbidden
+            )
+    handwrite_select = native_chrome_code[
+        handwrite_select_start:handwrite_select_end
+    ]
+    if (
+        "configureTextSelectionHardware(" in handwrite_select
+        or "disableHandWrite" in handwrite_select
+    ):
+        fail("handWriteSelectText can still disable/reconfigure hardware mid-gesture")
+
+    release_start = native_chrome_code.find(
+        "private static void releaseActivityResources("
+    )
+    retire_identity_start = native_chrome_code.find(
+        "private static void retireActivityComponentIdentity(", release_start
+    )
+    reset_editing_start = native_chrome_code.find(
+        "private static void resetSpreadEditingState(", retire_identity_start
+    )
+    reset_editing_end = native_chrome_code.find(
+        "private static boolean isCalibrationFile(", reset_editing_start
+    )
+    if min(
+        release_start,
+        retire_identity_start,
+        reset_editing_start,
+        reset_editing_end,
+    ) < 0:
+        fail("could not isolate text-selection lifecycle cleanup")
+    require_markers(
+        native_chrome_code[release_start:retire_identity_start],
+        (
+            'clearTextSelectionContact(activity, "activity_release")',
+            "TEXT_SELECTION_MODES.remove(activity)",
+        ),
+        "per-activity text-selection cleanup",
+    )
+    require_markers(
+        native_chrome_code[reset_editing_start:reset_editing_end],
+        (
+            "TEXT_SELECTION_PEN_CONTACTS.keySet()",
+            "clearTextSelectionContact(",
+            '"editing_reset_" + reason',
+            "TEXT_SELECTION_MODES.clear()",
+        ),
+        "global text-selection cleanup",
+    )
+    if "TEXT_SELECTION_PEN_CONTACTS.clear()" in native_chrome_code:
+        fail("global text-selection cleanup can discard an applied gate")
 
     require_markers(
         module,
@@ -8546,6 +10469,72 @@ def check(repo_root: Path) -> None:
         ),
         "single-operation completed-trace terminal pointer commit",
     )
+    trace_overlay_refresh_start = module.find(
+        "private static void refreshStatusOverlayAfterTraceStop(", finish_start
+    )
+    trace_overlay_refresh_end = module.find(
+        "private static boolean isTraceInputQuiescent(",
+        trace_overlay_refresh_start,
+    )
+    if trace_overlay_refresh_start < 0 or trace_overlay_refresh_end < 0:
+        fail("could not isolate post-trace status-overlay restoration")
+    finish_method = mask_comments_preserve_literals(
+        module[finish_start:trace_overlay_refresh_start]
+    )
+    overlay_restore_call = finish_method.find(
+        "refreshStatusOverlayAfterTraceStop("
+    )
+    overlay_complete_argument = finish_method.find(
+        "completed && publicationFailure == null", overlay_restore_call
+    )
+    if not (0 <= overlay_restore_call < overlay_complete_argument):
+        fail(
+            "trace finalization does not restore status from the accepted "
+            "durable completion result"
+        )
+    trace_overlay_refresh = mask_comments_preserve_literals(
+        module[trace_overlay_refresh_start:trace_overlay_refresh_end]
+    )
+    require_markers(
+        trace_overlay_refresh,
+        (
+            "new Handler(activity.getMainLooper()).post(",
+            "synchronized (TRACE_LOCK)",
+            "traceSession != null || traceStartPending",
+            "!isActiveActivityOwner(activity)",
+            "config == null || !config.enabled || !config.showHeader",
+            "if (!completed)",
+            '"SPREAD TRACE: stopped incompletely - recovery required"',
+            "snapshot == null || !snapshot.editable",
+            "|| !snapshot.geometryReady",
+            'activeSide = "LEFT"',
+            'activeSide = "RIGHT"',
+            '"RTL SPREAD: ACTIVE " + activeSide',
+            '"trace_status_overlay_restored state=active"',
+        ),
+        "post-trace truthful status-overlay restoration",
+    )
+    trace_overlay_lock = trace_overlay_refresh.find("synchronized (TRACE_LOCK)")
+    trace_overlay_session_guard = trace_overlay_refresh.find(
+        "traceSession != null || traceStartPending", trace_overlay_lock
+    )
+    trace_overlay_owner = trace_overlay_refresh.find(
+        "!isActiveActivityOwner(activity)", trace_overlay_session_guard
+    )
+    trace_overlay_incomplete = trace_overlay_refresh.find(
+        "if (!completed)", trace_overlay_owner
+    )
+    trace_overlay_normal = trace_overlay_refresh.find(
+        '"RTL SPREAD: ACTIVE " + activeSide', trace_overlay_incomplete
+    )
+    if not (
+        0 <= trace_overlay_lock < trace_overlay_session_guard
+        < trace_overlay_owner < trace_overlay_incomplete < trace_overlay_normal
+    ):
+        fail(
+            "post-trace overlay can overwrite a newer trace or report ordinary "
+            "status after an incomplete stop"
+        )
     pointer_commit_validator_start = module.find(
         "private static void validateCompletedTracePointerForCommit("
     )
@@ -9347,13 +11336,142 @@ def check(repo_root: Path) -> None:
         ),
         ("lasso rewrite", module[lasso_rewrite_start:lasso_rewrite_end]),
     ):
+        markers = (
+            "documentMutationAuthorityCurrent(",
+            "reason=writer_authority_unavailable",
+        )
+        if label.startswith("lasso"):
+            markers = (
+                "canonicalLassoMutationAuthority(",
+                "beginCanonicalLassoOperation(",
+                "reason=selection_authority_unavailable",
+            )
+            if label in ("lasso transition", "lasso rewrite"):
+                markers += ("scheduleCanonicalLassoCompletion(",)
         require_markers(
             hook_slice,
-            (
-                "documentMutationAuthorityCurrent(",
-                "reason=writer_authority_unavailable",
-            ),
+            markers,
             f"{label} writer-authority rejection",
+        )
+
+    lasso_transition = mask_comments_preserve_literals(
+        module[lasso_transition_start:lasso_rewrite_start]
+    )
+    move_mode_guard = lasso_transition.find(
+        "((Integer) param.args[5]) == 1"
+    )
+    move_commit_call = lasso_transition.find(
+        "commitCanonicalLassoMove(operation)", move_mode_guard
+    )
+    move_origin_restore = lasso_transition.find(
+        "endCanonicalLassoOperation(", move_commit_call
+    )
+    move_completion = lasso_transition.find(
+        "scheduleCanonicalLassoCompletion(", move_origin_restore
+    )
+    move_failed_retirement = lasso_transition.find(
+        '"transition_move_commit_failed"', move_completion
+    )
+    if not (
+        0 <= move_mode_guard < move_commit_call < move_origin_restore
+        < move_completion < move_failed_retirement
+    ):
+        fail(
+            "lasso move is not canonically committed before origin restore "
+            "and authority completion"
+        )
+    lasso_commit_start = module.find(
+        "private static boolean commitCanonicalLassoMove("
+    )
+    lasso_commit_end = module.find(
+        "private static void endCanonicalLassoOperation(", lasso_commit_start
+    )
+    if lasso_commit_start < 0 or lasso_commit_end < 0:
+        fail("could not isolate canonical lasso move commit")
+    lasso_commit = mask_comments_preserve_literals(
+        module[lasso_commit_start:lasso_commit_end]
+    )
+    lasso_commit_authority = lasso_commit.find(
+        "canonicalLassoMutationAuthority("
+    )
+    lasso_commit_rewrite = lasso_commit.find(
+        '"reWriteTrails"', lasso_commit_authority
+    )
+    lasso_commit_layout = lasso_commit.find(
+        '"setOnGlobalLayout"', lasso_commit_rewrite
+    )
+    lasso_commit_refresh = lasso_commit.find(
+        '"refreshBitmap"', lasso_commit_layout
+    )
+    lasso_commit_clear = lasso_commit.find(
+        '"sendClearAll"', lasso_commit_refresh
+    )
+    lasso_commit_success = lasso_commit.find(
+        '"lasso_transition_canonical_commit generation="', lasso_commit_clear
+    )
+    if not (
+        0 <= lasso_commit_authority < lasso_commit_rewrite
+        < lasso_commit_layout < lasso_commit_refresh < lasso_commit_clear
+        < lasso_commit_success
+    ):
+        fail(
+            "canonical lasso move does not serialize selection data and "
+            "refresh the layer bitmap under the same origin authority"
+        )
+    if "endCanonicalLassoOperation(" in lasso_commit:
+        fail("canonical lasso move restores its origin before finalization")
+
+    lasso_preview_start = module.find(
+        "private static void prepareSelectedTrailPreview("
+    )
+    lasso_preview_end = module.find(
+        "private static String jniRectDescription(", lasso_preview_start
+    )
+    if lasso_preview_start < 0 or lasso_preview_end < 0:
+        fail("could not isolate canonical lasso preview reconstruction")
+    lasso_preview = mask_comments_preserve_literals(
+        module[lasso_preview_start:lasso_preview_end]
+    )
+    preview_selected_count = lasso_preview.find(
+        'int selectedTrailCount = callInt(lassoInfo, "getTrailnum")'
+    )
+    preview_trails_only = lasso_preview.find(
+        "boolean trailsOnly = selectedTrailCount > 0",
+        preview_selected_count,
+    )
+    preview_drawn_count = lasso_preview.find(
+        "int drawnTrails = 0", preview_trails_only
+    )
+    preview_incomplete_guard = lasso_preview.find(
+        "if (trailsOnly && drawnTrails != selectedTrailCount)",
+        preview_drawn_count,
+    )
+    preview_discard = lasso_preview.find(
+        "corrected.recycle()", preview_incomplete_guard
+    )
+    preview_native_fallback = lasso_preview.find(
+        "spreadLassoCorrectedPreview = Bitmap.createBitmap(\n"
+        "                    nativePreview\n"
+        "                )",
+        preview_discard,
+    )
+    preview_fallback_log = lasso_preview.find(
+        '"lasso_preview_rebuild_incomplete_fallback controls="',
+        preview_native_fallback,
+    )
+    preview_complete_branch = lasso_preview.find(
+        "else if (drawnTrails > 0 || !trailsOnly)",
+        preview_fallback_log,
+    )
+    if not (
+        0 <= preview_selected_count < preview_trails_only
+        < preview_drawn_count < preview_incomplete_guard < preview_discard
+        < preview_native_fallback < preview_fallback_log
+        < preview_complete_branch
+    ):
+        fail(
+            "an incomplete canonical lasso reconstruction can replace the "
+            "firmware's native multi-trail preview"
         )
 
     event_activity_start = module.find(
@@ -10104,17 +12222,23 @@ try {
     claimed_confirmed = helper_reconcile_code.find(
         "claimed_confirmed=`$(stat -c '%d:%i:%s:%Y'", claimed_identity
     )
+    archive_create = helper_reconcile_code.find(
+        "if ! mkdir '$archivedRecovery'; then", claimed_confirmed
+    )
     archive_move = helper_reconcile_code.find(
-        "if ! mv '$recoveryLock' '$archivedRecovery'; then", claimed_confirmed
+        "if ! mv '$claimedPointer' '$archivedPointer'; then", archive_create
     )
     archived_identity = helper_reconcile_code.find(
         "archived_identity=`$(stat -c '%d:%i:%s:%Y'", archive_move
     )
     archived_status = helper_reconcile_code.find(
-        "echo __TRACE_ABANDONED_ARCHIVED__", archived_identity
+        "if ! rmdir '$recoveryLock'; then", archived_identity
+    )
+    archived_complete = helper_reconcile_code.find(
+        "echo __TRACE_ABANDONED_ARCHIVED__", archived_status
     )
     recovery_result_count = helper_reconcile_code.find(
-        "if ($result.Count -ne 1)", archived_status
+        "if ($result.Count -ne 1)", archived_complete
     )
     replacement_retained = helper_reconcile_code.find(
         "if ($recoveryStatus -eq '__TRACE_POINTER_REPLACEMENT_RETAINED__')",
@@ -10144,14 +12268,20 @@ try {
         0 <= active_pointer_path < recovery_lock_path < claimed_pointer_path
         < archived_recovery_path < recovery_invoke < recovery_lock_create
         < candidate_identity < candidate_value < candidate_confirmed
-        < claim_move < claimed_identity < claimed_confirmed < archive_move
-        < archived_identity < archived_status < recovery_result_count
+        < claim_move < claimed_identity < claimed_confirmed < archive_create
+        < archive_move < archived_identity < archived_status
+        < archived_complete < recovery_result_count
         < replacement_retained < pointer_changed < unexpected_recovery
         < recovered_check < recovered_identity < recovered_local_clear
     ):
         fail(
             "trace helper does not atomically claim, revalidate, archive, and "
             "clear only the matching abandoned-session state"
+        )
+    if "mv '$recoveryLock' '$archivedRecovery'" in helper_reconcile_code:
+        fail(
+            "trace helper still relies on an unsupported Android "
+            "shared-storage directory rename"
         )
 
     invalid_status_retention = helper_reconcile_code.find(
@@ -10273,10 +12403,10 @@ try {
     if '"$remoteRoot/$Session/screenshots"' in trace_script:
         fail("desktop screenshots can mutate an already-published trace bundle")
 
-    if 'android:versionCode="120"' not in manifest:
-        fail("companion manifest must use versionCode 120")
-    if 'android:versionName="0.0.120"' not in manifest:
-        fail("companion manifest must use versionName 0.0.120")
+    if 'android:versionCode="135"' not in manifest:
+        fail("companion manifest must use versionCode 135")
+    if 'android:versionName="0.0.135"' not in manifest:
+        fail("companion manifest must use versionName 0.0.135")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest
@@ -10287,19 +12417,34 @@ try {
     plugin_minimum = re.search(
         r'NATIVE_SPREAD_MIN_VERSION_CODE = (\d+)L', plugin
     )
-    if not manifest_version or not handshake_version or not plugin_minimum:
-        fail("could not read packaged, handshake, and minimum module versions")
-    reported_versions = {
-        int(manifest_version.group(1)),
-        int(handshake_version.group(1)),
-        int(plugin_minimum.group(1)),
-    }
-    if len(reported_versions) != 1:
+    transactional_minimum = re.search(
+        r'TRANSACTIONAL_MIN_MODULE_VERSION_CODE = (\d+)L;', module
+    )
+    if (
+        not manifest_version
+        or not handshake_version
+        or not plugin_minimum
+        or not transactional_minimum
+    ):
+        fail("could not read packaged, handshake, and supported module versions")
+    packaged_version = int(manifest_version.group(1))
+    reported_version = int(handshake_version.group(1))
+    required_version = int(plugin_minimum.group(1))
+    oldest_transactional_version = int(transactional_minimum.group(1))
+    if packaged_version != reported_version:
         fail(
-            "packaged, handshake, and minimum module versions must match: "
+            "packaged and handshake module versions must match: "
             f"manifest={manifest_version.group(1)} "
-            f"handshake={handshake_version.group(1)} "
-            f"minimum={plugin_minimum.group(1)}"
+            f"handshake={handshake_version.group(1)}"
+        )
+    if not (
+        oldest_transactional_version <= required_version <= reported_version
+    ):
+        fail(
+            "plugin minimum must remain inside the companion's supported "
+            "transactional range: "
+            f"oldest={oldest_transactional_version} "
+            f"required={required_version} current={reported_version}"
         )
 
     print("Native Spread safety invariants: PASS")

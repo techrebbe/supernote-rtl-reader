@@ -5,10 +5,85 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 ## Stable baseline
 
 v0.4.12 with Native Spread v0.0.116 is the current merged stable baseline.
-v0.4.14 with Native Spread v0.0.120 is the deeply reviewed transactional
+v0.4.14 with Native Spread v0.0.126 is the deeply reviewed transactional
 single-active-page candidate. It incorporates the partially hardware-validated
 v0.4.13/v0.0.119 eraser work plus pre-device race, lifecycle, recovery, and
-packaging hardening. Native Spread v0.0.117 is preserved only on its
+packaging hardening. v0.0.124 also keeps the lasso polygon out of the ordinary
+pen save/reload path, so a floating move no longer redraws its source stroke
+from disk, and archives abandoned trace pointers with file renames compatible
+with the Nomad's shared-storage filesystem. A completed trace now restores the
+ordinary active-page header instead of leaving a stale `recording` banner.
+The accepted selection now owns an immutable, page-bound writer transaction;
+its drag and dismissal contacts bypass the ordinary handwriting-contact timer,
+and transition/rewrite revalidate that exact transaction before mutation. This
+prevents a long lasso drag from expiring the pen guard and dropping the moved
+ink when the selection is dismissed.
+v0.0.125 additionally commits a moved selection from the actual centered ink
+bounds inside Supernote's padded 180-pixel lasso frame, retains its original
+canonical dimensions, completes the immutable lasso transaction at the native
+move-transition boundary, and preserves an unthinned bitmap while dragging.
+This targets the v0.0.124 hardware result where the ink survived dismissal but
+shifted up and left, shrank, and disappeared temporarily during the drag.
+v0.0.126 adds a process-wide containment boundary after the installed module
+was found to suppress the native highlighter even on documents that had never
+enabled Native Spread. Every behavior-changing Java hook now requires an exact,
+verified per-document control claim. Ordinary document startup, teardown,
+component-binding failures, pen/touch callbacks, selection/highlight callbacks,
+and writer-gate discovery all pass through without suppressing firmware or
+entering Native Spread's lifecycle barriers. Leaving an enabled document also
+restores the native hardware writer state explicitly.
+v0.0.135 is the current focused hardware candidate. v0.0.130 replaced the fixed
+top/bottom stylus exclusion bands with gesture-scoped pass-through for the
+native controls that are actually visible, including moved toolbars, the page
+bar, selection menus, and popup windows. A contact is classified once at
+stylus DOWN and retains that route until its exact UP/CANCEL, so a toolbar tap
+cannot become handwriting and a document stroke cannot become a control when
+it crosses the toolbar. Visible native chrome is passed to firmware without a
+page/writer-authority veto; only a malformed or mismatched contact stream is
+blocked. It also performs Supernote's normal selection-end
+rewrite and bitmap refresh while the moved lasso content still has canonical
+page authority, addressing the v0.0.126 cold-reopen loss where the vector path
+survived but the persisted layer bitmap was blank.
+v0.0.131 additionally gives each active-page native text-selection gesture its
+own exact-contact route. Highlighter and underline strokes now keep Supernote's
+native handwriting hardware enabled, pass through unchanged, and never publish
+ordinary handwriting ownership or a page-activation fence. This addresses the
+v0.0.130 failure where selecting the highlighter with the pen worked, but the
+document stroke produced no selection and permanently left page activation
+waiting for pen/page state.
+The first v0.0.131 Nomad test proved that contact ownership no longer became
+stuck, but also exposed a separate native precondition: Supernote's own
+`checkSelectText` path runs only while its transient `isAllowTurnPage` flag is
+false. v0.0.132 applies that native gate only for the exact active-page
+highlighter/underline contact, restores its previous value after Supernote has
+processed UP/CANCEL, and includes a bounded recovery for a missing Activity
+terminal. Native-only terminal callbacks cannot retire an Activity-owned
+selection before that restoration.
+The v0.0.132 Nomad pass confirmed aligned, persistent text highlighting on both
+active pages, clean immediate page activation after selection, and no stuck
+page-turn gate. v0.0.133 addresses the separate held-straight-line failure:
+Supernote recognizes and opens its line editor before the physical pen lift,
+so the ordinary immediate save/reload used to replace the editor's coordinate
+frame and turn a short horizontal line into a large diagonal. The module now
+retains exact page/writer/layout authority through the native line editor,
+maps its live geometry into the physical spread, and performs the canonical
+save/reload only after `onEditLineTransition` commits the final endpoints.
+v0.0.134 additionally makes both native editor entry and final commit fail
+closed if that exact receive transaction is missing or its writer/page/layout
+authority has changed, instead of falling through to Supernote's unremapped
+line editor during a narrow lifecycle race.
+v0.0.135 closes a separate intermittent text-selection race observed after an
+ordinary active-page pen stroke. Supernote can report the physical digital
+pen-down immediately before Android dispatches the same gesture's Activity
+`ACTION_DOWN`. The authoritative Activity classifier now atomically adopts
+that exact otherwise-unowned early signal into text-selection ownership rather
+than rejecting the gesture or publishing ordinary handwriting ownership. The
+native-first path still rejects an already-owned or already-started contact.
+A focused Nomad trace exercised the new adoption path, then completed aligned
+Underline on active left and Highlight on active right with clean gate restore,
+clean page activation, four retired selection contacts, and zero potential
+trace failures.
+Native Spread v0.0.117 is preserved only on its
 experimental branch and is not part of this release line.
 
 The validated reader behavior covers:
@@ -391,7 +466,7 @@ process restart; the next fresh eraser contact was accepted and persisted.
 
 The full design and safety boundary are recorded in
 `TRANSACTIONAL_ACTIVE_PAGE.md`. Regular active-page erasure remains validated
-on v0.0.119. The v0.4.14/v0.0.120 candidate additionally passed a deep static,
+on v0.0.119. The v0.4.14/v0.0.126 candidate additionally passed a deep static,
 compiled, and failure-injection review before device testing:
 
 - native eraser readiness is published only after both hook installers return
@@ -407,13 +482,21 @@ compiled, and failure-injection review before device testing:
   authority in lifecycle-safe OWNER-then-PAGE lock order;
 - annotation restore worker ownership and the one-shot native handoff skip are
   separate atomic states, closing the completion/restart window;
+- process-wide hooks remain behaviorally inert until a verified enabled
+  sidecar publishes an exact activity/document control claim; missing or stale
+  component bindings cannot suppress ordinary highlighter, pen, navigation,
+  lasso, or history callbacks;
+- the companion accepts the plug-in's declared minimum version anywhere within
+  its supported transactional range, and the reserved calibration filename
+  falls through to normal protected-marker validation when recovery authority
+  artifacts exist;
 - clean Windows and CI builds fail if native registration, compilation,
   `app.npk`, exact package metadata, native classes, or the runtime marker is
   missing. The finished archive is verified before it can reach `out/` or a CI
   artifact.
 
 Both invariant suites, trace-helper regressions, native packaging
-failure-injection tests, the v0.0.120 Java/C++ APK build, and a clean native
+failure-injection tests, the v0.0.126 Java/C++ APK build, and a clean native
 plugin build pass locally. Hardware validation of this candidate remains open.
 
 The active settled-ink compositor now clips its transformed bitmap to the

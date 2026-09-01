@@ -201,8 +201,10 @@ if ($AdbArguments.Count -ge 2 -and $AdbArguments[0] -eq 'shell') {
             "stat -c '%d:%i:%s:%Y' '$remoteRoot/active.txt'",
             "mv '$remoteRoot/active.txt' " +
                 "'$remoteRoot/.active-recovery/active.txt'",
-            "mv '$remoteRoot/.active-recovery' " +
-                "'$remoteRoot/.abandoned-$env:SN_TRACE_FAKE_ACTIVE'"
+            "mkdir '$remoteRoot/.abandoned-$env:SN_TRACE_FAKE_ACTIVE'",
+            "mv '$remoteRoot/.active-recovery/active.txt' " +
+                "'$remoteRoot/.abandoned-$env:SN_TRACE_FAKE_ACTIVE/active.txt'",
+            "rmdir '$remoteRoot/.active-recovery'"
         )
         foreach ($fragment in $requiredFragments) {
             if (-not $command.Contains($fragment)) {
@@ -216,6 +218,18 @@ if ($AdbArguments.Count -ge 2 -and $AdbArguments[0] -eq 'shell') {
         if ($command.Contains("stat -c '%d:%i:%s:%Y:%Z'")) {
             [Console]::Error.WriteLine(
                 'abandoned-pointer identity incorrectly includes rename-changing ctime'
+            )
+            $global:LASTEXITCODE = 97
+            return
+        }
+        if (
+            $command.Contains(
+                "mv '$remoteRoot/.active-recovery' " +
+                    "'$remoteRoot/.abandoned-$env:SN_TRACE_FAKE_ACTIVE'"
+            )
+        ) {
+            [Console]::Error.WriteLine(
+                'attempted unsupported Android shared-storage directory rename'
             )
             $global:LASTEXITCODE = 97
             return

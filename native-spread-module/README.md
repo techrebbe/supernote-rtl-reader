@@ -291,6 +291,57 @@ is bound to exact document/component identity, and canonical reloads require an
 acknowledged native save plus current authority in lifecycle-safe lock order.
 All previously weak cross-thread activity maps are synchronized.
 
+v0.0.121 corrects the transactional marker admission contract found during the
+first hardware gate. A committed marker may declare any minimum companion
+version from the oldest supported transactional protocol through the currently
+installed module, rather than being restricted to one historical value. The
+reserved calibration filename uses its automatic disposable mode only while no
+authority artifacts exist; a verified protected marker now follows the same
+validation path as every other document.
+
+v0.0.122 keeps the lasso polygon out of the active-pen canonical save/reload
+path. Supernote's native selection buffer therefore remains authoritative while
+the selection floats, instead of the persistent `.mark` bitmap resurrecting
+the selected source trail underneath a moved preview. The trace helper also
+archives an abandoned pointer by atomically renaming the verified pointer file
+into a separately created archive directory. This avoids the `Bad address`
+failure produced when Nomad shared storage is asked to rename the recovery
+directory itself; the empty recovery guard is removed only after the archived
+file's identity is revalidated.
+
+v0.0.123 restores the ordinary active-page header after a completed annotation
+trace. An incomplete or failed stop instead leaves an explicit recovery warning,
+so the on-screen status can no longer continue to claim that recording is active
+after the durable `active.txt` guard has been retired.
+
+v0.0.124 binds an accepted lasso selection to the exact immutable writer,
+document, page, presenter, and configuration epoch that admitted it. Native
+lasso drag/dismiss contacts bypass the ordinary handwriting-contact timeout;
+the transition and final rewrite remain fail-closed unless that exact selection
+authority is still current. This fixes moved ink disappearing when a selection
+was dismissed more than 15 seconds after its drag began.
+
+v0.0.125 corrects the remaining move geometry and UI lifecycle. Supernote pads
+small lasso selections into a 180-pixel square; the module now converts the
+centered ink bounds rather than that frame's top-left and retains the original
+canonical width and height. It replaces Supernote's thinned drag bitmap with an
+exact copy, so thin strokes remain visible while moving, and completes the
+immutable selection authority after a successful native move transition as
+well as after an unmoved rewrite.
+
+v0.0.126 contains every behavior-changing hook behind an exact, verified
+per-document Native Spread control claim. The audit was prompted by a native
+highlighter regression that reproduced on ordinary documents whenever the
+LSPosed module was installed. The earlier fail-closed owner logic treated a
+missing or stale component binding as authority to suppress the firmware call,
+even when no document had opted in. Ordinary callbacks now delegate unchanged;
+ordinary activity startup and teardown do not enter Native Spread lifecycle
+locks or JNI writer-gate paths; configuration discovery cannot arm hardware
+without a claim; and returning to Off restores the firmware writer state. The
+two native eraser detours remain installed for the target firmware, but their
+disabled path calls the original function exactly once with unmodified
+arguments and returns its original result.
+
 This is firmware-specific experimental software for a rooted device. Back up
 documents and `.mark` files before testing a new firmware or module revision.
 
@@ -321,11 +372,43 @@ previously installed build.
 
 Install the APK, enable **Supernote Native Spread Probe** in LSPosed, scope it
 only to `com.supernote.document`, and restart the document reader. Supernote
-RTL Reader v0.4.14 or newer and Native Spread v0.0.120 or newer are required for
-the current transactional hardening candidate. Its
+RTL Reader v0.4.14 or newer and Native Spread v0.0.135 or newer are required for
+the current native-control/lasso-persistence candidate. Stylus contacts that
+begin inside the current visible native toolbar, page bar, selection menu, or
+popup are passed to Supernote for that exact gesture without publishing a
+handwriting owner or consulting page/writer authority. Only malformed or
+mismatched streams are blocked. Contacts that begin on the document retain the
+normal Native Spread route even if they later cross visible chrome. The same build finalizes
+a moved lasso selection under canonical page authority before restoring the
+spread origin, so the persisted layer bitmap and native vector paths advance
+together. Native text-selection contacts on the active page are likewise
+gesture-scoped: Supernote's native handwriting selection engine remains enabled
+while ordinary Native Spread handwriting and activation ownership ignore that
+exact contact. The module also holds Supernote's native page-turn gate closed
+for only that selection gesture and restores its previous value after the
+native reader processes pen-up/cancel, allowing `checkSelectText` to receive
+the full highlight/underline stream without leaving navigation disabled.
+v0.0.135's contact classifier also handles Supernote's early digital pen-down
+ordering: when that signal immediately precedes the authoritative Activity
+DOWN for the same otherwise-unowned selection gesture, it is atomically
+adopted into the text-selection token instead of being misclassified as
+ordinary handwriting. Native-first callbacks and genuinely competing contact
+owners remain blocked. Its
 recovery manifest binds the backup to the PDF's full SHA-256 because
 Supernote changes the PDF modification time when the document activity
 reopens.
+
+Recognized straight lines use a distinct two-stage native transaction.
+Supernote enters `EditLineView` before the physical pen lift; Native Spread
+therefore retains the exact document, writer, page, destination, and native
+split-offset authority until `onEditLineTransition`. Live editor points are
+mapped into the physical active-page slot, final points are mapped back into
+Supernote's split-local frame, and only a successful native transition can
+trigger the canonical save/reload. This prevents a held short horizontal line
+from jumping into a long diagonal while leaving ordinary pen strokes on their
+existing path. The editor and commit hooks also reject a missing or stale
+recognized-line transaction while editable spread mode is active; they never
+fall through to Supernote's unremapped native line editor after authority loss.
 
 ## Annotation trace laboratory
 

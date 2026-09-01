@@ -602,10 +602,15 @@ function Reconcile-AbandonedTracePointer {
     # then unlinking a path which may have been replaced. The atomic recovery
     # directory also serializes concurrent helpers and remains as a guard if
     # the helper exits after the rename. A verified pointer is archived rather
-    # than deleted, preserving the object identity used for validation. Do not
-    # include ctime (%Z) in the cross-rename identity: Android updates it for
-    # the rename itself. Device, inode, size, mtime, and the exact pointer value
-    # still prove that the claimed object is the one which was authorized.
+    # than deleted, preserving the object identity used for validation. Android
+    # shared-storage FUSE rejects renaming this directory on some firmware, so
+    # create the unique archive directory and atomically rename the verified
+    # pointer file into it instead. The empty recovery lock is removed only
+    # after the archived file has been revalidated; any interrupted or failed
+    # stage therefore remains guarded. Do not include ctime (%Z) in the
+    # cross-rename identity: Android updates it for the rename itself. Device,
+    # inode, size, mtime, and the exact pointer value still prove that the
+    # archived object is the one which was authorized.
     $activePointer = "$remoteRoot/active.txt"
     $recoveryLock = "$remoteRoot/.active-recovery"
     $claimedPointer = "$recoveryLock/active.txt"
@@ -649,13 +654,21 @@ function Reconcile-AbandonedTracePointer {
             "[ `"`$claimed_value`" != '$session' ] || " +
             "[ `"`$claimed_size`" -ne `"`$claimed_expected_size`" ]; then " +
             "echo __TRACE_POINTER_REPLACEMENT_RETAINED__; exit 0; fi; " +
-            "if ! mv '$recoveryLock' '$archivedRecovery'; then " +
-            "echo __TRACE_ABANDONED_ARCHIVE_FAILED__ >&2; exit 82; fi; " +
+            "if ! mkdir '$archivedRecovery'; then " +
+            "echo __TRACE_ABANDONED_ARCHIVE_CREATE_FAILED__ >&2; " +
+            "exit 82; fi; " +
+            "if ! mv '$claimedPointer' '$archivedPointer'; then " +
+            "if ! rmdir '$archivedRecovery'; then " +
+            "echo __TRACE_ABANDONED_ARCHIVE_GUARDED__ >&2; " +
+            "else echo __TRACE_ABANDONED_ARCHIVE_FAILED__ >&2; fi; " +
+            "exit 82; fi; " +
             "archived_identity=`$(stat -c '%d:%i:%s:%Y' " +
             "'$archivedPointer') || exit 82; " +
             "if [ `"`$archived_identity`" != " +
             "`"`$claimed_confirmed`" ]; then " +
             "echo __TRACE_ABANDONED_ARCHIVE_CHANGED__ >&2; exit 82; fi; " +
+            "if ! rmdir '$recoveryLock'; then " +
+            "echo __TRACE_ABANDONED_LOCK_RETAINED__ >&2; exit 82; fi; " +
             "echo __TRACE_ABANDONED_ARCHIVED__"
         )
     )

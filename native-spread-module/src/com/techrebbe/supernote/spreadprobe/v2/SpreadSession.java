@@ -48,9 +48,10 @@ public final class SpreadSession {
             || !activationMachine.targetPublished(token, next)) {
             return false;
         }
-        // A buffered pen contact can still be physically down when the target
-        // becomes authoritative. Its DOWN-time route remains valid until the
-        // matching UP/CANCEL; the controller retires it at that terminal.
+        // A drain-only pen contact can still be physically down when the
+        // target becomes authoritative. Its DOWN-time route remains valid
+        // until the matching UP/CANCEL; the controller retires it at that
+        // terminal without synthesizing native pen samples.
         published.set(next);
         return true;
     }

@@ -101,17 +101,21 @@ MUTATIONS = (
     ),
     (
         "NativeReaderController.java",
-        "if (retired || context != expected || expected.replayRequested\n"
-        "                || !expected.targetPublished || !expected.inputComplete) {\n"
-        "                return;\n"
-        "            }\n"
-        "            initialKind = expected.replayKind;",
-        "if (retired || context != expected || expected.replayRequested\n"
-        "                || !expected.targetPublished) {\n"
-        "                return;\n"
-        "            }\n"
-        "            initialKind = expected.replayKind;",
-        "replay waits for input terminal",
+        "if (retired || context != expected || !expected.inputComplete\n"
+        "                || !expected.targetPublished\n"
+        "                || expected.replayKind != ReplayKind.DROP_PEN) {",
+        "if (retired || context != expected\n"
+        "                || !expected.targetPublished\n"
+        "                || expected.replayKind != ReplayKind.DROP_PEN) {",
+        "direct pen drain waits for input terminal",
+    ),
+    (
+        "NativeReaderController.java",
+        "ActivationMachine.CompletionMode.DRAIN_CONTACT\n"
+        "        );",
+        "ActivationMachine.CompletionMode.REPLAY_INPUT\n"
+        "        );",
+        "direct pen uses drain completion",
     ),
     (
         "NativeReaderController.java",

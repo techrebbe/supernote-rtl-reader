@@ -466,7 +466,9 @@ public final class NativeReaderV2CoreTests {
         SpreadSnapshot spread = spread(1, 1, 1, true);
         ActivationMachine machine = new ActivationMachine();
         machine.initialize(spread);
-        ActivationMachine.Token token = machine.begin(spread, 0, true);
+        ActivationMachine.Token token = machine.begin(
+            spread, 0, ActivationMachine.CompletionMode.REPLAY_INPUT
+        );
         check(token != null, "activation begins");
         status(machine, ActivationMachine.State.SOURCE_SAVING, 1, false);
         check(machine.sourceSaved(token), "source save accepted");
@@ -488,7 +490,7 @@ public final class NativeReaderV2CoreTests {
         status(machine, ActivationMachine.State.ACTIVE, 0, true);
 
         ActivationMachine.Token noReplay = machine.begin(
-            targetSnapshot, 1, false
+            targetSnapshot, 1, ActivationMachine.CompletionMode.IMMEDIATE
         );
         check(noReplay != null, "second activation begins");
         check(machine.sourceSaved(noReplay), "second source saved");
@@ -504,7 +506,9 @@ public final class NativeReaderV2CoreTests {
         SpreadSnapshot spread = spread(1, 2, 5, true);
         ActivationMachine machine = new ActivationMachine();
         machine.initialize(spread);
-        ActivationMachine.Token token = machine.begin(spread, 0, false);
+        ActivationMachine.Token token = machine.begin(
+            spread, 0, ActivationMachine.CompletionMode.IMMEDIATE
+        );
         check(machine.sourceSaved(token), "rollback source saved");
         check(machine.fail(token), "failure starts rollback");
         check(!machine.rollbackVerified(token, authority(1, 2, 4)),
@@ -518,11 +522,15 @@ public final class NativeReaderV2CoreTests {
         status(machine, ActivationMachine.State.ACTIVE, 1, true);
         check(!machine.sourceSaved(token), "retired callback rejected");
 
-        ActivationMachine.Token doomed = machine.begin(recovered, 0, false);
+        ActivationMachine.Token doomed = machine.begin(
+            recovered, 0, ActivationMachine.CompletionMode.IMMEDIATE
+        );
         check(doomed != null && machine.fail(doomed), "second failure");
         check(machine.rollbackFailed(doomed), "rollback failure disables");
         status(machine, ActivationMachine.State.DISABLED, 1, false);
-        check(machine.begin(spread, 0, false) == null,
+        check(machine.begin(
+            spread, 0, ActivationMachine.CompletionMode.IMMEDIATE
+        ) == null,
             "disabled machine cannot reactivate silently");
     }
 
@@ -537,7 +545,11 @@ public final class NativeReaderV2CoreTests {
             threads[index] = new Thread(() -> {
                 try {
                     start.await();
-                    if (machine.begin(spread, 0, false) != null) {
+                    if (machine.begin(
+                        spread,
+                        0,
+                        ActivationMachine.CompletionMode.IMMEDIATE
+                    ) != null) {
                         winners.incrementAndGet();
                     }
                 } catch (InterruptedException exception) {
@@ -599,7 +611,11 @@ public final class NativeReaderV2CoreTests {
         check(activationSession.publish(activationStart),
             "activation session initialized");
         ActivationMachine.Token activation = activationSession.activation()
-            .begin(activationStart, 0, true);
+            .begin(
+                activationStart,
+                0,
+                ActivationMachine.CompletionMode.REPLAY_INPUT
+            );
         check(activationSession.activation().sourceSaved(activation),
             "session activation source saved");
         check(activationSession.activation().targetLoaded(activation, 0),
@@ -627,7 +643,7 @@ public final class NativeReaderV2CoreTests {
         SpreadSession session = initializedSession(1, 10, 1);
         FakePort port = new FakePort();
         NativeReaderController controller = new NativeReaderController(
-            session, port, 16, 16 * 48, 1000
+            session, port
         );
         NativeReaderController.DownDecision down = controller.onDown(
             0, 1200, 500, 0.6, 100,
@@ -658,17 +674,10 @@ public final class NativeReaderV2CoreTests {
             authority(0, 10, 2),
             spread(0, 10, 2, true)
         );
-        equal("replayPen", port.calls.get(port.calls.size() - 1),
-            "completed direct pen replays after target publication");
-        equal(2, port.replayedPen.size(),
-            "cross-divider move discarded but terminal preserved");
-        near(port.replayedPen.get(0).x, port.replayedPen.get(1).x, 1.0e-12,
-            "outside terminal uses last valid source x");
-        near(port.replayedPen.get(0).y, port.replayedPen.get(1).y, 1.0e-12,
-            "outside terminal uses last valid source y");
-        controller.onReplayComplete(token, true);
         equal("release", port.calls.get(port.calls.size() - 1),
-            "input released only after replay completion");
+            "input releases only after dropped contact drains");
+        check(!port.calls.contains("replayFinger"),
+            "direct pen contact is never fabricated as native input");
         equal(0, session.snapshot().activePageIndex,
             "direct pen activation publishes target page");
         status(session.activation(), ActivationMachine.State.ACTIVE, 0, true);
@@ -678,7 +687,7 @@ public final class NativeReaderV2CoreTests {
         SpreadSession swipeSession = initializedSession(1, 11, 1);
         FakePort swipePort = new FakePort();
         NativeReaderController swipeController = new NativeReaderController(
-            swipeSession, swipePort, 16, 768, 1000
+            swipeSession, swipePort
         );
         NativeReaderController.DownDecision swipe = swipeController.onDown(
             0, 1200, 500, 0, 0,
@@ -728,7 +737,7 @@ public final class NativeReaderV2CoreTests {
         SpreadSession hoverSession = initializedSession(1, 12, 1);
         FakePort hoverPort = new FakePort();
         NativeReaderController hoverController = new NativeReaderController(
-            hoverSession, hoverPort, 16, 768, 1000
+            hoverSession, hoverPort
         );
         check(!hoverController.onInactiveHover(
             1200,
@@ -763,7 +772,7 @@ public final class NativeReaderV2CoreTests {
         SpreadSession marginSession = initializedSession(1, 16, 1);
         FakePort marginPort = new FakePort();
         NativeReaderController marginController = new NativeReaderController(
-            marginSession, marginPort, 16, 768, 1000
+            marginSession, marginPort
         );
         NativeReaderController.DownDecision margin = marginController.onDown(
             0, 1200, 10, 0, 0,
@@ -791,7 +800,7 @@ public final class NativeReaderV2CoreTests {
         SpreadSession rollbackSession = initializedSession(1, 13, 1);
         FakePort rollbackPort = new FakePort();
         NativeReaderController rollbackController = new NativeReaderController(
-            rollbackSession, rollbackPort, 2, 96, 1000
+            rollbackSession, rollbackPort
         );
         NativeReaderController.DownDecision down = rollbackController.onDown(
             0, 1200, 500, 0.5, 0,
@@ -816,63 +825,36 @@ public final class NativeReaderV2CoreTests {
                 1200, 500, 0, 10
             ), "retired activation gesture cannot mutate rollback");
 
-        SpreadSession overflowSession = initializedSession(1, 14, 1);
-        FakePort overflowPort = new FakePort();
-        NativeReaderController overflowController = new NativeReaderController(
-            overflowSession, overflowPort, 2, 96, 1000
+        SpreadSession cancelSession = initializedSession(1, 14, 1);
+        FakePort cancelPort = new FakePort();
+        NativeReaderController cancelController = new NativeReaderController(
+            cancelSession, cancelPort
         );
-        NativeReaderController.DownDecision overflow = overflowController.onDown(
+        NativeReaderController.DownDecision cancelled = cancelController.onDown(
             0, 1200, 500, 0.5, 0,
             GestureRouter.Tool.STYLUS, Collections.<RectD>emptyList()
         );
-        overflowController.onMotion(
-            overflow.gestureTokenId, 0, GestureBuffer.Action.MOVE,
-            1210, 510, 0.5, 1
+        ActivationMachine.Token cancelToken = cancelPort.lastToken;
+        cancelController.onMotion(
+            cancelled.gestureTokenId, 0, GestureBuffer.Action.CANCEL,
+            1210, 510, 0.0, 2
         );
-        overflowController.onMotion(
-            overflow.gestureTokenId, 0, GestureBuffer.Action.MOVE,
-            1220, 520, 0.5, 2
+        cancelController.onSourceSaveComplete(cancelToken, true);
+        cancelController.onTargetLoadComplete(cancelToken, 0, true);
+        cancelController.onTargetReady(
+            cancelToken,
+            authority(0, 14, 2),
+            spread(0, 14, 2, true)
         );
-        equal("rollback", overflowPort.calls.get(
-            overflowPort.calls.size() - 1
-        ), "buffer overflow fails into rollback");
-
-        SpreadSession uncertainSession = initializedSession(1, 15, 1);
-        FakePort uncertainPort = new FakePort();
-        NativeReaderController uncertainController =
-            new NativeReaderController(
-                uncertainSession, uncertainPort, 16, 768, 1000
-            );
-        NativeReaderController.DownDecision uncertain =
-            uncertainController.onDown(
-                0, 1200, 500, 0.5, 0,
-                GestureRouter.Tool.STYLUS, Collections.<RectD>emptyList()
-            );
-        uncertainController.onMotion(
-            uncertain.gestureTokenId, 0, GestureBuffer.Action.UP,
-            1210, 510, 0, 5
-        );
-        ActivationMachine.Token uncertainToken = uncertainPort.lastToken;
-        uncertainController.onSourceSaveComplete(uncertainToken, true);
-        uncertainController.onTargetLoadComplete(uncertainToken, 0, true);
-        uncertainController.onTargetReady(
-            uncertainToken,
-            authority(0, 15, 2),
-            spread(0, 15, 2, true)
-        );
-        uncertainController.onReplayComplete(uncertainToken, false);
-        equal("disable", uncertainPort.calls.get(
-            uncertainPort.calls.size() - 1
-        ), "uncertain replay hard-disables complete feature");
-        check(uncertainSession.snapshot() == null,
-            "hard-disable retires session authority");
+        equal("release", cancelPort.calls.get(cancelPort.calls.size() - 1),
+            "cancelled direct contact drains without replay or rollback");
     }
 
     private static void testControllerTargetReadyBeforePenUp() {
         SpreadSession session = initializedSession(1, 20, 1);
         FakePort port = new FakePort();
         NativeReaderController controller = new NativeReaderController(
-            session, port, 16, 768, 1000
+            session, port
         );
         NativeReaderController.DownDecision down = controller.onDown(
             0, 1200, 500, 0.5, 0,
@@ -886,16 +868,16 @@ public final class NativeReaderV2CoreTests {
             authority(0, 20, 2),
             spread(0, 20, 2, true)
         );
-        check(!port.calls.contains("replayPen"),
+        equal(ActivationMachine.State.DRAINING_CONTACT,
+            session.activation().status().state,
             "target publication waits for physical pen terminal");
         equal(NativeReaderController.InputResult.CONSUMED,
             controller.onMotion(
                 down.gestureTokenId, 0, GestureBuffer.Action.UP,
                 1210, 510, 0, 20
             ), "pen UP survives target publication");
-        equal("replayPen", port.calls.get(port.calls.size() - 1),
-            "pen replays immediately after late terminal");
-        controller.onReplayComplete(token, true);
+        equal("release", port.calls.get(port.calls.size() - 1),
+            "late terminal drains the deliberately dropped contact");
         status(session.activation(), ActivationMachine.State.ACTIVE, 0, true);
     }
 
@@ -903,7 +885,7 @@ public final class NativeReaderV2CoreTests {
         SpreadSession session = initializedSession(1, 21, 1);
         SynchronousPort port = new SynchronousPort(session, 21);
         NativeReaderController controller = new NativeReaderController(
-            session, port, 16, 768, 1000
+            session, port
         );
         port.controller = controller;
         NativeReaderController.DownDecision down = controller.onDown(
@@ -912,7 +894,8 @@ public final class NativeReaderV2CoreTests {
         );
         equal(NativeReaderController.InputResult.CONSUMED, down.result,
             "synchronous callback pen begins");
-        check(!port.calls.contains("replayPen"),
+        equal(ActivationMachine.State.DRAINING_CONTACT,
+            session.activation().status().state,
             "synchronous target callback still waits for UP");
         controller.onMotion(
             down.gestureTokenId, 0, GestureBuffer.Action.UP,
@@ -920,7 +903,7 @@ public final class NativeReaderV2CoreTests {
         );
         equal(Arrays.asList(
             "freeze", "save", "disableWriter", "load",
-            "replayPen", "release"
+            "release"
         ), port.calls, "fully synchronous port completes without deadlock");
         status(session.activation(), ActivationMachine.State.ACTIVE, 0, true);
     }
@@ -930,7 +913,7 @@ public final class NativeReaderV2CoreTests {
         FakePort duplicatePort = new FakePort();
         NativeReaderController duplicateController =
             new NativeReaderController(
-                duplicateSession, duplicatePort, 16, 768, 1000
+                duplicateSession, duplicatePort
             );
         duplicateController.onInactiveHover(
             1200, 500, Collections.<RectD>emptyList()
@@ -964,7 +947,7 @@ public final class NativeReaderV2CoreTests {
         FakePort reorderedPort = new FakePort();
         NativeReaderController reorderedController =
             new NativeReaderController(
-                reorderedSession, reorderedPort, 16, 768, 1000
+                reorderedSession, reorderedPort
             );
         reorderedController.onInactiveHover(
             1200, 500, Collections.<RectD>emptyList()
@@ -992,7 +975,7 @@ public final class NativeReaderV2CoreTests {
         SpreadSession busySession = initializedSession(1, 24, 1);
         FakePort busyPort = new FakePort();
         NativeReaderController busyController = new NativeReaderController(
-            busySession, busyPort, 16, 768, 1000
+            busySession, busyPort
         );
         check(busyController.onInactiveHover(
             1200, 500, Collections.<RectD>emptyList()
@@ -1016,7 +999,7 @@ public final class NativeReaderV2CoreTests {
         FakePort contactPort = new FakePort();
         NativeReaderController contactController =
             new NativeReaderController(
-                contactSession, contactPort, 16, 768, 1000
+                contactSession, contactPort
             );
         NativeReaderController.DownDecision activeContact =
             contactController.onDown(
@@ -1049,11 +1032,11 @@ public final class NativeReaderV2CoreTests {
         SpreadSession replaySession = initializedSession(1, 34, 1);
         ThrowingPort replayPort = new ThrowingPort(FailurePoint.REPLAY);
         NativeReaderController replayController = new NativeReaderController(
-            replaySession, replayPort, 16, 768, 1000
+            replaySession, replayPort
         );
         NativeReaderController.DownDecision replay = replayController.onDown(
-            0, 1200, 500, 0.5, 0,
-            GestureRouter.Tool.STYLUS, Collections.<RectD>emptyList()
+            0, 1200, 500, 0.0, 0,
+            GestureRouter.Tool.FINGER, Collections.<RectD>emptyList()
         );
         replayController.onMotion(
             replay.gestureTokenId, 0, GestureBuffer.Action.UP,
@@ -1074,7 +1057,7 @@ public final class NativeReaderV2CoreTests {
         ThrowingPort rollbackPort = new ThrowingPort(FailurePoint.ROLLBACK);
         NativeReaderController rollbackController =
             new NativeReaderController(
-                rollbackSession, rollbackPort, 16, 768, 1000
+                rollbackSession, rollbackPort
             );
         rollbackController.onInactiveHover(
             1200, 500, Collections.<RectD>emptyList()
@@ -1087,7 +1070,7 @@ public final class NativeReaderV2CoreTests {
         ThrowingPort releasePort = new ThrowingPort(FailurePoint.RELEASE);
         NativeReaderController releaseController =
             new NativeReaderController(
-                releaseSession, releasePort, 16, 768, 1000
+                releaseSession, releasePort
             );
         releaseController.onInactiveHover(
             1200, 500, Collections.<RectD>emptyList()
@@ -1113,7 +1096,7 @@ public final class NativeReaderV2CoreTests {
         );
         ThrowingPort port = new ThrowingPort(failure);
         NativeReaderController controller = new NativeReaderController(
-            session, port, 16, 768, 1000
+            session, port
         );
         if (failure == FailurePoint.FREEZE || failure == FailurePoint.SAVE) {
             controller.onInactiveHover(
@@ -1135,7 +1118,7 @@ public final class NativeReaderV2CoreTests {
         SpreadSession session = initializedSession(1, 40, 1);
         FakePort port = new FakePort();
         NativeReaderController controller = new NativeReaderController(
-            session, port, 16, 768, 1000
+            session, port
         );
         equal(NativeReaderController.InputResult.BLOCKED,
             controller.onDown(
@@ -1176,7 +1159,7 @@ public final class NativeReaderV2CoreTests {
         FakePort retiredPort = new FakePort();
         NativeReaderController retiredController =
             new NativeReaderController(
-                retiredSession, retiredPort, 16, 768, 1000
+                retiredSession, retiredPort
             );
         retiredController.onInactiveHover(
             1200, 500, Collections.<RectD>emptyList()
@@ -1206,11 +1189,11 @@ public final class NativeReaderV2CoreTests {
         FakePort timeoutPort = new FakePort();
         NativeReaderController timeoutController =
             new NativeReaderController(
-                timeoutSession, timeoutPort, 16, 768, 1000
-            );
+                timeoutSession, timeoutPort
+        );
         NativeReaderController.DownDecision down = timeoutController.onDown(
-            0, 1200, 500, 0.5, 0,
-            GestureRouter.Tool.STYLUS, Collections.<RectD>emptyList()
+            0, 1200, 500, 0.0, 0,
+            GestureRouter.Tool.FINGER, Collections.<RectD>emptyList()
         );
         timeoutController.onMotion(
             down.gestureTokenId, 0, GestureBuffer.Action.UP,
@@ -1224,7 +1207,7 @@ public final class NativeReaderV2CoreTests {
             authority(0, 42, 2),
             spread(0, 42, 2, true)
         );
-        equal("replayPen", timeoutPort.calls.get(
+        equal("replayFinger", timeoutPort.calls.get(
             timeoutPort.calls.size() - 1
         ), "replay dispatched before timeout fixture");
         timeoutController.onActivationTimeout(timeoutToken);
@@ -1239,7 +1222,7 @@ public final class NativeReaderV2CoreTests {
         SpreadSession session = initializedSession(1, 43, 1);
         FakePort port = new FakePort();
         NativeReaderController controller = new NativeReaderController(
-            session, port, 16, 768, 1000
+            session, port
         );
         AtomicInteger rejected = new AtomicInteger();
         Thread wrongThread = new Thread(() -> {
@@ -1267,7 +1250,7 @@ public final class NativeReaderV2CoreTests {
         NativeReaderFirmwarePort hoverPort =
             firmwarePort(hoverBridge);
         NativeReaderController hoverController = new NativeReaderController(
-            hoverSession, hoverPort, 16, 768, 1000
+            hoverSession, hoverPort
         );
         hoverPort.attachController(hoverController);
         check(hoverController.onInactiveHover(
@@ -1291,7 +1274,7 @@ public final class NativeReaderV2CoreTests {
         NativeReaderFirmwarePort penPort =
             firmwarePort(penBridge);
         NativeReaderController penController = new NativeReaderController(
-            penSession, penPort, 16, 768, 1000
+            penSession, penPort
         );
         penPort.attachController(penController);
         NativeReaderController.DownDecision down = penController.onDown(
@@ -1311,11 +1294,11 @@ public final class NativeReaderV2CoreTests {
         penBridge.ready(0, 2);
         penPort.onFirmwarePageReady(penBridge.observe());
         equal(NativeReaderFirmwarePort.Phase.IDLE, penPort.phase(),
-            "pen replay completes transaction");
-        check(penBridge.calls.contains("replayPen:2"),
-            "complete source-coordinate pen stream replayed");
+            "dropped direct pen contact completes transaction");
+        check(!penBridge.calls.contains("replayFinger"),
+            "direct pen contact is not synthetically replayed");
         equal("release", penBridge.calls.get(penBridge.calls.size() - 1),
-            "pen releases after replay acknowledgement");
+            "pen releases after physical contact drains");
         equal(0, penSession.snapshot().activePageIndex,
             "pen target remains authoritative");
     }
@@ -1327,7 +1310,7 @@ public final class NativeReaderV2CoreTests {
         delayedBridge.deferSave = true;
         NativeReaderFirmwarePort delayedPort = firmwarePort(delayedBridge);
         NativeReaderController delayedController = new NativeReaderController(
-            delayedSession, delayedPort, 16, 768, 1000
+            delayedSession, delayedPort
         );
         delayedPort.attachController(delayedController);
         check(delayedController.onInactiveHover(
@@ -1350,7 +1333,7 @@ public final class NativeReaderV2CoreTests {
         threadedBridge.deferSave = true;
         NativeReaderFirmwarePort threadedPort = firmwarePort(threadedBridge);
         NativeReaderController threadedController = new NativeReaderController(
-            threadedSession, threadedPort, 16, 768, 1000
+            threadedSession, threadedPort
         );
         threadedPort.attachController(threadedController);
         threadedController.onInactiveHover(
@@ -1372,7 +1355,7 @@ public final class NativeReaderV2CoreTests {
         staleBridge.deferSave = true;
         NativeReaderFirmwarePort stalePort = firmwarePort(staleBridge);
         NativeReaderController staleController = new NativeReaderController(
-            staleSession, stalePort, 16, 768, 1000
+            staleSession, stalePort
         );
         stalePort.attachController(staleController);
         staleController.onInactiveHover(
@@ -1395,7 +1378,7 @@ public final class NativeReaderV2CoreTests {
         NativeReaderFirmwarePort savePort =
             firmwarePort(saveBridge);
         NativeReaderController saveController = new NativeReaderController(
-            saveSession, savePort, 16, 768, 1000
+            saveSession, savePort
         );
         savePort.attachController(saveController);
         saveController.onInactiveHover(
@@ -1412,7 +1395,7 @@ public final class NativeReaderV2CoreTests {
         NativeReaderFirmwarePort disablePort =
             firmwarePort(disableBridge);
         NativeReaderController disableController = new NativeReaderController(
-            disableSession, disablePort, 16, 768, 1000
+            disableSession, disablePort
         );
         disablePort.attachController(disableController);
         disableController.onInactiveHover(
@@ -1427,7 +1410,7 @@ public final class NativeReaderV2CoreTests {
         FirmwareBridge bridge = new FirmwareBridge(1, 52, 1);
         NativeReaderFirmwarePort port = firmwarePort(bridge);
         NativeReaderController controller = new NativeReaderController(
-            session, port, 16, 768, 1000
+            session, port
         );
         port.attachController(controller);
         controller.onInactiveHover(
@@ -1451,12 +1434,12 @@ public final class NativeReaderV2CoreTests {
         NativeReaderFirmwarePort replayPort =
             firmwarePort(replayBridge);
         NativeReaderController replayController = new NativeReaderController(
-            replaySession, replayPort, 16, 768, 1000
+            replaySession, replayPort
         );
         replayPort.attachController(replayController);
         NativeReaderController.DownDecision down = replayController.onDown(
-            1, 1200, 500, 0.5, 0,
-            GestureRouter.Tool.STYLUS,
+            1, 1200, 500, 0.0, 0,
+            GestureRouter.Tool.FINGER,
             Collections.<RectD>emptyList()
         );
         replayController.onMotion(
@@ -1481,7 +1464,7 @@ public final class NativeReaderV2CoreTests {
         FirmwareBridge bridge = new FirmwareBridge(1, 54, 1);
         NativeReaderFirmwarePort port = firmwarePort(bridge);
         NativeReaderController controller = new NativeReaderController(
-            session, port, 16, 768, 1000
+            session, port
         );
         port.attachController(controller);
         expectThrows(() -> port.attachController(controller),
@@ -1834,16 +1817,6 @@ public final class NativeReaderV2CoreTests {
         }
 
         @Override
-        public void replayNativePen(
-            List<GestureBuffer.Sample> sourceSamples
-        ) {
-            calls.add("replayPen:" + sourceSamples.size());
-            if (replaceComponentsAfterReplay) {
-                componentSalt++;
-            }
-        }
-
-        @Override
         public void replayNativeFingerHit(PointD sourcePoint) {
             calls.add("replayFinger");
             if (replaceComponentsAfterReplay) {
@@ -1876,8 +1849,6 @@ public final class NativeReaderV2CoreTests {
         implements NativeReaderController.Port {
         final List<String> calls = new ArrayList<>();
         ActivationMachine.Token lastToken;
-        List<GestureBuffer.Sample> replayedPen =
-            Collections.emptyList();
         PointD replayedFinger;
 
         @Override
@@ -1900,15 +1871,6 @@ public final class NativeReaderV2CoreTests {
         @Override
         public void requestTargetLoad(ActivationMachine.Token token) {
             calls.add("load");
-        }
-
-        @Override
-        public void replayPen(
-            ActivationMachine.Token token,
-            List<GestureBuffer.Sample> sourceSamples
-        ) {
-            replayedPen = sourceSamples;
-            calls.add("replayPen");
         }
 
         @Override
@@ -1979,15 +1941,6 @@ public final class NativeReaderV2CoreTests {
         }
 
         @Override
-        public void replayPen(
-            ActivationMachine.Token token,
-            List<GestureBuffer.Sample> sourceSamples
-        ) {
-            super.replayPen(token, sourceSamples);
-            controller.onReplayComplete(token, true);
-        }
-
-        @Override
         public void replayFingerHit(
             ActivationMachine.Token token,
             PointD sourcePoint
@@ -2029,11 +1982,11 @@ public final class NativeReaderV2CoreTests {
         }
 
         @Override
-        public void replayPen(
+        public void replayFingerHit(
             ActivationMachine.Token token,
-            List<GestureBuffer.Sample> sourceSamples
+            PointD sourcePoint
         ) {
-            super.replayPen(token, sourceSamples);
+            super.replayFingerHit(token, sourcePoint);
             throwIf(FailurePoint.REPLAY);
         }
 

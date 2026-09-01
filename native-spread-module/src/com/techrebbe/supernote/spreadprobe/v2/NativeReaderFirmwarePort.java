@@ -1,6 +1,5 @@
 package com.techrebbe.supernote.spreadprobe.v2;
 
-import java.util.List;
 import java.util.Objects;
 
 /**
@@ -47,7 +46,6 @@ public final class NativeReaderFirmwarePort
         void postToOwnerThread(Runnable callback);
         void disableNativeWriter();
         void loadNativePage(int zeroBasedPageIndex);
-        void replayNativePen(List<GestureBuffer.Sample> sourceSamples);
         void replayNativeFingerHit(PointD sourcePoint);
         void navigateNativeSpread(
             SpreadSnapshot sourceSnapshot,
@@ -278,21 +276,6 @@ public final class NativeReaderFirmwarePort
         requireCurrent(requested, Phase.SOURCE_SAVED);
         phase = Phase.TARGET_LOADING;
         bridge.loadNativePage(requested.targetPage);
-    }
-
-    @Override
-    public void replayPen(
-        ActivationMachine.Token requested,
-        List<GestureBuffer.Sample> sourceSamples
-    ) {
-        assertOwnerThread();
-        requireCurrent(requested, Phase.TARGET_READY);
-        if (sourceSamples == null || sourceSamples.size() < 2) {
-            throw new IllegalArgumentException("pen replay is incomplete");
-        }
-        phase = Phase.REPLAYING;
-        bridge.replayNativePen(sourceSamples);
-        finishReplay(requested);
     }
 
     @Override

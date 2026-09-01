@@ -1,6 +1,5 @@
 package com.techrebbe.supernote.spreadprobe.v2;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -29,10 +28,6 @@ public final class NativeReaderController {
         void requestSourceSave(ActivationMachine.Token token);
         void disableWriter(ActivationMachine.Token token);
         void requestTargetLoad(ActivationMachine.Token token);
-        void replayPen(
-            ActivationMachine.Token token,
-            List<GestureBuffer.Sample> sourceSamples
-        );
         void replayFingerHit(
             ActivationMachine.Token token,
             PointD sourcePoint
@@ -47,7 +42,7 @@ public final class NativeReaderController {
         void disableFeature(ActivationMachine.Token token, String reason);
     }
 
-    private enum ReplayKind { NONE, PEN, FINGER }
+    private enum ReplayKind { NONE, DROP_PEN, FINGER }
 
     private static final class Context {
         final SpreadSnapshot sourceSnapshot;
@@ -57,9 +52,7 @@ public final class NativeReaderController {
         final double downX;
         final double downY;
         ActivationMachine.Token activation;
-        GestureBuffer penBuffer;
         PointD fingerSourcePoint;
-        PointD lastPenSourcePoint;
         NativeAuthority targetAuthority;
         boolean fingerMoved;
         boolean inputComplete;
@@ -93,28 +86,16 @@ public final class NativeReaderController {
     private final Object lock = new Object();
     private final SpreadSession session;
     private final Port port;
-    private final int maxPenSamples;
-    private final int maxPenBytes;
-    private final long maxPenDurationMs;
     private final long ownerThreadId;
     private Context context;
     private volatile boolean retired;
 
     public NativeReaderController(
         SpreadSession session,
-        Port port,
-        int maxPenSamples,
-        int maxPenBytes,
-        long maxPenDurationMs
+        Port port
     ) {
         this.session = Objects.requireNonNull(session, "session");
         this.port = Objects.requireNonNull(port, "port");
-        if (maxPenSamples < 2 || maxPenBytes < 96 || maxPenDurationMs <= 0) {
-            throw new IllegalArgumentException("invalid pen replay bounds");
-        }
-        this.maxPenSamples = maxPenSamples;
-        this.maxPenBytes = maxPenBytes;
-        this.maxPenDurationMs = maxPenDurationMs;
         this.ownerThreadId = Thread.currentThread().getId();
     }
 
@@ -204,39 +185,17 @@ public final class NativeReaderController {
             snapshot,
             target,
             gesture,
-            ReplayKind.PEN,
+            ReplayKind.DROP_PEN,
             screenX,
             screenY
         );
         pending.activation = session.activation().begin(
             snapshot,
             target.sourcePageIndex,
-            true
+            ActivationMachine.CompletionMode.DRAIN_CONTACT
         );
         if (pending.activation == null) {
             session.gestures().finish(gesture.id, pointerId);
-            return decision(InputResult.BLOCKED, gesture);
-        }
-        pending.penBuffer = new GestureBuffer(
-            gesture.id,
-            maxPenSamples,
-            maxPenBytes,
-            maxPenDurationMs
-        );
-        PointD sourcePoint = target.mapToSource(screenX, screenY);
-        pending.lastPenSourcePoint = sourcePoint;
-        if (!pending.penBuffer.append(
-            gesture.id,
-            new GestureBuffer.Sample(
-                eventTimeMs,
-                GestureBuffer.Action.DOWN,
-                sourcePoint.x,
-                sourcePoint.y,
-                pressure
-            )
-        )) {
-            session.gestures().finish(gesture.id, pointerId);
-            requestRollback(pending, "initial_pen_buffer_failed");
             return decision(InputResult.BLOCKED, gesture);
         }
         boolean accepted;
@@ -352,28 +311,6 @@ public final class NativeReaderController {
             return InputResult.CONSUMED;
         }
 
-        PointD sourcePoint = current.lastPenSourcePoint;
-        if (current.targetSlot.containsContent(screenX, screenY)) {
-            sourcePoint = current.targetSlot.mapToSource(screenX, screenY);
-            current.lastPenSourcePoint = sourcePoint;
-        } else if (!isTerminal(action)) {
-            return InputResult.CONSUMED;
-        }
-        GestureBuffer.Action bufferedAction = action;
-        if (!current.penBuffer.append(
-            gestureTokenId,
-            new GestureBuffer.Sample(
-                eventTimeMs,
-                bufferedAction,
-                sourcePoint.x,
-                sourcePoint.y,
-                pressure
-            )
-        )) {
-            session.gestures().finish(gestureTokenId, pointerId);
-            requestRollback(current, "pen_buffer_bound_exceeded");
-            return InputResult.BLOCKED;
-        }
         if (isTerminal(action)) {
             session.gestures().finish(gestureTokenId, pointerId);
             synchronized (lock) {
@@ -381,11 +318,7 @@ public final class NativeReaderController {
                     current.inputComplete = true;
                 }
             }
-            if (action == GestureBuffer.Action.CANCEL) {
-                requestRollback(current, "pen_contact_cancelled");
-            } else {
-                requestReplayIfReady(current);
-            }
+            completeDroppedContactIfReady(current);
         }
         return InputResult.CONSUMED;
     }
@@ -439,7 +372,7 @@ public final class NativeReaderController {
         pending.activation = session.activation().begin(
             snapshot,
             slot.sourcePageIndex,
-            false
+            ActivationMachine.CompletionMode.IMMEDIATE
         );
         if (pending.activation == null) {
             clearContext(pending);
@@ -552,6 +485,8 @@ public final class NativeReaderController {
         }
         if (current.replayKind == ReplayKind.NONE) {
             finishSuccessfulActivation(current);
+        } else if (current.replayKind == ReplayKind.DROP_PEN) {
+            completeDroppedContactIfReady(current);
         } else {
             requestReplayIfReady(current);
         }
@@ -639,7 +574,9 @@ public final class NativeReaderController {
         ActivationMachine.Token token = session.activation().begin(
             pending.sourceSnapshot,
             pending.targetSlot.sourcePageIndex,
-            pending.replayKind != ReplayKind.NONE
+            pending.replayKind == ReplayKind.FINGER
+                ? ActivationMachine.CompletionMode.REPLAY_INPUT
+                : ActivationMachine.CompletionMode.IMMEDIATE
         );
         if (token == null) {
             clearContext(pending);
@@ -661,7 +598,6 @@ public final class NativeReaderController {
     }
 
     private void requestReplayIfReady(Context expected) {
-        GestureBuffer penBuffer;
         ReplayKind initialKind;
         synchronized (lock) {
             if (retired || context != expected || expected.replayRequested
@@ -669,18 +605,9 @@ public final class NativeReaderController {
                 return;
             }
             initialKind = expected.replayKind;
-            penBuffer = expected.penBuffer;
         }
 
-        List<GestureBuffer.Sample> penSamples =
-            Collections.<GestureBuffer.Sample>emptyList();
-        if (initialKind == ReplayKind.PEN) {
-            if (penBuffer == null || !penBuffer.isReplayable()) {
-                requestRollback(expected, "pen_buffer_not_replayable");
-                return;
-            }
-            penSamples = penBuffer.immutableSamples();
-        } else if (initialKind != ReplayKind.FINGER) {
+        if (initialKind != ReplayKind.FINGER) {
             return;
         }
 
@@ -690,7 +617,7 @@ public final class NativeReaderController {
             if (retired || context != expected || expected.replayRequested
                 || !expected.targetPublished || !expected.inputComplete
                 || expected.replayKind != initialKind
-                || expected.penBuffer != penBuffer) {
+            ) {
                 return;
             }
             expected.replayRequested = true;
@@ -698,14 +625,29 @@ public final class NativeReaderController {
             fingerPoint = expected.fingerSourcePoint;
         }
         try {
-            if (initialKind == ReplayKind.PEN) {
-                port.replayPen(token, penSamples);
-            } else {
-                port.replayFingerHit(token, fingerPoint);
-            }
+            port.replayFingerHit(token, fingerPoint);
         } catch (Throwable throwable) {
             hardDisable(token, "native_replay_request_threw");
         }
+    }
+
+    private void completeDroppedContactIfReady(Context expected) {
+        ActivationMachine.Token token;
+        NativeAuthority authority;
+        synchronized (lock) {
+            if (retired || context != expected || !expected.inputComplete
+                || !expected.targetPublished
+                || expected.replayKind != ReplayKind.DROP_PEN) {
+                return;
+            }
+            token = expected.activation;
+            authority = expected.targetAuthority;
+        }
+        if (!session.activation().contactDrained(token, authority)) {
+            hardDisable(token, "dropped_pen_contact_drain_failed");
+            return;
+        }
+        finishSuccessfulActivation(expected);
     }
 
     private void requestRollback(Context expected, String reason) {

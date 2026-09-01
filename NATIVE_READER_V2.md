@@ -79,12 +79,19 @@ through `ACTION_UP` or `ACTION_CANCEL`:
 5. A finger tap on the inactive page activates it and may replay the original
    native hit after activation (for example an internal link).
 6. A pen contact reaching the inactive page before activation completes is
-   buffered as immutable `MotionEvent` samples. A temporary low-latency
-   preview may be drawn, but no native persistence occurs until ownership is
-   verified. The complete gesture is then replayed to the now-active native
-   page through its ordinary tool path.
-7. If activation cannot be proven, the buffered gesture and preview are
-   discarded visibly and no page state is mutated.
+   consumed through its matching `UP` or `CANCEL` while the writer transfer
+   completes. That one contact is deliberately not persisted. The now-active
+   page accepts the next native pen contact normally. The implementation must
+   never fabricate, redirect, or inject pen samples.
+7. If activation cannot be proven, the contact remains discarded and the
+   exact source writer is restored before input is released.
+
+This direct-contact loss is an explicit safety tradeoff, not an intended final
+gesture experience. In ordinary use Supernote hover should preactivate the
+page before pen-down, preserving the first written stroke. The inspected
+firmware exposes no supported Java/Binder API for replaying raw EMR samples.
+Injecting into DrawPath's undocumented C++ `PointMess` queue would couple the
+module to an unverified native ABI and could corrupt ink, so it is prohibited.
 
 Cross-divider motion retains the page chosen at gesture start and is clipped
 to that page. It cannot activate the neighboring page or a toolbar control.
@@ -94,7 +101,8 @@ to that page. It cannot activate the neighboring page or a toolbar control.
 Activation is one explicit state machine:
 
 `IDLE -> SOURCE_SAVING -> TARGET_LOADING -> TARGET_VERIFYING ->`
-`TARGET_PUBLISHING -> REPLAYING -> ACTIVE`
+`TARGET_PUBLISHING -> ACTIVE`, `DRAINING_CONTACT -> ACTIVE`, or
+`REPLAYING -> ACTIVE`
 
 Failure moves to `ROLLING_BACK -> ROLLBACK_PUBLISHING`, then either returns
 to the exact source owner or enters `DISABLED` with native writing blocked.
@@ -110,7 +118,8 @@ The transaction:
    geometry, `.mark` page, and layout generation;
 6. recomposes both source-page surfaces;
 7. publishes the target affine and writable region atomically;
-8. optionally replays one buffered gesture or native link hit; and
+8. drains one already-started pen contact or replays one verified finger hit;
+   and
 9. releases navigation/input only after the native result settles.
 
 ## Native features
@@ -159,7 +168,9 @@ The first full candidate must pass, on both physical landscape rotations:
 
 - portrait native page fidelity and RTL turns;
 - cover parity and RTL/LTR landscape spreads;
-- active and initially inactive page pen strokes;
+- active-page pen strokes and hover-preactivated inactive-page pen strokes;
+- direct inactive-page pen-down containment (first contact dropped safely,
+  subsequent contact native);
 - pen hover, pen tap, and finger-tap activation;
 - pen selection of every toolbar tool;
 - both erasers, lasso move/resize/dismiss, Undo/Redo;

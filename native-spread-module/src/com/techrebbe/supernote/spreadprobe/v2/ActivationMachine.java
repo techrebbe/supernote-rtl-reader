@@ -11,11 +11,18 @@ public final class ActivationMachine {
         TARGET_LOADING,
         TARGET_VERIFYING,
         TARGET_PUBLISHING,
+        DRAINING_CONTACT,
         REPLAYING,
         ACTIVE,
         ROLLING_BACK,
         ROLLBACK_PUBLISHING,
         DISABLED
+    }
+
+    public enum CompletionMode {
+        IMMEDIATE,
+        DRAIN_CONTACT,
+        REPLAY_INPUT
     }
 
     public static final class Token {
@@ -25,13 +32,13 @@ public final class ActivationMachine {
         public final long layoutGeneration;
         public final int sourcePage;
         public final int targetPage;
-        public final boolean bufferedGesture;
+        public final CompletionMode completionMode;
 
         private Token(
             long id,
             SpreadSnapshot snapshot,
             int targetPage,
-            boolean bufferedGesture
+            CompletionMode completionMode
         ) {
             this.id = id;
             this.documentId = snapshot.documentId;
@@ -39,7 +46,10 @@ public final class ActivationMachine {
             this.layoutGeneration = snapshot.layoutGeneration;
             this.sourcePage = snapshot.activePageIndex;
             this.targetPage = targetPage;
-            this.bufferedGesture = bufferedGesture;
+            this.completionMode = Objects.requireNonNull(
+                completionMode,
+                "completionMode"
+            );
         }
     }
 
@@ -104,7 +114,7 @@ public final class ActivationMachine {
     public synchronized Token begin(
         SpreadSnapshot snapshot,
         int targetPage,
-        boolean bufferedGesture
+        CompletionMode completionMode
     ) {
         Objects.requireNonNull(snapshot, "snapshot");
         if (current != null || state == State.DISABLED
@@ -122,7 +132,7 @@ public final class ActivationMachine {
             ids.getAndIncrement(),
             snapshot,
             targetPage,
-            bufferedGesture
+            completionMode
         );
         state = State.SOURCE_SAVING;
         writerEnabled = false;
@@ -176,14 +186,32 @@ public final class ActivationMachine {
             return false;
         }
         layoutGeneration = snapshot.layoutGeneration;
-        if (token.bufferedGesture) {
+        if (token.completionMode == CompletionMode.REPLAY_INPUT) {
             state = State.REPLAYING;
+        } else if (token.completionMode == CompletionMode.DRAIN_CONTACT) {
+            state = State.DRAINING_CONTACT;
         } else {
             state = State.ACTIVE;
             writerEnabled = true;
             current = null;
             verifiedAuthority = null;
         }
+        return true;
+    }
+
+    public synchronized boolean contactDrained(
+        Token token,
+        NativeAuthority authority
+    ) {
+        if (!owns(token) || state != State.DRAINING_CONTACT
+            || authority == null || verifiedAuthority == null
+            || !verifiedAuthority.equals(authority)) {
+            return false;
+        }
+        state = State.ACTIVE;
+        writerEnabled = true;
+        current = null;
+        verifiedAuthority = null;
         return true;
     }
 

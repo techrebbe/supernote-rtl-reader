@@ -30,10 +30,11 @@ below passes on the exact source head used to build it.
   have deterministic transitions.
 - No filesystem operation, hashing, JSON parsing, reflection discovery, bitmap
   composition, or blocking lock is allowed on the low-latency pen callback.
-- Buffered pen data is bounded by sample count, byte count, and time. Overflow
-  fails visibly without native mutation.
+- Direct inactive-page pen-down is gesture-scoped and drain-only. It must not
+  be replayed, redirected, previewed as committed ink, or sent to DrawPath's
+  undocumented native sample queue.
 - Activity destruction and document replacement retire every callback,
-  buffered gesture, bitmap, writer claim, and native component identity.
+  in-flight contact, bitmap, writer claim, and native component identity.
 - Save acknowledgement must precede source-owner release. Target load and
   component verification must precede writer publication.
 
@@ -70,9 +71,9 @@ below passes on the exact source head used to build it.
   deterministic failure.
 - Race tests for stale load completion, save completion, hover/contact overlap,
   rapid side changes, rapid turns, rotation, activity replacement, and close.
-- Gesture corpus replay for finger, hover, pen, eraser, lasso, text selection,
-  recognized line, toolbar contacts, cross-divider motion, cancellation, and
-  malformed/missing terminal events.
+- Gesture corpus coverage for finger replay, hover activation, direct pen and
+  eraser drain, lasso, text selection, recognized line, toolbar contacts,
+  cross-divider motion, cancellation, and malformed/missing terminal events.
 - Bitmap/cache tests for stale page, recycled bitmap, partial annotation layer,
   document replacement, and generation mismatch.
 - Package tests for exact version, signer, LSPosed scope, native-library ABI,
@@ -96,7 +97,9 @@ below passes on the exact source head used to build it.
 - Capture exact version, signer, firmware, logs, screenshots, `.mark` identity,
   and before/after page-element evidence.
 - Test every native tool on each physical side and both landscape rotations.
-- Exercise initial inactive-page input with finger, hover, and direct pen down.
+- Exercise initial inactive-page input with finger, hover, and direct pen down;
+  prove hover preserves the first native stroke and direct pen-down drops only
+  that contact before the next native stroke succeeds.
 - Test rapid navigation/activation and rotation during every transaction phase.
 - Reopen in ordinary portrait and verify native position, size, editability,
   Undo/Redo, and InkBridge export.

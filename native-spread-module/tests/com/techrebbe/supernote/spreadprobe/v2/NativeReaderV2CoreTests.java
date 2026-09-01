@@ -14,7 +14,9 @@ public final class NativeReaderV2CoreTests {
     public static void main(String[] args) throws Exception {
         testAffineRoundTrips();
         testNativeProjectionGeometry();
+        testNativeReaderV2LayoutFactory();
         testPairingMatrix();
+        testV2ConfigAdmission();
         testSnapshotAuthority();
         testGestureRouting();
         testGestureBuffer();
@@ -38,6 +40,75 @@ public final class NativeReaderV2CoreTests {
         testFirmwarePortAuthorityAndThreadConfinement();
         testFirmwareSymbolContractDigest();
         System.out.println("NativeReaderV2CoreTests PASS assertions=" + assertions);
+    }
+
+    private static void testV2ConfigAdmission() {
+        java.util.Properties properties = new java.util.Properties();
+        check(NativeReaderV2Config.from(properties) == null,
+            "ordinary marker cannot opt into v2");
+        properties.setProperty("enabled", "true");
+        properties.setProperty("direction", "rtl");
+        check(NativeReaderV2Config.from(properties) == null,
+            "legacy spread marker cannot opt into v2");
+
+        properties.setProperty(
+            NativeReaderV2Config.ENGINE_KEY,
+            NativeReaderV2Config.ENGINE_VALUE
+        );
+        NativeReaderV2Config config = NativeReaderV2Config.from(properties);
+        check(config.enabled, "explicit v2 marker enables v2");
+        equal(SpreadPairing.Direction.RTL, config.direction,
+            "v2 direction");
+        check(!config.coverSeparate, "cover separate defaults off");
+        check(!config.showDivider, "divider defaults off");
+        check(!config.showHeader, "header defaults off");
+        equal(NativeReaderV2Config.Sizing.FIT, config.sizing,
+            "v2 sizing defaults to fit");
+
+        properties.setProperty("enabled", "false");
+        properties.setProperty("direction", "ltr");
+        properties.setProperty("coverSeparate", "true");
+        properties.setProperty("showDivider", "true");
+        properties.setProperty("showHeader", "true");
+        properties.setProperty("spreadSizing", "native_fill");
+        config = NativeReaderV2Config.from(properties);
+        check(!config.enabled, "explicit disabled marker remains disabled");
+        equal(SpreadPairing.Direction.LTR, config.direction,
+            "LTR parses exactly");
+        check(config.coverSeparate, "cover parity parses exactly");
+        check(config.showDivider, "divider parses exactly");
+        check(config.showHeader, "header parses exactly");
+        equal(NativeReaderV2Config.Sizing.NATIVE_FILL, config.sizing,
+            "native fill parses exactly");
+
+        for (String key : new String[] {
+            "enabled", "coverSeparate", "showDivider", "showHeader"
+        }) {
+            java.util.Properties invalid = new java.util.Properties();
+            invalid.setProperty(
+                NativeReaderV2Config.ENGINE_KEY,
+                NativeReaderV2Config.ENGINE_VALUE
+            );
+            invalid.setProperty(key, "TRUE");
+            expectThrows(() -> NativeReaderV2Config.from(invalid),
+                "noncanonical boolean rejected for " + key);
+        }
+        java.util.Properties invalidDirection = new java.util.Properties();
+        invalidDirection.setProperty(
+            NativeReaderV2Config.ENGINE_KEY,
+            NativeReaderV2Config.ENGINE_VALUE
+        );
+        invalidDirection.setProperty("direction", "RTL");
+        expectThrows(() -> NativeReaderV2Config.from(invalidDirection),
+            "noncanonical direction rejected");
+        java.util.Properties invalidSizing = new java.util.Properties();
+        invalidSizing.setProperty(
+            NativeReaderV2Config.ENGINE_KEY,
+            NativeReaderV2Config.ENGINE_VALUE
+        );
+        invalidSizing.setProperty("spreadSizing", "fill");
+        expectThrows(() -> NativeReaderV2Config.from(invalidSizing),
+            "unknown sizing rejected");
     }
 
     private static void testAffineRoundTrips() {
@@ -83,8 +154,8 @@ public final class NativeReaderV2CoreTests {
             PageSlot.Side.FULL,
             new RectD(0, 0, 100, 100),
             new RectD(0, 0, 100, 100),
-            new Affine2D(1, 0, 0, 1, 1, 0)
-        ), "escaping page transform");
+            new Affine2D(1, 0, 0, 1, 101, 0)
+        ), "disjoint page transform");
         PageSlot diamond = new PageSlot(
             0,
             PageSlot.Side.FULL,
@@ -143,6 +214,28 @@ public final class NativeReaderV2CoreTests {
             "narrow page preserves aspect");
         near(936 + (936 - 280.8) / 2.0, narrowBounds.left, 1.0e-9,
             "narrow page centered");
+
+        PageSlot filled = PageProjectionFactory.landscapeSlot(
+            7,
+            PageSlot.Side.RIGHT,
+            new RectD(0, 0, 1404, 1872),
+            new RectD(0, 0, 1872, 2496),
+            new Affine2D(4.0 / 3.0, 0, 0, 4.0 / 3.0, 0, 0),
+            new RectD(936, 0, 1872, 1404),
+            PageProjectionFactory.Sizing.FILL
+        );
+        near(877.5, filled.contentBounds.left, 1.0e-9,
+            "fill is centered across physical slot");
+        near(1930.5, filled.contentBounds.right, 1.0e-9,
+            "fill extends equally beyond physical slot");
+        near(0.0, filled.contentBounds.top, 1.0e-9,
+            "fill uses full slot height");
+        near(1404.0, filled.contentBounds.bottom, 1.0e-9,
+            "fill uses full slot height bottom");
+        check(filled.containsContent(936, 702),
+            "fill clipped left edge remains hittable");
+        check(!filled.containsContent(935, 702),
+            "fill cannot claim neighboring slot");
 
         expectThrows(() -> PageProjectionFactory.landscapeSlot(
             0,
@@ -223,6 +316,80 @@ public final class NativeReaderV2CoreTests {
             near(sourceX, back.x, 1.0e-7, "random projection inverse x");
             near(sourceY, back.y, 1.0e-7, "random projection inverse y");
         }
+    }
+
+    private static void testNativeReaderV2LayoutFactory() {
+        final RectD[] pages = new RectD[] {
+            new RectD(0, 0, 1404, 1872),
+            new RectD(10, 20, 1010, 520),
+            new RectD(-50, 40, 350, 2040),
+            new RectD(0, 0, 2000, 2000),
+            new RectD(0, 0, 612, 792),
+        };
+        NativeReaderV2LayoutFactory.PageGeometrySource geometry =
+            new NativeReaderV2LayoutFactory.PageGeometrySource() {
+                @Override
+                public RectD sourceBox(int page) {
+                    return pages[page];
+                }
+            };
+        java.util.Properties properties = new java.util.Properties();
+        properties.setProperty(
+            NativeReaderV2Config.ENGINE_KEY,
+            NativeReaderV2Config.ENGINE_VALUE
+        );
+        properties.setProperty("enabled", "true");
+        properties.setProperty("coverSeparate", "true");
+        NativeReaderV2Config config = NativeReaderV2Config.from(properties);
+        NativeAuthority writer = authority(0, 1, 5);
+        SpreadSnapshot cover = NativeReaderV2LayoutFactory.landscape(
+            "doc", 1, 5, pages.length, 0,
+            new RectD(0, 0, 1872, 1404), 0,
+            config, geometry, writer, true
+        );
+        check(cover.leftOrFull.isBlank(), "cover left is virtual blank");
+        equal(0, cover.right.sourcePageIndex, "cover remains on right");
+        equal(0, cover.activePageIndex, "cover retains writer authority");
+
+        SpreadSnapshot mixed = NativeReaderV2LayoutFactory.landscape(
+            "doc", 1, 6, pages.length, 2,
+            new RectD(0, 0, 1872, 1404), 8,
+            config, geometry, authority(2, 1, 6), true
+        );
+        equal(1, mixed.right.sourcePageIndex, "RTL earlier page on right");
+        equal(2, mixed.leftOrFull.sourcePageIndex,
+            "RTL later page on left");
+        check(mixed.leftOrFull.contentBounds.height()
+                > mixed.leftOrFull.contentBounds.width(),
+            "narrow page retains its geometry");
+        check(!mixed.leftOrFull.screenBounds.overlaps(
+                mixed.right.screenBounds),
+            "divider keeps physical slots disjoint");
+
+        properties.setProperty("spreadSizing", "native_fill");
+        config = NativeReaderV2Config.from(properties);
+        SpreadSnapshot filled = NativeReaderV2LayoutFactory.landscape(
+            "doc", 1, 7, pages.length, 4,
+            new RectD(0, 0, 1872, 1404), 0,
+            config, geometry, authority(4, 1, 7), true
+        );
+        PageSlot active = filled.slotForPage(4);
+        check(active.contentBounds.width() >= active.screenBounds.width(),
+            "native fill covers active slot width");
+        check(active.contentBounds.height() >= active.screenBounds.height(),
+            "native fill covers active slot height");
+        check(active.containsContent(
+                active.screenBounds.left + 1,
+                active.screenBounds.top + 1
+            ), "native fill corner maps inside source");
+
+        properties.setProperty("enabled", "false");
+        NativeReaderV2Config disabled = NativeReaderV2Config.from(properties);
+        expectThrows(() -> NativeReaderV2LayoutFactory.landscape(
+            "doc", 1, 8, pages.length, 4,
+            new RectD(0, 0, 1872, 1404), 0,
+            disabled, geometry, authority(4, 1, 8), true
+        ), "disabled config cannot build spread authority");
     }
 
     private static void testPairingMatrix() {

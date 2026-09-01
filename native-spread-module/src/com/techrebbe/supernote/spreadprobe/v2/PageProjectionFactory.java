@@ -7,6 +7,8 @@ import java.util.Objects;
  * No tool is permitted to guess an independent fit or rotation.
  */
 public final class PageProjectionFactory {
+    public enum Sizing { FIT, FILL }
+
     private PageProjectionFactory() {}
 
     public static PageSlot portrait(
@@ -33,6 +35,26 @@ public final class PageProjectionFactory {
         Affine2D nativePageToCanvas,
         RectD physicalSlot
     ) {
+        return landscapeSlot(
+            sourcePageIndex,
+            side,
+            sourceBox,
+            nativeCanvas,
+            nativePageToCanvas,
+            physicalSlot,
+            Sizing.FIT
+        );
+    }
+
+    public static PageSlot landscapeSlot(
+        int sourcePageIndex,
+        PageSlot.Side side,
+        RectD sourceBox,
+        RectD nativeCanvas,
+        Affine2D nativePageToCanvas,
+        RectD physicalSlot,
+        Sizing sizing
+    ) {
         if (side != PageSlot.Side.LEFT && side != PageSlot.Side.RIGHT) {
             throw new IllegalArgumentException("landscape side must be physical");
         }
@@ -40,6 +62,7 @@ public final class PageProjectionFactory {
         Objects.requireNonNull(nativeCanvas, "nativeCanvas");
         Objects.requireNonNull(nativePageToCanvas, "nativePageToCanvas");
         Objects.requireNonNull(physicalSlot, "physicalSlot");
+        Objects.requireNonNull(sizing, "sizing");
 
         double slotTolerance = Math.max(
             0.5,
@@ -74,10 +97,11 @@ public final class PageProjectionFactory {
             );
         }
 
-        double scale = Math.min(
-            physicalSlot.width() / nativePageBounds.width(),
-            physicalSlot.height() / nativePageBounds.height()
-        );
+        double widthScale = physicalSlot.width() / nativePageBounds.width();
+        double heightScale = physicalSlot.height() / nativePageBounds.height();
+        double scale = sizing == Sizing.FILL
+            ? Math.max(widthScale, heightScale)
+            : Math.min(widthScale, heightScale);
         if (!Double.isFinite(scale) || scale <= 0.0) {
             throw new IllegalArgumentException("invalid landscape projection scale");
         }

@@ -59,7 +59,8 @@ public final class PageSlot {
     }
 
     public boolean containsContent(double x, double y) {
-        if (contentBounds == null || !contentBounds.contains(x, y)) {
+        if (contentBounds == null || !screenBounds.contains(x, y)
+            || !contentBounds.contains(x, y)) {
             return false;
         }
         PointD source = sourceToScreen.derivedInverse().map(x, y);
@@ -83,22 +84,10 @@ public final class PageSlot {
     }
 
     private void validateMappedCorners() {
-        double tolerance = Math.max(
-            0.5,
-            Math.max(screenBounds.width(), screenBounds.height()) * 1.0e-9
-        );
-        PointD[] corners = new PointD[] {
-            new PointD(contentBounds.left, contentBounds.top),
-            new PointD(contentBounds.right, contentBounds.top),
-            new PointD(contentBounds.left, contentBounds.bottom),
-            new PointD(contentBounds.right, contentBounds.bottom),
-        };
-        for (PointD corner : corners) {
-            if (!screenBounds.contains(corner, tolerance)) {
-                throw new IllegalArgumentException(
-                    "page transform escapes its physical slot"
-                );
-            }
+        if (!contentBounds.overlaps(screenBounds)) {
+            throw new IllegalArgumentException(
+                "page transform does not intersect its physical slot"
+            );
         }
     }
 }

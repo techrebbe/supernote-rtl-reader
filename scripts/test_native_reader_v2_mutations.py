@@ -30,6 +30,18 @@ MUTATIONS = (
         "blank-slot identity",
     ),
     (
+        "NativeReaderV2Config.java",
+        "if (!ENGINE_VALUE.equals(properties.getProperty(ENGINE_KEY))) {",
+        "if (false) {",
+        "explicit v2 marker admission",
+    ),
+    (
+        "NativeReaderV2Config.java",
+        "if (\"true\".equals(value)) return true;",
+        "if (\"true\".equalsIgnoreCase(value)) return true;",
+        "canonical config boolean",
+    ),
+    (
         "SpreadSnapshot.java",
         "if (writerAuthority == null || !writerAuthority.matches(",
         "if (writerAuthority == null || false && !writerAuthority.matches(",
@@ -64,6 +76,16 @@ MUTATIONS = (
         "return sourceBox.contains(source.x, source.y);",
         "return true;",
         "exact rotated-page content hit",
+    ),
+    (
+        "PageProjectionFactory.java",
+        "double scale = sizing == Sizing.FILL\n"
+        "            ? Math.max(widthScale, heightScale)\n"
+        "            : Math.min(widthScale, heightScale);",
+        "double scale = sizing == Sizing.FILL\n"
+        "            ? Math.min(widthScale, heightScale)\n"
+        "            : Math.min(widthScale, heightScale);",
+        "fill projection covers physical slot",
     ),
     (
         "SpreadSnapshot.java",

@@ -33,8 +33,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
       - name: Run full invariant suites
         run: |
+          python3 scripts/test_native_reader_v2_core.py .
+          python3 scripts/test_native_reader_v2_mutations.py .
           python3 scripts/check_native_invariants.py .
           python3 scripts/check_native_spread_invariants.py .
           python3 scripts/test_plugin_packaging_fail_closed.py

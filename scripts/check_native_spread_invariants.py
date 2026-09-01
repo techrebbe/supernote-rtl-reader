@@ -587,7 +587,7 @@ def check(repo_root: Path) -> None:
         ),
         (
             workflow_path,
-            "776d9068660553038fd2ae6f21fb8d2d9906369c59597fdb8765c038b9bb3ba7",
+            "4ad17c03d001d450c31db09426871afa16b27b1dfbb5ee15ec1167185e68d2e3",
             "Native Spread companion-build workflow",
         ),
         (
@@ -626,6 +626,8 @@ def check(repo_root: Path) -> None:
             "trace-helper-tests:",
             "invariant-suites:",
             "native-spread-build:",
+            "python3 scripts/test_native_reader_v2_core.py .",
+            "python3 scripts/test_native_reader_v2_mutations.py .",
             "python3 scripts/check_native_invariants.py .",
             "python3 scripts/check_native_spread_invariants.py .",
             "python3 scripts/test_plugin_packaging_fail_closed.py",
@@ -677,6 +679,12 @@ def check(repo_root: Path) -> None:
         "continue-on-error:" in invariant_job
         or disabled_job_pattern.search(invariant_job)
         or job_override_pattern.search(invariant_job)
+        or invariant_job.count(
+            "python3 scripts/test_native_reader_v2_core.py ."
+        ) != 1
+        or invariant_job.count(
+            "python3 scripts/test_native_reader_v2_mutations.py ."
+        ) != 1
         or invariant_job.count("python3 scripts/check_native_invariants.py .") != 1
         or invariant_job.count(
             "python3 scripts/check_native_spread_invariants.py ."

@@ -85,11 +85,12 @@ to that page. It cannot activate the neighboring page or a toolbar control.
 
 Activation is one explicit state machine:
 
-`IDLE -> SOURCE_SAVING -> TARGET_LOADING -> TARGET_VERIFYING -> REPLAYING -> ACTIVE`
+`IDLE -> SOURCE_SAVING -> TARGET_LOADING -> TARGET_VERIFYING ->`
+`TARGET_PUBLISHING -> REPLAYING -> ACTIVE`
 
-Failure moves to `ROLLING_BACK`, then either returns to the exact source owner
-or enters `DISABLED` with native writing blocked. A stale callback cannot
-advance another transaction.
+Failure moves to `ROLLING_BACK -> ROLLBACK_PUBLISHING`, then either returns
+to the exact source owner or enters `DISABLED` with native writing blocked.
+A stale callback cannot advance another transaction.
 
 The transaction:
 
@@ -160,4 +161,3 @@ The first full candidate must pass, on both physical landscape rotations:
 - repeated close/reopen and process recreation;
 - ordinary-document inertness; and
 - InkBridge export/move/erase/idempotent re-import on original page indices.
-

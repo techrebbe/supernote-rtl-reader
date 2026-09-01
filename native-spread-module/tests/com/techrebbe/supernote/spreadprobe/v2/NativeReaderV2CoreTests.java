@@ -33,8 +33,10 @@ public final class NativeReaderV2CoreTests {
         testControllerRetirementAndReplayTimeout();
         testControllerThreadConfinement();
         testFirmwarePortActivationAndReplay();
+        testFirmwarePortDeferredSaveCallbacks();
         testFirmwarePortRollbackAndFailClosed();
         testFirmwarePortAuthorityAndThreadConfinement();
+        testFirmwareSymbolContractDigest();
         System.out.println("NativeReaderV2CoreTests PASS assertions=" + assertions);
     }
 
@@ -1263,7 +1265,7 @@ public final class NativeReaderV2CoreTests {
         SpreadSession hoverSession = initializedSession(1, 50, 1);
         FirmwareBridge hoverBridge = new FirmwareBridge(1, 50, 1);
         NativeReaderFirmwarePort hoverPort =
-            new NativeReaderFirmwarePort(hoverBridge);
+            firmwarePort(hoverBridge);
         NativeReaderController hoverController = new NativeReaderController(
             hoverSession, hoverPort, 16, 768, 1000
         );
@@ -1287,7 +1289,7 @@ public final class NativeReaderV2CoreTests {
         SpreadSession penSession = initializedSession(1, 51, 1);
         FirmwareBridge penBridge = new FirmwareBridge(1, 51, 1);
         NativeReaderFirmwarePort penPort =
-            new NativeReaderFirmwarePort(penBridge);
+            firmwarePort(penBridge);
         NativeReaderController penController = new NativeReaderController(
             penSession, penPort, 16, 768, 1000
         );
@@ -1318,13 +1320,80 @@ public final class NativeReaderV2CoreTests {
             "pen target remains authoritative");
     }
 
+    private static void testFirmwarePortDeferredSaveCallbacks()
+        throws Exception {
+        SpreadSession delayedSession = initializedSession(1, 57, 1);
+        FirmwareBridge delayedBridge = new FirmwareBridge(1, 57, 1);
+        delayedBridge.deferSave = true;
+        NativeReaderFirmwarePort delayedPort = firmwarePort(delayedBridge);
+        NativeReaderController delayedController = new NativeReaderController(
+            delayedSession, delayedPort, 16, 768, 1000
+        );
+        delayedPort.attachController(delayedController);
+        check(delayedController.onInactiveHover(
+            1200, 500, Collections.<RectD>emptyList()
+        ), "deferred firmware save begins");
+        equal(NativeReaderFirmwarePort.Phase.FROZEN, delayedPort.phase(),
+            "pen-down path returns before native save completion");
+        equal(Arrays.asList("freeze", "save"), delayedBridge.calls,
+            "deferred save performs no writer or page mutation early");
+        delayedBridge.completeSave(true);
+        equal(NativeReaderFirmwarePort.Phase.TARGET_LOADING,
+            delayedPort.phase(), "owner save completion advances transfer");
+        int callsAfterFirstCompletion = delayedBridge.calls.size();
+        delayedBridge.repeatLastSaveCompletion(true);
+        equal(callsAfterFirstCompletion, delayedBridge.calls.size(),
+            "duplicate save completion is idempotent");
+
+        SpreadSession threadedSession = initializedSession(1, 58, 1);
+        FirmwareBridge threadedBridge = new FirmwareBridge(1, 58, 1);
+        threadedBridge.deferSave = true;
+        NativeReaderFirmwarePort threadedPort = firmwarePort(threadedBridge);
+        NativeReaderController threadedController = new NativeReaderController(
+            threadedSession, threadedPort, 16, 768, 1000
+        );
+        threadedPort.attachController(threadedController);
+        threadedController.onInactiveHover(
+            1200, 500, Collections.<RectD>emptyList()
+        );
+        Thread callbackThread = new Thread(
+            () -> threadedBridge.completeSave(true)
+        );
+        callbackThread.start();
+        callbackThread.join();
+        equal(NativeReaderFirmwarePort.Phase.FROZEN, threadedPort.phase(),
+            "background save completion cannot enter owner state directly");
+        threadedBridge.drainOwnerCallbacks();
+        equal(NativeReaderFirmwarePort.Phase.TARGET_LOADING,
+            threadedPort.phase(), "background completion is owner-marshalled");
+
+        SpreadSession staleSession = initializedSession(1, 59, 1);
+        FirmwareBridge staleBridge = new FirmwareBridge(1, 59, 1);
+        staleBridge.deferSave = true;
+        NativeReaderFirmwarePort stalePort = firmwarePort(staleBridge);
+        NativeReaderController staleController = new NativeReaderController(
+            staleSession, stalePort, 16, 768, 1000
+        );
+        stalePort.attachController(staleController);
+        staleController.onInactiveHover(
+            1200, 500, Collections.<RectD>emptyList()
+        );
+        staleBridge.completeSave(false);
+        equal(NativeReaderFirmwarePort.Phase.ROLLBACK_LOADING,
+            stalePort.phase(), "failed save begins rollback");
+        int callsBeforeLateCompletion = staleBridge.calls.size();
+        staleBridge.repeatLastSaveCompletion(true);
+        equal(callsBeforeLateCompletion, staleBridge.calls.size(),
+            "late save completion cannot restart target transfer");
+    }
+
     private static void testFirmwarePortRollbackAndFailClosed() {
         SpreadSession saveSession = initializedSession(1, 55, 1);
         FirmwareBridge saveBridge = new FirmwareBridge(1, 55, 1);
         saveBridge.markRevision = 5;
         saveBridge.saveRevisionDelta = -1;
         NativeReaderFirmwarePort savePort =
-            new NativeReaderFirmwarePort(saveBridge);
+            firmwarePort(saveBridge);
         NativeReaderController saveController = new NativeReaderController(
             saveSession, savePort, 16, 768, 1000
         );
@@ -1341,7 +1410,7 @@ public final class NativeReaderV2CoreTests {
         FirmwareBridge disableBridge = new FirmwareBridge(1, 56, 1);
         disableBridge.refuseDisable = true;
         NativeReaderFirmwarePort disablePort =
-            new NativeReaderFirmwarePort(disableBridge);
+            firmwarePort(disableBridge);
         NativeReaderController disableController = new NativeReaderController(
             disableSession, disablePort, 16, 768, 1000
         );
@@ -1356,7 +1425,7 @@ public final class NativeReaderV2CoreTests {
 
         SpreadSession session = initializedSession(1, 52, 1);
         FirmwareBridge bridge = new FirmwareBridge(1, 52, 1);
-        NativeReaderFirmwarePort port = new NativeReaderFirmwarePort(bridge);
+        NativeReaderFirmwarePort port = firmwarePort(bridge);
         NativeReaderController controller = new NativeReaderController(
             session, port, 16, 768, 1000
         );
@@ -1380,7 +1449,7 @@ public final class NativeReaderV2CoreTests {
         SpreadSession replaySession = initializedSession(1, 53, 1);
         FirmwareBridge replayBridge = new FirmwareBridge(1, 53, 1);
         NativeReaderFirmwarePort replayPort =
-            new NativeReaderFirmwarePort(replayBridge);
+            firmwarePort(replayBridge);
         NativeReaderController replayController = new NativeReaderController(
             replaySession, replayPort, 16, 768, 1000
         );
@@ -1410,7 +1479,7 @@ public final class NativeReaderV2CoreTests {
         throws Exception {
         SpreadSession session = initializedSession(1, 54, 1);
         FirmwareBridge bridge = new FirmwareBridge(1, 54, 1);
-        NativeReaderFirmwarePort port = new NativeReaderFirmwarePort(bridge);
+        NativeReaderFirmwarePort port = firmwarePort(bridge);
         NativeReaderController controller = new NativeReaderController(
             session, port, 16, 768, 1000
         );
@@ -1438,6 +1507,22 @@ public final class NativeReaderV2CoreTests {
             "authority rejection hard-disables incomplete adapter state");
         check(!bridge.calls.contains("freeze"),
             "authority rejection precedes native mutation");
+    }
+
+    private static void testFirmwareSymbolContractDigest() {
+        equal(
+            com.techrebbe.supernote.spreadprobe.v2.android
+                .NativeReaderFirmwareAdmission.EXPECTED_SYMBOL_DIGEST,
+            com.techrebbe.supernote.spreadprobe.v2.android
+                .NativeReaderFirmwareAdmission.compiledSymbolDigest(),
+            "firmware symbol contract digest is frozen"
+        );
+    }
+
+    private static NativeReaderFirmwarePort firmwarePort(
+        FirmwareBridge bridge
+    ) {
+        return new NativeReaderFirmwarePort(bridge, bridge.observe());
     }
 
     private static SpreadSession initializedSession(
@@ -1588,7 +1673,12 @@ public final class NativeReaderV2CoreTests {
         boolean writerEnabled = true;
         boolean refuseDisable;
         boolean replaceComponentsAfterReplay;
+        boolean deferSave;
         long componentSalt;
+        final long ownerThreadId = Thread.currentThread().getId();
+        final List<Runnable> ownerCallbacks = new ArrayList<>();
+        NativeReaderFirmwarePort.Bridge.SourceSaveCallback pendingSave;
+        NativeReaderFirmwarePort.Bridge.SourceSaveCallback lastSave;
 
         FirmwareBridge(
             int activePage,
@@ -1604,6 +1694,43 @@ public final class NativeReaderV2CoreTests {
             activePage = page;
             layoutGeneration = layout;
             writerEnabled = true;
+        }
+
+        void completeSave(boolean saved) {
+            NativeReaderFirmwarePort.Bridge.SourceSaveCallback callback =
+                pendingSave;
+            if (callback == null) {
+                throw new IllegalStateException("no deferred save callback");
+            }
+            pendingSave = null;
+            lastSave = callback;
+            if (saved) {
+                markRevision += saveRevisionDelta;
+            }
+            callback.onComplete(saved, observe());
+        }
+
+        void repeatLastSaveCompletion(boolean saved) {
+            if (lastSave == null) {
+                throw new IllegalStateException("no completed save callback");
+            }
+            lastSave.onComplete(saved, observe());
+        }
+
+        void drainOwnerCallbacks() {
+            if (Thread.currentThread().getId() != ownerThreadId) {
+                throw new IllegalStateException("not the bridge owner thread");
+            }
+            while (true) {
+                Runnable callback;
+                synchronized (ownerCallbacks) {
+                    if (ownerCallbacks.isEmpty()) {
+                        return;
+                    }
+                    callback = ownerCallbacks.remove(0);
+                }
+                callback.run();
+            }
         }
 
         @Override
@@ -1642,15 +1769,55 @@ public final class NativeReaderV2CoreTests {
         }
 
         @Override
+        public boolean isStableObservationCurrent(
+            NativeReaderFirmwarePort.Observation expected
+        ) {
+            if (expected == null) {
+                return false;
+            }
+            NativeReaderFirmwarePort.Observation current = observe();
+            return current.snapshot.documentId.equals(
+                expected.snapshot.documentId
+            ) && current.snapshot.activityGeneration
+                == expected.snapshot.activityGeneration
+                && current.snapshot.layoutGeneration
+                    == expected.snapshot.layoutGeneration
+                && current.snapshot.activePageIndex
+                    == expected.snapshot.activePageIndex
+                && current.writerEnabled == expected.writerEnabled
+                && (current.authority == null
+                    ? expected.authority == null
+                    : current.authority.equals(expected.authority));
+        }
+
+        @Override
         public void freezeDocumentInput() {
             calls.add("freeze");
         }
 
         @Override
-        public boolean saveNativeTrails() {
+        public void requestNativeSourceSave(
+            NativeReaderFirmwarePort.Bridge.SourceSaveCallback callback
+        ) {
             calls.add("save");
-            markRevision += saveRevisionDelta;
-            return true;
+            if (pendingSave != null) {
+                throw new IllegalStateException("overlapping native save");
+            }
+            pendingSave = callback;
+            if (!deferSave) {
+                completeSave(true);
+            }
+        }
+
+        @Override
+        public void postToOwnerThread(Runnable callback) {
+            if (Thread.currentThread().getId() == ownerThreadId) {
+                callback.run();
+                return;
+            }
+            synchronized (ownerCallbacks) {
+                ownerCallbacks.add(callback);
+            }
         }
 
         @Override

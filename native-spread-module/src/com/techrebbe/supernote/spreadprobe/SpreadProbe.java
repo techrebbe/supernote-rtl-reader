@@ -80,6 +80,7 @@ import com.techrebbe.supernote.spreadprobe.v2.RectD;
 import com.techrebbe.supernote.spreadprobe.v2.SpreadPairing;
 import com.techrebbe.supernote.spreadprobe.v2.SpreadSession;
 import com.techrebbe.supernote.spreadprobe.v2.SpreadSnapshot;
+import com.techrebbe.supernote.spreadprobe.v2.android.NativeReaderFirmwareAdmission;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -451,6 +452,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
     private static volatile boolean nativeBridgeLoaded;
     private static volatile boolean nativeHookReady;
     private static volatile boolean hooksReady;
+    private static volatile boolean nativeReaderV2FirmwareAdmitted;
+    private static volatile String nativeReaderV2SymbolDigest;
     private static volatile Object windowManagerGlobal;
     private static volatile Method windowManagerGetWindowViews;
     private static volatile Field windowManagerViewsField;
@@ -2184,6 +2187,23 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             log("disabled document_package_mismatch apk_length="
                 + installedApkLength + " source=" + TARGET_DOCUMENT_APK);
             return;
+        }
+
+        try {
+            NativeReaderFirmwareAdmission.Report admission =
+                NativeReaderFirmwareAdmission.verify(
+                    loadPackageParam.classLoader
+                );
+            nativeReaderV2FirmwareAdmitted = true;
+            nativeReaderV2SymbolDigest = admission.symbolDigest;
+            log("v2_firmware_admitted contract=" + admission.contractId
+                + " symbols=" + admission.symbolCount
+                + " digest=" + admission.symbolDigest);
+        } catch (Throwable throwable) {
+            nativeReaderV2FirmwareAdmitted = false;
+            nativeReaderV2SymbolDigest = null;
+            log("v2_firmware_rejected " + throwable);
+            XposedBridge.log(throwable);
         }
 
         try {

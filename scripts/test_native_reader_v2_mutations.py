@@ -163,6 +163,18 @@ MUTATIONS = (
         "    public Phase phase() {",
         "firmware port thread confinement",
     ),
+    (
+        "NativeReaderFirmwarePort.java",
+        "if (!bridge.isStableObservationCurrent(source)) {",
+        "if (false) {",
+        "firmware cached-authority freshness",
+    ),
+    (
+        "NativeReaderFirmwarePort.java",
+        "bridge.postToOwnerThread(completion);",
+        "completion.run();",
+        "firmware save callback owner marshalling",
+    ),
 )
 
 
@@ -177,7 +189,7 @@ def compile_and_run(
     test_dir: pathlib.Path,
     output_dir: pathlib.Path,
 ) -> subprocess.CompletedProcess[str]:
-    sources = sorted(source_dir.glob("*.java")) + sorted(
+    sources = sorted(source_dir.rglob("*.java")) + sorted(
         test_dir.rglob("*.java")
     )
     compile_result = subprocess.run(

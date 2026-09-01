@@ -86,9 +86,28 @@ def check_architecture(source_root: pathlib.Path) -> None:
         if marker not in firmware_port:
             fail(f"firmware authority gate missing: {marker!r}")
 
+    freeze_block, _ = java_block(
+        firmware_port,
+        "public void freezeInput(",
+        0,
+    )
+    for forbidden in ("bridge.observe()", "requestNativeSourceSave"):
+        if forbidden in freeze_block:
+            fail(
+                "low-latency freeze path performs deferred native work: "
+                + forbidden
+            )
+    for required in (
+        "bridge.isStableObservationCurrent(source)",
+        "bridge.freezeDocumentInput()",
+        "bridge.postToOwnerThread(completion)",
+    ):
+        if required not in firmware_port:
+            fail(f"firmware async boundary missing: {required!r}")
+
     all_source = "\n".join(
         path.read_text(encoding="utf-8")
-        for path in sorted(source_root.glob("*.java"))
+        for path in sorted(source_root.rglob("*.java"))
     )
     forbidden = (
         "Thread.sleep",
@@ -128,7 +147,7 @@ def main() -> None:
     root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
     source_root = root / "native-spread-module" / "src" / "com" / "techrebbe" / "supernote" / "spreadprobe" / "v2"
     test_root = root / "native-spread-module" / "tests"
-    sources = sorted(source_root.glob("*.java"))
+    sources = sorted(source_root.rglob("*.java"))
     tests = sorted(test_root.rglob("*.java"))
     if not sources or not tests:
         fail("Native Reader v2 source or test files are missing")

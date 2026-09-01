@@ -35,9 +35,16 @@ public final class NativeReaderFirmwarePort
 
     /** The firmware calls are provided by the pinned Android adapter. */
     public interface Bridge {
+        interface SourceSaveCallback {
+            void onComplete(boolean saved, Observation observation);
+        }
+
         Observation observe();
+        /** Constant-time check against adapter-owned, already-published state. */
+        boolean isStableObservationCurrent(Observation expected);
         void freezeDocumentInput();
-        boolean saveNativeTrails();
+        void requestNativeSourceSave(SourceSaveCallback callback);
+        void postToOwnerThread(Runnable callback);
         void disableNativeWriter();
         void loadNativePage(int zeroBasedPageIndex);
         void replayNativePen(List<GestureBuffer.Sample> sourceSamples);
@@ -105,10 +112,16 @@ public final class NativeReaderFirmwarePort
     private Phase phase = Phase.IDLE;
     private long sourceMarkRevision = -1L;
     private NativeAuthority targetAuthority;
+    private Observation stableObservation;
+    private boolean sourceSaveCompletionHandled;
 
-    public NativeReaderFirmwarePort(Bridge bridge) {
+    public NativeReaderFirmwarePort(
+        Bridge bridge,
+        Observation initialObservation
+    ) {
         this.bridge = Objects.requireNonNull(bridge, "bridge");
         this.ownerThreadId = Thread.currentThread().getId();
+        this.stableObservation = requireStableObservation(initialObservation);
     }
 
     /** One-time wiring after the controller has received this port. */
@@ -127,6 +140,33 @@ public final class NativeReaderFirmwarePort
         return phase;
     }
 
+    /**
+     * Replaces the cached stable authority after navigation/rotation that did
+     * not use an activation transaction. It is forbidden while an activation
+     * owns input.
+     */
+    public void publishStableObservation(Observation observation) {
+        assertOwnerThread();
+        requireAttached();
+        requirePhase(Phase.IDLE);
+        Observation next = requireStableObservation(observation);
+        Observation previous = stableObservation;
+        if (!previous.snapshot.documentId.equals(next.snapshot.documentId)
+            || previous.snapshot.activityGeneration
+                != next.snapshot.activityGeneration) {
+            throw new IllegalArgumentException(
+                "stable firmware identity changed; construct a new port"
+            );
+        }
+        if (next.snapshot.layoutGeneration
+            <= previous.snapshot.layoutGeneration) {
+            throw new IllegalArgumentException(
+                "stable firmware layout generation did not advance"
+            );
+        }
+        stableObservation = next;
+    }
+
     @Override
     public void freezeInput(ActivationMachine.Token requested) {
         assertOwnerThread();
@@ -134,14 +174,21 @@ public final class NativeReaderFirmwarePort
         requirePhase(Phase.IDLE);
         requireNewToken(requested);
         Observation source = requireObservation(
+            stableObservation,
             requested,
             requested.sourcePage,
             requested.layoutGeneration,
             true,
             false
         );
+        if (!bridge.isStableObservationCurrent(source)) {
+            throw new IllegalStateException(
+                "cached firmware authority is no longer current"
+            );
+        }
         token = requested;
         sourceMarkRevision = source.markRevision;
+        sourceSaveCompletionHandled = false;
         phase = Phase.FROZEN;
         bridge.freezeDocumentInput();
     }
@@ -150,8 +197,48 @@ public final class NativeReaderFirmwarePort
     public void requestSourceSave(ActivationMachine.Token requested) {
         assertOwnerThread();
         requireCurrent(requested, Phase.FROZEN);
-        boolean saved = bridge.saveNativeTrails();
-        Observation after = bridge.observe();
+        bridge.requestNativeSourceSave(
+            new Bridge.SourceSaveCallback() {
+                @Override
+                public void onComplete(
+                    boolean saved,
+                    Observation observation
+                ) {
+                    postSourceSaveCompletion(
+                        requested,
+                        saved,
+                        observation
+                    );
+                }
+            }
+        );
+    }
+
+    private void postSourceSaveCompletion(
+        ActivationMachine.Token requested,
+        boolean saved,
+        Observation observation
+    ) {
+        Runnable completion = new Runnable() {
+            @Override
+            public void run() {
+                onSourceSaveCompleted(requested, saved, observation);
+            }
+        };
+        bridge.postToOwnerThread(completion);
+    }
+
+    private void onSourceSaveCompleted(
+        ActivationMachine.Token requested,
+        boolean saved,
+        Observation after
+    ) {
+        assertOwnerThread();
+        if (token != requested || phase != Phase.FROZEN
+            || sourceSaveCompletionHandled) {
+            return;
+        }
+        sourceSaveCompletionHandled = true;
         boolean current = observationMatches(
             after,
             requested,
@@ -319,6 +406,7 @@ public final class NativeReaderFirmwarePort
             }
             phase = Phase.TARGET_READY;
             targetAuthority = authority;
+            stableObservation = ready;
             controller.onTargetLoadComplete(
                 current,
                 current.targetPage,
@@ -338,6 +426,7 @@ public final class NativeReaderFirmwarePort
                 );
                 return;
             }
+            stableObservation = ready;
             controller.onRollbackReady(current, authority, ready.snapshot);
         }
     }
@@ -372,6 +461,9 @@ public final class NativeReaderFirmwarePort
             true,
             false
         ) && targetAuthority.equals(after.authority);
+        if (success) {
+            stableObservation = after;
+        }
         controller.onReplayComplete(requested, success);
     }
 
@@ -395,13 +487,13 @@ public final class NativeReaderFirmwarePort
     }
 
     private Observation requireObservation(
+        Observation observation,
         ActivationMachine.Token requested,
         int page,
         long exactLayoutGeneration,
         boolean writerEnabled,
         boolean allowNewLayout
     ) {
-        Observation observation = bridge.observe();
         if (!observationMatches(
             observation,
             requested,
@@ -412,6 +504,21 @@ public final class NativeReaderFirmwarePort
         )) {
             throw new IllegalStateException(
                 "firmware authority observation does not match transaction"
+            );
+        }
+        return observation;
+    }
+
+    private static Observation requireStableObservation(
+        Observation observation
+    ) {
+        Objects.requireNonNull(observation, "observation");
+        if (!observation.writerEnabled || observation.authority == null
+            || !observation.authority.equals(
+                observation.snapshot.writerAuthority
+            )) {
+            throw new IllegalArgumentException(
+                "stable observation lacks native writer authority"
             );
         }
         return observation;
@@ -502,6 +609,7 @@ public final class NativeReaderFirmwarePort
         token = null;
         sourceMarkRevision = -1L;
         targetAuthority = null;
+        sourceSaveCompletionHandled = false;
         phase = Phase.IDLE;
     }
 

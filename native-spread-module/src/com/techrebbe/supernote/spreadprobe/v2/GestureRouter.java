@@ -13,7 +13,7 @@ public final class GestureRouter {
         NATIVE_CHROME,
         ACTIVE_DOCUMENT,
         ACTIVATE_AND_REPLAY_HIT,
-        ACTIVATE_AND_BUFFER_PEN,
+        ACTIVATE_AND_DRAIN_PEN,
         BLOCKED
     }
 
@@ -93,7 +93,7 @@ public final class GestureRouter {
                 } else if (page >= 0 && snapshot.writerReady
                     && page != snapshot.activePageIndex
                     && (tool == Tool.STYLUS || tool == Tool.ERASER)) {
-                    route = Route.ACTIVATE_AND_BUFFER_PEN;
+                    route = Route.ACTIVATE_AND_DRAIN_PEN;
                 }
             }
         }
@@ -174,7 +174,7 @@ public final class GestureRouter {
             return Route.BLOCKED;
         }
         return slot.sourcePageIndex == snapshot.activePageIndex
-            ? Route.ACTIVE_DOCUMENT : Route.ACTIVATE_AND_BUFFER_PEN;
+            ? Route.ACTIVE_DOCUMENT : Route.ACTIVATE_AND_DRAIN_PEN;
     }
 
     private static boolean isDocumentTool(Tool tool) {

@@ -18,10 +18,10 @@ public final class NativeReaderV2CoreTests {
         testPairingMatrix();
         testV2ConfigAdmission();
         testStrictMarkerProperties();
+        testNativeMarkPageInventory();
         testV2CommittedMarkerClaim();
         testSnapshotAuthority();
         testGestureRouting();
-        testGestureBuffer();
         testActivationHappyPaths();
         testActivationRollbackAndStaleEvents();
         testActivationConcurrency();
@@ -111,6 +111,38 @@ public final class NativeReaderV2CoreTests {
         invalidSizing.setProperty("spreadSizing", "fill");
         expectThrows(() -> NativeReaderV2Config.from(invalidSizing),
             "unknown sizing rejected");
+    }
+
+    private static void testNativeMarkPageInventory() {
+        check(!NativeMarkPageInventory.contains(
+            Collections.emptyList(), 8, 0
+        ), "empty native mark inventory proves an empty page");
+        check(NativeMarkPageInventory.contains(
+            Arrays.asList(1, 3, 8), 8, 2
+        ), "one-based native mark inventory identifies a present page");
+        check(!NativeMarkPageInventory.contains(
+            Arrays.asList(1, 3, 8), 8, 3
+        ), "one-based native mark inventory identifies an absent page");
+        expectThrows(() -> NativeMarkPageInventory.contains(null, 8, 0),
+            "missing native mark inventory rejected");
+        expectThrows(() -> NativeMarkPageInventory.contains(
+            Arrays.asList(1, 1), 8, 0
+        ), "duplicate native mark page rejected");
+        expectThrows(() -> NativeMarkPageInventory.contains(
+            Arrays.asList(0), 8, 0
+        ), "zero native mark page rejected");
+        expectThrows(() -> NativeMarkPageInventory.contains(
+            Arrays.asList(9), 8, 0
+        ), "out-of-range native mark page rejected");
+        expectThrows(() -> NativeMarkPageInventory.contains(
+            Arrays.asList("1"), 8, 0
+        ), "non-integer native mark page rejected");
+        expectThrows(() -> NativeMarkPageInventory.contains(
+            Collections.emptyList(), 0, 0
+        ), "invalid page count rejected");
+        expectThrows(() -> NativeMarkPageInventory.contains(
+            Collections.emptyList(), 8, 8
+        ), "invalid requested page rejected");
     }
 
     private static void testV2CommittedMarkerClaim() {
@@ -356,7 +388,6 @@ public final class NativeReaderV2CoreTests {
         near(0, projectedBounds.left, 1.0e-9, "wide page centered x");
         near((1404 - projectedBounds.height()) / 2.0,
             projectedBounds.top, 1.0e-9, "wide page centered y");
-
         RectD narrowSource = new RectD(0, 0, 400, 2000);
         Affine2D narrowNative = new Affine2D(
             0.6, 0, 0, 0.6, 816, 102
@@ -688,7 +719,7 @@ public final class NativeReaderV2CoreTests {
         GestureRouter.Token inactivePen = router.begin(
             spread, 0, 1200, 500, GestureRouter.Tool.STYLUS, chrome
         );
-        equal(GestureRouter.Route.ACTIVATE_AND_BUFFER_PEN,
+        equal(GestureRouter.Route.ACTIVATE_AND_DRAIN_PEN,
             inactivePen.route, "inactive pen activation");
         SpreadSnapshot newer = spread(1, 1, 2, true);
         check(!router.authorityCurrent(inactivePen, newer),
@@ -744,47 +775,10 @@ public final class NativeReaderV2CoreTests {
         equal(GestureRouter.Route.BLOCKED, blank.route,
             "blank page never owns input");
         router.retire();
-        equal(GestureRouter.Route.ACTIVATE_AND_BUFFER_PEN,
+        equal(GestureRouter.Route.ACTIVATE_AND_DRAIN_PEN,
             router.classifyHover(spread, 1200, 500,
                 GestureRouter.Tool.STYLUS, chrome),
             "inactive hover preactivates");
-    }
-
-    private static void testGestureBuffer() {
-        GestureBuffer buffer = new GestureBuffer(7, 4, 4 * 48, 100);
-        check(buffer.append(7, sample(10, GestureBuffer.Action.DOWN)),
-            "buffer down");
-        check(buffer.append(7, sample(20, GestureBuffer.Action.MOVE)),
-            "buffer move");
-        check(buffer.append(7, sample(30, GestureBuffer.Action.UP)),
-            "buffer up");
-        check(buffer.isReplayable(), "complete pen gesture replayable");
-        check(!buffer.append(7, sample(40, GestureBuffer.Action.MOVE)),
-            "terminal rejects append");
-        expectThrows(() -> buffer.immutableSamples().clear(),
-            "buffer snapshot immutable");
-
-        GestureBuffer wrongToken = new GestureBuffer(8, 4, 192, 100);
-        check(!wrongToken.append(9, sample(0, GestureBuffer.Action.DOWN)),
-            "wrong token rejected without mutation");
-        check(wrongToken.append(8, sample(0, GestureBuffer.Action.DOWN)),
-            "correct token still accepted");
-
-        GestureBuffer overflow = new GestureBuffer(9, 2, 96, 100);
-        check(overflow.append(9, sample(0, GestureBuffer.Action.DOWN)),
-            "overflow fixture down");
-        check(overflow.append(9, sample(1, GestureBuffer.Action.MOVE)),
-            "overflow fixture move");
-        check(!overflow.append(9, sample(2, GestureBuffer.Action.UP)),
-            "sample overflow fails");
-        check(overflow.isFailed(), "overflow latched failed");
-        equal(0, overflow.immutableSamples().size(), "failed buffer clears data");
-
-        GestureBuffer timeout = new GestureBuffer(10, 4, 192, 10);
-        check(timeout.append(10, sample(0, GestureBuffer.Action.DOWN)),
-            "timeout fixture down");
-        check(!timeout.append(10, sample(11, GestureBuffer.Action.UP)),
-            "duration overflow fails");
     }
 
     private static void testActivationHappyPaths() {
@@ -982,12 +976,12 @@ public final class NativeReaderV2CoreTests {
         ActivationMachine.Token token = port.lastToken;
         equal(NativeReaderController.InputResult.CONSUMED,
             controller.onMotion(
-                down.gestureTokenId, 0, GestureBuffer.Action.MOVE,
+                down.gestureTokenId, 0, GestureAction.MOVE,
                 100, 500, 0.7, 110
             ), "cross-divider pen move consumed");
         equal(NativeReaderController.InputResult.CONSUMED,
             controller.onMotion(
-                down.gestureTokenId, 0, GestureBuffer.Action.UP,
+                down.gestureTokenId, 0, GestureAction.UP,
                 100, 500, 0.0, 120
             ), "cross-divider pen terminal consumed");
         controller.onSourceSaveComplete(token, true);
@@ -1023,11 +1017,11 @@ public final class NativeReaderV2CoreTests {
         equal(0, swipePort.calls.size(),
             "finger down does not activate before tap/swipe decision");
         swipeController.onMotion(
-            swipe.gestureTokenId, 0, GestureBuffer.Action.MOVE,
+            swipe.gestureTokenId, 0, GestureAction.MOVE,
             1100, 500, 0, 10
         );
         swipeController.onMotion(
-            swipe.gestureTokenId, 0, GestureBuffer.Action.UP,
+            swipe.gestureTokenId, 0, GestureAction.UP,
             1050, 500, 0, 20
         );
         equal(Collections.singletonList("navigate"), swipePort.calls,
@@ -1038,7 +1032,7 @@ public final class NativeReaderV2CoreTests {
             GestureRouter.Tool.FINGER, Collections.<RectD>emptyList()
         );
         swipeController.onMotion(
-            tap.gestureTokenId, 0, GestureBuffer.Action.UP,
+            tap.gestureTokenId, 0, GestureAction.UP,
             1200, 500, 0, 40
         );
         equal(Arrays.asList("navigate", "freeze", "save"), swipePort.calls,
@@ -1104,7 +1098,7 @@ public final class NativeReaderV2CoreTests {
             GestureRouter.Tool.FINGER, Collections.<RectD>emptyList()
         );
         marginController.onMotion(
-            margin.gestureTokenId, 0, GestureBuffer.Action.UP,
+            margin.gestureTokenId, 0, GestureAction.UP,
             1200, 10, 0, 10
         );
         ActivationMachine.Token marginToken = marginPort.lastToken;
@@ -1146,7 +1140,7 @@ public final class NativeReaderV2CoreTests {
             "rollback republishes source");
         equal(NativeReaderController.InputResult.BLOCKED,
             rollbackController.onMotion(
-                down.gestureTokenId, 0, GestureBuffer.Action.UP,
+                down.gestureTokenId, 0, GestureAction.UP,
                 1200, 500, 0, 10
             ), "retired activation gesture cannot mutate rollback");
 
@@ -1161,7 +1155,7 @@ public final class NativeReaderV2CoreTests {
         );
         ActivationMachine.Token cancelToken = cancelPort.lastToken;
         cancelController.onMotion(
-            cancelled.gestureTokenId, 0, GestureBuffer.Action.CANCEL,
+            cancelled.gestureTokenId, 0, GestureAction.CANCEL,
             1210, 510, 0.0, 2
         );
         cancelController.onSourceSaveComplete(cancelToken, true);
@@ -1198,7 +1192,7 @@ public final class NativeReaderV2CoreTests {
             "target publication waits for physical pen terminal");
         equal(NativeReaderController.InputResult.CONSUMED,
             controller.onMotion(
-                down.gestureTokenId, 0, GestureBuffer.Action.UP,
+                down.gestureTokenId, 0, GestureAction.UP,
                 1210, 510, 0, 20
             ), "pen UP survives target publication");
         equal("release", port.calls.get(port.calls.size() - 1),
@@ -1223,7 +1217,7 @@ public final class NativeReaderV2CoreTests {
             session.activation().status().state,
             "synchronous target callback still waits for UP");
         controller.onMotion(
-            down.gestureTokenId, 0, GestureBuffer.Action.UP,
+            down.gestureTokenId, 0, GestureAction.UP,
             1210, 510, 0, 10
         );
         equal(Arrays.asList(
@@ -1340,7 +1334,7 @@ public final class NativeReaderV2CoreTests {
         contactController.onMotion(
             activeContact.gestureTokenId,
             0,
-            GestureBuffer.Action.UP,
+            GestureAction.UP,
             100,
             500,
             0,
@@ -1364,7 +1358,7 @@ public final class NativeReaderV2CoreTests {
             GestureRouter.Tool.FINGER, Collections.<RectD>emptyList()
         );
         replayController.onMotion(
-            replay.gestureTokenId, 0, GestureBuffer.Action.UP,
+            replay.gestureTokenId, 0, GestureAction.UP,
             1210, 510, 0, 10
         );
         ActivationMachine.Token replayToken = replayPort.lastToken;
@@ -1472,7 +1466,7 @@ public final class NativeReaderV2CoreTests {
         );
         equal(NativeReaderController.InputResult.BLOCKED,
             controller.onMotion(
-                valid.gestureTokenId, 0, GestureBuffer.Action.MOVE,
+                valid.gestureTokenId, 0, GestureAction.MOVE,
                 1210, Double.POSITIVE_INFINITY, 0.5, 1
             ), "invalid buffered MOVE is blocked");
         equal("rollback", port.calls.get(port.calls.size() - 1),
@@ -1521,7 +1515,7 @@ public final class NativeReaderV2CoreTests {
             GestureRouter.Tool.FINGER, Collections.<RectD>emptyList()
         );
         timeoutController.onMotion(
-            down.gestureTokenId, 0, GestureBuffer.Action.UP,
+            down.gestureTokenId, 0, GestureAction.UP,
             1210, 510, 0, 10
         );
         ActivationMachine.Token timeoutToken = timeoutPort.lastToken;
@@ -1610,7 +1604,7 @@ public final class NativeReaderV2CoreTests {
         penController.onMotion(
             down.gestureTokenId,
             4,
-            GestureBuffer.Action.UP,
+            GestureAction.UP,
             1220,
             520,
             0.0,
@@ -1768,7 +1762,7 @@ public final class NativeReaderV2CoreTests {
             Collections.<RectD>emptyList()
         );
         replayController.onMotion(
-            down.gestureTokenId, 1, GestureBuffer.Action.UP,
+            down.gestureTokenId, 1, GestureAction.UP,
             1210, 510, 0.0, 10
         );
         replayBridge.ready(0, 2);
@@ -1906,13 +1900,6 @@ public final class NativeReaderV2CoreTests {
             14,
             page
         );
-    }
-
-    private static GestureBuffer.Sample sample(
-        long time,
-        GestureBuffer.Action action
-    ) {
-        return new GestureBuffer.Sample(time, action, 10, 20, 0.5);
     }
 
     private static void status(

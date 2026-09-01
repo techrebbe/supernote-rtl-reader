@@ -219,14 +219,14 @@ public final class NativeReaderController {
     public InputResult onMotion(
         long gestureTokenId,
         int pointerId,
-        GestureBuffer.Action action,
+        GestureAction action,
         double screenX,
         double screenY,
         double pressure,
         long eventTimeMs
     ) {
         assertOwnerThread();
-        if (action == null || action == GestureBuffer.Action.DOWN) {
+        if (action == null || action == GestureAction.DOWN) {
             return InputResult.BLOCKED;
         }
         GestureRouter.Token gesture = session.gestures().current(
@@ -281,11 +281,11 @@ public final class NativeReaderController {
                 > FINGER_TAP_SLOP_SQUARED) {
                 current.fingerMoved = true;
             }
-            if (action == GestureBuffer.Action.CANCEL) {
+            if (action == GestureAction.CANCEL) {
                 finishGestureOnly(current, pointerId);
                 return InputResult.CONSUMED;
             }
-            if (action == GestureBuffer.Action.UP) {
+            if (action == GestureAction.UP) {
                 session.gestures().finish(
                     current.gesture.id,
                     pointerId
@@ -339,7 +339,7 @@ public final class NativeReaderController {
             screenY,
             GestureRouter.Tool.STYLUS,
             visibleNativeChrome
-        ) != GestureRouter.Route.ACTIVATE_AND_BUFFER_PEN) {
+        ) != GestureRouter.Route.ACTIVATE_AND_DRAIN_PEN) {
             return false;
         }
         PageSlot slot = snapshot.slotAt(screenX, screenY);
@@ -737,9 +737,9 @@ public final class NativeReaderController {
         }
     }
 
-    private static boolean isTerminal(GestureBuffer.Action action) {
-        return action == GestureBuffer.Action.UP
-            || action == GestureBuffer.Action.CANCEL;
+    private static boolean isTerminal(GestureAction action) {
+        return action == GestureAction.UP
+            || action == GestureAction.CANCEL;
     }
 
     private static boolean validInputSample(

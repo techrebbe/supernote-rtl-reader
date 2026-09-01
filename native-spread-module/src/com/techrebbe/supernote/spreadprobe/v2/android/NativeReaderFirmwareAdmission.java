@@ -15,7 +15,7 @@ public final class NativeReaderFirmwareAdmission {
     public static final String CONTRACT_ID =
         "supernote-document-1.02.446-native-reader-v2-symbols-v2";
     public static final String EXPECTED_SYMBOL_DIGEST =
-        "f3df28a4f2c4a8e002371415c2420f49184c5c3971534ebcfe4ce4ffc66ba6d5";
+        "c7403101e9819a9880c17d259422b46c7e53aaf579d1e68b53e2a7252814eb2a";
 
     private static final String ACTIVITY =
         "com.supernote.document.document.DocumentActivity";
@@ -29,6 +29,8 @@ public final class NativeReaderFirmwareAdmission {
         "com.supernote.document.handwrite.HandWriteView";
     private static final String HAND_WRITE_CLIENT =
         "com.supernote.document.handwrite.HandWriteClient";
+    private static final String NOTE =
+        "com.example.libsupernote.SuperNoteNote";
     private static final String NATIVE_CALLBACK = ACTIVITY + "$6";
 
     private static final String[] SYMBOLS = new String[] {
@@ -109,6 +111,7 @@ public final class NativeReaderFirmwareAdmission {
         field(PRESENTER, "currentPage", "int"),
         field(PRESENTER, "markPath", "java.lang.String"),
         field(PRESENTER, "screenRotation", "int"),
+        field(PRESENTER, "bitmap", "android.graphics.Bitmap"),
         field(PRESENTER, "superNoteNote",
             "com.example.libsupernote.SuperNoteNote"),
         field(PRESENTER, "handWriteClient",
@@ -143,6 +146,12 @@ public final class NativeReaderFirmwareAdmission {
         method(HAND_WRITE_VIEW, "clearAreaSelectionView", "void"),
 
         field(HAND_WRITE_CLIENT, "iBinder", "android.os.IBinder"),
+
+        method(NOTE, "screenRotation", "boolean", "int", "int", "int"),
+        method(NOTE, "fetchPagesOfMark", "java.util.List",
+            "java.lang.String"),
+        method(NOTE, "loadMarkPageBitmap", "boolean",
+            "java.lang.String", "int", "android.graphics.Bitmap"),
 
         field(NATIVE_CALLBACK, "mPressure", "int"),
         method(NATIVE_CALLBACK, "onDigitalPosition", "void", "int", "int"),

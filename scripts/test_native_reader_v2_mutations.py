@@ -84,10 +84,10 @@ MUTATIONS = (
         "inactive-writer authority",
     ),
     (
-        "GestureBuffer.java",
-        "sample.eventTimeMs - firstEventTimeMs > maxDurationMs",
-        "sample.eventTimeMs - firstEventTimeMs < maxDurationMs",
-        "gesture-duration bound",
+        "GestureRouter.java",
+        "route = Route.ACTIVATE_AND_DRAIN_PEN;",
+        "route = Route.ACTIVATE_AND_REPLAY_HIT;",
+        "inactive pen cannot enter replay path",
     ),
     (
         "ActivationMachine.java",

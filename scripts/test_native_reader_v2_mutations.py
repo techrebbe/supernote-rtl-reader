@@ -138,6 +138,31 @@ MUTATIONS = (
         "\"native_replay_timeout_uncertain\");",
         "uncertain replay timeout containment",
     ),
+    (
+        "NativeReaderFirmwarePort.java",
+        "after.markRevision >= sourceMarkRevision",
+        "after.markRevision < sourceMarkRevision",
+        "firmware source-save revision",
+    ),
+    (
+        "NativeReaderFirmwarePort.java",
+        "disabled == null || disabled.writerEnabled",
+        "disabled == null || false && disabled.writerEnabled",
+        "firmware writer-disable proof",
+    ),
+    (
+        "NativeReaderFirmwarePort.java",
+        "&& targetAuthority.equals(after.authority);",
+        ";",
+        "firmware replay component authority",
+    ),
+    (
+        "NativeReaderFirmwarePort.java",
+        "    public Phase phase() {\n"
+        "        assertOwnerThread();",
+        "    public Phase phase() {",
+        "firmware port thread confinement",
+    ),
 )
 
 

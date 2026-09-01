@@ -32,6 +32,9 @@ public final class NativeReaderV2CoreTests {
         testControllerInvalidInput();
         testControllerRetirementAndReplayTimeout();
         testControllerThreadConfinement();
+        testFirmwarePortActivationAndReplay();
+        testFirmwarePortRollbackAndFailClosed();
+        testFirmwarePortAuthorityAndThreadConfinement();
         System.out.println("NativeReaderV2CoreTests PASS assertions=" + assertions);
     }
 
@@ -1256,6 +1259,187 @@ public final class NativeReaderV2CoreTests {
             "off-owner callback cannot change page authority");
     }
 
+    private static void testFirmwarePortActivationAndReplay() {
+        SpreadSession hoverSession = initializedSession(1, 50, 1);
+        FirmwareBridge hoverBridge = new FirmwareBridge(1, 50, 1);
+        NativeReaderFirmwarePort hoverPort =
+            new NativeReaderFirmwarePort(hoverBridge);
+        NativeReaderController hoverController = new NativeReaderController(
+            hoverSession, hoverPort, 16, 768, 1000
+        );
+        hoverPort.attachController(hoverController);
+        check(hoverController.onInactiveHover(
+            1200, 500, Collections.<RectD>emptyList()
+        ), "firmware hover activation begins");
+        equal(NativeReaderFirmwarePort.Phase.TARGET_LOADING,
+            hoverPort.phase(), "firmware waits for complete target readiness");
+        equal(Arrays.asList("freeze", "save", "disable", "load:0"),
+            hoverBridge.calls, "firmware source transfer order");
+        hoverBridge.ready(0, 2);
+        hoverPort.onFirmwarePageReady(hoverBridge.observe());
+        equal(NativeReaderFirmwarePort.Phase.IDLE, hoverPort.phase(),
+            "hover activation releases input");
+        equal(0, hoverSession.snapshot().activePageIndex,
+            "hover publishes target page");
+        equal("release", hoverBridge.calls.get(hoverBridge.calls.size() - 1),
+            "hover releases only after target publication");
+
+        SpreadSession penSession = initializedSession(1, 51, 1);
+        FirmwareBridge penBridge = new FirmwareBridge(1, 51, 1);
+        NativeReaderFirmwarePort penPort =
+            new NativeReaderFirmwarePort(penBridge);
+        NativeReaderController penController = new NativeReaderController(
+            penSession, penPort, 16, 768, 1000
+        );
+        penPort.attachController(penController);
+        NativeReaderController.DownDecision down = penController.onDown(
+            4, 1200, 500, 0.7, 10,
+            GestureRouter.Tool.STYLUS,
+            Collections.<RectD>emptyList()
+        );
+        penController.onMotion(
+            down.gestureTokenId,
+            4,
+            GestureBuffer.Action.UP,
+            1220,
+            520,
+            0.0,
+            20
+        );
+        penBridge.ready(0, 2);
+        penPort.onFirmwarePageReady(penBridge.observe());
+        equal(NativeReaderFirmwarePort.Phase.IDLE, penPort.phase(),
+            "pen replay completes transaction");
+        check(penBridge.calls.contains("replayPen:2"),
+            "complete source-coordinate pen stream replayed");
+        equal("release", penBridge.calls.get(penBridge.calls.size() - 1),
+            "pen releases after replay acknowledgement");
+        equal(0, penSession.snapshot().activePageIndex,
+            "pen target remains authoritative");
+    }
+
+    private static void testFirmwarePortRollbackAndFailClosed() {
+        SpreadSession saveSession = initializedSession(1, 55, 1);
+        FirmwareBridge saveBridge = new FirmwareBridge(1, 55, 1);
+        saveBridge.markRevision = 5;
+        saveBridge.saveRevisionDelta = -1;
+        NativeReaderFirmwarePort savePort =
+            new NativeReaderFirmwarePort(saveBridge);
+        NativeReaderController saveController = new NativeReaderController(
+            saveSession, savePort, 16, 768, 1000
+        );
+        savePort.attachController(saveController);
+        saveController.onInactiveHover(
+            1200, 500, Collections.<RectD>emptyList()
+        );
+        equal(NativeReaderFirmwarePort.Phase.ROLLBACK_LOADING,
+            savePort.phase(), "regressed mark revision triggers rollback");
+        check(!saveBridge.calls.contains("load:0"),
+            "regressed save revision cannot load target");
+
+        SpreadSession disableSession = initializedSession(1, 56, 1);
+        FirmwareBridge disableBridge = new FirmwareBridge(1, 56, 1);
+        disableBridge.refuseDisable = true;
+        NativeReaderFirmwarePort disablePort =
+            new NativeReaderFirmwarePort(disableBridge);
+        NativeReaderController disableController = new NativeReaderController(
+            disableSession, disablePort, 16, 768, 1000
+        );
+        disablePort.attachController(disableController);
+        disableController.onInactiveHover(
+            1200, 500, Collections.<RectD>emptyList()
+        );
+        equal(NativeReaderFirmwarePort.Phase.ROLLBACK_LOADING,
+            disablePort.phase(), "writer-disable failure triggers rollback");
+        check(!disableBridge.calls.contains("load:0"),
+            "enabled source writer cannot load target");
+
+        SpreadSession session = initializedSession(1, 52, 1);
+        FirmwareBridge bridge = new FirmwareBridge(1, 52, 1);
+        NativeReaderFirmwarePort port = new NativeReaderFirmwarePort(bridge);
+        NativeReaderController controller = new NativeReaderController(
+            session, port, 16, 768, 1000
+        );
+        port.attachController(controller);
+        controller.onInactiveHover(
+            1200, 500, Collections.<RectD>emptyList()
+        );
+        bridge.ready(0, 1); // target page with a stale layout generation
+        port.onFirmwarePageReady(bridge.observe());
+        equal(NativeReaderFirmwarePort.Phase.ROLLBACK_LOADING, port.phase(),
+            "stale target authority requests source rollback");
+        equal("load:1", bridge.calls.get(bridge.calls.size() - 1),
+            "rollback reloads exact source page");
+        bridge.ready(1, 2);
+        port.onFirmwarePageReady(bridge.observe());
+        equal(NativeReaderFirmwarePort.Phase.IDLE, port.phase(),
+            "verified source rollback releases input");
+        equal(1, session.snapshot().activePageIndex,
+            "rollback preserves source authority");
+
+        SpreadSession replaySession = initializedSession(1, 53, 1);
+        FirmwareBridge replayBridge = new FirmwareBridge(1, 53, 1);
+        NativeReaderFirmwarePort replayPort =
+            new NativeReaderFirmwarePort(replayBridge);
+        NativeReaderController replayController = new NativeReaderController(
+            replaySession, replayPort, 16, 768, 1000
+        );
+        replayPort.attachController(replayController);
+        NativeReaderController.DownDecision down = replayController.onDown(
+            1, 1200, 500, 0.5, 0,
+            GestureRouter.Tool.STYLUS,
+            Collections.<RectD>emptyList()
+        );
+        replayController.onMotion(
+            down.gestureTokenId, 1, GestureBuffer.Action.UP,
+            1210, 510, 0.0, 10
+        );
+        replayBridge.ready(0, 2);
+        replayBridge.replaceComponentsAfterReplay = true;
+        replayPort.onFirmwarePageReady(replayBridge.observe());
+        equal(NativeReaderFirmwarePort.Phase.DISABLED, replayPort.phase(),
+            "uncertain post-replay authority hard-disables feature");
+        check(replaySession.snapshot() == null,
+            "uncertain replay retires published session");
+        equal("disableFeature:native_replay_failed_or_uncertain",
+            replayBridge.calls.get(replayBridge.calls.size() - 1),
+            "uncertain replay cannot attempt an unsafe rollback");
+    }
+
+    private static void testFirmwarePortAuthorityAndThreadConfinement()
+        throws Exception {
+        SpreadSession session = initializedSession(1, 54, 1);
+        FirmwareBridge bridge = new FirmwareBridge(1, 54, 1);
+        NativeReaderFirmwarePort port = new NativeReaderFirmwarePort(bridge);
+        NativeReaderController controller = new NativeReaderController(
+            session, port, 16, 768, 1000
+        );
+        port.attachController(controller);
+        expectThrows(() -> port.attachController(controller),
+            "firmware controller attaches once");
+        AtomicInteger rejected = new AtomicInteger();
+        Thread wrongThread = new Thread(() -> {
+            try {
+                port.phase();
+            } catch (IllegalStateException expected) {
+                rejected.incrementAndGet();
+            }
+        });
+        wrongThread.start();
+        wrongThread.join();
+        equal(1, rejected.get(),
+            "off-owner firmware callback is rejected");
+
+        bridge.activityGeneration = 999;
+        check(controller.onInactiveHover(
+            1200, 500, Collections.<RectD>emptyList()
+        ), "mismatched authority reaches fail-closed activation boundary");
+        equal(NativeReaderFirmwarePort.Phase.DISABLED, port.phase(),
+            "authority rejection hard-disables incomplete adapter state");
+        check(!bridge.calls.contains("freeze"),
+            "authority rejection precedes native mutation");
+    }
+
     private static SpreadSession initializedSession(
         int active,
         long activityGeneration,
@@ -1391,6 +1575,134 @@ public final class NativeReaderV2CoreTests {
         REPLAY,
         ROLLBACK,
         RELEASE
+    }
+
+    private static final class FirmwareBridge
+        implements NativeReaderFirmwarePort.Bridge {
+        final List<String> calls = new ArrayList<>();
+        int activePage;
+        long activityGeneration;
+        long layoutGeneration;
+        long markRevision;
+        long saveRevisionDelta = 1L;
+        boolean writerEnabled = true;
+        boolean refuseDisable;
+        boolean replaceComponentsAfterReplay;
+        long componentSalt;
+
+        FirmwareBridge(
+            int activePage,
+            long activityGeneration,
+            long layoutGeneration
+        ) {
+            this.activePage = activePage;
+            this.activityGeneration = activityGeneration;
+            this.layoutGeneration = layoutGeneration;
+        }
+
+        void ready(int page, long layout) {
+            activePage = page;
+            layoutGeneration = layout;
+            writerEnabled = true;
+        }
+
+        @Override
+        public NativeReaderFirmwarePort.Observation observe() {
+            long observedActivity = activityGeneration;
+            NativeAuthority observedAuthority = writerEnabled
+                ? new NativeAuthority(
+                    "doc",
+                    observedActivity,
+                    layoutGeneration,
+                    activePage,
+                    11 + componentSalt,
+                    12 + componentSalt,
+                    13 + componentSalt,
+                    14 + componentSalt,
+                    activePage
+                ) : null;
+            SpreadSnapshot observed = new SpreadSnapshot(
+                "doc",
+                observedActivity,
+                layoutGeneration,
+                10,
+                activePage,
+                SpreadSnapshot.Mode.SPREAD,
+                leftSlot(1),
+                rightSlot(0),
+                observedAuthority,
+                writerEnabled
+            );
+            return new NativeReaderFirmwarePort.Observation(
+                observedAuthority,
+                observed,
+                writerEnabled,
+                markRevision
+            );
+        }
+
+        @Override
+        public void freezeDocumentInput() {
+            calls.add("freeze");
+        }
+
+        @Override
+        public boolean saveNativeTrails() {
+            calls.add("save");
+            markRevision += saveRevisionDelta;
+            return true;
+        }
+
+        @Override
+        public void disableNativeWriter() {
+            calls.add("disable");
+            if (!refuseDisable) {
+                writerEnabled = false;
+            }
+        }
+
+        @Override
+        public void loadNativePage(int page) {
+            calls.add("load:" + page);
+        }
+
+        @Override
+        public void replayNativePen(
+            List<GestureBuffer.Sample> sourceSamples
+        ) {
+            calls.add("replayPen:" + sourceSamples.size());
+            if (replaceComponentsAfterReplay) {
+                componentSalt++;
+            }
+        }
+
+        @Override
+        public void replayNativeFingerHit(PointD sourcePoint) {
+            calls.add("replayFinger");
+            if (replaceComponentsAfterReplay) {
+                componentSalt++;
+            }
+        }
+
+        @Override
+        public void navigateNativeSpread(
+            SpreadSnapshot sourceSnapshot,
+            double deltaX,
+            double deltaY
+        ) {
+            calls.add("navigate");
+        }
+
+        @Override
+        public void releaseDocumentInput() {
+            calls.add("release");
+        }
+
+        @Override
+        public void disableNativeReaderV2(String reason) {
+            calls.add("disableFeature:" + reason);
+            writerEnabled = false;
+        }
     }
 
     private static class FakePort

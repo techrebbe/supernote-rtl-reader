@@ -69,6 +69,23 @@ def check_architecture(source_root: pathlib.Path) -> None:
             f"{len(entry_lines)}"
         )
 
+    firmware_port = (source_root / "NativeReaderFirmwarePort.java").read_text(
+        encoding="utf-8"
+    )
+    firmware_requirements = (
+        "requested == null || token != requested",
+        "after.markRevision >= sourceMarkRevision",
+        "disabled == null || disabled.writerEnabled",
+        "targetAuthority.equals(after.authority)",
+        "observation.snapshot.layoutGeneration\n"
+        "            <= requested.layoutGeneration",
+        "phase == Phase.REPLAYING",
+        "Thread.currentThread().getId() != ownerThreadId",
+    )
+    for marker in firmware_requirements:
+        if marker not in firmware_port:
+            fail(f"firmware authority gate missing: {marker!r}")
+
     all_source = "\n".join(
         path.read_text(encoding="utf-8")
         for path in sorted(source_root.glob("*.java"))

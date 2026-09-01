@@ -68,6 +68,12 @@ MUTATIONS = (
         "marker document digest authority",
     ),
     (
+        "NativeSaveWitness.java",
+        "return attempt.observed && attempt.nativeResult;",
+        "return true;",
+        "native dirty-save acknowledgement",
+    ),
+    (
         "SpreadSnapshot.java",
         "if (writerAuthority == null || !writerAuthority.matches(",
         "if (writerAuthority == null || false && !writerAuthority.matches(",

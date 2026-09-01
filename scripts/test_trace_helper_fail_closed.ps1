@@ -422,9 +422,23 @@ $global:LASTEXITCODE = 99
         if (-not $ExpectSuccess -and $exitCode -eq 0) {
             $failures.Add("$Name unexpectedly succeeded")
         }
-        if ($ExpectedMessage -and -not $scenarioOutput.Contains($ExpectedMessage)) {
+        $normalizedScenarioOutput = [regex]::Replace(
+            $scenarioOutput,
+            '\s+',
+            ' '
+        ).Trim()
+        $normalizedExpectedMessage = if ($ExpectedMessage) {
+            [regex]::Replace($ExpectedMessage, '\s+', ' ').Trim()
+        } else {
+            $null
+        }
+        if (
+            $normalizedExpectedMessage -and
+            -not $normalizedScenarioOutput.Contains($normalizedExpectedMessage)
+        ) {
             $failures.Add(
-                "$Name did not report expected message: $ExpectedMessage"
+                "$Name did not report expected message: $ExpectedMessage; " +
+                    "actual output: $normalizedScenarioOutput"
             )
         }
         $expectedStatePath = Join-Path `

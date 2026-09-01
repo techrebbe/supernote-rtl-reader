@@ -15,7 +15,7 @@ public final class NativeReaderFirmwareAdmission {
     public static final String CONTRACT_ID =
         "supernote-document-1.02.446-native-reader-v2-symbols-v2";
     public static final String EXPECTED_SYMBOL_DIGEST =
-        "c7403101e9819a9880c17d259422b46c7e53aaf579d1e68b53e2a7252814eb2a";
+        "9ed6acbb3bcb5302b255aed2b6d7891fa4b1278ddc975e19267f9add50fc93ca";
 
     private static final String ACTIVITY =
         "com.supernote.document.document.DocumentActivity";
@@ -112,6 +112,8 @@ public final class NativeReaderFirmwareAdmission {
         field(PRESENTER, "markPath", "java.lang.String"),
         field(PRESENTER, "screenRotation", "int"),
         field(PRESENTER, "bitmap", "android.graphics.Bitmap"),
+        field(PRESENTER, "existNoteFile", "boolean"),
+        field(PRESENTER, "hasTrails", "boolean"),
         field(PRESENTER, "superNoteNote",
             "com.example.libsupernote.SuperNoteNote"),
         field(PRESENTER, "handWriteClient",
@@ -152,6 +154,8 @@ public final class NativeReaderFirmwareAdmission {
             "java.lang.String"),
         method(NOTE, "loadMarkPageBitmap", "boolean",
             "java.lang.String", "int", "android.graphics.Bitmap"),
+        method(NOTE, "saveMarkData", "boolean",
+            "java.lang.String", "java.lang.String", "int", "boolean"),
 
         field(NATIVE_CALLBACK, "mPressure", "int"),
         method(NATIVE_CALLBACK, "onDigitalPosition", "void", "int", "int"),

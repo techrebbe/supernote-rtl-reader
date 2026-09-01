@@ -19,6 +19,7 @@ public final class NativeReaderV2CoreTests {
         testV2ConfigAdmission();
         testStrictMarkerProperties();
         testNativeMarkPageInventory();
+        testNativeSaveWitness();
         testV2CommittedMarkerClaim();
         testSnapshotAuthority();
         testGestureRouting();
@@ -143,6 +144,66 @@ public final class NativeReaderV2CoreTests {
         expectThrows(() -> NativeMarkPageInventory.contains(
             Collections.emptyList(), 8, 8
         ), "invalid requested page rejected");
+    }
+
+    private static void testNativeSaveWitness() {
+        Object note = new Object();
+        NativeSaveWitness witness = new NativeSaveWitness();
+        NativeSaveWitness.Token dirty = witness.begin(
+            note, "/tmp/book.mark", 4, true
+        );
+        witness.observe(note, "/tmp/book.mark", 4, true, true);
+        check(witness.finish(dirty), "dirty native save success witnessed");
+
+        NativeSaveWitness.Token failed = witness.begin(
+            note, "/tmp/book.mark", 4, true
+        );
+        witness.observe(note, "/tmp/book.mark", 4, true, false);
+        check(!witness.finish(failed), "native save failure preserved");
+
+        NativeSaveWitness.Token missing = witness.begin(
+            note, "/tmp/book.mark", 4, true
+        );
+        check(!witness.finish(missing), "missing dirty save call rejected");
+
+        NativeSaveWitness.Token clean = witness.begin(
+            note, "/tmp/book.mark", 4, false
+        );
+        check(witness.finish(clean), "proven-clean no-op save accepted");
+
+        NativeSaveWitness.Token unexpected = witness.begin(
+            note, "/tmp/book.mark", 4, false
+        );
+        witness.observe(note, "/tmp/book.mark", 4, true, true);
+        check(!witness.finish(unexpected),
+            "unexpected save on clean page rejected");
+
+        NativeSaveWitness.Token wrongPage = witness.begin(
+            note, "/tmp/book.mark", 4, true
+        );
+        witness.observe(note, "/tmp/book.mark", 5, true, true);
+        check(!witness.finish(wrongPage), "wrong-page save rejected");
+
+        NativeSaveWitness.Token wrongNote = witness.begin(
+            note, "/tmp/book.mark", 4, true
+        );
+        witness.observe(new Object(), "/tmp/book.mark", 4, true, true);
+        check(!witness.finish(wrongNote), "wrong-note save rejected");
+
+        NativeSaveWitness.Token duplicate = witness.begin(
+            note, "/tmp/book.mark", 4, true
+        );
+        witness.observe(note, "/tmp/book.mark", 4, true, true);
+        witness.observe(note, "/tmp/book.mark", 4, true, true);
+        check(!witness.finish(duplicate), "duplicate native save rejected");
+
+        NativeSaveWitness.Token aborted = witness.begin(
+            note, "/tmp/book.mark", 4, true
+        );
+        witness.abort(aborted);
+        check(!witness.active(), "aborted native save witness is retired");
+        expectThrows(() -> witness.finish(aborted),
+            "stale native save witness token rejected");
     }
 
     private static void testV2CommittedMarkerClaim() {

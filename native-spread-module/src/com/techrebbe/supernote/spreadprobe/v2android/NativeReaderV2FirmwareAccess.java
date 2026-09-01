@@ -49,6 +49,8 @@ public final class NativeReaderV2FirmwareAccess {
     private final Field presenterMarkPath;
     private final Field presenterScreenRotation;
     private final Field presenterBitmap;
+    private final Field presenterExistNoteFile;
+    private final Field presenterHasTrails;
     private final Field presenterNote;
     private final Field presenterClient;
     private final Field clientBinder;
@@ -99,6 +101,8 @@ public final class NativeReaderV2FirmwareAccess {
             presenterMarkPath = field(presenter, "markPath");
             presenterScreenRotation = field(presenter, "screenRotation");
             presenterBitmap = field(presenter, "bitmap");
+            presenterExistNoteFile = field(presenter, "existNoteFile");
+            presenterHasTrails = field(presenter, "hasTrails");
             presenterNote = field(presenter, "superNoteNote");
             presenterClient = field(presenter, "handWriteClient");
             clientBinder = field(client, "iBinder");
@@ -253,6 +257,22 @@ public final class NativeReaderV2FirmwareAccess {
         // retaining it would let the old page's samples survive into the
         // next writer page.
         invoke(presenterSave, components.presenter, Boolean.TRUE);
+    }
+
+    public boolean sourceHasTrails(Components components) {
+        try {
+            if (!presenterExistNoteFile.getBoolean(components.presenter)) {
+                throw new IllegalStateException(
+                    "native mark document is not ready for saving"
+                );
+            }
+            return presenterHasTrails.getBoolean(components.presenter);
+        } catch (IllegalAccessException exception) {
+            throw new IllegalStateException(
+                "native trail state inspection failed",
+                exception
+            );
+        }
     }
 
     public void disableWriter(Components components, String reason) {

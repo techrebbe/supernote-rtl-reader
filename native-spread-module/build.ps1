@@ -59,7 +59,7 @@ $verifiedTraceSources = @(
     ),
     @(
         $traceHelperTest,
-        'BB35E8E149AB47B5E28FC2DCD1B7BCCC9542666C8A52C00D59676317387D125D'
+        'A6C3C249D3239EE4FEC9DD465B01182E6A493965FC82F0230B78963D8611CA3D'
     )
 )
 foreach ($verifiedTraceSource in $verifiedTraceSources) {

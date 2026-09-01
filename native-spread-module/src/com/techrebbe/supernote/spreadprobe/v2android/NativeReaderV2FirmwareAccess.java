@@ -5,14 +5,17 @@ import android.graphics.Rect;
 import android.graphics.RectF;
 import android.net.Uri;
 import android.os.IBinder;
+import android.os.Parcel;
 import android.view.View;
 import android.widget.ImageView;
 
 import com.techrebbe.supernote.spreadprobe.v2.NativeAuthority;
 import com.techrebbe.supernote.spreadprobe.v2.NativeMarkPageInventory;
+import com.techrebbe.supernote.spreadprobe.v2.NativeWriterGeometry;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -457,6 +460,116 @@ public final class NativeReaderV2FirmwareAccess {
             disabledAreas
         );
         invoke(presenterSendWriteInfo, components.presenter);
+    }
+
+    /**
+     * Programs DrawPath, mark rendering, and the native writable region from
+     * one already-validated geometry. Partial acknowledgement is a failure;
+     * the caller must keep the writer disabled.
+     */
+    public void programWriterGeometry(
+        Components components,
+        NativeWriterGeometry geometry
+    ) {
+        if (components == null || geometry == null
+            || !components.writerReady()
+            || components.presenterRotation != geometry.rotation
+            || components.documentLayout.getWidth() != geometry.viewWidth
+            || components.documentLayout.getHeight() != geometry.viewHeight
+            || components.binder == null
+            || !components.binder.isBinderAlive()) {
+            throw new IllegalStateException(
+                "native writer geometry authority is incomplete"
+            );
+        }
+        Parcel request = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+        try {
+            request.writeInterfaceToken("android.demo.IMyService");
+            request.writeString("superNoteDocument");
+            request.writeInt(geometry.rotation);
+            request.writeInt(geometry.viewWidth);
+            request.writeInt(geometry.viewHeight);
+            request.writeInt(geometry.virtualWidth);
+            request.writeInt(geometry.virtualHeight);
+            request.writeInt(geometry.originX);
+            request.writeInt(geometry.originY);
+            request.writeFloat(1.0f);
+            boolean accepted = components.binder.transact(
+                10,
+                request,
+                reply,
+                0
+            );
+            String response = reply.readString();
+            if (!accepted || !"realTimeHandWriting".equals(response)) {
+                throw new IllegalStateException(
+                    "DrawPath rejected the exact writer geometry"
+                );
+            }
+        } catch (android.os.RemoteException exception) {
+            throw new IllegalStateException(
+                "DrawPath writer geometry transaction failed",
+                exception
+            );
+        } finally {
+            request.recycle();
+            reply.recycle();
+        }
+
+        synchronized (components.note) {
+            if (!Boolean.TRUE.equals(invoke(
+                noteScreenRotation,
+                components.note,
+                geometry.rotation + 2000,
+                geometry.originX,
+                geometry.originY
+            ))) {
+                throw new IllegalStateException(
+                    "native mark geometry was rejected"
+                );
+            }
+        }
+        enableWriterForAreas(
+            components,
+            disabledOutside(geometry)
+        );
+    }
+
+    private static List<Rect> disabledOutside(
+        NativeWriterGeometry geometry
+    ) {
+        int left = (int) geometry.writableBounds.left;
+        int top = (int) geometry.writableBounds.top;
+        int right = (int) geometry.writableBounds.right;
+        int bottom = (int) geometry.writableBounds.bottom;
+        ArrayList<Rect> disabled = new ArrayList<>();
+        if (left > 0) {
+            disabled.add(new Rect(0, 0, left, geometry.viewHeight));
+        }
+        if (top > 0 && right > left) {
+            disabled.add(new Rect(left, 0, right, top));
+        }
+        if (bottom < geometry.viewHeight && right > left) {
+            disabled.add(new Rect(
+                left,
+                bottom,
+                right,
+                geometry.viewHeight
+            ));
+        }
+        if (right < geometry.viewWidth) {
+            disabled.add(new Rect(
+                right,
+                0,
+                geometry.viewWidth,
+                geometry.viewHeight
+            ));
+        }
+        if (disabled.isEmpty()) {
+            disabled.add(new Rect(0, 0, 0, 0));
+        }
+        return disabled;
     }
 
     public NativeAuthority authority(

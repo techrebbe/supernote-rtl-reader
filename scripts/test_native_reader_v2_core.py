@@ -63,9 +63,9 @@ def check_architecture(source_root: pathlib.Path) -> None:
                     "public controller entry lacks owner-thread guard: "
                     + line.strip()
                 )
-    if len(entry_lines) != 11:
+    if len(entry_lines) != 12:
         fail(
-            "controller owner-thread scan expected 11 public entries, found "
+            "controller owner-thread scan expected 12 public entries, found "
             f"{len(entry_lines)}"
         )
 

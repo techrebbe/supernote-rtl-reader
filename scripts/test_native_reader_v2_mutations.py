@@ -74,6 +74,18 @@ MUTATIONS = (
         "native dirty-save acknowledgement",
     ),
     (
+        "NativeWriterGeometry.java",
+        "viewWidth - right,",
+        "0,",
+        "writer slot origin authority",
+    ),
+    (
+        "NativeReaderController.java",
+        "startNavigation(current, target);",
+        "clearContext(current);",
+        "swipe navigation must transfer writer authority",
+    ),
+    (
         "SpreadSnapshot.java",
         "if (writerAuthority == null || !writerAuthority.matches(",
         "if (writerAuthority == null || false && !writerAuthority.matches(",

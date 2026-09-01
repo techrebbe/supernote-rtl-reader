@@ -32,7 +32,7 @@ public final class NativeReaderController {
             ActivationMachine.Token token,
             PointD sourcePoint
         );
-        void navigateSwipe(
+        int navigationTarget(
             SpreadSnapshot sourceSnapshot,
             double deltaX,
             double deltaY
@@ -291,13 +291,13 @@ public final class NativeReaderController {
                     pointerId
                 );
                 if (current.fingerMoved) {
-                    clearContext(current);
                     try {
-                        port.navigateSwipe(
+                        int target = port.navigationTarget(
                             current.sourceSnapshot,
                             deltaX,
                             deltaY
                         );
+                        startNavigation(current, target);
                     } catch (Throwable throwable) {
                         hardDisable(null, "finger_swipe_failed");
                     }
@@ -321,6 +321,44 @@ public final class NativeReaderController {
             completeDroppedContactIfReady(current);
         }
         return InputResult.CONSUMED;
+    }
+
+    /** Starts the same save/disable/load transaction for native toolbar turns. */
+    public boolean requestNavigation(int targetPage) {
+        assertOwnerThread();
+        SpreadSnapshot snapshot = session.snapshot();
+        if (snapshot == null || retired || targetPage < 0
+            || targetPage >= snapshot.pageCount
+            || targetPage == snapshot.activePageIndex
+            || session.gestures().hasActiveGesture()) {
+            return false;
+        }
+        Context pending = new Context(
+            snapshot,
+            null,
+            null,
+            ReplayKind.NONE,
+            Double.NaN,
+            Double.NaN
+        );
+        pending.inputComplete = true;
+        synchronized (lock) {
+            if (retired || context != null) {
+                return false;
+            }
+            context = pending;
+        }
+        pending.activation = session.activation().begin(
+            snapshot,
+            targetPage,
+            ActivationMachine.CompletionMode.IMMEDIATE
+        );
+        if (pending.activation == null) {
+            clearContext(pending);
+            return false;
+        }
+        startActivation(pending);
+        return true;
     }
 
     public boolean onInactiveHover(
@@ -585,6 +623,39 @@ public final class NativeReaderController {
         pending.activation = token;
         pending.inputComplete = true;
         return true;
+    }
+
+    private void startNavigation(Context sourceGesture, int targetPage) {
+        if (targetPage < 0
+            || targetPage == sourceGesture.sourceSnapshot.activePageIndex) {
+            clearContext(sourceGesture);
+            return;
+        }
+        Context pending = new Context(
+            sourceGesture.sourceSnapshot,
+            null,
+            null,
+            ReplayKind.NONE,
+            sourceGesture.downX,
+            sourceGesture.downY
+        );
+        pending.inputComplete = true;
+        synchronized (lock) {
+            if (retired || context != sourceGesture) {
+                return;
+            }
+            context = pending;
+        }
+        pending.activation = session.activation().begin(
+            pending.sourceSnapshot,
+            targetPage,
+            ActivationMachine.CompletionMode.IMMEDIATE
+        );
+        if (pending.activation == null) {
+            clearContext(pending);
+            return;
+        }
+        startActivation(pending);
     }
 
     private void startActivation(Context pending) {

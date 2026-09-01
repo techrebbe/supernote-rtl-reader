@@ -47,7 +47,7 @@ public final class NativeReaderFirmwarePort
         void disableNativeWriter();
         void loadNativePage(int zeroBasedPageIndex);
         void replayNativeFingerHit(PointD sourcePoint);
-        void navigateNativeSpread(
+        int nativeSpreadNavigationTarget(
             SpreadSnapshot sourceSnapshot,
             double deltaX,
             double deltaY
@@ -292,7 +292,7 @@ public final class NativeReaderFirmwarePort
     }
 
     @Override
-    public void navigateSwipe(
+    public int navigationTarget(
         SpreadSnapshot sourceSnapshot,
         double deltaX,
         double deltaY
@@ -314,7 +314,13 @@ public final class NativeReaderFirmwarePort
                 "native navigation authority is stale"
             );
         }
-        bridge.navigateNativeSpread(sourceSnapshot, deltaX, deltaY);
+        int target = bridge.nativeSpreadNavigationTarget(
+            sourceSnapshot,
+            deltaX,
+            deltaY
+        );
+        return target >= 0 && target < sourceSnapshot.pageCount
+            && target != sourceSnapshot.activePageIndex ? target : -1;
     }
 
     @Override

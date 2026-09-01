@@ -20,6 +20,8 @@ public final class NativeReaderV2CoreTests {
         testStrictMarkerProperties();
         testNativeMarkPageInventory();
         testNativeSaveWitness();
+        testNativeWriterGeometry();
+        testTransactionalNavigationTargets();
         testV2CommittedMarkerClaim();
         testSnapshotAuthority();
         testGestureRouting();
@@ -204,6 +206,104 @@ public final class NativeReaderV2CoreTests {
         check(!witness.active(), "aborted native save witness is retired");
         expectThrows(() -> witness.finish(aborted),
             "stale native save witness token rejected");
+    }
+
+    private static void testNativeWriterGeometry() {
+        java.util.Properties properties = new java.util.Properties();
+        properties.setProperty(
+            NativeReaderV2Config.ENGINE_KEY,
+            NativeReaderV2Config.ENGINE_VALUE
+        );
+        properties.setProperty("enabled", "true");
+        NativeReaderV2Config config = NativeReaderV2Config.from(properties);
+        NativeAuthority authority = authority(0, 1L, 7L);
+        SpreadSnapshot right = NativeReaderV2LayoutFactory.landscape(
+            "doc", 1L, 7L, 9, 0,
+            new RectD(0, 0, 1872, 1404), 8.0,
+            config,
+            page -> new RectD(0, 0, 1404, 1872),
+            authority,
+            true
+        );
+        NativeWriterGeometry rightGeometry = NativeWriterGeometry.from(
+            right,
+            new RectD(0, 0, 1872, 1404),
+            90
+        );
+        check(rightGeometry.rotation == 90, "right writer rotation retained");
+        check(rightGeometry.viewWidth == 1872
+            && rightGeometry.viewHeight == 1404,
+            "writer uses physical canvas");
+        check(rightGeometry.virtualWidth == 932
+            && rightGeometry.virtualHeight == 1243,
+            "right writer uses fitted page content");
+        check(rightGeometry.originX == 0 && rightGeometry.originY == -81,
+            "right writer origin derived from affine");
+
+        NativeAuthority leftAuthority = authority(1, 1L, 8L);
+        SpreadSnapshot left = NativeReaderV2LayoutFactory.landscape(
+            "doc", 1L, 8L, 9, 1,
+            new RectD(0, 0, 1872, 1404), 8.0,
+            config,
+            page -> new RectD(0, 0, 1404, 1872),
+            leftAuthority,
+            true
+        );
+        NativeWriterGeometry leftGeometry = NativeWriterGeometry.from(
+            left,
+            new RectD(0, 0, 1872, 1404),
+            270
+        );
+        check(leftGeometry.originX == 940 && leftGeometry.originY == -81,
+            "left writer origin derived from affine");
+        near(0, leftGeometry.writableBounds.left, 0.0,
+            "writer bounds left");
+        near(81, leftGeometry.writableBounds.top, 0.0,
+            "writer bounds top");
+        near(932, leftGeometry.writableBounds.right, 0.0,
+            "writer bounds right");
+        near(1324, leftGeometry.writableBounds.bottom, 0.0,
+            "writer bounds bottom");
+
+        expectThrows(() -> NativeWriterGeometry.from(
+            right,
+            new RectD(0, 0, 1872, 1404),
+            0
+        ), "portrait presenter rotation rejected for spread writer");
+        expectThrows(() -> NativeWriterGeometry.from(
+            right,
+            new RectD(1, 0, 1873, 1404),
+            90
+        ), "translated physical canvas rejected");
+    }
+
+    private static void testTransactionalNavigationTargets() {
+        java.util.Properties properties = new java.util.Properties();
+        properties.setProperty(
+            NativeReaderV2Config.ENGINE_KEY,
+            NativeReaderV2Config.ENGINE_VALUE
+        );
+        properties.setProperty("enabled", "true");
+        NativeReaderV2Config rtl = NativeReaderV2Config.from(properties);
+        SpreadSnapshot first = spread(0, 1, 1, true);
+        equal(2, NativeReaderV2Navigation.swipeTarget(
+            first, rtl, 200, 0
+        ), "RTL right swipe advances to next transactional spread");
+        equal(-1, NativeReaderV2Navigation.swipeTarget(
+            first, rtl, -200, 0
+        ), "RTL backward swipe stops at document start");
+        equal(-1, NativeReaderV2Navigation.swipeTarget(
+            first, rtl, 10, 100
+        ), "vertical or sub-slop motion is not a page turn");
+
+        properties.setProperty("direction", "ltr");
+        NativeReaderV2Config ltr = NativeReaderV2Config.from(properties);
+        equal(2, NativeReaderV2Navigation.swipeTarget(
+            first, ltr, -200, 0
+        ), "LTR left swipe advances to next transactional spread");
+        equal(-1, NativeReaderV2Navigation.swipeTarget(
+            first, ltr, 200, 0
+        ), "LTR backward swipe stops at document start");
     }
 
     private static void testV2CommittedMarkerClaim() {
@@ -1085,33 +1185,39 @@ public final class NativeReaderV2CoreTests {
             swipe.gestureTokenId, 0, GestureAction.UP,
             1050, 500, 0, 20
         );
-        equal(Collections.singletonList("navigate"), swipePort.calls,
-            "finger swipe navigates without writer transfer");
+        equal(Arrays.asList("navigateTarget", "freeze", "save"),
+            swipePort.calls,
+            "finger swipe uses the writer-transfer transaction");
 
-        NativeReaderController.DownDecision tap = swipeController.onDown(
+        SpreadSession tapSession = initializedSession(1, 11, 1);
+        FakePort tapPort = new FakePort();
+        NativeReaderController tapController = new NativeReaderController(
+            tapSession, tapPort
+        );
+        NativeReaderController.DownDecision tap = tapController.onDown(
             0, 1200, 500, 0, 30,
             GestureRouter.Tool.FINGER, Collections.<RectD>emptyList()
         );
-        swipeController.onMotion(
+        tapController.onMotion(
             tap.gestureTokenId, 0, GestureAction.UP,
             1200, 500, 0, 40
         );
-        equal(Arrays.asList("navigate", "freeze", "save"), swipePort.calls,
+        equal(Arrays.asList("freeze", "save"), tapPort.calls,
             "finger tap begins activation after UP");
-        ActivationMachine.Token tapToken = swipePort.lastToken;
-        swipeController.onSourceSaveComplete(tapToken, true);
-        swipeController.onTargetLoadComplete(tapToken, 0, true);
-        swipeController.onTargetReady(
+        ActivationMachine.Token tapToken = tapPort.lastToken;
+        tapController.onSourceSaveComplete(tapToken, true);
+        tapController.onTargetLoadComplete(tapToken, 0, true);
+        tapController.onTargetReady(
             tapToken,
             authority(0, 11, 2),
             spread(0, 11, 2, true)
         );
-        equal("replayFinger", swipePort.calls.get(swipePort.calls.size() - 1),
+        equal("replayFinger", tapPort.calls.get(tapPort.calls.size() - 1),
             "finger hit replays after verified activation");
-        check(swipePort.replayedFinger != null,
+        check(tapPort.replayedFinger != null,
             "finger replay uses preserved source coordinate");
-        swipeController.onReplayComplete(tapToken, true);
-        equal("release", swipePort.calls.get(swipePort.calls.size() - 1),
+        tapController.onReplayComplete(tapToken, true);
+        equal("release", tapPort.calls.get(tapPort.calls.size() - 1),
             "finger activation releases after replay");
 
         SpreadSession hoverSession = initializedSession(1, 12, 1);
@@ -2198,12 +2304,13 @@ public final class NativeReaderV2CoreTests {
         }
 
         @Override
-        public void navigateNativeSpread(
+        public int nativeSpreadNavigationTarget(
             SpreadSnapshot sourceSnapshot,
             double deltaX,
             double deltaY
         ) {
-            calls.add("navigate");
+            calls.add("navigateTarget");
+            return 2;
         }
 
         @Override
@@ -2256,12 +2363,13 @@ public final class NativeReaderV2CoreTests {
         }
 
         @Override
-        public void navigateSwipe(
+        public int navigationTarget(
             SpreadSnapshot sourceSnapshot,
             double deltaX,
             double deltaY
         ) {
-            calls.add("navigate");
+            calls.add("navigateTarget");
+            return 0;
         }
 
         @Override

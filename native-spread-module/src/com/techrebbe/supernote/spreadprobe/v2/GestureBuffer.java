@@ -79,7 +79,7 @@ public final class GestureBuffer {
         }
         int prospectiveCount = samples.size() + 1;
         if (prospectiveCount > maxSamples
-            || prospectiveCount * ESTIMATED_BYTES_PER_SAMPLE > maxBytes
+            || (long) prospectiveCount * ESTIMATED_BYTES_PER_SAMPLE > maxBytes
             || sample.eventTimeMs - firstEventTimeMs > maxDurationMs) {
             return fail();
         }

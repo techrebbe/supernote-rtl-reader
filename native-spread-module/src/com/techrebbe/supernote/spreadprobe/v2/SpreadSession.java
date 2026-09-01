@@ -18,7 +18,8 @@ public final class SpreadSession {
         if (current != null) {
             if (!next.documentId.equals(current.documentId)
                 || next.activityGeneration != current.activityGeneration
-                || next.layoutGeneration <= current.layoutGeneration) {
+                || next.layoutGeneration <= current.layoutGeneration
+                || gestureRouter.hasActiveGesture()) {
                 return false;
             }
             ActivationMachine.Status status = activationMachine.status();
@@ -47,7 +48,9 @@ public final class SpreadSession {
             || !activationMachine.targetPublished(token, next)) {
             return false;
         }
-        gestureRouter.retire();
+        // A buffered pen contact can still be physically down when the target
+        // becomes authoritative. Its DOWN-time route remains valid until the
+        // matching UP/CANCEL; the controller retires it at that terminal.
         published.set(next);
         return true;
     }

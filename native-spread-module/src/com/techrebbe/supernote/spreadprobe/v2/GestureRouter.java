@@ -77,7 +77,14 @@ public final class GestureRouter {
             PageSlot slot = snapshot.slotAt(x, y);
             if (slot != null) {
                 page = slot.sourcePageIndex;
-                if (page == snapshot.activePageIndex && snapshot.writerReady) {
+                boolean penOutsideContent =
+                    (tool == Tool.STYLUS || tool == Tool.ERASER)
+                    && !slot.containsContent(x, y);
+                if (penOutsideContent) {
+                    route = Route.BLOCKED;
+                } else if (page == snapshot.activePageIndex
+                    && snapshot.writerReady
+                    && isDocumentTool(tool)) {
                     route = Route.ACTIVE_DOCUMENT;
                 } else if (page >= 0 && snapshot.writerReady
                     && page != snapshot.activePageIndex
@@ -134,6 +141,10 @@ public final class GestureRouter {
         current = null;
     }
 
+    public synchronized boolean hasActiveGesture() {
+        return current != null;
+    }
+
     public Route classifyHover(
         SpreadSnapshot snapshot,
         double x,
@@ -159,7 +170,15 @@ public final class GestureRouter {
         if (!snapshot.writerReady || slot.isBlank()) {
             return Route.BLOCKED;
         }
+        if (!slot.containsContent(x, y)) {
+            return Route.BLOCKED;
+        }
         return slot.sourcePageIndex == snapshot.activePageIndex
             ? Route.ACTIVE_DOCUMENT : Route.ACTIVATE_AND_BUFFER_PEN;
+    }
+
+    private static boolean isDocumentTool(Tool tool) {
+        return tool == Tool.FINGER || tool == Tool.STYLUS
+            || tool == Tool.ERASER;
     }
 }

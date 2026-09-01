@@ -59,6 +59,85 @@ MUTATIONS = (
         "            || authority.pageIndex != token.targetPage",
         "activation-generation advance",
     ),
+    (
+        "PageSlot.java",
+        "return sourceBox.contains(source.x, source.y);",
+        "return true;",
+        "exact rotated-page content hit",
+    ),
+    (
+        "SpreadSnapshot.java",
+        "|| leftOrFull.screenBounds.right\n"
+        "                    > right.screenBounds.left",
+        "|| leftOrFull.screenBounds.right\n"
+        "                    < right.screenBounds.left",
+        "physical slot order",
+    ),
+    (
+        "SpreadSession.java",
+        "|| next.layoutGeneration <= current.layoutGeneration\n"
+        "                || gestureRouter.hasActiveGesture())",
+        "|| next.layoutGeneration <= current.layoutGeneration)",
+        "contact-safe layout publication",
+    ),
+    (
+        "SpreadSession.java",
+        "        published.set(next);\n"
+        "        return true;\n"
+        "    }\n\n"
+        "    public synchronized boolean publishRollback",
+        "        gestureRouter.retire();\n"
+        "        published.set(next);\n"
+        "        return true;\n"
+        "    }\n\n"
+        "    public synchronized boolean publishRollback",
+        "pen route survives target publication",
+    ),
+    (
+        "NativeReaderController.java",
+        "if (current == null || current.sourceSaveHandled) {",
+        "if (current == null) {",
+        "duplicate source callback idempotency",
+    ),
+    (
+        "NativeReaderController.java",
+        "if (retired || context != expected || expected.replayRequested\n"
+        "                || !expected.targetPublished || !expected.inputComplete) {\n"
+        "                return;\n"
+        "            }\n"
+        "            initialKind = expected.replayKind;",
+        "if (retired || context != expected || expected.replayRequested\n"
+        "                || !expected.targetPublished) {\n"
+        "                return;\n"
+        "            }\n"
+        "            initialKind = expected.replayKind;",
+        "replay waits for input terminal",
+    ),
+    (
+        "NativeReaderController.java",
+        "    public boolean onInactiveHover(\n"
+        "        double screenX,\n"
+        "        double screenY,\n"
+        "        List<RectD> visibleNativeChrome\n"
+        "    ) {\n"
+        "        assertOwnerThread();",
+        "    public boolean onInactiveHover(\n"
+        "        double screenX,\n"
+        "        double screenY,\n"
+        "        List<RectD> visibleNativeChrome\n"
+        "    ) {",
+        "controller thread confinement",
+    ),
+    (
+        "NativeReaderController.java",
+        "if (replayMayHaveMutated) {\n"
+        "            hardDisable(token, "
+        "\"native_replay_timeout_uncertain\");",
+        "if (replayMayHaveMutated) {\n"
+        "            requestRollback(current, "
+        "\"native_replay_timeout_uncertain\");",
+        "uncertain replay timeout containment",
+    ),
 )
 
 

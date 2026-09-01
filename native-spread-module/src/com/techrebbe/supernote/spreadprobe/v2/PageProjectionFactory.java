@@ -41,6 +41,22 @@ public final class PageProjectionFactory {
         Objects.requireNonNull(nativePageToCanvas, "nativePageToCanvas");
         Objects.requireNonNull(physicalSlot, "physicalSlot");
 
+        double slotTolerance = Math.max(
+            0.5,
+            Math.max(nativeCanvas.width(), nativeCanvas.height()) * 1.0e-9
+        );
+        if (!nativeCanvas.contains(
+            new PointD(physicalSlot.left, physicalSlot.top),
+            slotTolerance
+        ) || !nativeCanvas.contains(
+            new PointD(physicalSlot.right, physicalSlot.bottom),
+            slotTolerance
+        )) {
+            throw new IllegalArgumentException(
+                "physical slot escapes the native canvas"
+            );
+        }
+
         RectD nativePageBounds = nativePageToCanvas.mapBounds(sourceBox);
         double nativeTolerance = Math.max(
             0.5,

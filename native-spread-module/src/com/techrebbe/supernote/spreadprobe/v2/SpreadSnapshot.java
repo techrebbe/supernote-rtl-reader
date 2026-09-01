@@ -88,6 +88,8 @@ public final class SpreadSnapshot {
                 || (!leftOrFull.isBlank() && !right.isBlank()
                     && leftOrFull.sourcePageIndex == right.sourcePageIndex)
                 || leftOrFull.screenBounds.overlaps(right.screenBounds)
+                || leftOrFull.screenBounds.right
+                    > right.screenBounds.left
                 || slotForPage(activePageIndex) == null) {
                 throw new IllegalArgumentException("invalid spread surfaces");
             }

@@ -9,6 +9,7 @@ public final class PageSlot {
     public final Side side;
     public final RectD sourceBox;
     public final RectD screenBounds;
+    public final RectD contentBounds;
     public final Affine2D sourceToScreen;
 
     public PageSlot(
@@ -29,6 +30,7 @@ public final class PageSlot {
             sourceToScreen,
             "sourceToScreen"
         );
+        this.contentBounds = sourceToScreen.mapBounds(sourceBox);
         validateMappedCorners();
     }
 
@@ -41,6 +43,7 @@ public final class PageSlot {
         this.sourceBox = null;
         this.screenBounds = Objects.requireNonNull(screenBounds, "screenBounds");
         this.sourceToScreen = null;
+        this.contentBounds = null;
     }
 
     public static PageSlot blank(Side side, RectD screenBounds) {
@@ -53,6 +56,14 @@ public final class PageSlot {
 
     public boolean containsScreen(double x, double y) {
         return screenBounds.contains(x, y);
+    }
+
+    public boolean containsContent(double x, double y) {
+        if (contentBounds == null || !contentBounds.contains(x, y)) {
+            return false;
+        }
+        PointD source = sourceToScreen.derivedInverse().map(x, y);
+        return sourceBox.contains(source.x, source.y);
     }
 
     public PointD mapToScreen(double sourceX, double sourceY) {
@@ -77,10 +88,10 @@ public final class PageSlot {
             Math.max(screenBounds.width(), screenBounds.height()) * 1.0e-9
         );
         PointD[] corners = new PointD[] {
-            sourceToScreen.map(sourceBox.left, sourceBox.top),
-            sourceToScreen.map(sourceBox.right, sourceBox.top),
-            sourceToScreen.map(sourceBox.left, sourceBox.bottom),
-            sourceToScreen.map(sourceBox.right, sourceBox.bottom),
+            new PointD(contentBounds.left, contentBounds.top),
+            new PointD(contentBounds.right, contentBounds.top),
+            new PointD(contentBounds.left, contentBounds.bottom),
+            new PointD(contentBounds.right, contentBounds.bottom),
         };
         for (PointD corner : corners) {
             if (!screenBounds.contains(corner, tolerance)) {

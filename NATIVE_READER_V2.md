@@ -45,6 +45,14 @@ Every callback validates the same session, generation, page, component, and
 gesture token. No tool maintains a parallel interpretation of the current
 page or geometry.
 
+The controller is confined to the reader thread that constructs it. Pen,
+finger, and hover input already arrive there; every asynchronous firmware or
+Binder acknowledgement is marshalled back to that same thread before it may
+advance the state machine. Cross-thread entry is a programming error and is
+rejected before authority or native state changes. Native calls are made only
+after releasing the controller's short state monitor, so a synchronous native
+callback on the owner thread remains safe and cannot deadlock.
+
 ## Two page surfaces
 
 Both slots use the same authoritative affine for PDF pixels, committed ink,

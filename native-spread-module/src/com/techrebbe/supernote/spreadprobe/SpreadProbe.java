@@ -81,6 +81,7 @@ import com.techrebbe.supernote.spreadprobe.v2.SpreadPairing;
 import com.techrebbe.supernote.spreadprobe.v2.SpreadSession;
 import com.techrebbe.supernote.spreadprobe.v2.SpreadSnapshot;
 import com.techrebbe.supernote.spreadprobe.v2.android.NativeReaderFirmwareAdmission;
+import com.techrebbe.supernote.spreadprobe.v2android.NativeReaderV2PackageAdmission;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -2183,13 +2184,13 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         File documentApk = new File(TARGET_DOCUMENT_APK);
         long installedApkLength = documentApk.isFile()
             ? documentApk.length() : -1L;
-        if (installedApkLength != TARGET_DOCUMENT_APK_LENGTH) {
-            log("disabled document_package_mismatch apk_length="
-                + installedApkLength + " source=" + TARGET_DOCUMENT_APK);
-            return;
-        }
 
         try {
+            NativeReaderV2PackageAdmission.Report packageAdmission =
+                NativeReaderV2PackageAdmission.verify(
+                    documentApk,
+                    Build.FINGERPRINT
+                );
             NativeReaderFirmwareAdmission.Report admission =
                 NativeReaderFirmwareAdmission.verify(
                     loadPackageParam.classLoader
@@ -2198,7 +2199,9 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             nativeReaderV2SymbolDigest = admission.symbolDigest;
             log("v2_firmware_admitted contract=" + admission.contractId
                 + " symbols=" + admission.symbolCount
-                + " digest=" + admission.symbolDigest);
+                + " digest=" + admission.symbolDigest
+                + " apk_sha256=" + packageAdmission.apkSha256
+                + " apk_inode=" + packageAdmission.inode);
         } catch (Throwable throwable) {
             nativeReaderV2FirmwareAdmitted = false;
             nativeReaderV2SymbolDigest = null;

@@ -13,9 +13,9 @@ import java.util.Arrays;
  */
 public final class NativeReaderFirmwareAdmission {
     public static final String CONTRACT_ID =
-        "supernote-document-1.02.446-native-reader-v2-symbols-v1";
+        "supernote-document-1.02.446-native-reader-v2-symbols-v2";
     public static final String EXPECTED_SYMBOL_DIGEST =
-        "1bfb31d16acc123ad0c4b3ab8c5e068d45a6c61d2778a430767d4bda26498b49";
+        "f3df28a4f2c4a8e002371415c2420f49184c5c3971534ebcfe4ce4ffc66ba6d5";
 
     private static final String ACTIVITY =
         "com.supernote.document.document.DocumentActivity";
@@ -25,21 +25,31 @@ public final class NativeReaderFirmwareAdmission {
         "com.supernote.document.document.PageInfo";
     private static final String PRESENTER =
         "com.supernote.document.handwrite.HandWritePresenter";
+    private static final String HAND_WRITE_VIEW =
+        "com.supernote.document.handwrite.HandWriteView";
+    private static final String HAND_WRITE_CLIENT =
+        "com.supernote.document.handwrite.HandWriteClient";
     private static final String NATIVE_CALLBACK = ACTIVITY + "$6";
 
     private static final String[] SYMBOLS = new String[] {
         field(ACTIVITY, "documentViewModel", VIEW_MODEL),
         field(ACTIVITY, "handWritePresenter", PRESENTER),
         field(ACTIVITY, "handWriteView",
-            "com.supernote.document.handwrite.HandWriteView"),
+            HAND_WRITE_VIEW),
         field(ACTIVITY, "mImage",
             "com.supernote.document.utils.view.DocumentImageView"),
+        field(ACTIVITY, "mContentView", "android.view.View"),
+        field(ACTIVITY, "documentViewLayout", "android.widget.RelativeLayout"),
         field(ACTIVITY, "eventCallBack",
             "com.ratta.supernote.eventlibrary.NativeEventCallBack"),
         field(ACTIVITY, "documentImageReady", "boolean"),
         field(ACTIVITY, "handWriteInitReady", "boolean"),
         method(ACTIVITY, "dispatchTouchEvent", "boolean",
             "android.view.MotionEvent"),
+        method(ACTIVITY, "onCreate", "void", "android.os.Bundle"),
+        method(ACTIVITY, "onResume", "void"),
+        method(ACTIVITY, "onPause", "void"),
+        method(ACTIVITY, "onDestroy", "void"),
         method(ACTIVITY, "onConfigurationChanged", "void",
             "android.content.res.Configuration"),
         method(ACTIVITY, "loadPageChanged", "void",
@@ -92,6 +102,8 @@ public final class NativeReaderFirmwareAdmission {
         method(PAGE_INFO, "getOffsetX", "int"),
         method(PAGE_INFO, "getOffsetY", "int"),
         method(PAGE_INFO, "getPage", "int"),
+        method(PAGE_INFO, "setOriginBitmap", "void", "android.graphics.Bitmap"),
+        method(PAGE_INFO, "setDisplayBitmap", "void", "android.graphics.Bitmap"),
         method(PAGE_INFO, "originBitmapIsLandscape", "boolean"),
 
         field(PRESENTER, "currentPage", "int"),
@@ -107,6 +119,12 @@ public final class NativeReaderFirmwareAdmission {
         method(PRESENTER, "disableHandWrite", "void", "java.lang.String"),
         method(PRESENTER, "loadPage", "void",
             "int", "android.graphics.RectF"),
+        method(PRESENTER, "getCurrentPage", "int"),
+        method(PRESENTER, "getMarkPath", "java.lang.String"),
+        method(PRESENTER, "getHandWriteOriginBitmap",
+            "android.graphics.Bitmap", "int"),
+        method(PRESENTER, "showDisplayBitmap", "void",
+            "int", "android.graphics.RectF"),
         method(PRESENTER, "sendWriteInfo", "void"),
         method(PRESENTER, "setDisableAreaList", "void",
             "java.lang.String", "java.util.List"),
@@ -119,6 +137,12 @@ public final class NativeReaderFirmwareAdmission {
         method(PRESENTER, "reWriteTrails", "void"),
         method(PRESENTER, "undo", "void"),
         method(PRESENTER, "redo", "void"),
+
+        method(HAND_WRITE_VIEW, "setBitmap", "void", "android.graphics.Bitmap"),
+        method(HAND_WRITE_VIEW, "cancelAreaSelect", "void"),
+        method(HAND_WRITE_VIEW, "clearAreaSelectionView", "void"),
+
+        field(HAND_WRITE_CLIENT, "iBinder", "android.os.IBinder"),
 
         field(NATIVE_CALLBACK, "mPressure", "int"),
         method(NATIVE_CALLBACK, "onDigitalPosition", "void", "int", "int"),

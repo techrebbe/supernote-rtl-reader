@@ -562,7 +562,7 @@ def check(repo_root: Path) -> None:
         ),
         (
             module_path,
-            "7089e303fa926487b9b0b27d6d2698d5358c7f0239668457b55e25805a52c619",
+            "5563a6746b1c043ad28444ff09df186d2e081fc0ae53628db2c92624bfbc2d57",
             "SpreadProbe.java",
         ),
         (
@@ -618,6 +618,43 @@ def check(repo_root: Path) -> None:
                 f"{label} changed without an explicit frozen-source digest "
                 f"review: expected {expected_digest}, got {actual_digest}"
             )
+
+    shadow_method = extract_java_method(
+        module,
+        "private static void publishV2Shadow(",
+        "Native Reader v2 shadow publication",
+    )
+    require_markers(
+        shadow_method,
+        (
+            "SpreadPairing.forPage(",
+            "new SpreadSnapshot(",
+            "state.session.publish(snapshot)",
+            "verifyV2ShadowAgreement(snapshot, readySnapshot)",
+            'log("v2_shadow_rejected reason=authority_mismatch "',
+        ),
+        "Native Reader v2 shadow publication",
+    )
+    for forbidden in (
+        "XposedHelpers",
+        "param.setResult",
+        "setImageBitmap",
+        "saveTrails",
+        "loadPage",
+        "sendWriteInfo",
+        "nativeSetCalibrationEnabled",
+        "showOverlay",
+        "showStatusOverlay",
+    ):
+        if forbidden in shadow_method:
+            fail(
+                "Native Reader v2 shadow publication changes native behavior: "
+                + forbidden
+            )
+    if module.count("publishV2Shadow(") != 2:
+        fail("Native Reader v2 shadow must have one definition and one call")
+    if "V2ShadowState v2State = V2_SHADOW_STATES.remove(activity);" not in module:
+        fail("Native Reader v2 shadow state is not retired with its Activity")
 
     workflow_code = mask_yaml_comments(workflow)
     require_markers(
@@ -3795,7 +3832,7 @@ def check(repo_root: Path) -> None:
     weak_map_declarations = tuple(
         re.finditer(r"new\s+WeakHashMap\s*<\s*>\s*\(\s*\)", module)
     )
-    if len(weak_map_declarations) != 23:
+    if len(weak_map_declarations) != 25:
         fail(
             "per-activity weak-map inventory changed without an explicit "
             f"concurrency review: found {len(weak_map_declarations)}"

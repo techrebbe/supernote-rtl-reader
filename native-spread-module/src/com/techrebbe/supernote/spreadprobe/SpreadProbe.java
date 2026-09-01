@@ -73,6 +73,14 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
+import com.techrebbe.supernote.spreadprobe.v2.Affine2D;
+import com.techrebbe.supernote.spreadprobe.v2.NativeAuthority;
+import com.techrebbe.supernote.spreadprobe.v2.PageSlot;
+import com.techrebbe.supernote.spreadprobe.v2.RectD;
+import com.techrebbe.supernote.spreadprobe.v2.SpreadPairing;
+import com.techrebbe.supernote.spreadprobe.v2.SpreadSession;
+import com.techrebbe.supernote.spreadprobe.v2.SpreadSnapshot;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -188,6 +196,8 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         new AtomicLong();
     private static final AtomicLong DOCUMENT_CONTEXT_GENERATION_COUNTER =
         new AtomicLong();
+    private static final AtomicLong V2_COMPONENT_ID_COUNTER =
+        new AtomicLong(1L);
     private static final ScheduledExecutorService LOW_LATENCY_LOG_EXECUTOR =
         Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
             @Override
@@ -353,6 +363,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         new ConcurrentHashMap<>();
     private static final Map<Activity, Long> DOCUMENT_CONTEXT_GENERATIONS =
         new ConcurrentHashMap<>();
+    private static final Map<Activity, V2ShadowState> V2_SHADOW_STATES =
+        Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<Object, Long> V2_COMPONENT_IDS =
+        Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<Activity, Boolean> DOCUMENT_CONTEXTS_PRESENTED =
         new ConcurrentHashMap<>();
     private static final Map<Activity, Long> DOCUMENT_RECEIVE_TOMBSTONES =
@@ -464,6 +478,18 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         Activity activity;
         boolean counted;
         PageActivationSourceSaveToken sourceToken;
+    }
+
+    private static final class V2ShadowState {
+        final String documentId;
+        final long activityGeneration;
+        final AtomicLong layoutGenerations = new AtomicLong();
+        final SpreadSession session = new SpreadSession();
+
+        V2ShadowState(String documentId, long activityGeneration) {
+            this.documentId = documentId;
+            this.activityGeneration = activityGeneration;
+        }
     }
 
     private static final class ExplicitCanonicalSaveScope {
@@ -13993,6 +14019,10 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         NAVIGATION_FAIL_CLOSED_DOCUMENTS.remove(activity);
         PROTECTED_VERIFICATIONS.remove(activity);
         PAGE_LOAD_GENERATIONS.remove(activity);
+        V2ShadowState v2State = V2_SHADOW_STATES.remove(activity);
+        if (v2State != null) {
+            v2State.session.retire();
+        }
         log("activity_resources_released active_cleared=" + activeCleared
             + " recycled_bitmaps=" + recycled);
     }
@@ -17409,6 +17439,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 outputWidth,
                 outputHeight
             );
+        PenInputSnapshot v2ReadySnapshot = null;
         int composePresenterMarkPage = XposedHelpers.getIntField(
             presenter,
             "currentPage"
@@ -17531,6 +17562,7 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
                 }
             }
             if (readyPublished) {
+                v2ReadySnapshot = readySnapshot;
                 PageActivationTransaction readyTransaction =
                     PAGE_ACTIVATION_TRANSACTIONS.get(activity);
                 if (readyTransaction != null
@@ -17595,6 +17627,24 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
             );
         }
 
+        publishV2Shadow(
+            activity,
+            config,
+            currentPage,
+            pageCount,
+            pair,
+            leftPage,
+            rightPage,
+            leftBitmap,
+            rightBitmap,
+            leftLayout,
+            rightLayout,
+            outputWidth,
+            outputHeight,
+            generation,
+            v2ReadySnapshot
+        );
+
         Bitmap previous = COMPOSITES.put(activity, composite);
         if (previous != null && previous != composite && !previous.isRecycled()) {
             previous.recycle();
@@ -17634,6 +17684,234 @@ public final class SpreadProbe implements IXposedHookLoadPackage {
         reapplyCanonicalCommittedInk(activity, handWriteView);
         applySpreadDigestOverlay(activity, "spread_composed");
         return true;
+    }
+
+    private static void publishV2Shadow(
+        Activity activity,
+        SpreadConfig config,
+        int currentPage,
+        int pageCount,
+        SpreadPair pair,
+        int leftPage,
+        int rightPage,
+        Bitmap leftBitmap,
+        Bitmap rightBitmap,
+        SpreadPageLayout leftLayout,
+        SpreadPageLayout rightLayout,
+        int outputWidth,
+        int outputHeight,
+        int composeGeneration,
+        PenInputSnapshot readySnapshot
+    ) {
+        if (activity == null || config == null || pair == null
+            || leftLayout == null || rightLayout == null
+            || outputWidth <= 0 || outputHeight <= 0
+            || config.nativeFill) {
+            log("v2_shadow_rejected reason=unsupported_or_missing_geometry");
+            return;
+        }
+        Long documentGeneration = DOCUMENT_CONTEXT_GENERATIONS.get(activity);
+        if (documentGeneration == null || documentGeneration.longValue() <= 0L) {
+            log("v2_shadow_rejected reason=document_generation_missing");
+            return;
+        }
+        String documentId = config.documentDevice + ":" + config.documentInode
+            + ":" + config.documentChangeSeconds + ":"
+            + config.documentChangeNanos + ":" + config.documentLength;
+        V2ShadowState state;
+        synchronized (V2_SHADOW_STATES) {
+            state = V2_SHADOW_STATES.get(activity);
+            if (state == null
+                || !state.documentId.equals(documentId)
+                || state.activityGeneration != documentGeneration.longValue()) {
+                if (state != null) {
+                    state.session.retire();
+                }
+                state = new V2ShadowState(
+                    documentId,
+                    documentGeneration.longValue()
+                );
+                V2_SHADOW_STATES.put(activity, state);
+            }
+        }
+        try {
+            SpreadPairing.Pair expected = SpreadPairing.forPage(
+                currentPage,
+                pageCount,
+                SpreadPairing.Direction.RTL,
+                config.coverSeparate
+            );
+            if (expected.leftPage != leftPage
+                || expected.rightPage != rightPage
+                || !pair.contains(currentPage)) {
+                throw new IllegalStateException("legacy pairing disagrees with v2");
+            }
+            float gutter = config.showDivider ? 8.0f : 0.0f;
+            float half = outputWidth / 2.0f;
+            RectD leftPhysical = new RectD(
+                0.0,
+                0.0,
+                half - gutter / 2.0f,
+                outputHeight
+            );
+            RectD rightPhysical = new RectD(
+                half + gutter / 2.0f,
+                0.0,
+                outputWidth,
+                outputHeight
+            );
+            PageSlot leftSlot = v2PageSlot(
+                leftPage,
+                PageSlot.Side.LEFT,
+                leftBitmap,
+                leftLayout.destination,
+                leftPhysical
+            );
+            PageSlot rightSlot = v2PageSlot(
+                rightPage,
+                PageSlot.Side.RIGHT,
+                rightBitmap,
+                rightLayout.destination,
+                rightPhysical
+            );
+            long layoutGeneration = state.layoutGenerations.incrementAndGet();
+            NativeAuthority writerAuthority = null;
+            boolean writerReady = readySnapshot != null
+                && readySnapshot.geometryReady
+                && readySnapshot.currentPage == currentPage
+                && readySnapshot.writerAuthority != null;
+            if (writerReady) {
+                PenContactIdentityCapture authority =
+                    readySnapshot.writerAuthority;
+                writerAuthority = new NativeAuthority(
+                    documentId,
+                    state.activityGeneration,
+                    layoutGeneration,
+                    currentPage,
+                    v2ComponentId(authority.viewModel),
+                    v2ComponentId(authority.presenter),
+                    v2ComponentId(authority.note),
+                    v2ComponentId(authority.client),
+                    currentPage
+                );
+            }
+            SpreadSnapshot snapshot = new SpreadSnapshot(
+                documentId,
+                state.activityGeneration,
+                layoutGeneration,
+                pageCount,
+                currentPage,
+                SpreadSnapshot.Mode.SPREAD,
+                leftSlot,
+                rightSlot,
+                writerAuthority,
+                writerReady
+            );
+            if (!state.session.publish(snapshot)) {
+                throw new IllegalStateException("v2 session rejected publication");
+            }
+            verifyV2ShadowAgreement(snapshot, readySnapshot);
+            log("v2_shadow_published compose_generation=" + composeGeneration
+                + " layout_generation=" + layoutGeneration
+                + " current=" + currentPage
+                + " left=" + leftPage
+                + " right=" + rightPage
+                + " writer_ready=" + writerReady);
+        } catch (Throwable throwable) {
+            state.session.retire();
+            synchronized (V2_SHADOW_STATES) {
+                V2_SHADOW_STATES.remove(activity, state);
+            }
+            log("v2_shadow_rejected reason=authority_mismatch " + throwable);
+        }
+    }
+
+    private static PageSlot v2PageSlot(
+        int page,
+        PageSlot.Side side,
+        Bitmap bitmap,
+        RectF destination,
+        RectD physicalSlot
+    ) {
+        if (page < 0) {
+            return PageSlot.blank(side, physicalSlot);
+        }
+        if (!usable(bitmap) || destination == null
+            || destination.width() <= 0.0f || destination.height() <= 0.0f) {
+            throw new IllegalArgumentException("visible page geometry missing");
+        }
+        RectD source = new RectD(
+            0.0,
+            0.0,
+            bitmap.getWidth(),
+            bitmap.getHeight()
+        );
+        Affine2D sourceToScreen = new Affine2D(
+            destination.width() / bitmap.getWidth(),
+            0.0,
+            0.0,
+            destination.height() / bitmap.getHeight(),
+            destination.left,
+            destination.top
+        );
+        return new PageSlot(
+            page,
+            side,
+            source,
+            physicalSlot,
+            sourceToScreen
+        );
+    }
+
+    private static long v2ComponentId(Object component) {
+        if (component == null) {
+            throw new IllegalArgumentException("native component missing");
+        }
+        synchronized (V2_COMPONENT_IDS) {
+            Long existing = V2_COMPONENT_IDS.get(component);
+            if (existing != null) {
+                return existing.longValue();
+            }
+            long assigned = V2_COMPONENT_ID_COUNTER.getAndIncrement();
+            if (assigned <= 0L) {
+                throw new IllegalStateException("v2 component identity exhausted");
+            }
+            V2_COMPONENT_IDS.put(component, Long.valueOf(assigned));
+            return assigned;
+        }
+    }
+
+    private static void verifyV2ShadowAgreement(
+        SpreadSnapshot snapshot,
+        PenInputSnapshot legacy
+    ) {
+        if (snapshot == null) {
+            throw new IllegalArgumentException("v2 snapshot missing");
+        }
+        if (legacy == null) {
+            if (snapshot.writerReady) {
+                throw new IllegalStateException("v2 writer exceeded legacy");
+            }
+            return;
+        }
+        if (!snapshot.writerReady || !legacy.geometryReady
+            || snapshot.activePageIndex != legacy.currentPage) {
+            throw new IllegalStateException("writer readiness disagrees");
+        }
+        PageSlot left = snapshot.leftOrFull;
+        PageSlot right = snapshot.right;
+        if ((!left.isBlank() && legacy.pageAt(
+                (float) (left.screenBounds.left + left.screenBounds.width() / 2.0),
+                (float) (left.screenBounds.top + left.screenBounds.height() / 2.0)
+            ) != left.sourcePageIndex)
+            || (!right.isBlank() && legacy.pageAt(
+                (float) (right.screenBounds.left
+                    + right.screenBounds.width() / 2.0),
+                (float) (right.screenBounds.top
+                    + right.screenBounds.height() / 2.0)
+            ) != right.sourcePageIndex)) {
+            throw new IllegalStateException("physical page routing disagrees");
+        }
     }
 
     private static void reapplyCanonicalCommittedInk(

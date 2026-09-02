@@ -70,6 +70,82 @@ STRICT_NATIVE_BUILD = '''        if ! build_android_apk "$project_root" "$gen_cf
     fi
 '''
 
+APK_COPY_FUNCTION_MARKER = '''# =========================================================
+# Function: copy_apk_and_update_config
+'''
+STRICT_APK_RESIGNING = '''# =========================================================
+# Function: sign_compacted_apk
+# Purpose: The upstream custom task rewrites a signed APK while removing
+#          unused native libraries. Re-align and re-sign those final bytes.
+# =========================================================
+sign_compacted_apk() {
+    local project_root="$1"
+    local apk_path="$2"
+    local sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+    if [[ -z "$sdk_root" ]]; then
+        write_color_output "Android SDK root is unavailable for final APK signing" "Red"
+        return 1
+    fi
+    if command -v cygpath >/dev/null 2>&1 && [[ "$sdk_root" =~ ^[A-Za-z]:[\\/] ]]; then
+        sdk_root="$(cygpath -u "$sdk_root")"
+    fi
+    local build_tools_root="$sdk_root/build-tools"
+    [[ -d "$build_tools_root" ]] || {
+        write_color_output "Android build-tools directory is unavailable" "Red"
+        return 1
+    }
+    local build_tools
+    build_tools="$(find "$build_tools_root" -mindepth 1 -maxdepth 1 -type d -print | sort -V | tail -n 1)"
+    [[ -n "$build_tools" ]] || {
+        write_color_output "No Android build-tools version is installed" "Red"
+        return 1
+    }
+    local zipalign="$build_tools/zipalign"
+    local apksigner="$build_tools/apksigner"
+    if [[ -f "${zipalign}.exe" ]]; then zipalign="${zipalign}.exe"; fi
+    if [[ -f "${apksigner}.bat" ]]; then apksigner="${apksigner}.bat"; fi
+    [[ -f "$zipalign" && -f "$apksigner" ]] || {
+        write_color_output "zipalign/apksigner is unavailable" "Red"
+        return 1
+    }
+    local keystore="$project_root/android/app/debug.keystore"
+    [[ -f "$keystore" ]] || {
+        write_color_output "Generated Android signing keystore is missing" "Red"
+        return 1
+    }
+    local aligned="${apk_path%.apk}-aligned.apk"
+    local signed="${apk_path%.apk}-signed.apk"
+    rm -f "$aligned" "$signed"
+    "$zipalign" -f 4 "$apk_path" "$aligned" || return 1
+    "$apksigner" sign \\
+        --ks "$keystore" \\
+        --ks-pass pass:android \\
+        --key-pass pass:android \\
+        --ks-key-alias androiddebugkey \\
+        --out "$signed" \\
+        "$aligned" || return 1
+    "$apksigner" verify --verbose --print-certs "$signed" >/dev/null || return 1
+    printf '%s\\n' "$signed"
+}
+
+'''
+
+UPSTREAM_APK_SELECTION = '''    [[ -z "$apk_path" ]] && { write_color_output "Generated APK not found" "Red"; return 1; }
+
+    local new_apk="app.npk"
+'''
+STRICT_APK_SELECTION = '''    [[ -z "$apk_path" ]] && { write_color_output "Generated APK not found" "Red"; return 1; }
+
+    local signed_apk
+    if ! signed_apk="$(sign_compacted_apk "$project_root" "$apk_path")"; then
+        write_color_output "Final compacted APK signing failed" "Red"
+        return 1
+    fi
+    apk_path="$signed_apk"
+
+    local new_apk="app.npk"
+'''
+
 
 def fail(message: str) -> None:
     raise SystemExit(f"patch_plugin_packager.py: {message}")
@@ -83,6 +159,18 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
 
 
 def patch_text(text: str) -> str:
+    text = replace_once(
+        text,
+        APK_COPY_FUNCTION_MARKER,
+        STRICT_APK_RESIGNING + APK_COPY_FUNCTION_MARKER,
+        "APK copy function",
+    )
+    text = replace_once(
+        text,
+        UPSTREAM_APK_SELECTION,
+        STRICT_APK_SELECTION,
+        "final compacted APK selection",
+    )
     text = replace_once(
         text,
         UPSTREAM_PACKAGE_SCAN,

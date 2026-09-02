@@ -44,6 +44,8 @@ def main() -> None:
     entry = read(source / "v2android/NativeReaderV2EntryPoint.java")
     hooks = read(source / "v2android/NativeReaderV2Hooks.java")
     runtime = read(source / "v2android/NativeReaderV2Runtime.java")
+    controller = read(source / "v2/NativeReaderController.java")
+    firmware_port = read(source / "v2/NativeReaderFirmwarePort.java")
     gate = read(source / "v2android/NativeReaderV2DocumentGate.java")
     package_gate = read(
         source / "v2android/NativeReaderV2PackageAdmission.java"
@@ -73,6 +75,7 @@ def main() -> None:
     app = read(root / "overlay/App.js")
     index = read(root / "overlay/index.js")
     plugin_config = read(root / "PluginConfig.json")
+    plugin_verifier = read(root / "scripts/verify_plugin_package.py")
 
     expected_entry = (
         "com.techrebbe.supernote.spreadprobe.v2android."
@@ -337,7 +340,7 @@ def main() -> None:
         runtime[same_page_start:same_page_end],
         [
             "saveCurrentSourceNow()",
-            "firmware.disableWriter(",
+            "disableWriterWithWitness(",
             "restoreWriterGeometry();",
             "restorePageGeometry();",
             "restorePresentationScale();",
@@ -359,7 +362,7 @@ def main() -> None:
         runtime[lifecycle_start:lifecycle_end],
         [
             "saveCurrentSourceNow()",
-            "firmware.disableWriter(",
+            "disableWriterWithWitness(",
             "restoreWriterGeometry();",
             "restorePageGeometry();",
             "restorePresentationScale();",
@@ -494,8 +497,60 @@ def main() -> None:
             "stale deferred navigation discarded",
             "projection completion failed closed",
             "queued continuation failed label=",
+            "if (action == MotionEvent.ACTION_DOWN && inputFrozen)",
+            "if (pressure > 0 && !penContact)",
+            "if (inputFrozen) {",
+            "preservingUnsavedSource",
+            "transactionAllowsStockRestoration()",
         ],
         "runtime concurrency and input containment",
+    )
+    require(
+        controller,
+        [
+            "source_save_timeout_uncertain",
+            "source_save_failed_or_stale",
+            "port.preserveUnsavedSource(token, reason);",
+            "status.state != ActivationMachine.State.SOURCE_SAVING",
+        ],
+        "uncertain source-save preservation",
+    )
+    require(
+        firmware_port,
+        [
+            "void preserveUnsavedNativeSource(String reason);",
+            "phase = Phase.DISABLED;",
+            "bridge.preserveUnsavedNativeSource(",
+            "public void retireDisabledForStock()",
+        ],
+        "firmware unsaved-source containment",
+    )
+    require(
+        runtime,
+        [
+            "port.retireDisabledForStock();",
+            "preservingUnsavedSource = false;",
+            "preserved source lost its disabled transaction authority",
+        ],
+        "witnessed preserved-source stock restoration",
+    )
+    if runtime.count("firmware.disableWriter(") != 1:
+        fail("writer disable bypasses the witnessed firmware after-hook")
+    require(
+        hooks,
+        [
+            'PRESENTER, loader, "disableHandWrite", String.class,',
+            "runtime.onNativeWriterDisableCompleted(",
+            "PendingNativeOpen pending = new PendingNativeOpen(",
+            "entry.pendingNativeOpen = pending;\n"
+            "                    boolean prepared =",
+            "replayNativeDocumentOpen(",
+            "DOCUMENT_OPEN_BYPASS.set(Boolean.TRUE);",
+            "pending.method.invoke(pending.receiver, pending.arguments);",
+            "if (pendingOpen != null && entry.runtime == null)",
+            "replayNativeDocumentOpen(entry, pendingOpen);",
+        ],
+        "observed writer disable and queued document-open replay",
     )
     admission_worker_start = hooks.find("ADMISSION.execute(new Runnable()")
     admission_publish = hooks.find(
@@ -591,7 +646,7 @@ def main() -> None:
     ordered(
         runtime[publish_start:publish_end],
         [
-            'firmware.disableWriter(current, "SN_NATIVE_READER_V2 compose")',
+            'disableWriterWithWitness(current, "SN_NATIVE_READER_V2 compose")',
             "restoreWriterGeometry();",
             "restorePageGeometry();",
             "capturePresentationScale(",
@@ -638,7 +693,7 @@ def main() -> None:
             "if (hasPhysicalInputContact()) {",
             "pendingContainmentReason",
             "inspectNativeCurrent();",
-            "firmware.disableWriter(",
+            "disableWriterWithWitness(",
         ],
         "authority-independent writer containment",
     )
@@ -671,7 +726,7 @@ def main() -> None:
             "ownsModifiedNativePresentation()",
             "stockPresentationRestorePending",
             "hasLiveInputContact()",
-            'beginStockPresentationRestoration(null, "native_document_open")',
+            'beginStockPresentationRestoration(\n                "native_document_open",\n                "native_document_open"',
             "return false;",
         ],
         "acknowledged pre-URI document replacement boundary",
@@ -729,7 +784,7 @@ def main() -> None:
     if pen_finish < 0 or refresh_gate < 0:
         fail("could not isolate native-contact refresh containment")
     ordered(
-        runtime[pen_finish:pen_finish + 900],
+        runtime[pen_finish:pen_finish + 1800],
         [
             "clearPenRoute();",
             'scheduleRefresh("native_pen_contact_complete");',
@@ -852,6 +907,32 @@ def main() -> None:
             "                NATIVE_ANNOTATION_BACKUP_FIELDS,",
         ],
         "cross-layer strict persisted authority",
+    )
+    load_start = plugin.find("fun loadNativeSpreadMode(")
+    load_end = plugin.find("fun reconcileNativeSpreadRecovery(", load_start)
+    if load_start < 0 or load_end < 0:
+        fail("could not isolate native-mode loading")
+    load_segment = plugin[load_start:load_end]
+    ordered(
+        load_segment,
+        [
+            'startNativeBackupWorker("RTLReaderNativeModeLoad")',
+            "readNativeAnnotationBackup(pdfFile)",
+            "readPropertiesIfFile(marker)",
+            "assessNativeSpreadAuthority(",
+            "Handler(Looper.getMainLooper()).post",
+            "resolveNativeSpreadMode(",
+        ],
+        "off-main-thread marker and recovery validation",
+    )
+    require(
+        load_segment,
+        [
+            "if (propertiesResult.isFailure)",
+            'NativeSpreadHandshake(false, "marker_unreadable")',
+            "backupResult,\n                                authority,",
+        ],
+        "malformed-marker recovery-only state",
     )
     if "minimumVersion <" in marker or "minimumVersion >" in marker:
         fail("v2 marker admission permits a version range instead of exact contract")
@@ -1169,8 +1250,12 @@ def main() -> None:
             '"after-mark-delete"',
             '"before-backup-retirement"',
             "restorePrePublicationMark(",
+            "immediateMarkerBytes?.contentEquals(previousMarkerBytes)",
+            "sameNativeAnnotationBackup(backup, immediateBackup)",
+            "immediateMarkerBytes?.contentEquals(pendingMarkerBytes)",
+            "liveNativeAnnotationMatchesBackup(backup)",
         ],
-        "crash-durable atomic publication",
+        "crash-durable compare-and-publish authority",
     )
     require(
         gate,
@@ -1253,11 +1338,32 @@ def main() -> None:
         ],
         "CI v2 gates",
     )
+    mutable_actions = re.findall(
+        r"^\s*uses:\s*actions/[^@\s]+@(?![0-9a-f]{40}(?:\s|$))([^\s#]+)",
+        workflow,
+        re.MULTILINE,
+    )
+    if mutable_actions:
+        fail(f"workflow uses mutable GitHub Action refs: {mutable_actions!r}")
+    require(
+        plugin_verifier,
+        [
+            "EXPECTED_ANDROID_PACKAGE = \"com.supernotertlreader\"",
+            "def verify_binary_manifest(",
+            "def verify_dex(",
+            'find_android_tool("aapt")',
+            'find_android_tool("apksigner")',
+            '"Number of signers: 1"',
+            "verify_apk_tools(Path(temporary_name))",
+        ],
+        "embedded APK structural and signature verification",
+    )
     if "check_native_spread_invariants.py ." in workflow:
         fail("release CI still treats the retired legacy engine as runtime authority")
     if "ndk;" in workflow or "-AndroidNdk" in workflow:
         fail("release CI still provisions the retired legacy native hook toolchain")
     stable_job = workflow[workflow.find("native-spread-upgrade-artifact:"):]
+    stable_job = stable_job.split("\n  build:", 1)[0]
     stable_condition = stable_job.split("    needs:", 1)[0]
     require(
         stable_condition,
@@ -1267,6 +1373,13 @@ def main() -> None:
             "       github.actor == github.repository_owner)",
         ],
         "trusted manual stable signing scope",
+    )
+    require(
+        stable_job,
+        [
+            "needs:\n      - native-spread-build\n      - build",
+        ],
+        "stable APK waits for both companion and plugin gates",
     )
 
     print("Native Reader v2 invariants: PASS")

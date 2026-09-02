@@ -171,9 +171,21 @@ MUTATIONS = (
     ),
     (
         "NativeReaderController.java",
-        "if (current == null || current.sourceSaveHandled) {",
-        "if (current == null) {",
-        "duplicate source callback idempotency",
+        "status.state != ActivationMachine.State.SOURCE_SAVING",
+        "false",
+        "late source callback transaction-state fence",
+    ),
+    (
+        "NativeReaderController.java",
+        "preserveUnsavedSource(\n"
+        "                current,\n"
+        '                "source_save_failed_or_stale"\n'
+        "            );",
+        "requestRollback(\n"
+        "                current,\n"
+        '                "source_save_failed_or_stale"\n'
+        "            );",
+        "uncertain source save preserves live ink",
     ),
     (
         "NativeReaderController.java",
@@ -263,6 +275,87 @@ MUTATIONS = (
 # fail-closed static gate rejects it. This converts recurring review findings
 # into deterministic regression coverage instead of relying on prose review.
 STATIC_MUTATIONS = (
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "        if (action == MotionEvent.ACTION_DOWN && inputFrozen) {",
+        "        if (false) {",
+        "frozen finger down admission",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "        if (pressure > 0 && !penContact) {\n"
+        "            if (inputFrozen) {",
+        "        if (pressure > 0 && !penContact) {\n"
+        "            if (false) {",
+        "frozen pen down admission",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "entry.runtime.onNativeWriterDisableCompleted(",
+        "entry.runtime.disableNativeReaderV2(",
+        "writer-disable firmware completion witness",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "                    entry.pendingNativeOpen = pending;\n"
+        "                    boolean prepared =",
+        "                    entry.pendingNativeOpen = null;\n"
+        "                    boolean prepared =",
+        "cross-document open retention",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "if (pendingOpen != null && entry.runtime == null)",
+        "if (false)",
+        "cross-document open retained during admission",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "immediateMarkerBytes?.contentEquals(previousMarkerBytes)",
+        "true",
+        "pending-marker compare-and-publish",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "immediateMarkerBytes?.contentEquals(pendingMarkerBytes)",
+        "true",
+        "committed-marker compare-and-publish",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                    if (propertiesResult.isFailure) {",
+        "                    if (false) {",
+        "malformed marker recovery state",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        '            startNativeBackupWorker("RTLReaderNativeModeLoad") {',
+        "            run {",
+        "native-mode validation background worker",
+    ),
+    (
+        ".github/workflows/build.yml",
+        "uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4",
+        "uses: actions/setup-node@v4 # v4",
+        "immutable CI action pin",
+    ),
+    (
+        ".github/workflows/build.yml",
+        "needs:\n      - native-spread-build\n      - build",
+        "needs:\n      - native-spread-build",
+        "stable artifact plugin dependency",
+    ),
+    (
+        "scripts/verify_plugin_package.py",
+        "        verify_apk_tools(Path(temporary_name))",
+        "        pass",
+        "embedded APK platform verification",
+    ),
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2Compositor.java",
@@ -597,6 +690,10 @@ def prepare_static_tree(root: pathlib.Path, destination: pathlib.Path) -> None:
     shutil.copy2(
         root / "scripts" / "check_native_reader_v2_invariants.py",
         scripts / "check_native_reader_v2_invariants.py",
+    )
+    shutil.copy2(
+        root / "scripts" / "verify_plugin_package.py",
+        scripts / "verify_plugin_package.py",
     )
 
 

@@ -54,6 +54,7 @@ public final class NativeReaderFirmwarePort
             double deltaY
         );
         void releaseDocumentInput();
+        void preserveUnsavedNativeSource(String reason);
         void disableNativeReaderV2(String reason);
     }
 
@@ -360,6 +361,29 @@ public final class NativeReaderFirmwarePort
     }
 
     @Override
+    public void preserveUnsavedSource(
+        ActivationMachine.Token requested,
+        String reason
+    ) {
+        assertOwnerThread();
+        requireAttached();
+        if (requested == null || token != requested
+            || phase != Phase.FROZEN) {
+            throw new IllegalStateException(
+                "unsaved source preservation lacks frozen authority"
+            );
+        }
+        phase = Phase.DISABLED;
+        token = null;
+        sourceMarkRevision = -1L;
+        targetAuthority = null;
+        sourceSaveCompletionHandled = true;
+        bridge.preserveUnsavedNativeSource(
+            reason == null ? "source_save_uncertain" : reason
+        );
+    }
+
+    @Override
     public void disableFeature(
         ActivationMachine.Token requested,
         String reason
@@ -373,6 +397,18 @@ public final class NativeReaderFirmwarePort
         bridge.disableNativeReaderV2(
             reason == null ? "unspecified_failure" : reason
         );
+    }
+
+    /**
+     * Allows the Android adapter to retire a fail-closed port only after it
+     * has independently saved the retained live source and restored stock
+     * presentation. No transaction operation is legal after this boundary.
+     */
+    public void retireDisabledForStock() {
+        assertOwnerThread();
+        requireAttached();
+        requirePhase(Phase.DISABLED);
+        clearTransaction();
     }
 
     /**

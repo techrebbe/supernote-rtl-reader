@@ -128,10 +128,14 @@ public final class NativeReaderV2Runtime
     private boolean saveWitnessFault;
     private boolean detachmentPrepared;
     private boolean containedFailClosed;
+    private boolean preservingUnsavedSource;
     private String pendingContainmentReason;
     private boolean stockPresentationRestorePending;
     private int stockPresentationReadyMask;
     private String pendingRetirementReason;
+    private volatile Object expectedWriterDisablePresenter;
+    private volatile boolean writerDisableInFlight;
+    private boolean writerDisableAcknowledged;
     private boolean activationReported;
     private long compositionGeneration;
     private long fingerGestureToken;
@@ -359,8 +363,10 @@ public final class NativeReaderV2Runtime
             return false;
         }
         NativeReaderV2FirmwareAccess.Components current = inspectNativeCurrent();
-        firmware.disableWriter(current, "SN_NATIVE_READER_V2 same-page reload");
-        writerDisabled = true;
+        disableWriterWithWitness(
+            current,
+            "SN_NATIVE_READER_V2 same-page reload"
+        );
         restoreWriterGeometry();
         restorePageGeometry();
         restorePresentationScale();
@@ -381,13 +387,20 @@ public final class NativeReaderV2Runtime
             detachmentPrepared = true;
             return true;
         }
+        pendingRetirementReason = "native_document_open";
         if (stockPresentationRestorePending) return false;
         if (hasLiveInputContact() || port != null
-            && port.phase() != NativeReaderFirmwarePort.Phase.IDLE) {
-            containFailClosed("document_open_during_live_authority");
+            && port.phase() != NativeReaderFirmwarePort.Phase.IDLE
+            && !(preservingUnsavedSource && port.phase()
+                == NativeReaderFirmwarePort.Phase.DISABLED)) {
+            inputFrozen = true;
+            Log.i(TAG, "native document open queued until authority settles");
             return false;
         }
-        if (!beginStockPresentationRestoration(null, "native_document_open")) {
+        if (!beginStockPresentationRestoration(
+                "native_document_open",
+                "native_document_open"
+            )) {
             containFailClosed("document_open_restore_failed");
         }
         // The triggering open is suppressed. It may be retried only after all
@@ -602,6 +615,13 @@ public final class NativeReaderV2Runtime
             }
             return consume;
         }
+        if (action == MotionEvent.ACTION_DOWN && inputFrozen) {
+            fingerContact = true;
+            fingerConsumed = true;
+            fingerConcurrentBlocked = true;
+            fingerPointerId = event.getPointerId(event.getActionIndex());
+            return true;
+        }
         if (controller == null) return false;
         if (action == MotionEvent.ACTION_DOWN) {
             fingerContact = true;
@@ -727,6 +747,12 @@ public final class NativeReaderV2Runtime
             return false;
         }
         if (pressure > 0 && !penContact) {
+            if (inputFrozen) {
+                penContact = true;
+                penGestureToken = 0L;
+                penSuppressed = true;
+                return true;
+            }
             NativeReaderController.DownDecision decision = controller.onDown(
                 0,
                 x,
@@ -743,6 +769,17 @@ public final class NativeReaderV2Runtime
             return penSuppressed;
         }
         if (penContact) {
+            if (penGestureToken <= 0L) {
+                if (pressure <= 0) {
+                    clearPenRoute();
+                    nativePenCallbackContact = false;
+                    postGuarded(
+                        "pending_restore_after_blocked_pen",
+                        this::settlePendingStockRestoration
+                    );
+                }
+                return true;
+            }
             GestureAction action = pressure > 0
                 ? GestureAction.MOVE : GestureAction.UP;
             NativeReaderController.InputResult result = controller.onMotion(
@@ -769,7 +806,10 @@ public final class NativeReaderV2Runtime
                 }
                 postGuarded(
                     "pending_containment_after_native_pen",
-                    this::settlePendingContainment
+                    () -> {
+                        settlePendingContainment();
+                        settlePendingStockRestoration();
+                    }
                 );
             }
             return suppress;
@@ -814,7 +854,10 @@ public final class NativeReaderV2Runtime
         }
         postGuarded(
             "pending_containment_after_missing_terminal",
-            this::settlePendingContainment
+            () -> {
+                settlePendingContainment();
+                settlePendingStockRestoration();
+            }
         );
     }
 
@@ -853,11 +896,10 @@ public final class NativeReaderV2Runtime
             return;
         }
         if (components != null) {
-            firmware.disableWriter(
+            disableWriterWithWitness(
                 inspectNativeCurrent(),
                 "SN_NATIVE_READER_V2 configuration change"
             );
-            writerDisabled = true;
             restoreWriterGeometry();
             restorePageGeometry();
             restorePresentationScale();
@@ -894,11 +936,10 @@ public final class NativeReaderV2Runtime
             disableNativeReaderV2("pause_source_save_failed");
             return;
         }
-        firmware.disableWriter(
+        disableWriterWithWitness(
             inspectNativeCurrent(),
             "SN_NATIVE_READER_V2 lifecycle pause"
         );
-        writerDisabled = true;
         restoreWriterGeometry();
         restorePageGeometry();
         restorePresentationScale();
@@ -944,6 +985,26 @@ public final class NativeReaderV2Runtime
         }
     }
 
+    /**
+     * Completion edge emitted by the hook around the firmware's actual
+     * disableHandWrite call. A void reflection return is not authority; only
+     * this observed after-hook may acknowledge the armed disable attempt.
+     */
+    public void onNativeWriterDisableCompleted(
+        Object presenter,
+        boolean success
+    ) {
+        if (!writerDisableInFlight
+            || expectedWriterDisablePresenter != presenter) return;
+        // Stock can call the same presenter method independently. Ignore an
+        // unrelated completion before asserting the v2 owner-thread contract;
+        // only the synchronous invocation armed by disableWriterWithWitness
+        // is allowed to acknowledge this transaction edge.
+        assertOwnerThread();
+        writerDisableAcknowledged = success;
+        if (success) writerDisabled = true;
+    }
+
     public boolean retire(String reason) {
         assertOwnerThread();
         if (retired) return true;
@@ -954,8 +1015,7 @@ public final class NativeReaderV2Runtime
             // restored. If any boundary is unavailable, stay installed and
             // block input fail-closed.
             if (stockPresentationRestorePending) return false;
-            if (hasLiveInputContact() || port != null
-                && port.phase() != NativeReaderFirmwarePort.Phase.IDLE) {
+            if (hasLiveInputContact() || !transactionAllowsStockRestoration()) {
                 pendingRetirementReason = reason;
                 containFailClosed(reason);
                 return false;
@@ -1020,11 +1080,10 @@ public final class NativeReaderV2Runtime
         restorePresentationScaleQuietly("runtime_retire");
         if (keepWriterDisabled) {
             try {
-                firmware.disableWriter(
+                disableWriterWithWitness(
                     inspectNativeCurrent(),
                     "SN_NATIVE_READER_V2 fail-closed retirement"
                 );
-                writerDisabled = true;
             } catch (RuntimeException failure) {
                 Log.e(TAG, "writer fail-close failed during retirement",
                     failure);
@@ -1051,13 +1110,25 @@ public final class NativeReaderV2Runtime
             if (latestObservation != null && !saveCurrentSourceNow()) {
                 return false;
             }
+            if (preservingUnsavedSource) {
+                if (port == null
+                    || port.phase() != NativeReaderFirmwarePort.Phase.DISABLED) {
+                    throw new IllegalStateException(
+                        "preserved source lost its disabled transaction authority"
+                    );
+                }
+                // The retry above has now witnessed the retained live source
+                // save. Only at that boundary may the disabled transaction be
+                // retired and ordinary stock teardown resume.
+                port.retireDisabledForStock();
+                preservingUnsavedSource = false;
+            }
             NativeReaderV2FirmwareAccess.Components current =
                 inspectNativeCurrent();
-            firmware.disableWriter(
+            disableWriterWithWitness(
                 current,
                 "SN_NATIVE_READER_V2 stock restore " + operation
             );
-            writerDisabled = true;
             restoreWriterGeometry();
             restorePageGeometry();
             restorePresentationScale();
@@ -1096,6 +1167,7 @@ public final class NativeReaderV2Runtime
             recycleVisible();
             latestObservation = null;
             writerDisabled = false;
+            preservingUnsavedSource = false;
             detachmentPrepared = true;
             removeStatusOverlayQuietly("stock_presentation_restored");
             final String reason = pendingRetirementReason;
@@ -1118,6 +1190,25 @@ public final class NativeReaderV2Runtime
         return visible != null || session != null || writerGeometryLease != null
             || pageGeometryLease != null || presentationScaleLease != null
             || latestObservation != null;
+    }
+
+    private boolean transactionAllowsStockRestoration() {
+        if (port == null) return true;
+        NativeReaderFirmwarePort.Phase phase = port.phase();
+        return phase == NativeReaderFirmwarePort.Phase.IDLE
+            || preservingUnsavedSource
+                && phase == NativeReaderFirmwarePort.Phase.DISABLED;
+    }
+
+    private void settlePendingStockRestoration() {
+        assertOwnerThread();
+        if (retired || stockPresentationRestorePending
+            || pendingRetirementReason == null || hasLiveInputContact()
+            || !transactionAllowsStockRestoration()) return;
+        String reason = pendingRetirementReason;
+        if (!beginStockPresentationRestoration(reason, reason)) {
+            containFailClosed(reason + "_restore_failed");
+        }
     }
 
     private void containFailClosed(String reason) {
@@ -1146,8 +1237,7 @@ public final class NativeReaderV2Runtime
         if (pendingRetirementReason != null
             && !stockPresentationRestorePending
             && ownsModifiedNativePresentation()
-            && (port == null
-                || port.phase() == NativeReaderFirmwarePort.Phase.IDLE)) {
+            && transactionAllowsStockRestoration()) {
             String retirementReason = pendingRetirementReason;
             if (!beginStockPresentationRestoration(
                     retirementReason,
@@ -1160,14 +1250,18 @@ public final class NativeReaderV2Runtime
     }
 
     private void disableContainedWriter(String reason) {
+        if (preservingUnsavedSource) {
+            Log.e(TAG, "runtime retained unsaved live source fail-closed reason="
+                + reason);
+            return;
+        }
         try {
             NativeReaderV2FirmwareAccess.Components current =
                 inspectNativeCurrent();
-            firmware.disableWriter(
+            disableWriterWithWitness(
                 current,
                 "SN_NATIVE_READER_V2 contained failure " + reason
             );
-            writerDisabled = true;
         } catch (RuntimeException failure) {
             Log.e(TAG, "writer containment failed reason=" + reason, failure);
         }
@@ -1213,11 +1307,10 @@ public final class NativeReaderV2Runtime
         }
         try {
             if (components != null) {
-                firmware.disableWriter(
+                disableWriterWithWitness(
                     inspectNativeCurrent(),
                     "SN_NATIVE_READER_V2 native lifecycle settled"
                 );
-                writerDisabled = true;
             }
             restoreWriterGeometry();
             restorePageGeometry();
@@ -1451,8 +1544,7 @@ public final class NativeReaderV2Runtime
         requireLive();
         NativeReaderV2FirmwareAccess.Components current =
             inspectNativeCurrent();
-        firmware.disableWriter(current, "SN_NATIVE_READER_V2 transfer");
-        writerDisabled = true;
+        disableWriterWithWitness(current, "SN_NATIVE_READER_V2 transfer");
     }
 
     @Override
@@ -1509,8 +1601,30 @@ public final class NativeReaderV2Runtime
     public void releaseDocumentInput() {
         assertOwnerThread();
         requireLive();
-        inputFrozen = false;
-        postGuarded("deferred_navigation_release", this::drainNavigation);
+        if (pendingRetirementReason != null) {
+            inputFrozen = true;
+            postGuarded(
+                "pending_stock_restoration_release",
+                this::settlePendingStockRestoration
+            );
+        } else {
+            inputFrozen = false;
+            postGuarded("deferred_navigation_release", this::drainNavigation);
+        }
+    }
+
+    @Override
+    public void preserveUnsavedNativeSource(String reason) {
+        assertOwnerThread();
+        if (retired) return;
+        preservingUnsavedSource = true;
+        containedFailClosed = true;
+        inputFrozen = true;
+        samePageReloadPrepared = false;
+        ++refreshGeneration;
+        Log.e(TAG, "unsaved source preserved behind input fence reason="
+            + reason);
+        settlePendingStockRestoration();
     }
 
     @Override
@@ -1797,8 +1911,7 @@ public final class NativeReaderV2Runtime
         boolean presentationPublicationAttempted = false;
         NativeReaderV2Compositor.Result previous = visible;
         try {
-            firmware.disableWriter(current, "SN_NATIVE_READER_V2 compose");
-            writerDisabled = true;
+            disableWriterWithWitness(current, "SN_NATIVE_READER_V2 compose");
             restoreWriterGeometry();
             restorePageGeometry();
             if (presentationScaleLease == null) {
@@ -1918,7 +2031,7 @@ public final class NativeReaderV2Runtime
                 restoreWriterGeometryQuietly("compose_failed");
                 restorePresentationScaleQuietly("compose_failed");
                 try {
-                    firmware.disableWriter(
+                    disableWriterWithWitness(
                         current,
                         "SN_NATIVE_READER_V2 compose failed"
                     );
@@ -1926,7 +2039,6 @@ public final class NativeReaderV2Runtime
                     Log.e(TAG, "writer fail-close failed after compose",
                         disableFailure);
                 }
-                writerDisabled = true;
             }
         }
     }
@@ -1936,8 +2048,10 @@ public final class NativeReaderV2Runtime
         String reason
     ) {
         if (writerGeometryLease != null) {
-            firmware.disableWriter(current, "SN_NATIVE_READER_V2 portrait restore");
-            writerDisabled = true;
+            disableWriterWithWitness(
+                current,
+                "SN_NATIVE_READER_V2 portrait restore"
+            );
             restoreWriterGeometry();
         }
         restorePageGeometry();
@@ -2105,6 +2219,33 @@ public final class NativeReaderV2Runtime
             source,
             "configuration source save failed"
         );
+    }
+
+    private void disableWriterWithWitness(
+        NativeReaderV2FirmwareAccess.Components current,
+        String reason
+    ) {
+        if (current == null || current.presenter == null
+            || writerDisableInFlight) {
+            throw new IllegalStateException(
+                "native writer disable lacks exclusive presenter authority"
+            );
+        }
+        expectedWriterDisablePresenter = current.presenter;
+        writerDisableInFlight = true;
+        writerDisableAcknowledged = false;
+        try {
+            firmware.disableWriter(current, reason);
+            if (!writerDisableAcknowledged || !writerDisabled) {
+                throw new IllegalStateException(
+                    "native writer disable did not reach its firmware after-hook"
+                );
+            }
+        } finally {
+            writerDisableInFlight = false;
+            expectedWriterDisablePresenter = null;
+            writerDisableAcknowledged = false;
+        }
     }
 
     private boolean sourceSaveAuthorityMatches(
@@ -2335,7 +2476,10 @@ public final class NativeReaderV2Runtime
         }
         postGuarded(
             "pending_containment_after_finger",
-            this::settlePendingContainment
+            () -> {
+                settlePendingContainment();
+                settlePendingStockRestoration();
+            }
         );
     }
 

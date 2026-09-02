@@ -1676,22 +1676,16 @@ public final class NativeReaderV2CoreTests {
         );
         ActivationMachine.Token token = rollbackPort.lastToken;
         rollbackController.onSourceSaveComplete(token, false);
-        equal("rollback", rollbackPort.calls.get(rollbackPort.calls.size() - 1),
-            "source-save failure requests rollback");
-        rollbackController.onRollbackReady(
-            token,
-            authority(1, 13, 2),
-            spread(1, 13, 2, true)
-        );
-        equal("release", rollbackPort.calls.get(rollbackPort.calls.size() - 1),
-            "verified rollback releases input");
-        equal(1, rollbackSession.snapshot().activePageIndex,
-            "rollback republishes source");
+        equal("preserve:source_save_failed_or_stale",
+            rollbackPort.calls.get(rollbackPort.calls.size() - 1),
+            "source-save failure preserves the possibly dirty live source");
+        check(rollbackSession.snapshot() == null,
+            "unsaved-source preservation retires transactional authority");
         equal(NativeReaderController.InputResult.BLOCKED,
             rollbackController.onMotion(
                 down.gestureTokenId, 0, GestureAction.UP,
                 1200, 500, 0, 10
-            ), "retired activation gesture cannot mutate rollback");
+            ), "retired activation gesture cannot mutate preserved source");
 
         SpreadSession cancelSession = initializedSession(1, 14, 1);
         FakePort cancelPort = new FakePort();
@@ -1856,8 +1850,9 @@ public final class NativeReaderV2CoreTests {
             ).result,
             "new source-page contact cannot bypass pending activation");
         busyController.onActivationTimeout(busyPort.lastToken);
-        equal("rollback", busyPort.calls.get(busyPort.calls.size() - 1),
-            "activation timeout requests rollback");
+        equal("preserve:source_save_timeout_uncertain",
+            busyPort.calls.get(busyPort.calls.size() - 1),
+            "source-save timeout preserves the live source");
         int timeoutCalls = busyPort.calls.size();
         busyController.onActivationTimeout(busyPort.lastToken);
         equal(timeoutCalls, busyPort.calls.size(),
@@ -1921,18 +1916,18 @@ public final class NativeReaderV2CoreTests {
         check(replaySession.snapshot() == null,
             "replay request exception hard-disables authority");
 
-        SpreadSession rollbackSession = initializedSession(1, 35, 1);
-        ThrowingPort rollbackPort = new ThrowingPort(FailurePoint.ROLLBACK);
-        NativeReaderController rollbackController =
+        SpreadSession preserveSession = initializedSession(1, 35, 1);
+        ThrowingPort preservePort = new ThrowingPort(FailurePoint.PRESERVE);
+        NativeReaderController preserveController =
             new NativeReaderController(
-                rollbackSession, rollbackPort
+                preserveSession, preservePort
             );
-        rollbackController.onInactiveHover(
+        preserveController.onInactiveHover(
             1200, 500, Collections.<RectD>emptyList()
         );
-        rollbackController.onSourceSaveComplete(rollbackPort.lastToken, false);
-        check(rollbackSession.snapshot() == null,
-            "rollback request exception hard-disables authority");
+        preserveController.onSourceSaveComplete(preservePort.lastToken, false);
+        check(preserveSession.snapshot() == null,
+            "preservation callback exception still retires authority");
 
         SpreadSession releaseSession = initializedSession(1, 36, 1);
         ThrowingPort releasePort = new ThrowingPort(FailurePoint.RELEASE);
@@ -2247,11 +2242,11 @@ public final class NativeReaderV2CoreTests {
         equal(1, timeoutBridge.activationTimeouts.size(),
             "watchdog is armed before deferred save can hang");
         timeoutBridge.fireActivationTimeout(0);
-        equal(NativeReaderFirmwarePort.Phase.ROLLBACK_LOADING,
-            timeoutPort.phase(), "watchdog requests source rollback");
-        equal("load:1",
+        equal(NativeReaderFirmwarePort.Phase.DISABLED,
+            timeoutPort.phase(), "watchdog preserves uncertain live source");
+        equal("preserve:source_save_timeout_uncertain",
             timeoutBridge.calls.get(timeoutBridge.calls.size() - 1),
-            "watchdog rollback reloads authoritative source page");
+            "watchdog does not reload over possibly unsaved ink");
         int callsAfterTimeout = timeoutBridge.calls.size();
         timeoutBridge.completeSave(true);
         equal(callsAfterTimeout, timeoutBridge.calls.size(),
@@ -2291,8 +2286,11 @@ public final class NativeReaderV2CoreTests {
             1200, 500, Collections.<RectD>emptyList()
         );
         staleBridge.completeSave(false);
-        equal(NativeReaderFirmwarePort.Phase.ROLLBACK_LOADING,
-            stalePort.phase(), "failed save begins rollback");
+        equal(NativeReaderFirmwarePort.Phase.DISABLED,
+            stalePort.phase(), "failed save preserves live source");
+        equal("preserve:source_save_failed_or_stale",
+            staleBridge.calls.get(staleBridge.calls.size() - 1),
+            "failed save cannot reload over dirty live ink");
         int callsBeforeLateCompletion = staleBridge.calls.size();
         staleBridge.repeatLastSaveCompletion(true);
         equal(callsBeforeLateCompletion, staleBridge.calls.size(),
@@ -2313,8 +2311,11 @@ public final class NativeReaderV2CoreTests {
         saveController.onInactiveHover(
             1200, 500, Collections.<RectD>emptyList()
         );
-        equal(NativeReaderFirmwarePort.Phase.ROLLBACK_LOADING,
-            savePort.phase(), "regressed mark revision triggers rollback");
+        equal(NativeReaderFirmwarePort.Phase.DISABLED,
+            savePort.phase(), "regressed save witness preserves live source");
+        equal("preserve:source_save_failed_or_stale",
+            saveBridge.calls.get(saveBridge.calls.size() - 1),
+            "regressed save revision cannot reload uncertain source ink");
         check(!saveBridge.calls.contains("load:0"),
             "regressed save revision cannot load target");
 
@@ -2564,6 +2565,7 @@ public final class NativeReaderV2CoreTests {
         LOAD,
         REPLAY,
         ROLLBACK,
+        PRESERVE,
         RELEASE
     }
 
@@ -2775,6 +2777,11 @@ public final class NativeReaderV2CoreTests {
         }
 
         @Override
+        public void preserveUnsavedNativeSource(String reason) {
+            calls.add("preserve:" + reason);
+        }
+
+        @Override
         public void disableNativeReaderV2(String reason) {
             calls.add("disableFeature:" + reason);
             writerEnabled = false;
@@ -2836,6 +2843,14 @@ public final class NativeReaderV2CoreTests {
         @Override
         public void requestRollback(ActivationMachine.Token token) {
             calls.add("rollback");
+        }
+
+        @Override
+        public void preserveUnsavedSource(
+            ActivationMachine.Token token,
+            String reason
+        ) {
+            calls.add("preserve:" + reason);
         }
 
         @Override
@@ -2931,6 +2946,15 @@ public final class NativeReaderV2CoreTests {
         public void requestRollback(ActivationMachine.Token token) {
             super.requestRollback(token);
             throwIf(FailurePoint.ROLLBACK);
+        }
+
+        @Override
+        public void preserveUnsavedSource(
+            ActivationMachine.Token token,
+            String reason
+        ) {
+            super.preserveUnsavedSource(token, reason);
+            throwIf(FailurePoint.PRESERVE);
         }
 
         @Override

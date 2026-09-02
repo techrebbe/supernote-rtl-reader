@@ -19,6 +19,7 @@ import com.techrebbe.supernote.spreadprobe.v2.RectD;
 import com.techrebbe.supernote.spreadprobe.v2.NativeReaderV2MarkerClaim;
 
 import java.io.File;
+import java.lang.reflect.Method;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -43,6 +44,8 @@ public final class NativeReaderV2Hooks {
         "com.supernote.document.utils.view.DocumentImageView";
     private static final String HAND_WRITE_VIEW =
         "com.supernote.document.handwrite.HandWriteView";
+    private static final String PRESENTER =
+        "com.supernote.document.handwrite.HandWritePresenter";
     private static final String NOTE =
         "com.example.libsupernote.SuperNoteNote";
     private static final String NATIVE_CALLBACK = ACTIVITY + "$6";
@@ -65,6 +68,8 @@ public final class NativeReaderV2Hooks {
     private static final ThreadLocal<Boolean> INTERNAL_PRESENTATION =
         new ThreadLocal<>();
     private static final ThreadLocal<Boolean> REPLAY_BYPASS =
+        new ThreadLocal<>();
+    private static final ThreadLocal<Boolean> DOCUMENT_OPEN_BYPASS =
         new ThreadLocal<>();
     private static final ThreadLocal<ArrayDeque<Boolean>> SAME_PAGE_RELOADS =
         new ThreadLocal<>();
@@ -361,12 +366,42 @@ public final class NativeReaderV2Hooks {
             Integer.TYPE, Integer.TYPE, Boolean.TYPE,
             new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    if (Boolean.TRUE.equals(DOCUMENT_OPEN_BYPASS.get())) return;
                     Entry entry = BY_COMPONENT.get(param.thisObject);
                     if (entry == null) return;
                     if (entry.runtime == null) {
-                        if (entry.admissionFence) param.setResult(null);
+                        if (entry.admissionFence) {
+                            // Last request wins while the old document is
+                            // fenced. A later user navigation must not be
+                            // silently discarded in favor of an older queued
+                            // link/open action.
+                            entry.pendingNativeOpen = new PendingNativeOpen(
+                                (Method) param.method,
+                                param.thisObject,
+                                param.args.clone()
+                            );
+                            // Admission is inspecting the old document. Keep
+                            // this exact open until that worker returns; never
+                            // silently drop the user's cross-document action.
+                            param.setResult(null);
+                        }
                         return;
                     }
+                    if (entry.pendingNativeOpen != null) {
+                        entry.pendingNativeOpen = new PendingNativeOpen(
+                            (Method) param.method,
+                            param.thisObject,
+                            param.args.clone()
+                        );
+                        param.setResult(null);
+                        return;
+                    }
+                    PendingNativeOpen pending = new PendingNativeOpen(
+                        (Method) param.method,
+                        param.thisObject,
+                        param.args.clone()
+                    );
+                    entry.pendingNativeOpen = pending;
                     boolean prepared = entry.runtime.prepareNativeDocumentOpen();
                     if (!prepared) {
                         // The old document remains the writer authority until
@@ -375,7 +410,9 @@ public final class NativeReaderV2Hooks {
                         param.setResult(null);
                         return;
                     }
+                    entry.pendingNativeOpen = null;
                     if (!resetRuntime(entry, "native_document_open")) {
+                        entry.pendingNativeOpen = pending;
                         param.setResult(null);
                         return;
                     }
@@ -688,6 +725,19 @@ public final class NativeReaderV2Hooks {
         List<XC_MethodHook.Unhook> hooks
     ) {
         hook(hooks,
+            PRESENTER, loader, "disableHandWrite", String.class,
+            new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    Entry entry = BY_COMPONENT.get(param.thisObject);
+                    if (entry == null || entry.runtime == null) return;
+                    entry.runtime.onNativeWriterDisableCompleted(
+                        param.thisObject,
+                        param.getThrowable() == null
+                    );
+                }
+            }
+        );
+        hook(hooks,
             NOTE, loader, "saveMarkData",
             String.class, String.class, Integer.TYPE, Boolean.TYPE,
             new XC_MethodHook() {
@@ -771,6 +821,15 @@ public final class NativeReaderV2Hooks {
                         if (entry.retired || BY_ACTIVITY.get(entry.activity) != entry) {
                             return;
                         }
+                        PendingNativeOpen pendingOpen = entry.pendingNativeOpen;
+                        if (pendingOpen != null && entry.runtime == null) {
+                            entry.pendingNativeOpen = null;
+                            entry.admissionFence = false;
+                            entry.admissionFencePath = null;
+                            entry.attemptedPath = null;
+                            replayNativeDocumentOpen(entry, pendingOpen);
+                            return;
+                        }
                         if (!entry.resumed || entry.lifecycleGeneration !=
                             admissionLifecycleGeneration) {
                             if (entry.resumed) maybeAdmit(entry, true);
@@ -828,23 +887,34 @@ public final class NativeReaderV2Hooks {
                                             NativeReaderV2Runtime readyRuntime,
                                             String reason
                                         ) {
-                                        if (entry.runtime == readyRuntime) {
-                                            boolean retireEntry =
-                                                entry.retireAfterDetachment;
-                                            boolean retryAdmission =
-                                                entry.retryAdmissionAfterDetachment;
-                                            entry.retireAfterDetachment = false;
-                                            entry.retryAdmissionAfterDetachment = false;
-                                            if (resetRuntime(entry, reason)) {
-                                                if (retireEntry) {
-                                                    entry.retired = true;
-                                                } else if (retryAdmission
-                                                    && entry.resumed) {
-                                                    maybeAdmit(entry, true);
+                                            if (entry.runtime == readyRuntime) {
+                                                PendingNativeOpen pendingOpen =
+                                                    entry.pendingNativeOpen;
+                                                boolean retireEntry =
+                                                    entry.retireAfterDetachment;
+                                                boolean retryAdmission =
+                                                    entry.retryAdmissionAfterDetachment;
+                                                entry.retireAfterDetachment = false;
+                                                entry.retryAdmissionAfterDetachment = false;
+                                                if (resetRuntime(entry, reason)) {
+                                                    if (retireEntry) {
+                                                        entry.retired = true;
+                                                    } else if (pendingOpen != null
+                                                        && "native_document_open"
+                                                            .equals(reason)) {
+                                                        entry.pendingNativeOpen = null;
+                                                        entry.attemptedPath = null;
+                                                        replayNativeDocumentOpen(
+                                                            entry,
+                                                            pendingOpen
+                                                        );
+                                                    } else if (retryAdmission
+                                                        && entry.resumed) {
+                                                        maybeAdmit(entry, true);
+                                                    }
                                                 }
                                             }
                                         }
-                                    }
                                 }
                             );
                             final NativeReaderV2Runtime admittedRuntime =
@@ -1387,6 +1457,7 @@ public final class NativeReaderV2Hooks {
         NativeReaderV2ChromeTracker chrome = entry.chrome;
         entry.runtime = null;
         entry.chrome = null;
+        entry.pendingNativeOpen = null;
         if (runtime != null) runtime.retireAfterNativeDestroy(reason);
         if (chrome != null) chrome.retire();
         for (Object component : entry.indexed) {
@@ -1394,6 +1465,30 @@ public final class NativeReaderV2Hooks {
         }
         entry.indexed.clear();
         clearStylusContact(entry);
+    }
+
+    private static void replayNativeDocumentOpen(
+        Entry entry,
+        PendingNativeOpen pending
+    ) {
+        Boolean previous = DOCUMENT_OPEN_BYPASS.get();
+        DOCUMENT_OPEN_BYPASS.set(Boolean.TRUE);
+        try {
+            // This Xposed API level does not expose invokeOriginalMethod.
+            // Invoke the exact captured overload reflectively; the hook is
+            // entered again, but DOCUMENT_OPEN_BYPASS makes that one replay
+            // pass through without scheduling a second restoration.
+            pending.method.setAccessible(true);
+            pending.method.invoke(pending.receiver, pending.arguments);
+            Log.i(TAG, "queued native document open replayed after stock restore");
+        } catch (Throwable failure) {
+            entry.admissionFence = true;
+            Log.e(TAG, "queued native document open replay failed", failure);
+            retire(entry, "native_document_open_replay_failed");
+        } finally {
+            if (previous == null) DOCUMENT_OPEN_BYPASS.remove();
+            else DOCUMENT_OPEN_BYPASS.set(previous);
+        }
     }
 
     private static final class Entry {
@@ -1409,6 +1504,7 @@ public final class NativeReaderV2Hooks {
         volatile boolean resumed;
         volatile boolean admissionFence;
         volatile String admissionFencePath;
+        volatile PendingNativeOpen pendingNativeOpen;
         volatile boolean retireAfterDetachment;
         volatile boolean retryAdmissionAfterDetachment;
         volatile long lifecycleGeneration;
@@ -1427,6 +1523,23 @@ public final class NativeReaderV2Hooks {
         Entry(Activity activity, long generation) {
             this.activity = activity;
             this.generation = generation;
+        }
+    }
+
+    private static final class PendingNativeOpen {
+        final Method method;
+        final Object receiver;
+        final Object[] arguments;
+
+        PendingNativeOpen(Method method, Object receiver, Object[] arguments) {
+            if (method == null || receiver == null || arguments == null) {
+                throw new IllegalArgumentException(
+                    "pending native document open is incomplete"
+                );
+            }
+            this.method = method;
+            this.receiver = receiver;
+            this.arguments = arguments;
         }
     }
 }

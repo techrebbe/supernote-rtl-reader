@@ -12,11 +12,15 @@ import zipfile
 from pathlib import Path
 
 from patch_plugin_packager import (
+    APK_COPY_FUNCTION_MARKER,
+    STRICT_APK_RESIGNING,
+    STRICT_APK_SELECTION,
     STRICT_NATIVE_BUILD,
     STRICT_PACKAGE,
     STRICT_PACKAGE_UPDATE,
     UPSTREAM_PACKAGE_SCAN,
     UPSTREAM_PACKAGE_UPDATE,
+    UPSTREAM_APK_SELECTION,
     UPSTREAM_SOFT_NATIVE_BUILD,
     patch_text,
 )
@@ -115,6 +119,10 @@ def write_package(path: Path, data: bytes) -> None:
 def test_packager_patch() -> None:
     upstream = (
         "prefix\n"
+        + APK_COPY_FUNCTION_MARKER
+        + "copy body\n"
+        + UPSTREAM_APK_SELECTION
+        + "copy suffix\n"
         + UPSTREAM_PACKAGE_SCAN
         + "middle\n"
         + UPSTREAM_PACKAGE_UPDATE
@@ -127,6 +135,8 @@ def test_packager_patch() -> None:
         STRICT_PACKAGE,
         STRICT_PACKAGE_UPDATE,
         STRICT_NATIVE_BUILD,
+        STRICT_APK_RESIGNING,
+        STRICT_APK_SELECTION,
     ):
         if patched.count(required) != 1:
             fail("packager patch did not publish one strict replacement")
@@ -136,6 +146,8 @@ def test_packager_patch() -> None:
         'if ! build_android_apk "$project_root" "$gen_cfg"; then',
         'if ! copy_apk_and_update_config "$project_root" "$gen_dir" "$gen_cfg"; then',
         'write_color_output "Required RTL Reader native build was not selected" "Red"',
+        'signed_apk="$(sign_compacted_apk "$project_root" "$apk_path")"',
+        '"$apksigner" verify --verbose --print-certs "$signed"',
     ):
         if patched.count(required) != 1:
             fail(f"patched packager lacks strict executable guard: {required}")
@@ -167,7 +179,13 @@ def test_package_verifier() -> None:
         package = root / "fixture.snplg"
 
         write_package(package, package_bytes())
-        verify(package, root)
+        # Archive/config/bundle behavior is tested with an injected trusted APK
+        # boundary. Production verification always uses the real structural,
+        # manifest, DEX, and signature validator below.
+        verify(package, root, native_apk_validator=lambda _data: None)
+
+        write_package(package, package_bytes())
+        expect_rejected(package, root, "padded fake APK")
 
         write_package(package, package_bytes(include_app=False))
         expect_rejected(package, root, "missing app.npk")

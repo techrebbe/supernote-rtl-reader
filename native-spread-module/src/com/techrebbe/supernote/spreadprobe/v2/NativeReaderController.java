@@ -39,6 +39,10 @@ public final class NativeReaderController {
         );
         void releaseInput(ActivationMachine.Token token);
         void requestRollback(ActivationMachine.Token token);
+        void preserveUnsavedSource(
+            ActivationMachine.Token token,
+            String reason
+        );
         void disableFeature(ActivationMachine.Token token, String reason);
     }
 
@@ -438,6 +442,11 @@ public final class NativeReaderController {
         }
         if (replayMayHaveMutated) {
             hardDisable(token, "native_replay_timeout_uncertain");
+        } else if (!current.sourceSaveHandled) {
+            preserveUnsavedSource(
+                current,
+                "source_save_timeout_uncertain"
+            );
         } else {
             requestRollback(current, "activation_timeout");
         }
@@ -448,6 +457,15 @@ public final class NativeReaderController {
         boolean success
     ) {
         assertOwnerThread();
+        ActivationMachine.Status status = session.activation().status();
+        if (token == null
+            || status.transactionId != token.id
+            || status.state != ActivationMachine.State.SOURCE_SAVING) {
+            // A prior failure may already be rolling the source back. A late
+            // save callback cannot replace that recovery decision with the
+            // stronger unsaved-source containment path.
+            return;
+        }
         Context current;
         synchronized (lock) {
             current = matchingContext(token);
@@ -457,7 +475,10 @@ public final class NativeReaderController {
             current.sourceSaveHandled = true;
         }
         if (!success || !session.activation().sourceSaved(token)) {
-            requestRollback(current, "source_save_failed_or_stale");
+            preserveUnsavedSource(
+                current,
+                "source_save_failed_or_stale"
+            );
             return;
         }
         try {
@@ -756,6 +777,29 @@ public final class NativeReaderController {
             port.requestRollback(token);
         } catch (Throwable throwable) {
             onRollbackFailed(token, reason + "_rollback_request_failed");
+        }
+    }
+
+    /**
+     * A source-save failure is not proof that the native live trail was
+     * persisted.  Retire transactional routing, but deliberately keep the
+     * source writer and its pixels intact behind a fail-closed input fence.
+     * Reloading the page here would replace the only known copy of dirty ink.
+     */
+    private void preserveUnsavedSource(Context expected, String reason) {
+        ActivationMachine.Token token = expected == null
+            ? null : expected.activation;
+        synchronized (lock) {
+            if (retired || context != expected) return;
+            retired = true;
+            context = null;
+        }
+        session.retire();
+        try {
+            port.preserveUnsavedSource(token, reason);
+        } catch (Throwable ignored) {
+            // The controller and gesture authority are already retired. The
+            // Android hook's admission fence remains the last-resort barrier.
         }
     }
 

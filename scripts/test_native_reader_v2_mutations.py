@@ -278,9 +278,11 @@ STATIC_MUTATIONS = (
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2Runtime.java",
-        "        if (action == MotionEvent.ACTION_DOWN && inputFrozen) {",
-        "        if (false) {",
-        "frozen finger down admission",
+        "            fingerIngressAdmitted = inputAdmission.begin(\n"
+        "                AtomicInputAdmission.Contact.FINGER\n"
+        "            );",
+        "            fingerIngressAdmitted = true;",
+        "atomic finger down admission",
     ),
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
@@ -322,7 +324,7 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "immediateMarkerBytes?.contentEquals(pendingMarkerBytes)",
+        "immediateMarker?.bytes?.contentEquals(pendingMarkerBytes)",
         "true",
         "committed-marker compare-and-publish",
     ),
@@ -387,24 +389,26 @@ STATIC_MUTATIONS = (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2Hooks.java",
         "                entry.stylusRoutePass = !entry.fingerPhysicalContact\n"
-        "                    && runtime.mayPassNativePenImmediately(x, y, chrome);",
+        "                    && runtime.beginNativePenContactImmediately(x, y, chrome);",
         "                entry.stylusRoutePass =\n"
-        "                    runtime.mayPassNativePenImmediately(x, y, chrome);",
+        "                    runtime.beginNativePenContactImmediately(x, y, chrome);",
         "cross-tool physical fence",
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
         (
-            "                            requireBackupDocumentIdentity(\n"
-            "                                pdfFile,\n"
-            "                                revalidatedBackup,\n"
-            '                                "before-mark-publish",'
+            "                                requireBackupDocumentIdentity(\n"
+            "                                    pdfFile,\n"
+            "                                    revalidatedBackup,\n"
+            "                                    if (revalidatedBackup.originalMarkPresent) {\n"
+            '                                        "before-mark-publish"'
         ),
         (
-            "                            requireBackupDocumentIdentity(\n"
-            "                                pdfFile,\n"
-            "                                revalidatedBackup,\n"
-            '                                "before-mark-publish-disabled",'
+            "                                requireBackupDocumentIdentity(\n"
+            "                                    pdfFile,\n"
+            "                                    revalidatedBackup,\n"
+            "                                    if (revalidatedBackup.originalMarkPresent) {\n"
+            '                                        "before-mark-publish-disabled"'
         ),
         "restore PDF publication revalidation",
     ),
@@ -545,8 +549,8 @@ STATIC_MUTATIONS = (
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2Runtime.java",
-        "        if (stockPresentationReadyMask != STOCK_PRESENTATION_READY) return;",
-        "        if (stockPresentationReadyMask == 0) return;",
+        "        if (!stockRestoreWitness.ready(token)) return;",
+        "        if (false) return;",
         "three-layer stock restoration acknowledgement",
     ),
     (
@@ -562,6 +566,41 @@ STATIC_MUTATIONS = (
         "                            if (projectionExecutor.awaitTermination(",
         "                            if (true || projectionExecutor.awaitTermination(",
         "asynchronous projection drain",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2/AtomicInputAdmission.java",
+        "        if (frozen || fingerActive || stylusActive) return -1L;",
+        "        if (frozen) return -1L;",
+        "atomic freeze rejects live contact",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "        sourceSaveFence.cancel();",
+        "        sourceSaveFence.active();",
+        "queued source save cancellation",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "                    | OsConstants.O_CLOEXEC | OsConstants.O_NOFOLLOW,",
+        "                    | OsConstants.O_CLOEXEC,",
+        "live mark lease no-follow authority",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "                    entry.runtime.onNativeWriterGeometryCompleted(",
+        "                    entry.runtime.onNativeWriterEnableCompleted(",
+        "final writer geometry firmware receipt",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2/NativePresentationRestoreWitness.java",
+        "        if (receiver != expectedReceiver || replacement == null",
+        "        if (replacement == null",
+        "stock restoration receiver identity",
     ),
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
@@ -586,8 +625,16 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or OsConstants.O_NOFOLLOW,",
-        "            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC,",
+        (
+            "        val descriptor = Os.open(\n"
+            "            path,\n"
+            "            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or OsConstants.O_NOFOLLOW,"
+        ),
+        (
+            "        val descriptor = Os.open(\n"
+            "            path,\n"
+            "            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC,"
+        ),
         "companion no-follow marker authority",
     ),
     (
@@ -622,6 +669,36 @@ STATIC_MUTATIONS = (
         "if (-not ($verificationOutput -contains 'Number of signers: 1') -or",
         "if ($false -or",
         "packaged signer verification",
+    ),
+    (
+        "build.sh",
+        'TEMPLATE_VERSION="1.0.12"',
+        'TEMPLATE_VERSION="latest"',
+        "immutable Supernote template version",
+    ),
+    (
+        "scripts/materialize_plugin_template.py",
+        "34dceadedd77d2c77c83521fee838dc60f3893b948a9070bf38271184268636f",
+        "04dceadedd77d2c77c83521fee838dc60f3893b948a9070bf38271184268636f",
+        "Supernote template content digest",
+    ),
+    (
+        "scripts/patch_plugin_packager.py",
+        "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+        "0ac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+        "embedded plugin APK signer pin",
+    ),
+    (
+        "scripts/verify_plugin_package.py",
+        "defined_classes.update(verify_dex(native.read(name), name))",
+        "defined_classes.update(set())",
+        "structural DEX class authority",
+    ),
+    (
+        "native-spread-module/build.ps1",
+        "Two clean Native Reader builds are byte-for-byte reproducible",
+        "Native Reader build completed",
+        "two-clean-build reproducibility gate",
     ),
 )
 
@@ -673,7 +750,13 @@ def prepare_static_tree(root: pathlib.Path, destination: pathlib.Path) -> None:
     destination.mkdir()
     for name in ("AGENTS.md", "build.sh", "PluginConfig.json"):
         shutil.copy2(root / name, destination / name)
-    for name in (".github", "overlay", "native", "native-spread-module"):
+    for name in (
+        ".github",
+        "overlay",
+        "native",
+        "native-spread-module",
+        "provenance",
+    ):
         shutil.copytree(
             root / name,
             destination / name,
@@ -691,16 +774,32 @@ def prepare_static_tree(root: pathlib.Path, destination: pathlib.Path) -> None:
         root / "scripts" / "check_native_reader_v2_invariants.py",
         scripts / "check_native_reader_v2_invariants.py",
     )
-    shutil.copy2(
-        root / "scripts" / "verify_plugin_package.py",
-        scripts / "verify_plugin_package.py",
-    )
+    for name in (
+        "materialize_plugin_template.py",
+        "normalize_apk_zip.py",
+        "patch_plugin_packager.py",
+        "test_build_provenance.py",
+        "verify_plugin_package.py",
+    ):
+        shutil.copy2(root / "scripts" / name, scripts / name)
 
 
 def run_static_mutations(root: pathlib.Path, temp_root: pathlib.Path) -> None:
     static_root = temp_root / "android-static"
     prepare_static_tree(root, static_root)
     checker = static_root / "scripts" / "check_native_reader_v2_invariants.py"
+    baseline = subprocess.run(
+        [sys.executable, os.fspath(checker), os.fspath(static_root)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if baseline.returncode != 0:
+        fail(
+            "static mutation baseline is not clean; mutation rejection would "
+            "be ambiguous:\n" + baseline.stdout + baseline.stderr
+        )
     for relative, old, new, label in STATIC_MUTATIONS:
         target = static_root / pathlib.PurePosixPath(relative)
         original = target.read_text(encoding="utf-8")

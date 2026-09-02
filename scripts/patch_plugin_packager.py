@@ -14,6 +14,9 @@ EXPECTED_SOURCE = (
 EXPECTED_APPLICATION = (
     "android/app/src/main/java/com/supernotertlreader/MainApplication.kt"
 )
+EXPECTED_PLUGIN_APK_SIGNER_SHA256 = (
+    "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c"
+)
 
 UPSTREAM_PACKAGE_SCAN = '''    local project_react_pkgs
     project_react_pkgs="$(find_manual_react_packages_from_application "$project_root" || true)"
@@ -124,11 +127,34 @@ sign_compacted_apk() {
         --ks-key-alias androiddebugkey \\
         --out "$signed" \\
         "$aligned" || return 1
-    "$apksigner" verify --verbose --print-certs "$signed" >/dev/null || return 1
+    local verification_output
+    if ! verification_output="$(
+        "$apksigner" verify --verbose --print-certs "$signed" 2>&1
+    )"; then
+        write_color_output "Final compacted APK signature verification failed" "Red"
+        return 1
+    fi
+    local expected_signer_sha256="__EXPECTED_PLUGIN_APK_SIGNER_SHA256__"
+    local actual_signer_sha256
+    actual_signer_sha256="$(
+        printf '%s\\n' "$verification_output" |
+        sed -n 's/^Signer #1 certificate SHA-256 digest: //p' |
+        tr -d ':\\r' |
+        tr '[:upper:]' '[:lower:]'
+    )"
+    if [[ "$(printf '%s\\n' "$verification_output" | tr -d '\\r' | grep -Fxc 'Number of signers: 1')" -ne 1 ]] || \
+       [[ "$actual_signer_sha256" != "$expected_signer_sha256" ]]; then
+        write_color_output "Final compacted APK signer is not the reviewed identity" "Red"
+        return 1
+    fi
     printf '%s\\n' "$signed"
 }
 
 '''
+STRICT_APK_RESIGNING = STRICT_APK_RESIGNING.replace(
+    "__EXPECTED_PLUGIN_APK_SIGNER_SHA256__",
+    EXPECTED_PLUGIN_APK_SIGNER_SHA256,
+)
 
 UPSTREAM_APK_SELECTION = '''    [[ -z "$apk_path" ]] && { write_color_output "Generated APK not found" "Red"; return 1; }
 

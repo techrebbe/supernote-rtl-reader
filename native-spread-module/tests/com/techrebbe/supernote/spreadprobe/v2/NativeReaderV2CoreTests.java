@@ -23,6 +23,9 @@ public final class NativeReaderV2CoreTests {
         testStrictMarkerProperties();
         testNativeMarkPageInventory();
         testNativeSaveWitness();
+        testAtomicInputAdmission();
+        testNativeAsyncSaveFence();
+        testNativePresentationRestoreWitness();
         testNativeWriterGeometry();
         testTransactionalNavigationTargets();
         testV2CommittedMarkerClaim();
@@ -468,6 +471,144 @@ public final class NativeReaderV2CoreTests {
         check(!witness.active(), "aborted native save witness is retired");
         expectThrows(() -> witness.finish(aborted),
             "stale native save witness token rejected");
+    }
+
+    private static void testAtomicInputAdmission() throws Exception {
+        AtomicInputAdmission gate = new AtomicInputAdmission();
+        check(gate.begin(AtomicInputAdmission.Contact.FINGER),
+            "finger wins unfrozen ingress");
+        check(!gate.begin(AtomicInputAdmission.Contact.STYLUS),
+            "second physical contact rejected");
+        check(gate.freezeIfIdle() < 0L,
+            "transaction cannot cross admitted contact");
+        long draining = gate.freeze();
+        check(draining > 0L && gate.frozen(),
+            "containment freezes while admitted contact drains");
+        gate.end(AtomicInputAdmission.Contact.FINGER);
+        check(!gate.begin(AtomicInputAdmission.Contact.STYLUS),
+            "new contact remains blocked after prior terminal");
+        gate.release();
+        check(gate.begin(AtomicInputAdmission.Contact.STYLUS),
+            "stylus admitted after explicit release");
+        gate.end(AtomicInputAdmission.Contact.STYLUS);
+
+        for (int attempt = 0; attempt < 200; attempt++) {
+            AtomicInputAdmission raced = new AtomicInputAdmission();
+            CountDownLatch start = new CountDownLatch(1);
+            AtomicInteger contactWins = new AtomicInteger();
+            AtomicInteger freezeWins = new AtomicInteger();
+            Thread contact = new Thread(() -> {
+                await(start);
+                if (raced.begin(AtomicInputAdmission.Contact.STYLUS)) {
+                    contactWins.incrementAndGet();
+                }
+            });
+            Thread freeze = new Thread(() -> {
+                await(start);
+                if (raced.freezeIfIdle() >= 0L) freezeWins.incrementAndGet();
+            });
+            contact.start();
+            freeze.start();
+            start.countDown();
+            contact.join();
+            freeze.join();
+            equal(1, contactWins.get() + freezeWins.get(),
+                "contact/freeze boundary has exactly one winner");
+        }
+    }
+
+    private static void testNativeAsyncSaveFence() {
+        NativeAsyncSaveFence fence = new NativeAsyncSaveFence();
+        SpreadSnapshot source = spread(1, 4L, 9L, true);
+        NativeAsyncSaveFence.Token first = fence.begin(source, 12L);
+        check(fence.current(first, source),
+            "async save token owns its exact source generation");
+        check(!fence.current(first, spread(1, 4L, 10L, true)),
+            "layout replacement invalidates async save authority");
+        check(!fence.current(first, spread(0, 4L, 9L, true)),
+            "page replacement invalidates async save authority");
+        expectThrows(() -> fence.begin(source, 12L),
+            "overlapping async save rejected");
+        fence.cancel();
+        check(!fence.current(first, source),
+            "timeout cancellation invalidates queued continuation");
+        check(!fence.complete(first),
+            "cancelled async save cannot complete");
+        NativeAsyncSaveFence.Token second = fence.begin(source, 12L);
+        check(second.id > first.id,
+            "async save generation advances across cancellation");
+        check(fence.complete(second), "current async save completes once");
+        check(!fence.complete(second),
+            "completed async save token cannot replay");
+    }
+
+    private static void testNativePresentationRestoreWitness() {
+        SpreadSnapshot source = spread(1, 7L, 11L, true);
+        Object background = new Object();
+        Object ink = new Object();
+        Object digest = new Object();
+        Object oldBackground = new Object();
+        Object oldInk = new Object();
+        Object oldDigest = new Object();
+        NativePresentationRestoreWitness witness =
+            new NativePresentationRestoreWitness();
+        NativePresentationRestoreWitness.Token token = witness.begin(
+            source, background, ink, digest,
+            oldBackground, oldInk, oldDigest, 20L
+        );
+        check(witness.observe(token,
+            NativePresentationRestoreWitness.Layer.BACKGROUND,
+            21L, background, new Object(), source),
+            "stock background replacement witnessed");
+        check(witness.observe(token,
+            NativePresentationRestoreWitness.Layer.INK,
+            22L, ink, new Object(), source),
+            "stock ink replacement witnessed");
+        check(witness.observe(token,
+            NativePresentationRestoreWitness.Layer.DIGEST,
+            23L, digest, new Object(), source),
+            "stock digest replacement witnessed");
+        check(witness.ready(token),
+            "all exact stock layers satisfy restoration");
+        check(witness.finish(token),
+            "versioned stock restoration completes once");
+        check(!witness.finish(token),
+            "stock restoration receipt cannot replay");
+
+        NativePresentationRestoreWitness wrongReceiver =
+            new NativePresentationRestoreWitness();
+        NativePresentationRestoreWitness.Token wrong = wrongReceiver.begin(
+            source, background, ink, digest,
+            oldBackground, oldInk, oldDigest, 30L
+        );
+        check(!wrongReceiver.observe(wrong,
+            NativePresentationRestoreWitness.Layer.BACKGROUND,
+            31L, new Object(), new Object(), source),
+            "wrong stock receiver rejected");
+        check(!wrongReceiver.ready(wrong),
+            "mismatched receipt permanently invalidates restoration");
+
+        NativePresentationRestoreWitness oldBitmap =
+            new NativePresentationRestoreWitness();
+        NativePresentationRestoreWitness.Token reused = oldBitmap.begin(
+            source, background, ink, digest,
+            oldBackground, oldInk, oldDigest, 40L
+        );
+        check(!oldBitmap.observe(reused,
+            NativePresentationRestoreWitness.Layer.INK,
+            41L, ink, oldInk, source),
+            "v2 ink bitmap reuse is not stock restoration");
+
+        NativePresentationRestoreWitness wrongGeneration =
+            new NativePresentationRestoreWitness();
+        NativePresentationRestoreWitness.Token stale = wrongGeneration.begin(
+            source, background, ink, digest,
+            oldBackground, oldInk, oldDigest, 50L
+        );
+        check(!wrongGeneration.observe(stale,
+            NativePresentationRestoreWitness.Layer.DIGEST,
+            51L, digest, new Object(), spread(1, 7L, 12L, true)),
+            "different layout generation cannot acknowledge stock restore");
     }
 
     private static void testNativeWriterGeometry() {
@@ -2523,6 +2664,15 @@ public final class NativeReaderV2CoreTests {
         equal(state, status.state, "activation state");
         equal(page, status.activePage, "activation page");
         equal(writer, status.writerEnabled, "writer state");
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("test thread interrupted", interrupted);
+        }
     }
 
     private static void check(boolean condition, String message) {

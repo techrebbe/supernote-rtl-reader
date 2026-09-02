@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_ROOT="$(mktemp -d)"
 trap 'rm -rf "$WORK_ROOT"' EXIT
+TEMPLATE_PACKAGE="@supernote-plugin/sn-plugin-template"
+TEMPLATE_VERSION="1.0.12"
+TEMPLATE_LOCK="$ROOT/provenance/plugin-template-package-lock.json.gz.b64"
 
 if [[ -n "${PYTHON_BIN:-}" ]]; then
   if command -v cygpath >/dev/null 2>&1 && [[ "$PYTHON_BIN" =~ ^[A-Za-z]:[\\/] ]]; then
@@ -23,13 +26,27 @@ fi
 
 "${PYTHON_CMD[@]}" "$ROOT/scripts/check_native_reader_v2_invariants.py" "$ROOT"
 
+PROJECT="$WORK_ROOT/SupernoteRtlReader"
+TEMPLATE_DOWNLOAD="$WORK_ROOT/template-download"
+mkdir -p "$TEMPLATE_DOWNLOAD"
 pushd "$WORK_ROOT" >/dev/null
-npx --yes @react-native-community/cli@18.0.0 init SupernoteRtlReader \
-  --template @supernote-plugin/sn-plugin-template \
-  --version 0.79.2
+npm pack --ignore-scripts --silent \
+  --pack-destination "$TEMPLATE_DOWNLOAD" \
+  "$TEMPLATE_PACKAGE@$TEMPLATE_VERSION"
+popd >/dev/null
+mapfile -t TEMPLATE_ARCHIVES < <(
+  find "$TEMPLATE_DOWNLOAD" -maxdepth 1 -type f -name '*.tgz' -print
+)
+if [[ "${#TEMPLATE_ARCHIVES[@]}" -ne 1 ]]; then
+  echo "Expected exactly one downloaded template archive, found ${#TEMPLATE_ARCHIVES[@]}." >&2
+  exit 1
+fi
+"${PYTHON_CMD[@]}" "$ROOT/scripts/materialize_plugin_template.py" \
+  "${TEMPLATE_ARCHIVES[0]}" "$TEMPLATE_LOCK" "$PROJECT"
+pushd "$PROJECT" >/dev/null
+npm ci --ignore-scripts --no-audit --no-fund
 popd >/dev/null
 
-PROJECT="$WORK_ROOT/SupernoteRtlReader"
 cp "$ROOT/overlay/App.js" "$PROJECT/App.js"
 cp "$ROOT/overlay/index.js" "$PROJECT/index.js"
 cp "$ROOT/overlay/app.json" "$PROJECT/app.json"
@@ -82,11 +99,23 @@ if [[ "${#PACKAGES[@]}" -ne 1 ]]; then
   echo "Expected exactly one generated .snplg, found ${#PACKAGES[@]}." >&2
   exit 1
 fi
-"${PYTHON_CMD[@]}" "$ROOT/scripts/verify_plugin_package.py" "${PACKAGES[0]}" "$ROOT"
+EXPECTED_BUNDLE="$PROJECT/build/generated/SupernoteRtlReader.bundle"
+EXPECTED_NATIVE_APK="$PROJECT/build/generated/app.npk"
+if [[ ! -f "$EXPECTED_BUNDLE" || ! -f "$EXPECTED_NATIVE_APK" ]]; then
+  echo "Generated bundle/native APK provenance inputs are missing." >&2
+  exit 1
+fi
+"${PYTHON_CMD[@]}" "$ROOT/scripts/verify_plugin_package.py" \
+  "${PACKAGES[0]}" "$ROOT" "$EXPECTED_BUNDLE" "$EXPECTED_NATIVE_APK"
 
 mkdir -p "$ROOT/out"
 rm -f "$ROOT/out"/*.snplg
 cp "${PACKAGES[0]}" "$ROOT/out/"
+PROVENANCE_OUTPUT="$ROOT/out/build-provenance"
+rm -rf "$PROVENANCE_OUTPUT"
+mkdir -p "$PROVENANCE_OUTPUT"
+cp "$EXPECTED_BUNDLE" "$PROVENANCE_OUTPUT/SupernoteRtlReader.bundle"
+cp "$EXPECTED_NATIVE_APK" "$PROVENANCE_OUTPUT/app.npk"
 
 echo "Built Supernote RTL Reader plugin:"
 ls -lh "$ROOT/out"/*.snplg

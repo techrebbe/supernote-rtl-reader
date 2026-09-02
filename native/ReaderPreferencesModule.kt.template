@@ -14,6 +14,7 @@ import android.os.SystemClock
 import android.system.Os
 import android.system.OsConstants
 import android.system.ErrnoException
+import android.system.StructStat
 import android.util.Log
 import android.widget.Toast
 import com.facebook.react.bridge.Arguments
@@ -25,6 +26,7 @@ import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileDescriptor
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.ObjectInputStream
@@ -96,6 +98,12 @@ class ReaderPreferencesModule(
             "/data/data/com.supernote.document/document_external_cache",
         )
         private const val STRICT_PROPERTIES_MAX_BYTES = 128 * 1024
+        // Linux O_DIRECTORY (0200000). Android's OsConstants omits this
+        // compile-time constant on the plug-in's API surface.
+        private const val LINUX_O_DIRECTORY = 0x10000
+        private const val NATIVE_SPREAD_PUBLICATION_LOCK_SUFFIX =
+            ".snspread-publication.lock"
+        private val NATIVE_SPREAD_PUBLICATION_PROCESS_LOCK = Any()
         private val NATIVE_READER_V2_COMMITTED_FIELDS = setOf(
             "nativeReaderEngine",
             "enabled",
@@ -750,10 +758,20 @@ class ReaderPreferencesModule(
                 // An explicit restore consumes a pending activation directly:
                 // disabling its never-authorized marker preserves the canonical
                 // recovery bytes for the restore worker instead of archiving them.
-                if (!deleteFileDurably(marker)) {
-                    throw IllegalStateException(
-                        "Could not disable Native Spread before recovery",
-                    )
+                withNativeSpreadPublicationLock(marker) {
+                    val markerAuthority = readPersistedAuthorityIfFile(marker)
+                    if (markerAuthority != null) {
+                        deleteRegularFileCas(
+                            marker,
+                            markerAuthority.identity,
+                            "Native Spread recovery disable",
+                        )
+                    }
+                    if (readPersistedAuthorityIfFile(marker) != null) {
+                        throw IllegalStateException(
+                            "Could not disable Native Spread before recovery",
+                        )
+                    }
                 }
                 scheduleAnnotationRestore(pdfFile, backup) { error ->
                     Handler(Looper.getMainLooper()).post {
@@ -977,7 +995,7 @@ class ReaderPreferencesModule(
         previousMarkerBytes: ByteArray?,
         previousMarkerProtected: Boolean,
         onPublished: () -> Unit,
-    ): NativeAnnotationBackup {
+    ): NativeAnnotationBackup = withNativeSpreadPublicationLock(marker) {
         check(
             pendingIntent == NATIVE_SPREAD_PENDING_DISABLE ||
                 handshake?.active == true,
@@ -989,7 +1007,8 @@ class ReaderPreferencesModule(
                 "The annotation recovery files changed before marker publication",
             )
         }
-        val currentMarkerBytes = readPersistedBytesIfFile(marker)
+        val currentMarkerAuthority = readPersistedAuthorityIfFile(marker)
+        val currentMarkerBytes = currentMarkerAuthority?.bytes
         val previousMarkerStillCurrent = if (previousMarkerBytes == null) {
             currentMarkerBytes == null && !marker.exists()
         } else {
@@ -1018,22 +1037,25 @@ class ReaderPreferencesModule(
                 "Protected editable pending marker was invalid before publication",
             )
         }
-        writePropertiesAtomically(
+        writePropertiesAtomicallyCas(
             marker,
             properties,
             "Supernote RTL protected editable pending activation",
-            onPublished,
+            expected = currentMarkerAuthority,
+            onPublished = onPublished,
             beforePublish = {
                 if (!nativeAnnotationBackupSourceFilesMatch(backup)) {
                     throw IllegalStateException(
                         "The annotation recovery files changed at pending publication",
                     )
                 }
-                val immediateMarkerBytes = readPersistedBytesIfFile(marker)
+                val immediateMarker = readPersistedAuthorityIfFile(marker)
+                val immediateMarkerBytes = immediateMarker?.bytes
                 val stillOwned = if (previousMarkerBytes == null) {
-                    immediateMarkerBytes == null && !marker.exists()
+                    immediateMarker == null
                 } else {
-                    immediateMarkerBytes?.contentEquals(previousMarkerBytes) == true
+                    samePersistedAuthority(currentMarkerAuthority, immediateMarker) &&
+                        immediateMarkerBytes?.contentEquals(previousMarkerBytes) == true
                 }
                 if (!stillOwned) {
                     throw IllegalStateException(
@@ -1090,7 +1112,7 @@ class ReaderPreferencesModule(
             LOG_TAG,
             "RTL_READER_NATIVE_SPREAD_TRANSITION_PENDING token=$activationToken intent=$pendingIntent marker=${marker.absolutePath}",
         )
-        return verifiedBackup
+        verifiedBackup
     }
 
     private fun commitNativeSpreadEditableMarker(
@@ -1104,11 +1126,12 @@ class ReaderPreferencesModule(
         backup: NativeAnnotationBackup,
         requireLiveBaselineMatch: Boolean,
         onCommitted: () -> Unit,
-    ): NativeAnnotationBackup {
-        val pendingMarkerBytes = readPersistedBytesIfFile(marker)
+    ): NativeAnnotationBackup = withNativeSpreadPublicationLock(marker) {
+        val pendingMarkerAuthority = readPersistedAuthorityIfFile(marker)
             ?: throw IllegalStateException(
                 "Protected editable pending marker disappeared before commit",
             )
+        val pendingMarkerBytes = pendingMarkerAuthority.bytes
         val pendingProperties = strictNativeSpreadMarkerProperties(
             pendingMarkerBytes,
         )
@@ -1152,14 +1175,19 @@ class ReaderPreferencesModule(
         // deliberately no fallible reread after it: pending is always rejected
         // by the companion, while a committed marker is final and must never be
         // rolled back merely because the publisher died after the rename.
-        writePropertiesAtomically(
+        writePropertiesAtomicallyCas(
             marker,
             committedProperties,
             "Supernote RTL protected editable committed activation",
+            expected = pendingMarkerAuthority,
             onPublished = onCommitted,
             beforePublish = {
-                val immediateMarkerBytes = readPersistedBytesIfFile(marker)
-                if (immediateMarkerBytes?.contentEquals(pendingMarkerBytes) != true) {
+                val immediateMarker = readPersistedAuthorityIfFile(marker)
+                if (!samePersistedAuthority(
+                        pendingMarkerAuthority,
+                        immediateMarker,
+                    ) || immediateMarker?.bytes?.contentEquals(pendingMarkerBytes) != true
+                ) {
                     throw IllegalStateException(
                         "Protected editable pending marker changed at commit publication",
                     )
@@ -1188,7 +1216,7 @@ class ReaderPreferencesModule(
                 }
             },
         )
-        return backup
+        backup
     }
 
     private fun resolveNativeSpreadMode(
@@ -1290,6 +1318,19 @@ class ReaderPreferencesModule(
     private data class NativeAnnotationBackupResult(
         val backup: NativeAnnotationBackup?,
         val status: String,
+    )
+
+    private data class PersistedFileAuthority(
+        val bytes: ByteArray,
+        val identity: StructStat,
+    )
+
+    private data class NativeMarkPublication(
+        val mark: File,
+        val publishedIdentity: StructStat?,
+        val previousPresent: Boolean,
+        val previousBytes: ByteArray?,
+        val changed: Boolean,
     )
 
     private data class NativeSpreadAuthorityAssessment(
@@ -2537,7 +2578,23 @@ class ReaderPreferencesModule(
      * Recovery and rollback consume these bytes as authority too, so they
      * must use the same anti-substitution boundary as property parsing.
      */
-    private fun readPersistedBytesIfFile(file: File): ByteArray? {
+    private fun readPersistedBytesIfFile(file: File): ByteArray? =
+        readPersistedAuthorityIfFile(file)?.bytes
+
+    private fun readPersistedAuthorityIfFile(file: File): PersistedFileAuthority? =
+        readRegularFileAuthorityIfFile(
+            file,
+            STRICT_PROPERTIES_MAX_BYTES.toLong(),
+            requireNonEmpty = true,
+            authorityLabel = "persisted-properties",
+        )
+
+    private fun readRegularFileAuthorityIfFile(
+        file: File,
+        maximumBytes: Long,
+        requireNonEmpty: Boolean,
+        authorityLabel: String,
+    ): PersistedFileAuthority? {
         val path = file.absolutePath
         val pathBefore = try {
             Os.lstat(path)
@@ -2548,9 +2605,11 @@ class ReaderPreferencesModule(
         require(
             OsConstants.S_ISREG(pathBefore.st_mode) &&
                 pathBefore.st_nlink == 1L &&
-                pathBefore.st_size in 1L..STRICT_PROPERTIES_MAX_BYTES.toLong(),
+                pathBefore.st_size >= (if (requireNonEmpty) 1L else 0L) &&
+                pathBefore.st_size <= maximumBytes &&
+                pathBefore.st_size <= Int.MAX_VALUE.toLong(),
         ) {
-            "persisted-properties authority is not one bounded single-link file"
+            "$authorityLabel authority is not one bounded single-link file"
         }
         val descriptor = Os.open(
             path,
@@ -2560,7 +2619,7 @@ class ReaderPreferencesModule(
         try {
             val opened = Os.fstat(descriptor)
             require(samePersistedFileVersion(pathBefore, opened)) {
-                "persisted-properties descriptor disagrees with its path"
+                "$authorityLabel descriptor disagrees with its path"
             }
             val bytes = ByteArrayOutputStream(opened.st_size.toInt()).use { output ->
                 FileInputStream(Os.dup(descriptor)).use { input ->
@@ -2568,8 +2627,8 @@ class ReaderPreferencesModule(
                     while (true) {
                         val count = input.read(buffer)
                         if (count < 0) break
-                        require(output.size() + count <= STRICT_PROPERTIES_MAX_BYTES) {
-                            "persisted-properties file exceeded its size bound"
+                        require(output.size().toLong() + count <= maximumBytes) {
+                            "$authorityLabel file exceeded its size bound"
                         }
                         output.write(buffer, 0, count)
                     }
@@ -2583,15 +2642,20 @@ class ReaderPreferencesModule(
                     samePersistedFileVersion(opened, pathAfter) &&
                     bytes.size.toLong() == opened.st_size,
             ) {
-                "persisted-properties authority changed or was replaced while reading"
+                "$authorityLabel authority changed or was replaced while reading"
             }
-            return bytes
+            return PersistedFileAuthority(bytes, opened)
         } finally {
             Os.close(descriptor)
         }
     }
 
-    private fun samePersistedFileVersion(first: android.system.StructStat, second: android.system.StructStat): Boolean =
+    private fun sameFileObject(first: StructStat, second: StructStat): Boolean =
+        first.st_dev == second.st_dev &&
+            first.st_ino == second.st_ino &&
+            first.st_mode == second.st_mode
+
+    private fun samePersistedFileVersion(first: StructStat, second: StructStat): Boolean =
         first.st_dev == second.st_dev &&
             first.st_ino == second.st_ino &&
             first.st_mode == second.st_mode &&
@@ -3122,17 +3186,20 @@ class ReaderPreferencesModule(
         backupManifestExisted: Boolean,
         markerPublishedByActivation: Boolean,
         activationError: Throwable,
-    ): Boolean {
+    ): Boolean = withNativeSpreadPublicationLock(marker) {
         try {
             var failedActivationArchive: FailedActivationBackupArchive? = null
-            val currentMarkerBytes = readPersistedBytesIfFile(marker)
-            val currentMarkerProperties = readPropertiesIfFile(marker)
+            val currentMarkerAuthority = readPersistedAuthorityIfFile(marker)
+            val currentMarkerBytes = currentMarkerAuthority?.bytes
+            val currentMarkerProperties = currentMarkerBytes?.let { bytes ->
+                strictNativeSpreadMarkerProperties(bytes)
+            } ?: Properties()
             val ownsPublishedMarker = currentMarkerProperties.getProperty(
                 "activationToken",
                 "",
             ) == activationToken
             val markerAlreadyPrevious = if (previousMarkerBytes == null) {
-                !marker.exists()
+                currentMarkerAuthority == null
             } else {
                 currentMarkerBytes?.contentEquals(previousMarkerBytes) == true
             }
@@ -3144,18 +3211,26 @@ class ReaderPreferencesModule(
                     LOG_TAG,
                     "RTL_READER_NATIVE_EDITABLE_ACTIVATION_ROLLBACK_SKIPPED reason=marker_ownership_lost marker=${marker.absolutePath}",
                 )
-                return false
+                return@withNativeSpreadPublicationLock false
             }
             fun restorePublishedMarkerIfOwned() {
                 if (!ownsPublishedMarker) return
                 if (previousMarkerBytes == null) {
-                    if (!deleteFileDurably(marker)) {
-                        throw IllegalStateException(
-                            "Could not remove the failed protected editable marker",
+                    val ownedIdentity = currentMarkerAuthority?.identity
+                        ?: throw IllegalStateException(
+                            "Owned protected editable marker disappeared",
                         )
-                    }
+                    deleteRegularFileCas(
+                        marker,
+                        ownedIdentity,
+                        "failed protected editable marker rollback",
+                    )
                 } else {
-                    writeBytesAtomically(marker, previousMarkerBytes)
+                    writeBytesAtomicallyCas(
+                        marker,
+                        previousMarkerBytes,
+                        currentMarkerAuthority,
+                    )
                 }
             }
 
@@ -3224,7 +3299,7 @@ class ReaderPreferencesModule(
                 LOG_TAG,
                 "RTL_READER_NATIVE_EDITABLE_ACTIVATION_ROLLED_BACK marker=${marker.absolutePath} markerRestored=$markerRestored markerOwnershipLost=$markerOwnershipLost backupCreated=${!backupManifestExisted} backupArchived=$archiveNewBackup",
             )
-            return true
+            true
         } catch (rollbackError: Throwable) {
             activationError.addSuppressed(rollbackError)
             Log.e(
@@ -3232,7 +3307,7 @@ class ReaderPreferencesModule(
                 "RTL_READER_NATIVE_EDITABLE_ACTIVATION_ROLLBACK_FAILED marker=${marker.absolutePath}",
                 rollbackError,
             )
-            return false
+            false
         }
     }
 
@@ -3735,6 +3810,403 @@ class ReaderPreferencesModule(
             onPublished = onPublished,
             beforePublish = beforePublish,
         )
+    }
+
+    /**
+     * Serializes marker compare-and-publish across every PluginHost process.
+     * The persistent lock inode and its parent directory remain open and are
+     * revalidated for the full critical section. The in-process monitor avoids
+     * FileChannel's overlapping-lock exception when two module instances in the
+     * same VM race for the same OS lock.
+     */
+    private fun <T> withNativeSpreadPublicationLock(
+        marker: File,
+        action: () -> T,
+    ): T = synchronized(NATIVE_SPREAD_PUBLICATION_PROCESS_LOCK) {
+        val parent = marker.parentFile
+            ?: throw IllegalStateException("Native Spread marker has no parent")
+        val parentDescriptor = Os.open(
+            parent.absolutePath,
+            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or
+                LINUX_O_DIRECTORY or OsConstants.O_NOFOLLOW,
+            0,
+        )
+        try {
+            val parentIdentity = Os.fstat(parentDescriptor)
+            require(OsConstants.S_ISDIR(parentIdentity.st_mode)) {
+                "Native Spread marker parent is not a directory"
+            }
+            require(sameFileObject(parentIdentity, Os.lstat(parent.absolutePath))) {
+                "Native Spread marker parent path changed before locking"
+            }
+
+            val lockFile = File(parent, marker.name + NATIVE_SPREAD_PUBLICATION_LOCK_SUFFIX)
+            val lockDescriptor = Os.open(
+                lockFile.absolutePath,
+                OsConstants.O_RDWR or OsConstants.O_CREAT or
+                    OsConstants.O_CLOEXEC or OsConstants.O_NOFOLLOW,
+                0x180, // 0600
+            )
+            try {
+                val lockIdentity = Os.fstat(lockDescriptor)
+                require(
+                    OsConstants.S_ISREG(lockIdentity.st_mode) &&
+                        lockIdentity.st_nlink == 1L &&
+                        sameFileObject(lockIdentity, Os.lstat(lockFile.absolutePath)),
+                ) {
+                    "Native Spread publication lock authority is invalid"
+                }
+                Os.fsync(parentDescriptor)
+                FileOutputStream(Os.dup(lockDescriptor)).channel.use { channel ->
+                    channel.lock().use {
+                        require(
+                            sameFileObject(parentIdentity, Os.fstat(parentDescriptor)) &&
+                                sameFileObject(parentIdentity, Os.lstat(parent.absolutePath)) &&
+                                samePersistedFileVersion(
+                                    lockIdentity,
+                                    Os.fstat(lockDescriptor),
+                                ) &&
+                                samePersistedFileVersion(
+                                    lockIdentity,
+                                    Os.lstat(lockFile.absolutePath),
+                                ),
+                        ) {
+                            "Native Spread publication lock or parent was replaced"
+                        }
+                        val result = action()
+                        require(
+                            sameFileObject(parentIdentity, Os.fstat(parentDescriptor)) &&
+                                sameFileObject(parentIdentity, Os.lstat(parent.absolutePath)) &&
+                                samePersistedFileVersion(
+                                    lockIdentity,
+                                    Os.fstat(lockDescriptor),
+                                ) &&
+                                samePersistedFileVersion(
+                                    lockIdentity,
+                                    Os.lstat(lockFile.absolutePath),
+                                ),
+                        ) {
+                            "Native Spread publication authority changed while locked"
+                        }
+                        result
+                    }
+                }
+            } finally {
+                Os.close(lockDescriptor)
+            }
+        } finally {
+            Os.close(parentDescriptor)
+        }
+    }
+
+    private fun samePersistedAuthority(
+        expected: PersistedFileAuthority?,
+        actual: PersistedFileAuthority?,
+    ): Boolean = when {
+        expected == null -> actual == null
+        actual == null -> false
+        else -> samePersistedFileVersion(expected.identity, actual.identity) &&
+            expected.bytes.contentEquals(actual.bytes)
+    }
+
+    private fun writePropertiesAtomicallyCas(
+        file: File,
+        properties: Properties,
+        comment: String,
+        expected: PersistedFileAuthority?,
+        onPublished: () -> Unit = {},
+        beforePublish: () -> Unit = {},
+    ) {
+        val bytes = ByteArrayOutputStream().use { buffer ->
+            properties.store(buffer, comment)
+            buffer.toByteArray()
+        }
+        writeBytesAtomicallyCas(
+            file,
+            bytes,
+            expected,
+            onPublished,
+            beforePublish,
+        )
+    }
+
+    /**
+     * Publishes only over the exact destination inode/version observed by the
+     * caller (or over proven absence), while the cross-process marker lock is
+     * held. Temporary creation is exclusive and no-follow; its inode and the
+     * parent directory are pinned across fsync and the atomic rename.
+     */
+    private fun writeBytesAtomicallyCas(
+        file: File,
+        bytes: ByteArray,
+        expected: PersistedFileAuthority?,
+        onPublished: () -> Unit = {},
+        beforePublish: () -> Unit = {},
+    ) {
+        val parent = file.parentFile
+            ?: throw IllegalStateException("Published file has no parent directory")
+        val parentDescriptor = Os.open(
+            parent.absolutePath,
+            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or
+                LINUX_O_DIRECTORY or OsConstants.O_NOFOLLOW,
+            0,
+        )
+        val temporary = File(
+            parent,
+            ".${file.name}.cas-${android.os.Process.myPid()}-${UUID.randomUUID()}",
+        )
+        var temporaryDescriptor: FileDescriptor? = null
+        try {
+            val parentIdentity = Os.fstat(parentDescriptor)
+            require(
+                OsConstants.S_ISDIR(parentIdentity.st_mode) &&
+                    sameFileObject(parentIdentity, Os.lstat(parent.absolutePath)),
+            ) {
+                "Publication parent authority is invalid"
+            }
+            val openedTemporary = Os.open(
+                temporary.absolutePath,
+                OsConstants.O_WRONLY or OsConstants.O_CREAT or
+                    OsConstants.O_EXCL or OsConstants.O_CLOEXEC or
+                    OsConstants.O_NOFOLLOW,
+                0x180, // 0600
+            )
+            temporaryDescriptor = openedTemporary
+            FileOutputStream(Os.dup(openedTemporary)).use { output ->
+                output.write(bytes)
+                output.flush()
+                output.fd.sync()
+            }
+            val stagedIdentity = Os.fstat(openedTemporary)
+            require(
+                OsConstants.S_ISREG(stagedIdentity.st_mode) &&
+                    stagedIdentity.st_nlink == 1L &&
+                    stagedIdentity.st_size == bytes.size.toLong() &&
+                    samePersistedFileVersion(
+                        stagedIdentity,
+                        Os.lstat(temporary.absolutePath),
+                    ),
+            ) {
+                "Staged publication authority changed"
+            }
+
+            beforePublish()
+            val immediate = readPersistedAuthorityIfFile(file)
+            require(samePersistedAuthority(expected, immediate)) {
+                "Published destination changed before compare-and-publish"
+            }
+            require(
+                sameFileObject(parentIdentity, Os.fstat(parentDescriptor)) &&
+                    sameFileObject(parentIdentity, Os.lstat(parent.absolutePath)) &&
+                    samePersistedFileVersion(
+                        stagedIdentity,
+                        Os.fstat(openedTemporary),
+                    ) &&
+                    samePersistedFileVersion(
+                        stagedIdentity,
+                        Os.lstat(temporary.absolutePath),
+                    ),
+            ) {
+                "Publication source or parent changed before compare-and-publish"
+            }
+
+            Os.rename(temporary.absolutePath, file.absolutePath)
+            onPublished()
+            val published = readPersistedAuthorityIfFile(file)
+                ?: throw IllegalStateException("Published destination disappeared")
+            require(
+                samePersistedFileVersion(stagedIdentity, published.identity) &&
+                    published.bytes.contentEquals(bytes) &&
+                    sameFileObject(parentIdentity, Os.fstat(parentDescriptor)) &&
+                    sameFileObject(parentIdentity, Os.lstat(parent.absolutePath)),
+            ) {
+                "Published destination or parent changed after atomic publication"
+            }
+            Os.fsync(parentDescriptor)
+        } finally {
+            temporaryDescriptor?.let { descriptor ->
+                runCatching { Os.close(descriptor) }
+            }
+            runCatching {
+                val staged = Os.lstat(temporary.absolutePath)
+                if (OsConstants.S_ISREG(staged.st_mode) && staged.st_nlink == 1L) {
+                    Files.deleteIfExists(temporary.toPath())
+                }
+            }
+            Os.close(parentDescriptor)
+        }
+    }
+
+    private fun pathIdentityNoFollow(file: File): StructStat? = try {
+        Os.lstat(file.absolutePath)
+    } catch (missing: ErrnoException) {
+        if (missing.errno == OsConstants.ENOENT) null else throw missing
+    }
+
+    private fun requireExpectedRegularDestination(
+        file: File,
+        expected: StructStat?,
+        authorityLabel: String,
+    ) {
+        val actual = pathIdentityNoFollow(file)
+        require(
+            if (expected == null) {
+                actual == null
+            } else {
+                actual != null &&
+                    OsConstants.S_ISREG(actual.st_mode) &&
+                    actual.st_nlink == 1L &&
+                    samePersistedFileVersion(expected, actual)
+            },
+        ) {
+            "$authorityLabel destination identity changed"
+        }
+    }
+
+    private fun writeRegularFileAtomicallyCas(
+        file: File,
+        bytes: ByteArray,
+        expected: StructStat?,
+        authorityLabel: String,
+        beforePublish: () -> Unit = {},
+        onPublished: (StructStat) -> Unit = {},
+    ): StructStat {
+        val parent = file.parentFile
+            ?: throw IllegalStateException("$authorityLabel destination has no parent")
+        val parentDescriptor = Os.open(
+            parent.absolutePath,
+            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or
+                LINUX_O_DIRECTORY or OsConstants.O_NOFOLLOW,
+            0,
+        )
+        val temporary = File(
+            parent,
+            ".${file.name}.restore-${android.os.Process.myPid()}-${UUID.randomUUID()}",
+        )
+        var temporaryDescriptor: FileDescriptor? = null
+        try {
+            val parentIdentity = Os.fstat(parentDescriptor)
+            require(
+                OsConstants.S_ISDIR(parentIdentity.st_mode) &&
+                    sameFileObject(parentIdentity, Os.lstat(parent.absolutePath)),
+            ) {
+                "$authorityLabel parent authority is invalid"
+            }
+            val openedTemporary = Os.open(
+                temporary.absolutePath,
+                OsConstants.O_WRONLY or OsConstants.O_CREAT or
+                    OsConstants.O_EXCL or OsConstants.O_CLOEXEC or
+                    OsConstants.O_NOFOLLOW,
+                0x180, // 0600
+            )
+            temporaryDescriptor = openedTemporary
+            FileOutputStream(Os.dup(openedTemporary)).use { output ->
+                output.write(bytes)
+                output.flush()
+                output.fd.sync()
+            }
+            val stagedIdentity = Os.fstat(openedTemporary)
+            require(
+                OsConstants.S_ISREG(stagedIdentity.st_mode) &&
+                    stagedIdentity.st_nlink == 1L &&
+                    stagedIdentity.st_size == bytes.size.toLong() &&
+                    samePersistedFileVersion(
+                        stagedIdentity,
+                        Os.lstat(temporary.absolutePath),
+                    ),
+            ) {
+                "$authorityLabel staged source changed"
+            }
+            beforePublish()
+            requireExpectedRegularDestination(file, expected, authorityLabel)
+            require(
+                sameFileObject(parentIdentity, Os.fstat(parentDescriptor)) &&
+                    sameFileObject(parentIdentity, Os.lstat(parent.absolutePath)) &&
+                    samePersistedFileVersion(
+                        stagedIdentity,
+                        Os.fstat(openedTemporary),
+                    ) &&
+                    samePersistedFileVersion(
+                        stagedIdentity,
+                        Os.lstat(temporary.absolutePath),
+                    ),
+            ) {
+                "$authorityLabel publication authority changed"
+            }
+            Os.rename(temporary.absolutePath, file.absolutePath)
+            onPublished(stagedIdentity)
+            require(
+                samePersistedFileVersion(
+                    stagedIdentity,
+                    checkNotNull(pathIdentityNoFollow(file)),
+                ) &&
+                    sameFileObject(parentIdentity, Os.fstat(parentDescriptor)) &&
+                    sameFileObject(parentIdentity, Os.lstat(parent.absolutePath)),
+            ) {
+                "$authorityLabel published destination changed"
+            }
+            Os.fsync(parentDescriptor)
+            return stagedIdentity
+        } finally {
+            temporaryDescriptor?.let { descriptor ->
+                runCatching { Os.close(descriptor) }
+            }
+            runCatching {
+                val staged = Os.lstat(temporary.absolutePath)
+                if (OsConstants.S_ISREG(staged.st_mode) && staged.st_nlink == 1L) {
+                    Files.deleteIfExists(temporary.toPath())
+                }
+            }
+            Os.close(parentDescriptor)
+        }
+    }
+
+    private fun deleteRegularFileCas(
+        file: File,
+        expected: StructStat,
+        authorityLabel: String,
+        beforePublish: () -> Unit = {},
+        onPublished: () -> Unit = {},
+    ) {
+        val parent = file.parentFile
+            ?: throw IllegalStateException("$authorityLabel destination has no parent")
+        val parentDescriptor = Os.open(
+            parent.absolutePath,
+            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or
+                LINUX_O_DIRECTORY or OsConstants.O_NOFOLLOW,
+            0,
+        )
+        try {
+            val parentIdentity = Os.fstat(parentDescriptor)
+            require(
+                OsConstants.S_ISDIR(parentIdentity.st_mode) &&
+                    sameFileObject(parentIdentity, Os.lstat(parent.absolutePath)),
+            ) {
+                "$authorityLabel parent authority is invalid"
+            }
+            beforePublish()
+            requireExpectedRegularDestination(file, expected, authorityLabel)
+            require(
+                sameFileObject(parentIdentity, Os.fstat(parentDescriptor)) &&
+                    sameFileObject(parentIdentity, Os.lstat(parent.absolutePath)),
+            ) {
+                "$authorityLabel parent changed before deletion"
+            }
+            Files.delete(file.toPath())
+            onPublished()
+            require(pathIdentityNoFollow(file) == null) {
+                "$authorityLabel destination reappeared after deletion"
+            }
+            require(
+                sameFileObject(parentIdentity, Os.fstat(parentDescriptor)) &&
+                    sameFileObject(parentIdentity, Os.lstat(parent.absolutePath)),
+            ) {
+                "$authorityLabel parent changed after deletion"
+            }
+            Os.fsync(parentDescriptor)
+        } finally {
+            Os.close(parentDescriptor)
+        }
     }
 
     private fun writeBytesAtomically(
@@ -4276,122 +4748,134 @@ class ReaderPreferencesModule(
                     running = documentPidsOrThrow(activityManager, "restore-quiescence")
                 }
 
-                val revalidatedBackup = readNativeAnnotationBackup(pdfFile).backup
-                    ?: throw IllegalStateException(
-                        "Document or recovery snapshot changed while preparing restore",
-                    )
-                if (!sameNativeAnnotationBackup(backup, revalidatedBackup)) {
-                    throw IllegalStateException(
-                        "Recovery snapshot identity changed while preparing restore",
-                    )
-                }
-
-                val currentMark = nativeAnnotationMark(pdfFile)
-                val preRestoreMarkPresent = currentMark.isFile
-                val preRestoreMarkBytes = if (preRestoreMarkPresent) {
-                    currentMark.readBytes()
-                } else {
-                    null
-                }
-                if (revalidatedBackup.originalMarkPresent) {
-                    if (revalidatedBackup.snapshot.length() != revalidatedBackup.markLength ||
-                        sha256(revalidatedBackup.snapshot) != revalidatedBackup.markSha256) {
-                        throw IllegalStateException("Recovery snapshot changed before restore")
+                withNativeSpreadPublicationLock(nativeSpreadMarker(pdfFile)) {
+                    if (readPersistedAuthorityIfFile(nativeSpreadMarker(pdfFile)) != null) {
+                        throw IllegalStateException(
+                            "Native Spread marker reappeared while annotation recovery was pending",
+                        )
                     }
-                    copyFileAtomically(
-                        revalidatedBackup.snapshot,
-                        currentMark,
-                        beforePublish = {
-                            requireDocumentProcessAbsent(
-                                activityManager,
-                                "before-mark-publish",
-                            )
-                            requireBackupDocumentIdentity(
-                                pdfFile,
-                                revalidatedBackup,
-                                "before-mark-publish",
-                            )
-                        },
-                        onPublished = {
-                            try {
+                    val revalidatedBackup = readNativeAnnotationBackup(pdfFile).backup
+                        ?: throw IllegalStateException(
+                            "Document or recovery snapshot changed while preparing restore",
+                        )
+                    if (!sameNativeAnnotationBackup(backup, revalidatedBackup)) {
+                        throw IllegalStateException(
+                            "Recovery snapshot identity changed while preparing restore",
+                        )
+                    }
+
+                    var publication: NativeMarkPublication? = null
+                    try {
+                        publication = publishNativeAnnotationRestore(
+                            revalidatedBackup,
+                            beforePublish = {
                                 requireDocumentProcessAbsent(
                                     activityManager,
-                                    "after-mark-publish",
+                                    if (revalidatedBackup.originalMarkPresent) {
+                                        "before-mark-publish"
+                                    } else {
+                                        "before-mark-delete"
+                                    },
                                 )
                                 requireBackupDocumentIdentity(
                                     pdfFile,
                                     revalidatedBackup,
-                                    "after-mark-publish",
+                                    if (revalidatedBackup.originalMarkPresent) {
+                                        "before-mark-publish"
+                                    } else {
+                                        "before-mark-delete"
+                                    },
                                 )
-                            } catch (identityFailure: Throwable) {
-                                restorePrePublicationMark(
-                                    currentMark,
-                                    preRestoreMarkPresent,
-                                    preRestoreMarkBytes,
+                            },
+                            afterPublish = {
+                                requireDocumentProcessAbsent(
+                                    activityManager,
+                                    if (revalidatedBackup.originalMarkPresent) {
+                                        "after-mark-publish"
+                                    } else {
+                                        "after-mark-delete"
+                                    },
                                 )
-                                throw identityFailure
-                            }
-                        },
-                    )
-                    if (currentMark.length() != revalidatedBackup.markLength ||
-                        sha256(currentMark) != revalidatedBackup.markSha256
-                    ) {
-                        throw IllegalStateException("Restored annotation file verification failed")
-                    }
-                    requireBackupDocumentIdentity(
-                        pdfFile,
-                        revalidatedBackup,
-                        "after-mark-verification",
-                    )
-                } else {
-                    requireDocumentProcessAbsent(activityManager, "before-mark-delete")
-                    requireBackupDocumentIdentity(
-                        pdfFile,
-                        revalidatedBackup,
-                        "before-mark-delete",
-                    )
-                    if (!deleteFileDurably(currentMark)) {
-                        throw IllegalStateException(
-                            "Could not restore the original no-annotation state",
+                                requireBackupDocumentIdentity(
+                                    pdfFile,
+                                    revalidatedBackup,
+                                    if (revalidatedBackup.originalMarkPresent) {
+                                        "after-mark-publish"
+                                    } else {
+                                        "after-mark-delete"
+                                    },
+                                )
+                            },
                         )
-                    }
-                    try {
+
+                        val restoredMark = readRegularFileAuthorityIfFile(
+                            revalidatedBackup.mark,
+                            Int.MAX_VALUE.toLong(),
+                            requireNonEmpty = false,
+                            authorityLabel = "restored annotation",
+                        )
+                        val restoredBytesMatch = if (revalidatedBackup.originalMarkPresent) {
+                            restoredMark != null &&
+                                restoredMark.bytes.size.toLong() ==
+                                    revalidatedBackup.markLength &&
+                                sha256(restoredMark.bytes) == revalidatedBackup.markSha256
+                        } else {
+                            restoredMark == null
+                        }
+                        if (!restoredBytesMatch) {
+                            throw IllegalStateException(
+                                "Restored annotation file verification failed",
+                            )
+                        }
+                        requireBackupDocumentIdentity(
+                            pdfFile,
+                            revalidatedBackup,
+                            "after-mark-verification",
+                        )
+
+                        Log.i(
+                            LOG_TAG,
+                            "RTL_READER_NATIVE_BACKUP_RESTORED originalPresent=${revalidatedBackup.originalMarkPresent} mark=${revalidatedBackup.mark.absolutePath}",
+                        )
                         requireDocumentProcessAbsent(
                             activityManager,
-                            "after-mark-delete",
+                            "before-backup-retirement",
                         )
                         requireBackupDocumentIdentity(
                             pdfFile,
                             revalidatedBackup,
-                            "after-mark-delete",
+                            "before-backup-retirement",
                         )
-                    } catch (identityFailure: Throwable) {
-                        restorePrePublicationMark(
-                            currentMark,
-                            preRestoreMarkPresent,
-                            preRestoreMarkBytes,
-                        )
-                        throw identityFailure
+                        removeNativeAnnotationBackupFiles(pdfFile, revalidatedBackup)
+                        SystemClock.sleep(250)
+                        reactApplicationContext.startActivity(Intent().apply {
+                            setClassName(DOCUMENT_PACKAGE, DOCUMENT_ACTIVITY)
+                            addFlags(
+                                Intent.FLAG_ACTIVITY_NEW_TASK or
+                                    Intent.FLAG_ACTIVITY_CLEAR_TASK,
+                            )
+                        })
+                        Log.i(LOG_TAG, "RTL_READER_NATIVE_BACKUP_RESTORE_REOPENED")
+                    } catch (restoreError: Throwable) {
+                        publication?.takeIf { value -> value.changed }?.let { value ->
+                            try {
+                                restorePrePublicationMark(value)
+                                Log.w(
+                                    LOG_TAG,
+                                    "RTL_READER_NATIVE_BACKUP_RESTORE_POST_PUBLICATION_ROLLED_BACK",
+                                )
+                            } catch (rollbackError: Throwable) {
+                                restoreError.addSuppressed(rollbackError)
+                                Log.e(
+                                    LOG_TAG,
+                                    "RTL_READER_NATIVE_BACKUP_RESTORE_POST_PUBLICATION_ROLLBACK_FAILED",
+                                    rollbackError,
+                                )
+                            }
+                        }
+                        throw restoreError
                     }
                 }
-
-                Log.i(
-                    LOG_TAG,
-                    "RTL_READER_NATIVE_BACKUP_RESTORED originalPresent=${revalidatedBackup.originalMarkPresent} mark=${currentMark.absolutePath}",
-                )
-                requireDocumentProcessAbsent(activityManager, "before-backup-retirement")
-                requireBackupDocumentIdentity(
-                    pdfFile,
-                    revalidatedBackup,
-                    "before-backup-retirement",
-                )
-                removeNativeAnnotationBackupFiles(pdfFile, revalidatedBackup)
-                SystemClock.sleep(250)
-                reactApplicationContext.startActivity(Intent().apply {
-                    setClassName(DOCUMENT_PACKAGE, DOCUMENT_ACTIVITY)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                })
-                Log.i(LOG_TAG, "RTL_READER_NATIVE_BACKUP_RESTORE_REOPENED")
                 completion(null)
                 } catch (error: Throwable) {
                     Log.e(
@@ -4441,20 +4925,256 @@ class ReaderPreferencesModule(
         }
     }
 
-    private fun restorePrePublicationMark(
-        mark: File,
-        wasPresent: Boolean,
-        previousBytes: ByteArray?,
-    ) {
-        if (wasPresent) {
-            val bytes = previousBytes ?: throw IllegalStateException(
+    private fun readPinnedRegularBytes(
+        descriptor: FileDescriptor,
+        identity: StructStat,
+        authorityLabel: String,
+    ): ByteArray {
+        require(
+            OsConstants.S_ISREG(identity.st_mode) &&
+                identity.st_nlink == 1L &&
+                identity.st_size in 0L..Int.MAX_VALUE.toLong(),
+        ) {
+            "$authorityLabel is not one readable single-link file"
+        }
+        val bytes = ByteArrayOutputStream(identity.st_size.toInt()).use { output ->
+            FileInputStream(Os.dup(descriptor)).use { input ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    require(output.size().toLong() + count <= identity.st_size) {
+                        "$authorityLabel grew while reading"
+                    }
+                    output.write(buffer, 0, count)
+                }
+            }
+            output.toByteArray()
+        }
+        require(
+            bytes.size.toLong() == identity.st_size &&
+                samePersistedFileVersion(identity, Os.fstat(descriptor)),
+        ) {
+            "$authorityLabel changed while reading"
+        }
+        return bytes
+    }
+
+    private fun openPinnedRegularFile(
+        file: File,
+        expected: StructStat,
+        authorityLabel: String,
+    ): FileDescriptor {
+        require(
+            OsConstants.S_ISREG(expected.st_mode) && expected.st_nlink == 1L,
+        ) {
+            "$authorityLabel is not one regular single-link file"
+        }
+        val descriptor = Os.open(
+            file.absolutePath,
+            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or OsConstants.O_NOFOLLOW,
+            0,
+        )
+        try {
+            require(
+                samePersistedFileVersion(expected, Os.fstat(descriptor)) &&
+                    samePersistedFileVersion(expected, Os.lstat(file.absolutePath)),
+            ) {
+                "$authorityLabel descriptor disagrees with its path"
+            }
+            return descriptor
+        } catch (error: Throwable) {
+            Os.close(descriptor)
+            throw error
+        }
+    }
+
+    private fun publishNativeAnnotationRestore(
+        backup: NativeAnnotationBackup,
+        beforePublish: () -> Unit,
+        afterPublish: () -> Unit,
+    ): NativeMarkPublication {
+        val mark = backup.mark
+        val previousPathIdentity = pathIdentityNoFollow(mark)
+        val previousDescriptor = previousPathIdentity?.let { identity ->
+            openPinnedRegularFile(mark, identity, "pre-restore annotation")
+        }
+        val previousBytes = previousDescriptor?.let { descriptor ->
+            readPinnedRegularBytes(
+                descriptor,
+                checkNotNull(previousPathIdentity),
+                "pre-restore annotation",
+            )
+        }
+        var publication: NativeMarkPublication? = null
+        try {
+            if (!backup.originalMarkPresent) {
+                if (previousPathIdentity == null) {
+                    beforePublish()
+                    afterPublish()
+                    return NativeMarkPublication(mark, null, false, null, false)
+                }
+                deleteRegularFileCas(
+                    mark,
+                    previousPathIdentity,
+                    "native annotation restore",
+                    beforePublish = {
+                        require(
+                            previousDescriptor != null &&
+                                samePersistedFileVersion(
+                                    previousPathIdentity,
+                                    Os.fstat(previousDescriptor),
+                                ),
+                        ) {
+                            "Pre-restore annotation identity changed"
+                        }
+                        beforePublish()
+                    },
+                    onPublished = {
+                        publication = NativeMarkPublication(
+                            mark,
+                            null,
+                            true,
+                            previousBytes,
+                            true,
+                        )
+                        afterPublish()
+                    },
+                )
+                return checkNotNull(publication)
+            }
+
+            val snapshotPathIdentity = pathIdentityNoFollow(backup.snapshot)
+                ?: throw IllegalStateException("Recovery snapshot disappeared")
+            val snapshotDescriptor = openPinnedRegularFile(
+                backup.snapshot,
+                snapshotPathIdentity,
+                "annotation recovery snapshot",
+            )
+            try {
+                val snapshotBytes = readPinnedRegularBytes(
+                    snapshotDescriptor,
+                    snapshotPathIdentity,
+                    "annotation recovery snapshot",
+                )
+                require(
+                    snapshotBytes.size.toLong() == backup.markLength &&
+                        sha256(snapshotBytes) == backup.markSha256,
+                ) {
+                    "Recovery snapshot bytes disagree with backup authority"
+                }
+                val publishedIdentity = writeRegularFileAtomicallyCas(
+                    mark,
+                    snapshotBytes,
+                    previousPathIdentity,
+                    "native annotation restore",
+                    beforePublish = {
+                        require(
+                            samePersistedFileVersion(
+                                snapshotPathIdentity,
+                                Os.fstat(snapshotDescriptor),
+                            ) &&
+                                samePersistedFileVersion(
+                                    snapshotPathIdentity,
+                                    Os.lstat(backup.snapshot.absolutePath),
+                                ),
+                        ) {
+                            "Recovery snapshot changed before publication"
+                        }
+                        if (previousPathIdentity != null) {
+                            require(
+                                previousDescriptor != null &&
+                                    samePersistedFileVersion(
+                                        previousPathIdentity,
+                                        Os.fstat(previousDescriptor),
+                                    ),
+                            ) {
+                                "Pre-restore annotation identity changed"
+                            }
+                        }
+                        beforePublish()
+                    },
+                    onPublished = { identity ->
+                        publication = NativeMarkPublication(
+                            mark,
+                            identity,
+                            previousPathIdentity != null,
+                            previousBytes,
+                            true,
+                        )
+                        afterPublish()
+                    },
+                )
+                require(
+                    samePersistedFileVersion(
+                        snapshotPathIdentity,
+                        Os.fstat(snapshotDescriptor),
+                    ) &&
+                        samePersistedFileVersion(
+                            snapshotPathIdentity,
+                            Os.lstat(backup.snapshot.absolutePath),
+                        ) &&
+                        samePersistedFileVersion(
+                            publishedIdentity,
+                            checkNotNull(pathIdentityNoFollow(mark)),
+                        ),
+                ) {
+                    "Restore authority changed during verified publication"
+                }
+                return checkNotNull(publication)
+            } finally {
+                Os.close(snapshotDescriptor)
+            }
+        } catch (error: Throwable) {
+            publication?.takeIf { value -> value.changed }?.let { value ->
+                try {
+                    restorePrePublicationMark(value)
+                } catch (rollbackError: Throwable) {
+                    error.addSuppressed(rollbackError)
+                }
+            }
+            throw error
+        } finally {
+            previousDescriptor?.let { descriptor -> Os.close(descriptor) }
+        }
+    }
+
+    private fun restorePrePublicationMark(publication: NativeMarkPublication) {
+        if (!publication.changed) return
+        if (publication.previousPresent) {
+            val bytes = publication.previousBytes ?: throw IllegalStateException(
                 "Missing pre-publication mark rollback bytes",
             )
-            writeBytesAtomically(mark, bytes)
-        } else if (!deleteFileDurably(mark)) {
-            throw IllegalStateException(
-                "Could not remove rejected annotation publication",
+            writeRegularFileAtomicallyCas(
+                publication.mark,
+                bytes,
+                publication.publishedIdentity,
+                "pre-restore annotation rollback",
             )
+            val restored = readRegularFileAuthorityIfFile(
+                publication.mark,
+                Int.MAX_VALUE.toLong(),
+                requireNonEmpty = false,
+                authorityLabel = "rolled-back annotation",
+            ) ?: throw IllegalStateException(
+                "Pre-restore annotation rollback disappeared",
+            )
+            require(restored.bytes.contentEquals(bytes)) {
+                "Pre-restore annotation rollback bytes changed"
+            }
+        } else {
+            val publishedIdentity = publication.publishedIdentity
+                ?: throw IllegalStateException(
+                    "Missing rejected annotation publication identity",
+                )
+            deleteRegularFileCas(
+                publication.mark,
+                publishedIdentity,
+                "rejected annotation publication rollback",
+            )
+            require(pathIdentityNoFollow(publication.mark) == null) {
+                "Could not remove rejected annotation publication"
+            }
         }
     }
 }

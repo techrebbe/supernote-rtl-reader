@@ -56,6 +56,11 @@ def main() -> None:
     marker = read(source / "v2/NativeReaderV2MarkerClaim.java")
     config = read(source / "v2/NativeReaderV2Config.java")
     transform = read(source / "v2/NativePageTransform.java")
+    input_admission = read(source / "v2/AtomicInputAdmission.java")
+    async_save_fence = read(source / "v2/NativeAsyncSaveFence.java")
+    restore_witness = read(
+        source / "v2/NativePresentationRestoreWitness.java"
+    )
     compositor = read(source / "v2android/NativeReaderV2Compositor.java")
     chrome_tracker = read(
         source / "v2android/NativeReaderV2ChromeTracker.java"
@@ -66,6 +71,7 @@ def main() -> None:
     status_overlay = read(
         source / "v2android/NativeReaderV2StatusOverlay.java"
     )
+    root_build = read(root / "build.sh")
     build = read(module / "build.ps1")
     manifest = read(module / "AndroidManifest.xml")
     xposed = read(module / "assets/xposed_init").strip()
@@ -75,7 +81,16 @@ def main() -> None:
     app = read(root / "overlay/App.js")
     index = read(root / "overlay/index.js")
     plugin_config = read(root / "PluginConfig.json")
+    template_materializer = read(
+        root / "scripts/materialize_plugin_template.py"
+    )
+    apk_normalizer = read(root / "scripts/normalize_apk_zip.py")
+    packager_patch = read(root / "scripts/patch_plugin_packager.py")
     plugin_verifier = read(root / "scripts/verify_plugin_package.py")
+    provenance_test = read(root / "scripts/test_build_provenance.py")
+    lock_input = read(
+        root / "provenance/plugin-template-package-lock.json.gz.b64"
+    )
 
     expected_entry = (
         "com.techrebbe.supernote.spreadprobe.v2android."
@@ -113,7 +128,7 @@ def main() -> None:
     if (
         '"${PYTHON_CMD[@]}" '
         '"$ROOT/scripts/check_native_reader_v2_invariants.py" "$ROOT"'
-        not in read(root / "build.sh")
+        not in root_build
     ):
         fail("plugin build does not execute the exclusive v2 invariant gate")
     if "RTL_READER_OPEN v0.4.16-native-reader-v2" not in index:
@@ -236,7 +251,7 @@ def main() -> None:
             "onRuntimeInputAuthorityReady(",
             "entry.admissionFence = false;",
             "fingerPhysicalContact = true;",
-            "runtime.mayPassNativePenImmediately(x, y, chrome)",
+            "runtime.beginNativePenContactImmediately(x, y, chrome)",
             "scheduleNativeTerminalGuard(entry, runtime);",
             "entry.suppressNativeUntilTerminal = true;",
             "runtime.cancelMissingNativePenTerminal();",
@@ -285,8 +300,8 @@ def main() -> None:
             "native pass-through contacts must remain visible to the v2 "
             "gesture authority"
         )
-    if "runtime.noteNativePenCallbackContact();" not in hooks:
-        fail("native pen DOWN lacks callback-thread refresh exclusion")
+    if "runtime.beginNativePenContactImmediately(x, y, chrome)" not in hooks:
+        fail("native pen DOWN lacks atomic callback-thread admission")
     require(
         runtime,
         [
@@ -308,7 +323,7 @@ def main() -> None:
         [
             "synchronized (entry.stylusRouteLock)",
             "!entry.fingerPhysicalContact",
-            "runtime.mayPassNativePenImmediately(x, y, chrome)",
+            "runtime.beginNativePenContactImmediately(x, y, chrome)",
             "entry.stylusRouteActive = true;",
         ],
         "single-decision cross-tool contact fence",
@@ -497,13 +512,59 @@ def main() -> None:
             "stale deferred navigation discarded",
             "projection completion failed closed",
             "queued continuation failed label=",
-            "if (action == MotionEvent.ACTION_DOWN && inputFrozen)",
+            "private final AtomicInputAdmission inputAdmission",
+            "fingerIngressAdmitted = inputAdmission.begin(",
+            "inputAdmission.begin(AtomicInputAdmission.Contact.STYLUS)",
+            "inputAdmission.freezeIfIdle()",
+            "inputAdmission.end(AtomicInputAdmission.Contact.FINGER)",
+            "inputAdmission.end(AtomicInputAdmission.Contact.STYLUS)",
             "if (pressure > 0 && !penContact)",
             "if (inputFrozen) {",
             "preservingUnsavedSource",
             "transactionAllowsStockRestoration()",
         ],
         "runtime concurrency and input containment",
+    )
+    require(
+        input_admission,
+        [
+            "public synchronized boolean begin(Contact contact)",
+            "frozen || fingerActive || stylusActive",
+            "public synchronized long freezeIfIdle()",
+            "if (frozen || fingerActive || stylusActive) return -1L;",
+        ],
+        "atomic contact/freeze admission",
+    )
+    require(
+        async_save_fence,
+        [
+            "public synchronized Token begin(SpreadSnapshot snapshot",
+            "token.layoutGeneration == snapshot.layoutGeneration",
+            "token.sourcePage == snapshot.activePageIndex",
+            "public synchronized void cancel()",
+        ],
+        "generation-bound asynchronous save fence",
+    )
+    require(
+        runtime,
+        [
+            "sourceSaveFence.begin(snapshot, markRevision)",
+            "if (!sourceSaveAttemptCurrent(attempt)) return;",
+            "sourceSaveFence.complete(attempt.token)",
+            "sourceSaveFence.cancel();",
+        ],
+        "queued source-save token containment",
+    )
+    require(
+        restore_witness,
+        [
+            "token.activityGeneration != observed.activityGeneration",
+            "token.layoutGeneration != observed.layoutGeneration",
+            "receiver != expectedReceiver",
+            "replacement == oldBitmap",
+            "token.mask == 7",
+        ],
+        "versioned stock presentation receipts",
     )
     require(
         controller,
@@ -541,6 +602,10 @@ def main() -> None:
         [
             'PRESENTER, loader, "disableHandWrite", String.class,',
             "runtime.onNativeWriterDisableCompleted(",
+            'PRESENTER, loader, "sendWriteInfo",',
+            "runtime.onNativeWriterEnableCompleted(",
+            'NOTE, loader, "screenRotation",',
+            "runtime.onNativeWriterGeometryCompleted(",
             "PendingNativeOpen pending = new PendingNativeOpen(",
             "entry.pendingNativeOpen = pending;\n"
             "                    boolean prepared =",
@@ -630,7 +695,7 @@ def main() -> None:
     ordered(
         runtime[compose_start:compose_end],
         [
-            "inputFrozen = true;",
+            "reserveInputIngressIfIdle()",
             'executeProjection("spread_composition", new Runnable()',
             "fastEvidenceStillCurrent(evidence)",
             "prepared = compositor.compose(",
@@ -653,7 +718,7 @@ def main() -> None:
             "presentationPublicationAttempted = true;",
             "firmware.setBackground(current, next.background);",
             "pageGeometryLease = firmware.programPageGeometry(",
-            "firmware.programWriterGeometry(",
+            "programWriterGeometryWithWitness(",
             "committed = true;",
         ],
         "prepared spread publication transaction",
@@ -662,7 +727,7 @@ def main() -> None:
         runtime[compose_start:publish_end],
         [
             "boolean inputWasFrozen = inputFrozen;",
-            "inputFrozen = inputWasFrozen;",
+            "setInputIngressFrozen(inputWasFrozen);",
             "next.recycle();",
         ],
         "composition preflight rollback",
@@ -688,7 +753,8 @@ def main() -> None:
     require(
         runtime[contain_start:contain_end],
         [
-            "inputFrozen = true;",
+            "cancelActiveSourceSave();",
+            "freezeInputIngress();",
             "containedFailClosed = true;",
             "if (hasPhysicalInputContact()) {",
             "pendingContainmentReason",
@@ -751,12 +817,14 @@ def main() -> None:
     require(
         runtime,
         [
-            "STOCK_PRESENTATION_READY =",
-            "STOCK_BACKGROUND_READY | STOCK_INK_READY | STOCK_DIGEST_READY",
-            "onNativeStockBackgroundPresented()",
-            "onNativeStockInkPresented()",
-            "onNativeStockDigestPresented()",
-            "if (stockPresentationReadyMask != STOCK_PRESENTATION_READY) return;",
+            "private final NativePresentationRestoreWitness stockRestoreWitness",
+            "stockRestoreWitness.begin(",
+            "onNativeStockBackgroundPresented(",
+            "onNativeStockInkPresented(",
+            "onNativeStockDigestPresented(",
+            "stockRestoreWitness.observe(",
+            "stockRestoreWitness.ready(token)",
+            "stockRestoreWitness.finish(token)",
             "stock presentation restoration acknowledged",
             "detachmentListener.onRuntimeDetachmentReady(this, reason)",
         ],
@@ -850,7 +918,9 @@ def main() -> None:
             "StableDigest document = hashRegularFile(canonical)",
             "StableBytes markerAfter",
             "RecoveryIdentity recovery = verifyRecoveryEvidence(",
+            "MarkAuthority.acquire(claim)",
             "public static boolean fastEvidenceStillCurrent(Evidence evidence)",
+            "if (!evidence.markAuthorityCurrent()) return false;",
             "evidence.recoveryManifestIdentity.sameVersion(",
             "evidence.recoverySnapshotIdentity.sameVersion(",
             "!pathExistsNoFollow(evidence.claim.backupSnapshotPath)",
@@ -861,6 +931,14 @@ def main() -> None:
             "modifiedNanos",
             "changedNanos",
             "OsConstants.O_NOFOLLOW",
+            (
+                "OsConstants.O_RDWR | OsConstants.O_CREAT\n"
+                "                    | OsConstants.O_CLOEXEC | OsConstants.O_NOFOLLOW,"
+            ),
+            "tryLock()",
+            "live mark disagrees with admitted recovery snapshot",
+            "another process owns the live mark writer lease",
+            "expectedTransition",
         ],
         "document and recovery admission",
     )
@@ -1109,10 +1187,11 @@ def main() -> None:
         runtime[transfer_start:transfer_end],
         [
             "firmware.prepareSourceForTransfer(source);",
-            "boolean dirty = firmware.sourceHasTrails(source);",
+            "dirty = firmware.sourceHasTrails(source);",
             "token = saveWitness.begin(",
             "firmware.saveSource(source);",
             "saveWitness.finish(token)",
+            "evidence.noteWitnessedMarkSave(dirty, saved);",
         ],
         "native selection commit/save ordering",
     )
@@ -1183,8 +1262,72 @@ def main() -> None:
             "'assets/native_init'",
             "'lib/arm64-v8a/libspreadprobe.so'",
             "v2 APK contains forbidden legacy payload",
+            "spread-probe-unsigned-normalized.apk",
+            "APK entry timestamp is not canonical",
+            "APK entry order is not canonical",
+            "Two clean Native Reader builds are byte-for-byte reproducible",
         ],
         "exclusive v2 packaging",
+    )
+    require(
+        root_build,
+        [
+            'TEMPLATE_VERSION="1.0.12"',
+            "plugin-template-package-lock.json.gz.b64",
+            "npm pack --ignore-scripts --silent",
+            "scripts/materialize_plugin_template.py",
+            "npm ci --ignore-scripts --no-audit --no-fund",
+            'EXPECTED_BUNDLE="$PROJECT/build/generated/SupernoteRtlReader.bundle"',
+            'EXPECTED_NATIVE_APK="$PROJECT/build/generated/app.npk"',
+            'PROVENANCE_OUTPUT="$ROOT/out/build-provenance"',
+            'cp "$EXPECTED_BUNDLE" "$PROVENANCE_OUTPUT/SupernoteRtlReader.bundle"',
+            'cp "$EXPECTED_NATIVE_APK" "$PROVENANCE_OUTPUT/app.npk"',
+        ],
+        "authenticated plugin-template build",
+    )
+    if "@supernote-plugin/sn-plugin-template \\" in root_build:
+        fail("plugin build still initializes from a mutable template tag")
+    require(
+        template_materializer,
+        [
+            'EXPECTED_TEMPLATE_VERSION = "1.0.12"',
+            "34dceadedd77d2c77c83521fee838dc60f3893b948a9070bf38271184268636f",
+            "sha512-n7wY9y43DYJUNGdFEjFu+i8bU9C3TX9UG1yWjYbkcn3zWBUNSFuEC5LQ5FmK",
+            "33ea436d56b68d332949db0689f4b0c2bfd6f227e78e904b7706360ebc161022",
+            "member.issym() or member.islnk() or member.isdev()",
+            "lacks SHA-512 integrity",
+        ],
+        "template and locked dependency authority",
+    )
+    if len("".join(lock_input.split())) < 100_000:
+        fail("committed compressed package lock is unexpectedly small")
+    require(
+        apk_normalizer,
+        [
+            "CANONICAL_TIMESTAMP = (1980, 1, 1, 0, 0, 0)",
+            "for name in sorted(entries)",
+            "compression=zipfile.ZIP_STORED",
+            "duplicate input entry",
+        ],
+        "deterministic unsigned APK normalization",
+    )
+    require(
+        packager_patch,
+        [
+            "EXPECTED_PLUGIN_APK_SIGNER_SHA256",
+            "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+            "Final compacted APK signer is not the reviewed identity",
+        ],
+        "embedded plugin APK signer authority",
+    )
+    require(
+        provenance_test,
+        [
+            "canonical ZIP output depends on input order or timestamps",
+            "mutated package lock",
+            "unreviewed template tarball",
+        ],
+        "build provenance failure tests",
     )
 
     if "RTL read-only" in app:
@@ -1239,9 +1382,10 @@ def main() -> None:
             "requireBackupDocumentIdentity(",
             (
                 "requireBackupDocumentIdentity(\n"
-                "                                pdfFile,\n"
-                "                                revalidatedBackup,\n"
-                '                                "before-mark-publish",'
+                "                                    pdfFile,\n"
+                "                                    revalidatedBackup,\n"
+                "                                    if (revalidatedBackup.originalMarkPresent) {\n"
+                '                                        "before-mark-publish"'
             ),
             '"before-mark-publish"',
             '"after-mark-publish"',
@@ -1252,10 +1396,106 @@ def main() -> None:
             "restorePrePublicationMark(",
             "immediateMarkerBytes?.contentEquals(previousMarkerBytes)",
             "sameNativeAnnotationBackup(backup, immediateBackup)",
-            "immediateMarkerBytes?.contentEquals(pendingMarkerBytes)",
+            "immediateMarker?.bytes?.contentEquals(pendingMarkerBytes)",
             "liveNativeAnnotationMatchesBackup(backup)",
         ],
         "crash-durable compare-and-publish authority",
+    )
+    require(
+        plugin,
+        [
+            'NATIVE_SPREAD_PUBLICATION_LOCK_SUFFIX =',
+            "NATIVE_SPREAD_PUBLICATION_PROCESS_LOCK",
+            "private fun <T> withNativeSpreadPublicationLock(",
+            "channel.lock().use",
+            "LINUX_O_DIRECTORY = 0x10000",
+            "LINUX_O_DIRECTORY or OsConstants.O_NOFOLLOW",
+            "OsConstants.O_NOFOLLOW",
+            "OsConstants.O_EXCL",
+            "private data class PersistedFileAuthority(",
+            (
+                "val descriptor = Os.open(\n"
+                "            path,\n"
+                "            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or OsConstants.O_NOFOLLOW,"
+            ),
+            "private fun samePersistedAuthority(",
+            "private fun writePropertiesAtomicallyCas(",
+            "expected = currentMarkerAuthority",
+            "expected = pendingMarkerAuthority",
+            "Published destination changed before compare-and-publish",
+            "samePersistedFileVersion(stagedIdentity, published.identity)",
+        ],
+        "cross-process marker compare-and-publish",
+    )
+    pending_publish_start = plugin.find("private fun writeNativeSpreadPendingMarker(")
+    pending_publish_end = plugin.find(
+        "private fun commitNativeSpreadEditableMarker(",
+        pending_publish_start,
+    )
+    commit_publish_end = plugin.find(
+        "private fun resolveNativeSpreadMode(",
+        pending_publish_end,
+    )
+    if pending_publish_start < 0 or pending_publish_end < 0 or commit_publish_end < 0:
+        fail("could not isolate companion marker publication methods")
+    for label, section in (
+        ("pending", plugin[pending_publish_start:pending_publish_end]),
+        ("committed", plugin[pending_publish_end:commit_publish_end]),
+    ):
+        require(
+            section,
+            [
+                "withNativeSpreadPublicationLock(marker)",
+                "readPersistedAuthorityIfFile(marker)",
+                "writePropertiesAtomicallyCas(",
+            ],
+            f"{label} marker locked CAS publication",
+        )
+
+    require(
+        plugin,
+        [
+            "private data class NativeMarkPublication(",
+            "private fun readPinnedRegularBytes(",
+            "private fun openPinnedRegularFile(",
+            "private fun publishNativeAnnotationRestore(",
+            'Os.fstat(snapshotDescriptor)',
+            'Os.lstat(backup.snapshot.absolutePath)',
+            'Os.fstat(previousDescriptor)',
+            "private fun writeRegularFileAtomicallyCas(",
+            "private fun deleteRegularFileCas(",
+            "requireExpectedRegularDestination(file, expected, authorityLabel)",
+            "withNativeSpreadPublicationLock(nativeSpreadMarker(pdfFile))",
+            "RTL_READER_NATIVE_BACKUP_RESTORE_POST_PUBLICATION_ROLLED_BACK",
+            "restorePrePublicationMark(value)",
+            "publishedIdentity",
+        ],
+        "descriptor-pinned annotation restore and rollback",
+    )
+    if "currentMark.readBytes()" in plugin:
+        fail("annotation restore reads the live .mark without no-follow descriptor authority")
+    if "copyFileAtomically(\n                        revalidatedBackup.snapshot" in plugin:
+        fail("annotation restore reopens its snapshot by path during publication")
+    restore_worker_start = plugin.find("private fun scheduleAnnotationRestore(")
+    restore_helpers_start = plugin.find(
+        "private fun requireBackupDocumentIdentity(",
+        restore_worker_start,
+    )
+    if restore_worker_start < 0 or restore_helpers_start < 0:
+        fail("could not isolate companion annotation restore worker")
+    restore_worker = plugin[restore_worker_start:restore_helpers_start]
+    ordered(
+        restore_worker,
+        [
+            "publication = publishNativeAnnotationRestore(",
+            '"after-mark-verification"',
+            '"before-backup-retirement"',
+            "removeNativeAnnotationBackupFiles(pdfFile, revalidatedBackup)",
+            "reactApplicationContext.startActivity(Intent().apply",
+            "restorePrePublicationMark(value)",
+            "throw restoreError",
+        ],
+        "all post-publication restore failures roll back before escape",
     )
     require(
         gate,
@@ -1298,6 +1538,7 @@ def main() -> None:
             "if (projectionExecutor.awaitTermination(",
             "firmware.releaseProjectionReader();",
             "firmware.releaseComponentIds(releasedComponents);",
+            "evidence.close();",
         ],
         "projection identities released only after worker drain",
     )
@@ -1327,6 +1568,9 @@ def main() -> None:
         workflow,
         [
             "python3 scripts/check_native_reader_v2_invariants.py .",
+            "python3 scripts/test_build_provenance.py .",
+            "out/build-provenance/SupernoteRtlReader.bundle",
+            "out/build-provenance/app.npk",
             "supernote-rtl-reader-v0.4.16-native-reader-v2",
             "native-spread-upgrade-artifact:",
             "github.event_name == 'workflow_dispatch'",
@@ -1351,15 +1595,24 @@ def main() -> None:
             "EXPECTED_ANDROID_PACKAGE = \"com.supernotertlreader\"",
             "def verify_binary_manifest(",
             "def verify_dex(",
+            "def verify_application_xmltree(",
+            "def verify_signer_output(",
             'find_android_tool("aapt")',
             'find_android_tool("apksigner")',
-            '"Number of signers: 1"',
+            "EXPECTED_NATIVE_APK_SIGNER_SHA256",
+            "EXPECTED_NATIVE_CLASS_DESCRIPTORS",
+            "defined_classes.update(verify_dex(",
+            "JavaScript bundle does not match the independently named build output",
+            "embedded app.npk does not match the independently named build output",
             "verify_apk_tools(Path(temporary_name))",
         ],
         "embedded APK structural and signature verification",
     )
-    if "check_native_spread_invariants.py ." in workflow:
-        fail("release CI still treats the retired legacy engine as runtime authority")
+    v2_invariant_job = workflow.split("  invariant-suites:", 1)[1].split(
+        "  native-spread-build:", 1
+    )[0]
+    if "check_native_spread_invariants.py ." in v2_invariant_job:
+        fail("Native Reader v2 CI still treats the retired legacy engine as runtime authority")
     if "ndk;" in workflow or "-AndroidNdk" in workflow:
         fail("release CI still provisions the retired legacy native hook toolchain")
     stable_job = workflow[workflow.find("native-spread-upgrade-artifact:"):]

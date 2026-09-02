@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import io
 import hashlib
+import hmac
 import json
 import re
 import shutil
@@ -19,13 +20,22 @@ from typing import Callable
 
 
 EXPECTED_REACT_PACKAGES = ["com.supernotertlreader.PdfRendererPackage"]
-EXPECTED_NATIVE_CLASSES = (
-    b"ReaderPreferencesModule",
-    b"PdfRendererPackage",
-    b"PdfPageView",
+EXPECTED_NATIVE_CLASS_DESCRIPTORS = (
+    b"Lcom/supernotertlreader/ReaderPreferencesModule;",
+    b"Lcom/supernotertlreader/PdfRendererPackage;",
+    b"Lcom/supernotertlreader/PdfPageView;",
 )
 MINIMUM_NATIVE_APK_SIZE = 1_000_000
 EXPECTED_ANDROID_PACKAGE = "com.supernotertlreader"
+EXPECTED_ANDROID_VERSION_CODE = "1"
+EXPECTED_ANDROID_VERSION_NAME = "1.0"
+EXPECTED_ANDROID_MIN_SDK = "27"
+EXPECTED_ANDROID_TARGET_SDK = "35"
+EXPECTED_ANDROID_APPLICATION = "com.supernotertlreader.MainApplication"
+EXPECTED_ANDROID_ACTIVITY = "com.supernotertlreader.MainActivity"
+EXPECTED_NATIVE_APK_SIGNER_SHA256 = (
+    "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c"
+)
 
 
 def fail(message: str) -> None:
@@ -90,7 +100,28 @@ def verify_binary_manifest(data: bytes) -> None:
         fail("embedded APK AndroidManifest.xml lacks required XML structure")
 
 
-def verify_dex(data: bytes, name: str) -> None:
+def read_uleb128(data: bytes, offset: int, label: str) -> tuple[int, int]:
+    value = 0
+    for index in range(5):
+        if offset >= len(data):
+            fail(f"embedded APK {label} has a truncated ULEB128")
+        byte = data[offset]
+        offset += 1
+        value |= (byte & 0x7F) << (index * 7)
+        if not byte & 0x80:
+            return value, offset
+    fail(f"embedded APK {label} has an oversized ULEB128")
+
+
+def dex_string_bytes(data: bytes, offset: int, label: str) -> bytes:
+    _, cursor = read_uleb128(data, offset, label)
+    terminator = data.find(b"\0", cursor)
+    if terminator < 0:
+        fail(f"embedded APK {label} has an unterminated DEX string")
+    return data[cursor:terminator]
+
+
+def verify_dex(data: bytes, name: str) -> set[bytes]:
     if len(data) < 0x70 or not re.fullmatch(rb"dex\n0(?:35|37|38|39|40|41)\0", data[:8]):
         fail(f"embedded APK {name} has an invalid DEX header")
     expected_checksum = struct.unpack_from("<I", data, 8)[0]
@@ -111,6 +142,47 @@ def verify_dex(data: bytes, name: str) -> None:
     data_size, data_offset = struct.unpack_from("<II", data, 104)
     if data_offset < header_size or data_offset + data_size != len(data):
         fail(f"embedded APK {name} has an invalid DEX data section")
+
+    string_count, string_offset = struct.unpack_from("<II", data, 56)
+    type_count, type_offset = struct.unpack_from("<II", data, 64)
+    class_count, class_offset = struct.unpack_from("<II", data, 96)
+    if string_count == 0 or type_count == 0 or class_count == 0:
+        fail(f"embedded APK {name} lacks DEX strings, types, or class definitions")
+    for count, offset, width, label in (
+        (string_count, string_offset, 4, "string IDs"),
+        (type_count, type_offset, 4, "type IDs"),
+        (class_count, class_offset, 32, "class definitions"),
+    ):
+        if offset < header_size or count > (len(data) - offset) // width:
+            fail(f"embedded APK {name} has invalid {label} bounds")
+
+    string_offsets = struct.unpack_from(
+        f"<{string_count}I", data, string_offset
+    )
+    type_string_indices = struct.unpack_from(
+        f"<{type_count}I", data, type_offset
+    )
+    descriptors: list[bytes] = []
+    for string_index in type_string_indices:
+        if string_index >= string_count:
+            fail(f"embedded APK {name} has an invalid type string index")
+        string_data_offset = string_offsets[string_index]
+        if string_data_offset < data_offset or string_data_offset >= len(data):
+            fail(f"embedded APK {name} has an invalid string-data offset")
+        descriptors.append(
+            dex_string_bytes(data, string_data_offset, f"{name} type descriptor")
+        )
+
+    defined_classes: set[bytes] = set()
+    for index in range(class_count):
+        class_index = struct.unpack_from("<I", data, class_offset + index * 32)[0]
+        if class_index >= len(descriptors):
+            fail(f"embedded APK {name} has an invalid class type index")
+        descriptor = descriptors[class_index]
+        if not descriptor.startswith(b"L") or not descriptor.endswith(b";"):
+            fail(f"embedded APK {name} has a non-class class descriptor")
+        defined_classes.add(descriptor)
+    return defined_classes
 
 
 def find_android_tool(tool: str) -> str:
@@ -143,6 +215,60 @@ def find_android_tool(tool: str) -> str:
     return str(sorted(candidates, key=lambda value: value.parent.name)[-1])
 
 
+def verify_application_xmltree(output: str) -> None:
+    lines = output.replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    applications: list[tuple[int, int]] = []
+    for index, line in enumerate(lines):
+        match = re.match(r"^(\s*)E: application(?:\s|$)", line)
+        if match is not None:
+            applications.append((index, len(match.group(1))))
+    if len(applications) != 1:
+        fail(
+            "embedded app.npk manifest must contain exactly one application "
+            f"element, found {len(applications)}"
+        )
+    start, indentation = applications[0]
+    direct_names: list[str] = []
+    for line in lines[start + 1 :]:
+        stripped = line.lstrip(" ")
+        current_indentation = len(line) - len(stripped)
+        if current_indentation <= indentation:
+            break
+        if current_indentation != indentation + 2 or not stripped.startswith("A: "):
+            continue
+        match = re.match(r'A: android:name\([^)]*\)="([^"]+)"', stripped)
+        if match is not None:
+            direct_names.append(match.group(1))
+    if direct_names != [EXPECTED_ANDROID_APPLICATION]:
+        fail("embedded app.npk has an unexpected Android application class")
+
+
+def verify_signer_output(output: str, return_code: int) -> None:
+    normalized = output.replace("\r\n", "\n").replace("\r", "\n")
+    signer_counts = re.findall(
+        r"^Number of signers: (\d+)$", normalized, re.MULTILINE
+    )
+    signer_digests = re.findall(
+        r"^Signer #1 certificate SHA-256 digest: ([0-9A-Fa-f:]+)$",
+        normalized,
+        re.MULTILINE,
+    )
+    normalized_signers = [
+        value.replace(":", "").lower() for value in signer_digests
+    ]
+    if (
+        return_code != 0
+        or signer_counts != ["1"]
+        or normalized_signers != [EXPECTED_NATIVE_APK_SIGNER_SHA256]
+    ):
+        fail("embedded app.npk signature verification failed")
+    if not re.search(
+        r"Verified using v(?:2|3) scheme \(APK Signature Scheme v[23]\): true",
+        normalized,
+    ):
+        fail("embedded app.npk lacks a verified modern APK signature")
+
+
 def verify_apk_tools(apk_path: Path) -> None:
     aapt = find_android_tool("aapt")
     apksigner = find_android_tool("apksigner")
@@ -154,23 +280,49 @@ def verify_apk_tools(apk_path: Path) -> None:
     )
     if badging.returncode != 0:
         fail(f"embedded app.npk manifest validation failed: {badging.stderr.strip()}")
-    package_match = re.search(r"^package: name='([^']+)'", badging.stdout, re.MULTILINE)
-    if package_match is None or package_match.group(1) != EXPECTED_ANDROID_PACKAGE:
+    package_match = re.search(
+        r"^package: name='([^']+)' versionCode='([^']+)' versionName='([^']+)'",
+        badging.stdout,
+        re.MULTILINE,
+    )
+    if package_match is None or package_match.groups() != (
+        EXPECTED_ANDROID_PACKAGE,
+        EXPECTED_ANDROID_VERSION_CODE,
+        EXPECTED_ANDROID_VERSION_NAME,
+    ):
         fail("embedded app.npk has an unexpected Android package identity")
+    sdk_match = re.search(r"^sdkVersion:'([^']+)'$", badging.stdout, re.MULTILINE)
+    target_match = re.search(
+        r"^targetSdkVersion:'([^']+)'$", badging.stdout, re.MULTILINE
+    )
+    activity_match = re.search(
+        r"^launchable-activity: name='([^']+)'", badging.stdout, re.MULTILINE
+    )
+    if (
+        sdk_match is None
+        or sdk_match.group(1) != EXPECTED_ANDROID_MIN_SDK
+        or target_match is None
+        or target_match.group(1) != EXPECTED_ANDROID_TARGET_SDK
+        or activity_match is None
+        or activity_match.group(1) != EXPECTED_ANDROID_ACTIVITY
+    ):
+        fail("embedded app.npk has unexpected SDK or activity provenance")
+    xmltree = subprocess.run(
+        [aapt, "dump", "xmltree", str(apk_path), "AndroidManifest.xml"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if xmltree.returncode != 0:
+        fail(f"embedded app.npk XML-tree validation failed: {xmltree.stderr.strip()}")
+    verify_application_xmltree(xmltree.stdout)
     signature = subprocess.run(
         [apksigner, "verify", "--verbose", "--print-certs", str(apk_path)],
         capture_output=True,
         text=True,
         check=False,
     )
-    signature_output = signature.stdout + signature.stderr
-    if signature.returncode != 0 or "Number of signers: 1" not in signature_output:
-        fail("embedded app.npk signature verification failed")
-    if not re.search(
-        r"Verified using v(?:2|3) scheme \(APK Signature Scheme v[23]\): true",
-        signature_output,
-    ):
-        fail("embedded app.npk lacks a verified modern APK signature")
+    verify_signer_output(signature.stdout + signature.stderr, signature.returncode)
 
 
 def verify_native_apk(data: bytes) -> None:
@@ -185,6 +337,8 @@ def verify_native_apk(data: bytes) -> None:
             if corrupt is not None:
                 fail(f"embedded app.npk has a corrupt entry: {corrupt}")
             native_names = native.namelist()
+            if len(native_names) != len(set(native_names)):
+                fail("embedded app.npk contains duplicate entry names")
             for required in (
                 "AndroidManifest.xml",
                 "lib/arm64-v8a/libnative-lib.so",
@@ -201,14 +355,14 @@ def verify_native_apk(data: bytes) -> None:
             if not dex_names:
                 fail("embedded app.npk does not contain Android bytecode")
             verify_binary_manifest(native.read("AndroidManifest.xml"))
-            dex_payloads = [native.read(name) for name in dex_names]
-            for name, payload in zip(dex_names, dex_payloads):
-                verify_dex(payload, name)
-            for class_name in EXPECTED_NATIVE_CLASSES:
-                if not any(class_name in payload for payload in dex_payloads):
+            defined_classes: set[bytes] = set()
+            for name in dex_names:
+                defined_classes.update(verify_dex(native.read(name), name))
+            for descriptor in EXPECTED_NATIVE_CLASS_DESCRIPTORS:
+                if descriptor not in defined_classes:
                     fail(
-                        "embedded app.npk is missing reviewed native class "
-                        + class_name.decode("ascii")
+                        "embedded app.npk is missing reviewed native class descriptor "
+                        + descriptor.decode("ascii")
                     )
     except zipfile.BadZipFile as error:
         fail(f"embedded app.npk is not a valid APK/ZIP: {error}")
@@ -226,6 +380,8 @@ def verify_native_apk(data: bytes) -> None:
 def verify(
     package_path: Path,
     repo_root: Path,
+    expected_bundle: bytes | None = None,
+    expected_native_apk: bytes | None = None,
     native_apk_validator: Callable[[bytes], None] = verify_native_apk,
 ) -> None:
     source_config = read_json(
@@ -275,25 +431,52 @@ def verify(
                 )
 
             bundle = require_single_entry(package, bundle_name)
+            if expected_bundle is None or not hmac.compare_digest(
+                hashlib.sha256(bundle).digest(),
+                hashlib.sha256(expected_bundle).digest(),
+            ):
+                fail("JavaScript bundle does not match the independently named build output")
             marker = expected_runtime_marker(repo_root)
-            if marker not in bundle:
+            if bundle.count(marker) != 1:
                 fail(
-                    "JavaScript bundle does not contain the reviewed runtime marker "
+                    "JavaScript bundle does not contain exactly one reviewed runtime marker "
                     + marker.decode("ascii")
                 )
-            native_apk_validator(require_single_entry(package, "app.npk"))
+            if not bundle.startswith(b"var __BUNDLE_START_TIME__=") or not re.search(
+                rb"__r\(\d+\);\s*__r\(\d+\);\s*$", bundle
+            ):
+                fail("JavaScript bundle lacks the reviewed Metro bundle structure")
+            native_apk = require_single_entry(package, "app.npk")
+            if expected_native_apk is None or not hmac.compare_digest(
+                hashlib.sha256(native_apk).digest(),
+                hashlib.sha256(expected_native_apk).digest(),
+            ):
+                fail("embedded app.npk does not match the independently named build output")
+            native_apk_validator(native_apk)
     except zipfile.BadZipFile as error:
         fail(f"plugin package is not a valid ZIP archive: {error}")
 
 
 def main() -> None:
-    if len(sys.argv) != 3:
-        fail("usage: verify_plugin_package.py <package.snplg> <repo-root>")
+    if len(sys.argv) != 5:
+        fail(
+            "usage: verify_plugin_package.py <package.snplg> <repo-root> "
+            "<expected.bundle> <expected-app.npk>"
+        )
     package_path = Path(sys.argv[1]).resolve()
     repo_root = Path(sys.argv[2]).resolve()
     if not package_path.is_file():
         fail(f"plugin package not found: {package_path}")
-    verify(package_path, repo_root)
+    expected_bundle_path = Path(sys.argv[3]).resolve()
+    expected_native_apk_path = Path(sys.argv[4]).resolve()
+    if not expected_bundle_path.is_file() or not expected_native_apk_path.is_file():
+        fail("expected bundle/native APK provenance input is missing")
+    verify(
+        package_path,
+        repo_root,
+        expected_bundle_path.read_bytes(),
+        expected_native_apk_path.read_bytes(),
+    )
     print(f"Verified native RTL Reader package: {package_path}")
 
 

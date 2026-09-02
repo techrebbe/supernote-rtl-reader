@@ -36,6 +36,18 @@ bounded, single-link, no-symlink descriptor boundary. The stable Actions
 signer is available only to trusted `main` pushes or a repository-owner manual
 run of the exact `main` ref.
 
+The final pre-hardware hardening batch makes pen admission and transaction
+freeze one atomic decision, requires observed firmware receipts before writer
+enablement, leases and revalidates the live `.mark` across every save, binds
+stock-layer restoration to exact generation/receiver/bitmap evidence, and
+cancels queued saves whose transaction authority has expired. Companion marker
+publication and recovery restore now use cross-process locking, no-follow
+descriptor identity, destination compare-and-swap, and rollback after every
+post-publication failure. Build inputs are locked to Supernote template 1.0.12
+and its complete dependency graph; package verification authenticates the real
+manifest, DEX class descriptors, signer, JavaScript bundle, and embedded APK.
+Two clean companion builds must be byte-for-byte identical before release.
+
 ## Stable baseline
 
 v0.4.12 with Native Spread v0.0.116 is the current merged stable baseline.

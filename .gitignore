@@ -1,1 +1,13 @@
 native-spread-module/trace-bundles/
+__pycache__/
+*.py[cod]
+tmp/
+output/
+virtual-spread-module/build/
+artifacts/
+deliverables/
+out/
+test-builds/
+.npm-cache-provenance/
+.provenance-temp/
+.provenance-materialized/

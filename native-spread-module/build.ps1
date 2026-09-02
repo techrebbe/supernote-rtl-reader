@@ -12,7 +12,16 @@ param(
         Join-Path $env:USERPROFILE '.android\debug.keystore'
     ),
     [Parameter(Mandatory = $true)]
-    [string]$ExpectedSignerSha256
+    [string]$ExpectedSignerSha256,
+    [string]$PythonExecutable = $(
+        if ($env:PYTHON_BIN) {
+            $env:PYTHON_BIN
+        } else {
+            $pythonCommand = Get-Command python.exe -ErrorAction SilentlyContinue
+            if ($pythonCommand) { $pythonCommand.Source } else { '' }
+        }
+    ),
+    [switch]$InternalReproducibilityPass
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,6 +57,17 @@ $workspaceRoot = [System.IO.Path]::GetFullPath(
 $buildRoot = [System.IO.Path]::GetFullPath(
     (Join-Path $projectRoot 'build')
 )
+$normalizer = Join-Path $repositoryRoot 'scripts\normalize_apk_zip.py'
+if (-not $PythonExecutable -or
+    -not (Test-Path -LiteralPath $PythonExecutable -PathType Leaf)) {
+    throw (
+        'Python 3 is required for deterministic APK normalization; ' +
+        'set -PythonExecutable or PYTHON_BIN.'
+    )
+}
+if (-not (Test-Path -LiteralPath $normalizer -PathType Leaf)) {
+    throw "Missing deterministic APK normalizer: $normalizer"
+}
 
 $traceHelperTest = Join-Path `
     $repositoryRoot `
@@ -220,8 +240,15 @@ if ($LASTEXITCODE -ne 0) {
     throw "jar dex/metadata update failed with exit code $LASTEXITCODE"
 }
 
+$normalizedUnsignedApk = Join-Path $buildRoot `
+    'spread-probe-unsigned-normalized.apk'
+& $PythonExecutable $normalizer $unsignedApk $normalizedUnsignedApk
+if ($LASTEXITCODE -ne 0) {
+    throw "APK normalization failed with exit code $LASTEXITCODE"
+}
+
 $alignedApk = Join-Path $buildRoot 'spread-probe-aligned.apk'
-& $zipalign -f -p 4 $unsignedApk $alignedApk
+& $zipalign -f -p 4 $normalizedUnsignedApk $alignedApk
 
 if ($LASTEXITCODE -ne 0) {
     throw "zipalign failed with exit code $LASTEXITCODE"
@@ -276,6 +303,43 @@ try {
             throw "APK contains duplicate entry: $($entry.FullName)"
         }
         $entriesByName[$entry.FullName] = $entry
+        $timestamp = $entry.LastWriteTime
+        if ($timestamp.Year -ne 1980 -or
+            $timestamp.Month -ne 1 -or
+            $timestamp.Day -ne 1 -or
+            $timestamp.Hour -ne 0 -or
+            $timestamp.Minute -ne 0 -or
+            $timestamp.Second -ne 0) {
+            throw "APK entry timestamp is not canonical: $($entry.FullName)"
+        }
+    }
+    $entryNames = @($apkArchive.Entries | ForEach-Object FullName)
+    $signatureEntryPattern = '^META-INF/(?:MANIFEST\.MF|[^/]+\.(?:SF|RSA|DSA|EC))$'
+    $payloadEntryNames = @(
+        $entryNames | Where-Object { $_ -notmatch $signatureEntryPattern }
+    )
+    [string[]]$sortedPayloadEntryNames = @($payloadEntryNames)
+    [Array]::Sort(
+        $sortedPayloadEntryNames,
+        [StringComparer]::Ordinal
+    )
+    if ([string]::Join("`n", $payloadEntryNames) -cne
+        [string]::Join("`n", $sortedPayloadEntryNames)) {
+        throw 'APK entry order is not canonical.'
+    }
+    $firstSignatureEntry = -1
+    for ($index = 0; $index -lt $entryNames.Count; $index++) {
+        if ($entryNames[$index] -match $signatureEntryPattern) {
+            $firstSignatureEntry = $index
+            break
+        }
+    }
+    if ($firstSignatureEntry -ge 0) {
+        for ($index = $firstSignatureEntry; $index -lt $entryNames.Count; $index++) {
+            if ($entryNames[$index] -notmatch $signatureEntryPattern) {
+                throw 'APK payload entry appears after signature metadata.'
+            }
+        }
     }
     foreach ($requiredEntry in $requiredEntries) {
         if (-not $entriesByName.ContainsKey($requiredEntry)) {
@@ -298,4 +362,37 @@ try {
 }
 
 & $aapt2 dump badging $outputApk | Select-Object -First 12
-Get-FileHash -Algorithm SHA256 -LiteralPath $outputApk
+$firstBuildHash = (Get-FileHash `
+    -Algorithm SHA256 `
+    -LiteralPath $outputApk
+).Hash
+Write-Host "Native Reader APK SHA-256: $firstBuildHash"
+
+if (-not $InternalReproducibilityPass) {
+    & $windowsPowerShell `
+        -NoProfile `
+        -ExecutionPolicy Bypass `
+        -File $PSCommandPath `
+        -AndroidSdk $AndroidSdk `
+        -DebugKeystore $DebugKeystore `
+        -ExpectedSignerSha256 $normalizedExpectedSigner `
+        -PythonExecutable $PythonExecutable `
+        -InternalReproducibilityPass
+    if ($LASTEXITCODE -ne 0) {
+        throw "Second clean reproducibility build failed with exit code $LASTEXITCODE"
+    }
+    $secondBuildHash = (Get-FileHash `
+        -Algorithm SHA256 `
+        -LiteralPath $outputApk
+    ).Hash
+    if ($secondBuildHash -cne $firstBuildHash) {
+        throw (
+            'Two clean Native Reader builds were not byte-for-byte reproducible: ' +
+            "$firstBuildHash != $secondBuildHash"
+        )
+    }
+    Write-Host (
+        'Two clean Native Reader builds are byte-for-byte reproducible: ' +
+        $secondBuildHash
+    )
+}

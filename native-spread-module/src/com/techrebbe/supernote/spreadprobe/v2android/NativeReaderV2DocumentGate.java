@@ -13,6 +13,9 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileDescriptor;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
 import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.Collections;
@@ -150,15 +153,27 @@ public final class NativeReaderV2DocumentGate {
                 claim,
                 documentFile
             );
-            return new Evidence(
-                claim,
-                markerPath,
-                document.identity,
-                markerAfter.identity,
-                sha256(markerAfter.bytes),
-                recovery.manifest,
-                recovery.snapshot
-            );
+            MarkAuthority markAuthority = null;
+            try {
+                // The live .mark is mutable data, unlike the immutable
+                // recovery snapshot. Pin its no-follow identity and acquire
+                // the process-shared writer lease before authority is ever
+                // published to the UI thread.
+                markAuthority = MarkAuthority.acquire(claim);
+                return new Evidence(
+                    claim,
+                    markerPath,
+                    document.identity,
+                    markerAfter.identity,
+                    sha256(markerAfter.bytes),
+                    recovery.manifest,
+                    recovery.snapshot,
+                    markAuthority
+                );
+            } catch (Exception failure) {
+                if (markAuthority != null) markAuthority.close();
+                throw failure;
+            }
         } catch (RuntimeException exception) {
             throw exception;
         } catch (Exception exception) {
@@ -378,6 +393,7 @@ public final class NativeReaderV2DocumentGate {
         }
         if (evidence == null || evidence.claim == null) return false;
         try {
+            if (!evidence.markAuthorityCurrent()) return false;
             if (!evidence.documentIdentity.sameVersion(regularIdentity(
                     evidence.claim.canonicalDocumentPath
                 ))) {
@@ -410,6 +426,22 @@ public final class NativeReaderV2DocumentGate {
         Identity identity = Identity.from(Os.lstat(path));
         identity.requireRegular();
         return identity;
+    }
+
+    private static Identity optionalRegularIdentity(String path)
+        throws Exception {
+        try {
+            OpenFile open = OpenFile.open(path);
+            try {
+                open.verifyUnchangedAndCurrent(path);
+                return open.identity;
+            } finally {
+                open.close();
+            }
+        } catch (ErrnoException missing) {
+            if (missing.errno == OsConstants.ENOENT) return null;
+            throw missing;
+        }
     }
 
     private static StableDigest hashRegularFile(String path) throws Exception {
@@ -573,7 +605,7 @@ public final class NativeReaderV2DocumentGate {
         }
     }
 
-    public static final class Evidence {
+    public static final class Evidence implements AutoCloseable {
         public final NativeReaderV2MarkerClaim claim;
         public final String markerPath;
         public final Identity documentIdentity;
@@ -581,6 +613,7 @@ public final class NativeReaderV2DocumentGate {
         public final String markerSha256;
         public final Identity recoveryManifestIdentity;
         public final Identity recoverySnapshotIdentity;
+        private final MarkAuthority markAuthority;
 
         private Evidence(
             NativeReaderV2MarkerClaim claim,
@@ -589,7 +622,8 @@ public final class NativeReaderV2DocumentGate {
             Identity markerIdentity,
             String markerSha256,
             Identity recoveryManifestIdentity,
-            Identity recoverySnapshotIdentity
+            Identity recoverySnapshotIdentity,
+            MarkAuthority markAuthority
         ) {
             this.claim = claim;
             this.markerPath = markerPath;
@@ -598,6 +632,210 @@ public final class NativeReaderV2DocumentGate {
             this.markerSha256 = markerSha256;
             this.recoveryManifestIdentity = recoveryManifestIdentity;
             this.recoverySnapshotIdentity = recoverySnapshotIdentity;
+            this.markAuthority = markAuthority;
+        }
+
+        /** Worker-thread proof of the exact live .mark and writer lease. */
+        public boolean markAuthorityCurrent() {
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                throw new IllegalStateException(
+                    "live mark identity revalidation is forbidden on the main thread"
+                );
+            }
+            return markAuthority != null && markAuthority.revalidate();
+        }
+
+        /** Records the one native save allowed to advance live .mark identity. */
+        public void noteWitnessedMarkSave(boolean dirty, boolean success) {
+            if (markAuthority == null) {
+                throw new IllegalStateException("live mark authority is absent");
+            }
+            markAuthority.noteWitnessedSave(dirty, success);
+        }
+
+        @Override public void close() {
+            if (markAuthority != null) markAuthority.close();
+        }
+    }
+
+    /**
+     * Session-scoped cross-process lease and no-follow live .mark identity.
+     * Native bytes remain exclusively owned by Supernote; v2 observes only
+     * file identity transitions after a witnessed native save.
+     */
+    private static final class MarkAuthority {
+        private final String markPath;
+        private final String leasePath;
+        private final FileOutputStream leaseStream;
+        private final FileLock lease;
+        private final Identity leaseIdentity;
+        private Identity markIdentity;
+        private boolean expectedTransition;
+        private boolean unsafe;
+        private boolean closed;
+
+        private MarkAuthority(
+            String markPath,
+            String leasePath,
+            FileOutputStream leaseStream,
+            FileLock lease,
+            Identity leaseIdentity,
+            Identity markIdentity
+        ) {
+            this.markPath = markPath;
+            this.leasePath = leasePath;
+            this.leaseStream = leaseStream;
+            this.lease = lease;
+            this.leaseIdentity = leaseIdentity;
+            this.markIdentity = markIdentity;
+        }
+
+        static MarkAuthority acquire(NativeReaderV2MarkerClaim claim)
+            throws Exception {
+            File markFile = new File(claim.markPath).getAbsoluteFile();
+            File parent = markFile.getParentFile();
+            if (parent == null) {
+                throw new IllegalStateException("live mark has no parent");
+            }
+            String leasePath = new File(
+                parent,
+                "." + markFile.getName() + ".snspread-writer.lock"
+            ).getAbsolutePath();
+            FileDescriptor descriptor = Os.open(
+                leasePath,
+                OsConstants.O_RDWR | OsConstants.O_CREAT
+                    | OsConstants.O_CLOEXEC | OsConstants.O_NOFOLLOW,
+                0600
+            );
+            FileOutputStream stream = null;
+            FileLock lock = null;
+            try {
+                Identity descriptorIdentity = Identity.from(
+                    Os.fstat(descriptor)
+                );
+                descriptorIdentity.requireRegular();
+                Identity pathIdentity = Identity.from(Os.lstat(leasePath));
+                pathIdentity.requireRegular();
+                if (!descriptorIdentity.sameVersion(pathIdentity)) {
+                    throw new IllegalStateException(
+                        "live mark lease path was replaced during acquisition"
+                    );
+                }
+                stream = new FileOutputStream(descriptor);
+                descriptor = null;
+                try {
+                    lock = stream.getChannel().tryLock();
+                } catch (OverlappingFileLockException conflict) {
+                    throw new IllegalStateException(
+                        "another Native Reader v2 writer owns this mark",
+                        conflict
+                    );
+                }
+                if (lock == null) {
+                    throw new IllegalStateException(
+                        "another process owns the live mark writer lease"
+                    );
+                }
+                Identity liveMark = optionalRegularIdentity(claim.markPath);
+                if (claim.originalMarkPresent) {
+                    if (liveMark == null) {
+                        throw new IllegalStateException(
+                            "live mark disappeared after recovery snapshot"
+                        );
+                    }
+                    StableDigest digest = hashRegularFile(claim.markPath);
+                    if (!liveMark.sameVersion(digest.identity)
+                        || digest.identity.size != claim.markLength
+                        || !claim.markSha256.equals(digest.sha256)) {
+                        throw new IllegalStateException(
+                            "live mark disagrees with admitted recovery snapshot"
+                        );
+                    }
+                } else if (liveMark != null) {
+                    throw new IllegalStateException(
+                        "live mark appeared after absent-mark recovery"
+                    );
+                }
+                return new MarkAuthority(
+                    claim.markPath,
+                    leasePath,
+                    stream,
+                    lock,
+                    descriptorIdentity,
+                    liveMark
+                );
+            } catch (Exception failure) {
+                if (lock != null) {
+                    try { lock.release(); } catch (Exception ignored) {}
+                }
+                if (stream != null) {
+                    try { stream.close(); } catch (Exception ignored) {}
+                } else if (descriptor != null) {
+                    try { Os.close(descriptor); } catch (Exception ignored) {}
+                }
+                throw failure;
+            }
+        }
+
+        synchronized void noteWitnessedSave(boolean dirty, boolean success) {
+            if (closed || unsafe || expectedTransition) {
+                unsafe = true;
+                throw new IllegalStateException(
+                    "live mark save authority is not exclusive"
+                );
+            }
+            if (dirty) {
+                if (!success) {
+                    unsafe = true;
+                } else {
+                    expectedTransition = true;
+                }
+            }
+        }
+
+        synchronized boolean revalidate() {
+            if (closed || unsafe || lease == null || !lease.isValid()) {
+                return false;
+            }
+            try {
+                Identity leaseDescriptor = Identity.from(
+                    Os.fstat(leaseStream.getFD())
+                );
+                Identity leaseCurrent = Identity.from(Os.lstat(leasePath));
+                leaseDescriptor.requireRegular();
+                leaseCurrent.requireRegular();
+                if (!leaseIdentity.sameVersion(leaseDescriptor)
+                    || !leaseIdentity.sameVersion(leaseCurrent)) {
+                    unsafe = true;
+                    return false;
+                }
+                Identity current = optionalRegularIdentity(markPath);
+                if (sameVersion(markIdentity, current)) {
+                    expectedTransition = false;
+                    return true;
+                }
+                if (!expectedTransition || current == null) {
+                    unsafe = true;
+                    return false;
+                }
+                markIdentity = current;
+                expectedTransition = false;
+                return true;
+            } catch (Throwable failure) {
+                unsafe = true;
+                return false;
+            }
+        }
+
+        private static boolean sameVersion(Identity first, Identity second) {
+            return first == null ? second == null : first.sameVersion(second);
+        }
+
+        synchronized void close() {
+            if (closed) return;
+            closed = true;
+            try { lease.release(); } catch (Exception ignored) {}
+            try { leaseStream.close(); } catch (Exception ignored) {}
         }
     }
 

@@ -1701,8 +1701,7 @@ export default function App() {
               />
             </View>
             <Text style={styles.settingHint}>
-              Off hides the red ACTIVE LEFT/RIGHT or READ ONLY banner. Safety
-              and annotation-save errors remain visible.
+              Off hides the red ACTIVE LEFT/RIGHT banner.
             </Text>
 
             <Text style={styles.settingLabel}>Supernote native reader</Text>
@@ -1714,21 +1713,7 @@ export default function App() {
                 disabled={nativeSpreadBusy || !nativeSpreadAuthorityResolved}
                 label="Off"
                 onPress={() => setNativeSpreadReadOnly(false)}
-                style={styles.segmentThird}
-              />
-              <SegmentedButton
-                active={
-                  nativeSpreadConfigured && !nativeSpreadConfiguredEditable
-                }
-                disabled={
-                  nativeSpreadBusy ||
-                  !nativeSpreadAuthorityResolved ||
-                  direction !== 'rtl' ||
-                  !nativeSpreadCompatible
-                }
-                label={nativeSpreadBusy ? 'Applying...' : 'RTL read-only'}
-                onPress={() => setNativeSpreadReadOnly(true)}
-                style={styles.segmentThird}
+                style={styles.segmentHalf}
               />
               <SegmentedButton
                 active={
@@ -1740,9 +1725,9 @@ export default function App() {
                   direction !== 'rtl' ||
                   !nativeSpreadCompatible
                 }
-                label="RTL editable"
+                label="RTL native"
                 onPress={() => setNativeEditableConfirmOpen(true)}
-                style={styles.segmentThirdLast}
+                style={styles.segmentHalfLast}
               />
             </View>
             <Text style={styles.settingHint}>
@@ -1752,15 +1737,15 @@ export default function App() {
                 ? 'Native writing is enabled for this PDF. A verified recovery snapshot protects the annotation state from before editing.'
                 : nativeSpreadConfiguredEditable
                   ? 'RTL editable remains configured, but its verified hooks are inactive. Select Off or restore the annotation snapshot.'
-                : nativeSpreadConfigured && !nativeSpreadCompatible
-                  ? 'RTL read-only remains configured, but the compatible hooks are inactive. Select Off to remove it.'
+                : nativeSpreadConfigured && !nativeSpreadConfiguredEditable
+                  ? 'A legacy read-only marker remains. Select Off to remove it or RTL native to replace it with the protected v2 configuration.'
                   : !nativeSpreadCompatible
-                  ? 'Requires the compatible rooted Native Spread module.'
+                  ? 'Requires the exact compatible rooted Native Reader v2 module.'
                   : direction !== 'rtl'
                     ? 'Select RTL direction to enable the native-reader pilot.'
                     : nativeSpreadEnabled
-                      ? "Close RTL Reader to reopen this PDF in Supernote's native RTL spread mode. Writing remains disabled for this pilot."
-                      : "Read-only preserves annotations. Editable creates and verifies a per-document recovery snapshot before native writing is enabled."}
+                      ? "Close RTL Reader to reopen this PDF in Supernote's full native RTL spread mode."
+                      : "RTL native creates and verifies a per-document recovery snapshot before native writing is enabled."}
             </Text>
             {nativeSpreadAuthorityResolved && nativeEditableConfirmOpen && (
               <View style={styles.nativeWarningPanel}>

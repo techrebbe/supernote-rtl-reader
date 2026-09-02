@@ -8,7 +8,6 @@ param(
             Join-Path $env:LOCALAPPDATA 'Android\Sdk'
         }
     ),
-    [string]$AndroidNdk = $env:ANDROID_NDK_HOME,
     [string]$DebugKeystore = $(
         Join-Path $env:USERPROFILE '.android\debug.keystore'
     )
@@ -82,10 +81,6 @@ if ($LASTEXITCODE -ne 0) {
     throw "Trace-helper tests failed with exit code $LASTEXITCODE"
 }
 
-if (-not $AndroidNdk) {
-    $AndroidNdk = Join-Path $AndroidSdk 'ndk\27.0.12077973'
-}
-
 $manifestPath = Join-Path $projectRoot 'AndroidManifest.xml'
 [xml]$manifestXml = Get-Content -LiteralPath $manifestPath
 $androidNamespace = 'http://schemas.android.com/apk/res/android'
@@ -112,10 +107,8 @@ if (Test-Path -LiteralPath $buildRoot) {
 $classesDir = Join-Path $buildRoot 'classes'
 $dexDir = Join-Path $buildRoot 'dex'
 $artifactDir = Join-Path $buildRoot 'artifact'
-$nativeLibRoot = Join-Path $buildRoot 'native'
-$arm64LibDir = Join-Path $nativeLibRoot 'lib\arm64-v8a'
 New-Item -ItemType Directory -Force -Path `
-    $classesDir, $dexDir, $artifactDir, $arm64LibDir | Out-Null
+    $classesDir, $dexDir, $artifactDir | Out-Null
 
 $androidJar = Join-Path $AndroidSdk 'platforms\android-35\android.jar'
 $buildTools = Join-Path $AndroidSdk 'build-tools\35.0.0'
@@ -123,16 +116,12 @@ $aapt2 = Join-Path $buildTools 'aapt2.exe'
 $d8 = Join-Path $buildTools 'd8.bat'
 $zipalign = Join-Path $buildTools 'zipalign.exe'
 $apksigner = Join-Path $buildTools 'apksigner.bat'
-$clang = Join-Path $AndroidNdk `
-    'toolchains\llvm\prebuilt\windows-x86_64\bin\aarch64-linux-android27-clang++.cmd'
-
 foreach ($required in @(
     $androidJar,
     $aapt2,
     $d8,
     $zipalign,
     $apksigner,
-    $clang,
     $DebugKeystore
 )) {
     if (-not (Test-Path -LiteralPath $required)) {
@@ -140,41 +129,19 @@ foreach ($required in @(
     }
 }
 
-$nativeSource = Join-Path $projectRoot 'native\spread_probe_native.cpp'
-$expectedNativeSourceSha256 =
-    '9584855FDEFAC7E7795D8AD34DDE6B0D17ECFD8C93518D309F170AF2BB882221'
-$nativeSourceSha256 = Get-NormalizedTextSha256 -LiteralPath $nativeSource
-if ($nativeSourceSha256 -ne $expectedNativeSourceSha256) {
-    throw (
-        'Frozen native eraser source digest mismatch: expected ' +
-        "$expectedNativeSourceSha256, got $nativeSourceSha256"
-    )
-}
-
-$nativeOutput = Join-Path $arm64LibDir 'libspreadprobe.so'
-& $clang `
-    -shared `
-    -fPIC `
-    -std=c++17 `
-    -O2 `
-    -fvisibility=hidden `
-    '-Wl,--build-id=sha1' `
-    -llog `
-    -ldl `
-    -o $nativeOutput `
-    $nativeSource
-
-if ($LASTEXITCODE -ne 0) {
-    throw "NDK compilation failed with exit code $LASTEXITCODE"
-}
-$compiledNativeSha256 = (
-    Get-FileHash -Algorithm SHA256 -LiteralPath $nativeOutput
-).Hash
-
+$legacySource = [System.IO.Path]::GetFullPath((Join-Path `
+    $projectRoot `
+    'src\com\techrebbe\supernote\spreadprobe\SpreadProbe.java'
+))
 $javaSources = @(
     Get-ChildItem -LiteralPath (Join-Path $projectRoot 'src') -Recurse -Filter '*.java' -File
     Get-ChildItem -LiteralPath (Join-Path $projectRoot 'stubs') -Recurse -Filter '*.java' -File
-) | ForEach-Object FullName
+) | ForEach-Object FullName | Where-Object {
+    -not [System.IO.Path]::GetFullPath($_).Equals(
+        $legacySource,
+        [System.StringComparison]::OrdinalIgnoreCase
+    )
+}
 
 & javac `
     -source 8 `
@@ -186,6 +153,23 @@ $javaSources = @(
 
 if ($LASTEXITCODE -ne 0) {
     throw "javac failed with exit code $LASTEXITCODE"
+}
+
+# Native Reader v2 is an exclusive Java-hook engine. Preserve the legacy
+# source for forensic comparison, but exclude it from compilation entirely.
+# The post-compile assertion also prevents a future indirect build input from
+# silently reintroducing its executable entry point.
+$legacyClassRoot = Join-Path `
+    $classesDir `
+    'com\techrebbe\supernote\spreadprobe'
+if (-not $legacyClassRoot.StartsWith(
+    $classesDir,
+    [System.StringComparison]::OrdinalIgnoreCase
+)) {
+    throw "Refusing to filter classes outside build output: $legacyClassRoot"
+}
+if (Get-ChildItem -LiteralPath $legacyClassRoot -Filter 'SpreadProbe*.class' -File) {
+    throw 'Legacy SpreadProbe executable classes entered the v2 build.'
 }
 
 $moduleJar = Join-Path $buildRoot 'spread-probe.jar'
@@ -234,22 +218,6 @@ if ($LASTEXITCODE -ne 0) {
     throw "jar dex/metadata update failed with exit code $LASTEXITCODE"
 }
 
-# LSPosed's module class loader maps native libraries directly from the APK.
-# Keep the arm64 library uncompressed so Android's linker can mmap it.
-if (
-    (Get-NormalizedTextSha256 -LiteralPath $nativeSource) -ne
-        $expectedNativeSourceSha256 -or
-    (Get-FileHash -Algorithm SHA256 -LiteralPath $nativeOutput).Hash -ne
-        $compiledNativeSha256
-) {
-    throw 'Native eraser source or compiled library changed before packaging.'
-}
-& jar u0f $unsignedApk `
-    -C $nativeLibRoot lib
-if ($LASTEXITCODE -ne 0) {
-    throw "jar native-library update failed with exit code $LASTEXITCODE"
-}
-
 $alignedApk = Join-Path $buildRoot 'spread-probe-aligned.apk'
 & $zipalign -f -p 4 $unsignedApk $alignedApk
 
@@ -281,11 +249,9 @@ $apkArchive = [IO.Compression.ZipFile]::OpenRead($outputApk)
 try {
     $requiredEntries = @(
         'AndroidManifest.xml',
-        'assets/native_init',
         'assets/xposed_init',
         'classes.dex',
-        'META-INF/xposed/scope.list',
-        'lib/arm64-v8a/libspreadprobe.so'
+        'META-INF/xposed/scope.list'
     )
     $entriesByName = @{}
     foreach ($entry in $apkArchive.Entries) {
@@ -302,22 +268,13 @@ try {
             throw "APK required entry is empty: $requiredEntry"
         }
     }
-    $nativeEntry = $entriesByName['lib/arm64-v8a/libspreadprobe.so']
-    if ($nativeEntry.CompressedLength -ne $nativeEntry.Length) {
-        throw 'APK native library is compressed and cannot be mmap-loaded.'
-    }
-    $nativeEntryStream = $nativeEntry.Open()
-    try {
-        $apkNativeSha256 = [BitConverter]::ToString(
-            [Security.Cryptography.SHA256]::Create().ComputeHash(
-                $nativeEntryStream
-            )
-        ).Replace('-', '')
-    } finally {
-        $nativeEntryStream.Dispose()
-    }
-    if ($apkNativeSha256 -ne $compiledNativeSha256) {
-        throw 'APK native library does not match the verified compiler output.'
+    foreach ($forbiddenEntry in @(
+        'assets/native_init',
+        'lib/arm64-v8a/libspreadprobe.so'
+    )) {
+        if ($entriesByName.ContainsKey($forbiddenEntry)) {
+            throw "v2 APK contains forbidden legacy payload: $forbiddenEntry"
+        }
     }
 } finally {
     $apkArchive.Dispose()

@@ -28,6 +28,7 @@ import java.io.FileOutputStream
 import java.io.ObjectInputStream
 import java.io.ObjectOutputStream
 import java.security.MessageDigest
+import java.nio.file.Files
 import java.util.Base64
 import java.util.Properties
 import java.util.UUID
@@ -46,7 +47,7 @@ class ReaderPreferencesModule(
         private const val NATIVE_SPREAD_PACKAGE =
             "com.techrebbe.supernote.spreadprobe"
         private const val PLUGIN_HOST_PACKAGE = "com.ratta.supernote.pluginhost"
-        private const val NATIVE_SPREAD_MIN_VERSION_CODE = 120L
+        private const val NATIVE_READER_V2_MIN_VERSION_CODE = 136L
         private const val NATIVE_SPREAD_MARKER_SUFFIX = ".snspread"
         private const val NATIVE_SPREAD_BACKUP_SUFFIX = ".snspread-backup.properties"
         private const val NATIVE_SPREAD_BACKUP_MARK_SUFFIX = ".snspread-backup.mark"
@@ -362,13 +363,18 @@ class ReaderPreferencesModule(
         promise: Promise,
     ) {
         try {
+            if (enabled) {
+                throw IllegalStateException(
+                    "RTL read-only belonged to the retired Native Spread engine. Native Reader v2 supports only Off or protected native editing.",
+                )
+            }
             val pdfFile = requirePdf(filePath)
             val marker = nativeSpreadMarker(pdfFile)
             val capability = nativeSpreadCapability()
 
             if (enabled && !capability.compatible) {
                 throw IllegalStateException(
-                    "Compatible Native Spread module is not active for this firmware",
+                    "Compatible Native Reader v2 module is not active for this firmware",
                 )
             }
 
@@ -459,7 +465,7 @@ class ReaderPreferencesModule(
                         }
 
                         if (!enabled) {
-                            if (marker.exists() && !marker.delete()) {
+                            if (!deleteFileDurably(marker)) {
                                 throw IllegalStateException(
                                     "Could not remove native spread setting: ${marker.absolutePath}",
                                 )
@@ -543,7 +549,7 @@ class ReaderPreferencesModule(
             val capability = nativeSpreadCapability()
             if (!capability.compatible) {
                 throw IllegalStateException(
-                    "Compatible Native Spread module is not active for this firmware",
+                    "Compatible Native Reader v2 module is not active for this firmware",
                 )
             }
 
@@ -620,7 +626,7 @@ class ReaderPreferencesModule(
                 // An explicit restore consumes a pending activation directly:
                 // disabling its never-authorized marker preserves the canonical
                 // recovery bytes for the restore worker instead of archiving them.
-                if (marker.exists() && !marker.delete()) {
+                if (!deleteFileDurably(marker)) {
                     throw IllegalStateException(
                         "Could not disable Native Spread before recovery",
                     )
@@ -762,6 +768,7 @@ class ReaderPreferencesModule(
             "A protected previous marker must be present"
         }
         return Properties().apply {
+            setProperty("nativeReaderEngine", "native-reader-v2")
             setProperty("enabled", "true")
             setProperty("direction", "rtl")
             setProperty("coverSeparate", coverSeparate.toString())
@@ -781,7 +788,7 @@ class ReaderPreferencesModule(
             )
             setProperty(
                 "minimumModuleVersionCode",
-                NATIVE_SPREAD_MIN_VERSION_CODE.toString(),
+                NATIVE_READER_V2_MIN_VERSION_CODE.toString(),
             )
             setProperty("activationToken", activationToken)
             setProperty("activationState", activationState)
@@ -1041,7 +1048,10 @@ class ReaderPreferencesModule(
             putBoolean("reconciliationAvailable", authority.reconciliationAvailable)
             putString("authorityStatus", authority.status)
             putString("authorityReason", authority.reason)
-            putBoolean("enabled", configured && runtimeCompatible)
+            putBoolean(
+                "enabled",
+                configuredEditable && runtimeCompatible,
+            )
             putBoolean("editable", configuredEditable && runtimeCompatible)
             putBoolean("coverSeparate", coverSeparate)
             putBoolean("showDivider", showDivider)
@@ -1317,7 +1327,7 @@ class ReaderPreferencesModule(
 
                 val valid = hooksReady &&
                     protocol == NATIVE_SPREAD_HANDSHAKE_PROTOCOL &&
-                    moduleVersionCode >= NATIVE_SPREAD_MIN_VERSION_CODE &&
+                    moduleVersionCode == NATIVE_READER_V2_MIN_VERSION_CODE &&
                     documentApkLength == SUPPORTED_DOCUMENT_APK_LENGTH &&
                     processId > 0 &&
                     canonicalReportedPath == expectedPath
@@ -1383,7 +1393,7 @@ class ReaderPreferencesModule(
         }
         val compatible = Build.FINGERPRINT == SUPPORTED_FINGERPRINT &&
             document == SUPPORTED_DOCUMENT_VERSION_CODE &&
-            module.first >= NATIVE_SPREAD_MIN_VERSION_CODE
+            module.first == NATIVE_READER_V2_MIN_VERSION_CODE
         return NativeSpreadCapability(
             compatible,
             module.first,
@@ -1805,8 +1815,7 @@ class ReaderPreferencesModule(
             // eligible for cleanup. Preexisting partial evidence is preserved
             // exactly so a later owning-token retry can attest it or fail closed.
             if (!archiveVerified) {
-                if (manifestCreated && archive.manifest.exists() &&
-                    !archive.manifest.delete()
+                if (manifestCreated && !deleteFileDurably(archive.manifest)
                 ) {
                     error.addSuppressed(
                         IllegalStateException(
@@ -1814,8 +1823,7 @@ class ReaderPreferencesModule(
                         ),
                     )
                 }
-                if (sourceManifestCreated && archive.sourceManifest.exists() &&
-                    !archive.sourceManifest.delete()
+                if (sourceManifestCreated && !deleteFileDurably(archive.sourceManifest)
                 ) {
                     error.addSuppressed(
                         IllegalStateException(
@@ -1823,8 +1831,7 @@ class ReaderPreferencesModule(
                         ),
                     )
                 }
-                if (snapshotCreated && archive.snapshot.exists() &&
-                    !archive.snapshot.delete()
+                if (snapshotCreated && !deleteFileDurably(archive.snapshot)
                 ) {
                     error.addSuppressed(
                         IllegalStateException(
@@ -1868,7 +1875,7 @@ class ReaderPreferencesModule(
     ) {
         val previousBytes = pending.previousMarkerBytes
         if (previousBytes == null) {
-            if (marker.exists() && !marker.delete()) {
+            if (!deleteFileDurably(marker)) {
                 throw IllegalStateException(
                     "Could not remove the interrupted pending activation marker",
                 )
@@ -1940,7 +1947,7 @@ class ReaderPreferencesModule(
                 properties.getProperty("transactionProtocol", "") ==
                     NATIVE_SPREAD_EDITABLE_MARKER_PROTOCOL.toString() &&
                 properties.getProperty("minimumModuleVersionCode", "") ==
-                    NATIVE_SPREAD_MIN_VERSION_CODE.toString() &&
+                    NATIVE_READER_V2_MIN_VERSION_CODE.toString() &&
                 properties.getProperty("activationState", "") ==
                     NATIVE_SPREAD_ACTIVATION_COMMITTED &&
                 pendingOnlyKeys.none { key -> properties.containsKey(key) } &&
@@ -2033,12 +2040,12 @@ class ReaderPreferencesModule(
                         "Interrupted protected-session retirement snapshot is ambiguous",
                     )
                 }
-                if (retiring.exists() && !retiring.delete()) {
+                if (!deleteFileDurably(retiring)) {
                     throw IllegalStateException(
                         "Interrupted protected-session retirement could not finish",
                     )
                 }
-                if (marker.exists() && !marker.delete()) {
+                if (!deleteFileDurably(marker)) {
                     throw IllegalStateException(
                         "Interrupted protected-session retirement marker could not be cleared",
                     )
@@ -2148,7 +2155,7 @@ class ReaderPreferencesModule(
                     "Interrupted activation has ambiguous canonical retirement remnants",
                 )
             }
-            if (retiringSnapshot.exists() && !retiringSnapshot.delete()) {
+            if (!deleteFileDurably(retiringSnapshot)) {
                 throw IllegalStateException(
                     "Interrupted activation's exact retiring snapshot could not be removed",
                 )
@@ -2199,7 +2206,7 @@ class ReaderPreferencesModule(
                         orphanSnapshot.length() == liveMark.length() &&
                         sha256(orphanSnapshot) == sha256(liveMark)
                 }.getOrDefault(false)
-                if (!orphanSnapshotMatchesLive || !orphanSnapshot.delete()) {
+                if (!orphanSnapshotMatchesLive || !deleteFileDurably(orphanSnapshot)) {
                     throw IllegalStateException(
                         "An incomplete annotation snapshot differs from the live mark; recovery files were not changed",
                     )
@@ -2413,15 +2420,15 @@ class ReaderPreferencesModule(
                 throw IllegalStateException("A prior annotation backup retirement is incomplete")
             }
             if (backup.originalMarkPresent) {
-                Os.rename(backup.snapshot.absolutePath, retiring.absolutePath)
+                renameFileDurably(backup.snapshot, retiring)
             }
-            if (backup.manifest.exists() && !backup.manifest.delete()) {
+            if (!deleteFileDurably(backup.manifest)) {
                 if (backup.originalMarkPresent && retiring.exists()) {
-                    Os.rename(retiring.absolutePath, backup.snapshot.absolutePath)
+                    renameFileDurably(retiring, backup.snapshot)
                 }
                 throw IllegalStateException("Could not retire the completed annotation backup manifest")
             }
-            if (retiring.exists() && !retiring.delete()) {
+            if (!deleteFileDurably(retiring)) {
                 Log.w(
                     LOG_TAG,
                     "RTL_READER_NATIVE_BACKUP_RETIRE_CLEANUP_DEFERRED file=${retiring.absolutePath}",
@@ -2510,7 +2517,7 @@ class ReaderPreferencesModule(
                 )
         } catch (error: Throwable) {
             var rollbackFailed = false
-            if (manifest.exists() && !manifest.delete()) {
+            if (!deleteFileDurably(manifest)) {
                 rollbackFailed = true
                 val cleanupError = IllegalStateException(
                     "Could not remove the failed annotation backup manifest",
@@ -2522,7 +2529,7 @@ class ReaderPreferencesModule(
                     cleanupError,
                 )
             }
-            if (!manifest.exists() && snapshot.exists() && !snapshot.delete()) {
+            if (!manifest.exists() && !deleteFileDurably(snapshot)) {
                 rollbackFailed = true
                 val cleanupError = IllegalStateException(
                     "Could not remove the failed annotation backup snapshot",
@@ -2540,7 +2547,7 @@ class ReaderPreferencesModule(
                     "RTL_READER_NATIVE_BACKUP_CREATION_ROLLED_BACK manifest=${manifest.absolutePath} snapshot=${snapshot.absolutePath}",
                 )
             }
-            if (retiring.exists() && !retiring.delete()) {
+            if (!deleteFileDurably(retiring)) {
                 val cleanupError = IllegalStateException(
                     "Could not remove the failed annotation backup retirement file",
                 )
@@ -2751,7 +2758,7 @@ class ReaderPreferencesModule(
             fun restorePublishedMarkerIfOwned() {
                 if (!ownsPublishedMarker) return
                 if (previousMarkerBytes == null) {
-                    if (marker.exists() && !marker.delete()) {
+                    if (!deleteFileDurably(marker)) {
                         throw IllegalStateException(
                             "Could not remove the failed protected editable marker",
                         )
@@ -2862,7 +2869,7 @@ class ReaderPreferencesModule(
                 )
             }
             if (manifest.isFile && !snapshot.exists() && retiring.isFile) {
-                Os.rename(retiring.absolutePath, snapshot.absolutePath)
+                renameFileDurably(retiring, snapshot)
                 Log.w(
                     LOG_TAG,
                     "RTL_READER_NATIVE_BACKUP_RETIREMENT_ROLLED_BACK file=${snapshot.absolutePath}",
@@ -3045,6 +3052,8 @@ class ReaderPreferencesModule(
             "previousMarkerBase64",
         )
         properties.getProperty("enabled", "") == "true" &&
+            properties.getProperty("nativeReaderEngine", "") ==
+                "native-reader-v2" &&
             properties.getProperty("direction", "") == "rtl" &&
             properties.getProperty("editable", "") == "true" &&
             properties.getProperty("disposable", "") == "false" &&
@@ -3052,7 +3061,7 @@ class ReaderPreferencesModule(
             properties.getProperty("transactionProtocol", "") ==
                 NATIVE_SPREAD_EDITABLE_MARKER_PROTOCOL.toString() &&
             properties.getProperty("minimumModuleVersionCode", "") ==
-                NATIVE_SPREAD_MIN_VERSION_CODE.toString() &&
+                NATIVE_READER_V2_MIN_VERSION_CODE.toString() &&
             properties.getProperty("activationState", "") == activationState &&
             (activationState != NATIVE_SPREAD_ACTIVATION_COMMITTED ||
                 pendingOnlyKeys.none { key -> properties.containsKey(key) }) &&
@@ -3112,7 +3121,7 @@ class ReaderPreferencesModule(
             properties.getProperty("transactionProtocol", "") !=
                 NATIVE_SPREAD_EDITABLE_MARKER_PROTOCOL.toString() ||
             properties.getProperty("minimumModuleVersionCode", "") !=
-                NATIVE_SPREAD_MIN_VERSION_CODE.toString() ||
+                NATIVE_READER_V2_MIN_VERSION_CODE.toString() ||
             properties.getProperty("activationState", "") !=
                 NATIVE_SPREAD_ACTIVATION_PENDING ||
             (
@@ -3349,6 +3358,7 @@ class ReaderPreferencesModule(
             beforePublish()
             Os.rename(temporary.absolutePath, file.absolutePath)
             onPublished()
+            syncParentDirectory(file)
         } finally {
             // No cleanup failure after the atomic rename may be mistaken for a
             // publication failure. Callers record the boundary synchronously.
@@ -3379,6 +3389,7 @@ class ReaderPreferencesModule(
             beforePublish()
             Os.rename(temporary.absolutePath, destination.absolutePath)
             onPublished()
+            syncParentDirectory(destination)
         } finally {
             if (temporary.exists()) temporary.delete()
         }
@@ -3397,6 +3408,25 @@ class ReaderPreferencesModule(
         return digest.digest().joinToString("") { byte ->
             "%02x".format(byte.toInt() and 0xff)
         }
+    }
+
+    private fun renameFileDurably(source: File, destination: File) {
+        Os.rename(source.absolutePath, destination.absolutePath)
+        syncParentDirectory(destination)
+        val sourceParent = source.parentFile?.absolutePath
+        val destinationParent = destination.parentFile?.absolutePath
+        if (sourceParent != null && sourceParent != destinationParent) {
+            syncParentDirectory(source)
+        }
+    }
+
+    private fun deleteFileDurably(file: File): Boolean {
+        val deleted = runCatching { Files.deleteIfExists(file.toPath()) }
+            .getOrElse { return false }
+        if (!deleted) return true
+        return runCatching {
+            syncParentDirectory(file)
+        }.isSuccess
     }
 
     private fun sha256(bytes: ByteArray): String =
@@ -3608,6 +3638,28 @@ class ReaderPreferencesModule(
             output.write(bytes)
             output.flush()
             output.fd.sync()
+        }
+    }
+
+    /**
+     * Makes an already-published rename durable. The publication callback is
+     * deliberately invoked before this method: if fsync fails, callers must
+     * still know that the destination name may now refer to the new bytes and
+     * execute the corresponding recovery path rather than treating the write
+     * as an unpublished temporary-file failure.
+     */
+    private fun syncParentDirectory(file: File) {
+        val parent = file.parentFile
+            ?: throw IllegalStateException("Published file has no parent directory")
+        val directory = Os.open(
+            parent.absolutePath,
+            OsConstants.O_RDONLY,
+            0,
+        )
+        try {
+            Os.fsync(directory)
+        } finally {
+            Os.close(directory)
         }
     }
 
@@ -3869,7 +3921,7 @@ class ReaderPreferencesModule(
                     }
                 } else {
                     requireDocumentProcessAbsent(activityManager, "before-mark-delete")
-                    if (currentMark.exists() && !currentMark.delete()) {
+                    if (!deleteFileDurably(currentMark)) {
                         throw IllegalStateException(
                             "Could not restore the original no-annotation state",
                         )

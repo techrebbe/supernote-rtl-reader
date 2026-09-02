@@ -21,7 +21,7 @@ else
   exit 1
 fi
 
-"${PYTHON_CMD[@]}" "$ROOT/scripts/check_native_spread_invariants.py" "$ROOT"
+"${PYTHON_CMD[@]}" "$ROOT/scripts/check_native_reader_v2_invariants.py" "$ROOT"
 
 pushd "$WORK_ROOT" >/dev/null
 npx --yes @react-native-community/cli@18.0.0 init SupernoteRtlReader \

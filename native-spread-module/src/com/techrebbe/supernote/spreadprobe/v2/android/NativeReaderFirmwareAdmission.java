@@ -8,14 +8,14 @@ import java.util.Arrays;
 
 /**
  * Fail-closed symbol admission for the one inspected SupernoteDocument build.
- * No v2 behavior-changing hook may be installed unless every field and method
- * below resolves with its exact declared type/signature.
+ * No v2 behavior-changing hook may be installed unless every field, method,
+ * and constructor below resolves with its exact declared type/signature.
  */
 public final class NativeReaderFirmwareAdmission {
     public static final String CONTRACT_ID =
-        "supernote-document-1.02.446-native-reader-v2-symbols-v2";
+        "supernote-document-1.02.446-native-reader-v2-symbols-v5";
     public static final String EXPECTED_SYMBOL_DIGEST =
-        "9ed6acbb3bcb5302b255aed2b6d7891fa4b1278ddc975e19267f9add50fc93ca";
+        "dfc662f560b0ac2507240aa39d84da01ce2c1e466425af818f4acb34cffee8f5";
 
     private static final String ACTIVITY =
         "com.supernote.document.document.DocumentActivity";
@@ -27,11 +27,16 @@ public final class NativeReaderFirmwareAdmission {
         "com.supernote.document.handwrite.HandWritePresenter";
     private static final String HAND_WRITE_VIEW =
         "com.supernote.document.handwrite.HandWriteView";
+    private static final String IMAGE_VIEW =
+        "com.supernote.document.utils.view.DocumentImageView";
     private static final String HAND_WRITE_CLIENT =
         "com.supernote.document.handwrite.HandWriteClient";
     private static final String NOTE =
         "com.example.libsupernote.SuperNoteNote";
+    private static final String DOCUMENT_CONSTANTS =
+        "com.ratta.supernote.documentlib.constants.DocumentConstants";
     private static final String NATIVE_CALLBACK = ACTIVITY + "$6";
+    private static final String MATRIX = "com.artifex.mupdf.fitz.Matrix";
 
     private static final String[] SYMBOLS = new String[] {
         field(ACTIVITY, "documentViewModel", VIEW_MODEL),
@@ -40,6 +45,8 @@ public final class NativeReaderFirmwareAdmission {
             HAND_WRITE_VIEW),
         field(ACTIVITY, "mImage",
             "com.supernote.document.utils.view.DocumentImageView"),
+        field(ACTIVITY, "digestImage",
+            "com.supernote.document.utils.view.DigestImageView"),
         field(ACTIVITY, "mContentView", "android.view.View"),
         field(ACTIVITY, "documentViewLayout", "android.widget.RelativeLayout"),
         field(ACTIVITY, "eventCallBack",
@@ -70,25 +77,40 @@ public final class NativeReaderFirmwareAdmission {
         method(ACTIVITY, "showSelectTextPopView", "void"),
         method(ACTIVITY, "onGlobalLayout", "void"),
 
+        method(IMAGE_VIEW, "setImageBitmap", "void",
+            "android.graphics.Bitmap"),
+
         field(VIEW_MODEL, "currentPage", "int"),
         field(VIEW_MODEL, "pageCount", "int"),
         field(VIEW_MODEL, "pageInfo", PAGE_INFO),
         field(VIEW_MODEL, "pageInfoHashMap", "java.util.HashMap"),
+        field(VIEW_MODEL, "documentAnnotationMap", "java.util.HashMap"),
         field(VIEW_MODEL, "mupdf",
             "com.supernote.document.document.DocumentMupdf"),
         field(VIEW_MODEL, "uri", "android.net.Uri"),
+        field(VIEW_MODEL, "portraitScaleRect", "android.graphics.RectF"),
+        field(VIEW_MODEL, "landscapeScaleRect", "android.graphics.RectF"),
+        field(VIEW_MODEL, "trimmingRect", "android.graphics.RectF"),
+        field(VIEW_MODEL, "landscapeTrimmingRect", "android.graphics.RectF"),
         method(VIEW_MODEL, "loadPage", "void", "int"),
         method(VIEW_MODEL, "turnPage", "void", "int"),
         method(VIEW_MODEL, "reloadPage", "void"),
+        method(VIEW_MODEL, "openDocument", "void",
+            "android.net.Uri", "int", "int", "int", "int", "int",
+            "boolean"),
         method(VIEW_MODEL, "getCurrentPage", "int"),
         method(VIEW_MODEL, "getPageCount", "int"),
         method(VIEW_MODEL, "getPageInfo", PAGE_INFO),
         method(VIEW_MODEL, "getOriginBitmap", "android.graphics.Bitmap"),
         method(VIEW_MODEL, "getShowRect", "android.graphics.RectF"),
         method(VIEW_MODEL, "getDisplayTrimmingRect", "android.graphics.RectF"),
+        method(VIEW_MODEL, "setScaleRect", "void", "android.graphics.RectF"),
         method(VIEW_MODEL, "checkLink",
             "com.supernote.document.document.bean.CheckLinkResult",
             "com.artifex.mupdf.fitz.Point"),
+        method(VIEW_MODEL, "setDocumentAnnotationMap", "void",
+            "java.util.HashMap"),
+        method(VIEW_MODEL, "updateDigestBitmap", "void", PAGE_INFO),
 
         field(PAGE_INFO, "ctm", "com.artifex.mupdf.fitz.Matrix"),
         field(PAGE_INFO, "revertCtm", "com.artifex.mupdf.fitz.Matrix"),
@@ -101,8 +123,10 @@ public final class NativeReaderFirmwareAdmission {
         method(PAGE_INFO, "getRevertCtm", "com.artifex.mupdf.fitz.Matrix"),
         method(PAGE_INFO, "getOriginBitmap", "android.graphics.Bitmap"),
         method(PAGE_INFO, "getDisplayBitmap", "android.graphics.Bitmap"),
+        method(PAGE_INFO, "getDigestBitmap", "android.graphics.Bitmap"),
         method(PAGE_INFO, "getOffsetX", "int"),
         method(PAGE_INFO, "getOffsetY", "int"),
+        method(PAGE_INFO, "getTrimmingRect", "android.graphics.RectF"),
         method(PAGE_INFO, "getPage", "int"),
         method(PAGE_INFO, "setOriginBitmap", "void", "android.graphics.Bitmap"),
         method(PAGE_INFO, "setDisplayBitmap", "void", "android.graphics.Bitmap"),
@@ -145,7 +169,6 @@ public final class NativeReaderFirmwareAdmission {
 
         method(HAND_WRITE_VIEW, "setBitmap", "void", "android.graphics.Bitmap"),
         method(HAND_WRITE_VIEW, "cancelAreaSelect", "void"),
-        method(HAND_WRITE_VIEW, "clearAreaSelectionView", "void"),
 
         field(HAND_WRITE_CLIENT, "iBinder", "android.os.IBinder"),
 
@@ -156,10 +179,26 @@ public final class NativeReaderFirmwareAdmission {
             "java.lang.String", "int", "android.graphics.Bitmap"),
         method(NOTE, "saveMarkData", "boolean",
             "java.lang.String", "java.lang.String", "int", "boolean"),
+        method(NOTE, "createSuperNoteNote", NOTE),
+        method(NOTE, "markInitProcess", "boolean", "int"),
+        method(NOTE, "changeDirtyFlag", "void", "boolean"),
+        method(NOTE, "freeCommon", "void"),
+
+        method(DOCUMENT_CONSTANTS, "getDeviceType", "int"),
 
         field(NATIVE_CALLBACK, "mPressure", "int"),
         method(NATIVE_CALLBACK, "onDigitalPosition", "void", "int", "int"),
-        method(NATIVE_CALLBACK, "onDigital", "void", "int")
+        method(NATIVE_CALLBACK, "onDigital", "void", "int"),
+
+        field(MATRIX, "a", "float"),
+        field(MATRIX, "b", "float"),
+        field(MATRIX, "c", "float"),
+        field(MATRIX, "d", "float"),
+        field(MATRIX, "e", "float"),
+        field(MATRIX, "f", "float"),
+        constructor(MATRIX,
+            "float", "float", "float", "float", "float", "float"),
+        method(MATRIX, "invert", MATRIX)
     };
 
     private NativeReaderFirmwareAdmission() {}
@@ -217,6 +256,15 @@ public final class NativeReaderFirmwareAdmission {
                     parameterNames[index]
                 );
             }
+            if ("C".equals(parts[0])) {
+                owner.getDeclaredConstructor(parameterTypes);
+                return;
+            }
+            if (!"M".equals(parts[0])) {
+                throw new IllegalStateException(
+                    "unknown firmware symbol kind: " + encoded
+                );
+            }
             Method method = owner.getDeclaredMethod(parts[2], parameterTypes);
             if (!method.getReturnType().getName().equals(parts[3])) {
                 throw new NoSuchMethodException(encoded);
@@ -255,6 +303,19 @@ public final class NativeReaderFirmwareAdmission {
         StringBuilder value = new StringBuilder()
             .append("M|").append(owner).append('|').append(name)
             .append('|').append(returnType).append('|');
+        for (int index = 0; index < parameterTypes.length; index++) {
+            if (index > 0) value.append(',');
+            value.append(parameterTypes[index]);
+        }
+        return value.toString();
+    }
+
+    private static String constructor(
+        String owner,
+        String... parameterTypes
+    ) {
+        StringBuilder value = new StringBuilder()
+            .append("C|").append(owner).append("|||");
         for (int index = 0; index < parameterTypes.length; index++) {
             if (index > 0) value.append(',');
             value.append(parameterTypes[index]);

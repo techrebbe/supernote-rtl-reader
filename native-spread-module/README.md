@@ -1,15 +1,21 @@
-# Supernote Native Spread companion module
+# Supernote Native Reader v2 companion module
 
 This LSPosed module supplies the rooted native-reader enhancement controlled by
-Supernote RTL Reader. It keeps Supernote's own PDF renderer, links, highlights,
-and `.mark` annotation data while adding:
+Supernote RTL Reader. v0.0.136 is a pre-hardware, exact-firmware candidate. It
+opens the original PDF and keeps Supernote's own writer, links, text tools,
+highlights, and page-local `.mark` annotation data while adding:
 
 - RTL page progression in portrait;
 - automatic two-page RTL spreads in landscape;
 - optional separate-cover parity;
-- per-document opt-in through a hidden `.snspread` sidecar;
-- a fail-closed read-only pilot mode;
+- per-document opt-in through a hidden authenticated `.snspread` marker;
 - protected per-document editing backed by a verified annotation recovery snapshot.
+
+The v0.0.135 experimental `SpreadProbe` and native interception source are
+retained only as hash-pinned forensic evidence. They are not compiled or
+packaged. v2 uses one live native writer page, one isolated read-only adjacent
+projection, and a witnessed save/disable/load/verify/publish transaction to
+move writer authority. The implementation never edits `.mark` bytes directly.
 
 ## Compatibility and safety
 
@@ -22,6 +28,14 @@ hardware-tested environment:
 - document APK length `138486560` bytes;
 - LSPosed scope limited to `com.supernote.document`;
 - an enabled marker beside the current PDF.
+
+## Archived experimental engine history
+
+The remainder of this version-by-version section describes the retired
+v0.0.75-v0.0.135 `SpreadProbe` experiment. It is retained to preserve the
+hardware evidence and design lessons that informed v2; none of these legacy
+hooks are executable in the v0.0.136 package. The authoritative current v2
+behavior is the architecture and compatibility contract above.
 
 The read-only marker sets `editable=false`. In that mode v0.0.75
 forces a full-page disabled handwriting region and blocks the native
@@ -351,29 +365,30 @@ Requirements:
 
 - JDK 17 with `javac` and `jar` on `PATH`;
 - Android SDK platform and build-tools 35.0.0;
-- Android NDK 27.0.12077973;
 - an Android debug keystore.
 
-`build.ps1` reads `ANDROID_SDK_ROOT` or `ANDROID_HOME`, and
-`ANDROID_NDK_HOME` when set. Paths can also be passed explicitly:
+`build.ps1` reads `ANDROID_SDK_ROOT` or `ANDROID_HOME`. Paths can also be passed
+explicitly:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
-The signed APK is written to `build/artifact/`. The GitHub workflow uses a
+The signed APK is written to `build/artifact/`. Pull-request CI uses a
 disposable, runner-local debug identity only so `build.ps1` can compile,
-package, and verify the APK; it does not upload that APK. Such a build is not
-upgrade-compatible with another disposable identity. Any installable update
-must instead be signed with the same authorized private identity as the
-previously installed build.
+package, and verify the APK; it does not upload that non-upgrade-compatible
+build. Trusted `main` pushes and manual workflow runs restore the repository's
+stable signing identity from an encrypted Actions secret and publish the
+verified upgrade-compatible APK as
+`supernote-native-reader-v2-v0.0.136`. Review branches never receive that
+credential.
 
 ## Install
 
-Install the APK, enable **Supernote Native Spread Probe** in LSPosed, scope it
-only to `com.supernote.document`, and restart the document reader. Supernote
-RTL Reader v0.4.14 or newer and Native Spread v0.0.135 or newer are required for
-the current native-control/lasso-persistence candidate. Stylus contacts that
+Install the APK, enable **Supernote Native Reader v2** in LSPosed, scope it only
+to `com.supernote.document`, and restart the document reader. The v0.0.136 APK
+requires Supernote RTL Reader v0.4.15 and refuses every other companion
+contract version. Stylus contacts that
 begin inside the current visible native toolbar, page bar, selection menu, or
 popup are passed to Supernote for that exact gesture without publishing a
 handwriting owner or consulting page/writer authority. Only malformed or

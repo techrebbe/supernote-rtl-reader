@@ -41,6 +41,13 @@ public final class NativeReaderV2PackageAdmission {
             );
             StructStat before = Os.fstat(descriptor);
             requireRegularExpectedFile(before);
+            StructStat pathBefore = Os.lstat(EXPECTED_APK_PATH);
+            requireRegularExpectedFile(pathBefore);
+            if (!sameIdentity(before, pathBefore)) {
+                throw new IllegalStateException(
+                    "document APK path does not name admitted descriptor"
+                );
+            }
 
             FileDescriptor duplicate = Os.dup(descriptor);
             String digest;
@@ -49,9 +56,11 @@ public final class NativeReaderV2PackageAdmission {
             }
 
             StructStat after = Os.fstat(descriptor);
-            if (!sameIdentity(before, after)) {
+            StructStat pathAfter = Os.lstat(EXPECTED_APK_PATH);
+            if (!sameIdentity(before, after)
+                || !sameIdentity(before, pathAfter)) {
                 throw new IllegalStateException(
-                    "document APK changed while it was being admitted"
+                    "document APK changed or its path was replaced during admission"
                 );
             }
             if (!EXPECTED_APK_SHA256.equals(digest)) {
@@ -94,7 +103,9 @@ public final class NativeReaderV2PackageAdmission {
             && first.st_nlink == second.st_nlink
             && first.st_size == second.st_size
             && first.st_mtime == second.st_mtime
-            && first.st_ctime == second.st_ctime;
+            && first.st_mtim.tv_nsec == second.st_mtim.tv_nsec
+            && first.st_ctime == second.st_ctime
+            && first.st_ctim.tv_nsec == second.st_ctim.tv_nsec;
     }
 
     private static String sha256(FileInputStream input) throws Exception {

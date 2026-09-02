@@ -49,9 +49,9 @@ MUTATIONS = (
     ),
     (
         "NativeReaderV2MarkerClaim.java",
-        "if (properties.containsKey(key)) {",
+        "if (!COMMITTED_FIELDS.equals(properties.stringPropertyNames())) {",
         "if (false) {",
-        "committed marker rejects pending authority",
+        "committed marker exact schema",
     ),
     (
         "NativeReaderV2MarkerClaim.java",
@@ -120,6 +120,16 @@ MUTATIONS = (
         "return sourceBox.contains(source.x, source.y);",
         "return true;",
         "exact rotated-page content hit",
+    ),
+    (
+        "NativePageTransform.java",
+        "activeSlot.sourceToScreen.then(\n"
+            "            displayToOrigin\n"
+            "        )",
+        "displayToOrigin.then(\n"
+        "            activeSlot.sourceToScreen\n"
+        "        )",
+        "native crop transform order",
     ),
     (
         "PageProjectionFactory.java",

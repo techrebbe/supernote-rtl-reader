@@ -52,10 +52,11 @@ public final class NativeReaderV2Navigation {
             || nativeOffset == 0) {
             return -1;
         }
+        // DocumentViewModel.turnPage() already reports a physical gesture:
+        // -1 is a rightward swipe and +1 is a leftward swipe. swipeTarget()
+        // is the one authoritative place that applies reading direction.
+        // Flipping RTL here as well would reverse it twice.
         double physicalDelta = nativeOffset > 0 ? -100.0 : 100.0;
-        if (config.direction == SpreadPairing.Direction.RTL) {
-            physicalDelta = -physicalDelta;
-        }
         return swipeTarget(snapshot, config, physicalDelta, 0.0);
     }
 

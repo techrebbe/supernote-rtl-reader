@@ -249,8 +249,12 @@ public final class NativeReaderController {
                 invalid = context != null && context.gesture == gesture
                     ? context : null;
             }
-            if (invalid != null && invalid.activation != null) {
-                requestRollback(invalid, "invalid_motion_sample");
+            if (invalid != null) {
+                if (invalid.activation != null) {
+                    requestRollback(invalid, "invalid_motion_sample");
+                } else {
+                    clearContext(invalid);
+                }
             }
             return InputResult.BLOCKED;
         }

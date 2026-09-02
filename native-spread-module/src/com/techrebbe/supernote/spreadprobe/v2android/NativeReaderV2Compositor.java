@@ -8,6 +8,7 @@ import android.graphics.Paint;
 import android.graphics.RectF;
 
 import com.techrebbe.supernote.spreadprobe.v2.Affine2D;
+import com.techrebbe.supernote.spreadprobe.v2.NativeDisplayTransform;
 import com.techrebbe.supernote.spreadprobe.v2.PageSlot;
 import com.techrebbe.supernote.spreadprobe.v2.RectD;
 import com.techrebbe.supernote.spreadprobe.v2.SpreadSnapshot;
@@ -20,6 +21,12 @@ public final class NativeReaderV2Compositor {
     private static final Paint INK_PAINT = new Paint(
         Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG
     );
+    private static final Paint DIVIDER_PAINT = new Paint();
+
+    static {
+        DIVIDER_PAINT.setColor(Color.BLACK);
+        DIVIDER_PAINT.setStyle(Paint.Style.FILL);
+    }
 
     private final NativeReaderV2FirmwareAccess firmware;
 
@@ -57,17 +64,24 @@ public final class NativeReaderV2Compositor {
             height,
             Bitmap.Config.ARGB_8888
         );
+        Bitmap digest = Bitmap.createBitmap(
+            width,
+            height,
+            Bitmap.Config.ARGB_8888
+        );
         boolean success = false;
         try {
             Canvas pageCanvas = new Canvas(background);
             pageCanvas.drawColor(Color.WHITE);
             Canvas inkCanvas = new Canvas(ink);
+            Canvas digestCanvas = new Canvas(digest);
             drawSlot(
                 components,
                 snapshot,
                 snapshot.leftOrFull,
                 pageCanvas,
                 inkCanvas,
+                digestCanvas,
                 activeNativeInk
             );
             if (snapshot.right != null) {
@@ -77,15 +91,18 @@ public final class NativeReaderV2Compositor {
                     snapshot.right,
                     pageCanvas,
                     inkCanvas,
+                    digestCanvas,
                     activeNativeInk
                 );
+                drawDivider(pageCanvas, snapshot);
             }
             success = true;
-            return new Result(snapshot, background, ink);
+            return new Result(snapshot, background, ink, digest);
         } finally {
             if (!success) {
                 background.recycle();
                 ink.recycle();
+                digest.recycle();
             }
         }
     }
@@ -96,6 +113,7 @@ public final class NativeReaderV2Compositor {
         PageSlot slot,
         Canvas pageCanvas,
         Canvas inkCanvas,
+        Canvas digestCanvas,
         Bitmap activeNativeInk
     ) {
         if (slot.isBlank()) return;
@@ -103,28 +121,103 @@ public final class NativeReaderV2Compositor {
             components,
             slot.sourcePageIndex
         );
-        if (!usable(page)
-            || page.getWidth() != Math.round(slot.sourceBox.width())
-            || page.getHeight() != Math.round(slot.sourceBox.height())) {
+        RectD fullSource = usable(page) ? new RectD(
+            0,
+            0,
+            page.getWidth(),
+            page.getHeight()
+        ) : null;
+        if (!usable(page) || !contains(fullSource, slot.sourceBox)) {
             throw new IllegalStateException(
                 "page cache bitmap disagrees with spread geometry"
             );
         }
-        drawMapped(pageCanvas, page, slot.sourceToScreen, slot.screenBounds,
+        RectD contentClip = intersection(
+            slot.screenBounds,
+            slot.contentBounds
+        );
+        drawMapped(pageCanvas, page, slot.sourceToScreen, contentClip,
             PAGE_PAINT);
+        Bitmap digest = firmware.digestBitmap(
+            components,
+            slot.sourcePageIndex
+        );
+        if (usable(digest)) {
+            if (digest.getWidth() == page.getWidth()
+                && digest.getHeight() == page.getHeight()) {
+                Affine2D digestToScreen =
+                    NativeDisplayTransform.displayToOrigin(
+                        slot.sourceBox,
+                        fullSource
+                    ).then(slot.sourceToScreen);
+                drawMapped(
+                    digestCanvas,
+                    digest,
+                    digestToScreen,
+                    contentClip,
+                    INK_PAINT
+                );
+            } else {
+                Affine2D digestToScreen =
+                    NativeDisplayTransform.croppedBitmapToOrigin(
+                        digest.getWidth(),
+                        digest.getHeight(),
+                        slot.sourceBox,
+                        fullSource
+                    ).then(slot.sourceToScreen);
+                drawMapped(
+                    digestCanvas,
+                    digest,
+                    digestToScreen,
+                    contentClip,
+                    INK_PAINT
+                );
+            }
+        }
 
         if (slot.sourcePageIndex == snapshot.activePageIndex) {
-            requirePageInkGeometry(activeNativeInk, page);
-            drawMapped(
-                inkCanvas,
-                activeNativeInk,
-                slot.sourceToScreen,
-                slot.screenBounds,
-                INK_PAINT
-            );
+            if (usable(activeNativeInk)) {
+                requireDisplayInkGeometry(activeNativeInk, page);
+                Affine2D activeInkToScreen =
+                    NativeDisplayTransform.displayToOrigin(
+                        slot.sourceBox,
+                        fullSource
+                    ).then(slot.sourceToScreen);
+                drawMapped(
+                    inkCanvas,
+                    activeNativeInk,
+                    activeInkToScreen,
+                    contentClip,
+                    INK_PAINT
+                );
+            } else {
+                drawCommittedInk(
+                    components,
+                    slot,
+                    page,
+                    contentClip,
+                    inkCanvas
+                );
+            }
             return;
         }
 
+        drawCommittedInk(
+            components,
+            slot,
+            page,
+            contentClip,
+            inkCanvas
+        );
+    }
+
+    private void drawCommittedInk(
+        NativeReaderV2FirmwareAccess.Components components,
+        PageSlot slot,
+        Bitmap page,
+        RectD contentClip,
+        Canvas inkCanvas
+    ) {
         NativeReaderV2FirmwareAccess.CanonicalInk committed =
             firmware.committedCanonicalHandwriting(
             components,
@@ -146,7 +239,7 @@ public final class NativeReaderV2Compositor {
                 inkCanvas,
                 committed.bitmap,
                 slot.sourceToScreen,
-                slot.screenBounds,
+                contentClip,
                 INK_PAINT
             );
         } finally {
@@ -175,6 +268,30 @@ public final class NativeReaderV2Compositor {
         }
     }
 
+    private static void drawDivider(
+        Canvas canvas,
+        SpreadSnapshot snapshot
+    ) {
+        double left = snapshot.leftOrFull.screenBounds.right;
+        double right = snapshot.right.screenBounds.left;
+        if (!(right > left)) return;
+        double top = Math.min(
+            snapshot.leftOrFull.screenBounds.top,
+            snapshot.right.screenBounds.top
+        );
+        double bottom = Math.max(
+            snapshot.leftOrFull.screenBounds.bottom,
+            snapshot.right.screenBounds.bottom
+        );
+        canvas.drawRect(
+            (float) left,
+            (float) top,
+            (float) right,
+            (float) bottom,
+            DIVIDER_PAINT
+        );
+    }
+
     private static Matrix androidMatrix(Affine2D transform) {
         Matrix matrix = new Matrix();
         matrix.setValues(new float[] {
@@ -191,7 +308,7 @@ public final class NativeReaderV2Compositor {
         return matrix;
     }
 
-    private static void requirePageInkGeometry(
+    private static void requireDisplayInkGeometry(
         Bitmap bitmap,
         Bitmap page
     ) {
@@ -199,7 +316,7 @@ public final class NativeReaderV2Compositor {
             || bitmap.getWidth() != page.getWidth()
             || bitmap.getHeight() != page.getHeight()) {
             throw new IllegalStateException(
-                "active native ink bitmap does not match its source page"
+                "active native ink display does not match its source page"
             );
         }
     }
@@ -209,20 +326,45 @@ public final class NativeReaderV2Compositor {
             && bitmap.getWidth() > 0 && bitmap.getHeight() > 0;
     }
 
+    private static boolean contains(RectD outer, RectD inner) {
+        if (outer == null || inner == null) return false;
+        double tolerance = 0.501;
+        return inner.left >= outer.left - tolerance
+            && inner.top >= outer.top - tolerance
+            && inner.right <= outer.right + tolerance
+            && inner.bottom <= outer.bottom + tolerance;
+    }
+
+    private static RectD intersection(RectD first, RectD second) {
+        double left = Math.max(first.left, second.left);
+        double top = Math.max(first.top, second.top);
+        double right = Math.min(first.right, second.right);
+        double bottom = Math.min(first.bottom, second.bottom);
+        if (!(right > left && bottom > top)) {
+            throw new IllegalStateException(
+                "page content has no visible physical intersection"
+            );
+        }
+        return new RectD(left, top, right, bottom);
+    }
+
     public static final class Result {
         public final SpreadSnapshot snapshot;
         public final Bitmap background;
         public final Bitmap ink;
+        public final Bitmap digest;
         private boolean recycled;
 
         private Result(
             SpreadSnapshot snapshot,
             Bitmap background,
-            Bitmap ink
+            Bitmap ink,
+            Bitmap digest
         ) {
             this.snapshot = snapshot;
             this.background = background;
             this.ink = ink;
+            this.digest = digest;
         }
 
         public synchronized void recycle() {
@@ -230,6 +372,7 @@ public final class NativeReaderV2Compositor {
             recycled = true;
             if (!background.isRecycled()) background.recycle();
             if (!ink.isRecycled()) ink.recycle();
+            if (!digest.isRecycled()) digest.recycle();
         }
     }
 }

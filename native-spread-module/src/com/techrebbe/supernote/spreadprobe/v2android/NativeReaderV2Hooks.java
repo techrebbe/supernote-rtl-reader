@@ -1,0 +1,1091 @@
+package com.techrebbe.supernote.spreadprobe.v2android;
+
+import android.app.Activity;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.res.Configuration;
+import android.os.Bundle;
+import android.os.Looper;
+import android.os.Process;
+import android.os.SystemClock;
+import android.util.Log;
+import android.view.InputDevice;
+import android.view.MotionEvent;
+
+import com.techrebbe.supernote.spreadprobe.v2.PointD;
+import com.techrebbe.supernote.spreadprobe.v2.RectD;
+import com.techrebbe.supernote.spreadprobe.v2.NativeReaderV2MarkerClaim;
+
+import java.io.File;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicLong;
+
+import de.robv.android.xposed.XC_MethodHook;
+import de.robv.android.xposed.XposedBridge;
+import de.robv.android.xposed.XposedHelpers;
+
+/** Exact-firmware hook shell for Native Reader v2. */
+public final class NativeReaderV2Hooks {
+    private static final String TAG = "SN_NATIVE_READER_V2";
+    private static final String ACTIVITY =
+        "com.supernote.document.document.DocumentActivity";
+    private static final String VIEW_MODEL =
+        "com.supernote.document.document.DocumentViewModel";
+    private static final String IMAGE_VIEW =
+        "com.supernote.document.utils.view.DocumentImageView";
+    private static final String HAND_WRITE_VIEW =
+        "com.supernote.document.handwrite.HandWriteView";
+    private static final String NOTE =
+        "com.example.libsupernote.SuperNoteNote";
+    private static final String NATIVE_CALLBACK = ACTIVITY + "$6";
+    private static final String PLUGIN_HOST_PACKAGE =
+        "com.ratta.supernote.pluginhost";
+    private static final String HANDSHAKE_REQUEST =
+        "com.techrebbe.supernote.spreadprobe.HANDSHAKE_REQUEST";
+    private static final String HANDSHAKE_RESPONSE =
+        "com.techrebbe.supernote.spreadprobe.HANDSHAKE_RESPONSE";
+    private static final int HANDSHAKE_PROTOCOL = 2;
+
+    private static final ConcurrentHashMap<Object, Entry> BY_ACTIVITY =
+        new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<Object, Entry> BY_COMPONENT =
+        new ConcurrentHashMap<>();
+    private static final AtomicLong ACTIVITY_GENERATIONS = new AtomicLong(1L);
+    private static final ExecutorService ADMISSION =
+        Executors.newSingleThreadExecutor();
+    private static final ThreadLocal<Boolean> INTERNAL_PRESENTATION =
+        new ThreadLocal<>();
+    private static final ThreadLocal<Boolean> REPLAY_BYPASS =
+        new ThreadLocal<>();
+    private static final ThreadLocal<ArrayDeque<Boolean>> SAME_PAGE_RELOADS =
+        new ThreadLocal<>();
+    private static final ThreadLocal<ArrayDeque<Boolean>> SCALE_CHANGES =
+        new ThreadLocal<>();
+    private static volatile NativeReaderV2FirmwareAccess firmware;
+    private static volatile BroadcastReceiver handshakeReceiver;
+    private static volatile boolean handshakeReceiverRegistered;
+    private static volatile boolean installed;
+
+    private NativeReaderV2Hooks() {}
+
+    public static synchronized void install(ClassLoader loader) {
+        if (installed) return;
+        ArrayList<XC_MethodHook.Unhook> hooks = new ArrayList<>();
+        try {
+            firmware = new NativeReaderV2FirmwareAccess(loader);
+            installLifecycle(loader, hooks);
+            installPresentation(loader, hooks);
+            installNavigation(loader, hooks);
+            installNativeChromeMasks(loader, hooks);
+            installInput(loader, hooks);
+            installSaveWitness(loader, hooks);
+            installed = true;
+            Log.i(TAG, "exact Native Reader v2 hooks installed count="
+                + hooks.size());
+        } catch (Throwable failure) {
+            for (int index = hooks.size() - 1; index >= 0; index--) {
+                try {
+                    hooks.get(index).unhook();
+                } catch (Throwable cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
+            }
+            firmware = null;
+            throw new IllegalStateException(
+                "Native Reader v2 hook installation rolled back",
+                failure
+            );
+        }
+    }
+
+    static void runInternalPresentation(Runnable action) {
+        if (action == null) return;
+        Boolean previous = INTERNAL_PRESENTATION.get();
+        INTERNAL_PRESENTATION.set(Boolean.TRUE);
+        try {
+            action.run();
+        } finally {
+            if (previous == null) INTERNAL_PRESENTATION.remove();
+            else INTERNAL_PRESENTATION.set(previous);
+        }
+    }
+
+    private static void hook(
+        List<XC_MethodHook.Unhook> hooks,
+        String className,
+        ClassLoader loader,
+        String methodName,
+        Object... parameterTypesAndCallback
+    ) {
+        hooks.add(XposedHelpers.findAndHookMethod(
+            className,
+            loader,
+            methodName,
+            parameterTypesAndCallback
+        ));
+    }
+
+    private static void installLifecycle(
+        ClassLoader loader,
+        List<XC_MethodHook.Unhook> hooks
+    ) {
+        hook(hooks,
+            ACTIVITY, loader, "onCreate", Bundle.class,
+            new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    Activity activity = (Activity) param.thisObject;
+                    Entry entry = new Entry(
+                        activity,
+                        ACTIVITY_GENERATIONS.getAndIncrement()
+                    );
+                    Entry replaced = BY_ACTIVITY.put(activity, entry);
+                    if (replaced != null) retire(replaced, "activity_replaced");
+                    registerHandshakeReceiver(activity);
+                }
+            }
+        );
+        hook(hooks,
+            ACTIVITY, loader, "onResume",
+            new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    Entry entry = entry(param.thisObject);
+                    if (entry == null) return;
+                    // The companion writes the v2 marker while PluginHost is
+                    // in front of this Activity. A resumed reader must retry
+                    // an earlier marker-missing admission without making
+                    // every image callback rehash the PDF.
+                    maybeAdmit(entry, true);
+                }
+            }
+        );
+        hook(hooks,
+            ACTIVITY, loader, "onPause",
+            new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    Entry entry = entry(param.thisObject);
+                    if (entry != null && entry.runtime != null) {
+                        entry.runtime.beforeLifecyclePause();
+                    }
+                }
+
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    Entry entry = entry(param.thisObject);
+                    if (entry != null && entry.runtime != null) {
+                        entry.runtime.afterLifecyclePause();
+                        // Stock onPause is the terminal boundary for both pen
+                        // transports even when the hardware omits an explicit
+                        // UP sample after disabling DrawPath.
+                        clearStylusContact(entry);
+                    }
+                }
+            }
+        );
+        hook(hooks,
+            ACTIVITY, loader, "onDestroy",
+            new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    Entry entry = BY_ACTIVITY.remove(param.thisObject);
+                    if (entry != null) {
+                        releaseDestroyedEntry(entry, "activity_destroyed");
+                    }
+                    if (BY_ACTIVITY.isEmpty() && firmware != null) {
+                        try {
+                            firmware.releaseProjectionReader();
+                        } catch (RuntimeException failure) {
+                            Log.e(
+                                TAG,
+                                "read-only projection reader cleanup failed",
+                                failure
+                            );
+                        }
+                    }
+                }
+            }
+        );
+        hook(hooks,
+            ACTIVITY, loader, "onConfigurationChanged", Configuration.class,
+            new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    Entry entry = entry(param.thisObject);
+                    if (entry != null && entry.runtime != null) {
+                        entry.runtime.beforeConfigurationChange();
+                    }
+                }
+
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    Entry entry = entry(param.thisObject);
+                    if (entry != null && entry.runtime != null) {
+                        entry.runtime.afterConfigurationChange();
+                    }
+                }
+            }
+        );
+
+        XC_MethodHook readySignal = new XC_MethodHook() {
+            @Override protected void afterHookedMethod(MethodHookParam param) {
+                Entry entry = entry(param.thisObject);
+                if (entry == null) return;
+                maybeAdmit(entry, false);
+                reindex(entry);
+                if (entry.runtime != null && !entry.admitting) {
+                    entry.runtime.onNativePresentationChanged(
+                        ((java.lang.reflect.Method) param.method).getName()
+                    );
+                }
+            }
+        };
+        hook(hooks,
+            ACTIVITY, loader, "setImage", android.graphics.Bitmap.class,
+            readySignal
+        );
+        hook(hooks,
+            ACTIVITY, loader, "updateImage", android.graphics.Bitmap.class,
+            readySignal
+        );
+        hook(hooks,
+            ACTIVITY, loader, "displayChanged",
+            "com.supernote.document.document.bean.DisplayResult",
+            readySignal
+        );
+        hook(hooks,
+            ACTIVITY, loader, "loadPageChanged",
+            "com.supernote.document.document.bean.LoadPageResult",
+            readySignal
+        );
+        hook(hooks,
+            ACTIVITY, loader, "setDigestImage", android.graphics.Bitmap.class,
+            new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    if (Boolean.TRUE.equals(INTERNAL_PRESENTATION.get())) return;
+                    Entry entry = entry(param.thisObject);
+                    if (entry != null && entry.runtime != null
+                        && entry.runtime.suppressNativePresentation()) {
+                        param.setResult(null);
+                    }
+                }
+
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    Entry entry = entry(param.thisObject);
+                    if (entry != null && entry.runtime != null
+                        && !Boolean.TRUE.equals(INTERNAL_PRESENTATION.get())) {
+                        entry.runtime.onNativePresentationChanged("setDigestImage");
+                    }
+                }
+            }
+        );
+    }
+
+    private static void installPresentation(
+        ClassLoader loader,
+        List<XC_MethodHook.Unhook> hooks
+    ) {
+        hook(hooks,
+            IMAGE_VIEW, loader, "setImageBitmap", android.graphics.Bitmap.class,
+            new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    if (Boolean.TRUE.equals(INTERNAL_PRESENTATION.get())) return;
+                    Entry entry = BY_COMPONENT.get(param.thisObject);
+                    if (entry != null && entry.runtime != null
+                        && entry.runtime.suppressNativePresentation()) {
+                        param.setResult(null);
+                        entry.runtime.onNativePresentationChanged(
+                            "native_background_suppressed"
+                        );
+                    }
+                }
+            }
+        );
+        hook(hooks,
+            HAND_WRITE_VIEW, loader, "setBitmap", android.graphics.Bitmap.class,
+            new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    if (Boolean.TRUE.equals(INTERNAL_PRESENTATION.get())) return;
+                    Entry entry = BY_COMPONENT.get(param.thisObject);
+                    if (entry != null && entry.runtime != null
+                        && entry.runtime.suppressNativePresentation()) {
+                        param.setResult(null);
+                        entry.runtime.onNativePresentationChanged(
+                            "native_ink_presentation_suppressed"
+                        );
+                    }
+                }
+            }
+        );
+    }
+
+    private static void installNavigation(
+        ClassLoader loader,
+        List<XC_MethodHook.Unhook> hooks
+    ) {
+        hook(hooks,
+            VIEW_MODEL, loader, "openDocument",
+            android.net.Uri.class,
+            Integer.TYPE, Integer.TYPE, Integer.TYPE,
+            Integer.TYPE, Integer.TYPE, Boolean.TYPE,
+            new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    Entry entry = BY_COMPONENT.get(param.thisObject);
+                    if (entry == null || entry.runtime == null) return;
+                    boolean prepared = entry.runtime.prepareNativeDocumentOpen();
+                    resetRuntime(
+                        entry,
+                        prepared
+                            ? "native_document_open"
+                            : "native_document_open_prepare_failed"
+                    );
+                    // This may be a reload of the same canonical path. The
+                    // old attempted-path suppression must not prevent fresh
+                    // marker and document admission after the stock open.
+                    entry.attemptedPath = null;
+                }
+            }
+        );
+        hook(hooks,
+            VIEW_MODEL, loader, "turnPage", Integer.TYPE,
+            new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    Entry entry = BY_COMPONENT.get(param.thisObject);
+                    if (entry == null || entry.runtime == null) return;
+                    int offset = (Integer) param.args[0];
+                    if (!entry.runtime.isLandscapeActive()) {
+                        param.args[0] = entry.runtime.adjustPortraitTurnOffset(offset);
+                        return;
+                    }
+                    int target = entry.runtime.targetForNativeOffset(offset);
+                    if (target >= 0) entry.runtime.requestNavigation(target);
+                    param.setResult(null);
+                }
+            }
+        );
+        hook(hooks,
+            VIEW_MODEL, loader, "loadPage", Integer.TYPE,
+            new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    ArrayDeque<Boolean> reloads = SAME_PAGE_RELOADS.get();
+                    if (reloads == null) {
+                        reloads = new ArrayDeque<>();
+                        SAME_PAGE_RELOADS.set(reloads);
+                    }
+                    reloads.push(Boolean.FALSE);
+                    Entry entry = BY_COMPONENT.get(param.thisObject);
+                    if (entry == null || entry.runtime == null
+                        || entry.runtime.isInternalPageLoad()
+                        || !entry.runtime.isLandscapeActive()) return;
+                    int target = (Integer) param.args[0];
+                    if (Boolean.TRUE.equals(REPLAY_BYPASS.get())) {
+                        if (!entry.runtime.deferNativeLoadDuringReplay(target)) {
+                            entry.runtime.disableNativeReaderV2(
+                                "replayed_link_load_not_authorized"
+                            );
+                        }
+                        param.setResult(null);
+                        return;
+                    }
+                    if (entry.runtime.isCurrentNativePage(target)) {
+                        if (entry.runtime.prepareSamePageReload()) {
+                            reloads.pop();
+                            reloads.push(Boolean.TRUE);
+                        } else {
+                            // A same-page reload may not bypass an active
+                            // transfer. Suppress it until v2 reaches a stable
+                            // ownership boundary or retires fail-closed.
+                            param.setResult(null);
+                        }
+                        return;
+                    }
+                    entry.runtime.requestNavigation(target);
+                    param.setResult(null);
+                }
+
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    ArrayDeque<Boolean> reloads = SAME_PAGE_RELOADS.get();
+                    boolean prepared = reloads != null && !reloads.isEmpty()
+                        && Boolean.TRUE.equals(reloads.pop());
+                    if (reloads != null && reloads.isEmpty()) {
+                        SAME_PAGE_RELOADS.remove();
+                    }
+                    if (!prepared) {
+                        return;
+                    }
+                    Entry entry = BY_COMPONENT.get(param.thisObject);
+                    if (entry == null || entry.runtime == null) return;
+                    if (param.getThrowable() != null) {
+                        entry.runtime.disableNativeReaderV2(
+                            "same_page_reload_firmware_failed"
+                        );
+                    } else {
+                        entry.runtime.scheduleRefresh("same_page_reload");
+                    }
+                }
+            }
+        );
+        hook(hooks,
+            VIEW_MODEL, loader, "setScaleRect", android.graphics.RectF.class,
+            new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    ArrayDeque<Boolean> changes = SCALE_CHANGES.get();
+                    if (changes == null) {
+                        changes = new ArrayDeque<>();
+                        SCALE_CHANGES.set(changes);
+                    }
+                    changes.push(Boolean.FALSE);
+                    Entry entry = BY_COMPONENT.get(param.thisObject);
+                    if (entry == null || entry.runtime == null
+                        || entry.runtime.isInternalPageLoad()
+                        || !entry.runtime.isLandscapeActive()) return;
+                    if (!entry.runtime.prepareNativeScaleChange()) {
+                        param.setResult(null);
+                        return;
+                    }
+                    changes.pop();
+                    changes.push(Boolean.TRUE);
+                }
+
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    ArrayDeque<Boolean> changes = SCALE_CHANGES.get();
+                    boolean prepared = changes != null && !changes.isEmpty()
+                        && Boolean.TRUE.equals(changes.pop());
+                    if (changes != null && changes.isEmpty()) {
+                        SCALE_CHANGES.remove();
+                    }
+                    if (!prepared) return;
+                    Entry entry = BY_COMPONENT.get(param.thisObject);
+                    if (entry != null && entry.runtime != null) {
+                        entry.runtime.completeNativeScaleChange(
+                            param.getThrowable() == null
+                        );
+                    }
+                }
+            }
+        );
+    }
+
+    private static void installInput(
+        ClassLoader loader,
+        List<XC_MethodHook.Unhook> hooks
+    ) {
+        hook(hooks,
+            ACTIVITY, loader, "dispatchTouchEvent", MotionEvent.class,
+            new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    if (Boolean.TRUE.equals(REPLAY_BYPASS.get())) return;
+                    MotionEvent event = (MotionEvent) param.args[0];
+                    if (event == null || event.getPointerCount() == 0) {
+                        return;
+                    }
+                    Entry entry = entry(param.thisObject);
+                    if (entry == null || entry.runtime == null) return;
+                    int tool = event.getToolType(event.getActionIndex());
+                    boolean consume;
+                    if (tool == MotionEvent.TOOL_TYPE_FINGER) {
+                        consume = entry.runtime.routeFinger(event, chrome(entry));
+                    } else if (tool == MotionEvent.TOOL_TYPE_STYLUS
+                        || tool == MotionEvent.TOOL_TYPE_ERASER
+                        || entry.androidPenContact) {
+                        consume = routeAndroidPen(entry, event, chrome(entry));
+                    } else {
+                        consume = false;
+                    }
+                    if (consume) {
+                        param.setResult(Boolean.TRUE);
+                    }
+                }
+            }
+        );
+        hook(hooks,
+            NATIVE_CALLBACK, loader, "onDigitalPosition",
+            Integer.TYPE, Integer.TYPE,
+            new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    Entry entry = BY_COMPONENT.get(param.thisObject);
+                    if (entry == null || entry.runtime == null) return;
+                    int x = (Integer) param.args[0];
+                    int y = (Integer) param.args[1];
+                    int pressure = XposedHelpers.getIntField(
+                        param.thisObject,
+                        "mPressure"
+                    );
+                    List<RectD> chrome = chrome(entry);
+                    boolean pass;
+                    if (pressure > 0 && !entry.penContact) {
+                        entry.penContact = true;
+                        entry.runtime.noteNativePenCallbackContact();
+                        entry.penPass = beginStylusRoute(
+                            entry,
+                            x,
+                            y,
+                            chrome
+                        );
+                    }
+                    if (entry.penContact) {
+                        pass = entry.penPass;
+                        // The firmware callback is also the authoritative
+                        // contact-lifecycle signal. Passing the sample to
+                        // Supernote must not make the contact invisible to
+                        // v2: presentation callbacks emitted while a native
+                        // pen/lasso/eraser/highlighter gesture is live must be
+                        // deferred until the matching terminal sample.
+                        postOrRoutePen(entry, x, y, pressure, chrome);
+                        if (pressure <= 0) {
+                            entry.penContact = false;
+                            entry.penPass = false;
+                            releaseStylusRouteIfComplete(entry);
+                        }
+                    } else {
+                        pass = entry.runtime.mayPassNativePenImmediately(
+                            x, y, chrome
+                        );
+                        if (!pass) postOrRoutePen(entry, x, y, pressure, chrome);
+                    }
+                    if (!pass) param.setResult(null);
+                }
+            }
+        );
+    }
+
+    private static void installNativeChromeMasks(
+        ClassLoader loader,
+        List<XC_MethodHook.Unhook> hooks
+    ) {
+        XC_MethodHook maskChanged = new XC_MethodHook() {
+            @Override protected void afterHookedMethod(MethodHookParam param) {
+                Entry entry = entry(param.thisObject);
+                if (entry != null && entry.runtime != null) {
+                    entry.runtime.onNativeDisableAreasChanged();
+                }
+            }
+        };
+        hook(hooks,
+            ACTIVITY, loader, "sendDisableWriteArea", maskChanged
+        );
+        hook(hooks,
+            ACTIVITY, loader, "sendDisableWriteAreaNotRefreshBitmap", maskChanged
+        );
+    }
+
+    private static void installSaveWitness(
+        ClassLoader loader,
+        List<XC_MethodHook.Unhook> hooks
+    ) {
+        hook(hooks,
+            NOTE, loader, "saveMarkData",
+            String.class, String.class, Integer.TYPE, Boolean.TYPE,
+            new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    Entry entry = BY_COMPONENT.get(param.thisObject);
+                    if (entry == null || entry.runtime == null) return;
+                    entry.runtime.onNativeSaveMarkData(
+                        param.thisObject,
+                        (String) param.args[0],
+                        (Integer) param.args[2],
+                        (Boolean) param.args[3],
+                        Boolean.TRUE.equals(param.getResult())
+                    );
+                }
+            }
+        );
+    }
+
+    private static void maybeAdmit(Entry entry, boolean forceRetry) {
+        if (entry == null || entry.retired || entry.admitting) return;
+        NativeReaderV2FirmwareAccess.Components components;
+        try {
+            components = firmware.inspect(entry.activity);
+        } catch (RuntimeException notReady) {
+            return;
+        }
+        final String path = components.documentPath;
+        if (entry.runtime != null) {
+            if (path != null && path.equals(
+                entry.runtime.admittedDocumentPath()
+            )) {
+                if (forceRetry) {
+                    revalidateExistingRuntime(entry, path);
+                }
+                return;
+            }
+            resetRuntime(entry, "document_changed");
+        }
+        if (path == null || !forceRetry && path.equals(entry.attemptedPath)) {
+            return;
+        }
+        entry.attemptedPath = path;
+        entry.admitting = true;
+        ADMISSION.execute(new Runnable() {
+            @Override public void run() {
+                NativeReaderV2DocumentGate.Evidence evidence = null;
+                Throwable failure = null;
+                try {
+                    evidence = NativeReaderV2DocumentGate.admit(path);
+                } catch (Throwable caught) {
+                    failure = caught;
+                }
+                final NativeReaderV2DocumentGate.Evidence accepted = evidence;
+                final Throwable rejected = failure;
+                entry.activity.runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        entry.admitting = false;
+                        if (entry.retired || BY_ACTIVITY.get(entry.activity) != entry
+                            || !path.equals(currentPath(entry))) return;
+                        if (accepted == null) {
+                            Log.i(TAG, "document not admitted path=" + path
+                                + " reason=" + (rejected == null
+                                    ? "unknown" : rejected.getClass().getSimpleName()));
+                            return;
+                        }
+                        try {
+                            entry.runtime = new NativeReaderV2Runtime(
+                                entry.activity,
+                                accepted,
+                                firmware,
+                                entry.generation,
+                                new NativeReaderV2Runtime.FingerReplayInjector() {
+                                    @Override public void replayFingerTap(
+                                        Activity activity,
+                                        PointD point
+                                    ) {
+                                        replayFinger(activity, point);
+                                    }
+                                }
+                            );
+                            final NativeReaderV2Runtime admittedRuntime =
+                                entry.runtime;
+                            entry.chrome = new NativeReaderV2ChromeTracker(
+                                entry.activity,
+                                new Runnable() {
+                                    @Override public void run() {
+                                        if (entry.runtime == admittedRuntime) {
+                                            retire(
+                                                entry,
+                                                "native_chrome_discovery_failed"
+                                            );
+                                        }
+                                    }
+                                }
+                            );
+                            reindex(entry);
+                            entry.runtime.scheduleRefresh("document_admitted");
+                            Log.i(TAG, "document admitted path=" + path);
+                        } catch (Throwable activationFailure) {
+                            Log.e(TAG, "document activation failed", activationFailure);
+                            retire(entry, "activation_failed");
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    private static void revalidateExistingRuntime(
+        Entry entry,
+        String path
+    ) {
+        if (entry == null || entry.retired || entry.admitting
+            || entry.runtime == null || path == null) {
+            return;
+        }
+        final NativeReaderV2Runtime expectedRuntime = entry.runtime;
+        entry.admitting = true;
+        ADMISSION.execute(new Runnable() {
+            @Override public void run() {
+                final boolean current =
+                    expectedRuntime.admissionEvidenceStillCurrent();
+                entry.activity.runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        entry.admitting = false;
+                        if (entry.retired
+                            || BY_ACTIVITY.get(entry.activity) != entry
+                            || entry.runtime != expectedRuntime
+                            || !path.equals(currentPath(entry))) {
+                            return;
+                        }
+                        if (current) {
+                            expectedRuntime.scheduleRefresh(
+                                "resume_authority_revalidated"
+                            );
+                            return;
+                        }
+                        resetRuntime(entry, "resume_authority_changed");
+                        maybeAdmit(entry, true);
+                    }
+                });
+            }
+        });
+    }
+
+    /**
+     * Minimal v2-only capability handshake. It deliberately does not depend
+     * on legacy Native Spread ownership, JNI interception, or trace state.
+     */
+    private static synchronized void registerHandshakeReceiver(
+        Activity activity
+    ) {
+        if (handshakeReceiverRegistered || activity == null) return;
+        Context context = activity.getApplicationContext();
+        if (context == null) {
+            throw new IllegalStateException(
+                "Native Reader v2 has no application context"
+            );
+        }
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override public void onReceive(
+                Context receiverContext,
+                Intent request
+            ) {
+                if (request == null
+                    || !HANDSHAKE_REQUEST.equals(request.getAction())) {
+                    return;
+                }
+                String nonce = request.getStringExtra("nonce");
+                String requestedPath = request.getStringExtra("documentPath");
+                int protocol = request.getIntExtra("protocol", -1);
+                Entry authority = handshakeEntry(requestedPath);
+                if (nonce == null || nonce.length() < 16
+                    || protocol != HANDSHAKE_PROTOCOL
+                    || authority == null) {
+                    Log.w(TAG, "v2 handshake rejected protocol=" + protocol);
+                    return;
+                }
+                String actualPath = canonicalPath(currentPath(authority));
+                if (actualPath == null
+                    || !actualPath.equals(canonicalPath(requestedPath))
+                    || BY_ACTIVITY.get(authority.activity) != authority
+                    || authority.retired) {
+                    Log.w(TAG, "v2 handshake authority changed before send");
+                    return;
+                }
+                Intent response = new Intent(HANDSHAKE_RESPONSE);
+                response.setPackage(PLUGIN_HOST_PACKAGE);
+                response.putExtra("nonce", nonce);
+                response.putExtra("documentPath", actualPath);
+                response.putExtra("protocol", HANDSHAKE_PROTOCOL);
+                response.putExtra("hooksReady", true);
+                response.putExtra(
+                    "moduleVersionCode",
+                    NativeReaderV2MarkerClaim.MINIMUM_COMPANION_MODULE_VERSION
+                );
+                response.putExtra(
+                    "documentApkLength",
+                    NativeReaderV2PackageAdmission.EXPECTED_APK_LENGTH
+                );
+                response.putExtra("processId", Process.myPid());
+                receiverContext.sendBroadcast(response);
+                Log.i(TAG, "v2 handshake response path=" + actualPath);
+            }
+        };
+        context.registerReceiver(
+            receiver,
+            new IntentFilter(HANDSHAKE_REQUEST)
+        );
+        handshakeReceiver = receiver;
+        handshakeReceiverRegistered = true;
+        Log.i(TAG, "v2 handshake receiver registered");
+    }
+
+    private static Entry handshakeEntry(String requestedPath) {
+        String expected = canonicalPath(requestedPath);
+        if (expected == null) return null;
+        Entry match = null;
+        for (Entry candidate : BY_ACTIVITY.values()) {
+            if (candidate == null || candidate.retired
+                || candidate.activity.isFinishing()
+                || candidate.activity.isDestroyed()) {
+                continue;
+            }
+            String actual = canonicalPath(currentPath(candidate));
+            if (!expected.equals(actual)) continue;
+            if (match != null && match != candidate) {
+                // Two live activities claiming the same document is not an
+                // authority state the companion may safely configure.
+                return null;
+            }
+            match = candidate;
+        }
+        return match;
+    }
+
+    private static String canonicalPath(String value) {
+        if (value == null || value.indexOf('\0') >= 0) return null;
+        try {
+            return new File(value).getCanonicalPath();
+        } catch (Exception failure) {
+            return null;
+        }
+    }
+
+    private static void postOrRoutePen(
+        Entry entry,
+        int x,
+        int y,
+        int pressure,
+        List<RectD> chrome
+    ) {
+        long now = SystemClock.uptimeMillis();
+        if (Looper.myLooper() == entry.activity.getMainLooper()) {
+            entry.runtime.routeNativePenPosition(x, y, pressure, now, chrome);
+        } else {
+            entry.runtime.postNativePenPosition(x, y, pressure, now, chrome);
+        }
+    }
+
+    /**
+     * Mirrors the native callback's one-decision-per-contact invariant for
+     * Android's parallel stylus stream. The native callback remains the
+     * authority for activation; this path merely prevents leaked UI effects.
+     */
+    private static boolean routeAndroidPen(
+        Entry entry,
+        MotionEvent event,
+        List<RectD> chrome
+    ) {
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+            int index = event.getActionIndex();
+            entry.androidPenContact = true;
+            entry.androidPenPointerId = event.getPointerId(index);
+            entry.androidPenPass = beginStylusRoute(
+                entry,
+                event.getX(index),
+                event.getY(index),
+                chrome
+            );
+            return !entry.androidPenPass;
+        }
+        if (!entry.androidPenContact) return false;
+        boolean consume = !entry.androidPenPass;
+        if (action == MotionEvent.ACTION_UP
+            || action == MotionEvent.ACTION_CANCEL) {
+            entry.androidPenContact = false;
+            entry.androidPenPass = false;
+            entry.androidPenPointerId = -1;
+            releaseStylusRouteIfComplete(entry);
+            return consume;
+        }
+        if (event.findPointerIndex(entry.androidPenPointerId) < 0) {
+            entry.androidPenContact = false;
+            entry.androidPenPass = false;
+            entry.androidPenPointerId = -1;
+            releaseStylusRouteIfComplete(entry);
+            return true;
+        }
+        return consume;
+    }
+
+    /**
+     * Android dispatch and the native digital-position callback describe the
+     * same physical stylus contact. Whichever stream observes DOWN first owns
+     * this single immutable decision until every participating stream ends.
+     */
+    private static boolean beginStylusRoute(
+        Entry entry,
+        double x,
+        double y,
+        List<RectD> chrome
+    ) {
+        synchronized (entry.stylusRouteLock) {
+            if (!entry.stylusRouteActive) {
+                entry.stylusRoutePass =
+                    entry.runtime.mayPassNativePenImmediately(x, y, chrome);
+                entry.stylusRouteActive = true;
+            }
+            return entry.stylusRoutePass;
+        }
+    }
+
+    private static void releaseStylusRouteIfComplete(Entry entry) {
+        synchronized (entry.stylusRouteLock) {
+            if (!entry.penContact && !entry.androidPenContact) {
+                entry.stylusRouteActive = false;
+                entry.stylusRoutePass = false;
+            }
+        }
+    }
+
+    private static void clearStylusContact(Entry entry) {
+        synchronized (entry.stylusRouteLock) {
+            entry.penContact = false;
+            entry.penPass = false;
+            entry.androidPenContact = false;
+            entry.androidPenPass = false;
+            entry.androidPenPointerId = -1;
+            entry.stylusRouteActive = false;
+            entry.stylusRoutePass = false;
+        }
+    }
+
+    private static void replayFinger(Activity activity, PointD point) {
+        if (Looper.myLooper() != activity.getMainLooper()) {
+            throw new IllegalStateException("finger replay must run on owner thread");
+        }
+        long downTime = SystemClock.uptimeMillis();
+        MotionEvent down = MotionEvent.obtain(
+            downTime, downTime, MotionEvent.ACTION_DOWN,
+            (float) point.x, (float) point.y, 0
+        );
+        MotionEvent up = MotionEvent.obtain(
+            downTime, downTime + 16L, MotionEvent.ACTION_UP,
+            (float) point.x, (float) point.y, 0
+        );
+        down.setSource(InputDevice.SOURCE_TOUCHSCREEN);
+        up.setSource(InputDevice.SOURCE_TOUCHSCREEN);
+        Boolean previous = REPLAY_BYPASS.get();
+        REPLAY_BYPASS.set(Boolean.TRUE);
+        try {
+            if (!activity.dispatchTouchEvent(down)
+                || !activity.dispatchTouchEvent(up)) {
+                throw new IllegalStateException("native finger replay was rejected");
+            }
+        } finally {
+            down.recycle();
+            up.recycle();
+            if (previous == null) REPLAY_BYPASS.remove();
+            else REPLAY_BYPASS.set(previous);
+        }
+    }
+
+    private static String currentPath(Entry entry) {
+        try {
+            return firmware.inspect(entry.activity).documentPath;
+        } catch (RuntimeException failure) {
+            return null;
+        }
+    }
+
+    private static void reindex(Entry entry) {
+        if (entry == null || entry.retired || entry.runtime == null) return;
+        try {
+            NativeReaderV2FirmwareAccess.Components components =
+                firmware.inspect(entry.activity);
+            ArrayList<Object> current = new ArrayList<>();
+            addIdentity(current, entry.activity);
+            addIdentity(current, components.viewModel);
+            addIdentity(current, components.presenter);
+            addIdentity(current, components.handWriteView);
+            addIdentity(current, components.eventCallback);
+            addIdentity(current, components.image);
+            addIdentity(current, components.note);
+            for (Object previous : entry.indexed) {
+                if (!containsIdentity(current, previous)) {
+                    BY_COMPONENT.remove(previous, entry);
+                    entry.indexed.remove(previous);
+                }
+            }
+            for (Object component : current) index(entry, component);
+        } catch (RuntimeException failure) {
+            resetRuntime(entry, "component_reindex_failed");
+        }
+    }
+
+    private static void addIdentity(List<Object> values, Object candidate) {
+        if (candidate != null && !containsIdentity(values, candidate)) {
+            values.add(candidate);
+        }
+    }
+
+    private static boolean containsIdentity(
+        List<Object> values,
+        Object candidate
+    ) {
+        for (Object value : values) {
+            if (value == candidate) return true;
+        }
+        return false;
+    }
+
+    private static void index(Entry entry, Object component) {
+        if (component != null) {
+            Entry previous = BY_COMPONENT.putIfAbsent(component, entry);
+            if (previous != null && previous != entry) {
+                throw new IllegalStateException(
+                    "native component is claimed by another live activity"
+                );
+            }
+            entry.indexed.add(component);
+        }
+    }
+
+    private static List<RectD> chrome(Entry entry) {
+        NativeReaderV2ChromeTracker tracker = entry == null ? null : entry.chrome;
+        if (tracker != null
+            && Looper.myLooper() == entry.activity.getMainLooper()) {
+            // Contact-start classification must see the current translated
+            // toolbar/menu bounds, not the preceding global-layout frame.
+            tracker.refresh();
+        }
+        return tracker == null ? Collections.<RectD>emptyList() : tracker.snapshot();
+    }
+
+    private static Entry entry(Object activity) {
+        return activity == null ? null : BY_ACTIVITY.get(activity);
+    }
+
+    private static void retire(Entry entry, String reason) {
+        if (entry == null || entry.retired) return;
+        entry.retired = true;
+        resetRuntime(entry, reason);
+    }
+
+    private static void resetRuntime(Entry entry, String reason) {
+        if (entry == null) return;
+        NativeReaderV2Runtime runtime = entry.runtime;
+        NativeReaderV2ChromeTracker chrome = entry.chrome;
+        entry.runtime = null;
+        entry.chrome = null;
+        if (runtime != null) runtime.retire(reason);
+        if (chrome != null) chrome.retire();
+        for (Object component : entry.indexed) {
+            BY_COMPONENT.remove(component, entry);
+        }
+        entry.indexed.clear();
+        clearStylusContact(entry);
+    }
+
+    private static void releaseDestroyedEntry(Entry entry, String reason) {
+        if (entry == null) return;
+        entry.retired = true;
+        NativeReaderV2Runtime runtime = entry.runtime;
+        NativeReaderV2ChromeTracker chrome = entry.chrome;
+        entry.runtime = null;
+        entry.chrome = null;
+        if (runtime != null) runtime.retireAfterNativeDestroy(reason);
+        if (chrome != null) chrome.retire();
+        for (Object component : entry.indexed) {
+            BY_COMPONENT.remove(component, entry);
+        }
+        entry.indexed.clear();
+        clearStylusContact(entry);
+    }
+
+    private static final class Entry {
+        final Activity activity;
+        final long generation;
+        final java.util.Set<Object> indexed =
+            Collections.newSetFromMap(new ConcurrentHashMap<Object, Boolean>());
+        volatile NativeReaderV2Runtime runtime;
+        volatile NativeReaderV2ChromeTracker chrome;
+        volatile String attemptedPath;
+        volatile boolean admitting;
+        volatile boolean retired;
+        volatile boolean penContact;
+        volatile boolean penPass;
+        volatile boolean androidPenContact;
+        volatile boolean androidPenPass;
+        int androidPenPointerId = -1;
+        final Object stylusRouteLock = new Object();
+        boolean stylusRouteActive;
+        boolean stylusRoutePass;
+
+        Entry(Activity activity, long generation) {
+            this.activity = activity;
+            this.generation = generation;
+        }
+    }
+}

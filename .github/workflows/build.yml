@@ -43,8 +43,8 @@ jobs:
         run: |
           python3 scripts/test_native_reader_v2_core.py .
           python3 scripts/test_native_reader_v2_mutations.py .
+          python3 scripts/check_native_reader_v2_invariants.py .
           python3 scripts/check_native_invariants.py .
-          python3 scripts/check_native_spread_invariants.py .
           python3 scripts/test_plugin_packaging_fail_closed.py
 
   native-spread-build:
@@ -65,14 +65,13 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK and NDK
+      - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
           packages: >-
             platform-tools
             platforms;android-35
             build-tools;35.0.0
-            ndk;27.0.12077973
 
       - name: Compile and verify Native Spread companion package
         shell: powershell
@@ -84,7 +83,6 @@ jobs:
           } else {
             throw 'Android SDK setup did not publish an SDK root.'
           }
-          $ndk = Join-Path $sdk 'ndk\27.0.12077973'
           $keystore = Join-Path $env:RUNNER_TEMP 'native-spread-debug.keystore'
           # build.ps1 verifies a fully packaged APK, which requires signing.
           # This disposable runner-local identity is never published and is
@@ -110,7 +108,6 @@ jobs:
             -ExecutionPolicy Bypass `
             -File .\native-spread-module\build.ps1 `
             -AndroidSdk $sdk `
-            -AndroidNdk $ndk `
             -DebugKeystore $keystore
           if ($LASTEXITCODE -ne 0) {
             throw "Native Spread build failed with exit code $LASTEXITCODE"
@@ -119,6 +116,81 @@ jobs:
             'Native package compiled and verified with a disposable ' +
             'runner-local identity; no APK is published by this workflow.'
           )
+
+  native-spread-upgrade-artifact:
+    name: Native Reader v2 stable-signer artifact
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs:
+      - native-spread-build
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: >-
+            platform-tools
+            platforms;android-35
+            build-tools;35.0.0
+
+      - name: Restore stable Native Reader signing identity
+        shell: powershell
+        env:
+          NATIVE_SPREAD_KEYSTORE_B64: ${{ secrets.NATIVE_SPREAD_KEYSTORE_B64 }}
+        run: |
+          if (-not $env:NATIVE_SPREAD_KEYSTORE_B64) {
+            throw 'The stable Native Reader signing secret is unavailable.'
+          }
+          $keystore = Join-Path $env:RUNNER_TEMP 'native-spread-stable.keystore'
+          [System.IO.File]::WriteAllBytes(
+            $keystore,
+            [Convert]::FromBase64String($env:NATIVE_SPREAD_KEYSTORE_B64)
+          )
+          "NATIVE_SPREAD_KEYSTORE=$keystore" | Out-File `
+            -FilePath $env:GITHUB_ENV `
+            -Encoding utf8 `
+            -Append
+
+      - name: Build and verify upgrade-compatible Native Reader APK
+        shell: powershell
+        run: |
+          $sdk = if ($env:ANDROID_SDK_ROOT) {
+            $env:ANDROID_SDK_ROOT
+          } elseif ($env:ANDROID_HOME) {
+            $env:ANDROID_HOME
+          } else {
+            throw 'Android SDK setup did not publish an SDK root.'
+          }
+          $windowsPowerShell = Join-Path `
+            $env:SystemRoot `
+            'System32\WindowsPowerShell\v1.0\powershell.exe'
+          & $windowsPowerShell `
+            -NoProfile `
+            -ExecutionPolicy Bypass `
+            -File .\native-spread-module\build.ps1 `
+            -AndroidSdk $sdk `
+            -DebugKeystore $env:NATIVE_SPREAD_KEYSTORE
+          if ($LASTEXITCODE -ne 0) {
+            throw "Stable Native Reader build failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload upgrade-compatible Native Reader APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: supernote-native-reader-v2-v0.0.136
+          path: native-spread-module/build/artifact/*.apk
+          if-no-files-found: error
+          retention-days: 7
 
   build:
     needs:
@@ -164,7 +236,7 @@ jobs:
       - name: Upload plugin package
         uses: actions/upload-artifact@v4
         with:
-          name: supernote-rtl-reader-v0.4.14-transactional-hardening
+          name: supernote-rtl-reader-v0.4.15-native-reader-v2
           path: out/*.snplg
           if-no-files-found: error
           retention-days: 3

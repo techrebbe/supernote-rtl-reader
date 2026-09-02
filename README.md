@@ -2,6 +2,29 @@
 
 A Supernote plugin focused on right-to-left PDF reading and landscape two-page spreads, designed especially for Hebrew books.
 
+## Native Reader v2 candidate
+
+The current development branch contains RTL Reader v0.4.15 with the rooted
+Native Reader v2 companion v0.0.136. This is an exact-firmware, pre-hardware
+candidate—not the merged stable release.
+
+Unlike Virtual Spread, v2 opens the original PDF directly. Portrait is the
+ordinary native full-page reader; landscape composes two original source pages
+while one exact page retains Supernote's complete live writer and the adjacent
+page is a read-only native projection. Moving writer ownership is a witnessed
+save/disable/load/verify/publish transaction. Native pen, eraser, lasso,
+Undo/Redo, text selection/highlight/underline/strikeout, links, bookmarks,
+contents, search, digest, keywords, and export remain Supernote operations on
+their original page and `.mark` identities.
+
+The v0.0.135 experimental engine is hash-pinned for forensic comparison but is
+excluded from the executable APK together with its native interception
+library. v2 fails closed on any unsupported firmware, missing recovery proof,
+PDF/`.mark` identity mismatch, stale callback, ambiguous writer ownership, or
+unverified native chrome. See `NATIVE_READER_V2.md`,
+`NATIVE_READER_V2_MIGRATION.md`, and `NATIVE_READER_V2_REVIEW_GATES.md` for the
+full contract and release gate.
+
 ## Stable baseline
 
 v0.4.12 with Native Spread v0.0.116 is the current merged stable baseline.

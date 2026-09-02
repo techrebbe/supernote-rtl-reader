@@ -14,6 +14,9 @@ public final class NativeReaderV2CoreTests {
     public static void main(String[] args) throws Exception {
         testAffineRoundTrips();
         testNativeProjectionGeometry();
+        testNativePageTransform();
+        testNativeDisplayTransform();
+        testNativeDisplayTransformProperties();
         testNativeReaderV2LayoutFactory();
         testPairingMatrix();
         testV2ConfigAdmission();
@@ -114,6 +117,263 @@ public final class NativeReaderV2CoreTests {
         invalidSizing.setProperty("spreadSizing", "fill");
         expectThrows(() -> NativeReaderV2Config.from(invalidSizing),
             "unknown sizing rejected");
+    }
+
+    private static void testNativePageTransform() {
+        java.util.Properties properties = new java.util.Properties();
+        properties.setProperty(
+            NativeReaderV2Config.ENGINE_KEY,
+            NativeReaderV2Config.ENGINE_VALUE
+        );
+        properties.setProperty("enabled", "true");
+        NativeReaderV2Config config = NativeReaderV2Config.from(properties);
+        NativeAuthority authority = authority(0, 1L, 1L);
+        SpreadSnapshot snapshot = NativeReaderV2LayoutFactory.landscape(
+            "doc", 1L, 1L, 10, 0,
+            new RectD(0, 0, 1872, 1404),
+            8.0,
+            config,
+            page -> new RectD(0, 0, 1404, 1872),
+            authority,
+            true
+        );
+        PageSlot slot = snapshot.slotForPage(0);
+        Affine2D originalCtm = new Affine2D(
+            2.5, 0.0, 0.0, 2.5, 3.0, 7.0
+        );
+        NativePageTransform transformed = NativePageTransform.from(
+            originalCtm,
+            41,
+            57,
+            slot
+        );
+        PointD pdf = new PointD(123.25, 321.75);
+        PointD originalContent = originalCtm.map(pdf.x, pdf.y);
+        PointD expected = slot.mapToScreen(
+            originalContent.x + 41,
+            originalContent.y + 57
+        );
+        PointD actualContent = transformed.ctm.map(pdf.x, pdf.y);
+        PointD actual = new PointD(
+            actualContent.x + transformed.offsetX,
+            actualContent.y + transformed.offsetY
+        );
+        near(expected.x, actual.x, 0.51,
+            "native PageInfo x shares compositor projection");
+        near(expected.y, actual.y, 0.51,
+            "native PageInfo y shares compositor projection");
+        PointD roundTrip = transformed.revertCtm.map(
+            actual.x - transformed.offsetX,
+            actual.y - transformed.offsetY
+        );
+        near(pdf.x, roundTrip.x, 1.0e-8,
+            "native PageInfo inverse x");
+        near(pdf.y, roundTrip.y, 1.0e-8,
+            "native PageInfo inverse y");
+
+        expectThrows(() -> NativePageTransform.from(
+            originalCtm,
+            0,
+            0,
+            new PageSlot(
+                0,
+                PageSlot.Side.LEFT,
+                new RectD(0, 0, 10, 10),
+                new RectD(0, 0, 10, 10),
+                new Affine2D(1, 0.1, 0, 1, 0, 0)
+            )
+        ), "native PageInfo rejects sheared compositor projection");
+    }
+
+    private static void testNativeDisplayTransform() {
+        RectD full = new RectD(0, 0, 1404, 1872);
+        RectD crop = new RectD(102, 213, 1187, 1639);
+        Affine2D displayToOrigin = NativeDisplayTransform.displayToOrigin(
+            crop,
+            full
+        );
+        double stockScale = Math.min(
+            full.width() / crop.width(),
+            full.height() / crop.height()
+        );
+        int nativePaddingX = (int) ((full.width()
+            - crop.width() * stockScale)
+            * (crop.left / (full.width() - crop.width())));
+        int nativePaddingY = (int) ((full.height()
+            - crop.height() * stockScale)
+            * (crop.top / (full.height() - crop.height())));
+        PointD mapped = displayToOrigin.map(711.0, 934.0);
+        near((711.0 - nativePaddingX) / stockScale + crop.left,
+            mapped.x, 1.0e-9, "native crop x matches firmware formula");
+        near((934.0 - nativePaddingY) / stockScale + crop.top,
+            mapped.y, 1.0e-9, "native crop y matches firmware formula");
+        equal(Affine2D.identity(),
+            NativeDisplayTransform.displayToOrigin(full, full),
+            "full-page display crop is identity");
+
+        PageSlot slot = new PageSlot(
+            0,
+            PageSlot.Side.LEFT,
+            crop,
+            new RectD(0, 0, 936, 1404),
+            new Affine2D(0.6, 0, 0, 0.6, -30, 20)
+        );
+        Affine2D originalCtm = new Affine2D(
+            2.5, 0.0, 0.0, 2.5, 3.0, 7.0
+        );
+        NativePageTransform transformed = NativePageTransform.from(
+            originalCtm,
+            41,
+            57,
+            slot,
+            displayToOrigin
+        );
+        PointD pdf = new PointD(123.25, 321.75);
+        PointD original = originalCtm.map(pdf.x, pdf.y);
+        PointD stockDisplay = new PointD(
+            original.x + 41,
+            original.y + 57
+        );
+        PointD expectedDisplay = slot.mapToScreen(
+            stockDisplay.x,
+            stockDisplay.y
+        );
+        // DocumentViewModel.checkLink()/select() apply mapToOrigin to the
+        // physical touch before PageInfo.revertCtm. Model that exact firmware
+        // pipeline rather than merely round-tripping the installed matrices.
+        PointD expectedPostTrim = displayToOrigin.map(
+            expectedDisplay.x,
+            expectedDisplay.y
+        );
+        PointD installed = transformed.ctm.map(pdf.x, pdf.y);
+        PointD installedPostTrim = new PointD(
+            installed.x + transformed.offsetX,
+            installed.y + transformed.offsetY
+        );
+        near(expectedPostTrim.x, installedPostTrim.x, 0.51,
+            "cropped PageInfo x matches stock post-trim hit-test space");
+        near(expectedPostTrim.y, installedPostTrim.y, 0.51,
+            "cropped PageInfo y matches stock post-trim hit-test space");
+        PointD wrongOrder = slot.mapToScreen(
+            displayToOrigin.map(stockDisplay.x, stockDisplay.y).x,
+            displayToOrigin.map(stockDisplay.x, stockDisplay.y).y
+        );
+        check(Math.abs(wrongOrder.x - installedPostTrim.x) > 10.0
+                || Math.abs(wrongOrder.y - installedPostTrim.y) > 10.0,
+            "crop fixture rejects pre-projection trim ordering");
+        PointD roundTrip = transformed.revertCtm.map(
+            expectedPostTrim.x - transformed.offsetX,
+            expectedPostTrim.y - transformed.offsetY
+        );
+        near(pdf.x, roundTrip.x, 0.51,
+            "cropped native PageInfo inverse x");
+        near(pdf.y, roundTrip.y, 0.51,
+            "cropped native PageInfo inverse y");
+
+        Affine2D bitmapToOrigin =
+            NativeDisplayTransform.croppedBitmapToOrigin(
+                1085,
+                1426,
+                crop,
+                full
+            );
+        near(crop.left, bitmapToOrigin.map(0, 0).x, 1.0e-9,
+            "cropped bitmap begins at source left");
+        near(crop.bottom, bitmapToOrigin.map(1085, 1426).y, 1.0e-9,
+            "cropped bitmap ends at source bottom");
+        expectThrows(() -> NativeDisplayTransform.displayToOrigin(
+            new RectD(-1, 0, 100, 100),
+            full
+        ), "crop outside original page rejected");
+    }
+
+    private static void testNativeDisplayTransformProperties() {
+        Random random = new Random(0x43524f505632L);
+        RectD full = new RectD(0, 0, 1404, 1872);
+        for (int index = 0; index < 5000; index++) {
+            double left = random.nextDouble() * 350.0;
+            double top = random.nextDouble() * 450.0;
+            double right = 1054.0 + random.nextDouble() * 350.0;
+            double bottom = 1422.0 + random.nextDouble() * 450.0;
+            RectD crop = new RectD(left, top, right, bottom);
+            Affine2D displayToOrigin =
+                NativeDisplayTransform.displayToOrigin(crop, full);
+
+            double projectionScale = Math.min(
+                936.0 / crop.width(),
+                1404.0 / crop.height()
+            ) * (0.5 + random.nextDouble() * 0.5);
+            double projectionX = (936.0 - crop.width()
+                * projectionScale) / 2.0 - crop.left * projectionScale;
+            double projectionY = (1404.0 - crop.height()
+                * projectionScale) / 2.0 - crop.top * projectionScale;
+            PageSlot slot = new PageSlot(
+                0,
+                PageSlot.Side.LEFT,
+                crop,
+                new RectD(0, 0, 936, 1404),
+                new Affine2D(
+                    projectionScale,
+                    0.0,
+                    0.0,
+                    projectionScale,
+                    projectionX,
+                    projectionY
+                )
+            );
+
+            double pageScale = 0.5 + random.nextDouble() * 3.0;
+            double angle = random.nextDouble() * Math.PI * 2.0;
+            double cosine = Math.cos(angle) * pageScale;
+            double sine = Math.sin(angle) * pageScale;
+            Affine2D originalCtm = new Affine2D(
+                cosine,
+                sine,
+                -sine,
+                cosine,
+                random.nextDouble() * 50.0 - 25.0,
+                random.nextDouble() * 50.0 - 25.0
+            );
+            int offsetX = random.nextInt(401) - 200;
+            int offsetY = random.nextInt(401) - 200;
+            NativePageTransform transformed = NativePageTransform.from(
+                originalCtm,
+                offsetX,
+                offsetY,
+                slot,
+                displayToOrigin
+            );
+
+            double pdfX = random.nextDouble() * 800.0 - 400.0;
+            double pdfY = random.nextDouble() * 800.0 - 400.0;
+            PointD stockContent = originalCtm.map(pdfX, pdfY);
+            PointD physical = slot.mapToScreen(
+                stockContent.x + offsetX,
+                stockContent.y + offsetY
+            );
+            PointD expectedPostTrim = displayToOrigin.map(
+                physical.x,
+                physical.y
+            );
+            PointD installedContent = transformed.ctm.map(pdfX, pdfY);
+            PointD installedPostTrim = new PointD(
+                installedContent.x + transformed.offsetX,
+                installedContent.y + transformed.offsetY
+            );
+            near(expectedPostTrim.x, installedPostTrim.x, 0.51,
+                "random cropped PageInfo forward x");
+            near(expectedPostTrim.y, installedPostTrim.y, 0.51,
+                "random cropped PageInfo forward y");
+
+            PointD roundTrip = transformed.revertCtm.map(
+                installedPostTrim.x - transformed.offsetX,
+                installedPostTrim.y - transformed.offsetY
+            );
+            near(pdfX, roundTrip.x, 1.0e-7,
+                "random cropped PageInfo inverse x");
+            near(pdfY, roundTrip.y, 1.0e-7,
+                "random cropped PageInfo inverse y");
+        }
     }
 
     private static void testNativeMarkPageInventory() {
@@ -292,6 +552,12 @@ public final class NativeReaderV2CoreTests {
         equal(-1, NativeReaderV2Navigation.swipeTarget(
             first, rtl, -200, 0
         ), "RTL backward swipe stops at document start");
+        equal(2, NativeReaderV2Navigation.offsetTarget(
+            first, rtl, -1
+        ), "native right-swipe offset advances RTL exactly once");
+        equal(-1, NativeReaderV2Navigation.offsetTarget(
+            first, rtl, 1
+        ), "native left-swipe offset retreats RTL exactly once");
         equal(-1, NativeReaderV2Navigation.swipeTarget(
             first, rtl, 10, 100
         ), "vertical or sub-slop motion is not a page turn");
@@ -304,6 +570,9 @@ public final class NativeReaderV2CoreTests {
         equal(-1, NativeReaderV2Navigation.swipeTarget(
             first, ltr, 200, 0
         ), "LTR backward swipe stops at document start");
+        equal(2, NativeReaderV2Navigation.offsetTarget(
+            first, ltr, 1
+        ), "native left-swipe offset advances LTR exactly once");
     }
 
     private static void testV2CommittedMarkerClaim() {
@@ -329,9 +598,19 @@ public final class NativeReaderV2CoreTests {
             "activationState",
             "backupVerified",
             "minimumModuleVersionCode",
+            "activationToken",
             "documentPath",
             "documentLength",
-            "documentSha256"
+            "documentSha256",
+            "backupManifestPath",
+            "backupManifestLength",
+            "backupManifestSha256",
+            "backupSnapshotPath",
+            "markPath",
+            "originalMarkPresent",
+            "markLength",
+            "markSha256",
+            "backupCreatedAt"
         }) {
             java.util.Properties missing = committedV2Marker(hash);
             missing.remove(key);
@@ -361,6 +640,57 @@ public final class NativeReaderV2CoreTests {
             ), "pending activation authority rejected for " + pending);
         }
 
+        java.util.Properties unknown = committedV2Marker(hash);
+        unknown.setProperty("futureAuthority", "accepted-by-accident");
+        expectThrows(() -> NativeReaderV2MarkerClaim.admit(
+            unknown,
+            "/storage/emulated/0/Document/book.pdf",
+            123456L,
+            hash
+        ), "unknown committed marker authority rejected");
+
+        java.util.Properties noncanonicalToken = committedV2Marker(hash);
+        noncanonicalToken.setProperty(
+            "activationToken",
+            "12345678-1234-4234-8234-123456789ABC"
+        );
+        expectThrows(() -> NativeReaderV2MarkerClaim.admit(
+            noncanonicalToken,
+            "/storage/emulated/0/Document/book.pdf",
+            123456L,
+            hash
+        ), "noncanonical activation token rejected");
+
+        java.util.Properties invalidBackupLength = committedV2Marker(hash);
+        invalidBackupLength.setProperty("backupManifestLength", "0");
+        expectThrows(() -> NativeReaderV2MarkerClaim.admit(
+            invalidBackupLength,
+            "/storage/emulated/0/Document/book.pdf",
+            123456L,
+            hash
+        ), "empty recovery manifest rejected");
+
+        java.util.Properties absentMark = committedV2Marker(hash);
+        absentMark.setProperty("originalMarkPresent", "false");
+        absentMark.setProperty("markLength", "0");
+        absentMark.setProperty("markSha256", "ABSENT");
+        NativeReaderV2MarkerClaim absentClaim = NativeReaderV2MarkerClaim.admit(
+            absentMark,
+            "/storage/emulated/0/Document/book.pdf",
+            123456L,
+            hash
+        );
+        check(!absentClaim.originalMarkPresent,
+            "canonical absent-mark recovery authority accepted");
+        java.util.Properties inconsistentAbsent = committedV2Marker(hash);
+        inconsistentAbsent.setProperty("originalMarkPresent", "false");
+        expectThrows(() -> NativeReaderV2MarkerClaim.admit(
+            inconsistentAbsent,
+            "/storage/emulated/0/Document/book.pdf",
+            123456L,
+            hash
+        ), "absent mark cannot retain present-mark identity");
+
         java.util.Properties leadingZero = committedV2Marker(hash);
         leadingZero.setProperty("documentLength", "0123456");
         expectThrows(() -> NativeReaderV2MarkerClaim.admit(
@@ -387,6 +717,22 @@ public final class NativeReaderV2CoreTests {
             123456L,
             hash.toUpperCase(java.util.Locale.ROOT)
         ), "noncanonical uppercase digest rejected");
+        java.util.Properties olderContract = committedV2Marker(hash);
+        olderContract.setProperty("minimumModuleVersionCode", "135");
+        expectThrows(() -> NativeReaderV2MarkerClaim.admit(
+            olderContract,
+            "/storage/emulated/0/Document/book.pdf",
+            123456L,
+            hash
+        ), "older companion contract rejected");
+        java.util.Properties futureContract = committedV2Marker(hash);
+        futureContract.setProperty("minimumModuleVersionCode", "137");
+        expectThrows(() -> NativeReaderV2MarkerClaim.admit(
+            futureContract,
+            "/storage/emulated/0/Document/book.pdf",
+            123456L,
+            hash
+        ), "future companion contract rejected");
     }
 
     private static void testStrictMarkerProperties() {
@@ -444,15 +790,37 @@ public final class NativeReaderV2CoreTests {
         properties.setProperty("managedBy", "supernote-rtl-reader");
         properties.setProperty("mode", NativeReaderV2MarkerClaim.MODE);
         properties.setProperty("transactionProtocol", "2");
-        properties.setProperty("minimumModuleVersionCode", "135");
+        properties.setProperty("minimumModuleVersionCode", "136");
         properties.setProperty("activationState", "committed");
         properties.setProperty("backupVerified", "true");
+        properties.setProperty(
+            "activationToken",
+            "12345678-1234-4234-8234-123456789abc"
+        );
         properties.setProperty(
             "documentPath",
             "/storage/emulated/0/Document/book.pdf"
         );
         properties.setProperty("documentLength", "123456");
         properties.setProperty("documentSha256", hash);
+        properties.setProperty(
+            "backupManifestPath",
+            "/storage/emulated/0/Document/.book.pdf.snspread-backup.properties"
+        );
+        properties.setProperty("backupManifestLength", "321");
+        properties.setProperty("backupManifestSha256", repeat("b", 64));
+        properties.setProperty(
+            "backupSnapshotPath",
+            "/storage/emulated/0/Document/.book.pdf.snspread-backup.mark"
+        );
+        properties.setProperty(
+            "markPath",
+            "/storage/emulated/0/Document/book.pdf.mark"
+        );
+        properties.setProperty("originalMarkPresent", "true");
+        properties.setProperty("markLength", "654");
+        properties.setProperty("markSha256", repeat("c", 64));
+        properties.setProperty("backupCreatedAt", "1723456789000");
         return properties;
     }
 
@@ -1638,6 +2006,36 @@ public final class NativeReaderV2CoreTests {
             ), "invalid buffered MOVE is blocked");
         equal("rollback", port.calls.get(port.calls.size() - 1),
             "invalid buffered MOVE requests rollback");
+
+        SpreadSession fingerSession = initializedSession(1, 401, 1);
+        FakePort fingerPort = new FakePort();
+        NativeReaderController fingerController =
+            new NativeReaderController(fingerSession, fingerPort);
+        NativeReaderController.DownDecision finger = fingerController.onDown(
+            3, 1200, 500, 0.0, 10,
+            GestureRouter.Tool.FINGER, Collections.<RectD>emptyList()
+        );
+        equal(NativeReaderController.InputResult.CONSUMED, finger.result,
+            "inactive finger begins deferred activation");
+        equal(NativeReaderController.InputResult.BLOCKED,
+            fingerController.onMotion(
+                finger.gestureTokenId, 3, GestureAction.MOVE,
+                Double.NaN, 510, 0.0, 11
+            ), "invalid deferred finger MOVE is blocked");
+        equal(0, fingerPort.calls.size(),
+            "invalid deferred finger cannot reach firmware");
+        NativeReaderController.DownDecision recovered =
+            fingerController.onDown(
+                4, 1200, 500, 0.0, 12,
+                GestureRouter.Tool.FINGER,
+                Collections.<RectD>emptyList()
+            );
+        equal(NativeReaderController.InputResult.CONSUMED, recovered.result,
+            "invalid deferred finger releases controller context");
+        fingerController.onMotion(
+            recovered.gestureTokenId, 4, GestureAction.CANCEL,
+            1200, 500, 0.0, 13
+        );
     }
 
     private static void testControllerRetirementAndReplayTimeout() {
@@ -1746,6 +2144,8 @@ public final class NativeReaderV2CoreTests {
             hoverPort.phase(), "firmware waits for complete target readiness");
         equal(Arrays.asList("freeze", "save", "disable", "load:0"),
             hoverBridge.calls, "firmware source transfer order");
+        equal(1, hoverBridge.activationTimeouts.size(),
+            "firmware schedules one watchdog per activation");
         hoverBridge.ready(0, 2);
         hoverPort.onFirmwarePageReady(hoverBridge.observe());
         equal(NativeReaderFirmwarePort.Phase.IDLE, hoverPort.phase(),
@@ -1754,6 +2154,10 @@ public final class NativeReaderV2CoreTests {
             "hover publishes target page");
         equal("release", hoverBridge.calls.get(hoverBridge.calls.size() - 1),
             "hover releases only after target publication");
+        int callsAfterSuccessfulActivation = hoverBridge.calls.size();
+        hoverBridge.fireActivationTimeout(0);
+        equal(callsAfterSuccessfulActivation, hoverBridge.calls.size(),
+            "expired watchdog cannot disturb completed activation");
 
         SpreadSession penSession = initializedSession(1, 51, 1);
         FirmwareBridge penBridge = new FirmwareBridge(1, 51, 1);
@@ -1813,6 +2217,31 @@ public final class NativeReaderV2CoreTests {
         delayedBridge.repeatLastSaveCompletion(true);
         equal(callsAfterFirstCompletion, delayedBridge.calls.size(),
             "duplicate save completion is idempotent");
+
+        SpreadSession timeoutSession = initializedSession(1, 60, 1);
+        FirmwareBridge timeoutBridge = new FirmwareBridge(1, 60, 1);
+        timeoutBridge.deferSave = true;
+        NativeReaderFirmwarePort timeoutPort = firmwarePort(timeoutBridge);
+        NativeReaderController timeoutController =
+            new NativeReaderController(timeoutSession, timeoutPort);
+        timeoutPort.attachController(timeoutController);
+        check(timeoutController.onInactiveHover(
+            1200, 500, Collections.<RectD>emptyList()
+        ), "watchdog activation begins");
+        equal(NativeReaderFirmwarePort.Phase.FROZEN, timeoutPort.phase(),
+            "watchdog observes deferred source save");
+        equal(1, timeoutBridge.activationTimeouts.size(),
+            "watchdog is armed before deferred save can hang");
+        timeoutBridge.fireActivationTimeout(0);
+        equal(NativeReaderFirmwarePort.Phase.ROLLBACK_LOADING,
+            timeoutPort.phase(), "watchdog requests source rollback");
+        equal("load:1",
+            timeoutBridge.calls.get(timeoutBridge.calls.size() - 1),
+            "watchdog rollback reloads authoritative source page");
+        int callsAfterTimeout = timeoutBridge.calls.size();
+        timeoutBridge.completeSave(true);
+        equal(callsAfterTimeout, timeoutBridge.calls.size(),
+            "late save after watchdog cannot restart target transfer");
 
         SpreadSession threadedSession = initializedSession(1, 58, 1);
         FirmwareBridge threadedBridge = new FirmwareBridge(1, 58, 1);
@@ -2139,6 +2568,7 @@ public final class NativeReaderV2CoreTests {
         long componentSalt;
         final long ownerThreadId = Thread.currentThread().getId();
         final List<Runnable> ownerCallbacks = new ArrayList<>();
+        final List<Runnable> activationTimeouts = new ArrayList<>();
         NativeReaderFirmwarePort.Bridge.SourceSaveCallback pendingSave;
         NativeReaderFirmwarePort.Bridge.SourceSaveCallback lastSave;
 
@@ -2193,6 +2623,13 @@ public final class NativeReaderV2CoreTests {
                 }
                 callback.run();
             }
+        }
+
+        void fireActivationTimeout(int index) {
+            if (index < 0 || index >= activationTimeouts.size()) {
+                throw new IllegalStateException("no activation timeout");
+            }
+            activationTimeouts.get(index).run();
         }
 
         @Override
@@ -2280,6 +2717,11 @@ public final class NativeReaderV2CoreTests {
             synchronized (ownerCallbacks) {
                 ownerCallbacks.add(callback);
             }
+        }
+
+        @Override
+        public void scheduleActivationTimeout(Runnable callback) {
+            activationTimeouts.add(callback);
         }
 
         @Override

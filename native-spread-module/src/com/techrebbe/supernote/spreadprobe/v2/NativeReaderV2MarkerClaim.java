@@ -1,32 +1,98 @@
 package com.techrebbe.supernote.spreadprobe.v2;
 
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Properties;
+import java.util.Set;
+import java.util.UUID;
 
 /** Pure validation of the companion's committed editable v2 authority. */
 public final class NativeReaderV2MarkerClaim {
     public static final int TRANSACTION_PROTOCOL = 2;
-    public static final long MINIMUM_COMPANION_MODULE_VERSION = 120L;
+    public static final long MINIMUM_COMPANION_MODULE_VERSION = 136L;
     public static final String MODE = "protected-editable-transactional-v1";
+    private static final Set<String> COMMITTED_FIELDS =
+        Collections.unmodifiableSet(new HashSet<String>(Arrays.asList(
+            NativeReaderV2Config.ENGINE_KEY,
+            "enabled",
+            "direction",
+            "coverSeparate",
+            "showDivider",
+            "showHeader",
+            "spreadSizing",
+            "editable",
+            "disposable",
+            "managedBy",
+            "mode",
+            "transactionProtocol",
+            "minimumModuleVersionCode",
+            "activationToken",
+            "activationState",
+            "documentPath",
+            "documentLength",
+            "documentSha256",
+            "backupVerified",
+            "backupManifestPath",
+            "backupManifestLength",
+            "backupManifestSha256",
+            "backupSnapshotPath",
+            "markPath",
+            "originalMarkPresent",
+            "markLength",
+            "markSha256",
+            "backupCreatedAt"
+        )));
 
     public final String documentId;
     public final String canonicalDocumentPath;
     public final long documentLength;
     public final String documentSha256;
     public final NativeReaderV2Config config;
+    public final String activationToken;
+    public final String backupManifestPath;
+    public final long backupManifestLength;
+    public final String backupManifestSha256;
+    public final String backupSnapshotPath;
+    public final String markPath;
+    public final boolean originalMarkPresent;
+    public final long markLength;
+    public final String markSha256;
+    public final long backupCreatedAt;
 
     private NativeReaderV2MarkerClaim(
         String canonicalDocumentPath,
         long documentLength,
         String documentSha256,
-        NativeReaderV2Config config
+        NativeReaderV2Config config,
+        String activationToken,
+        String backupManifestPath,
+        long backupManifestLength,
+        String backupManifestSha256,
+        String backupSnapshotPath,
+        String markPath,
+        boolean originalMarkPresent,
+        long markLength,
+        String markSha256,
+        long backupCreatedAt
     ) {
         this.canonicalDocumentPath = canonicalDocumentPath;
         this.documentLength = documentLength;
         this.documentSha256 = documentSha256;
         this.documentId = "sha256:" + documentSha256;
         this.config = config;
+        this.activationToken = activationToken;
+        this.backupManifestPath = backupManifestPath;
+        this.backupManifestLength = backupManifestLength;
+        this.backupManifestSha256 = backupManifestSha256;
+        this.backupSnapshotPath = backupSnapshotPath;
+        this.markPath = markPath;
+        this.originalMarkPresent = originalMarkPresent;
+        this.markLength = markLength;
+        this.markSha256 = markSha256;
+        this.backupCreatedAt = backupCreatedAt;
     }
 
     public static NativeReaderV2MarkerClaim admit(
@@ -41,6 +107,11 @@ public final class NativeReaderV2MarkerClaim {
             || !isCanonicalSha256(observedDocumentSha256)) {
             throw new IllegalArgumentException(
                 "complete observed document identity is required"
+            );
+        }
+        if (!COMMITTED_FIELDS.equals(properties.stringPropertyNames())) {
+            throw new IllegalArgumentException(
+                "committed marker schema is not exact"
             );
         }
         NativeReaderV2Config config = NativeReaderV2Config.from(properties);
@@ -68,9 +139,9 @@ public final class NativeReaderV2MarkerClaim {
             properties,
             "minimumModuleVersionCode"
         );
-        if (minimumVersion < MINIMUM_COMPANION_MODULE_VERSION) {
+        if (minimumVersion != MINIMUM_COMPANION_MODULE_VERSION) {
             throw new IllegalArgumentException(
-                "marker does not require a supported companion version"
+                "marker requires a different companion contract version"
             );
         }
         requireExact(properties, "documentPath", canonicalDocumentPath);
@@ -86,12 +157,88 @@ public final class NativeReaderV2MarkerClaim {
                 "marker and observed document identities disagree"
             );
         }
+        String activationToken = properties.getProperty("activationToken");
+        if (!isCanonicalUuid(activationToken)) {
+            throw new IllegalArgumentException(
+                "marker activation token is not canonical"
+            );
+        }
+        String backupManifestPath = requiredPath(
+            properties,
+            "backupManifestPath"
+        );
+        long backupManifestLength = strictNonNegativeLong(
+            properties,
+            "backupManifestLength"
+        );
+        String backupManifestSha256 = properties.getProperty(
+            "backupManifestSha256"
+        );
+        String backupSnapshotPath = requiredPath(
+            properties,
+            "backupSnapshotPath"
+        );
+        String markPath = requiredPath(properties, "markPath");
+        boolean originalMarkPresent = strictBoolean(
+            properties,
+            "originalMarkPresent"
+        );
+        long markLength = strictNonNegativeLong(properties, "markLength");
+        String markSha256 = properties.getProperty("markSha256");
+        long backupCreatedAt = strictNonNegativeLong(
+            properties,
+            "backupCreatedAt"
+        );
+        if (backupManifestLength <= 0L
+            || !isCanonicalSha256(backupManifestSha256)
+            || originalMarkPresent && (markLength <= 0L
+                || !isCanonicalSha256(markSha256))
+            || !originalMarkPresent && (markLength != 0L
+                || !"ABSENT".equals(markSha256))) {
+            throw new IllegalArgumentException(
+                "marker recovery identity is inconsistent"
+            );
+        }
         return new NativeReaderV2MarkerClaim(
             canonicalDocumentPath,
             observedDocumentLength,
             observedDocumentSha256,
-            config
+            config,
+            activationToken,
+            backupManifestPath,
+            backupManifestLength,
+            backupManifestSha256,
+            backupSnapshotPath,
+            markPath,
+            originalMarkPresent,
+            markLength,
+            markSha256,
+            backupCreatedAt
         );
+    }
+
+    private static String requiredPath(Properties properties, String key) {
+        String value = properties.getProperty(key);
+        if (value == null || value.isEmpty() || value.indexOf('\0') >= 0) {
+            throw new IllegalArgumentException("invalid marker path " + key);
+        }
+        return value;
+    }
+
+    private static boolean strictBoolean(Properties properties, String key) {
+        String value = properties.getProperty(key);
+        if ("true".equals(value)) return true;
+        if ("false".equals(value)) return false;
+        throw new IllegalArgumentException("invalid boolean for " + key);
+    }
+
+    private static boolean isCanonicalUuid(String value) {
+        if (value == null) return false;
+        try {
+            return UUID.fromString(value).toString().equals(value);
+        } catch (IllegalArgumentException invalid) {
+            return false;
+        }
     }
 
     private static long strictNonNegativeLong(

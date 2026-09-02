@@ -44,6 +44,7 @@ public final class NativeReaderFirmwarePort
         void freezeDocumentInput();
         void requestNativeSourceSave(SourceSaveCallback callback);
         void postToOwnerThread(Runnable callback);
+        void scheduleActivationTimeout(Runnable callback);
         void disableNativeWriter();
         void loadNativePage(int zeroBasedPageIndex);
         void replayNativeFingerHit(PointD sourcePoint);
@@ -189,6 +190,11 @@ public final class NativeReaderFirmwarePort
         sourceSaveCompletionHandled = false;
         phase = Phase.FROZEN;
         bridge.freezeDocumentInput();
+        bridge.scheduleActivationTimeout(new Runnable() {
+            @Override public void run() {
+                onActivationTimeout(requested);
+            }
+        });
     }
 
     @Override
@@ -454,6 +460,14 @@ public final class NativeReaderFirmwarePort
             stableObservation = after;
         }
         controller.onReplayComplete(requested, success);
+    }
+
+    private void onActivationTimeout(ActivationMachine.Token requested) {
+        assertOwnerThread();
+        if (token == requested && phase != Phase.IDLE
+            && phase != Phase.DISABLED) {
+            controller.onActivationTimeout(requested);
+        }
     }
 
     private NativeAuthority readyAuthority(

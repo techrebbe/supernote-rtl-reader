@@ -557,7 +557,7 @@ def check(repo_root: Path) -> None:
     frozen_source_digests = (
         (
             plugin_path,
-            "c293aaf4373158dabd9172a0b3ff82e01c9a68dcb1bd3192a5113f3e3e33eb1e",
+            "5cc5b487916f5a0208c0f6021940c3285d1298480a9e5e84614f2a0d88daed87",
             "ReaderPreferencesModule.kt.template",
         ),
         (
@@ -567,7 +567,7 @@ def check(repo_root: Path) -> None:
         ),
         (
             native_build_path,
-            "e6e2ff9dcd9e562551e34ec9589da384235b031176154ee58b6eace8cdc10d80",
+            "c1360bc500d645109b45826897a6d9fe658803cf05e2c34e8afebe80798044e1",
             "native build script",
         ),
         (
@@ -577,22 +577,22 @@ def check(repo_root: Path) -> None:
         ),
         (
             trace_helper_test_path,
-            "bb35e8e149ab47b5e28fc2dcd1b7bccc9542666c8a52c00d59676317387d125d",
+            "a6c3c249d3239ee4fec9dd465b01182e6a493965fc82f0230b78963d8611ca3d",
             "Native Spread trace-helper test",
         ),
         (
             app_path,
-            "b9304da544d1dfc238cc75f16ee398796b6c47024c77b54020d37167e35e414a",
+            "96e2fcab663fb2d2bb470c433048740773991254713c49e7c2a489644b85f0f1",
             "Native Spread UI authority source",
         ),
         (
             workflow_path,
-            "4ad17c03d001d450c31db09426871afa16b27b1dfbb5ee15ec1167185e68d2e3",
+            "fca41cc3d40cd1ffe30328a9e622a187969baf93defd1606c746aa8e23e0833f",
             "Native Spread companion-build workflow",
         ),
         (
             plugin_build_path,
-            "06171e49d9a175256b1aa8b69f8ef37cbc0d538f07c04270c69406a0782dfd4f",
+            "8f5a1d8ebcf07b500f8cb2a7720326680eb86a8855723b0d4b166028d6917197",
             "native plugin build entrypoint",
         ),
         (

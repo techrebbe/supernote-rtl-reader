@@ -67,6 +67,7 @@ def main() -> None:
     manifest = read(module / "AndroidManifest.xml")
     xposed = read(module / "assets/xposed_init").strip()
     workflow = read(root / ".github/workflows/build.yml")
+    guidance = read(root / "AGENTS.md")
     plugin = read(root / "native/ReaderPreferencesModule.kt.template")
     app = read(root / "overlay/App.js")
     index = read(root / "overlay/index.js")
@@ -113,6 +114,18 @@ def main() -> None:
         fail("plugin build does not execute the exclusive v2 invariant gate")
     if "RTL_READER_OPEN v0.4.15-native-reader-v2" not in index:
         fail("runtime marker does not identify the v2 plugin build")
+    require(
+        guidance,
+        [
+            "python scripts/check_native_invariants.py .",
+            "python scripts/check_native_reader_v2_invariants.py .",
+            "python scripts/test_native_reader_v2_core.py .",
+            "python scripts/test_native_reader_v2_mutations.py .",
+            "python scripts/test_plugin_packaging_fail_closed.py",
+            "legacy gate is expected to reject the v2 workflow",
+        ],
+        "Native Reader v2 repository validation guidance",
+    )
 
     ordered(
         entry,

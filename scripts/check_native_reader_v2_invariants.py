@@ -200,6 +200,9 @@ def main() -> None:
             "native component is claimed by another live activity",
             "firmware.releaseProjectionReader();",
             "native_chrome_discovery_failed",
+            "refreshChromeAtContactStart(entry, runtime)",
+            "chromeSnapshot(entry)",
+            "if (chrome == null || entry.runtime != runtime)",
             "tracker.refresh();",
             "Passing the sample to\n                        // Supernote must not make the contact invisible to",
             "entry.penPass = beginStylusRoute(",
@@ -213,9 +216,19 @@ def main() -> None:
             "clearStylusContact(entry);",
             "volatile boolean androidPenContact;",
             "volatile boolean androidPenPass;",
+            "volatile boolean resumed;",
+            "volatile long lifecycleGeneration;",
+            "entry.resumed = true;",
+            "entry.resumed = false;",
+            "final long admissionLifecycleGeneration = entry.lifecycleGeneration;",
+            "if (!entry.resumed || entry.lifecycleGeneration !=",
         ],
         "hook installation and resume authority",
     )
+    if "chrome(entry)" in hooks:
+        fail("input hooks still rescan native chrome after contact classification")
+    if hooks.count("tracker.refresh();") != 1:
+        fail("native chrome must refresh exactly at immutable contact start")
     require(
         chrome_tracker,
         [
@@ -233,12 +246,12 @@ def main() -> None:
     if pen_contact_start < 0 or pen_contact_end < 0:
         fail("could not isolate native pen-contact routing branch")
     pen_contact = hooks[pen_contact_start:pen_contact_end]
-    if "postOrRoutePen(entry, x, y, pressure, chrome);" not in pen_contact:
+    if "postOrRoutePen(entry, runtime, x, y, pressure, chrome);" not in pen_contact:
         fail(
             "native pass-through contacts must remain visible to the v2 "
             "gesture authority"
         )
-    if "entry.runtime.noteNativePenCallbackContact();" not in hooks:
+    if "runtime.noteNativePenCallbackContact();" not in hooks:
         fail("native pen DOWN lacks callback-thread refresh exclusion")
     require(
         runtime,
@@ -329,6 +342,19 @@ def main() -> None:
         ],
         "stock pause before/after settlement hooks",
     )
+    lifecycle_admission = hooks[
+        hooks.find("private static void maybeAdmit("):
+        hooks.find("private static synchronized void registerHandshakeReceiver(")
+    ]
+    ordered(
+        lifecycle_admission,
+        [
+            "final long admissionLifecycleGeneration = entry.lifecycleGeneration;",
+            "if (!entry.resumed || entry.lifecycleGeneration !=",
+            "entry.runtime = new NativeReaderV2Runtime(",
+        ],
+        "resumed-lifecycle admission fence",
+    )
     destroy_hook = hooks.find('ACTIVITY, loader, "onDestroy"')
     destroy_release = hooks.find(
         'releaseDestroyedEntry(entry, "activity_destroyed");',
@@ -356,16 +382,23 @@ def main() -> None:
     )
     if revalidation_start < 0 or revalidation_end < 0:
         fail("could not isolate resume revalidation method")
+    revalidation = hooks[revalidation_start:revalidation_end]
     ordered(
-        hooks[revalidation_start:revalidation_end],
+        revalidation,
         [
             "entry.admitting = true;",
             "expectedRuntime.admissionEvidenceStillCurrent();",
             "resetRuntime(entry, \"resume_authority_changed\")",
-            "maybeAdmit(entry, true);",
         ],
         "resume revalidation publication",
     )
+    reset_position = revalidation.find(
+        'resetRuntime(entry, "resume_authority_changed")'
+    )
+    if reset_position < 0 or revalidation.find(
+        "maybeAdmit(entry, true);", reset_position
+    ) < 0:
+        fail("resume authority reset does not retry admission")
 
     require(
         runtime,
@@ -582,6 +615,20 @@ def main() -> None:
             '"backupCreatedAt"',
         ],
         "committed marker authority",
+    )
+    require(
+        plugin,
+        [
+            "NATIVE_READER_V2_COMMITTED_FIELDS",
+            "NATIVE_READER_V2_PENDING_FIELDS",
+            "NATIVE_ANNOTATION_BACKUP_FIELDS",
+            "strictNativeSpreadMarkerProperties(file.readBytes())",
+            "duplicate persisted-property key $key",
+            "Native Reader v2 marker schema is not exact",
+            "strictProperties(\n                manifestBytes,\n"
+            "                NATIVE_ANNOTATION_BACKUP_FIELDS,",
+        ],
+        "cross-layer strict persisted authority",
     )
     if "minimumVersion <" in marker or "minimumVersion >" in marker:
         fail("v2 marker admission permits a version range instead of exact contract")

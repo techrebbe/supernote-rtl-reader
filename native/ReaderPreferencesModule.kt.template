@@ -91,6 +91,60 @@ class ReaderPreferencesModule(
             "/data/data/com.supernote.document/document_internal_cache",
             "/data/data/com.supernote.document/document_external_cache",
         )
+        private const val STRICT_PROPERTIES_MAX_BYTES = 128 * 1024
+        private val NATIVE_READER_V2_COMMITTED_FIELDS = setOf(
+            "nativeReaderEngine",
+            "enabled",
+            "direction",
+            "coverSeparate",
+            "showDivider",
+            "showHeader",
+            "spreadSizing",
+            "editable",
+            "disposable",
+            "managedBy",
+            "mode",
+            "transactionProtocol",
+            "minimumModuleVersionCode",
+            "activationToken",
+            "activationState",
+            "documentPath",
+            "documentLength",
+            "documentSha256",
+            "backupVerified",
+            "backupManifestPath",
+            "backupManifestLength",
+            "backupManifestSha256",
+            "backupSnapshotPath",
+            "markPath",
+            "originalMarkPresent",
+            "markLength",
+            "markSha256",
+            "backupCreatedAt",
+        )
+        private val NATIVE_READER_V2_PENDING_FIELDS =
+            NATIVE_READER_V2_COMMITTED_FIELDS + setOf(
+                "pendingIntent",
+                "previousMarkerPresent",
+                "previousMarkerProtected",
+                "previousMarkerLength",
+                "previousMarkerSha256",
+                "previousMarkerBase64",
+            )
+        private val NATIVE_ANNOTATION_BACKUP_FIELDS = setOf(
+            "version",
+            "managedBy",
+            "documentPath",
+            "documentLength",
+            "documentSha256",
+            "documentModified",
+            "markPath",
+            "originalMarkPresent",
+            "markLength",
+            "markSha256",
+            "snapshotPath",
+            "createdAt",
+        )
     }
 
     private val preferences by lazy {
@@ -150,10 +204,7 @@ class ReaderPreferencesModule(
         try {
             val pdfFile = requirePdf(filePath)
             val marker = nativeSpreadMarker(pdfFile)
-            val properties = Properties()
-            if (marker.isFile) {
-                FileInputStream(marker).use { input -> properties.load(input) }
-            }
+            val properties = readPropertiesIfFile(marker)
 
             val pendingActivation =
                 properties.getProperty("mode", "") ==
@@ -1915,9 +1966,7 @@ class ReaderPreferencesModule(
     ): Boolean = runCatching {
         val bytes = pending.previousMarkerBytes
             ?: throw IllegalStateException("pending_previous_marker_missing")
-        val properties = Properties().apply {
-            ByteArrayInputStream(bytes).use { input -> load(input) }
-        }
+        val properties = strictNativeSpreadMarkerProperties(bytes)
         if (!markerClaimsProtectedEditable(properties) ||
             !properties.getProperty("backupVerified", "false")
                 .equals("true", true) ||
@@ -2319,11 +2368,131 @@ class ReaderPreferencesModule(
         )
     }
 
-    private fun readPropertiesIfFile(file: File): Properties = Properties().apply {
+    private fun readPropertiesIfFile(file: File): Properties =
         if (file.isFile) {
-            FileInputStream(file).use { input -> load(input) }
+            require(file.length() in 1..STRICT_PROPERTIES_MAX_BYTES.toLong()) {
+                "invalid persisted-properties file length"
+            }
+            strictNativeSpreadMarkerProperties(file.readBytes())
+        } else {
+            Properties()
+        }
+
+    /**
+     * Mirrors NativeReaderV2StrictProperties. Java Properties silently keeps
+     * the last duplicate key, which would let the companion display authority
+     * that the injected module correctly rejects.
+     */
+    private fun strictProperties(
+        bytes: ByteArray,
+        exactKeys: Set<String>? = null,
+    ): Properties {
+        require(bytes.isNotEmpty() && bytes.size <= STRICT_PROPERTIES_MAX_BYTES) {
+            "invalid persisted-properties byte length"
+        }
+        require(bytes.none { item -> item == 0.toByte() }) {
+            "persisted properties contain NUL"
+        }
+        val text = bytes.toString(Charsets.ISO_8859_1)
+        val keys = HashSet<String>()
+        val logical = StringBuilder()
+        var continuing = false
+        var start = 0
+        var index = 0
+        while (index <= text.length) {
+            if (index != text.length && text[index] != '\n' && text[index] != '\r') {
+                index += 1
+                continue
+            }
+            var physical = text.substring(start, index)
+            if (index < text.length && text[index] == '\r' &&
+                index + 1 < text.length && text[index + 1] == '\n'
+            ) {
+                index += 1
+            }
+            start = index + 1
+            if (continuing) {
+                physical = physical.dropWhile { value -> isPropertyWhitespace(value) }
+            }
+            logical.append(physical)
+            if (endsWithPropertyContinuation(logical)) {
+                logical.setLength(logical.length - 1)
+                continuing = true
+                index += 1
+                continue
+            }
+            continuing = false
+            inspectLogicalPropertyLine(logical.toString(), keys)
+            logical.setLength(0)
+            index += 1
+        }
+        require(!continuing) { "unterminated persisted-properties continuation" }
+        val properties = Properties().apply {
+            ByteArrayInputStream(bytes).use { input -> load(input) }
+        }
+        require(properties.size == keys.size) {
+            "persisted-properties key decoding was ambiguous"
+        }
+        if (exactKeys != null) {
+            require(properties.stringPropertyNames() == exactKeys) {
+                "persisted-properties schema is not exact"
+            }
+        }
+        return properties
+    }
+
+    private fun strictNativeSpreadMarkerProperties(bytes: ByteArray): Properties {
+        val properties = strictProperties(bytes)
+        requireNativeReaderV2MarkerSchema(properties)
+        return properties
+    }
+
+    private fun requireNativeReaderV2MarkerSchema(properties: Properties) {
+        val engine = properties.getProperty("nativeReaderEngine", "")
+        val mode = properties.getProperty("mode", "")
+        if (engine != "native-reader-v2" && mode != NATIVE_SPREAD_EDITABLE_MODE) {
+            return
+        }
+        require(engine == "native-reader-v2" && mode == NATIVE_SPREAD_EDITABLE_MODE) {
+            "Native Reader v2 marker identity is incomplete"
+        }
+        val expected = when (properties.getProperty("activationState", "")) {
+            NATIVE_SPREAD_ACTIVATION_COMMITTED -> NATIVE_READER_V2_COMMITTED_FIELDS
+            NATIVE_SPREAD_ACTIVATION_PENDING -> NATIVE_READER_V2_PENDING_FIELDS
+            else -> throw IllegalStateException(
+                "Native Reader v2 marker activation state is unsupported",
+            )
+        }
+        require(properties.stringPropertyNames() == expected) {
+            "Native Reader v2 marker schema is not exact"
         }
     }
+
+    private fun inspectLogicalPropertyLine(line: String, keys: MutableSet<String>) {
+        val trimmed = line.dropWhile { value -> isPropertyWhitespace(value) }
+        if (trimmed.isEmpty() || trimmed[0] == '#' || trimmed[0] == '!') return
+        val one = Properties().apply {
+            ByteArrayInputStream((line + "\n").toByteArray(Charsets.ISO_8859_1)).use {
+                input -> load(input)
+            }
+        }
+        require(one.size == 1) { "invalid persisted-property line" }
+        val key = one.stringPropertyNames().single()
+        require(keys.add(key)) { "duplicate persisted-property key $key" }
+    }
+
+    private fun endsWithPropertyContinuation(line: StringBuilder): Boolean {
+        var slashes = 0
+        var index = line.length - 1
+        while (index >= 0 && line[index] == '\\') {
+            slashes += 1
+            index -= 1
+        }
+        return slashes and 1 != 0
+    }
+
+    private fun isPropertyWhitespace(value: Char): Boolean =
+        value == ' ' || value == '\t' || value == '\u000c'
 
     private fun startNativeBackupWorker(name: String, action: () -> Unit) {
         Thread(
@@ -2620,11 +2789,9 @@ class ReaderPreferencesModule(
                 backupManifestExisted,
             )
             backup = activationBackup
-            val previousMarkerProperties = Properties().apply {
-                previousMarkerBytes?.let { bytes ->
-                    ByteArrayInputStream(bytes).use { input -> load(input) }
-                }
-            }
+            val previousMarkerProperties = previousMarkerBytes?.let { bytes ->
+                strictNativeSpreadMarkerProperties(bytes)
+            } ?: Properties()
             val previousMarkerProtected = previousMarkerBytes != null &&
                 protectedEditableSessionMarkerValid(
                     pdfFile,
@@ -2885,11 +3052,15 @@ class ReaderPreferencesModule(
                     },
                 )
             }
+            if (manifest.length() !in 1..STRICT_PROPERTIES_MAX_BYTES.toLong()) {
+                throw IllegalStateException("manifest_length_invalid")
+            }
             val manifestBytes = manifest.readBytes()
             val manifestHash = sha256(manifestBytes)
-            val properties = Properties().apply {
-                ByteArrayInputStream(manifestBytes).use { input -> load(input) }
-            }
+            val properties = strictProperties(
+                manifestBytes,
+                NATIVE_ANNOTATION_BACKUP_FIELDS,
+            )
             if (properties.getProperty("version") != NATIVE_SPREAD_BACKUP_VERSION.toString() ||
                 properties.getProperty("managedBy") != "supernote-rtl-reader"
             ) {
@@ -3234,11 +3405,9 @@ class ReaderPreferencesModule(
             previousMarkerProtected,
         )
         if (backup != null) {
-            val previousProperties = Properties().apply {
-                pending.previousMarkerBytes?.let { bytes ->
-                    ByteArrayInputStream(bytes).use { input -> load(input) }
-                }
-            }
+            val previousProperties = pending.previousMarkerBytes?.let { bytes ->
+                strictNativeSpreadMarkerProperties(bytes)
+            } ?: Properties()
             val previousActuallyProtected = pending.previousMarkerBytes != null &&
                 protectedEditableSessionMarkerValid(
                     pdfFile,

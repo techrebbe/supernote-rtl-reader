@@ -557,7 +557,7 @@ def check(repo_root: Path) -> None:
     frozen_source_digests = (
         (
             plugin_path,
-            "5cc5b487916f5a0208c0f6021940c3285d1298480a9e5e84614f2a0d88daed87",
+            "c5760e283b065afc05be683122051090c0a534e0e33c187350dbfbea127db006",
             "ReaderPreferencesModule.kt.template",
         ),
         (

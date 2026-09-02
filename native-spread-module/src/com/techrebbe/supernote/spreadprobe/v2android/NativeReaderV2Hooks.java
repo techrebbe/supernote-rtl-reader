@@ -158,6 +158,8 @@ public final class NativeReaderV2Hooks {
                 @Override protected void afterHookedMethod(MethodHookParam param) {
                     Entry entry = entry(param.thisObject);
                     if (entry == null) return;
+                    entry.resumed = true;
+                    entry.lifecycleGeneration++;
                     // The companion writes the v2 marker while PluginHost is
                     // in front of this Activity. A resumed reader must retry
                     // an earlier marker-missing admission without making
@@ -171,6 +173,10 @@ public final class NativeReaderV2Hooks {
             new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam param) {
                     Entry entry = entry(param.thisObject);
+                    if (entry != null) {
+                        entry.resumed = false;
+                        entry.lifecycleGeneration++;
+                    }
                     if (entry != null && entry.runtime != null) {
                         entry.runtime.beforeLifecyclePause();
                     }
@@ -483,14 +489,26 @@ public final class NativeReaderV2Hooks {
                     }
                     Entry entry = entry(param.thisObject);
                     if (entry == null || entry.runtime == null) return;
+                    NativeReaderV2Runtime runtime = entry.runtime;
                     int tool = event.getToolType(event.getActionIndex());
+                    List<RectD> chrome = event.getActionMasked() ==
+                        MotionEvent.ACTION_DOWN
+                        ? refreshChromeAtContactStart(entry, runtime)
+                        : chromeSnapshot(entry);
+                    if (chrome == null || entry.runtime != runtime) {
+                        // Chrome discovery failure retires the runtime. The
+                        // triggering contact must not leak into stock writer
+                        // handling after its authority disappeared.
+                        param.setResult(Boolean.TRUE);
+                        return;
+                    }
                     boolean consume;
                     if (tool == MotionEvent.TOOL_TYPE_FINGER) {
-                        consume = entry.runtime.routeFinger(event, chrome(entry));
+                        consume = runtime.routeFinger(event, chrome);
                     } else if (tool == MotionEvent.TOOL_TYPE_STYLUS
                         || tool == MotionEvent.TOOL_TYPE_ERASER
                         || entry.androidPenContact) {
-                        consume = routeAndroidPen(entry, event, chrome(entry));
+                        consume = routeAndroidPen(entry, runtime, event, chrome);
                     } else {
                         consume = false;
                     }
@@ -507,19 +525,31 @@ public final class NativeReaderV2Hooks {
                 @Override protected void beforeHookedMethod(MethodHookParam param) {
                     Entry entry = BY_COMPONENT.get(param.thisObject);
                     if (entry == null || entry.runtime == null) return;
+                    NativeReaderV2Runtime runtime = entry.runtime;
                     int x = (Integer) param.args[0];
                     int y = (Integer) param.args[1];
                     int pressure = XposedHelpers.getIntField(
                         param.thisObject,
                         "mPressure"
                     );
-                    List<RectD> chrome = chrome(entry);
+                    boolean contactStart = pressure > 0 && !entry.penContact;
+                    List<RectD> chrome = contactStart &&
+                        !stylusRouteDecisionActive(entry)
+                        ? refreshChromeAtContactStart(entry, runtime)
+                        : chromeSnapshot(entry);
+                    if (chrome == null || entry.runtime != runtime) {
+                        // Retiring on chrome failure is fail-closed for the
+                        // sample that discovered it as well as future input.
+                        param.setResult(null);
+                        return;
+                    }
                     boolean pass;
-                    if (pressure > 0 && !entry.penContact) {
+                    if (contactStart) {
                         entry.penContact = true;
-                        entry.runtime.noteNativePenCallbackContact();
+                        runtime.noteNativePenCallbackContact();
                         entry.penPass = beginStylusRoute(
                             entry,
+                            runtime,
                             x,
                             y,
                             chrome
@@ -533,17 +563,21 @@ public final class NativeReaderV2Hooks {
                         // v2: presentation callbacks emitted while a native
                         // pen/lasso/eraser/highlighter gesture is live must be
                         // deferred until the matching terminal sample.
-                        postOrRoutePen(entry, x, y, pressure, chrome);
+                        postOrRoutePen(entry, runtime, x, y, pressure, chrome);
                         if (pressure <= 0) {
                             entry.penContact = false;
                             entry.penPass = false;
                             releaseStylusRouteIfComplete(entry);
                         }
                     } else {
-                        pass = entry.runtime.mayPassNativePenImmediately(
+                        pass = runtime.mayPassNativePenImmediately(
                             x, y, chrome
                         );
-                        if (!pass) postOrRoutePen(entry, x, y, pressure, chrome);
+                        if (!pass) {
+                            postOrRoutePen(
+                                entry, runtime, x, y, pressure, chrome
+                            );
+                        }
                     }
                     if (!pass) param.setResult(null);
                 }
@@ -595,7 +629,8 @@ public final class NativeReaderV2Hooks {
     }
 
     private static void maybeAdmit(Entry entry, boolean forceRetry) {
-        if (entry == null || entry.retired || entry.admitting) return;
+        if (entry == null || entry.retired || entry.admitting
+            || !entry.resumed) return;
         NativeReaderV2FirmwareAccess.Components components;
         try {
             components = firmware.inspect(entry.activity);
@@ -619,6 +654,7 @@ public final class NativeReaderV2Hooks {
         }
         entry.attemptedPath = path;
         entry.admitting = true;
+        final long admissionLifecycleGeneration = entry.lifecycleGeneration;
         ADMISSION.execute(new Runnable() {
             @Override public void run() {
                 NativeReaderV2DocumentGate.Evidence evidence = null;
@@ -633,8 +669,15 @@ public final class NativeReaderV2Hooks {
                 entry.activity.runOnUiThread(new Runnable() {
                     @Override public void run() {
                         entry.admitting = false;
-                        if (entry.retired || BY_ACTIVITY.get(entry.activity) != entry
-                            || !path.equals(currentPath(entry))) return;
+                        if (entry.retired || BY_ACTIVITY.get(entry.activity) != entry) {
+                            return;
+                        }
+                        if (!entry.resumed || entry.lifecycleGeneration !=
+                            admissionLifecycleGeneration) {
+                            if (entry.resumed) maybeAdmit(entry, true);
+                            return;
+                        }
+                        if (!path.equals(currentPath(entry))) return;
                         if (accepted == null) {
                             Log.i(TAG, "document not admitted path=" + path
                                 + " reason=" + (rejected == null
@@ -694,6 +737,7 @@ public final class NativeReaderV2Hooks {
         }
         final NativeReaderV2Runtime expectedRuntime = entry.runtime;
         entry.admitting = true;
+        final long admissionLifecycleGeneration = entry.lifecycleGeneration;
         ADMISSION.execute(new Runnable() {
             @Override public void run() {
                 final boolean current =
@@ -703,10 +747,15 @@ public final class NativeReaderV2Hooks {
                         entry.admitting = false;
                         if (entry.retired
                             || BY_ACTIVITY.get(entry.activity) != entry
-                            || entry.runtime != expectedRuntime
-                            || !path.equals(currentPath(entry))) {
+                            || entry.runtime != expectedRuntime) {
                             return;
                         }
+                        if (!entry.resumed || entry.lifecycleGeneration !=
+                            admissionLifecycleGeneration) {
+                            if (entry.resumed) maybeAdmit(entry, true);
+                            return;
+                        }
+                        if (!path.equals(currentPath(entry))) return;
                         if (current) {
                             expectedRuntime.scheduleRefresh(
                                 "resume_authority_revalidated"
@@ -823,6 +872,7 @@ public final class NativeReaderV2Hooks {
 
     private static void postOrRoutePen(
         Entry entry,
+        NativeReaderV2Runtime runtime,
         int x,
         int y,
         int pressure,
@@ -830,9 +880,9 @@ public final class NativeReaderV2Hooks {
     ) {
         long now = SystemClock.uptimeMillis();
         if (Looper.myLooper() == entry.activity.getMainLooper()) {
-            entry.runtime.routeNativePenPosition(x, y, pressure, now, chrome);
+            runtime.routeNativePenPosition(x, y, pressure, now, chrome);
         } else {
-            entry.runtime.postNativePenPosition(x, y, pressure, now, chrome);
+            runtime.postNativePenPosition(x, y, pressure, now, chrome);
         }
     }
 
@@ -843,6 +893,7 @@ public final class NativeReaderV2Hooks {
      */
     private static boolean routeAndroidPen(
         Entry entry,
+        NativeReaderV2Runtime runtime,
         MotionEvent event,
         List<RectD> chrome
     ) {
@@ -853,6 +904,7 @@ public final class NativeReaderV2Hooks {
             entry.androidPenPointerId = event.getPointerId(index);
             entry.androidPenPass = beginStylusRoute(
                 entry,
+                runtime,
                 event.getX(index),
                 event.getY(index),
                 chrome
@@ -886,6 +938,7 @@ public final class NativeReaderV2Hooks {
      */
     private static boolean beginStylusRoute(
         Entry entry,
+        NativeReaderV2Runtime runtime,
         double x,
         double y,
         List<RectD> chrome
@@ -893,7 +946,7 @@ public final class NativeReaderV2Hooks {
         synchronized (entry.stylusRouteLock) {
             if (!entry.stylusRouteActive) {
                 entry.stylusRoutePass =
-                    entry.runtime.mayPassNativePenImmediately(x, y, chrome);
+                    runtime.mayPassNativePenImmediately(x, y, chrome);
                 entry.stylusRouteActive = true;
             }
             return entry.stylusRoutePass;
@@ -906,6 +959,12 @@ public final class NativeReaderV2Hooks {
                 entry.stylusRouteActive = false;
                 entry.stylusRoutePass = false;
             }
+        }
+    }
+
+    private static boolean stylusRouteDecisionActive(Entry entry) {
+        synchronized (entry.stylusRouteLock) {
+            return entry.stylusRouteActive;
         }
     }
 
@@ -1012,14 +1071,26 @@ public final class NativeReaderV2Hooks {
         }
     }
 
-    private static List<RectD> chrome(Entry entry) {
+    private static List<RectD> refreshChromeAtContactStart(
+        Entry entry,
+        NativeReaderV2Runtime expectedRuntime
+    ) {
         NativeReaderV2ChromeTracker tracker = entry == null ? null : entry.chrome;
-        if (tracker != null
-            && Looper.myLooper() == entry.activity.getMainLooper()) {
+        if (tracker == null || expectedRuntime == null) return null;
+        if (Looper.myLooper() == entry.activity.getMainLooper()) {
             // Contact-start classification must see the current translated
             // toolbar/menu bounds, not the preceding global-layout frame.
             tracker.refresh();
         }
+        if (entry.retired || entry.runtime != expectedRuntime
+            || entry.chrome != tracker) {
+            return null;
+        }
+        return tracker.snapshot();
+    }
+
+    private static List<RectD> chromeSnapshot(Entry entry) {
+        NativeReaderV2ChromeTracker tracker = entry == null ? null : entry.chrome;
         return tracker == null ? Collections.<RectD>emptyList() : tracker.snapshot();
     }
 
@@ -1074,6 +1145,8 @@ public final class NativeReaderV2Hooks {
         volatile String attemptedPath;
         volatile boolean admitting;
         volatile boolean retired;
+        volatile boolean resumed;
+        volatile long lifecycleGeneration;
         volatile boolean penContact;
         volatile boolean penPass;
         volatile boolean androidPenContact;

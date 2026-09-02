@@ -563,10 +563,16 @@ export default function App() {
           (trustedNativeSpread.configured === true ||
             loadedNativeSpreadAuthority.state === 'pending' ||
             loadedNativeSpreadAuthority.state === 'recovery');
+        // A trusted v2 marker is the document's direction authority. Do not
+        // reopen the control UI or portrait page-turn path with an older
+        // per-document LTR preference after a crash or interrupted handoff.
+        const restoredDirection = nativeSpreadHasPersistedAppearance
+          ? 'rtl'
+          : restored.direction;
 
         filePathRef.current = context.filePath;
         nativePageIndexAtOpenRef.current = context.pageIndex;
-        directionRef.current = restored.direction;
+        directionRef.current = restoredDirection;
         viewModeRef.current = restored.viewMode;
         const restoredCoverSeparate = nativeSpreadHasPersistedAppearance
           ? trustedNativeSpread.coverSeparate === true
@@ -589,7 +595,7 @@ export default function App() {
         pageIndexRef.current = restored.pageIndex;
 
         setDocumentContext(context);
-        setDirection(restored.direction);
+        setDirection(restoredDirection);
         setViewMode(restored.viewMode);
         setCoverSeparate(restoredCoverSeparate);
         setShowSpreadDivider(restoredDivider);

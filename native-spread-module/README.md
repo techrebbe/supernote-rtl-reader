@@ -1,7 +1,7 @@
 # Supernote Native Reader v2 companion module
 
 This LSPosed module supplies the rooted native-reader enhancement controlled by
-Supernote RTL Reader. v0.0.136 is a pre-hardware, exact-firmware candidate. It
+Supernote RTL Reader. v0.0.137 is a pre-hardware, exact-firmware candidate. It
 opens the original PDF and keeps Supernote's own writer, links, text tools,
 highlights, and page-local `.mark` annotation data while adding:
 
@@ -34,7 +34,7 @@ hardware-tested environment:
 The remainder of this version-by-version section describes the retired
 v0.0.75-v0.0.135 `SpreadProbe` experiment. It is retained to preserve the
 hardware evidence and design lessons that informed v2; none of these legacy
-hooks are executable in the v0.0.136 package. The authoritative current v2
+hooks are executable in the v0.0.137 package. The authoritative current v2
 behavior is the architecture and compatibility contract above.
 
 The read-only marker sets `editable=false`. In that mode v0.0.75
@@ -380,14 +380,14 @@ package, and verify the APK; it does not upload that non-upgrade-compatible
 build. Trusted `main` pushes and manual workflow runs restore the repository's
 stable signing identity from an encrypted Actions secret and publish the
 verified upgrade-compatible APK as
-`supernote-native-reader-v2-v0.0.136`. Review branches never receive that
+`supernote-native-reader-v2-v0.0.137`. Review branches never receive that
 credential.
 
 ## Install
 
 Install the APK, enable **Supernote Native Reader v2** in LSPosed, scope it only
-to `com.supernote.document`, and restart the document reader. The v0.0.136 APK
-requires Supernote RTL Reader v0.4.15 and refuses every other companion
+to `com.supernote.document`, and restart the document reader. The v0.0.137 APK
+requires Supernote RTL Reader v0.4.16 and refuses every other companion
 contract version. Stylus contacts that
 begin inside the current visible native toolbar, page bar, selection menu, or
 popup are passed to Supernote for that exact gesture without publishing a

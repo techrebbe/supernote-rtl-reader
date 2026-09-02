@@ -10,7 +10,9 @@ param(
     ),
     [string]$DebugKeystore = $(
         Join-Path $env:USERPROFILE '.android\debug.keystore'
-    )
+    ),
+    [Parameter(Mandatory = $true)]
+    [string]$ExpectedSignerSha256
 )
 
 $ErrorActionPreference = 'Stop'
@@ -239,9 +241,24 @@ if ($LASTEXITCODE -ne 0) {
     throw "apksigner failed with exit code $LASTEXITCODE"
 }
 
-& $apksigner verify --verbose --print-certs $outputApk
+$verificationOutput = @(
+    & $apksigner verify --verbose --print-certs $outputApk 2>&1
+)
+$verificationOutput | ForEach-Object { Write-Host $_ }
 if ($LASTEXITCODE -ne 0) {
     throw "apksigner verification failed with exit code $LASTEXITCODE"
+}
+$normalizedExpectedSigner = $ExpectedSignerSha256.Trim().ToLowerInvariant()
+if ($normalizedExpectedSigner -notmatch '^[0-9a-f]{64}$') {
+    throw 'Expected signer SHA-256 is not canonical lowercase hexadecimal.'
+}
+$signerLine = "Signer #1 certificate SHA-256 digest: $normalizedExpectedSigner"
+if (-not ($verificationOutput -contains 'Number of signers: 1') -or
+    -not ($verificationOutput -contains $signerLine)) {
+    throw (
+        'APK signer does not match the exact established upgrade identity: ' +
+        $normalizedExpectedSigner
+    )
 }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem

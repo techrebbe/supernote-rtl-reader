@@ -32,11 +32,15 @@ public final class NativeReaderV2EntryPoint
         }
 
         try {
+            if (loadPackageParam.appInfo == null) {
+                throw new IllegalStateException(
+                    "active document application identity is unavailable"
+                );
+            }
             NativeReaderV2PackageAdmission.Report packageReport =
-                NativeReaderV2PackageAdmission.verify(
-                    new File(
-                        NativeReaderV2PackageAdmission.EXPECTED_APK_PATH
-                    ),
+                NativeReaderV2PackageAdmission.verifyLoaded(
+                    loadPackageParam.appInfo.sourceDir,
+                    loadPackageParam.appInfo.splitSourceDirs,
                     Build.FINGERPRINT
                 );
             NativeReaderFirmwareAdmission.Report firmwareReport =

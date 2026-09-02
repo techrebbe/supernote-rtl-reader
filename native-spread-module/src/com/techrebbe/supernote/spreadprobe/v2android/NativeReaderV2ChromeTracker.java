@@ -27,6 +27,7 @@ public final class NativeReaderV2ChromeTracker {
     private final Activity activity;
     private final View decor;
     private final Runnable failureHandler;
+    private final Runnable changeHandler;
     private final ViewTreeObserver.OnGlobalLayoutListener listener;
     private final ViewTreeObserver.OnPreDrawListener preDrawListener;
     private volatile List<RectD> published = Collections.emptyList();
@@ -38,14 +39,16 @@ public final class NativeReaderV2ChromeTracker {
     private static volatile Field windowManagerViewsField;
     public NativeReaderV2ChromeTracker(
         Activity activity,
-        Runnable failureHandler
+        Runnable failureHandler,
+        Runnable changeHandler
     ) {
         if (activity == null || activity.getWindow() == null
-            || failureHandler == null) {
+            || failureHandler == null || changeHandler == null) {
             throw new IllegalArgumentException("activity window is required");
         }
         this.activity = activity;
         this.failureHandler = failureHandler;
+        this.changeHandler = changeHandler;
         this.decor = activity.getWindow().getDecorView();
         if (decor == null) {
             throw new IllegalArgumentException("activity decor is required");
@@ -82,20 +85,26 @@ public final class NativeReaderV2ChromeTracker {
     public void refresh() {
         assertOwnerThread();
         if (retired || decor.getWidth() <= 0 || decor.getHeight() <= 0) return;
-        TreeMap<String, RectD> captured = new TreeMap<>();
-        long decorArea = (long) decor.getWidth() * (long) decor.getHeight();
-        collect(decor, false, decorArea, captured);
-        collectAdditionalWindows(decorArea, captured);
-        StringBuilder nextSignature = new StringBuilder();
-        for (Map.Entry<String, RectD> entry : captured.entrySet()) {
-            nextSignature.append(entry.getKey()).append(';');
+        try {
+            TreeMap<String, RectD> captured = new TreeMap<>();
+            long decorArea = (long) decor.getWidth() * (long) decor.getHeight();
+            collect(decor, false, decorArea, captured);
+            collectAdditionalWindows(decorArea, captured);
+            if (retired) return;
+            StringBuilder nextSignature = new StringBuilder();
+            for (Map.Entry<String, RectD> entry : captured.entrySet()) {
+                nextSignature.append(entry.getKey()).append(';');
+            }
+            String encoded = nextSignature.toString();
+            if (encoded.equals(signature)) return;
+            signature = encoded;
+            published = Collections.unmodifiableList(
+                new ArrayList<>(captured.values())
+            );
+            changeHandler.run();
+        } catch (Throwable failure) {
+            failClosed();
         }
-        String encoded = nextSignature.toString();
-        if (encoded.equals(signature)) return;
-        signature = encoded;
-        published = Collections.unmodifiableList(
-            new ArrayList<>(captured.values())
-        );
     }
 
     public void retire() {
@@ -164,9 +173,19 @@ public final class NativeReaderV2ChromeTracker {
             // Continuing without popover geometry could therefore route a
             // toolbar/lasso contact into the active document writer. Retire
             // the entire feature rather than silently weakening authority.
-            published = Collections.emptyList();
-            retired = true;
+            failClosed();
+        }
+    }
+
+    private void failClosed() {
+        if (retired) return;
+        published = Collections.emptyList();
+        retired = true;
+        try {
             failureHandler.run();
+        } catch (Throwable ignored) {
+            // The caller's runtime fence remains installed. Never propagate a
+            // queued layout/predraw failure into the document UI thread.
         }
     }
 

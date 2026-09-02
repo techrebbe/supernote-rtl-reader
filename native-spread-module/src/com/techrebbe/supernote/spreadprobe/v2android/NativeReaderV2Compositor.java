@@ -5,7 +5,6 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
-import android.graphics.PorterDuff;
 import android.graphics.RectF;
 
 import com.techrebbe.supernote.spreadprobe.v2.Affine2D;
@@ -106,99 +105,6 @@ public final class NativeReaderV2Compositor {
                 digest.recycle();
             }
         }
-    }
-
-    /**
-     * Refreshes only the active page's ink/digest halves in the already
-     * installed spread. Page pixels and the inactive projection are immutable
-     * for an ordinary completed stroke, so rebuilding three full-screen
-     * bitmaps (and rereading the inactive mark page) would be wasteful.
-     */
-    public void refreshActiveLayers(
-        NativeReaderV2FirmwareAccess.Components components,
-        Result current,
-        Bitmap activeNativeInk
-    ) {
-        if (components == null || current == null || current.recycled
-            || current.snapshot == null || !current.snapshot.writerReady
-            || components.readerPage != current.snapshot.activePageIndex
-            || !usable(current.ink) || !usable(current.digest)) {
-            throw new IllegalArgumentException(
-                "live writer-owned spread layers are required"
-            );
-        }
-        SpreadSnapshot snapshot = current.snapshot;
-        PageSlot slot = snapshot.slotForPage(snapshot.activePageIndex);
-        if (slot == null || slot.isBlank()) {
-            throw new IllegalStateException("active spread slot is unavailable");
-        }
-        Bitmap page = firmware.originBitmap(components, slot.sourcePageIndex);
-        RectD fullSource = usable(page) ? new RectD(
-            0,
-            0,
-            page.getWidth(),
-            page.getHeight()
-        ) : null;
-        if (!usable(page) || !contains(fullSource, slot.sourceBox)) {
-            throw new IllegalStateException(
-                "active page cache bitmap disagrees with spread geometry"
-            );
-        }
-        RectD contentClip = intersection(slot.screenBounds, slot.contentBounds);
-        int scratchLeft = Math.max(0, (int) Math.floor(slot.screenBounds.left));
-        int scratchTop = Math.max(0, (int) Math.floor(slot.screenBounds.top));
-        int scratchRight = Math.min(
-            current.ink.getWidth(),
-            (int) Math.ceil(slot.screenBounds.right)
-        );
-        int scratchBottom = Math.min(
-            current.ink.getHeight(),
-            (int) Math.ceil(slot.screenBounds.bottom)
-        );
-        if (scratchRight <= scratchLeft || scratchBottom <= scratchTop) {
-            throw new IllegalStateException("active spread slot has no pixels");
-        }
-        current.ensureActiveLayerScratch(
-            scratchRight - scratchLeft,
-            scratchBottom - scratchTop
-        );
-        Canvas inkScratch = new Canvas(current.activeInkScratch);
-        Canvas digestScratch = new Canvas(current.activeDigestScratch);
-        inkScratch.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
-        digestScratch.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
-        inkScratch.translate(-scratchLeft, -scratchTop);
-        digestScratch.translate(-scratchLeft, -scratchTop);
-
-        // Build both replacement layers off-screen. The installed bitmaps are
-        // not touched until every native read, geometry check, and draw has
-        // succeeded, so a failed refresh leaves the last coherent spread up.
-        drawDigest(components, slot, page, fullSource, contentClip, digestScratch);
-        drawActiveInk(
-            components,
-            slot,
-            page,
-            fullSource,
-            contentClip,
-            inkScratch,
-            activeNativeInk
-        );
-
-        Canvas inkCanvas = new Canvas(current.ink);
-        Canvas digestCanvas = new Canvas(current.digest);
-        clearSlot(inkCanvas, slot.screenBounds);
-        clearSlot(digestCanvas, slot.screenBounds);
-        inkCanvas.drawBitmap(
-            current.activeInkScratch,
-            scratchLeft,
-            scratchTop,
-            null
-        );
-        digestCanvas.drawBitmap(
-            current.activeDigestScratch,
-            scratchLeft,
-            scratchTop,
-            null
-        );
     }
 
     private void drawSlot(
@@ -312,7 +218,24 @@ public final class NativeReaderV2Compositor {
             );
             return;
         }
-        requireDisplayInkGeometry(activeNativeInk, page);
+        if (activeNativeInk.getWidth() == inkCanvas.getWidth()
+            && activeNativeInk.getHeight() == inkCanvas.getHeight()) {
+            // Once v2 owns DrawPath, the exact firmware presenter exposes its
+            // live layer in native display coordinates (1872x1404 on the
+            // Nomad landscape canvas), not in the origin page's portrait
+            // coordinates.  Preserve those pixels under the authoritative
+            // active-slot clip instead of applying the source-page transform
+            // a second time.
+            drawMapped(
+                inkCanvas,
+                activeNativeInk,
+                Affine2D.identity(),
+                contentClip,
+                INK_PAINT
+            );
+            return;
+        }
+        requireOriginInkGeometry(activeNativeInk, page);
         Affine2D activeInkToScreen = NativeDisplayTransform.displayToOrigin(
             slot.sourceBox,
             fullSource
@@ -324,21 +247,6 @@ public final class NativeReaderV2Compositor {
             contentClip,
             INK_PAINT
         );
-    }
-
-    private static void clearSlot(Canvas canvas, RectD bounds) {
-        int save = canvas.save();
-        try {
-            canvas.clipRect(new RectF(
-                (float) bounds.left,
-                (float) bounds.top,
-                (float) bounds.right,
-                (float) bounds.bottom
-            ));
-            canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
-        } finally {
-            canvas.restoreToCount(save);
-        }
     }
 
     private void drawCommittedInk(
@@ -438,7 +346,7 @@ public final class NativeReaderV2Compositor {
         return matrix;
     }
 
-    private static void requireDisplayInkGeometry(
+    private static void requireOriginInkGeometry(
         Bitmap bitmap,
         Bitmap page
     ) {
@@ -483,8 +391,6 @@ public final class NativeReaderV2Compositor {
         public final Bitmap background;
         public final Bitmap ink;
         public final Bitmap digest;
-        private Bitmap activeInkScratch;
-        private Bitmap activeDigestScratch;
         private boolean recycled;
 
         private Result(
@@ -499,57 +405,9 @@ public final class NativeReaderV2Compositor {
             this.digest = digest;
         }
 
-        private void ensureActiveLayerScratch(int width, int height) {
-            if (recycled || width <= 0 || height <= 0) {
-                throw new IllegalStateException("active layer scratch is invalid");
-            }
-            if (usable(activeInkScratch) && usable(activeDigestScratch)
-                && activeInkScratch.getWidth() == width
-                && activeInkScratch.getHeight() == height
-                && activeDigestScratch.getWidth() == width
-                && activeDigestScratch.getHeight() == height) {
-                return;
-            }
-            Bitmap nextInk = null;
-            Bitmap nextDigest = null;
-            try {
-                nextInk = Bitmap.createBitmap(
-                    width,
-                    height,
-                    Bitmap.Config.ARGB_8888
-                );
-                nextDigest = Bitmap.createBitmap(
-                    width,
-                    height,
-                    Bitmap.Config.ARGB_8888
-                );
-            } finally {
-                if (nextInk != null && nextDigest == null
-                    && !nextInk.isRecycled()) {
-                    nextInk.recycle();
-                }
-            }
-            recycleScratch();
-            activeInkScratch = nextInk;
-            activeDigestScratch = nextDigest;
-        }
-
-        private void recycleScratch() {
-            if (activeInkScratch != null && !activeInkScratch.isRecycled()) {
-                activeInkScratch.recycle();
-            }
-            if (activeDigestScratch != null
-                && !activeDigestScratch.isRecycled()) {
-                activeDigestScratch.recycle();
-            }
-            activeInkScratch = null;
-            activeDigestScratch = null;
-        }
-
         public synchronized void recycle() {
             if (recycled) return;
             recycled = true;
-            recycleScratch();
             if (!background.isRecycled()) background.recycle();
             if (!ink.isRecycled()) ink.recycle();
             if (!digest.isRecycled()) digest.recycle();

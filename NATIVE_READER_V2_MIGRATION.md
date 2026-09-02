@@ -58,6 +58,6 @@ geometry before that final save.
 
 ## Hardware gate
 
-v0.0.136 is a pre-hardware candidate. It must not replace the stable baseline
+v0.0.137 is a pre-hardware candidate. It must not replace the stable baseline
 until the exact-head automated review is clean and the full matrix in
 `NATIVE_READER_V2_REVIEW_GATES.md` passes on the Nomad.

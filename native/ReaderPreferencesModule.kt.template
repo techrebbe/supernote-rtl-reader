@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -47,7 +48,9 @@ class ReaderPreferencesModule(
         private const val NATIVE_SPREAD_PACKAGE =
             "com.techrebbe.supernote.spreadprobe"
         private const val PLUGIN_HOST_PACKAGE = "com.ratta.supernote.pluginhost"
-        private const val NATIVE_READER_V2_MIN_VERSION_CODE = 136L
+        private const val NATIVE_READER_V2_MIN_VERSION_CODE = 137L
+        private const val NATIVE_READER_V2_SIGNER_SHA256 =
+            "a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67"
         private const val NATIVE_SPREAD_MARKER_SUFFIX = ".snspread"
         private const val NATIVE_SPREAD_BACKUP_SUFFIX = ".snspread-backup.properties"
         private const val NATIVE_SPREAD_BACKUP_MARK_SUFFIX = ".snspread-backup.mark"
@@ -1117,6 +1120,7 @@ class ReaderPreferencesModule(
             putBoolean("moduleInstalled", capability.moduleVersionCode >= 0L)
             putDouble("moduleVersionCode", capability.moduleVersionCode.toDouble())
             putString("moduleVersionName", capability.moduleVersionName)
+            putString("moduleSignerSha256", capability.moduleSignerSha256)
             putDouble(
                 "documentVersionCode",
                 capability.documentVersionCode.toDouble(),
@@ -1145,6 +1149,7 @@ class ReaderPreferencesModule(
         val moduleVersionCode: Long,
         val moduleVersionName: String?,
         val documentVersionCode: Long,
+        val moduleSignerSha256: String?,
     )
 
     private data class NativeSpreadHandshake(
@@ -1307,6 +1312,44 @@ class ReaderPreferencesModule(
         return code to info.versionName
     }
 
+    @Suppress("DEPRECATION")
+    private fun signedPackageVersionCode(
+        packageName: String,
+    ): Triple<Long, String?, String> {
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            PackageManager.GET_SIGNATURES
+        }
+        val info = reactApplicationContext.packageManager.getPackageInfo(
+            packageName,
+            flags,
+        )
+        val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val signing = info.signingInfo
+                ?: throw IllegalStateException("Native Reader signer is unavailable")
+            if (signing.hasMultipleSigners()) {
+                throw IllegalStateException("Native Reader has multiple current signers")
+            }
+            signing.apkContentsSigners
+        } else {
+            info.signatures
+        }
+        if (signatures == null || signatures.size != 1) {
+            throw IllegalStateException("Native Reader signer set is not exact")
+        }
+        val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.longVersionCode
+        } else {
+            info.versionCode.toLong()
+        }
+        return Triple(
+            code,
+            info.versionName,
+            sha256(signatures[0].toByteArray()),
+        )
+    }
+
     private fun requestNativeSpreadHandshake(
         pdfFile: File,
         callback: (NativeSpreadHandshake) -> Unit,
@@ -1433,9 +1476,9 @@ class ReaderPreferencesModule(
 
     private fun nativeSpreadCapability(): NativeSpreadCapability {
         val module = try {
-            packageVersionCode(NATIVE_SPREAD_PACKAGE)
+            signedPackageVersionCode(NATIVE_SPREAD_PACKAGE)
         } catch (_: Throwable) {
-            -1L to null
+            Triple(-1L, null, "")
         }
         val document = try {
             packageVersionCode(DOCUMENT_PACKAGE).first
@@ -1444,12 +1487,14 @@ class ReaderPreferencesModule(
         }
         val compatible = Build.FINGERPRINT == SUPPORTED_FINGERPRINT &&
             document == SUPPORTED_DOCUMENT_VERSION_CODE &&
-            module.first == NATIVE_READER_V2_MIN_VERSION_CODE
+            module.first == NATIVE_READER_V2_MIN_VERSION_CODE &&
+            module.third == NATIVE_READER_V2_SIGNER_SHA256
         return NativeSpreadCapability(
             compatible,
             module.first,
             module.second,
             document,
+            module.third.ifEmpty { null },
         )
     }
 
@@ -4062,6 +4107,12 @@ class ReaderPreferencesModule(
                 }
 
                 val currentMark = nativeAnnotationMark(pdfFile)
+                val preRestoreMarkPresent = currentMark.isFile
+                val preRestoreMarkBytes = if (preRestoreMarkPresent) {
+                    currentMark.readBytes()
+                } else {
+                    null
+                }
                 if (revalidatedBackup.originalMarkPresent) {
                     if (revalidatedBackup.snapshot.length() != revalidatedBackup.markLength ||
                         sha256(revalidatedBackup.snapshot) != revalidatedBackup.markSha256) {
@@ -4075,12 +4126,31 @@ class ReaderPreferencesModule(
                                 activityManager,
                                 "before-mark-publish",
                             )
+                            requireBackupDocumentIdentity(
+                                pdfFile,
+                                revalidatedBackup,
+                                "before-mark-publish",
+                            )
                         },
                         onPublished = {
-                            requireDocumentProcessAbsent(
-                                activityManager,
-                                "after-mark-publish",
-                            )
+                            try {
+                                requireDocumentProcessAbsent(
+                                    activityManager,
+                                    "after-mark-publish",
+                                )
+                                requireBackupDocumentIdentity(
+                                    pdfFile,
+                                    revalidatedBackup,
+                                    "after-mark-publish",
+                                )
+                            } catch (identityFailure: Throwable) {
+                                restorePrePublicationMark(
+                                    currentMark,
+                                    preRestoreMarkPresent,
+                                    preRestoreMarkBytes,
+                                )
+                                throw identityFailure
+                            }
                         },
                     )
                     if (currentMark.length() != revalidatedBackup.markLength ||
@@ -4088,14 +4158,41 @@ class ReaderPreferencesModule(
                     ) {
                         throw IllegalStateException("Restored annotation file verification failed")
                     }
+                    requireBackupDocumentIdentity(
+                        pdfFile,
+                        revalidatedBackup,
+                        "after-mark-verification",
+                    )
                 } else {
                     requireDocumentProcessAbsent(activityManager, "before-mark-delete")
+                    requireBackupDocumentIdentity(
+                        pdfFile,
+                        revalidatedBackup,
+                        "before-mark-delete",
+                    )
                     if (!deleteFileDurably(currentMark)) {
                         throw IllegalStateException(
                             "Could not restore the original no-annotation state",
                         )
                     }
-                    requireDocumentProcessAbsent(activityManager, "after-mark-delete")
+                    try {
+                        requireDocumentProcessAbsent(
+                            activityManager,
+                            "after-mark-delete",
+                        )
+                        requireBackupDocumentIdentity(
+                            pdfFile,
+                            revalidatedBackup,
+                            "after-mark-delete",
+                        )
+                    } catch (identityFailure: Throwable) {
+                        restorePrePublicationMark(
+                            currentMark,
+                            preRestoreMarkPresent,
+                            preRestoreMarkBytes,
+                        )
+                        throw identityFailure
+                    }
                 }
 
                 Log.i(
@@ -4103,6 +4200,11 @@ class ReaderPreferencesModule(
                     "RTL_READER_NATIVE_BACKUP_RESTORED originalPresent=${revalidatedBackup.originalMarkPresent} mark=${currentMark.absolutePath}",
                 )
                 requireDocumentProcessAbsent(activityManager, "before-backup-retirement")
+                requireBackupDocumentIdentity(
+                    pdfFile,
+                    revalidatedBackup,
+                    "before-backup-retirement",
+                )
                 removeNativeAnnotationBackupFiles(pdfFile, revalidatedBackup)
                 SystemClock.sleep(250)
                 reactApplicationContext.startActivity(Intent().apply {
@@ -4140,6 +4242,39 @@ class ReaderPreferencesModule(
             name = "RtlReaderAnnotationRecovery"
             isDaemon = true
             start()
+        }
+    }
+
+    private fun requireBackupDocumentIdentity(
+        pdfFile: File,
+        backup: NativeAnnotationBackup,
+        phase: String,
+    ) {
+        if (pdfFile.canonicalPath != backup.documentPath ||
+            !pdfFile.isFile ||
+            pdfFile.length() != backup.documentLength ||
+            sha256(pdfFile) != backup.documentSha256
+        ) {
+            throw IllegalStateException(
+                "PDF identity changed during annotation recovery: $phase",
+            )
+        }
+    }
+
+    private fun restorePrePublicationMark(
+        mark: File,
+        wasPresent: Boolean,
+        previousBytes: ByteArray?,
+    ) {
+        if (wasPresent) {
+            val bytes = previousBytes ?: throw IllegalStateException(
+                "Missing pre-publication mark rollback bytes",
+            )
+            writeBytesAtomically(mark, bytes)
+        } else if (!deleteFileDurably(mark)) {
+            throw IllegalStateException(
+                "Could not remove rejected annotation publication",
+            )
         }
     }
 }

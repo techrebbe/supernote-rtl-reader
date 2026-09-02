@@ -22,6 +22,25 @@ public final class NativeReaderV2PackageAdmission {
 
     private NativeReaderV2PackageAdmission() {}
 
+    public static Report verifyLoaded(
+        String sourceDir,
+        String[] splitSourceDirs,
+        String fingerprint
+    ) {
+        if (sourceDir == null
+            || !EXPECTED_APK_PATH.equals(new File(sourceDir).getAbsolutePath())) {
+            throw new IllegalStateException(
+                "active document class loader is not backed by the admitted APK"
+            );
+        }
+        if (splitSourceDirs != null && splitSourceDirs.length != 0) {
+            throw new IllegalStateException(
+                "active document class loader has unadmitted split APKs"
+            );
+        }
+        return verify(new File(sourceDir), fingerprint);
+    }
+
     public static Report verify(File apk, String fingerprint) {
         if (!EXPECTED_FINGERPRINT.equals(fingerprint)) {
             throw new IllegalStateException("firmware fingerprint mismatch");

@@ -46,6 +46,41 @@ public final class NativeReaderV2DocumentGate {
 
     private NativeReaderV2DocumentGate() {}
 
+    /**
+     * Minimal synchronous signal used only to install a fail-closed input
+     * fence before the expensive descriptor/hash admission starts. The
+     * marker's content is never trusted here; full admission remains on the
+     * worker and rejects every malformed or stale byte.
+     */
+    public static boolean candidateMarkerPresent(String documentPath) {
+        if (documentPath == null || documentPath.indexOf('\0') >= 0) {
+            return false;
+        }
+        try {
+            // This is deliberately a lexical sibling lookup. Resolving the
+            // marker (or the document) through canonical paths here would add
+            // avoidable UI-thread filesystem work and could hide a hostile
+            // symlink before full descriptor-backed admission sees it.
+            File document = new File(documentPath).getAbsoluteFile();
+            File parent = document.getParentFile();
+            if (parent == null) return false;
+            String markerPath = new File(
+                parent,
+                "." + document.getName() + MARKER_SUFFIX
+            ).getAbsolutePath();
+            Os.lstat(markerPath);
+            // Any filesystem object at the authority path installs the early
+            // fence. The worker decides whether it is the one exact regular,
+            // bounded, descriptor-stable marker; malformed candidates may not
+            // fall through to stock writing during that decision.
+            return true;
+        } catch (ErrnoException failure) {
+            return failure.errno != OsConstants.ENOENT;
+        } catch (Throwable ambiguous) {
+            return true;
+        }
+    }
+
     public static Evidence admit(String documentPath) {
         if (Looper.myLooper() == Looper.getMainLooper()) {
             throw new IllegalStateException(
@@ -327,12 +362,16 @@ public final class NativeReaderV2DocumentGate {
     }
 
     /**
-     * Main-thread-safe identity check used before every privileged native
-     * operation. Initial admission and resume revalidation still hash the
-     * authority bytes off-thread; this guard prevents stale admitted evidence
-     * from surviving an in-place rewrite or path replacement between resumes.
+     * Cheap descriptor-identity revalidation used around asynchronous native
+     * publication/save boundaries. Even lstat is forbidden on the document UI
+     * thread: input routing consumes only already-published in-memory authority.
      */
     public static boolean fastEvidenceStillCurrent(Evidence evidence) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            throw new IllegalStateException(
+                "document identity revalidation is forbidden on the main thread"
+            );
+        }
         if (evidence == null || evidence.claim == null) return false;
         try {
             if (!evidence.documentIdentity.sameVersion(regularIdentity(

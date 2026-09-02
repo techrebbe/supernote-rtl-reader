@@ -740,7 +740,7 @@ public final class NativeReaderV2CoreTests {
             hash
         ), "older companion contract rejected");
         java.util.Properties futureContract = committedV2Marker(hash);
-        futureContract.setProperty("minimumModuleVersionCode", "137");
+        futureContract.setProperty("minimumModuleVersionCode", "138");
         expectThrows(() -> NativeReaderV2MarkerClaim.admit(
             futureContract,
             "/storage/emulated/0/Document/book.pdf",
@@ -804,7 +804,7 @@ public final class NativeReaderV2CoreTests {
         properties.setProperty("managedBy", "supernote-rtl-reader");
         properties.setProperty("mode", NativeReaderV2MarkerClaim.MODE);
         properties.setProperty("transactionProtocol", "2");
-        properties.setProperty("minimumModuleVersionCode", "136");
+        properties.setProperty("minimumModuleVersionCode", "137");
         properties.setProperty("activationState", "committed");
         properties.setProperty("backupVerified", "true");
         properties.setProperty(

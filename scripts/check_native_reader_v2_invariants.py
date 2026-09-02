@@ -96,15 +96,15 @@ def main() -> None:
     require(
         manifest,
         [
-            'android:versionCode="136"',
-            'android:versionName="0.0.136"',
+            'android:versionCode="137"',
+            'android:versionName="0.0.137"',
             'android:label="Supernote Native Reader v2"',
         ],
         "v2 manifest",
     )
     require(
         plugin_config,
-        ['"versionCode": "34"', '"versionName": "0.4.15"'],
+        ['"versionCode": "35"', '"versionName": "0.4.16"'],
         "plugin version",
     )
     if (
@@ -113,7 +113,7 @@ def main() -> None:
         not in read(root / "build.sh")
     ):
         fail("plugin build does not execute the exclusive v2 invariant gate")
-    if "RTL_READER_OPEN v0.4.15-native-reader-v2" not in index:
+    if "RTL_READER_OPEN v0.4.16-native-reader-v2" not in index:
         fail("runtime marker does not identify the v2 plugin build")
     require(
         guidance,
@@ -131,7 +131,7 @@ def main() -> None:
     ordered(
         entry,
         [
-            "NativeReaderV2PackageAdmission.verify(",
+            "NativeReaderV2PackageAdmission.verifyLoaded(",
             "NativeReaderFirmwareAdmission.verify(",
             "NativeReaderV2Hooks.install(",
         ],
@@ -142,6 +142,9 @@ def main() -> None:
         [
             '!TARGET_PACKAGE.equals(loadPackageParam.packageName)',
             '!TARGET_PACKAGE.equals(loadPackageParam.processName)',
+            "loadPackageParam.appInfo == null",
+            "loadPackageParam.appInfo.sourceDir",
+            "loadPackageParam.appInfo.splitSourceDirs",
             'log("rejected; no hooks installed: " + failure)',
         ],
         "entry-point containment",
@@ -156,6 +159,9 @@ def main() -> None:
             "EXPECTED_APK_PATH",
             "EXPECTED_APK_LENGTH = 138486560L",
             "EXPECTED_APK_SHA256",
+            "public static Report verifyLoaded(",
+            "active document class loader is not backed by the admitted APK",
+            "active document class loader has unadmitted split APKs",
             "OsConstants.O_NOFOLLOW",
             "StructStat pathBefore = Os.lstat(EXPECTED_APK_PATH)",
             "StructStat pathAfter = Os.lstat(EXPECTED_APK_PATH)",
@@ -220,6 +226,17 @@ def main() -> None:
             "entry.resumed = false;",
             "final long admissionLifecycleGeneration = entry.lifecycleGeneration;",
             "if (!entry.resumed || entry.lifecycleGeneration !=",
+            "volatile boolean admissionFence;",
+            "candidateMarkerPresent(path);",
+            "indexAdmissionComponents(entry, components);",
+            "onRuntimeInputAuthorityReady(",
+            "entry.admissionFence = false;",
+            "fingerPhysicalContact = true;",
+            "runtime.mayPassNativePenImmediately(x, y, chrome)",
+            "scheduleNativeTerminalGuard(entry, runtime);",
+            "entry.suppressNativeUntilTerminal = true;",
+            "runtime.cancelMissingNativePenTerminal();",
+            "guardedHookContinuation(",
         ],
         "hook installation and resume authority",
     )
@@ -227,6 +244,8 @@ def main() -> None:
         fail("input hooks still rescan native chrome after contact classification")
     if "refreshChromeAtContactStart" in hooks or "tracker.refresh();" in hooks:
         fail("input hooks still traverse native chrome at contact start")
+    if hooks.count("if (entry.admissionFence)") < 5:
+        fail("configured-document admission fence does not cover all write/navigation hooks")
     require(
         chrome_tracker,
         [
@@ -239,6 +258,8 @@ def main() -> None:
             "published = Collections.emptyList();",
             "retired = true;",
             "failureHandler.run();",
+            "changeHandler.run();",
+            "failClosed();",
         ],
         "fail-closed native chrome inventory",
     )
@@ -274,6 +295,20 @@ def main() -> None:
         fail("presentation refresh can race callback-thread pen DOWN")
     if runtime.count("nativePenCallbackContact = false;") < 2:
         fail("native pen callback latch lacks terminal and retirement release")
+    begin_route = hooks.find("private static boolean beginStylusRoute(")
+    end_route = hooks.find("private static void scheduleNativeTerminalGuard(", begin_route)
+    if begin_route < 0 or end_route < 0:
+        fail("could not isolate stylus/finger physical contact fence")
+    require(
+        hooks[begin_route:end_route],
+        [
+            "synchronized (entry.stylusRouteLock)",
+            "!entry.fingerPhysicalContact",
+            "runtime.mayPassNativePenImmediately(x, y, chrome)",
+            "entry.stylusRouteActive = true;",
+        ],
+        "single-decision cross-tool contact fence",
+    )
     require(
         runtime,
         [
@@ -415,22 +450,25 @@ def main() -> None:
             "private volatile SpreadSession session;",
             "private volatile boolean inputFrozen;",
             "private volatile boolean retired;",
+            "private boolean containedFailClosed;",
+            "private final ExecutorService projectionExecutor",
             "admissionEvidenceStillCurrent()",
             "NativeReaderV2DocumentGate.evidenceStillCurrent(evidence)",
-            "NativeReaderV2DocumentGate.fastEvidenceStillCurrent(evidence)",
-            "admitted document or recovery evidence changed",
+            "fastEvidenceStillCurrent(evidence)",
             "private NativeReaderV2FirmwareAccess.Components inspectNativeCurrent()",
             "Revoking the external marker must stop all new authorized work",
             "disableNativeReaderV2(\"admission_evidence_changed\")",
-            "return true;\n        if (inputFrozen) return false;",
+            "if (nativeLifecycleHandoffPending) return false;",
+            "if (inputFrozen) return false;",
             "scheduleActivationTimeout",
             "saveWitness.abort(token);",
             "presentationPublicationAttempted = true;",
             "restorePageGeometryQuietly(\"compose_failed\")",
             "restoreWriterGeometryQuietly(\"compose_failed\")",
             "SN_NATIVE_READER_V2 compose failed",
-            "retire(reason, true);",
-            "SN_NATIVE_READER_V2 fail-closed retirement",
+            "restoreStockPresentationForRetirement(reason)",
+            "containFailClosed(reason);",
+            "runtime retained fail-closed reason=",
             "current.handWriteView == components.handWriteView",
             "current.digestImage == components.digestImage",
             "current.documentLayout == components.documentLayout",
@@ -444,32 +482,86 @@ def main() -> None:
             "refresh ignored during transaction phase=",
             "if (stable.markRevision == markRevision) return stable;",
             "stable.snapshot,\n                true,\n                markRevision",
+            "PhysicalContactFence physicalContactFence",
+            "physicalContactFence.stylusContactActive()",
+            "MotionEvent.ACTION_POINTER_DOWN",
+            "cancelFingerGesture(event.getEventTime());",
+            "cancelMissingNativePenTerminal()",
+            "private final ArrayDeque<DeferredNavigation>",
+            "snapshot.layoutGeneration < request.layoutGeneration",
+            "snapshot.activePageIndex != request.sourcePage",
+            "stale deferred navigation discarded",
+            "postGuarded(\"projection_completion\"",
+            "queued continuation failed label=",
         ],
         "runtime concurrency and input containment",
     )
-    compose_start = runtime.find("private boolean composeAndPublish(")
-    compose_end = runtime.find(
-        "private void leaveSpreadForPortrait(",
-        compose_start,
+    if "inspectCurrent(" in runtime:
+        fail("runtime still performs filesystem authority checks on the UI thread")
+    if len(re.findall(r"fastEvidenceStillCurrent\(\s*evidence", runtime)) != 4:
+        fail("async authority bracketing changed without invariant review")
+    if runtime.count("compositor.compose(") != 1:
+        fail("spread compositor has more than one presentation path")
+    if "ownerHandler.post(new Runnable()" in runtime:
+        fail("unguarded runtime continuation can escape onto the UI thread")
+    require(
+        runtime,
+        ["ownerHandler.post(guarded(label, action));"],
+        "guarded runtime continuation publication",
     )
+    pointer_start = runtime.find(
+        "if (action == MotionEvent.ACTION_POINTER_DOWN"
+    )
+    pointer_end = runtime.find("boolean terminal =", pointer_start)
+    if pointer_start < 0 or pointer_end < 0:
+        fail("could not isolate multi-pointer cancellation")
+    require(
+        runtime[pointer_start:pointer_end],
+        [
+            "|| action == MotionEvent.ACTION_POINTER_UP",
+            "cancelFingerGesture(event.getEventTime());",
+            "fingerConcurrentBlocked = true;",
+            "return true;",
+        ],
+        "multi-pointer gesture cancellation",
+    )
+    compose_start = runtime.find("private boolean beginComposition(")
+    compose_end = runtime.find("private void completeComposition(", compose_start)
     if compose_start < 0 or compose_end < 0:
-        fail("could not isolate spread composition transaction")
+        fail("could not isolate asynchronous spread composition")
     ordered(
         runtime[compose_start:compose_end],
         [
             "inputFrozen = true;",
-            "next = compositor.compose(current, snapshot, activeInk);",
+            "projectionExecutor.execute(new Runnable()",
+            "fastEvidenceStillCurrent(evidence)",
+            "prepared = compositor.compose(",
+            "authority changed during projection",
+            "postGuarded(\"projection_completion\"",
+        ],
+        "off-thread composition and evidence bracketing",
+    )
+    publish_start = runtime.find("private boolean publishPreparedComposition(")
+    publish_end = runtime.find("private void leaveSpreadForPortrait(", publish_start)
+    if publish_start < 0 or publish_end < 0:
+        fail("could not isolate spread publication transaction")
+    ordered(
+        runtime[publish_start:publish_end],
+        [
             'firmware.disableWriter(current, "SN_NATIVE_READER_V2 compose")',
+            "restoreWriterGeometry();",
+            "restorePageGeometry();",
+            "capturePresentationScale(",
             "presentationPublicationAttempted = true;",
             "firmware.setBackground(current, next.background);",
             "pageGeometryLease = firmware.programPageGeometry(",
             "firmware.programWriterGeometry(",
             "committed = true;",
         ],
-        "read-only composition before native mutation",
+        "prepared spread publication transaction",
     )
     require(
-        runtime[compose_start:compose_end],
+        runtime[compose_start:publish_end],
         [
             "boolean inputWasFrozen = inputFrozen;",
             "inputFrozen = inputWasFrozen;",
@@ -477,6 +569,8 @@ def main() -> None:
         ],
         "composition preflight rollback",
     )
+    if "refreshActiveLayersIfPossible" in runtime:
+        fail("dead UI-thread active-layer compositor remains reachable")
     disable_start = runtime.find(
         "public void disableNativeReaderV2(String reason)"
     )
@@ -487,15 +581,33 @@ def main() -> None:
     if disable_start < 0 or disable_end < 0:
         fail("could not isolate fail-closed writer disable")
     disable_segment = runtime[disable_start:disable_end]
-    if "inspectNativeCurrent()" not in disable_segment:
-        fail("authority revocation can prevent native writer disable")
-    if "inspectCurrent()" in disable_segment:
-        fail("fail-closed writer disable still depends on revoked evidence")
+    if "containFailClosed(reason);" not in disable_segment:
+        fail("runtime disable does not retain fail-closed hook ownership")
+    contain_start = runtime.find("private void containFailClosed(String reason)")
+    contain_end = runtime.find("private void beginNativeLifecycleHandoff(", contain_start)
+    if contain_start < 0 or contain_end < 0:
+        fail("could not isolate retained fail-closed containment")
+    require(
+        runtime[contain_start:contain_end],
+        [
+            "inputFrozen = true;",
+            "containedFailClosed = true;",
+            "inspectNativeCurrent();",
+            "firmware.disableWriter(",
+        ],
+        "authority-independent writer containment",
+    )
     require(
         hooks,
         [
             'VIEW_MODEL, loader, "openDocument",',
-            "entry.runtime.prepareNativeDocumentOpen();",
+            "boolean prepared = entry.runtime.prepareNativeDocumentOpen();",
+            (
+                "if (!prepared) {\n"
+                "                        // The old document remains the writer authority until"
+            ),
+            "param.setResult(null);",
+            'if (!resetRuntime(entry, "native_document_open"))',
             'resetRuntime(',
             "entry.attemptedPath = null;",
         ],
@@ -521,6 +633,38 @@ def main() -> None:
             "firmware.releaseProjectionReader();",
         ],
         "pre-URI document replacement ordering",
+    )
+    retirement_start = runtime.find("public boolean retire(String reason)")
+    retirement_end = runtime.find(
+        "public void retireAfterNativeDestroy(String reason)",
+        retirement_start,
+    )
+    if retirement_start < 0 or retirement_end < 0:
+        fail("could not isolate safe runtime retirement")
+    ordered(
+        runtime[retirement_start:retirement_end],
+        [
+            "restoreStockPresentationForRetirement(reason)",
+            "containFailClosed(reason);",
+            "return false;",
+            "detachmentPrepared = true;",
+            "retirePrepared(reason, false);",
+        ],
+        "save/restore before hook detachment",
+    )
+    reset_start = hooks.find("private static boolean resetRuntime(")
+    reset_end = hooks.find("private static void releaseDestroyedEntry(", reset_start)
+    if reset_start < 0 or reset_end < 0:
+        fail("could not isolate hook/runtime detachment")
+    ordered(
+        hooks[reset_start:reset_end],
+        [
+            "if (runtime != null && !runtime.retire(reason))",
+            "return false;",
+            "entry.runtime = null;",
+            "BY_COMPONENT.remove(component, entry);",
+        ],
+        "hook detachment after runtime retirement proof",
     )
     routed_pen = runtime.find("if (penContact) {")
     pen_finish = runtime.find("if (pressure <= 0) {", routed_pen)
@@ -579,6 +723,11 @@ def main() -> None:
         [
             "document admission is forbidden on the main thread",
             "document revalidation is forbidden on the main thread",
+            "document identity revalidation is forbidden on the main thread",
+            "public static boolean candidateMarkerPresent(String documentPath)",
+            "Os.lstat(markerPath);",
+            "return failure.errno != OsConstants.ENOENT;",
+            "catch (Throwable ambiguous)",
             "StableBytes markerBefore",
             "StableDigest document = hashRegularFile(canonical)",
             "StableBytes markerAfter",
@@ -597,6 +746,8 @@ def main() -> None:
         ],
         "document and recovery admission",
     )
+    if "getCanonicalFile()" in gate[gate.find("candidateMarkerPresent"):gate.find("public static Evidence admit")]:
+        fail("early marker fence performs canonical filesystem resolution")
     ordered(
         gate,
         [
@@ -612,7 +763,7 @@ def main() -> None:
     require(
         marker,
         [
-            "MINIMUM_COMPANION_MODULE_VERSION = 136L",
+            "MINIMUM_COMPANION_MODULE_VERSION = 137L",
             "COMMITTED_FIELDS.equals(properties.stringPropertyNames())",
             "minimumVersion != MINIMUM_COMPANION_MODULE_VERSION",
             'requireExact(properties, "activationState", "committed")',
@@ -729,13 +880,14 @@ def main() -> None:
     require(
         runtime,
         [
-            "ownerHandler.post(new Runnable()",
+            "postGuarded(\"native_pen_position\"",
+            "postGuarded(\"refresh:\" + refreshReason",
+            "guarded(\n                \"refresh_retry:\" + reason",
             "queued source-save inspection failed",
             "sourceSaveAuthorityMatches(source)",
             "Always cross a queue boundary",
-            "refreshActiveLayersIfPossible(current, reason)",
-            '"native_pen_contact_complete".equals(reason)',
-            "compositor.refreshActiveLayers(current, visible, activeInk);",
+            "source-save prevalidation failed",
+            "source-save postvalidation failed",
             "statusOverlay.protectedAreas(",
             "concatenateMasks(",
             "firmware.programWriterGeometry(",
@@ -744,18 +896,41 @@ def main() -> None:
         "custom status chrome writer exclusion",
     )
     require(
+        runtime,
+        [
+            "public void onTrackedNativeChromeChanged(List<RectD> visibleChrome)",
+            "new ArrayList<>(safeChrome(visibleChrome))",
+            "List<RectD> writerChrome = concatenateMasks(",
+            "trackedChromeMasks,",
+            "firmware.nativeChromeDisabledAreas(current), writerChrome",
+            "firmware.refreshWriterDisabledAreas(",
+            (
+                "firmware.refreshWriterDisabledAreas(\n"
+                "                current,\n"
+                "                geometry,\n"
+                "                writerChrome"
+            ),
+        ],
+        "all visible pass-through chrome excluded from native writer",
+    )
+    require(
         compositor,
         [
-            "public void refreshActiveLayers(",
-            "current.ensureActiveLayerScratch(",
-            "Build both replacement layers off-screen.",
-            "clearSlot(inkCanvas, slot.screenBounds);",
-            "clearSlot(digestCanvas, slot.screenBounds);",
-            "current.activeInkScratch,",
-            "current.activeDigestScratch,",
             "drawActiveInk(",
+            "activeNativeInk.getWidth() == inkCanvas.getWidth()",
+            "Affine2D.identity()",
+            "requireOriginInkGeometry(activeNativeInk, page);",
         ],
-        "failure-atomic settled-stroke layer refresh",
+        "native-display versus origin-space live ink",
+    )
+    require(
+        runtime,
+        [
+            "Bitmap activeInk = writerGeometryLease == null",
+            "? null : firmware.liveHandwritingBitmap(current);",
+            "return new RectD(0, 0, bitmap.getWidth(), bitmap.getHeight());",
+        ],
+        "first-spread live ink and full-origin sizing authority",
     )
     require(
         firmware,
@@ -853,6 +1028,10 @@ def main() -> None:
     require(
         build,
         [
+            "[string]$ExpectedSignerSha256",
+            "Expected signer SHA-256 is not canonical lowercase hexadecimal.",
+            "Number of signers: 1",
+            "APK signer does not match the exact established upgrade identity",
             "$legacySource",
             "exclude it from compilation entirely",
             "'SpreadProbe*.class'",
@@ -875,15 +1054,25 @@ def main() -> None:
             "Legacy read-only settings cannot be edited.",
             "Legacy read-only appearance cannot be edited.",
             "(!nativeSpreadCompatible || !nativeSpreadConfiguredEditable)",
+            "const restoredDirection = nativeSpreadHasPersistedAppearance",
+            "? 'rtl'",
+            "directionRef.current = restoredDirection;",
+            "setDirection(restoredDirection);",
         ],
         "v2 settings UI",
     )
     require(
         plugin,
         [
-            "NATIVE_READER_V2_MIN_VERSION_CODE = 136L",
+            "NATIVE_READER_V2_MIN_VERSION_CODE = 137L",
+            "NATIVE_READER_V2_SIGNER_SHA256 =",
+            "PackageManager.GET_SIGNING_CERTIFICATES",
+            "signing.hasMultipleSigners()",
+            "Native Reader signer set is not exact",
             "moduleVersionCode == NATIVE_READER_V2_MIN_VERSION_CODE",
             "module.first == NATIVE_READER_V2_MIN_VERSION_CODE",
+            "module.third == NATIVE_READER_V2_SIGNER_SHA256",
+            'putString("moduleSignerSha256", capability.moduleSignerSha256)',
             "Native Reader v2 supports only Off or protected native editing.",
             '"enabled",\n                configuredEditable && runtimeCompatible',
         ],
@@ -903,6 +1092,20 @@ def main() -> None:
             "syncParentDirectory(destination)",
             "Files.deleteIfExists(file.toPath())",
             "if (!deleted) return true",
+            "requireBackupDocumentIdentity(",
+            (
+                "requireBackupDocumentIdentity(\n"
+                "                                pdfFile,\n"
+                "                                revalidatedBackup,\n"
+                '                                "before-mark-publish",'
+            ),
+            '"before-mark-publish"',
+            '"after-mark-publish"',
+            '"after-mark-verification"',
+            '"before-mark-delete"',
+            '"after-mark-delete"',
+            '"before-backup-retirement"',
+            "restorePrePublicationMark(",
         ],
         "crash-durable atomic publication",
     )
@@ -911,11 +1114,13 @@ def main() -> None:
         workflow,
         [
             "python3 scripts/check_native_reader_v2_invariants.py .",
-            "supernote-rtl-reader-v0.4.15-native-reader-v2",
+            "supernote-rtl-reader-v0.4.16-native-reader-v2",
             "native-spread-upgrade-artifact:",
-            "if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'",
+            "if: github.event_name == 'push' && github.ref == 'refs/heads/main'",
             "secrets.NATIVE_SPREAD_KEYSTORE_B64",
-            "supernote-native-reader-v2-v0.0.136",
+            "-ExpectedSignerSha256 $runnerSigner",
+            "-ExpectedSignerSha256 a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67",
+            "supernote-native-reader-v2-v0.0.137",
         ],
         "CI v2 gates",
     )
@@ -923,6 +1128,9 @@ def main() -> None:
         fail("release CI still treats the retired legacy engine as runtime authority")
     if "ndk;" in workflow or "-AndroidNdk" in workflow:
         fail("release CI still provisions the retired legacy native hook toolchain")
+    stable_job = workflow[workflow.find("native-spread-upgrade-artifact:"):]
+    if "workflow_dispatch" in stable_job.split("  build:", 1)[0]:
+        fail("stable signing credential is reachable from a manual ref")
 
     print("Native Reader v2 invariants: PASS")
 

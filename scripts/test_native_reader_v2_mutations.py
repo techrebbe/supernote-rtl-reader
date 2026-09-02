@@ -258,6 +258,179 @@ MUTATIONS = (
 )
 
 
+# Android/framework code cannot run in the host JVM suite. Mutate each
+# security/lifecycle invariant in an isolated repository copy and prove the
+# fail-closed static gate rejects it. This converts recurring review findings
+# into deterministic regression coverage instead of relying on prose review.
+STATIC_MUTATIONS = (
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Compositor.java",
+        "                Affine2D.identity(),",
+        "                slot.sourceToScreen,",
+        "live presenter display transform",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        (
+            "                    if (!prepared) {\n"
+            "                        // The old document remains the writer authority until"
+        ),
+        (
+            "                    if (false) {\n"
+            "                        // The old document remains the writer authority until"
+        ),
+        "document replacement abort",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "        if (runtime != null && !runtime.retire(reason)) {",
+        "        if (runtime != null && false) {",
+        "retirement restoration proof",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "                entry.stylusRoutePass = !entry.fingerPhysicalContact\n"
+        "                    && runtime.mayPassNativePenImmediately(x, y, chrome);",
+        "                entry.stylusRoutePass =\n"
+        "                    runtime.mayPassNativePenImmediately(x, y, chrome);",
+        "cross-tool physical fence",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        (
+            "                            requireBackupDocumentIdentity(\n"
+            "                                pdfFile,\n"
+            "                                revalidatedBackup,\n"
+            '                                "before-mark-publish",'
+        ),
+        (
+            "                            requireBackupDocumentIdentity(\n"
+            "                                pdfFile,\n"
+            "                                revalidatedBackup,\n"
+            '                                "before-mark-publish-disabled",'
+        ),
+        "restore PDF publication revalidation",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "            .candidateMarkerPresent(path);",
+        "            .candidateMarkerPresent(path) && false;",
+        "pre-admission configured document fence",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2EntryPoint.java",
+        "NativeReaderV2PackageAdmission.verifyLoaded(",
+        "NativeReaderV2PackageAdmission.verify(",
+        "loaded APK classloader authority",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        (
+            "            firmware.refreshWriterDisabledAreas(\n"
+            "                current,\n"
+            "                geometry,\n"
+            "                writerChrome"
+        ),
+        (
+            "            firmware.refreshWriterDisabledAreas(\n"
+            "                current,\n"
+            "                geometry,\n"
+            "                Collections.<RectD>emptyList()"
+        ),
+        "native chrome writer mask",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "            scheduleNativeTerminalGuard(entry, runtime);",
+        "            releaseStylusRouteIfComplete(entry);",
+        "missing native pen terminal guard",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "        return new RectD(0, 0, bitmap.getWidth(), bitmap.getHeight());",
+        "        return new RectD(1, 1, bitmap.getWidth(), bitmap.getHeight());",
+        "full origin sizing authority",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "        ownerHandler.post(guarded(label, action));",
+        "        ownerHandler.post(action);",
+        "guarded queued continuation",
+    ),
+    (
+        ".github/workflows/build.yml",
+        "if: github.event_name == 'push' && github.ref == 'refs/heads/main'",
+        "if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'",
+        "stable signing ref scope",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "            module.third == NATIVE_READER_V2_SIGNER_SHA256",
+        "            true",
+        "runtime companion signer pin",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "    private NativeReaderV2FirmwareAccess.Components inspectNativeCurrent() {",
+        "    private NativeReaderV2FirmwareAccess.Components inspectCurrent() {",
+        "no UI-thread filesystem authority check",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "            || snapshot.layoutGeneration < request.layoutGeneration) {",
+        "            || false) {",
+        "deferred navigation generation fence",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "            cancelFingerGesture(event.getEventTime());\n"
+        "            fingerConcurrentBlocked = true;",
+        "            fingerConcurrentBlocked = true;",
+        "multi-pointer cancellation",
+    ),
+    (
+        "overlay/App.js",
+        "          ? 'rtl'\n          : restored.direction;",
+        "          ? restored.direction\n          : restored.direction;",
+        "trusted marker direction authority",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "            return failure.errno != OsConstants.ENOENT;",
+        "            return false;",
+        "malformed marker early fence",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "        Bitmap activeInk = writerGeometryLease == null\n"
+        "            ? null : firmware.liveHandwritingBitmap(current);",
+        "        Bitmap activeInk = firmware.liveHandwritingBitmap(current);",
+        "first spread live ink authority",
+    ),
+    (
+        "native-spread-module/build.ps1",
+        "if (-not ($verificationOutput -contains 'Number of signers: 1') -or",
+        "if ($false -or",
+        "packaged signer verification",
+    ),
+)
+
+
 def fail(message: str) -> None:
     raise SystemExit(f"test_native_reader_v2_mutations.py: {message}")
 
@@ -301,6 +474,58 @@ def compile_and_run(
     )
 
 
+def prepare_static_tree(root: pathlib.Path, destination: pathlib.Path) -> None:
+    destination.mkdir()
+    for name in ("AGENTS.md", "build.sh", "PluginConfig.json"):
+        shutil.copy2(root / name, destination / name)
+    for name in (".github", "overlay", "native", "native-spread-module"):
+        shutil.copytree(
+            root / name,
+            destination / name,
+            ignore=shutil.ignore_patterns(
+                "build",
+                "out",
+                "node_modules",
+                "__pycache__",
+                "*.pyc",
+            ),
+        )
+    scripts = destination / "scripts"
+    scripts.mkdir()
+    shutil.copy2(
+        root / "scripts" / "check_native_reader_v2_invariants.py",
+        scripts / "check_native_reader_v2_invariants.py",
+    )
+
+
+def run_static_mutations(root: pathlib.Path, temp_root: pathlib.Path) -> None:
+    static_root = temp_root / "android-static"
+    prepare_static_tree(root, static_root)
+    checker = static_root / "scripts" / "check_native_reader_v2_invariants.py"
+    for relative, old, new, label in STATIC_MUTATIONS:
+        target = static_root / pathlib.PurePosixPath(relative)
+        original = target.read_text(encoding="utf-8")
+        if original.count(old) != 1:
+            fail(
+                f"{label} static mutation marker count is "
+                f"{original.count(old)}, not 1"
+            )
+        target.write_text(original.replace(old, new), encoding="utf-8")
+        try:
+            result = subprocess.run(
+                [sys.executable, os.fspath(checker), os.fspath(static_root)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            if result.returncode == 0:
+                fail(f"critical static mutation survived: {label}")
+            print(f"Static mutation rejected: {label}")
+        finally:
+            target.write_text(original, encoding="utf-8")
+
+
 def main() -> None:
     root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
     original_source = (
@@ -341,7 +566,9 @@ def main() -> None:
             if result.returncode == 0:
                 fail(f"critical mutation survived: {label}")
             print(f"Mutation rejected: {label}")
-    print(f"Native Reader v2 mutation tests: PASS ({len(MUTATIONS)} mutations)")
+        run_static_mutations(root, temp_root)
+    total = len(MUTATIONS) + len(STATIC_MUTATIONS)
+    print(f"Native Reader v2 mutation tests: PASS ({total} mutations)")
 
 
 if __name__ == "__main__":

@@ -53,6 +53,7 @@ public final class NativeReaderV2Hooks {
     private static final String HANDSHAKE_RESPONSE =
         "com.techrebbe.supernote.spreadprobe.HANDSHAKE_RESPONSE";
     private static final int HANDSHAKE_PROTOCOL = 2;
+    private static final long NATIVE_PEN_TERMINAL_GRACE_MS = 250L;
 
     private static final ConcurrentHashMap<Object, Entry> BY_ACTIVITY =
         new ConcurrentHashMap<>();
@@ -339,14 +340,23 @@ public final class NativeReaderV2Hooks {
             new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam param) {
                     Entry entry = BY_COMPONENT.get(param.thisObject);
-                    if (entry == null || entry.runtime == null) return;
+                    if (entry == null) return;
+                    if (entry.runtime == null) {
+                        if (entry.admissionFence) param.setResult(null);
+                        return;
+                    }
                     boolean prepared = entry.runtime.prepareNativeDocumentOpen();
-                    resetRuntime(
-                        entry,
-                        prepared
-                            ? "native_document_open"
-                            : "native_document_open_prepare_failed"
-                    );
+                    if (!prepared) {
+                        // The old document remains the writer authority until
+                        // its source save and restoration complete. Never let
+                        // openDocument mutate the URI underneath that state.
+                        param.setResult(null);
+                        return;
+                    }
+                    if (!resetRuntime(entry, "native_document_open")) {
+                        param.setResult(null);
+                        return;
+                    }
                     // This may be a reload of the same canonical path. The
                     // old attempted-path suppression must not prevent fresh
                     // marker and document admission after the stock open.
@@ -359,14 +369,21 @@ public final class NativeReaderV2Hooks {
             new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam param) {
                     Entry entry = BY_COMPONENT.get(param.thisObject);
-                    if (entry == null || entry.runtime == null) return;
+                    if (entry == null) return;
+                    if (entry.runtime == null) {
+                        if (entry.admissionFence) param.setResult(null);
+                        return;
+                    }
                     int offset = (Integer) param.args[0];
                     if (!entry.runtime.isLandscapeActive()) {
                         param.args[0] = entry.runtime.adjustPortraitTurnOffset(offset);
                         return;
                     }
-                    int target = entry.runtime.targetForNativeOffset(offset);
-                    if (target >= 0) entry.runtime.requestNavigation(target);
+                    if (!entry.runtime.requestNativeTurn(offset)) {
+                        entry.runtime.disableNativeReaderV2(
+                            "native_turn_could_not_be_preserved"
+                        );
+                    }
                     param.setResult(null);
                 }
             }
@@ -382,8 +399,12 @@ public final class NativeReaderV2Hooks {
                     }
                     reloads.push(Boolean.FALSE);
                     Entry entry = BY_COMPONENT.get(param.thisObject);
-                    if (entry == null || entry.runtime == null
-                        || entry.runtime.isInternalPageLoad()
+                    if (entry == null) return;
+                    if (entry.runtime == null) {
+                        if (entry.admissionFence) param.setResult(null);
+                        return;
+                    }
+                    if (entry.runtime.isInternalPageLoad()
                         || !entry.runtime.isLandscapeActive()) return;
                     int target = (Integer) param.args[0];
                     if (Boolean.TRUE.equals(REPLAY_BYPASS.get())) {
@@ -407,7 +428,11 @@ public final class NativeReaderV2Hooks {
                         }
                         return;
                     }
-                    entry.runtime.requestNavigation(target);
+                    if (!entry.runtime.requestNavigation(target)) {
+                        entry.runtime.disableNativeReaderV2(
+                            "native_load_could_not_be_preserved"
+                        );
+                    }
                     param.setResult(null);
                 }
 
@@ -488,7 +513,13 @@ public final class NativeReaderV2Hooks {
                         return;
                     }
                     Entry entry = entry(param.thisObject);
-                    if (entry == null || entry.runtime == null) return;
+                    if (entry == null) return;
+                    if (entry.runtime == null) {
+                        if (entry.admissionFence) {
+                            param.setResult(Boolean.TRUE);
+                        }
+                        return;
+                    }
                     NativeReaderV2Runtime runtime = entry.runtime;
                     int tool = event.getToolType(event.getActionIndex());
                     // Input dispatch consumes only the immutable rectangles
@@ -504,7 +535,19 @@ public final class NativeReaderV2Hooks {
                     }
                     boolean consume;
                     if (tool == MotionEvent.TOOL_TYPE_FINGER) {
+                        synchronized (entry.stylusRouteLock) {
+                            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                                entry.fingerPhysicalContact = true;
+                            }
+                        }
                         consume = runtime.routeFinger(event, chrome);
+                        if (event.getActionMasked() == MotionEvent.ACTION_UP
+                            || event.getActionMasked()
+                                == MotionEvent.ACTION_CANCEL) {
+                            synchronized (entry.stylusRouteLock) {
+                                entry.fingerPhysicalContact = false;
+                            }
+                        }
                     } else if (tool == MotionEvent.TOOL_TYPE_STYLUS
                         || tool == MotionEvent.TOOL_TYPE_ERASER
                         || entry.androidPenContact) {
@@ -524,7 +567,11 @@ public final class NativeReaderV2Hooks {
             new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam param) {
                     Entry entry = BY_COMPONENT.get(param.thisObject);
-                    if (entry == null || entry.runtime == null) return;
+                    if (entry == null) return;
+                    if (entry.runtime == null) {
+                        if (entry.admissionFence) param.setResult(null);
+                        return;
+                    }
                     NativeReaderV2Runtime runtime = entry.runtime;
                     int x = (Integer) param.args[0];
                     int y = (Integer) param.args[1];
@@ -541,6 +588,18 @@ public final class NativeReaderV2Hooks {
                         return;
                     }
                     boolean pass;
+                    synchronized (entry.stylusRouteLock) {
+                        if (entry.suppressNativeUntilTerminal) {
+                            if (pressure <= 0) {
+                                entry.suppressNativeUntilTerminal = false;
+                                entry.penContact = false;
+                                entry.penPass = false;
+                                releaseStylusRouteIfComplete(entry);
+                            }
+                            param.setResult(null);
+                            return;
+                        }
+                    }
                     if (contactStart) {
                         entry.penContact = true;
                         runtime.noteNativePenCallbackContact();
@@ -644,10 +703,16 @@ public final class NativeReaderV2Hooks {
                 }
                 return;
             }
-            resetRuntime(entry, "document_changed");
+            if (!resetRuntime(entry, "document_changed")) return;
         }
         if (path == null || !forceRetry && path.equals(entry.attemptedPath)) {
             return;
+        }
+        entry.admissionFence = NativeReaderV2DocumentGate
+            .candidateMarkerPresent(path);
+        entry.admissionFencePath = entry.admissionFence ? path : null;
+        if (entry.admissionFence) {
+            indexAdmissionComponents(entry, components);
         }
         entry.attemptedPath = path;
         entry.admitting = true;
@@ -663,7 +728,10 @@ public final class NativeReaderV2Hooks {
                 }
                 final NativeReaderV2DocumentGate.Evidence accepted = evidence;
                 final Throwable rejected = failure;
-                entry.activity.runOnUiThread(new Runnable() {
+                entry.activity.runOnUiThread(guardedHookContinuation(
+                    entry,
+                    "document_admission",
+                    new Runnable() {
                     @Override public void run() {
                         entry.admitting = false;
                         if (entry.retired || BY_ACTIVITY.get(entry.activity) != entry) {
@@ -679,6 +747,11 @@ public final class NativeReaderV2Hooks {
                             Log.i(TAG, "document not admitted path=" + path
                                 + " reason=" + (rejected == null
                                     ? "unknown" : rejected.getClass().getSimpleName()));
+                            if (!NativeReaderV2DocumentGate
+                                .candidateMarkerPresent(path)) {
+                                entry.admissionFence = false;
+                                entry.admissionFencePath = null;
+                            }
                             return;
                         }
                         try {
@@ -693,6 +766,27 @@ public final class NativeReaderV2Hooks {
                                         PointD point
                                     ) {
                                         replayFinger(activity, point);
+                                    }
+                                },
+                                new NativeReaderV2Runtime.PhysicalContactFence() {
+                                    @Override public boolean stylusContactActive() {
+                                        synchronized (entry.stylusRouteLock) {
+                                            return entry.penContact
+                                                || entry.androidPenContact
+                                                || entry.stylusRouteActive;
+                                        }
+                                    }
+                                },
+                                new NativeReaderV2Runtime.ActivationListener() {
+                                    @Override public void
+                                        onRuntimeInputAuthorityReady(
+                                            NativeReaderV2Runtime readyRuntime
+                                        ) {
+                                        if (entry.runtime == readyRuntime
+                                            && path.equals(currentPath(entry))) {
+                                            entry.admissionFence = false;
+                                            entry.admissionFencePath = null;
+                                        }
                                     }
                                 }
                             );
@@ -709,6 +803,17 @@ public final class NativeReaderV2Hooks {
                                             );
                                         }
                                     }
+                                },
+                                new Runnable() {
+                                    @Override public void run() {
+                                        if (entry.runtime == admittedRuntime
+                                            && entry.chrome != null) {
+                                            admittedRuntime
+                                                .onTrackedNativeChromeChanged(
+                                                    entry.chrome.snapshot()
+                                                );
+                                        }
+                                    }
                                 }
                             );
                             reindex(entry);
@@ -719,7 +824,7 @@ public final class NativeReaderV2Hooks {
                             retire(entry, "activation_failed");
                         }
                     }
-                });
+                }));
             }
         });
     }
@@ -737,9 +842,19 @@ public final class NativeReaderV2Hooks {
         final long admissionLifecycleGeneration = entry.lifecycleGeneration;
         ADMISSION.execute(new Runnable() {
             @Override public void run() {
-                final boolean current =
-                    expectedRuntime.admissionEvidenceStillCurrent();
-                entry.activity.runOnUiThread(new Runnable() {
+                boolean verified = false;
+                Throwable verificationFailure = null;
+                try {
+                    verified = expectedRuntime.admissionEvidenceStillCurrent();
+                } catch (Throwable failure) {
+                    verificationFailure = failure;
+                }
+                final boolean current = verified;
+                final Throwable rejected = verificationFailure;
+                entry.activity.runOnUiThread(guardedHookContinuation(
+                    entry,
+                    "resume_revalidation",
+                    new Runnable() {
                     @Override public void run() {
                         entry.admitting = false;
                         if (entry.retired
@@ -753,16 +868,22 @@ public final class NativeReaderV2Hooks {
                             return;
                         }
                         if (!path.equals(currentPath(entry))) return;
+                        if (rejected != null) {
+                            Log.e(TAG, "resume authority revalidation failed",
+                                rejected);
+                        }
                         if (current) {
                             expectedRuntime.scheduleRefresh(
                                 "resume_authority_revalidated"
                             );
                             return;
                         }
-                        resetRuntime(entry, "resume_authority_changed");
+                        if (!resetRuntime(entry, "resume_authority_changed")) {
+                            return;
+                        }
                         maybeAdmit(entry, true);
                     }
-                });
+                }));
             }
         });
     }
@@ -898,6 +1019,7 @@ public final class NativeReaderV2Hooks {
         if (action == MotionEvent.ACTION_DOWN) {
             int index = event.getActionIndex();
             entry.androidPenContact = true;
+            entry.nativeTerminalGeneration++;
             entry.androidPenPointerId = event.getPointerId(index);
             entry.androidPenPass = beginStylusRoute(
                 entry,
@@ -916,6 +1038,7 @@ public final class NativeReaderV2Hooks {
             entry.androidPenPass = false;
             entry.androidPenPointerId = -1;
             releaseStylusRouteIfComplete(entry);
+            scheduleNativeTerminalGuard(entry, runtime);
             return consume;
         }
         if (event.findPointerIndex(entry.androidPenPointerId) < 0) {
@@ -942,12 +1065,43 @@ public final class NativeReaderV2Hooks {
     ) {
         synchronized (entry.stylusRouteLock) {
             if (!entry.stylusRouteActive) {
-                entry.stylusRoutePass =
-                    runtime.mayPassNativePenImmediately(x, y, chrome);
+                entry.stylusRoutePass = !entry.fingerPhysicalContact
+                    && runtime.mayPassNativePenImmediately(x, y, chrome);
                 entry.stylusRouteActive = true;
             }
             return entry.stylusRoutePass;
         }
+    }
+
+    private static void scheduleNativeTerminalGuard(
+        Entry entry,
+        NativeReaderV2Runtime runtime
+    ) {
+        final long generation = ++entry.nativeTerminalGeneration;
+        entry.activity.getWindow().getDecorView().postDelayed(
+            guardedHookContinuation(
+                entry,
+                "native_terminal_guard",
+                new Runnable() {
+                @Override public void run() {
+                    if (entry.retired || entry.runtime != runtime
+                        || entry.nativeTerminalGeneration != generation) {
+                        return;
+                    }
+                    synchronized (entry.stylusRouteLock) {
+                        if (!entry.penContact || entry.androidPenContact) return;
+                        entry.suppressNativeUntilTerminal = true;
+                        entry.penPass = false;
+                        entry.stylusRoutePass = false;
+                    }
+                    runtime.cancelMissingNativePenTerminal();
+                    Log.w(TAG,
+                        "native pen pressure-zero terminal missing; "
+                            + "contact cancelled fail-closed");
+                }
+            }),
+            NATIVE_PEN_TERMINAL_GRACE_MS
+        );
     }
 
     private static void releaseStylusRouteIfComplete(Entry entry) {
@@ -974,6 +1128,9 @@ public final class NativeReaderV2Hooks {
             entry.androidPenPointerId = -1;
             entry.stylusRouteActive = false;
             entry.stylusRoutePass = false;
+            entry.suppressNativeUntilTerminal = false;
+            entry.fingerPhysicalContact = false;
+            entry.nativeTerminalGeneration++;
         }
     }
 
@@ -1040,6 +1197,20 @@ public final class NativeReaderV2Hooks {
         }
     }
 
+    private static void indexAdmissionComponents(
+        Entry entry,
+        NativeReaderV2FirmwareAccess.Components components
+    ) {
+        if (entry == null || components == null || !entry.admissionFence) return;
+        index(entry, entry.activity);
+        index(entry, components.viewModel);
+        index(entry, components.presenter);
+        index(entry, components.handWriteView);
+        index(entry, components.eventCallback);
+        index(entry, components.image);
+        index(entry, components.note);
+    }
+
     private static void addIdentity(List<Object> values, Object candidate) {
         if (candidate != null && !containsIdentity(values, candidate)) {
             values.add(candidate);
@@ -1077,25 +1248,57 @@ public final class NativeReaderV2Hooks {
         return activity == null ? null : BY_ACTIVITY.get(activity);
     }
 
-    private static void retire(Entry entry, String reason) {
-        if (entry == null || entry.retired) return;
-        entry.retired = true;
-        resetRuntime(entry, reason);
+    private static Runnable guardedHookContinuation(
+        Entry entry,
+        String label,
+        Runnable action
+    ) {
+        if (action == null) {
+            throw new IllegalArgumentException("hook continuation is required");
+        }
+        return new Runnable() {
+            @Override public void run() {
+                if (entry == null || entry.retired) return;
+                try {
+                    action.run();
+                } catch (Throwable failure) {
+                    Log.e(TAG, "hook continuation failed label=" + label,
+                        failure);
+                    entry.admissionFence = true;
+                    NativeReaderV2Runtime runtime = entry.runtime;
+                    if (runtime != null) {
+                        runtime.disableNativeReaderV2(
+                            "hook_continuation_failed:" + label
+                        );
+                    }
+                }
+            }
+        };
     }
 
-    private static void resetRuntime(Entry entry, String reason) {
-        if (entry == null) return;
+    private static void retire(Entry entry, String reason) {
+        if (entry == null || entry.retired) return;
+        if (resetRuntime(entry, reason)) entry.retired = true;
+    }
+
+    private static boolean resetRuntime(Entry entry, String reason) {
+        if (entry == null) return true;
         NativeReaderV2Runtime runtime = entry.runtime;
         NativeReaderV2ChromeTracker chrome = entry.chrome;
+        if (runtime != null && !runtime.retire(reason)) {
+            Log.e(TAG, "runtime reset deferred by fail-closed containment reason="
+                + reason);
+            return false;
+        }
         entry.runtime = null;
         entry.chrome = null;
-        if (runtime != null) runtime.retire(reason);
         if (chrome != null) chrome.retire();
         for (Object component : entry.indexed) {
             BY_COMPONENT.remove(component, entry);
         }
         entry.indexed.clear();
         clearStylusContact(entry);
+        return true;
     }
 
     private static void releaseDestroyedEntry(Entry entry, String reason) {
@@ -1125,6 +1328,8 @@ public final class NativeReaderV2Hooks {
         volatile boolean admitting;
         volatile boolean retired;
         volatile boolean resumed;
+        volatile boolean admissionFence;
+        volatile String admissionFencePath;
         volatile long lifecycleGeneration;
         volatile boolean penContact;
         volatile boolean penPass;
@@ -1134,6 +1339,9 @@ public final class NativeReaderV2Hooks {
         final Object stylusRouteLock = new Object();
         boolean stylusRouteActive;
         boolean stylusRoutePass;
+        boolean suppressNativeUntilTerminal;
+        boolean fingerPhysicalContact;
+        long nativeTerminalGeneration;
 
         Entry(Activity activity, long generation) {
             this.activity = activity;

@@ -35,6 +35,13 @@ below passes on the exact source head used to build it.
   undocumented native sample queue.
 - Activity destruction and document replacement retire every callback,
   in-flight contact, bitmap, writer claim, and native component identity.
+- A safe non-destroy detachment requires acknowledged replacement of the stock
+  background, handwriting, and digest layers before hook/component ownership
+  is released. Projection workers are cancelled and drained off the UI thread
+  before their captured component identities are released.
+- Containment discovered during a physical stylus contact freezes new work but
+  cannot disable the native writer until both digital-position and Android
+  contact streams have reached their exact terminal boundary.
 - Save acknowledgement must precede source-owner release. Target load and
   component verification must precede writer publication.
 
@@ -49,6 +56,9 @@ below passes on the exact source head used to build it.
 - Recovery evidence binds exact PDF and `.mark` bytes before editable testing
   on a non-disposable document.
 - Every failure path is tested for preservation of unrelated strokes.
+- Marker parsing, recovery, and rollback read only a bounded regular
+  single-link file through `O_NOFOLLOW`, and revalidate descriptor/path identity
+  before consuming those bytes as authority.
 
 ## Containment gates
 

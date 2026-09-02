@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.ArrayDeque;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Owner-thread Android runtime for one admitted original PDF. No legacy
@@ -56,11 +57,24 @@ public final class NativeReaderV2Runtime
         void onRuntimeInputAuthorityReady(NativeReaderV2Runtime runtime);
     }
 
+    /** Hook owner removes a runtime only after stock owns all three views. */
+    public interface DetachmentListener {
+        void onRuntimeDetachmentReady(
+            NativeReaderV2Runtime runtime,
+            String reason
+        );
+    }
+
     private static final String TAG = "SN_NATIVE_READER_V2";
     private static final long READY_RETRY_MS = 60L;
     private static final int READY_RETRY_LIMIT = 40;
     private static final long ACTIVATION_TIMEOUT_MS = 10_000L;
     private static final int MAX_DEFERRED_NAVIGATION = 16;
+    private static final int STOCK_BACKGROUND_READY = 1;
+    private static final int STOCK_INK_READY = 2;
+    private static final int STOCK_DIGEST_READY = 4;
+    private static final int STOCK_PRESENTATION_READY =
+        STOCK_BACKGROUND_READY | STOCK_INK_READY | STOCK_DIGEST_READY;
 
     private final Activity activity;
     private final NativeReaderV2DocumentGate.Evidence evidence;
@@ -75,6 +89,7 @@ public final class NativeReaderV2Runtime
     private final FingerReplayInjector fingerReplayInjector;
     private final PhysicalContactFence physicalContactFence;
     private final ActivationListener activationListener;
+    private final DetachmentListener detachmentListener;
     private final ExecutorService projectionExecutor =
         Executors.newSingleThreadExecutor();
 
@@ -97,6 +112,7 @@ public final class NativeReaderV2Runtime
     private boolean writerDisabled;
     private volatile boolean inputFrozen;
     private volatile boolean retired;
+    private volatile boolean projectionShutdown;
     // Published on the firmware callback thread before Supernote receives
     // the first sample. The owner-thread GestureRouter token may be posted a
     // little later, so refresh also consults this zero-work contact latch.
@@ -112,6 +128,10 @@ public final class NativeReaderV2Runtime
     private boolean saveWitnessFault;
     private boolean detachmentPrepared;
     private boolean containedFailClosed;
+    private String pendingContainmentReason;
+    private boolean stockPresentationRestorePending;
+    private int stockPresentationReadyMask;
+    private String pendingRetirementReason;
     private boolean activationReported;
     private long compositionGeneration;
     private long fingerGestureToken;
@@ -136,7 +156,8 @@ public final class NativeReaderV2Runtime
         long activityGeneration,
         FingerReplayInjector fingerReplayInjector,
         PhysicalContactFence physicalContactFence,
-        ActivationListener activationListener
+        ActivationListener activationListener,
+        DetachmentListener detachmentListener
     ) {
         this.activity = Objects.requireNonNull(activity, "activity");
         this.evidence = Objects.requireNonNull(evidence, "evidence");
@@ -153,6 +174,10 @@ public final class NativeReaderV2Runtime
         this.activationListener = Objects.requireNonNull(
             activationListener,
             "activationListener"
+        );
+        this.detachmentListener = Objects.requireNonNull(
+            detachmentListener,
+            "detachmentListener"
         );
         if (activityGeneration <= 0L || Looper.myLooper() != activity.getMainLooper()) {
             throw new IllegalArgumentException(
@@ -176,6 +201,43 @@ public final class NativeReaderV2Runtime
 
     public boolean admissionEvidenceStillCurrent() {
         return NativeReaderV2DocumentGate.evidenceStillCurrent(evidence);
+    }
+
+    /**
+     * Starts activation only after a final worker-side proof of every
+     * persisted authority object. The admission fence remains installed until
+     * the resulting portrait or landscape publication reports ready.
+     */
+    public void start() {
+        assertOwnerThread();
+        if (retired || containedFailClosed) return;
+        inputFrozen = true;
+        executeProjection("activation_evidence", new Runnable() {
+            @Override public void run() {
+                try {
+                    final boolean current = NativeReaderV2DocumentGate
+                        .evidenceStillCurrent(evidence);
+                    postGuarded("activation_evidence", new Runnable() {
+                        @Override public void run() {
+                            if (!current) {
+                                containFailClosed(
+                                    "activation_publication_evidence_changed"
+                                );
+                                return;
+                            }
+                            scheduleRefresh("document_admitted_revalidated");
+                        }
+                    });
+                } catch (Throwable failure) {
+                    postGuarded("activation_evidence_failure", () -> {
+                        Log.e(TAG, "activation evidence check failed", failure);
+                        containFailClosed(
+                            "activation_publication_evidence_failed"
+                        );
+                    });
+                }
+            }
+        });
     }
 
     public boolean ownsViewModel(Object candidate) {
@@ -315,44 +377,22 @@ public final class NativeReaderV2Runtime
     public boolean prepareNativeDocumentOpen() {
         assertOwnerThread();
         if (retired) return false;
-        inputFrozen = true;
-        samePageReloadPrepared = false;
-        ++refreshGeneration;
-        if (port != null && port.phase() != NativeReaderFirmwarePort.Phase.IDLE) {
-            disableNativeReaderV2("document_open_during_writer_transfer");
-            return false;
-        }
-        if (latestObservation != null && !saveCurrentSourceNow()) {
-            disableNativeReaderV2("document_open_source_save_failed");
-            return false;
-        }
-        try {
-            NativeReaderV2FirmwareAccess.Components current =
-                inspectNativeCurrent();
-            if (writerGeometryLease != null || pageGeometryLease != null) {
-                firmware.disableWriter(
-                    current,
-                    "SN_NATIVE_READER_V2 native document open"
-                );
-                writerDisabled = true;
-            }
-            restoreWriterGeometry();
-            restorePageGeometry();
-            restorePresentationScale();
-            retireTransactionalCore();
-            // The projector is a native SuperNoteNote instance bound to the
-            // old document's .mark path. Do not leave that file/native state
-            // alive across DocumentViewModel's URI mutation, even when the
-            // next document is ordinary and never creates another projector.
-            firmware.releaseProjectionReader();
-            removeStatusOverlayQuietly("native_document_open");
+        if (detachmentPrepared || !ownsModifiedNativePresentation()) {
             detachmentPrepared = true;
             return true;
-        } catch (RuntimeException failure) {
-            Log.e(TAG, "native document-open restoration failed", failure);
-            disableNativeReaderV2("document_open_restore_failed");
+        }
+        if (stockPresentationRestorePending) return false;
+        if (hasLiveInputContact() || port != null
+            && port.phase() != NativeReaderFirmwarePort.Phase.IDLE) {
+            containFailClosed("document_open_during_live_authority");
             return false;
         }
+        if (!beginStockPresentationRestoration(null, "native_document_open")) {
+            containFailClosed("document_open_restore_failed");
+        }
+        // The triggering open is suppressed. It may be retried only after all
+        // three stock presentation layers acknowledge replacement.
+        return false;
     }
 
     /** Restores stock page geometry before DocumentViewModel changes crop. */
@@ -395,7 +435,8 @@ public final class NativeReaderV2Runtime
 
     public boolean suppressNativePresentation() {
         assertOwnerThread();
-        return !retired && (isLandscapeActive() || samePageReloadPrepared);
+        return !retired && !stockPresentationRestorePending
+            && (isLandscapeActive() || samePageReloadPrepared);
     }
 
     /**
@@ -465,9 +506,33 @@ public final class NativeReaderV2Runtime
         });
     }
 
+    /** Rechecks deferred lifecycle/containment after the hook fence releases. */
+    public void postPhysicalContactFenceReleased() {
+        postGuarded("physical_contact_fence_released", new Runnable() {
+            @Override public void run() {
+                settlePendingContainment();
+                completeNativeLifecycleHandoffIfReady();
+            }
+        });
+    }
+
     public void onNativePresentationChanged(String reason) {
         assertOwnerThread();
-        if (!retired) scheduleRefresh(reason);
+        if (!retired && !stockPresentationRestorePending) {
+            scheduleRefresh(reason);
+        }
+    }
+
+    public void onNativeStockBackgroundPresented() {
+        noteStockPresentationLayer(STOCK_BACKGROUND_READY);
+    }
+
+    public void onNativeStockInkPresented() {
+        noteStockPresentationLayer(STOCK_INK_READY);
+    }
+
+    public void onNativeStockDigestPresented() {
+        noteStockPresentationLayer(STOCK_DIGEST_READY);
     }
 
     public void onNativeDisableAreasChanged() {
@@ -561,11 +626,18 @@ public final class NativeReaderV2Runtime
             return fingerConsumed;
         }
         if (!fingerContact) return inputFrozen;
-        if (action == MotionEvent.ACTION_POINTER_DOWN
-            || action == MotionEvent.ACTION_POINTER_UP) {
+        if ((action == MotionEvent.ACTION_POINTER_DOWN
+            || action == MotionEvent.ACTION_POINTER_UP) && fingerConsumed) {
             cancelFingerGesture(event.getEventTime());
             fingerConcurrentBlocked = true;
             return true;
+        }
+        if (action == MotionEvent.ACTION_POINTER_DOWN
+            || action == MotionEvent.ACTION_POINTER_UP) {
+            // PASS_NATIVE is immutable for the complete physical contact.
+            // Stock already received DOWN; swallowing a later pointer edge
+            // without a matching CANCEL/UP would strand its touch target.
+            return false;
         }
         boolean terminal = action == MotionEvent.ACTION_UP
             || action == MotionEvent.ACTION_CANCEL;
@@ -695,6 +767,10 @@ public final class NativeReaderV2Runtime
                 if (isLandscapeActive()) {
                     scheduleRefresh("native_pen_contact_complete");
                 }
+                postGuarded(
+                    "pending_containment_after_native_pen",
+                    this::settlePendingContainment
+                );
             }
             return suppress;
         }
@@ -736,12 +812,16 @@ public final class NativeReaderV2Runtime
         if (isLandscapeActive()) {
             scheduleRefresh("native_pen_terminal_missing_cancelled");
         }
+        postGuarded(
+            "pending_containment_after_missing_terminal",
+            this::settlePendingContainment
+        );
     }
 
     /** Called after setImage/configuration/page-ready firmware callbacks. */
     public void scheduleRefresh(String reason) {
         assertOwnerThread();
-        if (retired) return;
+        if (retired || containedFailClosed || detachmentPrepared) return;
         long generation = ++refreshGeneration;
         final String refreshReason = reason == null ? "signal" : reason;
         postGuarded("refresh:" + refreshReason, new Runnable() {
@@ -867,19 +947,24 @@ public final class NativeReaderV2Runtime
     public boolean retire(String reason) {
         assertOwnerThread();
         if (retired) return true;
-        if (!detachmentPrepared && latestObservation != null) {
+        if (!detachmentPrepared && ownsModifiedNativePresentation()) {
             // A hook-discovery, revalidation, or component fault is not a
             // license to abandon a live writer. Preserve routing ownership
             // until the source is witnessed saved and stock presentation is
             // restored. If any boundary is unavailable, stay installed and
             // block input fail-closed.
+            if (stockPresentationRestorePending) return false;
             if (hasLiveInputContact() || port != null
-                && port.phase() != NativeReaderFirmwarePort.Phase.IDLE
-                || !restoreStockPresentationForRetirement(reason)) {
+                && port.phase() != NativeReaderFirmwarePort.Phase.IDLE) {
+                pendingRetirementReason = reason;
                 containFailClosed(reason);
                 return false;
             }
-            detachmentPrepared = true;
+            pendingRetirementReason = reason;
+            if (!beginStockPresentationRestoration(reason, "safe_retirement")) {
+                containFailClosed(reason);
+            }
+            return false;
         }
         retirePrepared(reason, false);
         return true;
@@ -895,13 +980,12 @@ public final class NativeReaderV2Runtime
     public void retireAfterNativeDestroy(String reason) {
         assertOwnerThread();
         if (retired) {
-            firmware.releaseComponentIds(components);
             components = null;
             return;
         }
         NativeReaderV2FirmwareAccess.Components releasedComponents = components;
         retired = true;
-        projectionExecutor.shutdown();
+        shutdownProjectionWorker(releasedComponents);
         inputFrozen = true;
         nativePenCallbackContact = false;
         samePageReloadPrepared = false;
@@ -915,7 +999,6 @@ public final class NativeReaderV2Runtime
         visible = null;
         latestObservation = null;
         components = null;
-        firmware.releaseComponentIds(releasedComponents);
         removeStatusOverlayQuietly("native_activity_destroyed");
         Log.w(TAG, "runtime released after native destroy reason=" + reason);
     }
@@ -925,7 +1008,7 @@ public final class NativeReaderV2Runtime
         if (retired) return;
         NativeReaderV2FirmwareAccess.Components releasedComponents = components;
         retired = true;
-        projectionExecutor.shutdown();
+        shutdownProjectionWorker(releasedComponents);
         inputFrozen = true;
         nativePenCallbackContact = false;
         samePageReloadPrepared = false;
@@ -953,49 +1036,130 @@ public final class NativeReaderV2Runtime
         visible = null;
         latestObservation = null;
         components = null;
-        firmware.releaseComponentIds(releasedComponents);
         removeStatusOverlayQuietly("runtime_retire");
         Log.w(TAG, "runtime retired reason=" + reason);
     }
 
-    private boolean restoreStockPresentationForRetirement(String reason) {
+    private boolean beginStockPresentationRestoration(
+        String retirementReason,
+        String operation
+    ) {
         inputFrozen = true;
         samePageReloadPrepared = false;
         ++refreshGeneration;
         try {
-            if (!saveCurrentSourceNow()) return false;
+            if (latestObservation != null && !saveCurrentSourceNow()) {
+                return false;
+            }
             NativeReaderV2FirmwareAccess.Components current =
                 inspectNativeCurrent();
             firmware.disableWriter(
                 current,
-                "SN_NATIVE_READER_V2 safe retirement " + reason
+                "SN_NATIVE_READER_V2 stock restore " + operation
             );
             writerDisabled = true;
             restoreWriterGeometry();
             restorePageGeometry();
             restorePresentationScale();
+            stockPresentationReadyMask = 0;
+            stockPresentationRestorePending = true;
+            pendingRetirementReason = retirementReason;
             internalPageLoad = true;
             try {
                 firmware.reloadDocumentPage(current);
             } finally {
                 internalPageLoad = false;
             }
-            retireTransactionalCore();
-            recycleVisible();
-            removeStatusOverlayQuietly("safe_retirement");
+            // Completion is asynchronous and requires explicit replacement of
+            // background, handwriting, and digest views. No component identity
+            // or v2 bitmap is released at this point.
             return true;
         } catch (RuntimeException failure) {
-            Log.e(TAG, "stock presentation restoration failed reason="
-                + reason, failure);
+            stockPresentationRestorePending = false;
+            stockPresentationReadyMask = 0;
+            Log.e(TAG, "stock presentation restoration failed operation="
+                + operation, failure);
             return false;
         }
     }
 
+    private void noteStockPresentationLayer(int layer) {
+        assertOwnerThread();
+        if (retired || !stockPresentationRestorePending) return;
+        stockPresentationReadyMask |= layer;
+        if (stockPresentationReadyMask != STOCK_PRESENTATION_READY) return;
+        try {
+            inspectNativeCurrent();
+            stockPresentationRestorePending = false;
+            stockPresentationReadyMask = 0;
+            retireTransactionalCore();
+            recycleVisible();
+            latestObservation = null;
+            writerDisabled = false;
+            detachmentPrepared = true;
+            removeStatusOverlayQuietly("stock_presentation_restored");
+            final String reason = pendingRetirementReason;
+            pendingRetirementReason = null;
+            if (reason != null) {
+                postGuarded("detachment_ready", () ->
+                    detachmentListener.onRuntimeDetachmentReady(this, reason)
+                );
+            }
+            Log.i(TAG, "stock presentation restoration acknowledged");
+        } catch (RuntimeException failure) {
+            stockPresentationRestorePending = false;
+            stockPresentationReadyMask = 0;
+            Log.e(TAG, "stock presentation acknowledgment failed", failure);
+            containFailClosed("stock_presentation_acknowledgment_failed");
+        }
+    }
+
+    private boolean ownsModifiedNativePresentation() {
+        return visible != null || session != null || writerGeometryLease != null
+            || pageGeometryLease != null || presentationScaleLease != null
+            || latestObservation != null;
+    }
+
     private void containFailClosed(String reason) {
+        if (retired) return;
         inputFrozen = true;
         samePageReloadPrepared = false;
         containedFailClosed = true;
         ++refreshGeneration;
+        if (hasPhysicalInputContact()) {
+            pendingContainmentReason = reason == null
+                ? "contained_failure_during_contact" : reason;
+            Log.e(TAG, "runtime containment deferred until contact terminal reason="
+                + pendingContainmentReason);
+            return;
+        }
+        disableContainedWriter(reason);
+    }
+
+    private void settlePendingContainment() {
+        assertOwnerThread();
+        if (retired || pendingContainmentReason == null
+            || hasPhysicalInputContact()) return;
+        String reason = pendingContainmentReason;
+        pendingContainmentReason = null;
+        disableContainedWriter(reason);
+        if (pendingRetirementReason != null
+            && !stockPresentationRestorePending
+            && ownsModifiedNativePresentation()
+            && (port == null
+                || port.phase() == NativeReaderFirmwarePort.Phase.IDLE)) {
+            String retirementReason = pendingRetirementReason;
+            if (!beginStockPresentationRestoration(
+                    retirementReason,
+                    "deferred_safe_retirement"
+                )) {
+                Log.e(TAG, "deferred stock restoration could not start reason="
+                    + retirementReason);
+            }
+        }
+    }
+
+    private void disableContainedWriter(String reason) {
         try {
             NativeReaderV2FirmwareAccess.Components current =
                 inspectNativeCurrent();
@@ -1070,7 +1234,8 @@ public final class NativeReaderV2Runtime
     }
 
     private boolean hasPhysicalInputContact() {
-        return nativePenCallbackContact || fingerContact || penContact;
+        return nativePenCallbackContact || fingerContact || penContact
+            || physicalContactFence.stylusContactActive();
     }
 
     private void clearNativeLifecycleHandoff() {
@@ -1083,6 +1248,7 @@ public final class NativeReaderV2Runtime
     private boolean hasLiveInputContact() {
         SpreadSession current = session;
         return nativePenCallbackContact || fingerContact || penContact
+            || physicalContactFence.stylusContactActive()
             || current != null && current.gestures().hasActiveGesture();
     }
 
@@ -1168,7 +1334,7 @@ public final class NativeReaderV2Runtime
         // Admission identity checks and PDF/marker lstat calls stay off the
         // input/UI thread. Native saveTrails itself remains owner-thread
         // confined, bracketed by worker-side authority checks.
-        projectionExecutor.execute(new Runnable() {
+        executeProjection("source_save_prevalidation", new Runnable() {
             @Override public void run() {
                 try {
                     final boolean admitted = NativeReaderV2DocumentGate
@@ -1222,7 +1388,7 @@ public final class NativeReaderV2Runtime
             source,
             "source save failed"
         );
-        projectionExecutor.execute(new Runnable() {
+        executeProjection("source_save_postvalidation", new Runnable() {
             @Override public void run() {
                 try {
                     final boolean admittedAfterSave = saved
@@ -1355,7 +1521,8 @@ public final class NativeReaderV2Runtime
     }
 
     private void refreshWhenReady(long generation, int attempt, String reason) {
-        if (retired || generation != refreshGeneration) return;
+        if (retired || containedFailClosed || detachmentPrepared
+            || generation != refreshGeneration) return;
         SpreadSession currentSession = session;
         if (nativePenCallbackContact || currentSession != null
             && currentSession.gestures().hasActiveGesture()) {
@@ -1473,7 +1640,7 @@ public final class NativeReaderV2Runtime
         inputFrozen = true;
         compositionGeneration = generation;
         try {
-            projectionExecutor.execute(new Runnable() {
+            boolean accepted = executeProjection("spread_composition", new Runnable() {
                 @Override public void run() {
                     NativeReaderV2Compositor.Result prepared = null;
                     Throwable failure = null;
@@ -1500,28 +1667,49 @@ public final class NativeReaderV2Runtime
                     } catch (Throwable caught) {
                         failure = caught;
                     }
+                    if (retired || projectionShutdown
+                        || Thread.currentThread().isInterrupted()) {
+                        if (prepared != null) prepared.recycle();
+                        return;
+                    }
                     final NativeReaderV2Compositor.Result result = prepared;
                     final Throwable projectionFailure = failure;
-                    postGuarded("projection_completion", new Runnable() {
+                    boolean posted = ownerHandler.post(new Runnable() {
                         @Override public void run() {
-                            completeComposition(
-                                current,
-                                snapshot,
-                                authority,
-                                canvas,
-                                nextLayout,
-                                generation,
-                                attempt,
-                                reason,
-                                inputWasFrozen,
-                                result,
-                                projectionFailure
-                            );
+                            try {
+                                completeComposition(
+                                    current,
+                                    snapshot,
+                                    authority,
+                                    canvas,
+                                    nextLayout,
+                                    generation,
+                                    attempt,
+                                    reason,
+                                    inputWasFrozen,
+                                    result,
+                                    projectionFailure
+                                );
+                            } catch (Throwable completionFailure) {
+                                if (result != null && result != visible) {
+                                    result.recycle();
+                                }
+                                Log.e(TAG,
+                                    "projection completion failed closed",
+                                    completionFailure);
+                                if (!retired) {
+                                    containFailClosed(
+                                        "projection_completion_failed"
+                                    );
+                                }
+                            }
                         }
                     });
+                    if (!posted && result != null) result.recycle();
                 }
             });
-            return true;
+            if (!accepted) inputFrozen = inputWasFrozen;
+            return accepted;
         } catch (RuntimeException failure) {
             inputFrozen = inputWasFrozen;
             throw failure;
@@ -1600,6 +1788,11 @@ public final class NativeReaderV2Runtime
         String reason,
         NativeReaderV2Compositor.Result next
     ) {
+        if (retired || containedFailClosed || detachmentPrepared) {
+            throw new IllegalStateException(
+                "contained or detached runtime cannot publish a composition"
+            );
+        }
         boolean committed = false;
         boolean presentationPublicationAttempted = false;
         NativeReaderV2Compositor.Result previous = visible;
@@ -2140,6 +2333,10 @@ public final class NativeReaderV2Runtime
         if (!consumed && isLandscapeActive()) {
             scheduleRefresh("native_finger_contact_complete");
         }
+        postGuarded(
+            "pending_containment_after_finger",
+            this::settlePendingContainment
+        );
     }
 
     private void clearPenRoute() {
@@ -2171,7 +2368,8 @@ public final class NativeReaderV2Runtime
     }
 
     private void requireLive() {
-        if (retired || components == null || latestObservation == null) {
+        if (retired || containedFailClosed || components == null
+            || latestObservation == null) {
             throw new IllegalStateException("Native Reader v2 is not live");
         }
     }
@@ -2184,6 +2382,62 @@ public final class NativeReaderV2Runtime
 
     private void postGuarded(String label, Runnable action) {
         ownerHandler.post(guarded(label, action));
+    }
+
+    private boolean executeProjection(String label, Runnable action) {
+        Objects.requireNonNull(action, "action");
+        if (retired || projectionShutdown) return false;
+        try {
+            projectionExecutor.execute(action);
+            return true;
+        } catch (RuntimeException rejected) {
+            if (!retired && !projectionShutdown) {
+                postGuarded("projection_rejected:" + label, () -> {
+                    Log.e(TAG, "projection work rejected label=" + label,
+                        rejected);
+                    containFailClosed("projection_work_rejected:" + label);
+                });
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Cancels speculative work immediately, then releases identity bookkeeping
+     * only after any already-running native projection has relinquished every
+     * captured component. Lifecycle callbacks never wait on that drain.
+     */
+    private void shutdownProjectionWorker(
+        NativeReaderV2FirmwareAccess.Components releasedComponents
+    ) {
+        if (projectionShutdown) return;
+        projectionShutdown = true;
+        projectionExecutor.shutdownNow();
+        Thread cleanup = new Thread(new Runnable() {
+            @Override public void run() {
+                boolean interrupted = false;
+                try {
+                    while (true) {
+                        try {
+                            if (projectionExecutor.awaitTermination(
+                                    1L,
+                                    TimeUnit.SECONDS
+                                )) break;
+                        } catch (InterruptedException stop) {
+                            interrupted = true;
+                        }
+                    }
+                    firmware.releaseProjectionReader();
+                    firmware.releaseComponentIds(releasedComponents);
+                } catch (RuntimeException failure) {
+                    Log.e(TAG, "projection worker cleanup failed", failure);
+                } finally {
+                    if (interrupted) Thread.currentThread().interrupt();
+                }
+            }
+        }, "NativeReaderV2ProjectionCleanup");
+        cleanup.setDaemon(true);
+        cleanup.start();
     }
 
     private Runnable guarded(String label, Runnable action) {

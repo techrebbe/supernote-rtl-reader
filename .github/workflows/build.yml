@@ -125,7 +125,11 @@ jobs:
 
   native-spread-upgrade-artifact:
     name: Native Reader v2 stable-signer artifact
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref == 'refs/heads/main' &&
+       github.actor == github.repository_owner)
     needs:
       - native-spread-build
     runs-on: windows-latest

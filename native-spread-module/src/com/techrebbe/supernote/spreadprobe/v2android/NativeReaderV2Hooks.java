@@ -191,6 +191,7 @@ public final class NativeReaderV2Hooks {
                         // transports even when the hardware omits an explicit
                         // UP sample after disabling DrawPath.
                         clearStylusContact(entry);
+                        entry.runtime.postPhysicalContactFenceReleased();
                     }
                 }
             }
@@ -283,6 +284,9 @@ public final class NativeReaderV2Hooks {
                     Entry entry = entry(param.thisObject);
                     if (entry != null && entry.runtime != null
                         && !Boolean.TRUE.equals(INTERNAL_PRESENTATION.get())) {
+                        if (param.getThrowable() == null) {
+                            entry.runtime.onNativeStockDigestPresented();
+                        }
                         entry.runtime.onNativePresentationChanged("setDigestImage");
                     }
                 }
@@ -308,6 +312,15 @@ public final class NativeReaderV2Hooks {
                         );
                     }
                 }
+
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    if (Boolean.TRUE.equals(INTERNAL_PRESENTATION.get())
+                        || param.getThrowable() != null) return;
+                    Entry entry = BY_COMPONENT.get(param.thisObject);
+                    if (entry != null && entry.runtime != null) {
+                        entry.runtime.onNativeStockBackgroundPresented();
+                    }
+                }
             }
         );
         hook(hooks,
@@ -322,6 +335,15 @@ public final class NativeReaderV2Hooks {
                         entry.runtime.onNativePresentationChanged(
                             "native_ink_presentation_suppressed"
                         );
+                    }
+                }
+
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    if (Boolean.TRUE.equals(INTERNAL_PRESENTATION.get())
+                        || param.getThrowable() != null) return;
+                    Entry entry = BY_COMPONENT.get(param.thisObject);
+                    if (entry != null && entry.runtime != null) {
+                        entry.runtime.onNativeStockInkPresented();
                     }
                 }
             }
@@ -703,17 +725,17 @@ public final class NativeReaderV2Hooks {
                 }
                 return;
             }
-            if (!resetRuntime(entry, "document_changed")) return;
+            if (!resetRuntime(entry, "document_changed", false, true)) return;
         }
         if (path == null || !forceRetry && path.equals(entry.attemptedPath)) {
             return;
         }
-        entry.admissionFence = NativeReaderV2DocumentGate
-            .candidateMarkerPresent(path);
-        entry.admissionFencePath = entry.admissionFence ? path : null;
-        if (entry.admissionFence) {
-            indexAdmissionComponents(entry, components);
-        }
+        // Fence first without touching storage on this hook/UI callback. The
+        // serialized worker decides whether a marker candidate exists and
+        // releases the fence for ordinary PDFs only after that lookup.
+        entry.admissionFence = true;
+        entry.admissionFencePath = path;
+        indexAdmissionComponents(entry, components);
         entry.attemptedPath = path;
         entry.admitting = true;
         final long admissionLifecycleGeneration = entry.lifecycleGeneration;
@@ -721,13 +743,25 @@ public final class NativeReaderV2Hooks {
             @Override public void run() {
                 NativeReaderV2DocumentGate.Evidence evidence = null;
                 Throwable failure = null;
+                boolean candidate = true;
                 try {
-                    evidence = NativeReaderV2DocumentGate.admit(path);
+                    candidate = NativeReaderV2DocumentGate
+                        .candidateMarkerPresent(path);
+                    if (candidate) {
+                        evidence = NativeReaderV2DocumentGate.admit(path);
+                        if (!NativeReaderV2DocumentGate
+                            .evidenceStillCurrent(evidence)) {
+                            throw new IllegalStateException(
+                                "admission evidence changed before publication"
+                            );
+                        }
+                    }
                 } catch (Throwable caught) {
                     failure = caught;
                 }
                 final NativeReaderV2DocumentGate.Evidence accepted = evidence;
                 final Throwable rejected = failure;
+                final boolean markerCandidate = candidate;
                 entry.activity.runOnUiThread(guardedHookContinuation(
                     entry,
                     "document_admission",
@@ -747,8 +781,7 @@ public final class NativeReaderV2Hooks {
                             Log.i(TAG, "document not admitted path=" + path
                                 + " reason=" + (rejected == null
                                     ? "unknown" : rejected.getClass().getSimpleName()));
-                            if (!NativeReaderV2DocumentGate
-                                .candidateMarkerPresent(path)) {
+                            if (!markerCandidate && rejected == null) {
                                 entry.admissionFence = false;
                                 entry.admissionFencePath = null;
                             }
@@ -788,6 +821,30 @@ public final class NativeReaderV2Hooks {
                                             entry.admissionFencePath = null;
                                         }
                                     }
+                                },
+                                new NativeReaderV2Runtime.DetachmentListener() {
+                                    @Override public void
+                                        onRuntimeDetachmentReady(
+                                            NativeReaderV2Runtime readyRuntime,
+                                            String reason
+                                        ) {
+                                        if (entry.runtime == readyRuntime) {
+                                            boolean retireEntry =
+                                                entry.retireAfterDetachment;
+                                            boolean retryAdmission =
+                                                entry.retryAdmissionAfterDetachment;
+                                            entry.retireAfterDetachment = false;
+                                            entry.retryAdmissionAfterDetachment = false;
+                                            if (resetRuntime(entry, reason)) {
+                                                if (retireEntry) {
+                                                    entry.retired = true;
+                                                } else if (retryAdmission
+                                                    && entry.resumed) {
+                                                    maybeAdmit(entry, true);
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             );
                             final NativeReaderV2Runtime admittedRuntime =
@@ -817,7 +874,7 @@ public final class NativeReaderV2Hooks {
                                 }
                             );
                             reindex(entry);
-                            entry.runtime.scheduleRefresh("document_admitted");
+                            entry.runtime.start();
                             Log.i(TAG, "document admitted path=" + path);
                         } catch (Throwable activationFailure) {
                             Log.e(TAG, "document activation failed", activationFailure);
@@ -878,7 +935,12 @@ public final class NativeReaderV2Hooks {
                             );
                             return;
                         }
-                        if (!resetRuntime(entry, "resume_authority_changed")) {
+                        if (!resetRuntime(
+                                entry,
+                                "resume_authority_changed",
+                                false,
+                                true
+                            )) {
                             return;
                         }
                         maybeAdmit(entry, true);
@@ -1105,11 +1167,17 @@ public final class NativeReaderV2Hooks {
     }
 
     private static void releaseStylusRouteIfComplete(Entry entry) {
+        boolean released = false;
         synchronized (entry.stylusRouteLock) {
             if (!entry.penContact && !entry.androidPenContact) {
                 entry.stylusRouteActive = false;
                 entry.stylusRoutePass = false;
+                released = true;
             }
+        }
+        NativeReaderV2Runtime runtime = entry.runtime;
+        if (released && runtime != null) {
+            runtime.postPhysicalContactFenceReleased();
         }
     }
 
@@ -1193,7 +1261,7 @@ public final class NativeReaderV2Hooks {
             }
             for (Object component : current) index(entry, component);
         } catch (RuntimeException failure) {
-            resetRuntime(entry, "component_reindex_failed");
+            retire(entry, "component_reindex_failed");
         }
     }
 
@@ -1278,14 +1346,25 @@ public final class NativeReaderV2Hooks {
 
     private static void retire(Entry entry, String reason) {
         if (entry == null || entry.retired) return;
-        if (resetRuntime(entry, reason)) entry.retired = true;
+        if (resetRuntime(entry, reason, true, false)) entry.retired = true;
     }
 
     private static boolean resetRuntime(Entry entry, String reason) {
+        return resetRuntime(entry, reason, false, false);
+    }
+
+    private static boolean resetRuntime(
+        Entry entry,
+        String reason,
+        boolean retireAfterDetachment,
+        boolean retryAdmissionAfterDetachment
+    ) {
         if (entry == null) return true;
         NativeReaderV2Runtime runtime = entry.runtime;
         NativeReaderV2ChromeTracker chrome = entry.chrome;
         if (runtime != null && !runtime.retire(reason)) {
+            entry.retireAfterDetachment |= retireAfterDetachment;
+            entry.retryAdmissionAfterDetachment |= retryAdmissionAfterDetachment;
             Log.e(TAG, "runtime reset deferred by fail-closed containment reason="
                 + reason);
             return false;
@@ -1330,6 +1409,8 @@ public final class NativeReaderV2Hooks {
         volatile boolean resumed;
         volatile boolean admissionFence;
         volatile String admissionFencePath;
+        volatile boolean retireAfterDetachment;
+        volatile boolean retryAdmissionAfterDetachment;
         volatile long lifecycleGeneration;
         volatile boolean penContact;
         volatile boolean penPass;

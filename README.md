@@ -25,6 +25,17 @@ unverified native chrome. See `NATIVE_READER_V2.md`,
 `NATIVE_READER_V2_MIGRATION.md`, and `NATIVE_READER_V2_REVIEW_GATES.md` for the
 full contract and release gate.
 
+The current hardening pass also prevents a contained runtime from republishing
+writer authority; defers fail-closed writer disable until a live physical pen
+contact ends; revalidates persisted evidence before activation publication;
+requires acknowledged stock background/ink/digest replacement before hook
+detachment; cancels and asynchronously drains projections before releasing
+native component identities; keeps a native finger route immutable through a
+multi-pointer contact; and reads companion marker/recovery bytes through a
+bounded, single-link, no-symlink descriptor boundary. The stable Actions
+signer is available only to trusted `main` pushes or a repository-owner manual
+run of the exact `main` ref.
+
 ## Stable baseline
 
 v0.4.12 with Native Spread v0.0.116 is the current merged stable baseline.

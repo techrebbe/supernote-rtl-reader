@@ -50,11 +50,30 @@ original page/presentation geometry, and then either rebuilds the rotated
 spread or waits for resume. Missing authority fails closed instead of
 abandoning modified geometry in the stock reader.
 
+Containment follows the same physical-contact fence across both Supernote's
+digital-position callback and Android stylus dispatch. A failure discovered
+during a native pass-through contact freezes new v2 work immediately but
+defers writer disable until the exact UP/CANCEL boundary, so fail-closed
+handling cannot truncate a stroke that Supernote already owns. A contained
+runtime cannot schedule or publish another writer/session generation.
+
+Safe runtime detachment is likewise acknowledged, not assumed. v2 restores
+its geometry leases and asks Supernote to reload the stock page, then remains
+installed and input-frozen until fresh stock background, handwriting, and
+digest layers have all been presented. Only after those three independent
+signals and a final live-component check may hook ownership be removed.
+
 Activity destruction is a distinct boundary. Supernote's pinned `onDestroy`
 is allowed to perform its final native save, writer disable, and surface clear
 while the v2 transform is still authoritative. Only its after-hook retires the
 runtime and discards the now-dead component leases; v2 never restores stock
 geometry before that final save.
+
+Projection shutdown first rejects new work and cancels queued work. Any
+already-running native projection is drained on a dedicated daemon cleanup
+thread; component identities are released only after that drain. Lifecycle UI
+callbacks never wait on the projection lock, and late or stale results recycle
+their bitmaps instead of publishing them.
 
 ## Hardware gate
 

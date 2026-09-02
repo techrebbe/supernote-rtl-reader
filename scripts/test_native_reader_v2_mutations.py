@@ -369,9 +369,32 @@ STATIC_MUTATIONS = (
     ),
     (
         ".github/workflows/build.yml",
-        "if: github.event_name == 'push' && github.ref == 'refs/heads/main'",
-        "if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'",
-        "stable signing ref scope",
+        "       github.actor == github.repository_owner)",
+        "       true)",
+        "trusted manual stable signing actor scope",
+    ),
+    (
+        ".github/workflows/build.yml",
+        "       github.ref == 'refs/heads/main' &&\n"
+        "       github.actor == github.repository_owner)",
+        "       github.actor == github.repository_owner)",
+        "trusted manual stable signing main scope",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "                        if (!NativeReaderV2DocumentGate\n"
+        "                            .evidenceStillCurrent(evidence)) {",
+        "                        if (false) {",
+        "admission worker publication freshness",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "                    final boolean current = NativeReaderV2DocumentGate\n"
+        "                        .evidenceStillCurrent(evidence);",
+        "                    final boolean current = true;",
+        "activation publication freshness",
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
@@ -400,6 +423,85 @@ STATIC_MUTATIONS = (
         "            fingerConcurrentBlocked = true;",
         "            fingerConcurrentBlocked = true;",
         "multi-pointer cancellation",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "        if (retired || containedFailClosed || detachmentPrepared\n"
+        "            || generation != refreshGeneration) return;",
+        "        if (retired || detachmentPrepared\n"
+        "            || generation != refreshGeneration) return;",
+        "contained runtime publication fence",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "        if (hasPhysicalInputContact()) {\n"
+        "            pendingContainmentReason = reason == null",
+        "        if (false) {\n"
+        "            pendingContainmentReason = reason == null",
+        "deferred containment during physical contact",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "            || physicalContactFence.stylusContactActive();",
+        "            || false;",
+        "android stylus lifecycle fence",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "        if (stockPresentationReadyMask != STOCK_PRESENTATION_READY) return;",
+        "        if (stockPresentationReadyMask == 0) return;",
+        "three-layer stock restoration acknowledgement",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "        projectionExecutor.shutdownNow();",
+        "        projectionExecutor.shutdown();",
+        "projection cancellation before identity release",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "                            if (projectionExecutor.awaitTermination(",
+        "                            if (true || projectionExecutor.awaitTermination(",
+        "asynchronous projection drain",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        '                "candidate marker lookup is forbidden on the main thread"',
+        '                "candidate marker lookup unexpectedly ran on the main thread"',
+        "worker-only candidate marker lookup",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2FirmwareAccess.java",
+        "            if (rect.left == 0 && rect.top == 0\n"
+        "                && rect.right == 0 && rect.bottom == 0) {",
+        "            if (false) {",
+        "zero-area native mask sentinel",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                pathBefore.st_nlink == 1L &&",
+        "                pathBefore.st_nlink >= 1L &&",
+        "companion single-link marker authority",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or OsConstants.O_NOFOLLOW,",
+        "            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC,",
+        "companion no-follow marker authority",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                        val previousMarkerBytes = readPersistedBytesIfFile(marker)",
+        "                        val previousMarkerBytes = if (marker.isFile) marker.readBytes() else null",
+        "companion rollback marker descriptor authority",
     ),
     (
         "overlay/App.js",

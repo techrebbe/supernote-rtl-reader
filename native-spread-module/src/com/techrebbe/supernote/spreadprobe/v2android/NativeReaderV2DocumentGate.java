@@ -47,12 +47,16 @@ public final class NativeReaderV2DocumentGate {
     private NativeReaderV2DocumentGate() {}
 
     /**
-     * Minimal synchronous signal used only to install a fail-closed input
-     * fence before the expensive descriptor/hash admission starts. The
-     * marker's content is never trusted here; full admission remains on the
-     * worker and rejects every malformed or stale byte.
+     * Minimal worker-thread signal used after the hook has already installed
+     * a fail-closed input fence. The marker's content is never trusted here;
+     * full admission rejects every malformed or stale byte.
      */
     public static boolean candidateMarkerPresent(String documentPath) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            throw new IllegalStateException(
+                "candidate marker lookup is forbidden on the main thread"
+            );
+        }
         if (documentPath == null || documentPath.indexOf('\0') >= 0) {
             return false;
         }

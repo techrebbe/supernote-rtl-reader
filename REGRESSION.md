@@ -2,6 +2,22 @@
 
 Device baseline: Supernote Nomad, plugin beta firmware.
 
+## Native Reader v2 pre-hardware adversarial gate — PASS
+
+- [x] 84,805 deterministic controller/geometry/transaction assertions pass.
+- [x] 66 authority mutations are rejected, including stale admission evidence,
+  contained-runtime publication, contact-safe containment, three-layer stock
+  restoration, projection drain ordering, and descriptor-backed marker
+  recovery.
+- [x] Ordinary native/plugin invariants, packaging fail-closed tests, and trace
+  helper fail-closed tests pass.
+- [x] Companion v0.0.137 compiles and verifies with the upgrade-compatible
+  signer; RTL Reader v0.4.16 compiles and packages with the hardened native
+  module.
+- [ ] Exact-head independent review is clean.
+- [ ] Nomad hardware gate passes. No hardware result is claimed by this
+  automated section.
+
 v0.0.9 established the hardware-validated reading-engine baseline. v0.1.1 subsequently validated the polished UI and direction-aware footer. v0.4.2 is the current merged hardware-validated direct-render and direction-aware native bitmap-prefetch baseline.
 
 ## v0.0.9 full regression — PASS

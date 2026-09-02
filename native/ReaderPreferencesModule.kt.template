@@ -13,6 +13,7 @@ import android.net.Uri
 import android.os.SystemClock
 import android.system.Os
 import android.system.OsConstants
+import android.system.ErrnoException
 import android.util.Log
 import android.widget.Toast
 import com.facebook.react.bridge.Arguments
@@ -444,7 +445,7 @@ class ReaderPreferencesModule(
                             pdfFile,
                             marker,
                         )
-                        val previousMarkerBytes = if (marker.isFile) marker.readBytes() else null
+                        val previousMarkerBytes = readPersistedBytesIfFile(marker)
                         val previousMarkerProperties = readPropertiesIfFile(marker)
                         val previousBackup = readNativeAnnotationBackup(pdfFile)
                         val protectedBackup = previousBackup.backup?.takeIf { backup ->
@@ -919,7 +920,7 @@ class ReaderPreferencesModule(
                 "The annotation recovery files changed before marker publication",
             )
         }
-        val currentMarkerBytes = if (marker.isFile) marker.readBytes() else null
+        val currentMarkerBytes = readPersistedBytesIfFile(marker)
         val previousMarkerStillCurrent = if (previousMarkerBytes == null) {
             currentMarkerBytes == null && !marker.exists()
         } else {
@@ -1982,7 +1983,7 @@ class ReaderPreferencesModule(
         val restored = if (previousBytes == null) {
             !marker.exists()
         } else {
-            marker.isFile && marker.readBytes().contentEquals(previousBytes)
+            readPersistedBytesIfFile(marker)?.contentEquals(previousBytes) == true
         }
         if (!restored) {
             throw IllegalStateException(
@@ -2414,14 +2415,80 @@ class ReaderPreferencesModule(
     }
 
     private fun readPropertiesIfFile(file: File): Properties =
-        if (file.isFile) {
-            require(file.length() in 1..STRICT_PROPERTIES_MAX_BYTES.toLong()) {
-                "invalid persisted-properties file length"
-            }
-            strictNativeSpreadMarkerProperties(file.readBytes())
-        } else {
-            Properties()
+        readPersistedBytesIfFile(file)?.let { bytes ->
+            strictNativeSpreadMarkerProperties(bytes)
+        } ?: Properties()
+
+    /**
+     * Reads one persisted marker through a descriptor that is proven to name
+     * the same bounded, regular, single-link inode before and after the read.
+     * Recovery and rollback consume these bytes as authority too, so they
+     * must use the same anti-substitution boundary as property parsing.
+     */
+    private fun readPersistedBytesIfFile(file: File): ByteArray? {
+        val path = file.absolutePath
+        val pathBefore = try {
+            Os.lstat(path)
+        } catch (missing: ErrnoException) {
+            if (missing.errno == OsConstants.ENOENT) return null
+            throw missing
         }
+        require(
+            OsConstants.S_ISREG(pathBefore.st_mode) &&
+                pathBefore.st_nlink == 1L &&
+                pathBefore.st_size in 1L..STRICT_PROPERTIES_MAX_BYTES.toLong(),
+        ) {
+            "persisted-properties authority is not one bounded single-link file"
+        }
+        val descriptor = Os.open(
+            path,
+            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or OsConstants.O_NOFOLLOW,
+            0,
+        )
+        try {
+            val opened = Os.fstat(descriptor)
+            require(samePersistedFileVersion(pathBefore, opened)) {
+                "persisted-properties descriptor disagrees with its path"
+            }
+            val bytes = ByteArrayOutputStream(opened.st_size.toInt()).use { output ->
+                FileInputStream(Os.dup(descriptor)).use { input ->
+                    val buffer = ByteArray(8192)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        require(output.size() + count <= STRICT_PROPERTIES_MAX_BYTES) {
+                            "persisted-properties file exceeded its size bound"
+                        }
+                        output.write(buffer, 0, count)
+                    }
+                }
+                output.toByteArray()
+            }
+            val openedAfter = Os.fstat(descriptor)
+            val pathAfter = Os.lstat(path)
+            require(
+                samePersistedFileVersion(opened, openedAfter) &&
+                    samePersistedFileVersion(opened, pathAfter) &&
+                    bytes.size.toLong() == opened.st_size,
+            ) {
+                "persisted-properties authority changed or was replaced while reading"
+            }
+            return bytes
+        } finally {
+            Os.close(descriptor)
+        }
+    }
+
+    private fun samePersistedFileVersion(first: android.system.StructStat, second: android.system.StructStat): Boolean =
+        first.st_dev == second.st_dev &&
+            first.st_ino == second.st_ino &&
+            first.st_mode == second.st_mode &&
+            first.st_nlink == second.st_nlink &&
+            first.st_size == second.st_size &&
+            first.st_mtime == second.st_mtime &&
+            first.st_mtim.tv_nsec == second.st_mtim.tv_nsec &&
+            first.st_ctime == second.st_ctime &&
+            first.st_ctim.tv_nsec == second.st_ctim.tv_nsec
 
     /**
      * Mirrors NativeReaderV2StrictProperties. Java Properties silently keeps
@@ -2821,7 +2888,7 @@ class ReaderPreferencesModule(
         spreadSizing: String,
         handshake: NativeSpreadHandshake,
     ): NativeAnnotationBackup {
-        val previousMarkerBytes = if (marker.isFile) marker.readBytes() else null
+        val previousMarkerBytes = readPersistedBytesIfFile(marker)
         val backupManifestExisted = nativeAnnotationBackupManifest(pdfFile).isFile
         val activationToken = UUID.randomUUID().toString()
         var backup: NativeAnnotationBackup? = null
@@ -2946,7 +3013,7 @@ class ReaderPreferencesModule(
     ): Boolean {
         try {
             var failedActivationArchive: FailedActivationBackupArchive? = null
-            val currentMarkerBytes = if (marker.isFile) marker.readBytes() else null
+            val currentMarkerBytes = readPersistedBytesIfFile(marker)
             val currentMarkerProperties = readPropertiesIfFile(marker)
             val ownsPublishedMarker = currentMarkerProperties.getProperty(
                 "activationToken",
@@ -3004,7 +3071,8 @@ class ReaderPreferencesModule(
             val markerRestored = if (previousMarkerBytes == null) {
                 !marker.exists()
             } else {
-                marker.isFile && marker.readBytes().contentEquals(previousMarkerBytes)
+                readPersistedBytesIfFile(marker)
+                    ?.contentEquals(previousMarkerBytes) == true
             }
             val canonicalBackupCleared =
                 !nativeAnnotationBackupManifest(pdfFile).exists() &&

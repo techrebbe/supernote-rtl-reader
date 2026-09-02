@@ -632,9 +632,9 @@ public final class NativeReaderV2FirmwareAccess {
      * are always freed by committedCanonicalHandwriting().
      */
     public void releaseProjectionReader() {
-        synchronized (projectionNoteLock) {
-            // Synchronize with an in-flight projection before teardown.
-        }
+        // Every projection owns and frees a snapshot-scoped SuperNoteNote.
+        // Lifecycle callers therefore have no reader object to release and,
+        // critically, must never wait on projectionNoteLock from the UI thread.
     }
 
     private Object createProjectionNoteLocked() {
@@ -1075,6 +1075,19 @@ public final class NativeReaderV2FirmwareAccess {
         ArrayList<com.techrebbe.supernote.spreadprobe.v2.RectD> result =
             new ArrayList<>();
         for (Rect rect : nativeDisabledRects(components)) {
+            if (rect.left == 0 && rect.top == 0
+                && rect.right == 0 && rect.bottom == 0) {
+                // Exact-firmware sentinel for "no native disabled region".
+                continue;
+            }
+            if (rect.left < 0 || rect.top < 0
+                || rect.right <= rect.left || rect.bottom <= rect.top
+                || rect.right > components.documentLayout.getWidth()
+                || rect.bottom > components.documentLayout.getHeight()) {
+                throw new IllegalStateException(
+                    "native writer mask is invalid or outside the canvas"
+                );
+            }
             result.add(new com.techrebbe.supernote.spreadprobe.v2.RectD(
                 rect.left,
                 rect.top,

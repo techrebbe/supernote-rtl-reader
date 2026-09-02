@@ -200,7 +200,7 @@ def main() -> None:
             "if (entry.runtime != null && !entry.admitting)",
             "revalidateExistingRuntime(entry, path);",
             "expectedRuntime.admissionEvidenceStillCurrent()",
-            "resetRuntime(entry, \"resume_authority_changed\")",
+            '"resume_authority_changed",',
             "BY_COMPONENT.remove(previous, entry);",
             "containsIdentity(current, previous)",
             "BY_COMPONENT.putIfAbsent(component, entry)",
@@ -227,7 +227,8 @@ def main() -> None:
             "final long admissionLifecycleGeneration = entry.lifecycleGeneration;",
             "if (!entry.resumed || entry.lifecycleGeneration !=",
             "volatile boolean admissionFence;",
-            "candidateMarkerPresent(path);",
+            ".candidateMarkerPresent(path);",
+            "entry.admissionFence = true;",
             "indexAdmissionComponents(entry, components);",
             "onRuntimeInputAuthorityReady(",
             "entry.admissionFence = false;",
@@ -432,12 +433,12 @@ def main() -> None:
         [
             "entry.admitting = true;",
             "expectedRuntime.admissionEvidenceStillCurrent();",
-            "resetRuntime(entry, \"resume_authority_changed\")",
+            '"resume_authority_changed",',
         ],
         "resume revalidation publication",
     )
     reset_position = revalidation.find(
-        'resetRuntime(entry, "resume_authority_changed")'
+        '"resume_authority_changed",'
     )
     if reset_position < 0 or revalidation.find(
         "maybeAdmit(entry, true);", reset_position
@@ -466,7 +467,7 @@ def main() -> None:
             "restorePageGeometryQuietly(\"compose_failed\")",
             "restoreWriterGeometryQuietly(\"compose_failed\")",
             "SN_NATIVE_READER_V2 compose failed",
-            "restoreStockPresentationForRetirement(reason)",
+            'beginStockPresentationRestoration(reason, "safe_retirement")',
             "containFailClosed(reason);",
             "runtime retained fail-closed reason=",
             "current.handWriteView == components.handWriteView",
@@ -491,10 +492,41 @@ def main() -> None:
             "snapshot.layoutGeneration < request.layoutGeneration",
             "snapshot.activePageIndex != request.sourcePage",
             "stale deferred navigation discarded",
-            "postGuarded(\"projection_completion\"",
+            "projection completion failed closed",
             "queued continuation failed label=",
         ],
         "runtime concurrency and input containment",
+    )
+    admission_worker_start = hooks.find("ADMISSION.execute(new Runnable()")
+    admission_publish = hooks.find(
+        'entry.activity.runOnUiThread(guardedHookContinuation(',
+        admission_worker_start,
+    )
+    if admission_worker_start < 0 or admission_publish < 0:
+        fail("could not isolate document admission worker publication")
+    ordered(
+        hooks[admission_worker_start:admission_publish],
+        [
+            ".candidateMarkerPresent(path);",
+            "NativeReaderV2DocumentGate.admit(path);",
+            ".evidenceStillCurrent(evidence)",
+            '"admission evidence changed before publication"',
+        ],
+        "worker admission evidence revalidated before UI publication",
+    )
+    start_method = runtime.find("public void start()")
+    start_end = runtime.find("public boolean ownsViewModel(", start_method)
+    if start_method < 0 or start_end < 0:
+        fail("could not isolate runtime activation start")
+    require(
+        runtime[start_method:start_end],
+        [
+            'executeProjection("activation_evidence"',
+            ".evidenceStillCurrent(evidence);",
+            '"activation_publication_evidence_changed"',
+            'scheduleRefresh("document_admitted_revalidated")',
+        ],
+        "runtime activation evidence revalidation",
     )
     if "inspectCurrent(" in runtime:
         fail("runtime still performs filesystem authority checks on the UI thread")
@@ -502,15 +534,24 @@ def main() -> None:
         fail("async authority bracketing changed without invariant review")
     if runtime.count("compositor.compose(") != 1:
         fail("spread compositor has more than one presentation path")
-    if "ownerHandler.post(new Runnable()" in runtime:
-        fail("unguarded runtime continuation can escape onto the UI thread")
+    if runtime.count("ownerHandler.post(new Runnable()") != 1:
+        fail("only the resource-owning projection completion may post directly")
+    require(
+        runtime,
+        [
+            "if (result != null && result != visible)",
+            "projection completion failed closed",
+            "if (!posted && result != null) result.recycle();",
+        ],
+        "resource-owning projection completion containment",
+    )
     require(
         runtime,
         ["ownerHandler.post(guarded(label, action));"],
         "guarded runtime continuation publication",
     )
     pointer_start = runtime.find(
-        "if (action == MotionEvent.ACTION_POINTER_DOWN"
+        "if ((action == MotionEvent.ACTION_POINTER_DOWN"
     )
     pointer_end = runtime.find("boolean terminal =", pointer_start)
     if pointer_start < 0 or pointer_end < 0:
@@ -522,6 +563,8 @@ def main() -> None:
             "cancelFingerGesture(event.getEventTime());",
             "fingerConcurrentBlocked = true;",
             "return true;",
+            "PASS_NATIVE is immutable for the complete physical contact",
+            "return false;",
         ],
         "multi-pointer gesture cancellation",
     )
@@ -533,11 +576,11 @@ def main() -> None:
         runtime[compose_start:compose_end],
         [
             "inputFrozen = true;",
-            "projectionExecutor.execute(new Runnable()",
+            'executeProjection("spread_composition", new Runnable()',
             "fastEvidenceStillCurrent(evidence)",
             "prepared = compositor.compose(",
             "authority changed during projection",
-            "postGuarded(\"projection_completion\"",
+            "boolean posted = ownerHandler.post(new Runnable()",
         ],
         "off-thread composition and evidence bracketing",
     )
@@ -592,6 +635,8 @@ def main() -> None:
         [
             "inputFrozen = true;",
             "containedFailClosed = true;",
+            "if (hasPhysicalInputContact()) {",
+            "pendingContainmentReason",
             "inspectNativeCurrent();",
             "firmware.disableWriter(",
         ],
@@ -620,19 +665,16 @@ def main() -> None:
     )
     if document_open < 0 or document_open_end < 0:
         fail("could not isolate native document-open relinquishment")
-    ordered(
+    require(
         runtime[document_open:document_open_end],
         [
-            "inputFrozen = true;",
-            "saveCurrentSourceNow()",
-            "firmware.disableWriter(",
-            "restoreWriterGeometry();",
-            "restorePageGeometry();",
-            "restorePresentationScale();",
-            "retireTransactionalCore();",
-            "firmware.releaseProjectionReader();",
+            "ownsModifiedNativePresentation()",
+            "stockPresentationRestorePending",
+            "hasLiveInputContact()",
+            'beginStockPresentationRestoration(null, "native_document_open")',
+            "return false;",
         ],
-        "pre-URI document replacement ordering",
+        "acknowledged pre-URI document replacement boundary",
     )
     retirement_start = runtime.find("public boolean retire(String reason)")
     retirement_end = runtime.find(
@@ -641,16 +683,29 @@ def main() -> None:
     )
     if retirement_start < 0 or retirement_end < 0:
         fail("could not isolate safe runtime retirement")
-    ordered(
+    require(
         runtime[retirement_start:retirement_end],
         [
-            "restoreStockPresentationForRetirement(reason)",
+            'beginStockPresentationRestoration(reason, "safe_retirement")',
             "containFailClosed(reason);",
             "return false;",
-            "detachmentPrepared = true;",
             "retirePrepared(reason, false);",
         ],
-        "save/restore before hook detachment",
+        "acknowledged stock restore before hook detachment",
+    )
+    require(
+        runtime,
+        [
+            "STOCK_PRESENTATION_READY =",
+            "STOCK_BACKGROUND_READY | STOCK_INK_READY | STOCK_DIGEST_READY",
+            "onNativeStockBackgroundPresented()",
+            "onNativeStockInkPresented()",
+            "onNativeStockDigestPresented()",
+            "if (stockPresentationReadyMask != STOCK_PRESENTATION_READY) return;",
+            "stock presentation restoration acknowledged",
+            "detachmentListener.onRuntimeDetachmentReady(this, reason)",
+        ],
+        "three-layer stock presentation acknowledgement",
     )
     reset_start = hooks.find("private static boolean resetRuntime(")
     reset_end = hooks.find("private static void releaseDestroyedEntry(", reset_start)
@@ -693,6 +748,14 @@ def main() -> None:
         "mid-gesture publication suppression",
     )
     refresh_segment = runtime[refresh_gate:refresh_gate + 1800]
+    require(
+        refresh_segment,
+        [
+            "retired || containedFailClosed || detachmentPrepared",
+            "generation != refreshGeneration",
+        ],
+        "permanent fail-closed refresh fence",
+    )
     for phase in ["FROZEN", "SOURCE_SAVED", "TARGET_READY", "REPLAYING"]:
         if f"NativeReaderFirmwarePort.Phase.{phase}" not in refresh_segment:
             fail(f"refresh publication is not blocked during {phase}")
@@ -782,7 +845,7 @@ def main() -> None:
             "NATIVE_READER_V2_COMMITTED_FIELDS",
             "NATIVE_READER_V2_PENDING_FIELDS",
             "NATIVE_ANNOTATION_BACKUP_FIELDS",
-            "strictNativeSpreadMarkerProperties(file.readBytes())",
+            "strictNativeSpreadMarkerProperties(bytes)",
             "duplicate persisted-property key $key",
             "Native Reader v2 marker schema is not exact",
             "strictProperties(\n                manifestBytes,\n"
@@ -1109,6 +1172,71 @@ def main() -> None:
         ],
         "crash-durable atomic publication",
     )
+    require(
+        gate,
+        [
+            "candidate marker lookup is forbidden on the main thread",
+            "Os.lstat(markerPath);",
+        ],
+        "worker-only candidate marker lookup",
+    )
+    require(
+        firmware,
+        [
+            "rect.left == 0 && rect.top == 0",
+            "rect.right == 0 && rect.bottom == 0",
+            "continue;",
+            "native writer mask is invalid or outside the canvas",
+            "must never wait on projectionNoteLock from the UI thread",
+        ],
+        "native mask sentinel and nonblocking projection lifecycle",
+    )
+    require(
+        runtime,
+        [
+            "projectionExecutor.shutdownNow();",
+            "if (projectionExecutor.awaitTermination(",
+            "firmware.releaseComponentIds(releasedComponents);",
+            "if (retired || projectionShutdown",
+            "if (prepared != null) prepared.recycle();",
+        ],
+        "asynchronous projection cancellation and resource drain",
+    )
+    shutdown_start = runtime.find("private void shutdownProjectionWorker(")
+    shutdown_end = runtime.find("private Runnable guarded(", shutdown_start)
+    if shutdown_start < 0 or shutdown_end < 0:
+        fail("could not isolate asynchronous projection shutdown")
+    ordered(
+        runtime[shutdown_start:shutdown_end],
+        [
+            "projectionExecutor.shutdownNow();",
+            "if (projectionExecutor.awaitTermination(",
+            "firmware.releaseProjectionReader();",
+            "firmware.releaseComponentIds(releasedComponents);",
+        ],
+        "projection identities released only after worker drain",
+    )
+    physical_start = runtime.find("private boolean hasPhysicalInputContact()")
+    physical_end = runtime.find("private void clearNativeLifecycleHandoff()", physical_start)
+    if physical_start < 0 or physical_end < 0:
+        fail("could not isolate physical input lifecycle fence")
+    require(
+        runtime[physical_start:physical_end],
+        ["|| physicalContactFence.stylusContactActive();"],
+        "Android stylus contact included in lifecycle gates",
+    )
+    require(
+        plugin,
+        [
+            "OsConstants.O_NOFOLLOW",
+            "pathBefore.st_nlink == 1L",
+            "samePersistedFileVersion(opened, pathAfter)",
+            "private fun readPersistedBytesIfFile(file: File): ByteArray?",
+        ],
+        "single-link descriptor-backed companion marker reads",
+    )
+    if "marker.readBytes()" in plugin:
+        fail("companion marker recovery bypasses descriptor-backed authority")
 
     require(
         workflow,
@@ -1116,7 +1244,8 @@ def main() -> None:
             "python3 scripts/check_native_reader_v2_invariants.py .",
             "supernote-rtl-reader-v0.4.16-native-reader-v2",
             "native-spread-upgrade-artifact:",
-            "if: github.event_name == 'push' && github.ref == 'refs/heads/main'",
+            "github.event_name == 'workflow_dispatch'",
+            "github.actor == github.repository_owner",
             "secrets.NATIVE_SPREAD_KEYSTORE_B64",
             "-ExpectedSignerSha256 $runnerSigner",
             "-ExpectedSignerSha256 a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67",
@@ -1129,8 +1258,16 @@ def main() -> None:
     if "ndk;" in workflow or "-AndroidNdk" in workflow:
         fail("release CI still provisions the retired legacy native hook toolchain")
     stable_job = workflow[workflow.find("native-spread-upgrade-artifact:"):]
-    if "workflow_dispatch" in stable_job.split("  build:", 1)[0]:
-        fail("stable signing credential is reachable from a manual ref")
+    stable_condition = stable_job.split("    needs:", 1)[0]
+    require(
+        stable_condition,
+        [
+            "(github.event_name == 'workflow_dispatch' &&\n"
+            "       github.ref == 'refs/heads/main' &&\n"
+            "       github.actor == github.repository_owner)",
+        ],
+        "trusted manual stable signing scope",
+    )
 
     print("Native Reader v2 invariants: PASS")
 

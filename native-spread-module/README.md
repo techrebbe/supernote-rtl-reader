@@ -377,9 +377,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 The signed APK is written to `build/artifact/`. Pull-request CI uses a
 disposable, runner-local debug identity only so `build.ps1` can compile,
 package, and verify the APK; it does not upload that non-upgrade-compatible
-build. Trusted `main` pushes and manual workflow runs restore the repository's
-stable signing identity from an encrypted Actions secret and publish the
-verified upgrade-compatible APK as
+build. Trusted `main` pushes—and repository-owner manual runs of the exact
+`main` ref—restore the repository's stable signing identity from an encrypted
+Actions secret and publish the verified upgrade-compatible APK as
 `supernote-native-reader-v2-v0.0.137`. Review branches never receive that
 credential.
 

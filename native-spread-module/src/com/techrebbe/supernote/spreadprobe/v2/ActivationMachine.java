@@ -119,7 +119,7 @@ public final class ActivationMachine {
         Objects.requireNonNull(snapshot, "snapshot");
         if (current != null || state == State.DISABLED
             || targetPage == snapshot.activePageIndex
-            || snapshot.slotForPage(targetPage) == null
+            || targetPage < 0 || targetPage >= snapshot.pageCount
             || activePage != snapshot.activePageIndex
             || documentId == null
             || !documentId.equals(snapshot.documentId)

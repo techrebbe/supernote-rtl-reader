@@ -28,6 +28,7 @@ public final class NativeReaderV2ChromeTracker {
     private final View decor;
     private final Runnable failureHandler;
     private final ViewTreeObserver.OnGlobalLayoutListener listener;
+    private final ViewTreeObserver.OnPreDrawListener preDrawListener;
     private volatile List<RectD> published = Collections.emptyList();
     private volatile String signature = "";
     private boolean retired;
@@ -54,7 +55,18 @@ public final class NativeReaderV2ChromeTracker {
                 refresh();
             }
         };
-        decor.getViewTreeObserver().addOnGlobalLayoutListener(listener);
+        preDrawListener = new ViewTreeObserver.OnPreDrawListener() {
+            @Override public boolean onPreDraw() {
+                // Translation-only toolbar/menu movement need not produce a
+                // global-layout callback. Publish the final rectangles before
+                // that frame is drawable, never from an input callback.
+                refresh();
+                return true;
+            }
+        };
+        ViewTreeObserver observer = decor.getViewTreeObserver();
+        observer.addOnGlobalLayoutListener(listener);
+        observer.addOnPreDrawListener(preDrawListener);
         decor.post(new Runnable() {
             @Override public void run() {
                 refresh();
@@ -93,6 +105,7 @@ public final class NativeReaderV2ChromeTracker {
         ViewTreeObserver observer = decor.getViewTreeObserver();
         if (observer.isAlive()) {
             observer.removeOnGlobalLayoutListener(listener);
+            observer.removeOnPreDrawListener(preDrawListener);
         }
     }
 

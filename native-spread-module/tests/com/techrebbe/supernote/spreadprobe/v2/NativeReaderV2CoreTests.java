@@ -74,15 +74,14 @@ public final class NativeReaderV2CoreTests {
             "v2 sizing defaults to fit");
 
         properties.setProperty("enabled", "false");
-        properties.setProperty("direction", "ltr");
         properties.setProperty("coverSeparate", "true");
         properties.setProperty("showDivider", "true");
         properties.setProperty("showHeader", "true");
         properties.setProperty("spreadSizing", "native_fill");
         config = NativeReaderV2Config.from(properties);
         check(!config.enabled, "explicit disabled marker remains disabled");
-        equal(SpreadPairing.Direction.LTR, config.direction,
-            "LTR parses exactly");
+        equal(SpreadPairing.Direction.RTL, config.direction,
+            "disabled v2 marker remains RTL-authoritative");
         check(config.coverSeparate, "cover parity parses exactly");
         check(config.showDivider, "divider parses exactly");
         check(config.showHeader, "header parses exactly");
@@ -109,6 +108,9 @@ public final class NativeReaderV2CoreTests {
         invalidDirection.setProperty("direction", "RTL");
         expectThrows(() -> NativeReaderV2Config.from(invalidDirection),
             "noncanonical direction rejected");
+        invalidDirection.setProperty("direction", "ltr");
+        expectThrows(() -> NativeReaderV2Config.from(invalidDirection),
+            "unsupported LTR v2 marker rejected across all layers");
         java.util.Properties invalidSizing = new java.util.Properties();
         invalidSizing.setProperty(
             NativeReaderV2Config.ENGINE_KEY,
@@ -562,17 +564,29 @@ public final class NativeReaderV2CoreTests {
             first, rtl, 10, 100
         ), "vertical or sub-slop motion is not a page turn");
 
-        properties.setProperty("direction", "ltr");
-        NativeReaderV2Config ltr = NativeReaderV2Config.from(properties);
-        equal(2, NativeReaderV2Navigation.swipeTarget(
-            first, ltr, -200, 0
-        ), "LTR left swipe advances to next transactional spread");
-        equal(-1, NativeReaderV2Navigation.swipeTarget(
-            first, ltr, 200, 0
-        ), "LTR backward swipe stops at document start");
-        equal(2, NativeReaderV2Navigation.offsetTarget(
-            first, ltr, 1
-        ), "native left-swipe offset advances LTR exactly once");
+        ActivationMachine navigation = new ActivationMachine();
+        navigation.initialize(first);
+        ActivationMachine.Token acrossSpread = navigation.begin(
+            first,
+            2,
+            ActivationMachine.CompletionMode.IMMEDIATE
+        );
+        check(acrossSpread != null,
+            "next spread target need not be visible in the source snapshot");
+        navigation.retire();
+
+        SpreadSession session = initializedSession(0, 91, 1);
+        FakePort port = new FakePort();
+        NativeReaderController controller = new NativeReaderController(
+            session,
+            port
+        );
+        check(controller.requestNavigation(2),
+            "controller admits the next document-bounded spread target");
+        equal(2, port.lastToken.targetPage,
+            "cross-spread navigation retains its exact target");
+        equal(Arrays.asList("freeze", "save"), port.calls,
+            "cross-spread navigation starts one transactional transfer");
     }
 
     private static void testV2CommittedMarkerClaim() {

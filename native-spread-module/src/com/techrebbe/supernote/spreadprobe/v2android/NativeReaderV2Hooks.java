@@ -491,10 +491,10 @@ public final class NativeReaderV2Hooks {
                     if (entry == null || entry.runtime == null) return;
                     NativeReaderV2Runtime runtime = entry.runtime;
                     int tool = event.getToolType(event.getActionIndex());
-                    List<RectD> chrome = event.getActionMasked() ==
-                        MotionEvent.ACTION_DOWN
-                        ? refreshChromeAtContactStart(entry, runtime)
-                        : chromeSnapshot(entry);
+                    // Input dispatch consumes only the immutable rectangles
+                    // published by layout/pre-draw. Never walk the Android
+                    // view hierarchy while a contact is being dispatched.
+                    List<RectD> chrome = chromeSnapshot(entry);
                     if (chrome == null || entry.runtime != runtime) {
                         // Chrome discovery failure retires the runtime. The
                         // triggering contact must not leak into stock writer
@@ -533,10 +533,7 @@ public final class NativeReaderV2Hooks {
                         "mPressure"
                     );
                     boolean contactStart = pressure > 0 && !entry.penContact;
-                    List<RectD> chrome = contactStart &&
-                        !stylusRouteDecisionActive(entry)
-                        ? refreshChromeAtContactStart(entry, runtime)
-                        : chromeSnapshot(entry);
+                    List<RectD> chrome = chromeSnapshot(entry);
                     if (chrome == null || entry.runtime != runtime) {
                         // Retiring on chrome failure is fail-closed for the
                         // sample that discovered it as well as future input.
@@ -1069,24 +1066,6 @@ public final class NativeReaderV2Hooks {
             }
             entry.indexed.add(component);
         }
-    }
-
-    private static List<RectD> refreshChromeAtContactStart(
-        Entry entry,
-        NativeReaderV2Runtime expectedRuntime
-    ) {
-        NativeReaderV2ChromeTracker tracker = entry == null ? null : entry.chrome;
-        if (tracker == null || expectedRuntime == null) return null;
-        if (Looper.myLooper() == entry.activity.getMainLooper()) {
-            // Contact-start classification must see the current translated
-            // toolbar/menu bounds, not the preceding global-layout frame.
-            tracker.refresh();
-        }
-        if (entry.retired || entry.runtime != expectedRuntime
-            || entry.chrome != tracker) {
-            return null;
-        }
-        return tracker.snapshot();
     }
 
     private static List<RectD> chromeSnapshot(Entry entry) {

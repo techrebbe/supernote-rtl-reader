@@ -52,6 +52,7 @@ def main() -> None:
         source / "v2/android/NativeReaderFirmwareAdmission.java"
     )
     marker = read(source / "v2/NativeReaderV2MarkerClaim.java")
+    config = read(source / "v2/NativeReaderV2Config.java")
     transform = read(source / "v2/NativePageTransform.java")
     compositor = read(source / "v2android/NativeReaderV2Compositor.java")
     chrome_tracker = read(
@@ -200,10 +201,7 @@ def main() -> None:
             "native component is claimed by another live activity",
             "firmware.releaseProjectionReader();",
             "native_chrome_discovery_failed",
-            "refreshChromeAtContactStart(entry, runtime)",
             "chromeSnapshot(entry)",
-            "if (chrome == null || entry.runtime != runtime)",
-            "tracker.refresh();",
             "Passing the sample to\n                        // Supernote must not make the contact invisible to",
             "entry.penPass = beginStylusRoute(",
             "entry.androidPenPass = beginStylusRoute(",
@@ -227,11 +225,14 @@ def main() -> None:
     )
     if "chrome(entry)" in hooks:
         fail("input hooks still rescan native chrome after contact classification")
-    if hooks.count("tracker.refresh();") != 1:
-        fail("native chrome must refresh exactly at immutable contact start")
+    if "refreshChromeAtContactStart" in hooks or "tracker.refresh();" in hooks:
+        fail("input hooks still traverse native chrome at contact start")
     require(
         chrome_tracker,
         [
+            "ViewTreeObserver.OnPreDrawListener",
+            "observer.addOnPreDrawListener(preDrawListener);",
+            "observer.removeOnPreDrawListener(preDrawListener);",
             "collectAdditionalWindows(decorArea, captured);",
             'throw new IllegalStateException(\n'
             '                    "native window inventory is not iterable"',
@@ -241,6 +242,14 @@ def main() -> None:
         ],
         "fail-closed native chrome inventory",
     )
+    activation = read(source / "v2/ActivationMachine.java")
+    require(
+        activation,
+        ["targetPage < 0 || targetPage >= snapshot.pageCount"],
+        "document-bounded cross-spread activation",
+    )
+    if "snapshot.slotForPage(targetPage) == null" in activation:
+        fail("activation still rejects targets outside the source spread")
     pen_contact_start = hooks.find("if (entry.penContact) {")
     pen_contact_end = hooks.find("} else {", pen_contact_start)
     if pen_contact_start < 0 or pen_contact_end < 0:
@@ -632,6 +641,17 @@ def main() -> None:
     )
     if "minimumVersion <" in marker or "minimumVersion >" in marker:
         fail("v2 marker admission permits a version range instead of exact contract")
+    require(
+        config,
+        [
+            'if (!"rtl".equals(directionValue))',
+            "Native Reader v2 supports only RTL markers",
+            "SpreadPairing.Direction direction = SpreadPairing.Direction.RTL;",
+        ],
+        "cross-layer RTL-only v2 admission",
+    )
+    if '"ltr".equals(directionValue)' in config:
+        fail("v2 module still admits LTR markers rejected by the companion")
 
     require(
         transform,
@@ -709,12 +729,49 @@ def main() -> None:
     require(
         runtime,
         [
+            "ownerHandler.post(new Runnable()",
+            "queued source-save inspection failed",
+            "sourceSaveAuthorityMatches(source)",
+            "Always cross a queue boundary",
+            "refreshActiveLayersIfPossible(current, reason)",
+            '"native_pen_contact_complete".equals(reason)',
+            "compositor.refreshActiveLayers(current, visible, activeInk);",
             "statusOverlay.protectedAreas(",
             "concatenateMasks(",
             "firmware.programWriterGeometry(",
             "overlayMasks",
         ],
         "custom status chrome writer exclusion",
+    )
+    require(
+        compositor,
+        [
+            "public void refreshActiveLayers(",
+            "current.ensureActiveLayerScratch(",
+            "Build both replacement layers off-screen.",
+            "clearSlot(inkCanvas, slot.screenBounds);",
+            "clearSlot(digestCanvas, slot.screenBounds);",
+            "current.activeInkScratch,",
+            "current.activeDigestScratch,",
+            "drawActiveInk(",
+        ],
+        "failure-atomic settled-stroke layer refresh",
+    )
+    require(
+        firmware,
+        [
+            "WeakReference<Object>",
+            "public synchronized void releaseComponentIds(Components components)",
+            "Firmware access is process-scoped",
+        ],
+        "bounded native component identity lifetime",
+    )
+    if "IdentityHashMap<Object, Long> componentIds" in firmware:
+        fail("firmware still strongly retains retired component graphs")
+    require(
+        runtime,
+        ["firmware.releaseComponentIds(releasedComponents);"],
+        "retired component identity release",
     )
     require(
         read(source / "v2android/NativeReaderV2StatusOverlay.java"),
@@ -815,6 +872,9 @@ def main() -> None:
             'label="RTL native"',
             "Back up & enable",
             "legacy read-only marker remains",
+            "Legacy read-only settings cannot be edited.",
+            "Legacy read-only appearance cannot be edited.",
+            "(!nativeSpreadCompatible || !nativeSpreadConfiguredEditable)",
         ],
         "v2 settings UI",
     )

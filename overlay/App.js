@@ -957,6 +957,12 @@ export default function App() {
       );
       return;
     }
+    if (nativeSpreadConfigured && !nativeSpreadConfiguredEditable) {
+      setNativeSpreadError(
+        'Legacy read-only settings cannot be edited. Turn that mode Off or migrate this PDF to RTL native first.',
+      );
+      return;
+    }
     if (!nativeSpreadConfigured) {
       coverSeparateRef.current = normalized;
       setCoverSeparate(normalized);
@@ -1024,6 +1030,12 @@ export default function App() {
     if (nativeSpreadConfigured && !nativeSpreadCompatible) {
       setNativeSpreadError(
         'Native Spread is configured but unavailable. Appearance can be changed after the native hooks reconnect.',
+      );
+      return;
+    }
+    if (nativeSpreadConfigured && !nativeSpreadConfiguredEditable) {
+      setNativeSpreadError(
+        'Legacy read-only appearance cannot be edited. Turn that mode Off or migrate this PDF to RTL native first.',
       );
       return;
     }
@@ -1556,7 +1568,8 @@ export default function App() {
                 disabled={
                   nativeSpreadBusy ||
                   !nativeSpreadAuthorityResolved ||
-                  (nativeSpreadConfigured && !nativeSpreadCompatible)
+                  (nativeSpreadConfigured &&
+                    (!nativeSpreadCompatible || !nativeSpreadConfiguredEditable))
                 }
                 label="Off"
                 onPress={() => setCoverSeparateValue(false)}
@@ -1567,7 +1580,8 @@ export default function App() {
                 disabled={
                   nativeSpreadBusy ||
                   !nativeSpreadAuthorityResolved ||
-                  (nativeSpreadConfigured && !nativeSpreadCompatible)
+                  (nativeSpreadConfigured &&
+                    (!nativeSpreadCompatible || !nativeSpreadConfiguredEditable))
                 }
                 label="On"
                 onPress={() => setCoverSeparateValue(true)}
@@ -1585,7 +1599,8 @@ export default function App() {
                 disabled={
                   nativeSpreadBusy ||
                   !nativeSpreadAuthorityResolved ||
-                  (nativeSpreadConfigured && !nativeSpreadCompatible)
+                  (nativeSpreadConfigured &&
+                    (!nativeSpreadCompatible || !nativeSpreadConfiguredEditable))
                 }
                 label="Fit page"
                 onPress={() =>
@@ -1602,7 +1617,8 @@ export default function App() {
                 disabled={
                   nativeSpreadBusy ||
                   !nativeSpreadAuthorityResolved ||
-                  (nativeSpreadConfigured && !nativeSpreadCompatible)
+                  (nativeSpreadConfigured &&
+                    (!nativeSpreadCompatible || !nativeSpreadConfiguredEditable))
                 }
                 label="Native fill"
                 onPress={() =>
@@ -1629,7 +1645,8 @@ export default function App() {
                 disabled={
                   nativeSpreadBusy ||
                   !nativeSpreadAuthorityResolved ||
-                  (nativeSpreadConfigured && !nativeSpreadCompatible)
+                  (nativeSpreadConfigured &&
+                    (!nativeSpreadCompatible || !nativeSpreadConfiguredEditable))
                 }
                 label="Off"
                 onPress={() =>
@@ -1646,7 +1663,8 @@ export default function App() {
                 disabled={
                   nativeSpreadBusy ||
                   !nativeSpreadAuthorityResolved ||
-                  (nativeSpreadConfigured && !nativeSpreadCompatible)
+                  (nativeSpreadConfigured &&
+                    (!nativeSpreadCompatible || !nativeSpreadConfiguredEditable))
                 }
                 label="On"
                 onPress={() =>
@@ -1670,7 +1688,8 @@ export default function App() {
                 disabled={
                   nativeSpreadBusy ||
                   !nativeSpreadAuthorityResolved ||
-                  (nativeSpreadConfigured && !nativeSpreadCompatible)
+                  (nativeSpreadConfigured &&
+                    (!nativeSpreadCompatible || !nativeSpreadConfiguredEditable))
                 }
                 label="Off"
                 onPress={() =>
@@ -1687,7 +1706,8 @@ export default function App() {
                 disabled={
                   nativeSpreadBusy ||
                   !nativeSpreadAuthorityResolved ||
-                  (nativeSpreadConfigured && !nativeSpreadCompatible)
+                  (nativeSpreadConfigured &&
+                    (!nativeSpreadCompatible || !nativeSpreadConfiguredEditable))
                 }
                 label="On"
                 onPress={() =>

@@ -20,9 +20,9 @@ import com.techrebbe.supernote.spreadprobe.v2.RectD;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Constructor;
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -41,8 +41,10 @@ public final class NativeReaderV2FirmwareAccess {
     private static final String DOCUMENT_CONSTANTS =
         "com.ratta.supernote.documentlib.constants.DocumentConstants";
 
-    private final IdentityHashMap<Object, Long> componentIds =
-        new IdentityHashMap<>();
+    // Firmware access is process-scoped, while Activity component graphs are
+    // not. Weak identity entries prevent a retired reader from being retained
+    // merely because it once participated in an authority observation.
+    private final ArrayList<ComponentIdentity> componentIds = new ArrayList<>();
     private long nextComponentId = 1L;
     private final Object projectionNoteLock = new Object();
 
@@ -1204,14 +1206,44 @@ public final class NativeReaderV2FirmwareAccess {
         if (component == null) {
             throw new IllegalArgumentException("native component is missing");
         }
-        Long existing = componentIds.get(component);
-        if (existing != null) return existing;
+        for (int index = componentIds.size() - 1; index >= 0; index--) {
+            ComponentIdentity entry = componentIds.get(index);
+            Object existing = entry.component.get();
+            if (existing == null) {
+                componentIds.remove(index);
+            } else if (existing == component) {
+                return entry.id;
+            }
+        }
         if (nextComponentId <= 0L) {
             throw new IllegalStateException("component identity exhausted");
         }
         long assigned = nextComponentId++;
-        componentIds.put(component, assigned);
+        componentIds.add(new ComponentIdentity(component, assigned));
         return assigned;
+    }
+
+    public synchronized void releaseComponentIds(Components components) {
+        if (components == null) return;
+        for (int index = componentIds.size() - 1; index >= 0; index--) {
+            Object component = componentIds.get(index).component.get();
+            if (component == null || component == components.viewModel
+                || component == components.presenter
+                || component == components.note
+                || component == components.binder) {
+                componentIds.remove(index);
+            }
+        }
+    }
+
+    private static final class ComponentIdentity {
+        final WeakReference<Object> component;
+        final long id;
+
+        ComponentIdentity(Object component, long id) {
+            this.component = new WeakReference<>(component);
+            this.id = id;
+        }
     }
 
     private static Field field(Class<?> owner, String name)

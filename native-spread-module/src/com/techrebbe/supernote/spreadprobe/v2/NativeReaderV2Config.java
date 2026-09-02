@@ -44,14 +44,12 @@ public final class NativeReaderV2Config {
         }
         boolean enabled = strictBoolean(properties, "enabled", false);
         String directionValue = properties.getProperty("direction", "rtl");
-        SpreadPairing.Direction direction;
-        if ("rtl".equals(directionValue)) {
-            direction = SpreadPairing.Direction.RTL;
-        } else if ("ltr".equals(directionValue)) {
-            direction = SpreadPairing.Direction.LTR;
-        } else {
-            throw new IllegalArgumentException("invalid reading direction");
+        if (!"rtl".equals(directionValue)) {
+            throw new IllegalArgumentException(
+                "Native Reader v2 supports only RTL markers"
+            );
         }
+        SpreadPairing.Direction direction = SpreadPairing.Direction.RTL;
         String sizingValue = properties.getProperty("spreadSizing", "fit");
         Sizing sizing;
         if ("fit".equals(sizingValue)) {

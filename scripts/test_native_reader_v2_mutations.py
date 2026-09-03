@@ -702,6 +702,36 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
+        "sameFileObject(stagedIdentity, renamedStagedIdentity)",
+        "sameFileObject(stagedIdentity, stagedIdentity)",
+        "post-rename staged inode identity",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "            val renamedStagedIdentity = Os.fstat(openedTemporary)\n"
+        "            onPublished()",
+        "            onPublished()\n"
+        "            val renamedStagedIdentity = Os.fstat(openedTemporary)",
+        "post-rename identity captured before publication callback",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                        renamedStagedIdentity,\n"
+        "                        published.identity,",
+        "                        stagedIdentity,\n"
+        "                        published.identity,",
+        "post-rename descriptor version authority",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                        published.identity,\n"
+        "                        Os.lstat(file.absolutePath),",
+        "                        published.identity,\n"
+        "                        published.identity,",
+        "post-publication destination path recheck",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
         "immediateMarker?.bytes?.contentEquals(pendingMarkerBytes)",
         "true",
         "committed-marker compare-and-publish",

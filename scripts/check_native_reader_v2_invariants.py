@@ -125,7 +125,7 @@ def main() -> None:
     )
     require(
         plugin_config,
-        ['"versionCode": "37"', '"versionName": "0.4.18"'],
+        ['"versionCode": "38"', '"versionName": "0.4.19"'],
         "plugin version",
     )
     if (
@@ -134,7 +134,7 @@ def main() -> None:
         not in root_build
     ):
         fail("plugin build does not execute the exclusive v2 invariant gate")
-    if "RTL_READER_OPEN v0.4.18-native-reader-v2" not in index:
+    if "RTL_READER_OPEN v0.4.19-native-reader-v2" not in index:
         fail("runtime marker does not identify the v2 plugin build")
     require(
         guidance,
@@ -2002,9 +2002,40 @@ def main() -> None:
             "expected = currentMarkerAuthority",
             "expected = pendingMarkerAuthority",
             "Published destination changed before compare-and-publish",
-            "samePersistedFileVersion(stagedIdentity, published.identity)",
+            "val renamedStagedIdentity = Os.fstat(openedTemporary)",
+            "sameFileObject(stagedIdentity, renamedStagedIdentity)",
+            (
+                "samePersistedFileVersion(\n"
+                "                        renamedStagedIdentity,\n"
+                "                        published.identity,"
+            ),
+            (
+                "samePersistedFileVersion(\n"
+                "                        published.identity,\n"
+                "                        Os.lstat(file.absolutePath),"
+            ),
         ],
         "cross-process marker compare-and-publish",
+    )
+    publication_start = plugin.find("private fun writeBytesAtomicallyCas(")
+    publication_end = plugin.find(
+        "private fun pathIdentityNoFollow(",
+        publication_start,
+    )
+    if publication_start < 0 or publication_end < 0:
+        fail("could not isolate atomic CAS publication method")
+    publication = plugin[publication_start:publication_end]
+    if "samePersistedFileVersion(stagedIdentity, published.identity)" in publication:
+        fail("atomic publication compares pre-rename ctime to published ctime")
+    ordered(
+        publication,
+        [
+            "Os.rename(temporary.absolutePath, file.absolutePath)",
+            "val renamedStagedIdentity = Os.fstat(openedTemporary)",
+            "onPublished()",
+            "val published = readPersistedAuthorityIfFile(file)",
+        ],
+        "post-rename descriptor capture precedes adversarial publication callback",
     )
     if plugin.count("LINUX_O_DIRECTORY or OsConstants.O_NOFOLLOW") != 1:
         fail("directory descriptors bypass the pinned FUSE-compatible opener")
@@ -2358,7 +2389,7 @@ def main() -> None:
             "python3 scripts/test_build_provenance.py .",
             "out/build-provenance/SupernoteRtlReader.bundle",
             "out/build-provenance/app.npk",
-            "supernote-rtl-reader-v0.4.18-native-reader-v2",
+            "supernote-rtl-reader-v0.4.19-native-reader-v2",
             "native-spread-upgrade-artifact:",
             "github.event_name == 'workflow_dispatch'",
             "github.actor == github.repository_owner",

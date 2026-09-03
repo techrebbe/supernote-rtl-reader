@@ -4766,11 +4766,27 @@ class ReaderPreferencesModule(
             }
 
             Os.rename(temporary.absolutePath, file.absolutePath)
+            // Android's emulated-storage FUSE layer legitimately advances
+            // ctime when the staged inode is renamed into its published path.
+            // Compare the still-open staged descriptor across the rename by
+            // object identity, then use its post-rename version as the exact
+            // authority for the descriptor-backed destination read. This
+            // accepts the rename metadata transition without weakening the
+            // destination-substitution or post-read path fences.
+            val renamedStagedIdentity = Os.fstat(openedTemporary)
             onPublished()
             val published = readPersistedAuthorityIfFile(file)
                 ?: throw IllegalStateException("Published destination disappeared")
             require(
-                samePersistedFileVersion(stagedIdentity, published.identity) &&
+                sameFileObject(stagedIdentity, renamedStagedIdentity) &&
+                    samePersistedFileVersion(
+                        renamedStagedIdentity,
+                        published.identity,
+                    ) &&
+                    samePersistedFileVersion(
+                        published.identity,
+                        Os.lstat(file.absolutePath),
+                    ) &&
                     published.bytes.contentEquals(bytes) &&
                     sameFileObject(parentIdentity, Os.fstat(parentDescriptor)) &&
                     sameFileObject(parentIdentity, Os.lstat(parent.absolutePath)),

@@ -719,7 +719,7 @@ jobs:
       - name: Upload plugin package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: supernote-rtl-reader-v0.4.18-native-reader-v2
+          name: supernote-rtl-reader-v0.4.19-native-reader-v2
           path: out/*.snplg
           if-no-files-found: error
           retention-days: 3

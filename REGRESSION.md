@@ -7,7 +7,7 @@ with SupernoteDocument `1.02.446`.
 ## Native Reader v2 pre-hardware adversarial gate — PASS
 
 - [x] 85,071 deterministic controller/geometry/transaction assertions pass.
-- [x] 172 authority mutations are rejected, including exact firmware-declaration
+- [x] 176 authority mutations are rejected, including exact firmware-declaration
   and native pen-callback ownership drift, stale admission evidence,
   contained-runtime publication, contact-safe containment, three-layer stock
   restoration, projection drain ordering, and descriptor-backed marker
@@ -23,9 +23,9 @@ with SupernoteDocument `1.02.446`.
 - [x] Two clean v0.0.138 companion builds are byte-for-byte identical at
   258,587 bytes and SHA-256
   `8a641a67be2b56acb4afbe0634bc6187d5e07ac230b50e02d87c93bdeb749f3c`.
-  The exact locally generated RTL Reader hardware-candidate package for this
-  gate has SHA-256
-  `cf1c75f4e3248796a4f69fc3895745fd2964a1d3c149e5a58a5d0499fca07c40`.
+  The exact locally generated v0.4.19 RTL Reader hardware-candidate package
+  for this gate has SHA-256
+  `4fe438ff223870971b53e4209da92167cda4b6aa26e5f4e90623eb0be4a29a27`.
 - [x] The final adversarial review findings are covered by deterministic gates:
   epoch-owned input/lifecycle authority, exact stock-reload receipts, no-clobber
   `.mark` publication/rollback interleavings, post-commit relaunch, exact
@@ -53,6 +53,17 @@ with SupernoteDocument `1.02.446`.
   accepts `O_NOFOLLOW` without `O_DIRECTORY`, preserves exact descriptor/path
   identity, and supports directory `fsync`; v0.4.18 uses only that narrowly
   validated fallback and retains the before/open/after inode checks.
+- [x] The first v0.4.18 retry admitted the companion and verified the live
+  annotation backup, then rejected pending-marker publication because Android
+  emulated storage legitimately advanced the staged inode's `ctime` during
+  atomic rename. Fail-closed rollback restored the original ABSENT `.mark`,
+  removed the unpublished marker, and retained exact recovery evidence under
+  token `6097c662-1947-4585-91e0-f6106560bceb`. A scoped Nomad probe proved the
+  rename preserved device/inode/mode/links/size/mtime while advancing only
+  `ctime`. v0.4.19 therefore anchors the post-publication check to the still-open
+  staged descriptor's post-rename identity, then rechecks the descriptor-backed
+  destination and final path exactly; four new mutation cases protect identity
+  capture ordering and all three authority fences.
 - [ ] Exact-head independent review is clean.
 - [ ] Nomad hardware gate passes. No hardware result is claimed by this
   automated section.

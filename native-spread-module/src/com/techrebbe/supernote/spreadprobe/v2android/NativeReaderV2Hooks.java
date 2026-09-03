@@ -7,8 +7,6 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.Configuration;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.Process;
 import android.os.SystemClock;
@@ -59,6 +57,7 @@ public final class NativeReaderV2Hooks {
     private static final String HANDSHAKE_RESPONSE =
         "com.techrebbe.supernote.spreadprobe.HANDSHAKE_RESPONSE";
     private static final int HANDSHAKE_PROTOCOL = 2;
+    private static final long HANDSHAKE_PROVIDER_EXPIRY_MS = 1_200L;
     private static final long NATIVE_PEN_TERMINAL_GRACE_MS = 250L;
 
     private static final ConcurrentHashMap<Object, Entry> BY_ACTIVITY =
@@ -82,8 +81,6 @@ public final class NativeReaderV2Hooks {
         new ThreadLocal<>();
     private static volatile NativeReaderV2FirmwareAccess firmware;
     private static volatile BroadcastReceiver handshakeReceiver;
-    private static volatile Handler handshakeHandler;
-    private static volatile HandlerThread handshakeThread;
     private static volatile boolean handshakeReceiverRegistered;
     private static volatile boolean installed;
 
@@ -1098,19 +1095,6 @@ public final class NativeReaderV2Hooks {
                 "Native Reader v2 has no application context"
             );
         }
-        final HandlerThread thread = new HandlerThread(
-            "SNReaderV2Handshake",
-            Process.THREAD_PRIORITY_BACKGROUND
-        );
-        thread.start();
-        final Handler handler;
-        try {
-            handler = new Handler(thread.getLooper());
-        } catch (RuntimeException | Error failure) {
-            thread.quitSafely();
-            throw failure;
-        }
-        final Handler mainHandler = new Handler(Looper.getMainLooper());
         BroadcastReceiver receiver = new BroadcastReceiver() {
             @Override public void onReceive(
                 Context receiverContext,
@@ -1125,71 +1109,54 @@ public final class NativeReaderV2Hooks {
                     return;
                 }
                 String nonce = request.getStringExtra("nonce");
-                String requestedPath = request.getStringExtra("documentPath");
+                String requestedCanonicalPath =
+                    request.getStringExtra("documentPath");
+                String requestedRawPath =
+                    request.getStringExtra("rawDocumentPath");
                 int protocol = request.getIntExtra("protocol", -1);
                 if (nonce == null || nonce.length() < 16
                     || protocol != HANDSHAKE_PROTOCOL
-                    || requestedPath == null
-                    || requestedPath.indexOf('\0') >= 0) {
+                    || requestedCanonicalPath == null
+                    || requestedCanonicalPath.indexOf('\0') >= 0
+                    || requestedRawPath == null
+                    || requestedRawPath.indexOf('\0') >= 0) {
                     Log.w(TAG, "v2 handshake rejected protocol=" + protocol);
                     return;
                 }
-                if (!HANDSHAKE_SINGLE_FLIGHT.tryBegin()) {
+                final long handshakeToken = HANDSHAKE_SINGLE_FLIGHT.tryBegin();
+                if (handshakeToken == 0L) {
                     Log.w(TAG, "v2 handshake rejected while another request is pending");
                     return;
                 }
-                boolean handedOff = false;
+                final long handshakeDeadlineUptimeMs =
+                    SystemClock.uptimeMillis() + HANDSHAKE_PROVIDER_EXPIRY_MS;
                 try {
                     HandshakeSnapshot snapshot = captureHandshakeSnapshot();
                     if (snapshot == null) {
                         Log.w(TAG, "v2 handshake snapshot rejected");
                         return;
                     }
-                    boolean queued = handler.post(() -> {
-                        boolean publicationAccepted = false;
-                        try {
-                            HandshakeResolution resolution = resolveHandshake(
-                                snapshot,
-                                requestedPath
-                            );
-                            if (resolution == null) {
-                                Log.w(TAG, "v2 handshake worker rejected authority");
-                                return;
-                            }
-                            publicationAccepted = mainHandler.post(() -> {
-                                try {
-                                    publishHandshakeResponse(
-                                        receiverContext,
-                                        nonce,
-                                        snapshot,
-                                        resolution
-                                    );
-                                } finally {
-                                    HANDSHAKE_SINGLE_FLIGHT.finish();
-                                }
-                            });
-                            if (!publicationAccepted) {
-                                Log.w(TAG, "v2 handshake main publication was rejected");
-                            }
-                        } catch (Throwable failure) {
-                            Log.w(TAG, "v2 handshake worker failed closed", failure);
-                        } finally {
-                            if (!publicationAccepted) {
-                                HANDSHAKE_SINGLE_FLIGHT.finish();
-                            }
-                        }
-                    });
-                    if (!queued) {
-                        Log.w(TAG, "v2 handshake worker queue was rejected");
+                    HandshakeResolution resolution = resolveHandshake(
+                        snapshot,
+                        requestedRawPath,
+                        requestedCanonicalPath
+                    );
+                    if (resolution == null) {
+                        Log.w(TAG, "v2 handshake rejected path authority");
                         return;
                     }
-                    handedOff = true;
+                    publishHandshakeResponse(
+                        receiverContext,
+                        nonce,
+                        snapshot,
+                        resolution,
+                        handshakeToken,
+                        handshakeDeadlineUptimeMs
+                    );
                 } catch (Throwable failure) {
-                    Log.w(TAG, "v2 handshake snapshot failed closed", failure);
+                    Log.w(TAG, "v2 handshake failed closed", failure);
                 } finally {
-                    if (!handedOff) {
-                        HANDSHAKE_SINGLE_FLIGHT.finish();
-                    }
+                    HANDSHAKE_SINGLE_FLIGHT.finish(handshakeToken);
                 }
             }
         };
@@ -1199,14 +1166,11 @@ public final class NativeReaderV2Hooks {
                 new IntentFilter(HANDSHAKE_REQUEST)
             );
         } catch (RuntimeException | Error failure) {
-            thread.quitSafely();
             throw failure;
         }
         handshakeReceiver = receiver;
-        handshakeHandler = handler;
-        handshakeThread = thread;
         handshakeReceiverRegistered = true;
-        Log.i(TAG, "v2 handshake receiver registered with worker canonicalizer");
+        Log.i(TAG, "v2 handshake receiver registered with in-memory path binding");
     }
 
     private static HandshakeSnapshot captureHandshakeSnapshot() {
@@ -1239,27 +1203,31 @@ public final class NativeReaderV2Hooks {
 
     private static HandshakeResolution resolveHandshake(
         HandshakeSnapshot snapshot,
-        String requestedPath
+        String requestedRawPath,
+        String requestedCanonicalPath
     ) {
-        String expected = canonicalPath(requestedPath);
-        if (snapshot == null || expected == null) return null;
+        if (snapshot == null
+            || requestedRawPath == null
+            || requestedCanonicalPath == null) return null;
         HandshakeCandidate match = null;
         for (HandshakeCandidate candidate : snapshot.candidates) {
             if (candidate.rawPath == null) continue;
-            String actual = canonicalPath(candidate.rawPath);
-            if (actual == null) return null;
-            if (!expected.equals(actual)) continue;
+            if (!requestedRawPath.equals(candidate.rawPath)) continue;
             if (match != null && match.entry != candidate.entry) return null;
             match = candidate;
         }
-        return match == null ? null : new HandshakeResolution(match, expected);
+        return match == null
+            ? null
+            : new HandshakeResolution(match, requestedCanonicalPath);
     }
 
     private static void publishHandshakeResponse(
         Context receiverContext,
         String nonce,
         HandshakeSnapshot snapshot,
-        HandshakeResolution resolution
+        HandshakeResolution resolution,
+        long handshakeToken,
+        long handshakeDeadlineUptimeMs
     ) {
         if (Looper.myLooper() != Looper.getMainLooper()
             || receiverContext == null
@@ -1285,6 +1253,14 @@ public final class NativeReaderV2Hooks {
             NativeReaderV2PackageAdmission.EXPECTED_APK_LENGTH
         );
         response.putExtra("processId", Process.myPid());
+        if (!HANDSHAKE_SINGLE_FLIGHT.currentBefore(
+                handshakeToken,
+                SystemClock.uptimeMillis(),
+                handshakeDeadlineUptimeMs
+            )) {
+            Log.w(TAG, "v2 handshake publication expired");
+            return;
+        }
         try {
             receiverContext.sendBroadcast(response);
             Log.i(TAG, "v2 handshake response path="
@@ -1352,19 +1328,6 @@ public final class NativeReaderV2Hooks {
             && expected.binder == actual.binder
             && expected.documentPath != null
             && expected.documentPath.equals(actual.documentPath);
-    }
-
-    private static String canonicalPath(String value) {
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            Log.e(TAG, "v2 handshake canonicalization rejected on main looper");
-            return null;
-        }
-        if (value == null || value.indexOf('\0') >= 0) return null;
-        try {
-            return new File(value).getCanonicalPath();
-        } catch (Exception failure) {
-            return null;
-        }
     }
 
     private static final class HandshakeCandidate {

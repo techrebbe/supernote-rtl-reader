@@ -65,7 +65,7 @@ class ReaderPreferencesModule(
             "a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67"
         private const val NATIVE_READER_V2_APK_LENGTH = 258587L
         private const val NATIVE_READER_V2_APK_SHA256 =
-            "31e83f5ea104d41ed1fe9bddb140a6e19572fb766893e2754810496b5ca4bf80"
+            "6022d6f1dc2adc38a46be7c5513016a05c9d616ca84afb120dedd253f279ebac"
         private const val NATIVE_SPREAD_MARKER_SUFFIX = ".snspread"
         private const val NATIVE_SPREAD_BACKUP_SUFFIX = ".snspread-backup.properties"
         private const val NATIVE_SPREAD_BACKUP_MARK_SUFFIX = ".snspread-backup.mark"
@@ -98,6 +98,7 @@ class ReaderPreferencesModule(
             "com.techrebbe.supernote.spreadprobe.HANDSHAKE_RESPONSE"
         private const val HANDSHAKE_EXTRA_NONCE = "nonce"
         private const val HANDSHAKE_EXTRA_DOCUMENT_PATH = "documentPath"
+        private const val HANDSHAKE_EXTRA_RAW_DOCUMENT_PATH = "rawDocumentPath"
         private const val HANDSHAKE_EXTRA_PROTOCOL = "protocol"
         private const val HANDSHAKE_EXTRA_HOOKS_READY = "hooksReady"
         private const val HANDSHAKE_EXTRA_MODULE_VERSION_CODE = "moduleVersionCode"
@@ -1768,6 +1769,7 @@ class ReaderPreferencesModule(
         val completed = AtomicBoolean(false)
         val receiver = AtomicReference<BroadcastReceiver?>(null)
         val pathTask = AtomicReference<Future<*>?>(null)
+        val requestedRawPath = pdfFile.absolutePath
         lateinit var timeout: Runnable
 
         val finish: (NativeSpreadHandshake) -> Unit = { result ->
@@ -1877,6 +1879,7 @@ class ReaderPreferencesModule(
                         } else {
                             requestNativeSpreadHandshakeCanonical(
                                 expectedPath,
+                                requestedRawPath,
                                 configurationGeneration,
                                 completed,
                                 receiver,
@@ -1906,6 +1909,7 @@ class ReaderPreferencesModule(
 
     private fun requestNativeSpreadHandshakeCanonical(
         expectedPath: String,
+        requestedRawPath: String,
         configurationGeneration: Long,
         completed: AtomicBoolean,
         receiver: AtomicReference<BroadcastReceiver?>,
@@ -1992,6 +1996,10 @@ class ReaderPreferencesModule(
                     setPackage(DOCUMENT_PACKAGE)
                     putExtra(HANDSHAKE_EXTRA_NONCE, nonce)
                     putExtra(HANDSHAKE_EXTRA_DOCUMENT_PATH, expectedPath)
+                    putExtra(
+                        HANDSHAKE_EXTRA_RAW_DOCUMENT_PATH,
+                        requestedRawPath,
+                    )
                     putExtra(
                         HANDSHAKE_EXTRA_PROTOCOL,
                         NATIVE_SPREAD_HANDSHAKE_PROTOCOL,

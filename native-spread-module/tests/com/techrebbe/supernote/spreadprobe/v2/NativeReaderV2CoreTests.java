@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 public final class NativeReaderV2CoreTests {
     private static int assertions;
@@ -541,12 +542,17 @@ public final class NativeReaderV2CoreTests {
         CountDownLatch start = new CountDownLatch(1);
         CountDownLatch done = new CountDownLatch(contenders);
         AtomicInteger admitted = new AtomicInteger();
+        AtomicLong admittedToken = new AtomicLong();
         for (int index = 0; index < contenders; index++) {
             Thread thread = new Thread(() -> {
                 ready.countDown();
                 try {
                     start.await();
-                    if (gate.tryBegin()) admitted.incrementAndGet();
+                    long token = gate.tryBegin();
+                    if (token != 0L) {
+                        admitted.incrementAndGet();
+                        admittedToken.set(token);
+                    }
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
                 } finally {
@@ -560,11 +566,31 @@ public final class NativeReaderV2CoreTests {
         done.await();
         equal(1, admitted.get(), "handshake flood admits one request");
         check(gate.pending(), "admitted handshake remains pending");
-        check(!gate.tryBegin(), "pending handshake rejects another request");
-        gate.finish();
+        long first = admittedToken.get();
+        check(gate.current(first), "admitted token owns handshake generation");
+        equal(0L, gate.tryBegin(), "pending handshake rejects another request");
+        check(!gate.finish(first + 1L), "foreign token cannot release admission");
+        check(gate.current(first), "foreign release preserves the owner");
+        check(gate.currentBefore(first, 100L, 1_200L),
+            "provider result before the absolute deadline retains authority");
+        check(!gate.currentBefore(first, 1_200L, 1_200L),
+            "provider result at the deadline loses publication authority");
+        check(!gate.currentBefore(first, 1_201L, 1_200L),
+            "slow snapshot completion cannot extend admission authority");
+        check(!gate.currentBefore(first, 2_000L, 1_200L),
+            "main publication dequeued after its deadline is rejected");
+        check(gate.finish(first), "terminal path releases its exact generation");
         check(!gate.pending(), "terminal path releases handshake admission");
-        check(gate.tryBegin(), "released handshake admits the next request");
-        gate.finish();
+        long second = gate.tryBegin();
+        check(second != 0L && second != first,
+            "released handshake admits a distinct next generation");
+        check(!gate.finish(first), "late first generation cannot release successor");
+        check(gate.current(second), "late first completion preserves successor");
+        check(!gate.currentBefore(first, 2_001L, 3_200L),
+            "late first publication cannot borrow successor deadline authority");
+        check(gate.currentBefore(second, 2_001L, 3_200L),
+            "successor retains its independent deadline authority");
+        check(gate.finish(second), "successor releases its exact generation");
         check(!gate.pending(), "second terminal path releases admission");
     }
 

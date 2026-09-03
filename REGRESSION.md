@@ -6,8 +6,8 @@ with SupernoteDocument `1.02.446`.
 
 ## Native Reader v2 pre-hardware adversarial gate — PASS
 
-- [x] 85,058 deterministic controller/geometry/transaction assertions pass.
-- [x] 160 authority mutations are rejected, including stale admission evidence,
+- [x] 85,071 deterministic controller/geometry/transaction assertions pass.
+- [x] 161 authority mutations are rejected, including stale admission evidence,
   contained-runtime publication, contact-safe containment, three-layer stock
   restoration, projection drain ordering, and descriptor-backed marker
   recovery.
@@ -21,15 +21,17 @@ with SupernoteDocument `1.02.446`.
   Spread generator tests, contract fixtures, and native viewport tests pass.
 - [x] Two clean v0.0.137 companion builds are byte-for-byte identical at
   258,587 bytes and SHA-256
-  `31e83f5ea104d41ed1fe9bddb140a6e19572fb766893e2754810496b5ca4bf80`.
+  `6022d6f1dc2adc38a46be7c5513016a05c9d616ca84afb120dedd253f279ebac`.
   The exact locally generated RTL Reader hardware-candidate package for this
   gate has SHA-256
-  `64081b090b0c4d32ac2f600e35301bd9d4600adc1fb008b4eed790daf9dcb9e4`.
+  `0bcbaf8e29c60fc41999cedf1065a75c09cfd477941718258f5231f1c50afe70`.
 - [x] The final adversarial review findings are covered by deterministic gates:
   epoch-owned input/lifecycle authority, exact stock-reload receipts, no-clobber
   `.mark` publication/rollback interleavings, post-commit relaunch, exact
   installed-companion identity, protected two-stage release signing, bounded
-  off-main handshake resolution, process-global provider single-flight, and
+  off-main plug-in canonicalization, filesystem-free native raw-path binding,
+  generation-owned provider admission with absolute-deadline publication,
+  plus
   generation-linearized terminal plug-in callbacks.
 - [x] Delayed runtime retirement cannot remove component IDs leased by a new
   same-Activity session, and every unproven post-rename `.mark` failure blocks

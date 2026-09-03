@@ -287,15 +287,21 @@ MUTATIONS = (
     ),
     (
         "NativeHandshakeSingleFlight.java",
-        "return pending.compareAndSet(false, true);",
-        "return true;",
+        "return owner.compareAndSet(0L, token) ? token : 0L;",
+        "return token;",
         "handshake flood single-flight admission",
     ),
     (
         "NativeHandshakeSingleFlight.java",
-        "pending.set(false);",
-        "pending.set(true);",
-        "handshake terminal-path admission release",
+        "return token != 0L && owner.compareAndSet(token, 0L);",
+        "owner.set(0L);\n        return token != 0L;",
+        "handshake generation-owned admission release",
+    ),
+    (
+        "NativeHandshakeSingleFlight.java",
+        "        return nowUptimeMs < deadlineUptimeMs && current(token);",
+        "        return current(token);",
+        "handshake absolute publication deadline",
     ),
 )
 
@@ -372,37 +378,48 @@ STATIC_MUTATIONS = (
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2Hooks.java",
-        "                boolean queued = handler.post(() -> {",
-        "                boolean queued = mainHandler.post(() -> {",
-        "handshake canonicalization worker dispatch",
+        "    private static final long HANDSHAKE_PROVIDER_EXPIRY_MS = 1_200L;",
+        "    private static final long HANDSHAKE_PROVIDER_EXPIRY_MS = Long.MAX_VALUE;",
+        "handshake provider bounded expiry",
     ),
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2Hooks.java",
-        "            Process.THREAD_PRIORITY_BACKGROUND",
-        "            Process.THREAD_PRIORITY_DEFAULT",
-        "handshake worker background priority",
+        "                    || requestedRawPath == null\n"
+        "                    || requestedRawPath.indexOf('\\0') >= 0)",
+        "                    || false)",
+        "handshake required raw-path request authority",
     ),
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2Hooks.java",
-        "                            publicationAccepted = mainHandler.post(() -> {",
-        "                            publicationAccepted = handler.post(() -> {",
-        "handshake main-thread publication dispatch",
+        "            if (!requestedRawPath.equals(candidate.rawPath)) continue;",
+        "            if (false) continue;",
+        "handshake exact request raw-path binding",
     ),
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2Hooks.java",
-        "        String expected = canonicalPath(requestedPath);",
-        "        String expected = requestedPath;",
-        "handshake requested-path canonical authority",
+        "            : new HandshakeResolution(match, requestedCanonicalPath);",
+        "            : new HandshakeResolution(match, requestedRawPath);",
+        "handshake canonical identity echo binding",
     ),
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2Hooks.java",
-        "            String actual = canonicalPath(candidate.rawPath);",
-        "            String actual = candidate.rawPath;",
-        "handshake candidate-path canonical authority",
+        "        if (!HANDSHAKE_SINGLE_FLIGHT.currentBefore(\n"
+        "                handshakeToken,\n"
+        "                SystemClock.uptimeMillis(),\n"
+        "                handshakeDeadlineUptimeMs\n"
+        "            )) {\n"
+        "            Log.w(TAG, \"v2 handshake publication expired\");\n"
+        "            return;\n"
+        "        }",
+        "        if (false) {\n"
+        "            Log.w(TAG, \"v2 handshake publication expired\");\n"
+        "            return;\n"
+        "        }",
+        "handshake expired main publication fence",
     ),
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
@@ -467,15 +484,6 @@ STATIC_MUTATIONS = (
         "            && expected.binder == actual.binder",
         "            && true",
         "handshake binder component identity",
-    ),
-    (
-        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
-        "v2android/NativeReaderV2Hooks.java",
-        "        if (Looper.myLooper() == Looper.getMainLooper()) {\n"
-        "            Log.e(TAG, \"v2 handshake canonicalization rejected on main looper\");",
-        "        if (false) {\n"
-        "            Log.e(TAG, \"v2 handshake canonicalization rejected on main looper\");",
-        "handshake canonicalization main-thread rejection",
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
@@ -549,6 +557,18 @@ STATIC_MUTATIONS = (
         "                    reportedPath == expectedPath",
         "                    reportedPath?.let { File(it).canonicalPath } == expectedPath",
         "plugin handshake response avoids main-thread canonicalization",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                    putExtra(\n"
+        "                        HANDSHAKE_EXTRA_RAW_DOCUMENT_PATH,\n"
+        "                        requestedRawPath,\n"
+        "                    )",
+        "                    putExtra(\n"
+        "                        HANDSHAKE_EXTRA_RAW_DOCUMENT_PATH,\n"
+        "                        expectedPath,\n"
+        "                    )",
+        "plugin handshake raw-path request binding",
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
@@ -641,7 +661,7 @@ STATIC_MUTATIONS = (
     ),
     (
         ".github/workflows/build.yml",
-        "31e83f5ea104d41ed1fe9bddb140a6e19572fb766893e2754810496b5ca4bf80",
+        "6022d6f1dc2adc38a46be7c5513016a05c9d616ca84afb120dedd253f279ebac",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "published companion exact signed digest",
     ),
@@ -1116,7 +1136,7 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "31e83f5ea104d41ed1fe9bddb140a6e19572fb766893e2754810496b5ca4bf80",
+        "6022d6f1dc2adc38a46be7c5513016a05c9d616ca84afb120dedd253f279ebac",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "installed companion APK digest pin",
     ),

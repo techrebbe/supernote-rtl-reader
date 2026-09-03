@@ -7,7 +7,7 @@ with SupernoteDocument `1.02.446`.
 ## Native Reader v2 pre-hardware adversarial gate — PASS
 
 - [x] 85,071 deterministic controller/geometry/transaction assertions pass.
-- [x] 161 authority mutations are rejected, including stale admission evidence,
+- [x] 163 authority mutations are rejected, including stale admission evidence,
   contained-runtime publication, contact-safe containment, three-layer stock
   restoration, projection drain ordering, and descriptor-backed marker
   recovery.
@@ -21,15 +21,15 @@ with SupernoteDocument `1.02.446`.
   Spread generator tests, contract fixtures, and native viewport tests pass.
 - [x] Two clean v0.0.137 companion builds are byte-for-byte identical at
   258,587 bytes and SHA-256
-  `6022d6f1dc2adc38a46be7c5513016a05c9d616ca84afb120dedd253f279ebac`.
+  `0bcf7c19240b4526e70c2c8ab664afd96b9846d6537931275199574ba48be901`.
   The exact locally generated RTL Reader hardware-candidate package for this
   gate has SHA-256
-  `0bcbaf8e29c60fc41999cedf1065a75c09cfd477941718258f5231f1c50afe70`.
+  `f41933bd29e071e2ee850799a15b7b0b68c73e9de5f7fb823851551b5c6cb20e`.
 - [x] The final adversarial review findings are covered by deterministic gates:
   epoch-owned input/lifecycle authority, exact stock-reload receipts, no-clobber
   `.mark` publication/rollback interleavings, post-commit relaunch, exact
   installed-companion identity, protected two-stage release signing, bounded
-  off-main plug-in canonicalization, filesystem-free native raw-path binding,
+  filesystem-free exact raw-path binding across the plug-in and native provider,
   generation-owned provider admission with absolute-deadline publication,
   plus
   generation-linearized terminal plug-in callbacks.

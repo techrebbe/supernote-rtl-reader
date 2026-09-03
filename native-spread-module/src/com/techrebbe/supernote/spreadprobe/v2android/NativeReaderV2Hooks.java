@@ -56,7 +56,7 @@ public final class NativeReaderV2Hooks {
         "com.techrebbe.supernote.spreadprobe.HANDSHAKE_REQUEST";
     private static final String HANDSHAKE_RESPONSE =
         "com.techrebbe.supernote.spreadprobe.HANDSHAKE_RESPONSE";
-    private static final int HANDSHAKE_PROTOCOL = 2;
+    private static final int HANDSHAKE_PROTOCOL = 3;
     private static final long HANDSHAKE_PROVIDER_EXPIRY_MS = 1_200L;
     private static final long NATIVE_PEN_TERMINAL_GRACE_MS = 250L;
 
@@ -1109,17 +1109,12 @@ public final class NativeReaderV2Hooks {
                     return;
                 }
                 String nonce = request.getStringExtra("nonce");
-                String requestedCanonicalPath =
-                    request.getStringExtra("documentPath");
-                String requestedRawPath =
-                    request.getStringExtra("rawDocumentPath");
+                String requestedPath = request.getStringExtra("rawDocumentPath");
                 int protocol = request.getIntExtra("protocol", -1);
                 if (nonce == null || nonce.length() < 16
                     || protocol != HANDSHAKE_PROTOCOL
-                    || requestedCanonicalPath == null
-                    || requestedCanonicalPath.indexOf('\0') >= 0
-                    || requestedRawPath == null
-                    || requestedRawPath.indexOf('\0') >= 0) {
+                    || requestedPath == null
+                    || requestedPath.indexOf('\0') >= 0) {
                     Log.w(TAG, "v2 handshake rejected protocol=" + protocol);
                     return;
                 }
@@ -1138,8 +1133,7 @@ public final class NativeReaderV2Hooks {
                     }
                     HandshakeResolution resolution = resolveHandshake(
                         snapshot,
-                        requestedRawPath,
-                        requestedCanonicalPath
+                        requestedPath
                     );
                     if (resolution == null) {
                         Log.w(TAG, "v2 handshake rejected path authority");
@@ -1203,22 +1197,19 @@ public final class NativeReaderV2Hooks {
 
     private static HandshakeResolution resolveHandshake(
         HandshakeSnapshot snapshot,
-        String requestedRawPath,
-        String requestedCanonicalPath
+        String requestedPath
     ) {
-        if (snapshot == null
-            || requestedRawPath == null
-            || requestedCanonicalPath == null) return null;
+        if (snapshot == null || requestedPath == null) return null;
         HandshakeCandidate match = null;
         for (HandshakeCandidate candidate : snapshot.candidates) {
             if (candidate.rawPath == null) continue;
-            if (!requestedRawPath.equals(candidate.rawPath)) continue;
+            if (!requestedPath.equals(candidate.rawPath)) continue;
             if (match != null && match.entry != candidate.entry) return null;
             match = candidate;
         }
         return match == null
             ? null
-            : new HandshakeResolution(match, requestedCanonicalPath);
+            : new HandshakeResolution(match, match.rawPath);
     }
 
     private static void publishHandshakeResponse(
@@ -1241,7 +1232,7 @@ public final class NativeReaderV2Hooks {
         Intent response = new Intent(HANDSHAKE_RESPONSE);
         response.setPackage(PLUGIN_HOST_PACKAGE);
         response.putExtra("nonce", nonce);
-        response.putExtra("documentPath", resolution.canonicalPath);
+        response.putExtra("rawDocumentPath", resolution.rawPath);
         response.putExtra("protocol", HANDSHAKE_PROTOCOL);
         response.putExtra("hooksReady", true);
         response.putExtra(
@@ -1264,7 +1255,7 @@ public final class NativeReaderV2Hooks {
         try {
             receiverContext.sendBroadcast(response);
             Log.i(TAG, "v2 handshake response path="
-                + resolution.canonicalPath);
+                + resolution.rawPath);
         } catch (RuntimeException failure) {
             Log.w(TAG, "v2 handshake response send failed", failure);
         }
@@ -1367,14 +1358,14 @@ public final class NativeReaderV2Hooks {
 
     private static final class HandshakeResolution {
         final HandshakeCandidate candidate;
-        final String canonicalPath;
+        final String rawPath;
 
         HandshakeResolution(
             HandshakeCandidate candidate,
-            String canonicalPath
+            String rawPath
         ) {
             this.candidate = candidate;
-            this.canonicalPath = canonicalPath;
+            this.rawPath = rawPath;
         }
     }
 

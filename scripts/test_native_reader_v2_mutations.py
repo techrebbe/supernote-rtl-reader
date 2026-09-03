@@ -378,6 +378,19 @@ STATIC_MUTATIONS = (
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2Hooks.java",
+        "    private static final int HANDSHAKE_PROTOCOL = 3;",
+        "    private static final int HANDSHAKE_PROTOCOL = 2;",
+        "native handshake protocol v3",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "        private const val NATIVE_SPREAD_HANDSHAKE_PROTOCOL = 3",
+        "        private const val NATIVE_SPREAD_HANDSHAKE_PROTOCOL = 2",
+        "plugin handshake protocol v3",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
         "    private static final long HANDSHAKE_PROVIDER_EXPIRY_MS = 1_200L;",
         "    private static final long HANDSHAKE_PROVIDER_EXPIRY_MS = Long.MAX_VALUE;",
         "handshake provider bounded expiry",
@@ -385,24 +398,24 @@ STATIC_MUTATIONS = (
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2Hooks.java",
-        "                    || requestedRawPath == null\n"
-        "                    || requestedRawPath.indexOf('\\0') >= 0)",
+        "                    || requestedPath == null\n"
+        "                    || requestedPath.indexOf('\\0') >= 0)",
         "                    || false)",
         "handshake required raw-path request authority",
     ),
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2Hooks.java",
-        "            if (!requestedRawPath.equals(candidate.rawPath)) continue;",
+        "            if (!requestedPath.equals(candidate.rawPath)) continue;",
         "            if (false) continue;",
         "handshake exact request raw-path binding",
     ),
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2Hooks.java",
-        "            : new HandshakeResolution(match, requestedCanonicalPath);",
-        "            : new HandshakeResolution(match, requestedRawPath);",
-        "handshake canonical identity echo binding",
+        "            : new HandshakeResolution(match, match.rawPath);",
+        "            : new HandshakeResolution(match, requestedPath);",
+        "handshake provider-source raw-path echo binding",
     ),
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
@@ -530,19 +543,19 @@ STATIC_MUTATIONS = (
         "            finish(NativeSpreadHandshake(false, \"stale_operation\"))\n"
         "            return\n"
         "        }\n\n"
-        "        try {",
+        "        val start = Runnable {",
         "        if (false) {\n"
         "            finish(NativeSpreadHandshake(false, \"stale_operation\"))\n"
         "            return\n"
         "        }\n\n"
-        "        try {",
-        "plugin handshake pre-worker generation fence",
+        "        val start = Runnable {",
+        "plugin handshake pre-dispatch generation fence",
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "            NATIVE_SPREAD_HANDSHAKE_EXECUTOR.execute(task)",
-        "            task.run()",
-        "plugin bounded handshake path executor",
+        "        val expectedPath = pdfFile.absolutePath",
+        "        val expectedPath = pdfFile.canonicalPath",
+        "plugin handshake filesystem-free path capture",
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
@@ -560,14 +573,8 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "                    putExtra(\n"
-        "                        HANDSHAKE_EXTRA_RAW_DOCUMENT_PATH,\n"
-        "                        requestedRawPath,\n"
-        "                    )",
-        "                    putExtra(\n"
-        "                        HANDSHAKE_EXTRA_RAW_DOCUMENT_PATH,\n"
-        "                        expectedPath,\n"
-        "                    )",
+        "                    putExtra(HANDSHAKE_EXTRA_RAW_DOCUMENT_PATH, expectedPath)",
+        "                    putExtra(HANDSHAKE_EXTRA_RAW_DOCUMENT_PATH, pdfFile.path)",
         "plugin handshake raw-path request binding",
     ),
     (
@@ -579,9 +586,17 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "            ArrayBlockingQueue<Runnable>(1),",
-        "            java.util.concurrent.LinkedBlockingQueue<Runnable>(),",
-        "plugin bounded handshake executor queue",
+        "            if (SystemClock.uptimeMillis() >= handshakeDeadlineUptimeMs) {\n"
+        "                finish(NativeSpreadHandshake(false, \"timeout\"))\n"
+        "                return\n"
+        "            }\n"
+        "            reactApplicationContext.sendBroadcast(",
+        "            if (false) {\n"
+        "                finish(NativeSpreadHandshake(false, \"timeout\"))\n"
+        "                return\n"
+        "            }\n"
+        "            reactApplicationContext.sendBroadcast(",
+        "plugin handshake pre-send absolute deadline",
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
@@ -661,7 +676,7 @@ STATIC_MUTATIONS = (
     ),
     (
         ".github/workflows/build.yml",
-        "6022d6f1dc2adc38a46be7c5513016a05c9d616ca84afb120dedd253f279ebac",
+        "0bcf7c19240b4526e70c2c8ab664afd96b9846d6537931275199574ba48be901",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "published companion exact signed digest",
     ),
@@ -1136,7 +1151,7 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "6022d6f1dc2adc38a46be7c5513016a05c9d616ca84afb120dedd253f279ebac",
+        "0bcf7c19240b4526e70c2c8ab664afd96b9846d6537931275199574ba48be901",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "installed companion APK digest pin",
     ),

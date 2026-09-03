@@ -37,12 +37,7 @@ import java.util.Base64
 import java.util.Collections
 import java.util.Properties
 import java.util.UUID
-import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Future
-import java.util.concurrent.FutureTask
-import java.util.concurrent.ThreadPoolExecutor
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -65,7 +60,7 @@ class ReaderPreferencesModule(
             "a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67"
         private const val NATIVE_READER_V2_APK_LENGTH = 258587L
         private const val NATIVE_READER_V2_APK_SHA256 =
-            "6022d6f1dc2adc38a46be7c5513016a05c9d616ca84afb120dedd253f279ebac"
+            "0bcf7c19240b4526e70c2c8ab664afd96b9846d6537931275199574ba48be901"
         private const val NATIVE_SPREAD_MARKER_SUFFIX = ".snspread"
         private const val NATIVE_SPREAD_BACKUP_SUFFIX = ".snspread-backup.properties"
         private const val NATIVE_SPREAD_BACKUP_MARK_SUFFIX = ".snspread-backup.mark"
@@ -76,7 +71,7 @@ class ReaderPreferencesModule(
         private const val NATIVE_SPREAD_FAILED_ARCHIVE_VERSION = 1
         private const val NATIVE_SPREAD_FAILED_ARCHIVE_KIND =
             "failed-protected-editable-activation"
-        private const val NATIVE_SPREAD_HANDSHAKE_PROTOCOL = 2
+        private const val NATIVE_SPREAD_HANDSHAKE_PROTOCOL = 3
         private const val NATIVE_SPREAD_EDITABLE_MARKER_PROTOCOL = 2
         private const val NATIVE_SPREAD_EDITABLE_MODE =
             "protected-editable-transactional-v1"
@@ -97,7 +92,6 @@ class ReaderPreferencesModule(
         private const val NATIVE_SPREAD_HANDSHAKE_RESPONSE =
             "com.techrebbe.supernote.spreadprobe.HANDSHAKE_RESPONSE"
         private const val HANDSHAKE_EXTRA_NONCE = "nonce"
-        private const val HANDSHAKE_EXTRA_DOCUMENT_PATH = "documentPath"
         private const val HANDSHAKE_EXTRA_RAW_DOCUMENT_PATH = "rawDocumentPath"
         private const val HANDSHAKE_EXTRA_PROTOCOL = "protocol"
         private const val HANDSHAKE_EXTRA_HOOKS_READY = "hooksReady"
@@ -127,19 +121,6 @@ class ReaderPreferencesModule(
         private val nativeSpreadConfigurationGeneration = AtomicLong(0L)
         private val nativeSpreadConfigurationIntentLock = Any()
         private val nativeSpreadConfigurationLock = Any()
-        private val NATIVE_SPREAD_HANDSHAKE_EXECUTOR = ThreadPoolExecutor(
-            1,
-            1,
-            0L,
-            TimeUnit.MILLISECONDS,
-            ArrayBlockingQueue<Runnable>(1),
-            { runnable ->
-                Thread(runnable, "RTLReaderNativeV2HandshakePath").apply {
-                    isDaemon = true
-                }
-            },
-            ThreadPoolExecutor.AbortPolicy(),
-        )
         private val NATIVE_READER_V2_COMMITTED_FIELDS = setOf(
             "nativeReaderEngine",
             "enabled",
@@ -221,9 +202,6 @@ class ReaderPreferencesModule(
     private var lastSavedFilePath: String? = null
 
     private val nativeSpreadModuleInvalidated = AtomicBoolean(false)
-    private val nativeSpreadHandshakeTasks = Collections.newSetFromMap(
-        ConcurrentHashMap<Future<*>, Boolean>(),
-    )
     private val nativeSpreadHandshakeReceivers = Collections.newSetFromMap(
         ConcurrentHashMap<BroadcastReceiver, Boolean>(),
     )
@@ -240,13 +218,6 @@ class ReaderPreferencesModule(
             }
         }
         if (newlyInvalidated) {
-            nativeSpreadHandshakeTasks.toList().forEach { task ->
-                task.cancel(true)
-                if (task is Runnable) {
-                    NATIVE_SPREAD_HANDSHAKE_EXECUTOR.remove(task)
-                }
-            }
-            nativeSpreadHandshakeTasks.clear()
             val cleanup = Runnable {
                 nativeSpreadHandshakeReceivers.toList().forEach { receiver ->
                     try {
@@ -1768,8 +1739,9 @@ class ReaderPreferencesModule(
         val mainHandler = Handler(Looper.getMainLooper())
         val completed = AtomicBoolean(false)
         val receiver = AtomicReference<BroadcastReceiver?>(null)
-        val pathTask = AtomicReference<Future<*>?>(null)
-        val requestedRawPath = pdfFile.absolutePath
+        val expectedPath = pdfFile.absolutePath
+        val handshakeDeadlineUptimeMs =
+            SystemClock.uptimeMillis() + NATIVE_SPREAD_HANDSHAKE_TIMEOUT_MS
         lateinit var timeout: Runnable
 
         val finish: (NativeSpreadHandshake) -> Unit = { result ->
@@ -1782,13 +1754,6 @@ class ReaderPreferencesModule(
                             reactApplicationContext.unregisterReceiver(registered)
                         } catch (_: Throwable) {
                             // The receiver may already have been removed during teardown.
-                        }
-                    }
-                    pathTask.getAndSet(null)?.let { task ->
-                        nativeSpreadHandshakeTasks.remove(task)
-                        if (!task.isDone) task.cancel(true)
-                        if (task is Runnable) {
-                            NATIVE_SPREAD_HANDSHAKE_EXECUTOR.remove(task)
                         }
                     }
                     synchronized(nativeSpreadConfigurationIntentLock) {
@@ -1847,69 +1812,31 @@ class ReaderPreferencesModule(
             return
         }
 
-        try {
-            val task = FutureTask<Unit>(
-                Runnable {
-                    val expectedPath = try {
-                        pdfFile.canonicalPath
-                    } catch (_: Throwable) {
-                        null
-                    }
-                    val queued = mainHandler.post {
-                        if (completed.get()) {
-                            return@post
-                        }
-                        if (nativeSpreadModuleInvalidated.get()) {
-                            finish(NativeSpreadHandshake(false, "module_invalidated"))
-                            return@post
-                        }
-                        if (nativeSpreadConfigurationGeneration.get() !=
-                            configurationGeneration
-                        ) {
-                            finish(NativeSpreadHandshake(false, "stale_operation"))
-                            return@post
-                        }
-                        if (expectedPath == null) {
-                            finish(
-                                NativeSpreadHandshake(
-                                    false,
-                                    "document_path_unavailable",
-                                ),
-                            )
-                        } else {
-                            requestNativeSpreadHandshakeCanonical(
-                                expectedPath,
-                                requestedRawPath,
-                                configurationGeneration,
-                                completed,
-                                receiver,
-                                finish,
-                            )
-                        }
-                    }
-                    if (!queued) {
-                        completed.compareAndSet(false, true)
-                    }
-                },
-                Unit,
-            )
-            pathTask.set(task)
-            nativeSpreadHandshakeTasks.add(task)
-            if (completed.get()) {
-                nativeSpreadHandshakeTasks.remove(task)
-                pathTask.compareAndSet(task, null)
-                task.cancel(true)
-                return
+        val start = Runnable {
+            if (completed.get()) return@Runnable
+            if (SystemClock.uptimeMillis() >= handshakeDeadlineUptimeMs) {
+                finish(NativeSpreadHandshake(false, "timeout"))
+                return@Runnable
             }
-            NATIVE_SPREAD_HANDSHAKE_EXECUTOR.execute(task)
-        } catch (_: Throwable) {
-            finish(NativeSpreadHandshake(false, "request_busy"))
+            requestNativeSpreadHandshakeBound(
+                expectedPath,
+                handshakeDeadlineUptimeMs,
+                configurationGeneration,
+                completed,
+                receiver,
+                finish,
+            )
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            start.run()
+        } else if (!mainHandler.post(start)) {
+            completed.compareAndSet(false, true)
         }
     }
 
-    private fun requestNativeSpreadHandshakeCanonical(
+    private fun requestNativeSpreadHandshakeBound(
         expectedPath: String,
-        requestedRawPath: String,
+        handshakeDeadlineUptimeMs: Long,
         configurationGeneration: Long,
         completed: AtomicBoolean,
         receiver: AtomicReference<BroadcastReceiver?>,
@@ -1945,6 +1872,10 @@ class ReaderPreferencesModule(
                     finish(NativeSpreadHandshake(false, "stale_operation"))
                     return
                 }
+                if (SystemClock.uptimeMillis() >= handshakeDeadlineUptimeMs) {
+                    finish(NativeSpreadHandshake(false, "timeout"))
+                    return
+                }
 
                 val protocol = intent.getIntExtra(HANDSHAKE_EXTRA_PROTOCOL, -1)
                 val hooksReady = intent.getBooleanExtra(
@@ -1964,7 +1895,7 @@ class ReaderPreferencesModule(
                     -1,
                 )
                 val reportedPath = intent.getStringExtra(
-                    HANDSHAKE_EXTRA_DOCUMENT_PATH,
+                    HANDSHAKE_EXTRA_RAW_DOCUMENT_PATH,
                 )
 
                 val valid = hooksReady &&
@@ -1991,15 +1922,15 @@ class ReaderPreferencesModule(
                 registered,
                 IntentFilter(NATIVE_SPREAD_HANDSHAKE_RESPONSE),
             )
+            if (SystemClock.uptimeMillis() >= handshakeDeadlineUptimeMs) {
+                finish(NativeSpreadHandshake(false, "timeout"))
+                return
+            }
             reactApplicationContext.sendBroadcast(
                 Intent(NATIVE_SPREAD_HANDSHAKE_REQUEST).apply {
                     setPackage(DOCUMENT_PACKAGE)
                     putExtra(HANDSHAKE_EXTRA_NONCE, nonce)
-                    putExtra(HANDSHAKE_EXTRA_DOCUMENT_PATH, expectedPath)
-                    putExtra(
-                        HANDSHAKE_EXTRA_RAW_DOCUMENT_PATH,
-                        requestedRawPath,
-                    )
+                    putExtra(HANDSHAKE_EXTRA_RAW_DOCUMENT_PATH, expectedPath)
                     putExtra(
                         HANDSHAKE_EXTRA_PROTOCOL,
                         NATIVE_SPREAD_HANDSHAKE_PROTOCOL,

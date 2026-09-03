@@ -511,6 +511,7 @@ def main() -> None:
     require(
         hooks,
         [
+            "private static final int HANDSHAKE_PROTOCOL = 3;",
             "private static final NativeHandshakeSingleFlight HANDSHAKE_SINGLE_FLIGHT",
             "private static final long HANDSHAKE_PROVIDER_EXPIRY_MS = 1_200L",
             "final long handshakeToken = HANDSHAKE_SINGLE_FLIGHT.tryBegin()",
@@ -534,10 +535,8 @@ def main() -> None:
         handshake,
         [
             "Looper.myLooper() != Looper.getMainLooper()",
-            'request.getStringExtra("documentPath")',
             'request.getStringExtra("rawDocumentPath")',
-            "requestedCanonicalPath.indexOf('\\0') >= 0",
-            "requestedRawPath.indexOf('\\0') >= 0",
+            "requestedPath.indexOf('\\0') >= 0",
             "final long handshakeToken = HANDSHAKE_SINGLE_FLIGHT.tryBegin();",
             "final long handshakeDeadlineUptimeMs =",
             "SystemClock.uptimeMillis() + HANDSHAKE_PROVIDER_EXPIRY_MS;",
@@ -606,11 +605,10 @@ def main() -> None:
     ordered(
         resolution,
         [
-            "requestedRawPath == null",
-            "requestedCanonicalPath == null",
-            "if (!requestedRawPath.equals(candidate.rawPath)) continue;",
+            "requestedPath == null",
+            "if (!requestedPath.equals(candidate.rawPath)) continue;",
             "if (match != null && match.entry != candidate.entry) return null;",
-            "new HandshakeResolution(match, requestedCanonicalPath)",
+            "new HandshakeResolution(match, match.rawPath)",
         ],
         "in-memory raw-path binding and unique Activity authority",
     )
@@ -622,7 +620,7 @@ def main() -> None:
             "snapshot.candidates.contains(resolution.candidate)",
             "response.setPackage(PLUGIN_HOST_PACKAGE);",
             'response.putExtra("nonce", nonce);',
-            'response.putExtra("documentPath", resolution.canonicalPath);',
+            'response.putExtra("rawDocumentPath", resolution.rawPath);',
             "HANDSHAKE_SINGLE_FLIGHT.currentBefore(\n"
             "                handshakeToken,\n"
             "                SystemClock.uptimeMillis(),\n"
@@ -683,51 +681,42 @@ def main() -> None:
     plugin_handshake_end = plugin.find(
         "private fun nativeSpreadCapability()", plugin_handshake_start
     )
-    plugin_canonical_start = plugin.find(
-        "private fun requestNativeSpreadHandshakeCanonical(",
+    plugin_bound_start = plugin.find(
+        "private fun requestNativeSpreadHandshakeBound(",
         plugin_handshake_start,
     )
     plugin_generation_start = plugin.find(
         "private fun requireNativeSpreadConfigurationGeneration(",
-        plugin_canonical_start,
+        plugin_bound_start,
     )
     if min(
         plugin_handshake_start,
-        plugin_canonical_start,
+        plugin_bound_start,
         plugin_generation_start,
         plugin_handshake_end,
     ) < 0:
         fail("could not isolate plug-in v2 handshake")
     plugin_handshake = plugin[plugin_handshake_start:plugin_handshake_end]
-    plugin_wrapper = plugin[plugin_handshake_start:plugin_canonical_start]
-    plugin_response = plugin[plugin_canonical_start:plugin_generation_start]
+    plugin_wrapper = plugin[plugin_handshake_start:plugin_bound_start]
+    plugin_response = plugin[plugin_bound_start:plugin_generation_start]
     ordered(
         plugin_wrapper,
         [
             "val completed = AtomicBoolean(false)",
             "val receiver = AtomicReference<BroadcastReceiver?>(null)",
-            "val pathTask = AtomicReference<Future<*>?>(null)",
-            "val requestedRawPath = pdfFile.absolutePath",
+            "val expectedPath = pdfFile.absolutePath",
+            "val handshakeDeadlineUptimeMs =",
             "if (!mainHandler.postDelayed(\n"
             "                timeout,\n"
             "                NATIVE_SPREAD_HANDSHAKE_TIMEOUT_MS,",
             "nativeSpreadConfigurationGeneration.get() != configurationGeneration",
-            "val task = FutureTask<Unit>(",
-            "pdfFile.canonicalPath",
-            "val queued = mainHandler.post {",
-            "if (completed.get()) {\n"
-            "                            return@post\n"
-            "                        }\n"
-            "                        if (nativeSpreadModuleInvalidated.get()) {\n"
-            "                            finish(NativeSpreadHandshake(false, \"module_invalidated\"))\n"
-            "                            return@post\n"
-            "                        }\n"
-            "                        if (nativeSpreadConfigurationGeneration.get() !=",
-            "requestNativeSpreadHandshakeCanonical(",
-            "requestedRawPath,",
-            "NATIVE_SPREAD_HANDSHAKE_EXECUTOR.execute(task)",
+            "val start = Runnable {",
+            "SystemClock.uptimeMillis() >= handshakeDeadlineUptimeMs",
+            "requestNativeSpreadHandshakeBound(",
+            "            start.run()",
+            "} else if (!mainHandler.post(start))",
         ],
-        "plug-in end-to-end timeout and path preparation worker",
+        "filesystem-free plug-in handshake dispatch and absolute deadline",
     )
     require(
         plugin_wrapper,
@@ -735,8 +724,6 @@ def main() -> None:
             "completed.compareAndSet(false, true)",
             "mainHandler.removeCallbacks(timeout)",
             "receiver.getAndSet(null)",
-            "pathTask.getAndSet(null)",
-            "nativeSpreadHandshakeTasks.remove(task)",
             "synchronized(nativeSpreadConfigurationIntentLock)",
             "if (!nativeSpreadModuleInvalidated.get())",
             "val terminalResult =",
@@ -755,14 +742,13 @@ def main() -> None:
             "if (completed.get()) return",
             "nativeSpreadConfigurationGeneration.get() != configurationGeneration",
             "receiver.set(registered)",
-            "reactApplicationContext.registerReceiver(",
+            "IntentFilter(NATIVE_SPREAD_HANDSHAKE_RESPONSE),\n"
+            "            )\n"
+            "            if (SystemClock.uptimeMillis() >= handshakeDeadlineUptimeMs)",
             "reactApplicationContext.sendBroadcast(",
-            "putExtra(HANDSHAKE_EXTRA_DOCUMENT_PATH, expectedPath)",
-            "putExtra(\n"
-            "                        HANDSHAKE_EXTRA_RAW_DOCUMENT_PATH,\n"
-            "                        requestedRawPath,",
+            "putExtra(HANDSHAKE_EXTRA_RAW_DOCUMENT_PATH, expectedPath)",
         ],
-        "plug-in main-thread registration after canonicalization",
+        "plug-in main-thread registration with raw-path authority",
     )
     ordered(
         plugin_response,
@@ -772,10 +758,22 @@ def main() -> None:
             "reportedPath == expectedPath",
             "if (valid) \"ok\" else \"invalid_response\"",
         ],
-        "plug-in handshake exact canonical response",
+        "plug-in handshake exact native raw-path response",
     )
-    if ".canonicalPath" in plugin_response:
-        fail("plug-in handshake response canonicalizes storage on the main thread")
+    for forbidden in (
+        ".canonicalPath",
+        "getCanonicalPath(",
+        "FutureTask",
+        "ThreadPoolExecutor",
+        "NATIVE_SPREAD_HANDSHAKE_EXECUTOR",
+        "nativeSpreadHandshakeTasks",
+    ):
+        if forbidden in plugin_handshake:
+            fail(f"plug-in handshake retains blocking worker authority: {forbidden}")
+    if plugin_handshake.count(
+        "SystemClock.uptimeMillis() >= handshakeDeadlineUptimeMs"
+    ) < 3:
+        fail("plug-in handshake lacks entry, pre-send, and response deadlines")
     if "postDelayed(" in plugin_response:
         fail("plug-in handshake helper starts a second timeout window")
     require(
@@ -794,9 +792,7 @@ def main() -> None:
     require(
         plugin,
         [
-            "private val NATIVE_SPREAD_HANDSHAKE_EXECUTOR = ThreadPoolExecutor(",
-            "ArrayBlockingQueue<Runnable>(1)",
-            "ThreadPoolExecutor.AbortPolicy()",
+            "private const val NATIVE_SPREAD_HANDSHAKE_PROTOCOL = 3",
             "private val nativeSpreadConfigurationGeneration = AtomicLong(0L)",
             "private val nativeSpreadConfigurationIntentLock = Any()",
             "private val nativeSpreadConfigurationLock = Any()",
@@ -804,11 +800,10 @@ def main() -> None:
             "val newlyInvalidated = synchronized(nativeSpreadConfigurationIntentLock)",
             "nativeSpreadModuleInvalidated.compareAndSet(false, true)",
             "nativeSpreadConfigurationGeneration.incrementAndGet()",
-            "task.cancel(true)",
             "nativeSpreadHandshakeReceivers.toList()",
             "super.invalidate()",
         ],
-        "bounded handshake executor and module invalidation containment",
+        "filesystem-free handshake and module invalidation containment",
     )
     if plugin.count(
         "withNativeSpreadConfigurationAuthority(configurationGeneration)"
@@ -1899,7 +1894,7 @@ def main() -> None:
             "NATIVE_READER_V2_SIGNER_SHA256 =",
             "NATIVE_READER_V2_APK_LENGTH = 258587L",
             "NATIVE_READER_V2_APK_SHA256 =",
-            "6022d6f1dc2adc38a46be7c5513016a05c9d616ca84afb120dedd253f279ebac",
+            "0bcf7c19240b4526e70c2c8ab664afd96b9846d6537931275199574ba48be901",
             "PackageManager.GET_SIGNING_CERTIFICATES",
             "signing.hasMultipleSigners()",
             "Native Reader signer set is not exact",
@@ -2430,7 +2425,7 @@ def main() -> None:
             "Remove-Item -LiteralPath $keystore -Force",
             "release-output/SupernoteNativeSpreadProbe-v0.0.137.apk",
             "$expectedSignedLength = 258587L",
-            "6022d6f1dc2adc38a46be7c5513016a05c9d616ca84afb120dedd253f279ebac",
+            "0bcf7c19240b4526e70c2c8ab664afd96b9846d6537931275199574ba48be901",
             "Signed APK length differs from the reviewed upgrade identity",
             "Signed APK SHA-256 differs from the reviewed upgrade identity.",
         ],

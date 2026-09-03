@@ -596,10 +596,10 @@ STATIC_MUTATIONS = (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2Runtime.java",
         "        if (retired || containedFailClosed || detachmentPrepared\n"
-        "            || lifecycleSuspended\n"
+        "            || lifecycleSuspended || nativeLifecycleHandoffPending\n"
         "            || generation != refreshGeneration) return;",
         "        if (retired || detachmentPrepared\n"
-        "            || lifecycleSuspended\n"
+        "            || lifecycleSuspended || nativeLifecycleHandoffPending\n"
         "            || generation != refreshGeneration) return;",
         "contained runtime publication fence",
     ),
@@ -611,6 +611,36 @@ STATIC_MUTATIONS = (
         "        if (false) {\n"
         "            pendingContainmentReason = reason == null",
         "deferred containment during physical contact",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "        advanceLifecycleEpoch();\n"
+        "        if (hasLiveInputContact()) {",
+        "        if (hasLiveInputContact()) {",
+        "configuration handoff epoch invalidation",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "        if (retired || containedFailClosed || detachmentPrepared\n"
+        "            || lifecycleSuspended || nativeLifecycleHandoffPending) return;\n"
+        "        long generation = ++refreshGeneration;",
+        "        if (retired || containedFailClosed || detachmentPrepared\n"
+        "            || lifecycleSuspended) return;\n"
+        "        long generation = ++refreshGeneration;",
+        "configuration handoff refresh-scheduling fence",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "        if (retired || containedFailClosed || detachmentPrepared\n"
+        "            || lifecycleSuspended || nativeLifecycleHandoffPending\n"
+        "            || generation != refreshGeneration) return;",
+        "        if (retired || containedFailClosed || detachmentPrepared\n"
+        "            || lifecycleSuspended\n"
+        "            || generation != refreshGeneration) return;",
+        "configuration handoff refresh-publication fence",
     ),
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"

@@ -945,7 +945,7 @@ public final class NativeReaderV2Runtime
     public void scheduleRefresh(String reason) {
         assertOwnerThread();
         if (retired || containedFailClosed || detachmentPrepared
-            || lifecycleSuspended) return;
+            || lifecycleSuspended || nativeLifecycleHandoffPending) return;
         long generation = ++refreshGeneration;
         final String refreshReason = reason == null ? "signal" : reason;
         postGuarded("refresh:" + refreshReason, new Runnable() {
@@ -958,6 +958,9 @@ public final class NativeReaderV2Runtime
     public void beforeConfigurationChange() {
         assertOwnerThread();
         if (retired) return;
+        // Invalidate every callback from the outgoing presentation before
+        // stock configuration handling can settle or reject the live contact.
+        advanceLifecycleEpoch();
         if (hasLiveInputContact()) {
             beginNativeLifecycleHandoff(
                 "configuration_change_during_contact",
@@ -965,7 +968,6 @@ public final class NativeReaderV2Runtime
             );
             return;
         }
-        advanceLifecycleEpoch();
         if (supersedeInputIngressIfIdle() == null) {
             beginNativeLifecycleHandoff(
                 "configuration_change_during_contact",
@@ -2008,7 +2010,7 @@ public final class NativeReaderV2Runtime
 
     private void refreshWhenReady(long generation, int attempt, String reason) {
         if (retired || containedFailClosed || detachmentPrepared
-            || lifecycleSuspended
+            || lifecycleSuspended || nativeLifecycleHandoffPending
             || generation != refreshGeneration) return;
         SpreadSession currentSession = session;
         if (nativePenCallbackContact || currentSession != null

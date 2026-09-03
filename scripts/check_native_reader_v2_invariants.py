@@ -344,6 +344,38 @@ def main() -> None:
         ],
         "live native mark-path and lifecycle authority",
     )
+    configuration_start = runtime.find("public void beforeConfigurationChange()")
+    configuration_end = runtime.find(
+        "public void afterConfigurationChange()",
+        configuration_start,
+    )
+    if configuration_start < 0 or configuration_end < 0:
+        fail("could not isolate configuration-change lifecycle handoff")
+    ordered(
+        runtime[configuration_start:configuration_end],
+        [
+            "if (retired) return;",
+            "advanceLifecycleEpoch();",
+            "if (hasLiveInputContact()) {",
+            "beginNativeLifecycleHandoff(",
+        ],
+        "configuration handoff epoch invalidation",
+    )
+    schedule_start = runtime.find("public void scheduleRefresh(String reason)")
+    schedule_end = runtime.find(
+        "public void beforeConfigurationChange()",
+        schedule_start,
+    )
+    refresh_start = runtime.find("private void refreshWhenReady(")
+    refresh_end = runtime.find("private void retryRefresh(", refresh_start)
+    if min(schedule_start, schedule_end, refresh_start, refresh_end) < 0:
+        fail("could not isolate lifecycle-gated presentation refresh")
+    for segment, label in (
+        (runtime[schedule_start:schedule_end], "refresh scheduling"),
+        (runtime[refresh_start:refresh_end], "refresh publication"),
+    ):
+        if "nativeLifecycleHandoffPending" not in segment:
+            fail(f"{label} can run during a native lifecycle handoff")
     same_page_start = runtime.find("public boolean prepareSamePageReload()")
     same_page_end = runtime.find(
         "public boolean prepareNativeDocumentOpen()",

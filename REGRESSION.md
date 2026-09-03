@@ -23,7 +23,7 @@ with SupernoteDocument `1.02.446`.
   254,491 bytes and SHA-256
   `a6b83b1cdb0bfd739b702a456f45c11a3c13e859a8b9997c9a6f884652bb68c1`.
   The strict provenance-bound RTL Reader package has SHA-256
-  `e9ed8410fe14356c034431f41f25a70870487804f0b99aa04db0dcfa843b1631`.
+  `e456ce45b139c857cb50ea527afa8de1ab3af5038049984b232efd6adcfeb43f`.
 - [x] The final adversarial review findings are covered by deterministic gates:
   epoch-owned input/lifecycle authority, exact stock-reload receipts, no-clobber
   `.mark` publication/rollback interleavings, post-commit relaunch, exact

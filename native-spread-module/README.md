@@ -365,14 +365,32 @@ Requirements:
 
 - JDK 17 with `javac` and `jar` on `PATH`;
 - Android SDK platform and build-tools 35.0.0;
-- an Android debug keystore.
+- an Android signing keystore for signed builds.
 
 `build.ps1` reads `ANDROID_SDK_ROOT` or `ANDROID_HOME`. Paths can also be passed
 explicitly:
 
+Create the deterministic unsigned/aligned APK without selecting a signing
+identity:
+
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -AlignedOnly
 ```
+
+A signed build must explicitly bind the selected keystore to its reviewed
+certificate digest. The repository does not assume that a contributor's
+ordinary Android debug key is the protected upgrade identity:
+
+```powershell
+$expectedSigner = 'a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 `
+    -ExpectedSignerSha256 $expectedSigner
+```
+
+The example digest is the established upgrade identity for this repository's
+owner-controlled release key. A contributor using another key must pass that
+key's own reviewed, separator-free lowercase certificate SHA-256; the resulting
+APK is not upgrade-compatible with the project release.
 
 The signed APK is written to `build/artifact/`. Pull-request CI uses a
 disposable, runner-local debug identity only so `build.ps1` can compile,

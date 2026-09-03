@@ -408,7 +408,7 @@ STATIC_MUTATIONS = (
     ),
     (
         ".github/workflows/build.yml",
-        "a6b83b1cdb0bfd739b702a456f45c11a3c13e859a8b9997c9a6f884652bb68c1",
+        "e88ff6566d375d8fc5e26eb9f3491f459b55cf2b32f6b9c413431b311f9ffb87",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "published companion exact signed digest",
     ),
@@ -823,9 +823,21 @@ STATIC_MUTATIONS = (
     ),
     (
         "native-spread-module/build.ps1",
-        "a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67",
-        "b5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67",
-        "default upgrade signer pin",
+        "    if (-not $ExpectedSignerSha256) {",
+        "    if ($false) {",
+        "missing signed-build identity rejection",
+    ),
+    (
+        "native-spread-module/build.ps1",
+        "    if ($ExpectedSignerSha256) {",
+        "    if ($false) {",
+        "aligned-only signer rejection",
+    ),
+    (
+        "native-spread-module/build.ps1",
+        "-ExpectedSignerSha256 is required for signed builds",
+        "-ExpectedSignerSha256 is optional for signed builds",
+        "required explicit signer pin",
     ),
     (
         "native-spread-module/build.ps1",
@@ -871,7 +883,7 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "a6b83b1cdb0bfd739b702a456f45c11a3c13e859a8b9997c9a6f884652bb68c1",
+        "e88ff6566d375d8fc5e26eb9f3491f459b55cf2b32f6b9c413431b311f9ffb87",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "installed companion APK digest pin",
     ),

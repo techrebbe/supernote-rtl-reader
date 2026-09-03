@@ -11,8 +11,7 @@ param(
     [string]$DebugKeystore = $(
         Join-Path $env:USERPROFILE '.android\debug.keystore'
     ),
-    [string]$ExpectedSignerSha256 = `
-        'a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67',
+    [string]$ExpectedSignerSha256 = '',
     [string]$PythonExecutable = $(
         if ($env:PYTHON_BIN) {
             $env:PYTHON_BIN
@@ -26,6 +25,25 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+$normalizedExpectedSigner = ''
+if ($AlignedOnly) {
+    if ($ExpectedSignerSha256) {
+        throw '-ExpectedSignerSha256 is incompatible with -AlignedOnly.'
+    }
+} else {
+    if (-not $ExpectedSignerSha256) {
+        throw (
+            '-ExpectedSignerSha256 is required for signed builds; supply the ' +
+            'reviewed certificate SHA-256 for the selected keystore.'
+        )
+    }
+    $normalizedExpectedSigner = `
+        $ExpectedSignerSha256.Trim().ToLowerInvariant()
+    if ($normalizedExpectedSigner -notmatch '^[0-9a-f]{64}$') {
+        throw 'Expected signer SHA-256 is not canonical lowercase hexadecimal.'
+    }
+}
 
 function Get-NormalizedTextSha256 {
     param(
@@ -258,7 +276,6 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $outputApk = $alignedApk
-$normalizedExpectedSigner = ''
 if (-not $AlignedOnly) {
     $outputApk = Join-Path $artifactDir `
         "SupernoteNativeSpreadProbe-v$versionName.apk"
@@ -280,10 +297,6 @@ if (-not $AlignedOnly) {
     $verificationOutput | ForEach-Object { Write-Host $_ }
     if ($LASTEXITCODE -ne 0) {
         throw "apksigner verification failed with exit code $LASTEXITCODE"
-    }
-    $normalizedExpectedSigner = $ExpectedSignerSha256.Trim().ToLowerInvariant()
-    if ($normalizedExpectedSigner -notmatch '^[0-9a-f]{64}$') {
-        throw 'Expected signer SHA-256 is not canonical lowercase hexadecimal.'
     }
     $signerLine = "Signer #1 certificate SHA-256 digest: $normalizedExpectedSigner"
     if (-not ($verificationOutput -contains 'Number of signers: 1') -or

@@ -1448,8 +1448,9 @@ def main() -> None:
     require(
         build,
         [
-            "[string]$ExpectedSignerSha256 =",
-            "a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67",
+            "[string]$ExpectedSignerSha256 = ''",
+            "-ExpectedSignerSha256 is required for signed builds",
+            "-ExpectedSignerSha256 is incompatible with -AlignedOnly.",
             "Expected signer SHA-256 is not canonical lowercase hexadecimal.",
             "Number of signers: 1",
             "APK signer does not match the exact established upgrade identity",
@@ -1469,6 +1470,20 @@ def main() -> None:
             "Two clean Native Reader builds are byte-for-byte reproducible",
         ],
         "exclusive v2 packaging",
+    )
+    ordered(
+        build,
+        [
+            "$normalizedExpectedSigner = ''",
+            "if ($AlignedOnly) {",
+            "if ($ExpectedSignerSha256) {",
+            "-ExpectedSignerSha256 is incompatible with -AlignedOnly.",
+            "if (-not $ExpectedSignerSha256) {",
+            "-ExpectedSignerSha256 is required for signed builds",
+            "$ExpectedSignerSha256.Trim().ToLowerInvariant()",
+            "Expected signer SHA-256 is not canonical lowercase hexadecimal.",
+        ],
+        "explicit signed-build identity selection",
     )
     require(
         root_build,
@@ -1564,7 +1579,7 @@ def main() -> None:
             "NATIVE_READER_V2_SIGNER_SHA256 =",
             "NATIVE_READER_V2_APK_LENGTH = 254491L",
             "NATIVE_READER_V2_APK_SHA256 =",
-            "a6b83b1cdb0bfd739b702a456f45c11a3c13e859a8b9997c9a6f884652bb68c1",
+            "e88ff6566d375d8fc5e26eb9f3491f459b55cf2b32f6b9c413431b311f9ffb87",
             "PackageManager.GET_SIGNING_CERTIFICATES",
             "signing.hasMultipleSigners()",
             "Native Reader signer set is not exact",
@@ -2095,7 +2110,7 @@ def main() -> None:
             "Remove-Item -LiteralPath $keystore -Force",
             "release-output/SupernoteNativeSpreadProbe-v0.0.137.apk",
             "$expectedSignedLength = 254491L",
-            "a6b83b1cdb0bfd739b702a456f45c11a3c13e859a8b9997c9a6f884652bb68c1",
+            "e88ff6566d375d8fc5e26eb9f3491f459b55cf2b32f6b9c413431b311f9ffb87",
             "Signed APK length differs from the reviewed upgrade identity",
             "Signed APK SHA-256 differs from the reviewed upgrade identity.",
         ],

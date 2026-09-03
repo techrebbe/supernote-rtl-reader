@@ -644,8 +644,28 @@ public final class NativeReaderV2Hooks {
             Integer.TYPE, Integer.TYPE,
             new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam param) {
-                    Entry entry = BY_COMPONENT.get(param.thisObject);
+                    NativeReaderV2FirmwareAccess.NativePenSignal signal;
+                    try {
+                        signal = firmware.inspectNativePenCallback(
+                            param.thisObject
+                        );
+                    } catch (RuntimeException failure) {
+                        Log.e(
+                            TAG,
+                            "native pen callback inspection failed",
+                            failure
+                        );
+                        param.setResult(null);
+                        return;
+                    }
+                    Entry entry = BY_ACTIVITY.get(signal.activity);
                     if (entry == null) return;
+                    if (BY_COMPONENT.get(signal.eventCallback) != entry) {
+                        if (entry.admissionFence || entry.runtime != null) {
+                            param.setResult(null);
+                        }
+                        return;
+                    }
                     if (entry.runtime == null) {
                         if (entry.admissionFence) param.setResult(null);
                         return;
@@ -653,10 +673,7 @@ public final class NativeReaderV2Hooks {
                     NativeReaderV2Runtime runtime = entry.runtime;
                     int x = (Integer) param.args[0];
                     int y = (Integer) param.args[1];
-                    int pressure = XposedHelpers.getIntField(
-                        param.thisObject,
-                        "mPressure"
-                    );
+                    int pressure = signal.pressure;
                     boolean contactStart = pressure > 0 && !entry.penContact;
                     List<RectD> chrome = chromeSnapshot(entry);
                     if (chrome == null || entry.runtime != runtime) {

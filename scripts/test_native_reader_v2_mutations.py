@@ -312,6 +312,62 @@ MUTATIONS = (
 # into deterministic regression coverage instead of relying on prose review.
 STATIC_MUTATIONS = (
     (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2/android/NativeReaderFirmwareAdmission.java",
+        'field(VIEW_MODEL, "documentAnnotationMap", "java.util.Map")',
+        'field(VIEW_MODEL, "documentAnnotationMap", "java.util.HashMap")',
+        "firmware annotation-map declared type",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2/android/NativeReaderFirmwareAdmission.java",
+        '            "android.graphics.Point"),',
+        '            "com.artifex.mupdf.fitz.Point"),',
+        "firmware link hit-test point type",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2/android/NativeReaderFirmwareAdmission.java",
+        'field(NATIVE_CALLBACK, "this$0", ACTIVITY)',
+        'field(NATIVE_CALLBACK, "mPressure", "int")',
+        "firmware native listener owner field",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2/android/NativeReaderFirmwareAdmission.java",
+        'field(NATIVE_EVENT_CALLBACK, "mPressure", "int")',
+        'field(NATIVE_CALLBACK, "mPressure", "int")',
+        "firmware native event pressure owner",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "Entry entry = BY_ACTIVITY.get(signal.activity);",
+        "Entry entry = BY_COMPONENT.get(param.thisObject);",
+        "native pen listener activity ownership",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "BY_COMPONENT.get(signal.eventCallback) != entry",
+        "BY_COMPONENT.get(signal.eventCallback) == entry",
+        "native event callback component authority",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "int pressure = signal.pressure;",
+        "int pressure = 0;",
+        "native event callback pressure signal",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2/android/NativeReaderFirmwareAdmission.java",
+        '            } catch (IllegalStateException failure) {',
+        '            } catch (IllegalArgumentException failure) {',
+        "batch firmware symbol mismatch reporting",
+    ),
+    (
         "scripts/patch_plugin_packager.py",
         'build-tools/35.0.0',
         'build-tools/36.0.0',
@@ -676,7 +732,7 @@ STATIC_MUTATIONS = (
     ),
     (
         ".github/workflows/build.yml",
-        "0bcf7c19240b4526e70c2c8ab664afd96b9846d6537931275199574ba48be901",
+        "283b81bfc3f377cc15b4e1ed42c21c2624f953162fa6fb5cea75b6b829cab721",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "published companion exact signed digest",
     ),
@@ -1151,7 +1207,7 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "0bcf7c19240b4526e70c2c8ab664afd96b9846d6537931275199574ba48be901",
+        "283b81bfc3f377cc15b4e1ed42c21c2624f953162fa6fb5cea75b6b829cab721",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "installed companion APK digest pin",
     ),

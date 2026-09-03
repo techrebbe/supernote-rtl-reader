@@ -7,24 +7,25 @@ with SupernoteDocument `1.02.446`.
 ## Native Reader v2 pre-hardware adversarial gate — PASS
 
 - [x] 85,071 deterministic controller/geometry/transaction assertions pass.
-- [x] 163 authority mutations are rejected, including stale admission evidence,
+- [x] 171 authority mutations are rejected, including exact firmware-declaration
+  and native pen-callback ownership drift, stale admission evidence,
   contained-runtime publication, contact-safe containment, three-layer stock
   restoration, projection drain ordering, and descriptor-backed marker
   recovery.
 - [x] Ordinary native/plugin invariants, packaging fail-closed tests, and trace
   helper fail-closed tests pass.
-- [x] Companion v0.0.137 compiles and verifies with the upgrade-compatible
-  signer; RTL Reader v0.4.16 compiles and packages with the hardened native
+- [x] Companion v0.0.138 compiles and verifies with the upgrade-compatible
+  signer; RTL Reader v0.4.17 compiles and packages with the hardened native
   module.
 - [x] The current stable `origin/main` baseline at
   `81942105e60e1b5498a7fb790762a3b750371a2d` is integrated; all 189 Virtual
   Spread generator tests, contract fixtures, and native viewport tests pass.
-- [x] Two clean v0.0.137 companion builds are byte-for-byte identical at
+- [x] Two clean v0.0.138 companion builds are byte-for-byte identical at
   258,587 bytes and SHA-256
-  `0bcf7c19240b4526e70c2c8ab664afd96b9846d6537931275199574ba48be901`.
+  `283b81bfc3f377cc15b4e1ed42c21c2624f953162fa6fb5cea75b6b829cab721`.
   The exact locally generated RTL Reader hardware-candidate package for this
   gate has SHA-256
-  `f41933bd29e071e2ee850799a15b7b0b68c73e9de5f7fb823851551b5c6cb20e`.
+  `331783d24393cf01653deaf1fda2e62923e98dd49c26eb8a291d3b77de2b4887`.
 - [x] The final adversarial review findings are covered by deterministic gates:
   epoch-owned input/lifecycle authority, exact stock-reload receipts, no-clobber
   `.mark` publication/rollback interleavings, post-commit relaunch, exact
@@ -38,6 +39,12 @@ with SupernoteDocument `1.02.446`.
   all native-reader relaunch paths while retaining displaced recovery evidence.
 - [x] The protected no-checkout signer verifies the final signed APK's fixed
   258,587-byte length and SHA-256 before publishing it.
+- [x] The first v0.0.137 Nomad admission attempt failed closed before any hook
+  installation. An exact offline DEX audit of all 124 pinned symbols identified
+  and corrected all three declaration mismatches together: the annotation map
+  interface type, the link hit-test point type, and the native-event pressure
+  owner. The v6 symbol contract now matches the captured firmware APK with zero
+  mismatches, and future runtime admission reports every mismatch in one pass.
 - [ ] Exact-head independent review is clean.
 - [ ] Nomad hardware gate passes. No hardware result is claimed by this
   automated section.

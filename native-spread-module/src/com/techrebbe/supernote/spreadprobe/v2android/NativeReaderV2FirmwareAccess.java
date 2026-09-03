@@ -42,6 +42,9 @@ public final class NativeReaderV2FirmwareAccess {
         "com.supernote.document.handwrite.HandWriteClient";
     private static final String DOCUMENT_CONSTANTS =
         "com.ratta.supernote.documentlib.constants.DocumentConstants";
+    private static final String NATIVE_CALLBACK = ACTIVITY + "$6";
+    private static final String NATIVE_EVENT_CALLBACK =
+        "com.ratta.supernote.eventlibrary.NativeEventCallBack";
 
     // Firmware access is process-scoped. Explicit runtime leases preserve an
     // identity while either a retiring runtime or its same-Activity successor
@@ -57,6 +60,8 @@ public final class NativeReaderV2FirmwareAccess {
     private final Field activityDigestImage;
     private final Field activityDocumentLayout;
     private final Field activityEventCallback;
+    private final Field nativeCallbackActivity;
+    private final Field nativeEventCallbackPressure;
     private final Field activityImageReady;
     private final Field activityHandWriteReady;
     private final Method activitySendDisableWriteArea;
@@ -131,6 +136,16 @@ public final class NativeReaderV2FirmwareAccess {
                 false,
                 loader
             );
+            Class<?> nativeCallback = Class.forName(
+                NATIVE_CALLBACK,
+                false,
+                loader
+            );
+            Class<?> nativeEventCallback = Class.forName(
+                NATIVE_EVENT_CALLBACK,
+                false,
+                loader
+            );
             Class<?> matrix = Class.forName(
                 "com.artifex.mupdf.fitz.Matrix",
                 false,
@@ -149,6 +164,11 @@ public final class NativeReaderV2FirmwareAccess {
             activityDigestImage = field(activity, "digestImage");
             activityDocumentLayout = field(activity, "documentViewLayout");
             activityEventCallback = field(activity, "eventCallBack");
+            nativeCallbackActivity = field(nativeCallback, "this$0");
+            nativeEventCallbackPressure = field(
+                nativeEventCallback,
+                "mPressure"
+            );
             activityImageReady = field(activity, "documentImageReady");
             activityHandWriteReady = field(activity, "handWriteInitReady");
             activitySendDisableWriteArea = method(
@@ -347,6 +367,32 @@ public final class NativeReaderV2FirmwareAccess {
         } catch (ReflectiveOperationException exception) {
             throw new IllegalStateException(
                 "native reader component inspection failed",
+                exception
+            );
+        }
+    }
+
+    /**
+     * Resolve one exact firmware-native pen callback to its owning Activity
+     * and the pressure held by that Activity's current NativeEventCallBack.
+     */
+    public NativePenSignal inspectNativePenCallback(Object callback) {
+        try {
+            Object activity = nativeCallbackActivity.get(callback);
+            Object eventCallback = activityEventCallback.get(activity);
+            if (activity == null || eventCallback == null) {
+                throw new IllegalStateException(
+                    "native pen callback owner is incomplete"
+                );
+            }
+            return new NativePenSignal(
+                activity,
+                eventCallback,
+                nativeEventCallbackPressure.getInt(eventCallback)
+            );
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException(
+                "native pen callback inspection failed",
                 exception
             );
         }
@@ -1474,6 +1520,22 @@ public final class NativeReaderV2FirmwareAccess {
             // rectangles and DrawPath's physical canvas. This exact-firmware
             // adapter may proceed only when all four spaces share (0,0).
             return location[0] == 0 && location[1] == 0;
+        }
+    }
+
+    public static final class NativePenSignal {
+        public final Object activity;
+        public final Object eventCallback;
+        public final int pressure;
+
+        private NativePenSignal(
+            Object activity,
+            Object eventCallback,
+            int pressure
+        ) {
+            this.activity = activity;
+            this.eventCallback = eventCallback;
+            this.pressure = pressure;
         }
     }
 

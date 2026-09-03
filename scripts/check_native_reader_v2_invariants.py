@@ -117,15 +117,15 @@ def main() -> None:
     require(
         manifest,
         [
-            'android:versionCode="137"',
-            'android:versionName="0.0.137"',
+            'android:versionCode="138"',
+            'android:versionName="0.0.138"',
             'android:label="Supernote Native Reader v2"',
         ],
         "v2 manifest",
     )
     require(
         plugin_config,
-        ['"versionCode": "35"', '"versionName": "0.4.16"'],
+        ['"versionCode": "36"', '"versionName": "0.4.17"'],
         "plugin version",
     )
     if (
@@ -134,7 +134,7 @@ def main() -> None:
         not in root_build
     ):
         fail("plugin build does not execute the exclusive v2 invariant gate")
-    if "RTL_READER_OPEN v0.4.16-native-reader-v2" not in index:
+    if "RTL_READER_OPEN v0.4.17-native-reader-v2" not in index:
         fail("runtime marker does not identify the v2 plugin build")
     require(
         guidance,
@@ -194,7 +194,14 @@ def main() -> None:
     require(
         firmware_gate,
         [
-            '"supernote-document-1.02.446-native-reader-v2-symbols-v5"',
+            '"supernote-document-1.02.446-native-reader-v2-symbols-v6"',
+            'field(VIEW_MODEL, "documentAnnotationMap", "java.util.Map")',
+            '"android.graphics.Point")',
+            'field(NATIVE_CALLBACK, "this$0", ACTIVITY)',
+            'field(NATIVE_EVENT_CALLBACK, "mPressure", "int")',
+            'for (String encoded : SYMBOLS) {',
+            '} catch (IllegalStateException failure) {',
+            '"required firmware symbols are missing or changed ("',
             'method(IMAGE_VIEW, "setImageBitmap", "void",',
             'method(NOTE, "createSuperNoteNote", NOTE)',
             'method(NOTE, "markInitProcess", "boolean", "int")',
@@ -259,11 +266,27 @@ def main() -> None:
             "entry.suppressNativeUntilTerminal = true;",
             "runtime.cancelMissingNativePenTerminal();",
             "guardedHookContinuation(",
+            "firmware.inspectNativePenCallback(",
+            "Entry entry = BY_ACTIVITY.get(signal.activity);",
+            "BY_COMPONENT.get(signal.eventCallback) != entry",
+            "int pressure = signal.pressure;",
         ],
         "hook installation and resume authority",
     )
     if "chrome(entry)" in hooks:
         fail("input hooks still rescan native chrome after contact classification")
+    if 'getIntField(\n                        param.thisObject,\n                        "mPressure"' in hooks:
+        fail("native pen hook reads pressure from the anonymous listener")
+    require(
+        firmware,
+        [
+            "public NativePenSignal inspectNativePenCallback(Object callback)",
+            "Object activity = nativeCallbackActivity.get(callback);",
+            "Object eventCallback = activityEventCallback.get(activity);",
+            "nativeEventCallbackPressure.getInt(eventCallback)",
+        ],
+        "exact native pen callback owner and pressure source",
+    )
     if "refreshChromeAtContactStart" in hooks or "tracker.refresh();" in hooks:
         fail("input hooks still traverse native chrome at contact start")
     if hooks.count("if (entry.admissionFence)") < 5:
@@ -1890,11 +1913,11 @@ def main() -> None:
     require(
         plugin,
         [
-            "NATIVE_READER_V2_MIN_VERSION_CODE = 137L",
+            "NATIVE_READER_V2_MIN_VERSION_CODE = 138L",
             "NATIVE_READER_V2_SIGNER_SHA256 =",
             "NATIVE_READER_V2_APK_LENGTH = 258587L",
             "NATIVE_READER_V2_APK_SHA256 =",
-            "0bcf7c19240b4526e70c2c8ab664afd96b9846d6537931275199574ba48be901",
+            "283b81bfc3f377cc15b4e1ed42c21c2624f953162fa6fb5cea75b6b829cab721",
             "PackageManager.GET_SIGNING_CERTIFICATES",
             "signing.hasMultipleSigners()",
             "Native Reader signer set is not exact",
@@ -2325,7 +2348,7 @@ def main() -> None:
             "python3 scripts/test_build_provenance.py .",
             "out/build-provenance/SupernoteRtlReader.bundle",
             "out/build-provenance/app.npk",
-            "supernote-rtl-reader-v0.4.16-native-reader-v2",
+            "supernote-rtl-reader-v0.4.17-native-reader-v2",
             "native-spread-upgrade-artifact:",
             "github.event_name == 'workflow_dispatch'",
             "github.actor == github.repository_owner",
@@ -2338,7 +2361,7 @@ def main() -> None:
             "never as a repository-scoped secret",
             "Verify aligned APK provenance without signing credentials",
             "Sign, verify, and remove protected Native Reader signing key",
-            "supernote-native-reader-v2-v0.0.137",
+            "supernote-native-reader-v2-v0.0.138",
         ],
         "CI v2 gates",
     )
@@ -2423,9 +2446,9 @@ def main() -> None:
             "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
             "$env:NATIVE_SPREAD_KEYSTORE_B64 = $null",
             "Remove-Item -LiteralPath $keystore -Force",
-            "release-output/SupernoteNativeSpreadProbe-v0.0.137.apk",
+            "release-output/SupernoteNativeSpreadProbe-v0.0.138.apk",
             "$expectedSignedLength = 258587L",
-            "0bcf7c19240b4526e70c2c8ab664afd96b9846d6537931275199574ba48be901",
+            "283b81bfc3f377cc15b4e1ed42c21c2624f953162fa6fb5cea75b6b829cab721",
             "Signed APK length differs from the reviewed upgrade identity",
             "Signed APK SHA-256 differs from the reviewed upgrade identity.",
         ],

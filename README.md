@@ -4,8 +4,8 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 
 ## Native Reader v2 candidate
 
-The current development branch contains RTL Reader v0.4.16 with the rooted
-Native Reader v2 companion v0.0.137. This is an exact-firmware, pre-hardware
+The current development branch contains RTL Reader v0.4.17 with the rooted
+Native Reader v2 companion v0.0.138. This is an exact-firmware, pre-hardware
 candidate—not the merged stable release.
 
 Unlike Virtual Spread, v2 opens the original PDF directly. Portrait is the

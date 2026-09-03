@@ -13,9 +13,9 @@ import java.util.Arrays;
  */
 public final class NativeReaderFirmwareAdmission {
     public static final String CONTRACT_ID =
-        "supernote-document-1.02.446-native-reader-v2-symbols-v5";
+        "supernote-document-1.02.446-native-reader-v2-symbols-v6";
     public static final String EXPECTED_SYMBOL_DIGEST =
-        "dfc662f560b0ac2507240aa39d84da01ce2c1e466425af818f4acb34cffee8f5";
+        "43a203cb01dc1d6f2224db83a26dd078d4a30be3c62602b142db8a4cf999ee17";
 
     private static final String ACTIVITY =
         "com.supernote.document.document.DocumentActivity";
@@ -36,6 +36,8 @@ public final class NativeReaderFirmwareAdmission {
     private static final String DOCUMENT_CONSTANTS =
         "com.ratta.supernote.documentlib.constants.DocumentConstants";
     private static final String NATIVE_CALLBACK = ACTIVITY + "$6";
+    private static final String NATIVE_EVENT_CALLBACK =
+        "com.ratta.supernote.eventlibrary.NativeEventCallBack";
     private static final String MATRIX = "com.artifex.mupdf.fitz.Matrix";
 
     private static final String[] SYMBOLS = new String[] {
@@ -84,7 +86,7 @@ public final class NativeReaderFirmwareAdmission {
         field(VIEW_MODEL, "pageCount", "int"),
         field(VIEW_MODEL, "pageInfo", PAGE_INFO),
         field(VIEW_MODEL, "pageInfoHashMap", "java.util.HashMap"),
-        field(VIEW_MODEL, "documentAnnotationMap", "java.util.HashMap"),
+        field(VIEW_MODEL, "documentAnnotationMap", "java.util.Map"),
         field(VIEW_MODEL, "mupdf",
             "com.supernote.document.document.DocumentMupdf"),
         field(VIEW_MODEL, "uri", "android.net.Uri"),
@@ -107,7 +109,7 @@ public final class NativeReaderFirmwareAdmission {
         method(VIEW_MODEL, "setScaleRect", "void", "android.graphics.RectF"),
         method(VIEW_MODEL, "checkLink",
             "com.supernote.document.document.bean.CheckLinkResult",
-            "com.artifex.mupdf.fitz.Point"),
+            "android.graphics.Point"),
         method(VIEW_MODEL, "setDocumentAnnotationMap", "void",
             "java.util.HashMap"),
         method(VIEW_MODEL, "updateDigestBitmap", "void", PAGE_INFO),
@@ -186,9 +188,10 @@ public final class NativeReaderFirmwareAdmission {
 
         method(DOCUMENT_CONSTANTS, "getDeviceType", "int"),
 
-        field(NATIVE_CALLBACK, "mPressure", "int"),
+        field(NATIVE_CALLBACK, "this$0", ACTIVITY),
         method(NATIVE_CALLBACK, "onDigitalPosition", "void", "int", "int"),
         method(NATIVE_CALLBACK, "onDigital", "void", "int"),
+        field(NATIVE_EVENT_CALLBACK, "mPressure", "int"),
 
         field(MATRIX, "a", "float"),
         field(MATRIX, "b", "float"),
@@ -225,8 +228,22 @@ public final class NativeReaderFirmwareAdmission {
                 "compiled firmware symbol contract digest mismatch: " + digest
             );
         }
+        StringBuilder failures = new StringBuilder();
+        int failureCount = 0;
         for (String encoded : SYMBOLS) {
-            verifySymbol(classLoader, encoded);
+            try {
+                verifySymbol(classLoader, encoded);
+            } catch (IllegalStateException failure) {
+                if (failureCount > 0) failures.append("; ");
+                failures.append(encoded);
+                failureCount++;
+            }
+        }
+        if (failureCount > 0) {
+            throw new IllegalStateException(
+                "required firmware symbols are missing or changed ("
+                    + failureCount + "): " + failures
+            );
         }
         return new Report(digest);
     }

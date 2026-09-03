@@ -1485,9 +1485,17 @@ def main() -> None:
             "EXPECTED_PLUGIN_APK_SIGNER_SHA256",
             "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
             "Final compacted APK signer is not the reviewed identity",
+            "build-tools/35.0.0",
+            "normalized_verification_output",
+            "signer_digests",
+            "Final compacted APK must contain exactly one signer digest",
+            "for required_scheme in 2 3; do",
+            r"[[:space:]]*$/\\1/p'",
         ],
         "embedded plugin APK signer authority",
     )
+    if "sort -V" in packager_patch or "tail -n 1" in packager_patch:
+        fail("plugin packager may select an unreviewed Android build-tools version")
     require(
         provenance_test,
         [
@@ -1986,6 +1994,8 @@ def main() -> None:
             "def verify_dex(",
             "def verify_application_xmltree(",
             "def verify_signer_output(",
+            'ANDROID_BUILD_TOOLS_VERSION = "35.0.0"',
+            'required_schemes != {"2", "3"}',
             'find_android_tool("aapt")',
             'find_android_tool("apksigner")',
             "EXPECTED_NATIVE_APK_SIGNER_SHA256",

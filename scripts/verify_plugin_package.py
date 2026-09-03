@@ -8,7 +8,7 @@ import hashlib
 import hmac
 import json
 import re
-import shutil
+import os
 import struct
 import subprocess
 import sys
@@ -185,34 +185,27 @@ def verify_dex(data: bytes, name: str) -> set[bytes]:
     return defined_classes
 
 
+ANDROID_BUILD_TOOLS_VERSION = "35.0.0"
+
+
 def find_android_tool(tool: str) -> str:
     executable_names = [tool]
     if sys.platform.startswith("win"):
         # Android build-tools ships aapt as an .exe and apksigner as a .bat.
         executable_names = [f"{tool}.bat", f"{tool}.exe", tool]
-    for executable in executable_names:
-        from_path = shutil.which(executable)
-        if from_path:
-            return from_path
-    roots = [
-        value
-        for key in ("ANDROID_SDK_ROOT", "ANDROID_HOME")
-        if (value := __import__("os").environ.get(key))
-    ]
-    candidates: list[Path] = []
-    for root in roots:
-        build_tools = Path(root) / "build-tools"
-        if build_tools.is_dir():
-            for version in build_tools.iterdir():
-                if not version.is_dir():
-                    continue
-                for executable in executable_names:
-                    candidate = version / executable
-                    if candidate.is_file():
-                        candidates.append(candidate)
-    if not candidates:
-        fail(f"Android SDK tool {tool!r} is required for package verification")
-    return str(sorted(candidates, key=lambda value: value.parent.name)[-1])
+    for key in ("ANDROID_SDK_ROOT", "ANDROID_HOME"):
+        root = os.environ.get(key)
+        if not root:
+            continue
+        build_tools = Path(root) / "build-tools" / ANDROID_BUILD_TOOLS_VERSION
+        for executable in executable_names:
+            candidate = build_tools / executable
+            if candidate.is_file():
+                return str(candidate)
+    fail(
+        f"Android SDK build-tools {ANDROID_BUILD_TOOLS_VERSION} tool "
+        f"{tool!r} is required for package verification"
+    )
 
 
 def verify_application_xmltree(output: str) -> None:
@@ -245,11 +238,8 @@ def verify_application_xmltree(output: str) -> None:
 
 def verify_signer_output(output: str, return_code: int) -> None:
     normalized = output.replace("\r\n", "\n").replace("\r", "\n")
-    signer_counts = re.findall(
-        r"^Number of signers: (\d+)$", normalized, re.MULTILINE
-    )
     signer_digests = re.findall(
-        r"^Signer #1 certificate SHA-256 digest: ([0-9A-Fa-f:]+)$",
+        r"^[ \t]*Signer #[0-9]+ certificate SHA-256 digest:[ \t]*([0-9A-Fa-f:]+)[ \t]*$",
         normalized,
         re.MULTILINE,
     )
@@ -258,15 +248,22 @@ def verify_signer_output(output: str, return_code: int) -> None:
     ]
     if (
         return_code != 0
-        or signer_counts != ["1"]
         or normalized_signers != [EXPECTED_NATIVE_APK_SIGNER_SHA256]
     ):
-        fail("embedded app.npk signature verification failed")
-    if not re.search(
-        r"Verified using v(?:2|3) scheme \(APK Signature Scheme v[23]\): true",
-        normalized,
-    ):
-        fail("embedded app.npk lacks a verified modern APK signature")
+        evidence = ",".join(normalized_signers) if normalized_signers else "none"
+        fail(
+            "embedded app.npk signature verification failed "
+            f"(returnCode={return_code}, certificateDigests={evidence})"
+        )
+    required_schemes = set(
+        re.findall(
+            r"^[ \t]*Verified using v([23]) scheme \(APK Signature Scheme v\1\):[ \t]*true[ \t]*$",
+            normalized,
+            re.MULTILINE,
+        )
+    )
+    if required_schemes != {"2", "3"}:
+        fail("embedded app.npk must have verified v2 and v3 APK signatures")
 
 
 def verify_apk_tools(apk_path: Path) -> None:

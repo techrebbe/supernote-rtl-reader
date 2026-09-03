@@ -92,15 +92,9 @@ sign_compacted_apk() {
     if command -v cygpath >/dev/null 2>&1 && [[ "$sdk_root" =~ ^[A-Za-z]:[\\/] ]]; then
         sdk_root="$(cygpath -u "$sdk_root")"
     fi
-    local build_tools_root="$sdk_root/build-tools"
-    [[ -d "$build_tools_root" ]] || {
-        write_color_output "Android build-tools directory is unavailable" "Red"
-        return 1
-    }
-    local build_tools
-    build_tools="$(find "$build_tools_root" -mindepth 1 -maxdepth 1 -type d -print | sort -V | tail -n 1)"
-    [[ -n "$build_tools" ]] || {
-        write_color_output "No Android build-tools version is installed" "Red"
+    local build_tools="$sdk_root/build-tools/35.0.0"
+    [[ -d "$build_tools" ]] || {
+        write_color_output "Required Android build-tools 35.0.0 is unavailable" "Red"
         return 1
     }
     local zipalign="$build_tools/zipalign"
@@ -131,22 +125,40 @@ sign_compacted_apk() {
     if ! verification_output="$(
         "$apksigner" verify --verbose --print-certs "$signed" 2>&1
     )"; then
+        printf '%s\\n' "$verification_output" >&2
         write_color_output "Final compacted APK signature verification failed" "Red"
         return 1
     fi
+    local normalized_verification_output
+    normalized_verification_output="$(printf '%s\\n' "$verification_output" | tr -d '\\r')"
+    printf '%s\\n' "$normalized_verification_output" >&2
     local expected_signer_sha256="__EXPECTED_PLUGIN_APK_SIGNER_SHA256__"
+    local signer_digests=()
+    local signer_digest
+    while IFS= read -r signer_digest; do
+        [[ -n "$signer_digest" ]] && signer_digests+=("$signer_digest")
+    done < <(
+        printf '%s\\n' "$normalized_verification_output" |
+        sed -nE 's/^[[:space:]]*Signer #[0-9]+ certificate SHA-256 digest:[[:space:]]*([0-9A-Fa-f:]+)[[:space:]]*$/\\1/p'
+    )
+    if [[ "${#signer_digests[@]}" -ne 1 ]]; then
+        write_color_output "Final compacted APK must contain exactly one signer digest" "Red"
+        return 1
+    fi
     local actual_signer_sha256
-    actual_signer_sha256="$(
-        printf '%s\\n' "$verification_output" |
-        sed -n 's/^Signer #1 certificate SHA-256 digest: //p' |
-        tr -d ':\\r' |
-        tr '[:upper:]' '[:lower:]'
-    )"
-    if [[ "$(printf '%s\\n' "$verification_output" | tr -d '\\r' | grep -Fxc 'Number of signers: 1')" -ne 1 ]] || \
+    actual_signer_sha256="$(printf '%s' "${signer_digests[0]}" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+    if [[ ! "$actual_signer_sha256" =~ ^[0-9a-f]{64}$ ]] || \
        [[ "$actual_signer_sha256" != "$expected_signer_sha256" ]]; then
         write_color_output "Final compacted APK signer is not the reviewed identity" "Red"
         return 1
     fi
+    local required_scheme
+    for required_scheme in 2 3; do
+        if ! printf '%s\\n' "$normalized_verification_output" | grep -Eq "^[[:space:]]*Verified using v${required_scheme} scheme \\(APK Signature Scheme v${required_scheme}\\):[[:space:]]*true[[:space:]]*$"; then
+            write_color_output "Final compacted APK lacks verified v${required_scheme} signing" "Red"
+            return 1
+        fi
+    done
     printf '%s\\n' "$signed"
 }
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 import io
 import hashlib
 import json
+import os
 import struct
 import sys
 import tempfile
@@ -13,6 +14,7 @@ import warnings
 import zipfile
 import zlib
 from pathlib import Path
+from unittest.mock import patch
 
 from patch_plugin_packager import (
     APK_COPY_FUNCTION_MARKER,
@@ -28,9 +30,11 @@ from patch_plugin_packager import (
     patch_text,
 )
 from verify_plugin_package import (
+    ANDROID_BUILD_TOOLS_VERSION,
     EXPECTED_ANDROID_APPLICATION,
     EXPECTED_NATIVE_CLASS_DESCRIPTORS,
     EXPECTED_NATIVE_APK_SIGNER_SHA256,
+    find_android_tool,
     verify,
     verify_application_xmltree,
     verify_dex,
@@ -217,6 +221,14 @@ def test_packager_patch() -> None:
         + "suffix\n"
     )
     patched = patch_text(upstream)
+    if "\x01" in patched:
+        fail("packager patch emitted a control character instead of a sed backreference")
+    expected_signer_parser = (
+        "certificate SHA-256 digest:[[:space:]]*([0-9A-Fa-f:]+)"
+        "[[:space:]]*$/\\1/p'"
+    )
+    if expected_signer_parser not in patched:
+        fail("packager patch did not preserve the signer parser backreference")
     for required in (
         STRICT_PACKAGE,
         STRICT_PACKAGE_UPDATE,
@@ -235,10 +247,17 @@ def test_packager_patch() -> None:
         'signed_apk="$(sign_compacted_apk "$project_root" "$apk_path")"',
         '"$apksigner" verify --verbose --print-certs "$signed"',
         'Final compacted APK signer is not the reviewed identity',
-        'Signer #1 certificate SHA-256 digest:',
+        '$sdk_root/build-tools/35.0.0',
+        'Final compacted APK must contain exactly one signer digest',
+        'for required_scheme in 2 3; do',
     ):
         if patched.count(required) != 1:
             fail(f"patched packager lacks strict executable guard: {required}")
+    for required in ("normalized_verification_output", "signer_digests"):
+        if required not in patched:
+            fail(f"patched packager lacks normalized signer evidence: {required}")
+    if "sort -V" in patched or "tail -n 1" in patched:
+        fail("patched packager still discovers the newest Android build-tools")
     if (
         'copy_apk_and_update_config "$project_root" "$gen_dir" "$gen_cfg" || true'
         in patched
@@ -386,34 +405,91 @@ def test_manifest_and_signer_evidence() -> None:
         "duplicate application element",
     )
 
+    colon_digest = ":".join(
+        EXPECTED_NATIVE_APK_SIGNER_SHA256.upper()[index : index + 2]
+        for index in range(0, 64, 2)
+    )
     valid_signature = (
-        "Verified using v2 scheme (APK Signature Scheme v2): true\n"
-        "Verified using v3 scheme (APK Signature Scheme v3): true\n"
-        "Number of signers: 1\n"
-        "Signer #1 certificate SHA-256 digest: "
-        f"{EXPECTED_NATIVE_APK_SIGNER_SHA256}\n"
+        "  Verified using v2 scheme (APK Signature Scheme v2): true  \r\n"
+        "\tVerified using v3 scheme (APK Signature Scheme v3):\ttrue\r\n"
+        "Number of signers: 1\r\n"
+        f"  Signer #1 certificate SHA-256 digest: {colon_digest}  \r\n"
     )
     verify_signer_output(valid_signature, 0)
-    expect_failure(
-        lambda: verify_signer_output(valid_signature.replace("Number of signers: 1", "Number of signers: 2"), 0),
-        "unexpected signer count",
+    verify_signer_output(
+        valid_signature.replace("\r\n", "\n").replace(
+            colon_digest, EXPECTED_NATIVE_APK_SIGNER_SHA256
+        ),
+        0,
     )
     expect_failure(
         lambda: verify_signer_output(
-            valid_signature.replace(EXPECTED_NATIVE_APK_SIGNER_SHA256, "0" * 64),
+            valid_signature.replace(
+                f"  Signer #1 certificate SHA-256 digest: {colon_digest}  \r\n",
+                "",
+            ),
+            0,
+        ),
+        "missing signer digest",
+    )
+    expect_failure(
+        lambda: verify_signer_output(
+            valid_signature
+            + f"Signer #2 certificate SHA-256 digest: {colon_digest}\n",
+            0,
+        ),
+        "multiple signer digests",
+    )
+    expect_failure(
+        lambda: verify_signer_output(
+            valid_signature.replace(colon_digest, "0" * 64),
             0,
         ),
         "unexpected signer identity",
     )
     expect_failure(
         lambda: verify_signer_output(
-            valid_signature.replace("v2): true", "v2): false").replace(
-                "v3): true", "v3): false"
-            ),
+            valid_signature.replace("v2): true", "v2): false"),
             0,
         ),
-        "missing modern signature scheme",
+        "missing v2 signature scheme",
     )
+    expect_failure(
+        lambda: verify_signer_output(
+            valid_signature.replace("v3):\ttrue", "v3):\tfalse"), 0
+        ),
+        "missing v3 signature scheme",
+    )
+    expect_failure(
+        lambda: verify_signer_output(valid_signature, 1),
+        "nonzero verifier result",
+    )
+
+
+def test_exact_android_build_tools_selection() -> None:
+    if ANDROID_BUILD_TOOLS_VERSION != "35.0.0":
+        fail("plugin verifier build-tools pin drifted")
+    suffix = ".bat" if sys.platform.startswith("win") else ""
+    with tempfile.TemporaryDirectory(prefix="rtl-reader-sdk-test-") as temp:
+        sdk = Path(temp)
+        pinned = sdk / "build-tools" / "35.0.0" / f"apksigner{suffix}"
+        newer = sdk / "build-tools" / "99.0.0" / f"apksigner{suffix}"
+        pinned.parent.mkdir(parents=True)
+        newer.parent.mkdir(parents=True)
+        pinned.write_text("fixture", encoding="utf-8")
+        newer.write_text("fixture", encoding="utf-8")
+        with patch.dict(
+            os.environ,
+            {"ANDROID_SDK_ROOT": str(sdk), "ANDROID_HOME": ""},
+            clear=False,
+        ):
+            if Path(find_android_tool("apksigner")) != pinned:
+                fail("plugin verifier selected unpinned Android build-tools")
+            pinned.unlink()
+            expect_failure(
+                lambda: find_android_tool("apksigner"),
+                "missing pinned build-tools despite newer installation",
+            )
 
 
 def main() -> None:
@@ -421,6 +497,7 @@ def main() -> None:
     test_package_verifier()
     test_dex_class_descriptor_verification()
     test_manifest_and_signer_evidence()
+    test_exact_android_build_tools_selection()
     print("Native plugin packaging fail-closed tests: PASS")
 
 

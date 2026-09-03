@@ -294,6 +294,36 @@ MUTATIONS = (
 # into deterministic regression coverage instead of relying on prose review.
 STATIC_MUTATIONS = (
     (
+        "scripts/patch_plugin_packager.py",
+        'build-tools/35.0.0',
+        'build-tools/36.0.0',
+        "plugin packager build-tools pin",
+    ),
+    (
+        "scripts/patch_plugin_packager.py",
+        "[[:space:]]*$/\\\\1/p'",
+        "[[:space:]]*$/\\1/p'",
+        "plugin packager signer-parser backreference",
+    ),
+    (
+        "scripts/verify_plugin_package.py",
+        'ANDROID_BUILD_TOOLS_VERSION = "35.0.0"',
+        'ANDROID_BUILD_TOOLS_VERSION = "36.0.0"',
+        "plugin verifier build-tools pin",
+    ),
+    (
+        "scripts/patch_plugin_packager.py",
+        'for required_scheme in 2 3; do',
+        'for required_scheme in 2; do',
+        "plugin packager v2/v3 requirement",
+    ),
+    (
+        "scripts/verify_plugin_package.py",
+        'required_schemes != {"2", "3"}',
+        'not required_schemes',
+        "plugin verifier v2/v3 requirement",
+    ),
+    (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2Runtime.java",
         "            fingerIngressAdmitted = inputAdmission.begin(\n"

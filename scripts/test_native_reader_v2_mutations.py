@@ -708,11 +708,11 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "            val renamedStagedIdentity = Os.fstat(openedTemporary)\n"
-        "            onPublished()",
-        "            onPublished()\n"
-        "            val renamedStagedIdentity = Os.fstat(openedTemporary)",
-        "post-rename identity captured before publication callback",
+        "            } finally {\n"
+        "                // Rename is the irreversible publication boundary. Record it\n",
+        "            }\n"
+        "                // Rename is the irreversible publication boundary. Record it\n",
+        "post-rename failure still publishes commit boundary",
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
@@ -1476,6 +1476,36 @@ class _ConfigurationGenerationGate:
         callback(result if self.generation == expected else "stale_operation")
 
 
+def _model_post_rename_identity_capture(identity_reader, on_published):
+    """Model Kotlin's try/finally around the irreversible rename boundary."""
+    try:
+        return identity_reader()
+    finally:
+        on_published()
+
+
+def run_post_rename_publication_boundary_tests() -> None:
+    state = {"publications": 0}
+
+    def published() -> None:
+        state["publications"] += 1
+
+    try:
+        _model_post_rename_identity_capture(
+            lambda: (_ for _ in ()).throw(OSError("post-rename fstat failed")),
+            published,
+        )
+        raise AssertionError("post-rename descriptor fault was not propagated")
+    except OSError as error:
+        assert str(error) == "post-rename fstat failed"
+    assert state == {"publications": 1}
+
+    observed = _model_post_rename_identity_capture(lambda: "identity", published)
+    assert observed == "identity"
+    assert state == {"publications": 2}
+    print("Native Reader v2 post-rename publication boundary: PASS")
+
+
 def run_configuration_generation_interleaving_tests() -> None:
     gate = _ConfigurationGenerationGate()
     state = {"marker": "off", "pending": None}
@@ -2206,6 +2236,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="native-reader-v2-mut-") as temp:
         temp_root = pathlib.Path(temp)
         run_configuration_generation_interleaving_tests()
+        run_post_rename_publication_boundary_tests()
         run_no_clobber_interleaving_tests(temp_root)
         run_durable_recovery_fence_tests(temp_root)
         for filename, old, new, label in MUTATIONS:

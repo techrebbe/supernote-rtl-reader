@@ -4773,8 +4773,15 @@ class ReaderPreferencesModule(
             // authority for the descriptor-backed destination read. This
             // accepts the rename metadata transition without weakening the
             // destination-substitution or post-read path fences.
-            val renamedStagedIdentity = Os.fstat(openedTemporary)
-            onPublished()
+            val renamedStagedIdentity = try {
+                Os.fstat(openedTemporary)
+            } finally {
+                // Rename is the irreversible publication boundary. Record it
+                // exactly once even when the post-rename descriptor snapshot
+                // itself fails, so callers never roll an already-authorizing
+                // committed marker back as though publication had not happened.
+                onPublished()
+            }
             val published = readPersistedAuthorityIfFile(file)
                 ?: throw IllegalStateException("Published destination disappeared")
             require(

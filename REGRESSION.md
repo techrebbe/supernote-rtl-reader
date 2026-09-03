@@ -25,7 +25,7 @@ with SupernoteDocument `1.02.446`.
   `8a641a67be2b56acb4afbe0634bc6187d5e07ac230b50e02d87c93bdeb749f3c`.
   The exact locally generated v0.4.19 RTL Reader hardware-candidate package
   for this gate has SHA-256
-  `4fe438ff223870971b53e4209da92167cda4b6aa26e5f4e90623eb0be4a29a27`.
+  `a2ab8ee29678642445e7d876fdaa1106f033843929b910c5e40df5e1b6d98964`.
 - [x] The final adversarial review findings are covered by deterministic gates:
   epoch-owned input/lifecycle authority, exact stock-reload receipts, no-clobber
   `.mark` publication/rollback interleavings, post-commit relaunch, exact
@@ -63,7 +63,9 @@ with SupernoteDocument `1.02.446`.
   `ctime`. v0.4.19 therefore anchors the post-publication check to the still-open
   staged descriptor's post-rename identity, then rechecks the descriptor-backed
   destination and final path exactly; four new mutation cases protect identity
-  capture ordering and all three authority fences.
+  capture ordering and all three authority fences. An executable injected
+  post-rename `fstat` failure additionally proves that the irreversible
+  publication callback runs exactly once before the failure propagates.
 - [ ] Exact-head independent review is clean.
 - [ ] Nomad hardware gate passes. No hardware result is claimed by this
   automated section.

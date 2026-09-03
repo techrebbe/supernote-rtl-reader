@@ -2002,7 +2002,9 @@ def main() -> None:
             "expected = currentMarkerAuthority",
             "expected = pendingMarkerAuthority",
             "Published destination changed before compare-and-publish",
-            "val renamedStagedIdentity = Os.fstat(openedTemporary)",
+            "val renamedStagedIdentity = try {",
+            "Os.fstat(openedTemporary)",
+            "} finally {\n                // Rename is the irreversible publication boundary.",
             "sameFileObject(stagedIdentity, renamedStagedIdentity)",
             (
                 "samePersistedFileVersion(\n"
@@ -2031,7 +2033,10 @@ def main() -> None:
         publication,
         [
             "Os.rename(temporary.absolutePath, file.absolutePath)",
-            "val renamedStagedIdentity = Os.fstat(openedTemporary)",
+            (
+                "val renamedStagedIdentity = try {\n"
+                "                Os.fstat(openedTemporary)"
+            ),
             "onPublished()",
             "val published = readPersistedAuthorityIfFile(file)",
         ],

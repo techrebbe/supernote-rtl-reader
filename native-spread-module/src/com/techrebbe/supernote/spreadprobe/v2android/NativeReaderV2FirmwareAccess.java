@@ -12,6 +12,7 @@ import android.view.View;
 import android.widget.ImageView;
 
 import com.techrebbe.supernote.spreadprobe.v2.NativeAuthority;
+import com.techrebbe.supernote.spreadprobe.v2.NativeComponentIdentityRegistry;
 import com.techrebbe.supernote.spreadprobe.v2.NativeMarkPageInventory;
 import com.techrebbe.supernote.spreadprobe.v2.Affine2D;
 import com.techrebbe.supernote.spreadprobe.v2.NativePageTransform;
@@ -22,7 +23,6 @@ import com.techrebbe.supernote.spreadprobe.v2.RectD;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Constructor;
-import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -43,11 +43,11 @@ public final class NativeReaderV2FirmwareAccess {
     private static final String DOCUMENT_CONSTANTS =
         "com.ratta.supernote.documentlib.constants.DocumentConstants";
 
-    // Firmware access is process-scoped, while Activity component graphs are
-    // not. Weak identity entries prevent a retired reader from being retained
-    // merely because it once participated in an authority observation.
-    private final ArrayList<ComponentIdentity> componentIds = new ArrayList<>();
-    private long nextComponentId = 1L;
+    // Firmware access is process-scoped. Explicit runtime leases preserve an
+    // identity while either a retiring runtime or its same-Activity successor
+    // still owns that exact component graph.
+    private final NativeComponentIdentityRegistry componentIdentities =
+        new NativeComponentIdentityRegistry();
     private final Object projectionNoteLock = new Object();
 
     private final Field activityViewModel;
@@ -1225,66 +1225,48 @@ public final class NativeReaderV2FirmwareAccess {
         Components components,
         String documentId,
         long activityGeneration,
-        long layoutGeneration
+        long layoutGeneration,
+        NativeComponentIdentityRegistry.Lease identityLease
     ) {
         if (!components.writerReady()) {
             return null;
+        }
+        if (identityLease == null || identityLease.size() != 4) {
+            throw new IllegalStateException(
+                "native component identity lease is unavailable"
+            );
         }
         return new NativeAuthority(
             documentId,
             activityGeneration,
             layoutGeneration,
             components.readerPage,
-            componentId(components.viewModel),
-            componentId(components.presenter),
-            componentId(components.note),
-            componentId(components.binder),
+            identityLease.id(0, components.viewModel),
+            identityLease.id(1, components.presenter),
+            identityLease.id(2, components.note),
+            identityLease.id(3, components.binder),
             components.readerPage
         );
     }
 
-    public synchronized long componentId(Object component) {
-        if (component == null) {
-            throw new IllegalArgumentException("native component is missing");
+    public NativeComponentIdentityRegistry.Lease acquireComponentIdentityLease(
+        Components components
+    ) {
+        if (components == null) {
+            throw new IllegalArgumentException("native components are missing");
         }
-        for (int index = componentIds.size() - 1; index >= 0; index--) {
-            ComponentIdentity entry = componentIds.get(index);
-            Object existing = entry.component.get();
-            if (existing == null) {
-                componentIds.remove(index);
-            } else if (existing == component) {
-                return entry.id;
-            }
-        }
-        if (nextComponentId <= 0L) {
-            throw new IllegalStateException("component identity exhausted");
-        }
-        long assigned = nextComponentId++;
-        componentIds.add(new ComponentIdentity(component, assigned));
-        return assigned;
+        return componentIdentities.acquire(
+            components.viewModel,
+            components.presenter,
+            components.note,
+            components.binder
+        );
     }
 
-    public synchronized void releaseComponentIds(Components components) {
-        if (components == null) return;
-        for (int index = componentIds.size() - 1; index >= 0; index--) {
-            Object component = componentIds.get(index).component.get();
-            if (component == null || component == components.viewModel
-                || component == components.presenter
-                || component == components.note
-                || component == components.binder) {
-                componentIds.remove(index);
-            }
-        }
-    }
-
-    private static final class ComponentIdentity {
-        final WeakReference<Object> component;
-        final long id;
-
-        ComponentIdentity(Object component, long id) {
-            this.component = new WeakReference<>(component);
-            this.id = id;
-        }
+    public void releaseComponentIdentityLease(
+        NativeComponentIdentityRegistry.Lease identityLease
+    ) {
+        componentIdentities.release(identityLease);
     }
 
     private static Field field(Class<?> owner, String name)

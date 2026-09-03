@@ -54,9 +54,9 @@ class ReaderPreferencesModule(
         private const val NATIVE_READER_V2_MIN_VERSION_CODE = 137L
         private const val NATIVE_READER_V2_SIGNER_SHA256 =
             "a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67"
-        private const val NATIVE_READER_V2_APK_LENGTH = 250395L
+        private const val NATIVE_READER_V2_APK_LENGTH = 254491L
         private const val NATIVE_READER_V2_APK_SHA256 =
-            "59474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817"
+            "7ea8b945e2fbd3e5aac53c63f9eb37ce1662ff0afb551cd8421ba938f050e586"
         private const val NATIVE_SPREAD_MARKER_SUFFIX = ".snspread"
         private const val NATIVE_SPREAD_BACKUP_SUFFIX = ".snspread-backup.properties"
         private const val NATIVE_SPREAD_BACKUP_MARK_SUFFIX = ".snspread-backup.mark"
@@ -171,6 +171,7 @@ class ReaderPreferencesModule(
 
     private val annotationRecoveryPending = AtomicBoolean(false)
     private val annotationRecoveryHandoffPending = AtomicBoolean(false)
+    private val nativeMarkRecoveryRequiredPending = AtomicBoolean(false)
     private val nativeSpreadConfigurationLock = Any()
 
     override fun getName(): String = "ReaderPreferencesModule"
@@ -1348,6 +1349,17 @@ class ReaderPreferencesModule(
         val transactionDirectory: File,
         val transactionDirectoryIdentity: StructStat,
     )
+
+    /**
+     * The live native annotation path could not be proven usable after a
+     * no-clobber transaction moved an inode aside.  Callers must keep
+     * DocumentActivity stopped: reopening it could create a new empty .mark or
+     * persist a stale in-memory model over the retained recovery evidence.
+     */
+    private class NativeMarkRecoveryRequiredException(
+        message: String,
+        cause: Throwable,
+    ) : IllegalStateException(message, cause)
 
     private data class NativeSpreadAuthorityAssessment(
         val status: String,
@@ -4167,76 +4179,257 @@ class ReaderPreferencesModule(
         authorityLabel: String,
         beforePublish: () -> Unit,
     ): DisplacedRegularFile? {
-        beforePublish()
-        val immediate = readRegularFileAuthorityIfFile(
-            file,
-            Int.MAX_VALUE.toLong(),
-            requireNonEmpty = false,
-            authorityLabel = "$authorityLabel destination",
-        )
-        require(sameRegularFileAuthority(expected, immediate)) {
-            "$authorityLabel destination changed before preservation"
-        }
-        if (immediate == null) return null
-
-        val transactionDirectory = File(
-            file.parentFile,
-            ".${file.name}.transaction-${android.os.Process.myPid()}-${UUID.randomUUID()}",
-        )
-        Files.createDirectory(transactionDirectory.toPath())
-        val transactionDirectoryDescriptor = Os.open(
-            transactionDirectory.absolutePath,
+        val parent = file.parentFile
+            ?: throw IllegalStateException("$authorityLabel destination has no parent")
+        val parentDescriptor = Os.open(
+            parent.absolutePath,
             OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or
                 LINUX_O_DIRECTORY or OsConstants.O_NOFOLLOW,
             0,
         )
-        val transactionDirectoryIdentity = Os.fstat(transactionDirectoryDescriptor)
-        val displaced = File(transactionDirectory, "displaced")
         try {
+            val parentIdentity = Os.fstat(parentDescriptor)
             require(
-                OsConstants.S_ISDIR(transactionDirectoryIdentity.st_mode) &&
-                    samePersistedFileVersion(
-                        transactionDirectoryIdentity,
-                        Os.lstat(transactionDirectory.absolutePath),
-                    ) &&
-                    pathIdentityNoFollow(displaced) == null
+                OsConstants.S_ISDIR(parentIdentity.st_mode) &&
+                    sameFileObject(parentIdentity, Os.lstat(parent.absolutePath))
             ) {
-                "$authorityLabel private displacement directory is invalid"
+                "$authorityLabel parent authority is invalid"
             }
-            Os.rename(file.absolutePath, displaced.absolutePath)
-            Os.fsync(transactionDirectoryDescriptor)
-            syncParentDirectory(file)
-            val moved = readRegularFileAuthorityIfFile(
-                displaced,
+
+            beforePublish()
+            val immediate = readRegularFileAuthorityIfFile(
+                file,
                 Int.MAX_VALUE.toLong(),
                 requireNonEmpty = false,
-                authorityLabel = "$authorityLabel displaced destination",
-            ) ?: throw IllegalStateException("$authorityLabel displaced destination disappeared")
-            require(
-                sameRegularFileAuthority(expected, moved) &&
-                    sameFileObject(
-                        transactionDirectoryIdentity,
-                        Os.fstat(transactionDirectoryDescriptor),
-                    ) &&
-                    sameFileObject(
-                        transactionDirectoryIdentity,
-                        Os.lstat(transactionDirectory.absolutePath),
-                    )
-            ) {
-                "$authorityLabel raced with destination preservation; displaced inode retained"
-            }
-            require(pathIdentityNoFollow(file) == null) {
-                "$authorityLabel destination reappeared after preservation"
-            }
-            return DisplacedRegularFile(
-                displaced,
-                moved.identity,
-                moved.bytes,
-                transactionDirectory,
-                transactionDirectoryIdentity,
+                authorityLabel = "$authorityLabel destination",
             )
+            require(sameRegularFileAuthority(expected, immediate)) {
+                "$authorityLabel destination changed before preservation"
+            }
+            require(
+                sameFileObject(parentIdentity, Os.fstat(parentDescriptor)) &&
+                    sameFileObject(parentIdentity, Os.lstat(parent.absolutePath))
+            ) {
+                "$authorityLabel parent changed before preservation"
+            }
+            if (immediate == null) return null
+
+            val transactionDirectory = File(
+                parent,
+                ".${file.name}.transaction-${android.os.Process.myPid()}-${UUID.randomUUID()}",
+            )
+            Files.createDirectory(transactionDirectory.toPath())
+            val transactionDirectoryDescriptor = Os.open(
+                transactionDirectory.absolutePath,
+                OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or
+                    LINUX_O_DIRECTORY or OsConstants.O_NOFOLLOW,
+                0,
+            )
+            try {
+                val transactionDirectoryIdentity = Os.fstat(transactionDirectoryDescriptor)
+                val displaced = File(transactionDirectory, "displaced")
+                var renameCompleted = false
+                var movedAuthority: PersistedFileAuthority? = null
+                try {
+                    require(
+                        OsConstants.S_ISDIR(transactionDirectoryIdentity.st_mode) &&
+                            samePersistedFileVersion(
+                                transactionDirectoryIdentity,
+                                Os.lstat(transactionDirectory.absolutePath),
+                            ) &&
+                            sameFileObject(parentIdentity, Os.fstat(parentDescriptor)) &&
+                            sameFileObject(parentIdentity, Os.lstat(parent.absolutePath)) &&
+                            pathIdentityNoFollow(displaced) == null
+                    ) {
+                        "$authorityLabel private displacement directory is invalid"
+                    }
+                    Os.rename(file.absolutePath, displaced.absolutePath)
+                    renameCompleted = true
+                    Os.fsync(transactionDirectoryDescriptor)
+                    Os.fsync(parentDescriptor)
+                    val moved = readRegularFileAuthorityIfFile(
+                        displaced,
+                        Int.MAX_VALUE.toLong(),
+                        requireNonEmpty = false,
+                        authorityLabel = "$authorityLabel displaced destination",
+                    ) ?: throw IllegalStateException(
+                        "$authorityLabel displaced destination disappeared",
+                    )
+                    movedAuthority = moved
+                    require(
+                        sameRegularFileAuthority(expected, moved) &&
+                            sameFileObject(parentIdentity, Os.fstat(parentDescriptor)) &&
+                            sameFileObject(parentIdentity, Os.lstat(parent.absolutePath)) &&
+                            sameFileObject(
+                                transactionDirectoryIdentity,
+                                Os.fstat(transactionDirectoryDescriptor),
+                            ) &&
+                            sameFileObject(
+                                transactionDirectoryIdentity,
+                                Os.lstat(transactionDirectory.absolutePath),
+                            )
+                    ) {
+                        "$authorityLabel raced with destination preservation; displaced inode retained"
+                    }
+                    require(pathIdentityNoFollow(file) == null) {
+                        "$authorityLabel destination reappeared after preservation"
+                    }
+                    return DisplacedRegularFile(
+                        displaced,
+                        moved.identity,
+                        moved.bytes,
+                        transactionDirectory,
+                        transactionDirectoryIdentity,
+                    )
+                } catch (failure: Throwable) {
+                    if (!renameCompleted) throw failure
+
+                    // A process can start immediately after the sampled
+                    // process-absence fence and mutate or replace the .mark
+                    // before rename(2). A rejected rename must never leave an
+                    // absent live annotation path when its moved bytes can be
+                    // restored without clobbering. The displaced inode remains
+                    // retained recovery evidence until a later explicit
+                    // retirement transaction.
+                    val pathAuthoritiesStillOwned = runCatching {
+                        sameFileObject(parentIdentity, Os.fstat(parentDescriptor)) &&
+                            sameFileObject(parentIdentity, Os.lstat(parent.absolutePath)) &&
+                            sameFileObject(
+                                transactionDirectoryIdentity,
+                                Os.fstat(transactionDirectoryDescriptor),
+                            ) &&
+                            sameFileObject(
+                                transactionDirectoryIdentity,
+                                Os.lstat(transactionDirectory.absolutePath),
+                            )
+                    }.getOrDefault(false)
+                    val retained = movedAuthority ?: runCatching {
+                        readRegularFileAuthorityIfFile(
+                            displaced,
+                            Int.MAX_VALUE.toLong(),
+                            requireNonEmpty = false,
+                            authorityLabel =
+                                "$authorityLabel rejected displaced destination",
+                        )
+                    }.getOrNull()
+                    val live = runCatching {
+                        readRegularFileAuthorityIfFile(
+                            file,
+                            Int.MAX_VALUE.toLong(),
+                            requireNonEmpty = false,
+                            authorityLabel = "$authorityLabel recovery destination",
+                        )
+                    }.getOrElse { recoveryReadError ->
+                        throw NativeMarkRecoveryRequiredException(
+                            "$authorityLabel requires explicit recovery; " +
+                                "the live annotation path is ambiguous and " +
+                                "displaced evidence was retained",
+                            failure,
+                        ).apply { addSuppressed(recoveryReadError) }
+                    }
+
+                    if (!pathAuthoritiesStillOwned || retained == null || live != null) {
+                        throw NativeMarkRecoveryRequiredException(
+                            "$authorityLabel requires explicit recovery; no live " +
+                                "annotation path was overwritten and displaced " +
+                                "evidence was retained",
+                            failure,
+                        )
+                    }
+
+                    try {
+                        val restoredIdentity = createRegularFileNoClobber(
+                            file,
+                            retained.bytes,
+                            "$authorityLabel rejected-preservation recovery",
+                        )
+                        val restored = readRegularFileAuthorityIfFile(
+                            file,
+                            Int.MAX_VALUE.toLong(),
+                            requireNonEmpty = false,
+                            authorityLabel = "$authorityLabel recovered destination",
+                        ) ?: throw IllegalStateException(
+                            "$authorityLabel recovered destination disappeared",
+                        )
+                        val retainedAfterRestore = readRegularFileAuthorityIfFile(
+                            displaced,
+                            Int.MAX_VALUE.toLong(),
+                            requireNonEmpty = false,
+                            authorityLabel =
+                                "$authorityLabel retained displaced destination",
+                        ) ?: throw IllegalStateException(
+                            "$authorityLabel retained displaced destination disappeared",
+                        )
+                        require(
+                            samePersistedFileVersion(
+                                restoredIdentity,
+                                restored.identity,
+                            ) &&
+                                retained.bytes.contentEquals(restored.bytes) &&
+                                sameRegularFileAuthority(retained, retainedAfterRestore) &&
+                                sameFileObject(
+                                    parentIdentity,
+                                    Os.fstat(parentDescriptor),
+                                ) &&
+                                sameFileObject(
+                                    parentIdentity,
+                                    Os.lstat(parent.absolutePath),
+                                ) &&
+                                sameFileObject(
+                                    transactionDirectoryIdentity,
+                                    Os.fstat(transactionDirectoryDescriptor),
+                                ) &&
+                                sameFileObject(
+                                    transactionDirectoryIdentity,
+                                    Os.lstat(transactionDirectory.absolutePath),
+                                )
+                        ) {
+                            "$authorityLabel recovered destination or displaced " +
+                                "evidence changed"
+                        }
+                    } catch (recoveryError: Throwable) {
+                        throw NativeMarkRecoveryRequiredException(
+                            "$authorityLabel requires explicit recovery; exact " +
+                                "displaced bytes could not be restored without " +
+                                "clobbering and evidence was retained",
+                            failure,
+                        ).apply { addSuppressed(recoveryError) }
+                    }
+
+                    // The live path again contains the exact bytes moved aside,
+                    // and the original displaced inode remains intact as
+                    // evidence. Preserve the rejection but permit the ordinary
+                    // failure relaunch path.
+                    throw failure
+                }
+            } finally {
+                closeDescriptorWithoutMaskingRecovery(
+                    transactionDirectoryDescriptor,
+                    "$authorityLabel displacement directory",
+                )
+            }
         } finally {
-            Os.close(transactionDirectoryDescriptor)
+            closeDescriptorWithoutMaskingRecovery(
+                parentDescriptor,
+                "$authorityLabel parent directory",
+            )
+        }
+    }
+
+    private fun closeDescriptorWithoutMaskingRecovery(
+        descriptor: FileDescriptor,
+        authorityLabel: String,
+    ) {
+        runCatching { Os.close(descriptor) }.onFailure { closeError ->
+            // A read-only directory descriptor has no unflushed payload. A
+            // cleanup failure must not replace a recovery-required exception or
+            // prevent a successfully returned displacement from being followed
+            // by its O_EXCL publication.
+            Log.w(
+                LOG_TAG,
+                "RTL_READER_NATIVE_MARK_DESCRIPTOR_CLOSE_DEFERRED authority=$authorityLabel",
+                closeError,
+            )
         }
     }
 
@@ -4313,14 +4506,18 @@ class ReaderPreferencesModule(
             // A failed direct O_EXCL write may have left a partial file at the
             // live path. Preserve that inode (or any racer that replaced it)
             // before attempting recovery; never unlink or overwrite it.
-            val failedDestination = runCatching {
+            val recoveryErrors = mutableListOf<Throwable>()
+            val failedDestination = try {
                 readRegularFileAuthorityIfFile(
                     file,
                     Int.MAX_VALUE.toLong(),
                     requireNonEmpty = false,
                     authorityLabel = "$authorityLabel failed publication",
                 )
-            }.getOrNull()
+            } catch (inspectionError: Throwable) {
+                recoveryErrors.add(inspectionError)
+                null
+            }
             if (failedDestination != null) {
                 try {
                     preserveRegularDestinationNoClobber(
@@ -4329,23 +4526,77 @@ class ReaderPreferencesModule(
                         "$authorityLabel failed publication",
                     ) {}
                 } catch (preservationError: Throwable) {
-                    error.addSuppressed(preservationError)
+                    recoveryErrors.add(preservationError)
                 }
             }
             // If the path is still absent, reconstruct the admitted bytes with
             // O_EXCL. The original displaced inode remains until recovery is
             // verified, even if a racer prevents reconstruction.
-            if (expected != null && pathIdentityNoFollow(file) == null) {
+            var recoveredIdentity: StructStat? = null
+            val livePathAbsentBeforeRecovery = try {
+                pathIdentityNoFollow(file) == null
+            } catch (pathError: Throwable) {
+                recoveryErrors.add(pathError)
+                false
+            }
+            if (expected != null && livePathAbsentBeforeRecovery) {
                 try {
-                    createRegularFileNoClobber(
+                    recoveredIdentity = createRegularFileNoClobber(
                         file,
                         expected.bytes,
                         "$authorityLabel failed-publication recovery",
                     )
                 } catch (recoveryError: Throwable) {
-                    error.addSuppressed(recoveryError)
+                    recoveryErrors.add(recoveryError)
                 }
             }
+            val recovered = try {
+                readRegularFileAuthorityIfFile(
+                    file,
+                    Int.MAX_VALUE.toLong(),
+                    requireNonEmpty = false,
+                    authorityLabel = "$authorityLabel failed-publication recovery",
+                )
+            } catch (verificationError: Throwable) {
+                recoveryErrors.add(verificationError)
+                null
+            }
+            val desiredStateRestored = if (expected == null) {
+                val livePathAbsentAfterRecovery = try {
+                    pathIdentityNoFollow(file) == null
+                } catch (pathError: Throwable) {
+                    recoveryErrors.add(pathError)
+                    false
+                }
+                recovered == null && livePathAbsentAfterRecovery
+            } else {
+                recoveredIdentity != null &&
+                    recovered != null &&
+                    samePersistedFileVersion(recoveredIdentity, recovered.identity) &&
+                    expected.bytes.contentEquals(recovered.bytes)
+            }
+            val displacedEvidenceIntact = try {
+                requireDisplacedRegularFileIntact(
+                    displaced,
+                    "$authorityLabel pre-publication displacement",
+                )
+                true
+            } catch (evidenceError: Throwable) {
+                recoveryErrors.add(evidenceError)
+                false
+            }
+            if (!desiredStateRestored || !displacedEvidenceIntact) {
+                throw NativeMarkRecoveryRequiredException(
+                    "$authorityLabel requires explicit recovery after failed " +
+                        "publication; admitted bytes are not proven at the live path",
+                    error,
+                ).apply {
+                    recoveryErrors.forEach { recoveryError ->
+                        addSuppressed(recoveryError)
+                    }
+                }
+            }
+            recoveryErrors.forEach { recoveryError -> error.addSuppressed(recoveryError) }
             throw error
         }
     }
@@ -4481,10 +4732,16 @@ class ReaderPreferencesModule(
      */
     @ReactMethod
     fun handoffLastSavedPage(promise: Promise) {
-        if (annotationRecoveryPending.get() ||
+        if (nativeMarkRecoveryRequiredPending.get() ||
+            annotationRecoveryPending.get() ||
             annotationRecoveryHandoffPending.compareAndSet(true, false)
         ) {
-            Log.i(LOG_TAG, "RTL_READER_HANDOFF_SKIPPED reason=annotation_recovery")
+            val reason = if (nativeMarkRecoveryRequiredPending.get()) {
+                "native_mark_recovery_required"
+            } else {
+                "annotation_recovery"
+            }
+            Log.i(LOG_TAG, "RTL_READER_HANDOFF_SKIPPED reason=$reason")
             promise.resolve(Arguments.createMap().apply {
                 putBoolean("annotationRecovery", true)
                 putInt("uid", android.os.Process.myUid())
@@ -4772,58 +5029,80 @@ class ReaderPreferencesModule(
                 // foreground before replacing its process.
                 SystemClock.sleep(900)
 
-                val activityManager = reactApplicationContext.getSystemService(
-                    Context.ACTIVITY_SERVICE,
-                ) as ActivityManager
-                val pids = documentPidsOrThrow(activityManager, "handoff-initial")
-                Log.i(LOG_TAG, "RTL_READER_HANDOFF_DOCUMENT_PIDS ${pids.joinToString(",")}")
-
-                for (pid in pids) {
-                    try {
-                        Os.kill(pid, OsConstants.SIGKILL)
-                        Log.i(LOG_TAG, "RTL_READER_HANDOFF_KILL_SENT pid=$pid")
-                    } catch (error: Throwable) {
+                synchronized(nativeSpreadConfigurationLock) {
+                    if (nativeMarkRecoveryRequiredPending.get()) {
                         Log.e(
                             LOG_TAG,
-                            "RTL_READER_HANDOFF_KILL_FAILED pid=$pid: ${error.message}",
-                            error,
+                            "RTL_READER_HANDOFF_RESTART_BLOCKED reason=native_mark_recovery_required",
                         )
-                        throw error
+                        return@synchronized
                     }
-                }
 
-                if (pids.isNotEmpty()) {
-                    val deadline =
-                        SystemClock.elapsedRealtime() + DOCUMENT_PROCESS_STOP_TIMEOUT_MS
-                    var remaining = pids
-                    while (remaining.isNotEmpty() && SystemClock.elapsedRealtime() < deadline) {
-                        SystemClock.sleep(DOCUMENT_PROCESS_SAMPLE_INTERVAL_MS)
-                        val running = documentPidsOrThrow(
-                            activityManager,
-                            "handoff-confirmation",
-                        ).toSet()
-                        remaining = pids.filter { pid -> pid in running }
+                    val activityManager = reactApplicationContext.getSystemService(
+                        Context.ACTIVITY_SERVICE,
+                    ) as ActivityManager
+                    val pids = documentPidsOrThrow(activityManager, "handoff-initial")
+                    Log.i(
+                        LOG_TAG,
+                        "RTL_READER_HANDOFF_DOCUMENT_PIDS ${pids.joinToString(",")}",
+                    )
+
+                    for (pid in pids) {
+                        try {
+                            Os.kill(pid, OsConstants.SIGKILL)
+                            Log.i(LOG_TAG, "RTL_READER_HANDOFF_KILL_SENT pid=$pid")
+                        } catch (error: Throwable) {
+                            Log.e(
+                                LOG_TAG,
+                                "RTL_READER_HANDOFF_KILL_FAILED pid=$pid: ${error.message}",
+                                error,
+                            )
+                            throw error
+                        }
                     }
-                    if (remaining.isEmpty()) {
-                        Log.i(LOG_TAG, "RTL_READER_HANDOFF_KILL_CONFIRMED")
+
+                    if (pids.isNotEmpty()) {
+                        val deadline =
+                            SystemClock.elapsedRealtime() + DOCUMENT_PROCESS_STOP_TIMEOUT_MS
+                        var remaining = pids
+                        while (remaining.isNotEmpty() &&
+                            SystemClock.elapsedRealtime() < deadline
+                        ) {
+                            SystemClock.sleep(DOCUMENT_PROCESS_SAMPLE_INTERVAL_MS)
+                            val running = documentPidsOrThrow(
+                                activityManager,
+                                "handoff-confirmation",
+                            ).toSet()
+                            remaining = pids.filter { pid -> pid in running }
+                        }
+                        if (remaining.isEmpty()) {
+                            Log.i(LOG_TAG, "RTL_READER_HANDOFF_KILL_CONFIRMED")
+                        } else {
+                            Log.w(
+                                LOG_TAG,
+                                "RTL_READER_HANDOFF_KILL_NOT_CONFIRMED pids=${remaining.joinToString(",")}",
+                            )
+                        }
                     } else {
-                        Log.w(
-                            LOG_TAG,
-                            "RTL_READER_HANDOFF_KILL_NOT_CONFIRMED pids=${remaining.joinToString(",")}",
-                        )
+                        Log.w(LOG_TAG, "RTL_READER_HANDOFF_NO_DOCUMENT_PID")
                     }
-                } else {
-                    Log.w(LOG_TAG, "RTL_READER_HANDOFF_NO_DOCUMENT_PID")
-                }
 
-                SystemClock.sleep(450)
+                    SystemClock.sleep(450)
 
-                val intent = Intent().apply {
-                    setClassName(DOCUMENT_PACKAGE, DOCUMENT_ACTIVITY)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                    if (nativeMarkRecoveryRequiredPending.get()) {
+                        Log.e(
+                            LOG_TAG,
+                            "RTL_READER_HANDOFF_RESTART_BLOCKED reason=native_mark_recovery_required",
+                        )
+                        return@synchronized
+                    }
+                    val intent = Intent().apply {
+                        setClassName(DOCUMENT_PACKAGE, DOCUMENT_ACTIVITY)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                    }
+                    reactApplicationContext.startActivity(intent)
+                    Log.i(LOG_TAG, "RTL_READER_HANDOFF_START_REQUESTED_DIRECT")
                 }
-                reactApplicationContext.startActivity(intent)
-                Log.i(LOG_TAG, "RTL_READER_HANDOFF_START_REQUESTED_DIRECT")
             } catch (error: Throwable) {
                 Log.e(
                     LOG_TAG,
@@ -5057,6 +5336,12 @@ class ReaderPreferencesModule(
                         error,
                     )
                     persistenceError = error
+                    if (nativeMarkRecoveryRequired(error)) {
+                        nativeMarkRecoveryRequiredPending.set(true)
+                    }
+                }
+                if (persistenceError == null) {
+                    nativeMarkRecoveryRequiredPending.set(false)
                 }
             }
 
@@ -5066,34 +5351,44 @@ class ReaderPreferencesModule(
             // ActivityManager failure must never restore the discarded working
             // .mark after its recovery backup has been retired.
             val committed = persistenceError == null
-            try {
-                if (committed) SystemClock.sleep(250)
-                reactApplicationContext.startActivity(Intent().apply {
-                    setClassName(DOCUMENT_PACKAGE, DOCUMENT_ACTIVITY)
-                    addFlags(
-                        Intent.FLAG_ACTIVITY_NEW_TASK or
-                            Intent.FLAG_ACTIVITY_CLEAR_TASK,
-                    )
-                })
-                Log.i(
-                    LOG_TAG,
-                    if (committed) {
-                        "RTL_READER_NATIVE_BACKUP_RESTORE_REOPENED"
-                    } else {
-                        "RTL_READER_NATIVE_BACKUP_RESTORE_FAILURE_REOPENED"
-                    },
-                )
-            } catch (restartError: Throwable) {
+            val recoveryRequired = nativeMarkRecoveryRequiredPending.get() ||
+                nativeMarkRecoveryRequired(persistenceError)
+            if (recoveryRequired) {
                 Log.e(
                     LOG_TAG,
-                    if (committed) {
-                        "RTL_READER_NATIVE_BACKUP_RESTORE_REOPEN_FAILED: ${restartError.message}"
-                    } else {
-                        "RTL_READER_NATIVE_BACKUP_RESTORE_FAILURE_REOPEN_FAILED: ${restartError.message}"
-                    },
-                    restartError,
+                    "RTL_READER_NATIVE_BACKUP_RESTORE_RECOVERY_REQUIRED_NOT_REOPENED",
+                    persistenceError,
                 )
-                if (committed) persistenceError = restartError
+            } else {
+                try {
+                    if (committed) SystemClock.sleep(250)
+                    reactApplicationContext.startActivity(Intent().apply {
+                        setClassName(DOCUMENT_PACKAGE, DOCUMENT_ACTIVITY)
+                        addFlags(
+                            Intent.FLAG_ACTIVITY_NEW_TASK or
+                                Intent.FLAG_ACTIVITY_CLEAR_TASK,
+                        )
+                    })
+                    Log.i(
+                        LOG_TAG,
+                        if (committed) {
+                            "RTL_READER_NATIVE_BACKUP_RESTORE_REOPENED"
+                        } else {
+                            "RTL_READER_NATIVE_BACKUP_RESTORE_FAILURE_REOPENED"
+                        },
+                    )
+                } catch (restartError: Throwable) {
+                    Log.e(
+                        LOG_TAG,
+                        if (committed) {
+                            "RTL_READER_NATIVE_BACKUP_RESTORE_REOPEN_FAILED: ${restartError.message}"
+                        } else {
+                            "RTL_READER_NATIVE_BACKUP_RESTORE_FAILURE_REOPEN_FAILED: ${restartError.message}"
+                        },
+                        restartError,
+                    )
+                    if (committed) persistenceError = restartError
+                }
             }
             completion(persistenceError)
         }.apply {
@@ -5101,6 +5396,23 @@ class ReaderPreferencesModule(
             isDaemon = true
             start()
         }
+    }
+
+    private fun nativeMarkRecoveryRequired(error: Throwable?): Boolean {
+        if (error == null) return false
+        val pending = java.util.ArrayDeque<Throwable>()
+        val visited = java.util.Collections.newSetFromMap(
+            java.util.IdentityHashMap<Throwable, Boolean>(),
+        )
+        pending.addLast(error)
+        while (!pending.isEmpty()) {
+            val current = pending.removeFirst()
+            if (!visited.add(current)) continue
+            if (current is NativeMarkRecoveryRequiredException) return true
+            current.cause?.let { cause -> pending.addLast(cause) }
+            current.suppressed.forEach { suppressed -> pending.addLast(suppressed) }
+        }
+        return false
     }
 
     private fun requireBackupDocumentIdentity(
@@ -5314,7 +5626,10 @@ class ReaderPreferencesModule(
                 }
                 return checkNotNull(publication)
             } finally {
-                Os.close(snapshotDescriptor)
+                closeDescriptorWithoutMaskingRecovery(
+                    snapshotDescriptor,
+                    "annotation recovery snapshot",
+                )
             }
         } catch (error: Throwable) {
             publication?.takeIf { value -> value.changed }?.let { value ->
@@ -5326,7 +5641,12 @@ class ReaderPreferencesModule(
             }
             throw error
         } finally {
-            previousDescriptor?.let { descriptor -> Os.close(descriptor) }
+            previousDescriptor?.let { descriptor ->
+                closeDescriptorWithoutMaskingRecovery(
+                    descriptor,
+                    "pre-restore annotation",
+                )
+            }
         }
     }
 
@@ -5343,30 +5663,57 @@ class ReaderPreferencesModule(
             publishedAuthority,
             "rejected annotation publication rollback",
         ) {}
-        if (publication.previousPresent) {
-            val bytes = publication.previousBytes ?: throw IllegalStateException(
-                "Missing pre-publication mark rollback bytes",
-            )
-            createRegularFileNoClobber(
-                publication.mark,
-                bytes,
-                "pre-restore annotation rollback",
-            )
-            val restored = readRegularFileAuthorityIfFile(
-                publication.mark,
-                Int.MAX_VALUE.toLong(),
-                requireNonEmpty = false,
-                authorityLabel = "rolled-back annotation",
-            ) ?: throw IllegalStateException(
-                "Pre-restore annotation rollback disappeared",
-            )
-            require(restored.bytes.contentEquals(bytes)) {
-                "Pre-restore annotation rollback bytes changed"
+        try {
+            if (publication.previousPresent) {
+                val bytes = publication.previousBytes ?: throw IllegalStateException(
+                    "Missing pre-publication mark rollback bytes",
+                )
+                val restoredIdentity = createRegularFileNoClobber(
+                    publication.mark,
+                    bytes,
+                    "pre-restore annotation rollback",
+                )
+                val restored = readRegularFileAuthorityIfFile(
+                    publication.mark,
+                    Int.MAX_VALUE.toLong(),
+                    requireNonEmpty = false,
+                    authorityLabel = "rolled-back annotation",
+                ) ?: throw IllegalStateException(
+                    "Pre-restore annotation rollback disappeared",
+                )
+                require(
+                    samePersistedFileVersion(restoredIdentity, restored.identity) &&
+                        restored.bytes.contentEquals(bytes)
+                ) {
+                    "Pre-restore annotation rollback bytes changed"
+                }
+            } else {
+                require(pathIdentityNoFollow(publication.mark) == null) {
+                    "Could not remove rejected annotation publication"
+                }
             }
-        } else {
-            require(pathIdentityNoFollow(publication.mark) == null) {
-                "Could not remove rejected annotation publication"
-            }
+            requireDisplacedRegularFileIntact(
+                rejected,
+                "rejected annotation publication",
+            )
+            requireDisplacedRegularFileIntact(
+                publication.displaced?.let { displaced ->
+                    DisplacedRegularFile(
+                        displaced,
+                        checkNotNull(publication.displacedIdentity),
+                        checkNotNull(publication.previousBytes),
+                        checkNotNull(publication.displacementDirectory),
+                        checkNotNull(publication.displacementDirectoryIdentity),
+                    )
+                },
+                "pre-publication annotation",
+            )
+        } catch (rollbackError: Throwable) {
+            throw NativeMarkRecoveryRequiredException(
+                "Pre-publication annotation state is not proven restored; " +
+                    "DocumentActivity must remain stopped for explicit recovery",
+                rollbackError,
+            )
         }
         retireDisplacedRegularFile(rejected, "rejected annotation publication")
         retireDisplacedRegularFile(
@@ -5381,6 +5728,46 @@ class ReaderPreferencesModule(
             },
             "pre-publication annotation",
         )
+    }
+
+    private fun requireDisplacedRegularFileIntact(
+        displaced: DisplacedRegularFile?,
+        authorityLabel: String,
+    ) {
+        if (displaced == null) return
+        val directoryDescriptor = Os.open(
+            displaced.transactionDirectory.absolutePath,
+            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or
+                LINUX_O_DIRECTORY or OsConstants.O_NOFOLLOW,
+            0,
+        )
+        try {
+            val current = readRegularFileAuthorityIfFile(
+                displaced.file,
+                Int.MAX_VALUE.toLong(),
+                requireNonEmpty = false,
+                authorityLabel = authorityLabel,
+            ) ?: throw IllegalStateException("$authorityLabel disappeared")
+            require(
+                samePersistedFileVersion(displaced.identity, current.identity) &&
+                    displaced.bytes.contentEquals(current.bytes) &&
+                    sameFileObject(
+                        displaced.transactionDirectoryIdentity,
+                        Os.fstat(directoryDescriptor),
+                    ) &&
+                    sameFileObject(
+                        displaced.transactionDirectoryIdentity,
+                        Os.lstat(displaced.transactionDirectory.absolutePath),
+                    ),
+            ) {
+                "$authorityLabel retained evidence changed"
+            }
+        } finally {
+            closeDescriptorWithoutMaskingRecovery(
+                directoryDescriptor,
+                "$authorityLabel retained evidence directory",
+            )
+        }
     }
 
     private fun retireNativeMarkPublication(publication: NativeMarkPublication) {

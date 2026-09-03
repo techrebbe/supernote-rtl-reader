@@ -11,6 +11,7 @@ import android.util.Log;
 import android.view.MotionEvent;
 
 import com.techrebbe.supernote.spreadprobe.v2.NativeAuthority;
+import com.techrebbe.supernote.spreadprobe.v2.NativeComponentIdentityRegistry;
 import com.techrebbe.supernote.spreadprobe.v2.AtomicInputAdmission;
 import com.techrebbe.supernote.spreadprobe.v2.NativeAsyncSaveFence;
 import com.techrebbe.supernote.spreadprobe.v2.NativePresentationRestoreWitness;
@@ -103,6 +104,7 @@ public final class NativeReaderV2Runtime
     private NativeReaderFirmwarePort port;
     private NativeReaderController controller;
     private NativeReaderV2FirmwareAccess.Components components;
+    private NativeComponentIdentityRegistry.Lease componentIdentityLease;
     private NativeReaderV2Compositor.Result visible;
     private NativeReaderV2FirmwareAccess.PageGeometryLease pageGeometryLease;
     private NativeReaderV2FirmwareAccess.PresentationScaleLease
@@ -1215,10 +1217,12 @@ public final class NativeReaderV2Runtime
             components = null;
             return;
         }
-        NativeReaderV2FirmwareAccess.Components releasedComponents = components;
+        NativeComponentIdentityRegistry.Lease releasedIdentityLease =
+            componentIdentityLease;
+        componentIdentityLease = null;
         cancelActiveSourceSave();
         retired = true;
-        shutdownProjectionWorker(releasedComponents);
+        shutdownProjectionWorker(releasedIdentityLease);
         freezeInputIngress();
         nativePenCallbackContact = false;
         samePageReloadPrepared = false;
@@ -1239,10 +1243,12 @@ public final class NativeReaderV2Runtime
     private void retirePrepared(String reason, boolean keepWriterDisabled) {
         assertOwnerThread();
         if (retired) return;
-        NativeReaderV2FirmwareAccess.Components releasedComponents = components;
+        NativeComponentIdentityRegistry.Lease releasedIdentityLease =
+            componentIdentityLease;
+        componentIdentityLease = null;
         cancelActiveSourceSave();
         retired = true;
-        shutdownProjectionWorker(releasedComponents);
+        shutdownProjectionWorker(releasedIdentityLease);
         freezeInputIngress();
         nativePenCallbackContact = false;
         samePageReloadPrepared = false;
@@ -2087,11 +2093,16 @@ public final class NativeReaderV2Runtime
             current.documentLayout.getWidth(),
             current.documentLayout.getHeight()
         );
+        if (componentIdentityLease == null) {
+            componentIdentityLease =
+                firmware.acquireComponentIdentityLease(current);
+        }
         NativeAuthority authority = firmware.authority(
             current,
             claim.documentId,
             activityGeneration,
-            nextLayout
+            nextLayout,
+            componentIdentityLease
         );
         if (authority == null) return false;
         SpreadSnapshot snapshot = NativeReaderV2LayoutFactory.landscape(
@@ -3126,7 +3137,7 @@ public final class NativeReaderV2Runtime
      * captured component. Lifecycle callbacks never wait on that drain.
      */
     private void shutdownProjectionWorker(
-        NativeReaderV2FirmwareAccess.Components releasedComponents
+        NativeComponentIdentityRegistry.Lease releasedIdentityLease
     ) {
         if (projectionShutdown) return;
         projectionShutdown = true;
@@ -3146,7 +3157,9 @@ public final class NativeReaderV2Runtime
                         }
                     }
                     firmware.releaseProjectionReader();
-                    firmware.releaseComponentIds(releasedComponents);
+                    firmware.releaseComponentIdentityLease(
+                        releasedIdentityLease
+                    );
                 } catch (RuntimeException failure) {
                     Log.e(TAG, "projection worker cleanup failed", failure);
                 } finally {

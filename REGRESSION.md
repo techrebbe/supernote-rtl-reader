@@ -6,8 +6,8 @@ with SupernoteDocument `1.02.446`.
 
 ## Native Reader v2 pre-hardware adversarial gate — PASS
 
-- [x] 85,042 deterministic controller/geometry/transaction assertions pass.
-- [x] 101 authority mutations are rejected, including stale admission evidence,
+- [x] 85,052 deterministic controller/geometry/transaction assertions pass.
+- [x] 113 authority mutations are rejected, including stale admission evidence,
   contained-runtime publication, contact-safe containment, three-layer stock
   restoration, projection drain ordering, and descriptor-backed marker
   recovery.
@@ -20,14 +20,19 @@ with SupernoteDocument `1.02.446`.
   `81942105e60e1b5498a7fb790762a3b750371a2d` is integrated; all 189 Virtual
   Spread generator tests, contract fixtures, and native viewport tests pass.
 - [x] Two clean v0.0.137 companion builds are byte-for-byte identical at
-  250,395 bytes and SHA-256
-  `59474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817`.
+  254,491 bytes and SHA-256
+  `7ea8b945e2fbd3e5aac53c63f9eb37ce1662ff0afb551cd8421ba938f050e586`.
   The strict provenance-bound RTL Reader package has SHA-256
-  `e17ef0cc71c80ee4cf32c0459e3f544b2a15a3f259148e9df84abb55ccb5aba5`.
+  `83674fd23e7937ff5f2aab819f60f9f39a6347b8bed880328c348e9cc4988391`.
 - [x] The final adversarial review findings are covered by deterministic gates:
   epoch-owned input/lifecycle authority, exact stock-reload receipts, no-clobber
   `.mark` publication/rollback interleavings, post-commit relaunch, exact
   installed-companion identity, and protected two-stage release signing.
+- [x] Delayed runtime retirement cannot remove component IDs leased by a new
+  same-Activity session, and every unproven post-rename `.mark` failure blocks
+  all native-reader relaunch paths while retaining displaced recovery evidence.
+- [x] The protected no-checkout signer verifies the final signed APK's fixed
+  254,491-byte length and SHA-256 before publishing it.
 - [ ] Exact-head independent review is clean.
 - [ ] Nomad hardware gate passes. No hardware result is claimed by this
   automated section.

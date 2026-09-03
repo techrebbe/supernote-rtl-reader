@@ -1288,21 +1288,45 @@ def main() -> None:
         ],
         "first-spread live ink and full-origin sizing authority",
     )
+    component_identity_registry = read(
+        source / "v2/NativeComponentIdentityRegistry.java"
+    )
+    require(
+        component_identity_registry,
+        [
+            "public synchronized Lease acquire(Object... requestedComponents)",
+            "entry.leaseCount++;",
+            "public synchronized void release(Lease lease)",
+            "entry.leaseCount--;",
+            "if (entry.leaseCount == 0) entries.remove(entry);",
+            "if (lease.components[role] != component)",
+            "native component identity lease authority was lost",
+        ],
+        "runtime-leased native component identities",
+    )
     require(
         firmware,
         [
-            "WeakReference<Object>",
-            "public synchronized void releaseComponentIds(Components components)",
-            "Firmware access is process-scoped",
+            "NativeComponentIdentityRegistry componentIdentities",
+            "acquireComponentIdentityLease(",
+            "releaseComponentIdentityLease(",
+            "identityLease.id(0, components.viewModel)",
+            "identityLease.id(3, components.binder)",
         ],
-        "bounded native component identity lifetime",
+        "firmware component identity lease boundary",
     )
-    if "IdentityHashMap<Object, Long> componentIds" in firmware:
-        fail("firmware still strongly retains retired component graphs")
     require(
         runtime,
-        ["firmware.releaseComponentIds(releasedComponents);"],
-        "retired component identity release",
+        [
+            "componentIdentityLease =",
+            "firmware.acquireComponentIdentityLease(current);",
+            (
+                "firmware.releaseComponentIdentityLease(\n"
+                "                        releasedIdentityLease\n"
+                "                    );"
+            ),
+        ],
+        "retired runtime identity lease release",
     )
     require(
         read(source / "v2android/NativeReaderV2StatusOverlay.java"),
@@ -1490,9 +1514,9 @@ def main() -> None:
         [
             "NATIVE_READER_V2_MIN_VERSION_CODE = 137L",
             "NATIVE_READER_V2_SIGNER_SHA256 =",
-            "NATIVE_READER_V2_APK_LENGTH = 250395L",
+            "NATIVE_READER_V2_APK_LENGTH = 254491L",
             "NATIVE_READER_V2_APK_SHA256 =",
-            "59474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
+            "7ea8b945e2fbd3e5aac53c63f9eb37ce1662ff0afb551cd8421ba938f050e586",
             "PackageManager.GET_SIGNING_CERTIFICATES",
             "signing.hasMultipleSigners()",
             "Native Reader signer set is not exact",
@@ -1603,6 +1627,8 @@ def main() -> None:
         [
             "private data class NativeMarkPublication(",
             "private data class DisplacedRegularFile(",
+            "private class NativeMarkRecoveryRequiredException(",
+            "private val nativeMarkRecoveryRequiredPending = AtomicBoolean(false)",
             "private fun readPinnedRegularBytes(",
             "private fun openPinnedRegularFile(",
             "private fun publishNativeAnnotationRestore(",
@@ -1622,6 +1648,8 @@ def main() -> None:
             "RTL_READER_NATIVE_BACKUP_RESTORE_POST_PUBLICATION_ROLLED_BACK",
             "restorePrePublicationMark(value)",
             "publishedIdentity",
+            "RTL_READER_NATIVE_BACKUP_RESTORE_RECOVERY_REQUIRED_NOT_REOPENED",
+            "RTL_READER_HANDOFF_RESTART_BLOCKED reason=native_mark_recovery_required",
         ],
         "descriptor-pinned annotation restore and rollback",
     )
@@ -1647,6 +1675,77 @@ def main() -> None:
         ],
         "native annotation no-clobber final creation",
     )
+    preserve_start = plugin.find(
+        "private fun preserveRegularDestinationNoClobber("
+    )
+    preserve_end = plugin.find(
+        "private fun createRegularFileNoClobber(", preserve_start
+    )
+    if preserve_start < 0 or preserve_end < 0:
+        fail("could not isolate native annotation displaced-file preservation")
+    preserve = plugin[preserve_start:preserve_end]
+    require(
+        preserve,
+        [
+            "val parentDescriptor = Os.open(",
+            "LINUX_O_DIRECTORY or OsConstants.O_NOFOLLOW",
+            "beforePublish()",
+            "val immediate = readRegularFileAuthorityIfFile(",
+            "var renameCompleted = false",
+            "Os.rename(file.absolutePath, displaced.absolutePath)",
+            "renameCompleted = true",
+            "Os.fsync(transactionDirectoryDescriptor)",
+            "Os.fsync(parentDescriptor)",
+            "if (!renameCompleted) throw failure",
+            "val pathAuthoritiesStillOwned = runCatching",
+            "retained == null || live != null",
+            "NativeMarkRecoveryRequiredException(",
+            '"$authorityLabel rejected-preservation recovery"',
+            "val retainedAfterRestore = readRegularFileAuthorityIfFile(",
+            "retained.bytes.contentEquals(restored.bytes)",
+            "sameRegularFileAuthority(retained, retainedAfterRestore)",
+            "closeDescriptorWithoutMaskingRecovery(",
+            "throw failure",
+        ],
+        "post-rename annotation recovery and retained evidence",
+    )
+    ordered(
+        preserve,
+        [
+            "beforePublish()",
+            "val immediate = readRegularFileAuthorityIfFile(",
+            "Os.rename(file.absolutePath, displaced.absolutePath)",
+            "renameCompleted = true",
+            "catch (failure: Throwable)",
+            "val live = runCatching",
+            "retained == null || live != null",
+            "val restoredIdentity = createRegularFileNoClobber(",
+            "val retainedAfterRestore = readRegularFileAuthorityIfFile(",
+            "The live path again contains the exact bytes moved aside",
+        ],
+        "capture, rename, no-clobber recovery, and rejection order",
+    )
+    failed_publish_start = plugin.find("private fun publishRegularFileNoClobber(")
+    failed_publish_end = plugin.find(
+        "private fun publishRegularFileAbsenceNoClobber(", failed_publish_start
+    )
+    if failed_publish_start < 0 or failed_publish_end < 0:
+        fail("could not isolate failed native annotation publication recovery")
+    failed_publish = plugin[failed_publish_start:failed_publish_end]
+    require(
+        failed_publish,
+        [
+            "val recoveryErrors = mutableListOf<Throwable>()",
+            "var recoveredIdentity: StructStat? = null",
+            "livePathAbsentBeforeRecovery",
+            "recoveredIdentity = createRegularFileNoClobber(",
+            "val desiredStateRestored = if (expected == null)",
+            "requireDisplacedRegularFileIntact(",
+            "if (!desiredStateRestored || !displacedEvidenceIntact)",
+            "throw NativeMarkRecoveryRequiredException(",
+        ],
+        "failed publication exact-state recovery fence",
+    )
     restore_worker_start = plugin.find("private fun scheduleAnnotationRestore(")
     restore_helpers_start = plugin.find(
         "private fun requireBackupDocumentIdentity(",
@@ -1665,9 +1764,64 @@ def main() -> None:
             "restorePrePublicationMark(value)",
             "throw restoreError",
             "val committed = persistenceError == null",
+            "val recoveryRequired = nativeMarkRecoveryRequiredPending.get() ||\n"
+            "                nativeMarkRecoveryRequired(persistenceError)",
+            "if (recoveryRequired)",
+            "RTL_READER_NATIVE_BACKUP_RESTORE_RECOVERY_REQUIRED_NOT_REOPENED",
+            "} else {\n                try {\n                    if (committed)",
             "reactApplicationContext.startActivity(Intent().apply",
         ],
-        "persistence rollback completes before fallible relaunch",
+        "persistence rollback and recovery-required fence precede relaunch",
+    )
+    require(
+        restore_worker,
+        [
+            "nativeMarkRecoveryRequiredPending.set(true)",
+            "if (persistenceError == null)",
+            "nativeMarkRecoveryRequiredPending.set(false)",
+        ],
+        "recovery-required restart latch publication and safe clearing",
+    )
+    handoff_start = plugin.find("fun handoffLastSavedPage(promise: Promise)")
+    handoff_end = plugin.find("private fun findMatchingConfig(", handoff_start)
+    restart_start = plugin.find("private fun scheduleDocumentRestart()")
+    restart_end = plugin.find("private fun scheduleAnnotationRestore(", restart_start)
+    if min(handoff_start, handoff_end, restart_start, restart_end) < 0:
+        fail("could not isolate native-reader handoff and restart gates")
+    require(
+        plugin[handoff_start:handoff_end],
+        [
+            "if (nativeMarkRecoveryRequiredPending.get() ||\n"
+            "            annotationRecoveryPending.get() ||",
+            "nativeMarkRecoveryRequiredPending.get()",
+            '"native_mark_recovery_required"',
+        ],
+        "handoff recovery-required gate",
+    )
+    require(
+        plugin[restart_start:restart_end],
+        [
+            "synchronized(nativeSpreadConfigurationLock)",
+            "nativeMarkRecoveryRequiredPending.get()",
+            "RTL_READER_HANDOFF_RESTART_BLOCKED reason=native_mark_recovery_required",
+            "reactApplicationContext.startActivity(intent)",
+        ],
+        "queued restart recovery-required gate",
+    )
+    rollback_start = plugin.find("private fun restorePrePublicationMark(")
+    rollback_end = plugin.find("private fun requireDisplacedRegularFileIntact(", rollback_start)
+    if rollback_start < 0 or rollback_end < 0:
+        fail("could not isolate native annotation rollback recovery fence")
+    require(
+        plugin[rollback_start:rollback_end],
+        [
+            "val restoredIdentity = createRegularFileNoClobber(",
+            "samePersistedFileVersion(restoredIdentity, restored.identity)",
+            "requireDisplacedRegularFileIntact(",
+            "throw NativeMarkRecoveryRequiredException(",
+            "Pre-publication annotation state is not proven restored;",
+        ],
+        "rollback exact-state and retained-evidence fence",
     )
     committed_scope = restore_worker[
         restore_worker.find("withNativeSpreadPublicationLock("):
@@ -1699,7 +1853,11 @@ def main() -> None:
         [
             "projectionExecutor.shutdownNow();",
             "if (projectionExecutor.awaitTermination(",
-            "firmware.releaseComponentIds(releasedComponents);",
+            (
+                "firmware.releaseComponentIdentityLease(\n"
+                "                        releasedIdentityLease\n"
+                "                    );"
+            ),
             "if (retired || projectionShutdown",
             "if (prepared != null) prepared.recycle();",
         ],
@@ -1715,7 +1873,11 @@ def main() -> None:
             "projectionExecutor.shutdownNow();",
             "if (projectionExecutor.awaitTermination(",
             "firmware.releaseProjectionReader();",
-            "firmware.releaseComponentIds(releasedComponents);",
+            (
+                "firmware.releaseComponentIdentityLease(\n"
+                "                        releasedIdentityLease\n"
+                "                    );"
+            ),
             "evidence.close();",
         ],
         "projection identities released only after worker drain",
@@ -1846,8 +2008,23 @@ def main() -> None:
             "$env:NATIVE_SPREAD_KEYSTORE_B64 = $null",
             "Remove-Item -LiteralPath $keystore -Force",
             "release-output/SupernoteNativeSpreadProbe-v0.0.137.apk",
+            "$expectedSignedLength = 254491L",
+            "7ea8b945e2fbd3e5aac53c63f9eb37ce1662ff0afb551cd8421ba938f050e586",
+            "Signed APK length differs from the reviewed upgrade identity",
+            "Signed APK SHA-256 differs from the reviewed upgrade identity.",
         ],
         "checkout-free protected Native Reader signing boundary",
+    )
+    ordered(
+        stable_job,
+        [
+            "apksigner verification failed",
+            "$expectedSignedLength = 254491L",
+            "Signed APK SHA-256 differs from the reviewed upgrade identity.",
+            "} finally {",
+            "Upload upgrade-compatible Native Reader APK",
+        ],
+        "signature then exact signed identity then cleanup then publication",
     )
 
     print("Native Reader v2 invariants: PASS")

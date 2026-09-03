@@ -60,6 +60,14 @@ admission independently pins the installed companion base APK by no-follow
 descriptor, exact length, SHA-256, package, version, and signer while rejecting
 split APKs.
 
+Runtime component identities are held through exact-object reference-counted
+leases, so a retiring reader cannot invalidate a newly admitted session on the
+same Activity. Any unproven post-rename `.mark` recovery sets a persistent
+recovery-required latch: queued and immediate native-reader relaunches remain
+blocked until the live file is restored and reverified, while displaced bytes
+stay available as recovery evidence. The protected signer also verifies the
+final signed APK's exact pinned length and SHA-256 before publication.
+
 ## Stable baseline
 
 v0.4.12 with Native Spread v0.0.116 is the current merged stable baseline.

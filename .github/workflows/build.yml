@@ -339,6 +339,23 @@ jobs:
                 -not ($verification -contains 'Verified using v3 scheme (APK Signature Scheme v3): true')) {
               throw 'Signed APK is missing required modern signature schemes.'
             }
+            $expectedSignedLength = 254491L
+            $expectedSignedSha256 = `
+              '7ea8b945e2fbd3e5aac53c63f9eb37ce1662ff0afb551cd8421ba938f050e586'
+            $actualSignedLength = (Get-Item `
+              -LiteralPath $outputApk `
+              -Force
+            ).Length
+            if ($actualSignedLength -ne $expectedSignedLength) {
+              throw "Signed APK length differs from the reviewed upgrade identity: $actualSignedLength"
+            }
+            $actualSignedSha256 = (Get-FileHash `
+              -LiteralPath $outputApk `
+              -Algorithm SHA256
+            ).Hash.ToLowerInvariant()
+            if ($actualSignedSha256 -cne $expectedSignedSha256) {
+              throw 'Signed APK SHA-256 differs from the reviewed upgrade identity.'
+            }
           } finally {
             $env:NATIVE_SPREAD_KEYSTORE_B64 = $null
             if ($null -ne $keyBytes) {

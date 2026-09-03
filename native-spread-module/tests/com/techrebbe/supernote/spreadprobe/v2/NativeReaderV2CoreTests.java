@@ -30,6 +30,7 @@ public final class NativeReaderV2CoreTests {
         testTransactionalNavigationTargets();
         testV2CommittedMarkerClaim();
         testSnapshotAuthority();
+        testComponentIdentityLeaseReAdmissionRace();
         testGestureRouting();
         testActivationHappyPaths();
         testActivationRollbackAndStaleEvents();
@@ -2702,6 +2703,118 @@ public final class NativeReaderV2CoreTests {
             13,
             14,
             page
+        );
+    }
+
+    private static void testComponentIdentityLeaseReAdmissionRace()
+        throws InterruptedException {
+        NativeComponentIdentityRegistry registry =
+            new NativeComponentIdentityRegistry();
+        Object viewModel = new Object();
+        Object presenter = new Object();
+        Object note = new Object();
+        Object binder = new Object();
+        NativeComponentIdentityRegistry.Lease retiring = registry.acquire(
+            viewModel,
+            presenter,
+            note,
+            binder
+        );
+
+        CountDownLatch oldWorkerBlocked = new CountDownLatch(1);
+        CountDownLatch permitOldCleanup = new CountDownLatch(1);
+        RuntimeException[] cleanupFailure = new RuntimeException[1];
+        Thread oldCleanup = new Thread(() -> {
+            oldWorkerBlocked.countDown();
+            await(permitOldCleanup);
+            try {
+                registry.release(retiring);
+            } catch (RuntimeException failure) {
+                cleanupFailure[0] = failure;
+            }
+        }, "blocked-retiring-projection-worker");
+        oldCleanup.start();
+        await(oldWorkerBlocked);
+
+        // Runtime B re-admits the exact same Activity component graph before
+        // runtime A's blocked projection cleanup is allowed to complete.
+        NativeComponentIdentityRegistry.Lease replacement = registry.acquire(
+            viewModel,
+            presenter,
+            note,
+            binder
+        );
+        NativeAuthority beforeOldCleanup = leasedAuthority(
+            replacement,
+            viewModel,
+            presenter,
+            note,
+            binder
+        );
+        check(retiring.id(0, viewModel) == replacement.id(0, viewModel),
+            "same-Activity replacement reuses the view-model identity");
+        check(retiring.id(1, presenter) == replacement.id(1, presenter),
+            "same-Activity replacement reuses the presenter identity");
+
+        permitOldCleanup.countDown();
+        oldCleanup.join();
+        check(cleanupFailure[0] == null,
+            "retiring projection cleanup releases only its own claim");
+        check(retiring.released(), "retiring runtime lease is released");
+        NativeAuthority afterOldCleanup = leasedAuthority(
+            replacement,
+            viewModel,
+            presenter,
+            note,
+            binder
+        );
+        equal(beforeOldCleanup, afterOldCleanup,
+            "replacement authority survives delayed old-runtime cleanup");
+        NativeComponentIdentityRegistry.Lease observer = registry.acquire(
+            viewModel,
+            presenter,
+            note,
+            binder
+        );
+        check(observer.id(0, viewModel) == replacement.id(0, viewModel),
+            "later runtime observes replacement's retained identity");
+        registry.release(observer);
+
+        long replacementViewModelId = replacement.id(0, viewModel);
+        expectThrows(() -> replacement.id(0, new Object()),
+            "lease rejects a different component in the same role");
+        registry.release(replacement);
+        check(replacement.released(), "replacement lease releases cleanly");
+        expectThrows(() -> replacement.id(0, viewModel),
+            "released replacement authority cannot be reused");
+        NativeComponentIdentityRegistry.Lease future = registry.acquire(
+            viewModel,
+            presenter,
+            note,
+            binder
+        );
+        check(future.id(0, viewModel) != replacementViewModelId,
+            "fully released graph receives a new authority epoch");
+        registry.release(future);
+    }
+
+    private static NativeAuthority leasedAuthority(
+        NativeComponentIdentityRegistry.Lease lease,
+        Object viewModel,
+        Object presenter,
+        Object note,
+        Object binder
+    ) {
+        return new NativeAuthority(
+            "doc",
+            19L,
+            23L,
+            4,
+            lease.id(0, viewModel),
+            lease.id(1, presenter),
+            lease.id(2, note),
+            lease.id(3, binder),
+            4
         );
     }
 

@@ -3192,6 +3192,62 @@ class ReaderPreferencesModule(
             first.st_ino == second.st_ino &&
             first.st_mode == second.st_mode
 
+    /**
+     * Opens and pins a directory without accepting a symlink or replacement.
+     *
+     * Android 11's emulated-storage FUSE mount rejects O_DIRECTORY with EINVAL,
+     * but accepts O_NOFOLLOW and directory fsync. Prefer both kernel-enforced
+     * flags everywhere else. On that one documented incompatibility, drop only
+     * O_DIRECTORY and prove the still-no-follow descriptor against lstat
+     * snapshots before returning it. Every caller keeps the descriptor open
+     * and revalidates the same inode across its operation.
+     */
+    private fun openPinnedDirectory(
+        directory: File,
+        authorityLabel: String,
+    ): FileDescriptor {
+        val strictFlags = OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or
+            LINUX_O_DIRECTORY or OsConstants.O_NOFOLLOW
+        val strictFailure = try {
+            return Os.open(directory.absolutePath, strictFlags, 0)
+        } catch (failure: ErrnoException) {
+            failure
+        }
+        if (strictFailure.errno != OsConstants.EINVAL) {
+            throw strictFailure
+        }
+
+        val before = Os.lstat(directory.absolutePath)
+        require(OsConstants.S_ISDIR(before.st_mode)) {
+            "$authorityLabel is not a no-follow directory"
+        }
+        val descriptor = Os.open(
+            directory.absolutePath,
+            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or
+                OsConstants.O_NOFOLLOW,
+            0,
+        )
+        try {
+            val opened = Os.fstat(descriptor)
+            val after = Os.lstat(directory.absolutePath)
+            require(
+                OsConstants.S_ISDIR(opened.st_mode) &&
+                    sameFileObject(before, opened) &&
+                    sameFileObject(opened, after),
+            ) {
+                "$authorityLabel changed during FUSE-compatible directory open"
+            }
+            Log.w(
+                LOG_TAG,
+                "RTL_READER_PINNED_DIRECTORY_FUSE_FALLBACK path=${directory.absolutePath}",
+            )
+            return descriptor
+        } catch (failure: Throwable) {
+            runCatching { Os.close(descriptor) }
+            throw failure
+        }
+    }
+
     private fun samePersistedFileVersion(first: StructStat, second: StructStat): Boolean =
         first.st_dev == second.st_dev &&
             first.st_ino == second.st_ino &&
@@ -4525,11 +4581,9 @@ class ReaderPreferencesModule(
     ): T = synchronized(NATIVE_SPREAD_PUBLICATION_PROCESS_LOCK) {
         val parent = marker.parentFile
             ?: throw IllegalStateException("Native Spread marker has no parent")
-        val parentDescriptor = Os.open(
-            parent.absolutePath,
-            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or
-                LINUX_O_DIRECTORY or OsConstants.O_NOFOLLOW,
-            0,
+        val parentDescriptor = openPinnedDirectory(
+            parent,
+            "Native Spread publication-lock parent",
         )
         try {
             val parentIdentity = Os.fstat(parentDescriptor)
@@ -4648,11 +4702,9 @@ class ReaderPreferencesModule(
     ) {
         val parent = file.parentFile
             ?: throw IllegalStateException("Published file has no parent directory")
-        val parentDescriptor = Os.open(
-            parent.absolutePath,
-            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or
-                LINUX_O_DIRECTORY or OsConstants.O_NOFOLLOW,
-            0,
+        val parentDescriptor = openPinnedDirectory(
+            parent,
+            "Published-file parent",
         )
         val temporary = File(
             parent,
@@ -4776,11 +4828,9 @@ class ReaderPreferencesModule(
     ) {
         val parent = file.parentFile
             ?: throw IllegalStateException("$authorityLabel destination has no parent")
-        val parentDescriptor = Os.open(
-            parent.absolutePath,
-            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or
-                LINUX_O_DIRECTORY or OsConstants.O_NOFOLLOW,
-            0,
+        val parentDescriptor = openPinnedDirectory(
+            parent,
+            "$authorityLabel deletion parent",
         )
         try {
             val parentIdentity = Os.fstat(parentDescriptor)
@@ -4827,11 +4877,9 @@ class ReaderPreferencesModule(
     ): DisplacedRegularFile? {
         val parent = file.parentFile
             ?: throw IllegalStateException("$authorityLabel destination has no parent")
-        val parentDescriptor = Os.open(
-            parent.absolutePath,
-            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or
-                LINUX_O_DIRECTORY or OsConstants.O_NOFOLLOW,
-            0,
+        val parentDescriptor = openPinnedDirectory(
+            parent,
+            "$authorityLabel preservation parent",
         )
         try {
             val parentIdentity = Os.fstat(parentDescriptor)
@@ -4865,11 +4913,9 @@ class ReaderPreferencesModule(
                 ".${file.name}.transaction-${android.os.Process.myPid()}-${UUID.randomUUID()}",
             )
             Files.createDirectory(transactionDirectory.toPath())
-            val transactionDirectoryDescriptor = Os.open(
-                transactionDirectory.absolutePath,
-                OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or
-                    LINUX_O_DIRECTORY or OsConstants.O_NOFOLLOW,
-                0,
+            val transactionDirectoryDescriptor = openPinnedDirectory(
+                transactionDirectory,
+                "$authorityLabel transaction directory",
             )
             try {
                 val transactionDirectoryIdentity = Os.fstat(transactionDirectoryDescriptor)
@@ -5593,10 +5639,9 @@ class ReaderPreferencesModule(
     private fun syncParentDirectory(file: File) {
         val parent = file.parentFile
             ?: throw IllegalStateException("Published file has no parent directory")
-        val directory = Os.open(
-            parent.absolutePath,
-            OsConstants.O_RDONLY,
-            0,
+        val directory = openPinnedDirectory(
+            parent,
+            "Published-file sync parent",
         )
         try {
             Os.fsync(directory)
@@ -6455,11 +6500,9 @@ class ReaderPreferencesModule(
         authorityLabel: String,
     ) {
         if (displaced == null) return
-        val directoryDescriptor = Os.open(
-            displaced.transactionDirectory.absolutePath,
-            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or
-                LINUX_O_DIRECTORY or OsConstants.O_NOFOLLOW,
-            0,
+        val directoryDescriptor = openPinnedDirectory(
+            displaced.transactionDirectory,
+            "$authorityLabel retained-evidence directory",
         )
         try {
             val current = readRegularFileAuthorityIfFile(
@@ -6510,11 +6553,9 @@ class ReaderPreferencesModule(
         authorityLabel: String,
     ) {
         if (displaced == null) return
-        val directoryDescriptor = Os.open(
-            displaced.transactionDirectory.absolutePath,
-            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or
-                LINUX_O_DIRECTORY or OsConstants.O_NOFOLLOW,
-            0,
+        val directoryDescriptor = openPinnedDirectory(
+            displaced.transactionDirectory,
+            "$authorityLabel retirement directory",
         )
         try {
             val current = readRegularFileAuthorityIfFile(

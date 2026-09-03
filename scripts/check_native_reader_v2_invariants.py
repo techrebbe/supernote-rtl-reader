@@ -125,7 +125,7 @@ def main() -> None:
     )
     require(
         plugin_config,
-        ['"versionCode": "36"', '"versionName": "0.4.17"'],
+        ['"versionCode": "37"', '"versionName": "0.4.18"'],
         "plugin version",
     )
     if (
@@ -134,7 +134,7 @@ def main() -> None:
         not in root_build
     ):
         fail("plugin build does not execute the exclusive v2 invariant gate")
-    if "RTL_READER_OPEN v0.4.17-native-reader-v2" not in index:
+    if "RTL_READER_OPEN v0.4.18-native-reader-v2" not in index:
         fail("runtime marker does not identify the v2 plugin build")
     require(
         guidance,
@@ -1981,6 +1981,14 @@ def main() -> None:
             "channel.lock().use",
             "LINUX_O_DIRECTORY = 0x10000",
             "LINUX_O_DIRECTORY or OsConstants.O_NOFOLLOW",
+            "private fun openPinnedDirectory(",
+            "if (strictFailure.errno != OsConstants.EINVAL)",
+            "val before = Os.lstat(directory.absolutePath)",
+            "OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or\n"
+            "                OsConstants.O_NOFOLLOW,",
+            "sameFileObject(before, opened)",
+            "sameFileObject(opened, after)",
+            "RTL_READER_PINNED_DIRECTORY_FUSE_FALLBACK",
             "OsConstants.O_NOFOLLOW",
             "OsConstants.O_EXCL",
             "private data class PersistedFileAuthority(",
@@ -1998,6 +2006,8 @@ def main() -> None:
         ],
         "cross-process marker compare-and-publish",
     )
+    if plugin.count("LINUX_O_DIRECTORY or OsConstants.O_NOFOLLOW") != 1:
+        fail("directory descriptors bypass the pinned FUSE-compatible opener")
     pending_publish_start = plugin.find("private fun writeNativeSpreadPendingMarker(")
     pending_publish_end = plugin.find(
         "private fun commitNativeSpreadEditableMarker(",
@@ -2094,8 +2104,8 @@ def main() -> None:
     require(
         preserve,
         [
-            "val parentDescriptor = Os.open(",
-            "LINUX_O_DIRECTORY or OsConstants.O_NOFOLLOW",
+            "val parentDescriptor = openPinnedDirectory(",
+            '"$authorityLabel preservation parent"',
             "beforePublish()",
             "val immediate = readRegularFileAuthorityIfFile(",
             "var renameCompleted = false",
@@ -2348,7 +2358,7 @@ def main() -> None:
             "python3 scripts/test_build_provenance.py .",
             "out/build-provenance/SupernoteRtlReader.bundle",
             "out/build-provenance/app.npk",
-            "supernote-rtl-reader-v0.4.17-native-reader-v2",
+            "supernote-rtl-reader-v0.4.18-native-reader-v2",
             "native-spread-upgrade-artifact:",
             "github.event_name == 'workflow_dispatch'",
             "github.actor == github.repository_owner",

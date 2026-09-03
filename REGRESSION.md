@@ -15,7 +15,7 @@ with SupernoteDocument `1.02.446`.
 - [x] Ordinary native/plugin invariants, packaging fail-closed tests, and trace
   helper fail-closed tests pass.
 - [x] Companion v0.0.138 compiles and verifies with the upgrade-compatible
-  signer; RTL Reader v0.4.17 compiles and packages with the hardened native
+  signer; RTL Reader v0.4.18 compiles and packages with the hardened native
   module.
 - [x] The current stable `origin/main` baseline at
   `81942105e60e1b5498a7fb790762a3b750371a2d` is integrated; all 189 Virtual
@@ -45,6 +45,14 @@ with SupernoteDocument `1.02.446`.
   interface type, the link hit-test point type, and the native-event pressure
   owner. The v6 symbol contract now matches the captured firmware APK with zero
   mismatches, and future runtime admission reports every mismatch in one pass.
+- [x] Companion v0.0.138 admitted the exact Nomad firmware, installed all 24 v2
+  hooks, and left an ordinary PDF explicitly unadmitted. The first v0.4.17
+  editable attempt verified the live annotation backup and then failed closed
+  before marker publication because Android's emulated-storage FUSE mount
+  rejects `O_DIRECTORY` with `EINVAL`. A device probe proved that the same mount
+  accepts `O_NOFOLLOW` without `O_DIRECTORY`, preserves exact descriptor/path
+  identity, and supports directory `fsync`; v0.4.18 uses only that narrowly
+  validated fallback and retains the before/open/after inode checks.
 - [ ] Exact-head independent review is clean.
 - [ ] Nomad hardware gate passes. No hardware result is claimed by this
   automated section.

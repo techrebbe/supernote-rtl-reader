@@ -57,6 +57,9 @@ def main() -> None:
     config = read(source / "v2/NativeReaderV2Config.java")
     transform = read(source / "v2/NativePageTransform.java")
     input_admission = read(source / "v2/AtomicInputAdmission.java")
+    handshake_single_flight = read(
+        source / "v2/NativeHandshakeSingleFlight.java"
+    )
     async_save_fence = read(source / "v2/NativeAsyncSaveFence.java")
     restore_witness = read(
         source / "v2/NativePresentationRestoreWitness.java"
@@ -494,6 +497,315 @@ def main() -> None:
         "maybeAdmit(entry, true);", reset_position
     ) < 0:
         fail("resume authority reset does not retry admission")
+
+    handshake_start = hooks.find(
+        "private static synchronized void registerHandshakeReceiver("
+    )
+    handshake_end = hooks.find(
+        "private static HandshakeSnapshot captureHandshakeSnapshot(",
+        handshake_start,
+    )
+    if handshake_start < 0 or handshake_end < 0:
+        fail("could not isolate v2 handshake receiver")
+    handshake = hooks[handshake_start:handshake_end]
+    require(
+        hooks,
+        [
+            "private static final NativeHandshakeSingleFlight HANDSHAKE_SINGLE_FLIGHT",
+            "if (!HANDSHAKE_SINGLE_FLIGHT.tryBegin())",
+            "private static volatile Handler handshakeHandler;",
+            "private static volatile HandlerThread handshakeThread;",
+        ],
+        "handshake worker lifetime authority",
+    )
+    require(
+        handshake_single_flight,
+        [
+            "private final AtomicBoolean pending",
+            "return pending.compareAndSet(false, true);",
+            "pending.set(false);",
+        ],
+        "bounded handshake single-flight gate",
+    )
+    ordered(
+        handshake,
+        [
+            'new HandlerThread(\n            "SNReaderV2Handshake",',
+            "Process.THREAD_PRIORITY_BACKGROUND",
+            "thread.start();",
+            "handler = new Handler(thread.getLooper());",
+            "final Handler mainHandler = new Handler(Looper.getMainLooper());",
+            "Looper.myLooper() != Looper.getMainLooper()",
+            "requestedPath.indexOf('\\0') >= 0",
+            "HandshakeSnapshot snapshot = captureHandshakeSnapshot();",
+            "boolean queued = handler.post(",
+            "HandshakeResolution resolution = resolveHandshake(",
+            "publicationAccepted = mainHandler.post(",
+            "publishHandshakeResponse(",
+            "HANDSHAKE_SINGLE_FLIGHT.finish();",
+            "new IntentFilter(HANDSHAKE_REQUEST)",
+            "handshakeHandler = handler;",
+            "handshakeThread = thread;",
+        ],
+        "main snapshot, worker canonicalization, and main publication",
+    )
+    if "canonicalPath(" in handshake or "firmware.inspect" in handshake:
+        fail("handshake receiver performs blocking authority work inline")
+    canonical_path = hooks[hooks.find("private static String canonicalPath("):
+        hooks.find("private static final class HandshakeCandidate")]
+    ordered(
+        canonical_path,
+        [
+            "Looper.myLooper() == Looper.getMainLooper()",
+            'Log.e(TAG, "v2 handshake canonicalization rejected on main looper")',
+            "return null;",
+            "new File(value).getCanonicalPath();",
+        ],
+        "handshake canonicalization main-thread rejection",
+    )
+    if "thread.quitSafely();" not in handshake:
+        fail("failed handshake receiver registration leaks its worker thread")
+    if handshake.count("HANDSHAKE_SINGLE_FLIGHT.finish();") != 3:
+        fail("handshake single-flight is not released on every terminal path")
+
+    snapshot_start = hooks.find(
+        "private static HandshakeSnapshot captureHandshakeSnapshot("
+    )
+    resolve_start = hooks.find(
+        "private static HandshakeResolution resolveHandshake(", snapshot_start
+    )
+    publish_start = hooks.find(
+        "private static void publishHandshakeResponse(", resolve_start
+    )
+    freshness_start = hooks.find(
+        "private static boolean handshakeSnapshotStillCurrent(", publish_start
+    )
+    path_match_start = hooks.find(
+        "private static boolean sameHandshakePath(", freshness_start
+    )
+    component_match_start = hooks.find(
+        "private static boolean sameHandshakeComponents(", path_match_start
+    )
+    component_match_end = hooks.find(
+        "private static String canonicalPath(", component_match_start
+    )
+    if min(
+        snapshot_start,
+        resolve_start,
+        publish_start,
+        freshness_start,
+        path_match_start,
+        component_match_start,
+        component_match_end,
+    ) < 0:
+        fail("could not isolate handshake authority pipeline")
+    snapshot_capture = hooks[snapshot_start:resolve_start]
+    resolution = hooks[resolve_start:publish_start]
+    publication = hooks[publish_start:freshness_start]
+    freshness = hooks[freshness_start:path_match_start]
+    if "canonicalPath(" in snapshot_capture or "canonicalPath(" in publication:
+        fail("handshake main-thread snapshot/publication canonicalizes storage")
+    ordered(
+        snapshot_capture,
+        [
+            "Looper.myLooper() != Looper.getMainLooper()",
+            "firmware.inspect(candidate.activity)",
+            "candidate.generation",
+            "candidate.lifecycleGeneration",
+            "candidate.resumed",
+            "components.documentPath",
+        ],
+        "main-thread immutable handshake snapshot",
+    )
+    ordered(
+        resolution,
+        [
+            "String expected = canonicalPath(requestedPath);",
+            "String actual = canonicalPath(candidate.rawPath);",
+            "if (actual == null) return null;",
+            "if (match != null && match.entry != candidate.entry) return null;",
+            "new HandshakeResolution(match, expected)",
+        ],
+        "worker handshake request binding and unique authority",
+    )
+    ordered(
+        publication,
+        [
+            "Looper.myLooper() != Looper.getMainLooper()",
+            "!handshakeSnapshotStillCurrent(snapshot)",
+            "snapshot.candidates.contains(resolution.candidate)",
+            "response.setPackage(PLUGIN_HOST_PACKAGE);",
+            'response.putExtra("nonce", nonce);',
+            'response.putExtra("documentPath", resolution.canonicalPath);',
+            "receiverContext.sendBroadcast(response);",
+        ],
+        "main-thread handshake response publication",
+    )
+    ordered(
+        freshness,
+        [
+            "HandshakeSnapshot actual = captureHandshakeSnapshot();",
+            "expected.candidates.size() != actual.candidates.size()",
+            "candidate.entry == expectedCandidate.entry",
+            "expectedCandidate.entryGeneration !=",
+            "expectedCandidate.lifecycleGeneration !=",
+            "expectedCandidate.resumed != actualCandidate.resumed",
+            "!sameHandshakePath(",
+            "!sameHandshakeComponents(",
+        ],
+        "handshake final Activity/lifecycle/document/component freshness",
+    )
+    component_match = hooks[component_match_start:component_match_end]
+    require(
+        component_match,
+        [
+            "expected.activity == actual.activity",
+            "expected.viewModel == actual.viewModel",
+            "expected.presenter == actual.presenter",
+            "expected.handWriteView == actual.handWriteView",
+            "expected.eventCallback == actual.eventCallback",
+            "expected.image == actual.image",
+            "expected.digestImage == actual.digestImage",
+            "expected.documentLayout == actual.documentLayout",
+            "expected.note == actual.note",
+            "expected.client == actual.client",
+            "expected.binder == actual.binder",
+            "expected.documentPath.equals(actual.documentPath)",
+        ],
+        "handshake exact component authority",
+    )
+
+    plugin_handshake_start = plugin.find(
+        "private fun requestNativeSpreadHandshake("
+    )
+    plugin_handshake_end = plugin.find(
+        "private fun nativeSpreadCapability()", plugin_handshake_start
+    )
+    plugin_canonical_start = plugin.find(
+        "private fun requestNativeSpreadHandshakeCanonical(",
+        plugin_handshake_start,
+    )
+    plugin_generation_start = plugin.find(
+        "private fun requireNativeSpreadConfigurationGeneration(",
+        plugin_canonical_start,
+    )
+    if min(
+        plugin_handshake_start,
+        plugin_canonical_start,
+        plugin_generation_start,
+        plugin_handshake_end,
+    ) < 0:
+        fail("could not isolate plug-in v2 handshake")
+    plugin_handshake = plugin[plugin_handshake_start:plugin_handshake_end]
+    plugin_wrapper = plugin[plugin_handshake_start:plugin_canonical_start]
+    plugin_response = plugin[plugin_canonical_start:plugin_generation_start]
+    ordered(
+        plugin_wrapper,
+        [
+            "val completed = AtomicBoolean(false)",
+            "val receiver = AtomicReference<BroadcastReceiver?>(null)",
+            "val pathTask = AtomicReference<Future<*>?>(null)",
+            "if (!mainHandler.postDelayed(\n"
+            "                timeout,\n"
+            "                NATIVE_SPREAD_HANDSHAKE_TIMEOUT_MS,",
+            "nativeSpreadConfigurationGeneration.get() != configurationGeneration",
+            "val task = FutureTask<Unit>(",
+            "pdfFile.canonicalPath",
+            "val queued = mainHandler.post {",
+            "if (completed.get()) {\n"
+            "                            return@post\n"
+            "                        }\n"
+            "                        if (nativeSpreadModuleInvalidated.get()) {\n"
+            "                            finish(NativeSpreadHandshake(false, \"module_invalidated\"))\n"
+            "                            return@post\n"
+            "                        }\n"
+            "                        if (nativeSpreadConfigurationGeneration.get() !=",
+            "requestNativeSpreadHandshakeCanonical(",
+            "NATIVE_SPREAD_HANDSHAKE_EXECUTOR.execute(task)",
+        ],
+        "plug-in end-to-end timeout and path preparation worker",
+    )
+    require(
+        plugin_wrapper,
+        [
+            "completed.compareAndSet(false, true)",
+            "mainHandler.removeCallbacks(timeout)",
+            "receiver.getAndSet(null)",
+            "pathTask.getAndSet(null)",
+            "nativeSpreadHandshakeTasks.remove(task)",
+            "synchronized(nativeSpreadConfigurationIntentLock)",
+            "if (!nativeSpreadModuleInvalidated.get())",
+            "val terminalResult =",
+            "nativeSpreadConfigurationGeneration.get() ==",
+            "configurationGeneration",
+            'NativeSpreadHandshake(false, "stale_operation")',
+            "callback(terminalResult)",
+            'NativeSpreadHandshake(false, "stale_operation")',
+        ],
+        "plug-in single-completion and stale-operation fence",
+    )
+    ordered(
+        plugin_response,
+        [
+            "check(Looper.myLooper() == Looper.getMainLooper())",
+            "if (completed.get()) return",
+            "nativeSpreadConfigurationGeneration.get() != configurationGeneration",
+            "receiver.set(registered)",
+            "reactApplicationContext.registerReceiver(",
+            "reactApplicationContext.sendBroadcast(",
+        ],
+        "plug-in main-thread registration after canonicalization",
+    )
+    ordered(
+        plugin_response,
+        [
+            "val reportedPath = intent.getStringExtra(",
+            "val valid = hooksReady",
+            "reportedPath == expectedPath",
+            "if (valid) \"ok\" else \"invalid_response\"",
+        ],
+        "plug-in handshake exact canonical response",
+    )
+    if ".canonicalPath" in plugin_response:
+        fail("plug-in handshake response canonicalizes storage on the main thread")
+    if "postDelayed(" in plugin_response:
+        fail("plug-in handshake helper starts a second timeout window")
+    require(
+        plugin[plugin_generation_start:plugin_handshake_end],
+        [
+            "nativeSpreadConfigurationGeneration.get() == expected",
+            "!nativeSpreadModuleInvalidated.get()",
+            '"Native Spread configuration was superseded"',
+        ],
+        "plug-in persisted-state generation authority",
+    )
+    if plugin.count(
+        "val configurationGeneration = beginNativeSpreadConfiguration()"
+    ) != 2:
+        fail("Native Spread configuration entrypoints do not both supersede older work")
+    require(
+        plugin,
+        [
+            "private val NATIVE_SPREAD_HANDSHAKE_EXECUTOR = ThreadPoolExecutor(",
+            "ArrayBlockingQueue<Runnable>(1)",
+            "ThreadPoolExecutor.AbortPolicy()",
+            "private val nativeSpreadConfigurationGeneration = AtomicLong(0L)",
+            "private val nativeSpreadConfigurationIntentLock = Any()",
+            "private val nativeSpreadConfigurationLock = Any()",
+            "override fun invalidate()",
+            "val newlyInvalidated = synchronized(nativeSpreadConfigurationIntentLock)",
+            "nativeSpreadModuleInvalidated.compareAndSet(false, true)",
+            "nativeSpreadConfigurationGeneration.incrementAndGet()",
+            "task.cancel(true)",
+            "nativeSpreadHandshakeReceivers.toList()",
+            "super.invalidate()",
+        ],
+        "bounded handshake executor and module invalidation containment",
+    )
+    if plugin.count(
+        "withNativeSpreadConfigurationAuthority(configurationGeneration)"
+    ) < 3:
+        fail("persisted Native Spread publications are not generation-linearized")
 
     require(
         runtime,
@@ -1577,9 +1889,9 @@ def main() -> None:
         [
             "NATIVE_READER_V2_MIN_VERSION_CODE = 137L",
             "NATIVE_READER_V2_SIGNER_SHA256 =",
-            "NATIVE_READER_V2_APK_LENGTH = 254491L",
+            "NATIVE_READER_V2_APK_LENGTH = 258587L",
             "NATIVE_READER_V2_APK_SHA256 =",
-            "e88ff6566d375d8fc5e26eb9f3491f459b55cf2b32f6b9c413431b311f9ffb87",
+            "31e83f5ea104d41ed1fe9bddb140a6e19572fb766893e2754810496b5ca4bf80",
             "PackageManager.GET_SIGNING_CERTIFICATES",
             "signing.hasMultipleSigners()",
             "Native Reader signer set is not exact",
@@ -2109,8 +2421,8 @@ def main() -> None:
             "$env:NATIVE_SPREAD_KEYSTORE_B64 = $null",
             "Remove-Item -LiteralPath $keystore -Force",
             "release-output/SupernoteNativeSpreadProbe-v0.0.137.apk",
-            "$expectedSignedLength = 254491L",
-            "e88ff6566d375d8fc5e26eb9f3491f459b55cf2b32f6b9c413431b311f9ffb87",
+            "$expectedSignedLength = 258587L",
+            "31e83f5ea104d41ed1fe9bddb140a6e19572fb766893e2754810496b5ca4bf80",
             "Signed APK length differs from the reviewed upgrade identity",
             "Signed APK SHA-256 differs from the reviewed upgrade identity.",
         ],
@@ -2120,7 +2432,7 @@ def main() -> None:
         stable_job,
         [
             "apksigner verification failed",
-            "$expectedSignedLength = 254491L",
+            "$expectedSignedLength = 258587L",
             "Signed APK SHA-256 differs from the reviewed upgrade identity.",
             "} finally {",
             "Upload upgrade-compatible Native Reader APK",

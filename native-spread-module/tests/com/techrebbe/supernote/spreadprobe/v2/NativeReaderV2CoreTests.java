@@ -24,6 +24,7 @@ public final class NativeReaderV2CoreTests {
         testNativeMarkPageInventory();
         testNativeSaveWitness();
         testAtomicInputAdmission();
+        testNativeHandshakeSingleFlight();
         testNativeAsyncSaveFence();
         testNativePresentationRestoreWitness();
         testNativeWriterGeometry();
@@ -531,6 +532,40 @@ public final class NativeReaderV2CoreTests {
             "old asynchronous owner cannot thaw restoration");
         check(replacement.release(restore),
             "restoration owner releases its exact epoch");
+    }
+
+    private static void testNativeHandshakeSingleFlight() throws Exception {
+        NativeHandshakeSingleFlight gate = new NativeHandshakeSingleFlight();
+        int contenders = 64;
+        CountDownLatch ready = new CountDownLatch(contenders);
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(contenders);
+        AtomicInteger admitted = new AtomicInteger();
+        for (int index = 0; index < contenders; index++) {
+            Thread thread = new Thread(() -> {
+                ready.countDown();
+                try {
+                    start.await();
+                    if (gate.tryBegin()) admitted.incrementAndGet();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    done.countDown();
+                }
+            });
+            thread.start();
+        }
+        ready.await();
+        start.countDown();
+        done.await();
+        equal(1, admitted.get(), "handshake flood admits one request");
+        check(gate.pending(), "admitted handshake remains pending");
+        check(!gate.tryBegin(), "pending handshake rejects another request");
+        gate.finish();
+        check(!gate.pending(), "terminal path releases handshake admission");
+        check(gate.tryBegin(), "released handshake admits the next request");
+        gate.finish();
+        check(!gate.pending(), "second terminal path releases admission");
     }
 
     private static void testNativeAsyncSaveFence() {

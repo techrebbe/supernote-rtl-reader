@@ -285,6 +285,18 @@ MUTATIONS = (
         "completion.run();",
         "firmware save callback owner marshalling",
     ),
+    (
+        "NativeHandshakeSingleFlight.java",
+        "return pending.compareAndSet(false, true);",
+        "return true;",
+        "handshake flood single-flight admission",
+    ),
+    (
+        "NativeHandshakeSingleFlight.java",
+        "pending.set(false);",
+        "pending.set(true);",
+        "handshake terminal-path admission release",
+    ),
 )
 
 
@@ -351,6 +363,227 @@ STATIC_MUTATIONS = (
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2Hooks.java",
+        "                if (Looper.myLooper() != Looper.getMainLooper()) {\n"
+        "                    Log.e(TAG, \"v2 handshake rejected outside main snapshot looper\");",
+        "                if (false) {\n"
+        "                    Log.e(TAG, \"v2 handshake rejected outside main snapshot looper\");",
+        "handshake receiver main snapshot affinity",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "                boolean queued = handler.post(() -> {",
+        "                boolean queued = mainHandler.post(() -> {",
+        "handshake canonicalization worker dispatch",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "            Process.THREAD_PRIORITY_BACKGROUND",
+        "            Process.THREAD_PRIORITY_DEFAULT",
+        "handshake worker background priority",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "                            publicationAccepted = mainHandler.post(() -> {",
+        "                            publicationAccepted = handler.post(() -> {",
+        "handshake main-thread publication dispatch",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "        String expected = canonicalPath(requestedPath);",
+        "        String expected = requestedPath;",
+        "handshake requested-path canonical authority",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "            String actual = canonicalPath(candidate.rawPath);",
+        "            String actual = candidate.rawPath;",
+        "handshake candidate-path canonical authority",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "            if (match != null && match.entry != candidate.entry) return null;",
+        "            if (false) return null;",
+        "handshake unique matching activity authority",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "            || !handshakeSnapshotStillCurrent(snapshot)",
+        "            || false",
+        "handshake final snapshot freshness",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "                || expectedCandidate.entryGeneration !=\n"
+        "                    actualCandidate.entryGeneration",
+        "                || false",
+        "handshake entry generation fence",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "                || expectedCandidate.lifecycleGeneration !=\n"
+        "                    actualCandidate.lifecycleGeneration",
+        "                || false",
+        "handshake lifecycle generation fence",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "                || expectedCandidate.resumed != actualCandidate.resumed",
+        "                || false",
+        "handshake resumed-state fence",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "                || !sameHandshakePath(\n"
+        "                    expectedCandidate.rawPath,\n"
+        "                    actualCandidate.rawPath\n"
+        "                )",
+        "                || false",
+        "handshake exact raw-path fence",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "                || !sameHandshakeComponents(\n"
+        "                    expectedCandidate.components,\n"
+        "                    actualCandidate.components\n"
+        "                )",
+        "                || false",
+        "handshake exact component authority fence",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "            && expected.binder == actual.binder",
+        "            && true",
+        "handshake binder component identity",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "        if (Looper.myLooper() == Looper.getMainLooper()) {\n"
+        "            Log.e(TAG, \"v2 handshake canonicalization rejected on main looper\");",
+        "        if (false) {\n"
+        "            Log.e(TAG, \"v2 handshake canonicalization rejected on main looper\");",
+        "handshake canonicalization main-thread rejection",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                    synchronized(nativeSpreadConfigurationIntentLock) {\n"
+        "                        if (!nativeSpreadModuleInvalidated.get()) {\n"
+        "                            val terminalResult =\n"
+        "                                if (nativeSpreadConfigurationGeneration.get() ==\n"
+        "                                    configurationGeneration\n"
+        "                                ) {\n"
+        "                                    result\n"
+        "                                } else {\n"
+        "                                    NativeSpreadHandshake(false, \"stale_operation\")\n"
+        "                                }\n"
+        "                            callback(terminalResult)\n"
+        "                        }\n"
+        "                    }",
+        "                    if (!nativeSpreadModuleInvalidated.get()) {\n"
+        "                        callback(NativeSpreadHandshake(false, \"stale_operation\"))\n"
+        "                    }",
+        "plugin handshake callback terminal generation linearization",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "        val newlyInvalidated = synchronized(nativeSpreadConfigurationIntentLock) {\n"
+        "            if (nativeSpreadModuleInvalidated.compareAndSet(false, true)) {\n"
+        "                nativeSpreadConfigurationGeneration.incrementAndGet()",
+        "        val newlyInvalidated = if (nativeSpreadModuleInvalidated.compareAndSet(false, true)) {\n"
+        "            nativeSpreadConfigurationGeneration.incrementAndGet()",
+        "plugin invalidation generation linearization",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "        if (!mainHandler.postDelayed(\n"
+        "                timeout,\n"
+        "                NATIVE_SPREAD_HANDSHAKE_TIMEOUT_MS,",
+        "        if (!mainHandler.postDelayed(\n"
+        "                timeout,\n"
+        "                60_000L,",
+        "plugin handshake end-to-end timeout",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "        if (nativeSpreadConfigurationGeneration.get() != configurationGeneration) {\n"
+        "            finish(NativeSpreadHandshake(false, \"stale_operation\"))\n"
+        "            return\n"
+        "        }\n\n"
+        "        try {",
+        "        if (false) {\n"
+        "            finish(NativeSpreadHandshake(false, \"stale_operation\"))\n"
+        "            return\n"
+        "        }\n\n"
+        "        try {",
+        "plugin handshake pre-worker generation fence",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "            NATIVE_SPREAD_HANDSHAKE_EXECUTOR.execute(task)",
+        "            task.run()",
+        "plugin bounded handshake path executor",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "        check(Looper.myLooper() == Looper.getMainLooper()) {\n"
+        '            "Native Reader v2 handshake registration must run on the main thread"',
+        "        check(true) {\n"
+        '            "Native Reader v2 handshake registration must run on the main thread"',
+        "plugin handshake registration thread affinity",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                    reportedPath == expectedPath",
+        "                    reportedPath?.let { File(it).canonicalPath } == expectedPath",
+        "plugin handshake response avoids main-thread canonicalization",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                !nativeSpreadModuleInvalidated.get() &&\n"
+        "                    nativeSpreadConfigurationGeneration.get() == expected",
+        "                nativeSpreadConfigurationGeneration.get() == expected",
+        "plugin persisted-state generation authority",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "            ArrayBlockingQueue<Runnable>(1),",
+        "            java.util.concurrent.LinkedBlockingQueue<Runnable>(),",
+        "plugin bounded handshake executor queue",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "            if (nativeSpreadModuleInvalidated.compareAndSet(false, true)) {",
+        "            if (false) {",
+        "plugin module invalidation fence",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "        withNativeSpreadConfigurationAuthority(configurationGeneration) {\n"
+        "            writePropertiesAtomicallyCas(\n"
+        "                marker,\n"
+        "                properties,",
+        "        run {\n"
+        "            writePropertiesAtomicallyCas(\n"
+        "                marker,\n"
+        "                properties,",
+        "plugin persisted-state publication linearization",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
         "                    entry.pendingNativeOpen = pending;\n"
         "                    boolean prepared =",
         "                    entry.pendingNativeOpen = null;\n"
@@ -402,13 +635,13 @@ STATIC_MUTATIONS = (
     ),
     (
         ".github/workflows/build.yml",
-        "$expectedSignedLength = 254491L",
+        "$expectedSignedLength = 258587L",
         "$expectedSignedLength = 250394L",
         "published companion exact signed length",
     ),
     (
         ".github/workflows/build.yml",
-        "e88ff6566d375d8fc5e26eb9f3491f459b55cf2b32f6b9c413431b311f9ffb87",
+        "31e83f5ea104d41ed1fe9bddb140a6e19572fb766893e2754810496b5ca4bf80",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "published companion exact signed digest",
     ),
@@ -877,13 +1110,13 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "NATIVE_READER_V2_APK_LENGTH = 254491L",
+        "NATIVE_READER_V2_APK_LENGTH = 258587L",
         "NATIVE_READER_V2_APK_LENGTH = 250394L",
         "installed companion APK length pin",
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "e88ff6566d375d8fc5e26eb9f3491f459b55cf2b32f6b9c413431b311f9ffb87",
+        "31e83f5ea104d41ed1fe9bddb140a6e19572fb766893e2754810496b5ca4bf80",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "installed companion APK digest pin",
     ),
@@ -1078,6 +1311,103 @@ class _InterleavingRejected(RuntimeError):
     @property
     def reopen_allowed(self) -> bool:
         return not self.recovery_required
+
+
+class _ConfigurationGenerationGate:
+    """Executable model of the process-shared Kotlin publication gate."""
+
+    def __init__(self) -> None:
+        self.generation = 0
+        self.invalidated = False
+
+    def begin(self) -> int:
+        self.generation += 1
+        return self.generation
+
+    def require(self, expected: int) -> None:
+        if self.invalidated or self.generation != expected:
+            raise _InterleavingRejected("configuration was superseded")
+
+    def publish(self, expected: int, action) -> None:
+        # Kotlin holds one process-shared intent monitor across this check and
+        # the exact CAS publication/retirement boundary.
+        self.require(expected)
+        action()
+
+    def invalidate(self) -> None:
+        # The real module advances the shared generation in the same monitor
+        # transaction that publishes its invalidated state.
+        if not self.invalidated:
+            self.invalidated = True
+            self.generation += 1
+
+    def complete(self, expected: int, result: str, callback) -> None:
+        # A live superseded request receives one fail-closed terminal result so
+        # its Promise settles. A destroyed module receives no callback at all.
+        if self.invalidated:
+            return
+        callback(result if self.generation == expected else "stale_operation")
+
+
+def run_configuration_generation_interleaving_tests() -> None:
+    gate = _ConfigurationGenerationGate()
+    state = {"marker": "off", "pending": None}
+
+    # Supersession after preliminary work but before pending publication.
+    first = gate.begin()
+    gate.require(first)
+    second = gate.begin()
+    try:
+        gate.publish(first, lambda: state.update(pending="first"))
+        raise AssertionError("superseded operation published a pending marker")
+    except _InterleavingRejected:
+        assert state == {"marker": "off", "pending": None}
+
+    gate.publish(second, lambda: state.update(pending="second"))
+    assert state["pending"] == "second"
+
+    # A handshake response that was valid when received cannot invoke its old
+    # callback after a newer configure request linearizes.
+    callback_state = {"results": [], "publications": 0}
+    response_generation = second
+    third = gate.begin()
+    gate.complete(
+        response_generation,
+        "ok",
+        lambda result: callback_state["results"].append(result),
+    )
+    assert callback_state == {
+        "results": ["stale_operation"],
+        "publications": 0,
+    }
+
+    # Supersession between pending and commit rejects the old authorization;
+    # the pending transaction evidence permits an exact rollback.
+    try:
+        gate.publish(second, lambda: state.update(marker="enabled"))
+        raise AssertionError("superseded pending marker committed")
+    except _InterleavingRejected:
+        state.update(marker="off", pending=None)
+    assert state == {"marker": "off", "pending": None}
+
+    # Likewise, a response accepted before teardown cannot invoke its callback
+    # after invalidation advances the same process-wide generation.
+    invalidation_callback = {"results": []}
+    gate.invalidate()
+    gate.complete(
+        third,
+        "ok",
+        lambda result: invalidation_callback["results"].append(result),
+    )
+    assert invalidation_callback == {"results": []}
+
+    try:
+        gate.publish(third, lambda: state.update(marker="enabled"))
+        raise AssertionError("invalidated module published persisted state")
+    except _InterleavingRejected:
+        assert state == {"marker": "off", "pending": None}
+
+    print("Native Reader v2 configuration-generation interleavings: PASS")
 
 
 def _read_if_file(path: pathlib.Path) -> bytes | None:
@@ -1748,6 +2078,7 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory(prefix="native-reader-v2-mut-") as temp:
         temp_root = pathlib.Path(temp)
+        run_configuration_generation_interleaving_tests()
         run_no_clobber_interleaving_tests(temp_root)
         run_durable_recovery_fence_tests(temp_root)
         for filename, old, new, label in MUTATIONS:

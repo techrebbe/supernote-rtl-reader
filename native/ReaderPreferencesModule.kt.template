@@ -34,9 +34,18 @@ import java.io.ObjectOutputStream
 import java.security.MessageDigest
 import java.nio.file.Files
 import java.util.Base64
+import java.util.Collections
 import java.util.Properties
 import java.util.UUID
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Future
+import java.util.concurrent.FutureTask
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 class ReaderPreferencesModule(
     reactContext: ReactApplicationContext,
@@ -54,9 +63,9 @@ class ReaderPreferencesModule(
         private const val NATIVE_READER_V2_MIN_VERSION_CODE = 137L
         private const val NATIVE_READER_V2_SIGNER_SHA256 =
             "a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67"
-        private const val NATIVE_READER_V2_APK_LENGTH = 254491L
+        private const val NATIVE_READER_V2_APK_LENGTH = 258587L
         private const val NATIVE_READER_V2_APK_SHA256 =
-            "e88ff6566d375d8fc5e26eb9f3491f459b55cf2b32f6b9c413431b311f9ffb87"
+            "31e83f5ea104d41ed1fe9bddb140a6e19572fb766893e2754810496b5ca4bf80"
         private const val NATIVE_SPREAD_MARKER_SUFFIX = ".snspread"
         private const val NATIVE_SPREAD_BACKUP_SUFFIX = ".snspread-backup.properties"
         private const val NATIVE_SPREAD_BACKUP_MARK_SUFFIX = ".snspread-backup.mark"
@@ -112,6 +121,24 @@ class ReaderPreferencesModule(
         private val NATIVE_SPREAD_PUBLICATION_PROCESS_LOCK = Any()
         private val NATIVE_MARK_RECOVERY_PROCESS_LOCK = Any()
         private val NATIVE_MARK_RECOVERY_REQUIRED_PATHS = HashSet<String>()
+        private val annotationRecoveryPending = AtomicBoolean(false)
+        private val annotationRecoveryHandoffPending = AtomicBoolean(false)
+        private val nativeSpreadConfigurationGeneration = AtomicLong(0L)
+        private val nativeSpreadConfigurationIntentLock = Any()
+        private val nativeSpreadConfigurationLock = Any()
+        private val NATIVE_SPREAD_HANDSHAKE_EXECUTOR = ThreadPoolExecutor(
+            1,
+            1,
+            0L,
+            TimeUnit.MILLISECONDS,
+            ArrayBlockingQueue<Runnable>(1),
+            { runnable ->
+                Thread(runnable, "RTLReaderNativeV2HandshakePath").apply {
+                    isDaemon = true
+                }
+            },
+            ThreadPoolExecutor.AbortPolicy(),
+        )
         private val NATIVE_READER_V2_COMMITTED_FIELDS = setOf(
             "nativeReaderEngine",
             "enabled",
@@ -192,11 +219,51 @@ class ReaderPreferencesModule(
     @Volatile
     private var lastSavedFilePath: String? = null
 
-    private val annotationRecoveryPending = AtomicBoolean(false)
-    private val annotationRecoveryHandoffPending = AtomicBoolean(false)
-    private val nativeSpreadConfigurationLock = Any()
+    private val nativeSpreadModuleInvalidated = AtomicBoolean(false)
+    private val nativeSpreadHandshakeTasks = Collections.newSetFromMap(
+        ConcurrentHashMap<Future<*>, Boolean>(),
+    )
+    private val nativeSpreadHandshakeReceivers = Collections.newSetFromMap(
+        ConcurrentHashMap<BroadcastReceiver, Boolean>(),
+    )
 
     override fun getName(): String = "ReaderPreferencesModule"
+
+    override fun invalidate() {
+        val newlyInvalidated = synchronized(nativeSpreadConfigurationIntentLock) {
+            if (nativeSpreadModuleInvalidated.compareAndSet(false, true)) {
+                nativeSpreadConfigurationGeneration.incrementAndGet()
+                true
+            } else {
+                false
+            }
+        }
+        if (newlyInvalidated) {
+            nativeSpreadHandshakeTasks.toList().forEach { task ->
+                task.cancel(true)
+                if (task is Runnable) {
+                    NATIVE_SPREAD_HANDSHAKE_EXECUTOR.remove(task)
+                }
+            }
+            nativeSpreadHandshakeTasks.clear()
+            val cleanup = Runnable {
+                nativeSpreadHandshakeReceivers.toList().forEach { receiver ->
+                    try {
+                        reactApplicationContext.unregisterReceiver(receiver)
+                    } catch (_: Throwable) {
+                        // Already removed by a response/timeout completion.
+                    }
+                }
+                nativeSpreadHandshakeReceivers.clear()
+            }
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                cleanup.run()
+            } else {
+                Handler(Looper.getMainLooper()).post(cleanup)
+            }
+        }
+        super.invalidate()
+    }
 
     @ReactMethod
     fun load(filePath: String, promise: Promise) {
@@ -344,7 +411,12 @@ class ReaderPreferencesModule(
                             )
                             return@post
                         }
-                        requestNativeSpreadHandshake(pdfFile) { handshake ->
+                        val handshakeGeneration =
+                            nativeSpreadConfigurationGeneration.get()
+                        requestNativeSpreadHandshake(
+                            pdfFile,
+                            handshakeGeneration,
+                        ) { handshake ->
                             if (handshake.active && legacyConfiguredEditable) {
                                 startNativeBackupWorker(
                                     "RTLReaderNativeEditableMigrate",
@@ -355,6 +427,7 @@ class ReaderPreferencesModule(
                                                 pdfFile,
                                                 marker,
                                                 handshake,
+                                                handshakeGeneration,
                                             )
                                         val migratedResult =
                                             NativeAnnotationBackupResult(
@@ -520,6 +593,7 @@ class ReaderPreferencesModule(
         spreadSizing: String,
         promise: Promise,
     ) {
+        val configurationGeneration = beginNativeSpreadConfiguration()
         try {
             if (enabled) {
                 throw IllegalStateException(
@@ -539,16 +613,23 @@ class ReaderPreferencesModule(
             fun applyReadOnlyConfiguration(handshake: NativeSpreadHandshake?) {
                 startNativeBackupWorker("RTLReaderNativeBackupRetire") {
                     try {
+                        requireNativeSpreadConfigurationGeneration(
+                            configurationGeneration,
+                        )
                         if (annotationRecoveryPending.get()) {
                             throw IllegalStateException(
                                 "Annotation recovery is already in progress",
                             )
                         }
                         requireNoNativeMarkRecoveryFence(pdfFile)
-                        reconcileFailedActivationBackupForExplicitActivation(
-                            pdfFile,
-                            marker,
-                        )
+                        withNativeSpreadConfigurationAuthority(
+                            configurationGeneration,
+                        ) {
+                            reconcileFailedActivationBackupForExplicitActivation(
+                                pdfFile,
+                                marker,
+                            )
+                        }
                         val previousMarkerBytes = readPersistedBytesIfFile(marker)
                         val previousMarkerProperties = readPropertiesIfFile(marker)
                         val previousBackup = readNativeAnnotationBackup(pdfFile)
@@ -586,58 +667,64 @@ class ReaderPreferencesModule(
                                 },
                                 previousMarkerBytes,
                                 true,
+                                configurationGeneration,
                             ) {}
-                            retireNativeAnnotationBackup(
-                                pdfFile,
-                                previousMarkerProperties,
-                                previousBackup,
-                            )
-                            if (nativeAnnotationBackupManifest(pdfFile).exists() ||
-                                nativeAnnotationBackupSnapshot(pdfFile).exists() ||
-                                nativeAnnotationRetiringSnapshot(pdfFile).exists()
-                            ) {
-                                throw IllegalStateException(
-                                    "Protected-session recovery retirement was not verified",
-                                )
-                            }
                         }
 
-                        retirementToken?.let { token ->
-                            val pending = readPendingEditableActivation(
-                                pdfFile,
-                                readPropertiesIfFile(marker),
-                            )
-                            val expectedIntent = if (enabled) {
-                                NATIVE_SPREAD_PENDING_READ_ONLY
+                        withNativeSpreadConfigurationAuthority(configurationGeneration) {
+                            if (protectedBackup != null) {
+                                retireNativeAnnotationBackup(
+                                    pdfFile,
+                                    previousMarkerProperties,
+                                    previousBackup,
+                                )
+                                if (nativeAnnotationBackupManifest(pdfFile).exists() ||
+                                    nativeAnnotationBackupSnapshot(pdfFile).exists() ||
+                                    nativeAnnotationRetiringSnapshot(pdfFile).exists()
+                                ) {
+                                    throw IllegalStateException(
+                                        "Protected-session recovery retirement was not verified",
+                                    )
+                                }
+                            }
+
+                            retirementToken?.let { token ->
+                                val pending = readPendingEditableActivation(
+                                    pdfFile,
+                                    readPropertiesIfFile(marker),
+                                )
+                                val expectedIntent = if (enabled) {
+                                    NATIVE_SPREAD_PENDING_READ_ONLY
+                                } else {
+                                    NATIVE_SPREAD_PENDING_DISABLE
+                                }
+                                if (pending == null ||
+                                    pending.activationToken != token ||
+                                    pending.intent != expectedIntent ||
+                                    !pendingPreviousMarkerMatchesIdentity(pdfFile, pending)
+                                ) {
+                                    throw IllegalStateException(
+                                        "Protected-session retirement marker changed before final publication",
+                                    )
+                                }
+                            }
+
+                            if (!enabled) {
+                                if (!deleteFileDurably(marker)) {
+                                    throw IllegalStateException(
+                                        "Could not remove native spread setting: ${marker.absolutePath}",
+                                    )
+                                }
                             } else {
-                                NATIVE_SPREAD_PENDING_DISABLE
-                            }
-                            if (pending == null ||
-                                pending.activationToken != token ||
-                                pending.intent != expectedIntent ||
-                                !pendingPreviousMarkerMatchesIdentity(pdfFile, pending)
-                            ) {
-                                throw IllegalStateException(
-                                    "Protected-session retirement marker changed before final publication",
+                                writeNativeSpreadReadOnlyMarker(
+                                    marker,
+                                    coverSeparate,
+                                    showDivider,
+                                    showHeader,
+                                    spreadSizing,
+                                    checkNotNull(handshake),
                                 )
                             }
-                        }
-
-                        if (!enabled) {
-                            if (!deleteFileDurably(marker)) {
-                                throw IllegalStateException(
-                                    "Could not remove native spread setting: ${marker.absolutePath}",
-                                )
-                            }
-                        } else {
-                            writeNativeSpreadReadOnlyMarker(
-                                marker,
-                                coverSeparate,
-                                showDivider,
-                                showHeader,
-                                spreadSizing,
-                                checkNotNull(handshake),
-                            )
                         }
 
                         runCatching {
@@ -667,7 +754,10 @@ class ReaderPreferencesModule(
                 return
             }
 
-            requestNativeSpreadHandshake(pdfFile) { handshake ->
+            requestNativeSpreadHandshake(
+                pdfFile,
+                configurationGeneration,
+            ) { handshake ->
                 if (!handshake.active) {
                     val error = IllegalStateException(
                         "Native Spread hooks did not answer the live safety check: ${handshake.reason}",
@@ -702,6 +792,7 @@ class ReaderPreferencesModule(
         spreadSizing: String,
         promise: Promise,
     ) {
+        val configurationGeneration = beginNativeSpreadConfiguration()
         try {
             val pdfFile = requirePdf(filePath)
             val marker = nativeSpreadMarker(pdfFile)
@@ -712,7 +803,10 @@ class ReaderPreferencesModule(
                 )
             }
 
-            requestNativeSpreadHandshake(pdfFile) { handshake ->
+            requestNativeSpreadHandshake(
+                pdfFile,
+                configurationGeneration,
+            ) { handshake ->
                 if (!handshake.active) {
                     val error = IllegalStateException(
                         "Native Spread hooks did not answer the live safety check: ${handshake.reason}",
@@ -723,16 +817,23 @@ class ReaderPreferencesModule(
 
                 startNativeBackupWorker("RTLReaderNativeBackupCreate") {
                     try {
+                        requireNativeSpreadConfigurationGeneration(
+                            configurationGeneration,
+                        )
                         if (annotationRecoveryPending.get()) {
                             throw IllegalStateException(
                                 "Annotation recovery is already in progress",
                             )
                         }
                         requireNoNativeMarkRecoveryFence(pdfFile)
-                        reconcileFailedActivationBackupForExplicitActivation(
-                            pdfFile,
-                            marker,
-                        )
+                        withNativeSpreadConfigurationAuthority(
+                            configurationGeneration,
+                        ) {
+                            reconcileFailedActivationBackupForExplicitActivation(
+                                pdfFile,
+                                marker,
+                            )
+                        }
                         val backup = activateNativeSpreadEditableWithStableBackup(
                             pdfFile,
                             marker,
@@ -741,6 +842,7 @@ class ReaderPreferencesModule(
                             showHeader,
                             spreadSizing,
                             handshake,
+                            configurationGeneration,
                         )
                         promise.resolve(nativeAnnotationBackupMap(backup, "verified"))
                     } catch (error: Throwable) {
@@ -1041,6 +1143,7 @@ class ReaderPreferencesModule(
         pendingIntent: String,
         previousMarkerBytes: ByteArray?,
         previousMarkerProtected: Boolean,
+        configurationGeneration: Long,
         onPublished: () -> Unit,
     ): NativeAnnotationBackup = withNativeSpreadPublicationLock(marker) {
         check(
@@ -1084,41 +1187,46 @@ class ReaderPreferencesModule(
                 "Protected editable pending marker was invalid before publication",
             )
         }
-        writePropertiesAtomicallyCas(
-            marker,
-            properties,
-            "Supernote RTL protected editable pending activation",
-            expected = currentMarkerAuthority,
-            onPublished = onPublished,
-            beforePublish = {
-                if (!nativeAnnotationBackupSourceFilesMatch(backup)) {
-                    throw IllegalStateException(
-                        "The annotation recovery files changed at pending publication",
+        withNativeSpreadConfigurationAuthority(configurationGeneration) {
+            writePropertiesAtomicallyCas(
+                marker,
+                properties,
+                "Supernote RTL protected editable pending activation",
+                expected = currentMarkerAuthority,
+                onPublished = onPublished,
+                beforePublish = {
+                    requireNativeSpreadConfigurationGeneration(
+                        configurationGeneration,
                     )
-                }
-                val immediateMarker = readPersistedAuthorityIfFile(marker)
-                val immediateMarkerBytes = immediateMarker?.bytes
-                val stillOwned = if (previousMarkerBytes == null) {
-                    immediateMarker == null
-                } else {
-                    samePersistedAuthority(currentMarkerAuthority, immediateMarker) &&
-                        immediateMarkerBytes?.contentEquals(previousMarkerBytes) == true
-                }
-                if (!stillOwned) {
-                    throw IllegalStateException(
-                        "Native Spread marker changed at pending publication",
-                    )
-                }
-                val immediateBackup = readNativeAnnotationBackup(pdfFile).backup
-                if (immediateBackup == null ||
-                    !sameNativeAnnotationBackup(backup, immediateBackup)
-                ) {
-                    throw IllegalStateException(
-                        "Annotation recovery identity changed at pending publication",
-                    )
-                }
-            },
-        )
+                    if (!nativeAnnotationBackupSourceFilesMatch(backup)) {
+                        throw IllegalStateException(
+                            "The annotation recovery files changed at pending publication",
+                        )
+                    }
+                    val immediateMarker = readPersistedAuthorityIfFile(marker)
+                    val immediateMarkerBytes = immediateMarker?.bytes
+                    val stillOwned = if (previousMarkerBytes == null) {
+                        immediateMarker == null
+                    } else {
+                        samePersistedAuthority(currentMarkerAuthority, immediateMarker) &&
+                            immediateMarkerBytes?.contentEquals(previousMarkerBytes) == true
+                    }
+                    if (!stillOwned) {
+                        throw IllegalStateException(
+                            "Native Spread marker changed at pending publication",
+                        )
+                    }
+                    val immediateBackup = readNativeAnnotationBackup(pdfFile).backup
+                    if (immediateBackup == null ||
+                        !sameNativeAnnotationBackup(backup, immediateBackup)
+                    ) {
+                        throw IllegalStateException(
+                            "Annotation recovery identity changed at pending publication",
+                        )
+                    }
+                },
+            )
+        }
         // The atomic rename above is the publication boundary. Report it before
         // any reread can fail so rollback never mistakes published recovery
         // authority for a pre-publication failure.
@@ -1172,6 +1280,7 @@ class ReaderPreferencesModule(
         spreadSizing: String,
         backup: NativeAnnotationBackup,
         requireLiveBaselineMatch: Boolean,
+        configurationGeneration: Long,
         onCommitted: () -> Unit,
     ): NativeAnnotationBackup = withNativeSpreadPublicationLock(marker) {
         val pendingMarkerAuthority = readPersistedAuthorityIfFile(marker)
@@ -1222,47 +1331,52 @@ class ReaderPreferencesModule(
         // deliberately no fallible reread after it: pending is always rejected
         // by the companion, while a committed marker is final and must never be
         // rolled back merely because the publisher died after the rename.
-        writePropertiesAtomicallyCas(
-            marker,
-            committedProperties,
-            "Supernote RTL protected editable committed activation",
-            expected = pendingMarkerAuthority,
-            onPublished = onCommitted,
-            beforePublish = {
-                val immediateMarker = readPersistedAuthorityIfFile(marker)
-                if (!samePersistedAuthority(
-                        pendingMarkerAuthority,
-                        immediateMarker,
-                    ) || immediateMarker?.bytes?.contentEquals(pendingMarkerBytes) != true
-                ) {
-                    throw IllegalStateException(
-                        "Protected editable pending marker changed at commit publication",
+        withNativeSpreadConfigurationAuthority(configurationGeneration) {
+            writePropertiesAtomicallyCas(
+                marker,
+                committedProperties,
+                "Supernote RTL protected editable committed activation",
+                expected = pendingMarkerAuthority,
+                onPublished = onCommitted,
+                beforePublish = {
+                    requireNativeSpreadConfigurationGeneration(
+                        configurationGeneration,
                     )
-                }
-                val immediateBackup = readNativeAnnotationBackup(pdfFile).backup
-                if (immediateBackup == null ||
-                    !sameNativeAnnotationBackup(backup, immediateBackup) ||
-                    !nativeAnnotationBackupSourceFilesMatch(immediateBackup)
-                ) {
-                    throw IllegalStateException(
-                        "Annotation recovery identity changed at commit publication",
-                    )
-                }
-                // First activation must still match the recovery snapshot after
-                // the temporary marker has been durably synced. This callback
-                // runs immediately before the authorization rename, closing the
-                // window in which a delayed native .mark flush could otherwise
-                // authorize a stale baseline. Existing protected sessions may
-                // legitimately differ from their original recovery snapshot.
-                if (requireLiveBaselineMatch &&
-                    !liveNativeAnnotationMatchesBackup(backup)
-                ) {
-                    throw IllegalStateException(
-                        "Supernote annotations changed immediately before protected editing authorization",
-                    )
-                }
-            },
-        )
+                    val immediateMarker = readPersistedAuthorityIfFile(marker)
+                    if (!samePersistedAuthority(
+                            pendingMarkerAuthority,
+                            immediateMarker,
+                        ) || immediateMarker?.bytes?.contentEquals(pendingMarkerBytes) != true
+                    ) {
+                        throw IllegalStateException(
+                            "Protected editable pending marker changed at commit publication",
+                        )
+                    }
+                    val immediateBackup = readNativeAnnotationBackup(pdfFile).backup
+                    if (immediateBackup == null ||
+                        !sameNativeAnnotationBackup(backup, immediateBackup) ||
+                        !nativeAnnotationBackupSourceFilesMatch(immediateBackup)
+                    ) {
+                        throw IllegalStateException(
+                            "Annotation recovery identity changed at commit publication",
+                        )
+                    }
+                    // First activation must still match the recovery snapshot after
+                    // the temporary marker has been durably synced. This callback
+                    // runs immediately before the authorization rename, closing the
+                    // window in which a delayed native .mark flush could otherwise
+                    // authorize a stale baseline. Existing protected sessions may
+                    // legitimately differ from their original recovery snapshot.
+                    if (requireLiveBaselineMatch &&
+                        !liveNativeAnnotationMatchesBackup(backup)
+                    ) {
+                        throw IllegalStateException(
+                            "Supernote annotations changed immediately before protected editing authorization",
+                        )
+                    }
+                },
+            )
+        }
         backup
     }
 
@@ -1647,44 +1761,184 @@ class ReaderPreferencesModule(
 
     private fun requestNativeSpreadHandshake(
         pdfFile: File,
+        configurationGeneration: Long,
         callback: (NativeSpreadHandshake) -> Unit,
     ) {
-        if (reactApplicationContext.packageName != PLUGIN_HOST_PACKAGE) {
-            callback(NativeSpreadHandshake(false, "unexpected_plugin_host"))
-            return
-        }
-
-        val expectedPath = try {
-            pdfFile.canonicalPath
-        } catch (error: Throwable) {
-            callback(NativeSpreadHandshake(false, "document_path_unavailable"))
-            return
-        }
-        val nonce = UUID.randomUUID().toString()
+        val mainHandler = Handler(Looper.getMainLooper())
         val completed = AtomicBoolean(false)
-        val handler = Handler(Looper.getMainLooper())
-        var receiver: BroadcastReceiver? = null
-        var timeout: Runnable? = null
+        val receiver = AtomicReference<BroadcastReceiver?>(null)
+        val pathTask = AtomicReference<Future<*>?>(null)
+        lateinit var timeout: Runnable
 
         val finish: (NativeSpreadHandshake) -> Unit = { result ->
-            if (completed.compareAndSet(false, true)) {
-                timeout?.let(handler::removeCallbacks)
-                receiver?.let { registered ->
-                    try {
-                        reactApplicationContext.unregisterReceiver(registered)
-                    } catch (_: Throwable) {
-                        // The receiver may already have been removed during teardown.
+            val publication = Runnable {
+                if (completed.compareAndSet(false, true)) {
+                    mainHandler.removeCallbacks(timeout)
+                    receiver.getAndSet(null)?.let { registered ->
+                        nativeSpreadHandshakeReceivers.remove(registered)
+                        try {
+                            reactApplicationContext.unregisterReceiver(registered)
+                        } catch (_: Throwable) {
+                            // The receiver may already have been removed during teardown.
+                        }
+                    }
+                    pathTask.getAndSet(null)?.let { task ->
+                        nativeSpreadHandshakeTasks.remove(task)
+                        if (!task.isDone) task.cancel(true)
+                        if (task is Runnable) {
+                            NATIVE_SPREAD_HANDSHAKE_EXECUTOR.remove(task)
+                        }
+                    }
+                    synchronized(nativeSpreadConfigurationIntentLock) {
+                        if (!nativeSpreadModuleInvalidated.get()) {
+                            val terminalResult =
+                                if (nativeSpreadConfigurationGeneration.get() ==
+                                    configurationGeneration
+                                ) {
+                                    result
+                                } else {
+                                    NativeSpreadHandshake(false, "stale_operation")
+                                }
+                            callback(terminalResult)
+                        }
                     }
                 }
-                callback(result)
+            }
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                publication.run()
+            } else if (!mainHandler.post(publication)) {
+                // The host looper is exiting. Fence every later response even
+                // though there is no live caller left to receive a callback.
+                completed.compareAndSet(false, true)
             }
         }
 
-        receiver = object : BroadcastReceiver() {
+        timeout = Runnable {
+            val reason = when {
+                nativeSpreadModuleInvalidated.get() -> "module_invalidated"
+                nativeSpreadConfigurationGeneration.get() !=
+                    configurationGeneration -> "stale_operation"
+                else -> "timeout"
+            }
+            finish(NativeSpreadHandshake(false, reason))
+        }
+
+        if (!mainHandler.postDelayed(
+                timeout,
+                NATIVE_SPREAD_HANDSHAKE_TIMEOUT_MS,
+            )
+        ) {
+            completed.set(true)
+            return
+        }
+
+        if (reactApplicationContext.packageName != PLUGIN_HOST_PACKAGE) {
+            finish(NativeSpreadHandshake(false, "unexpected_plugin_host"))
+            return
+        }
+        if (nativeSpreadModuleInvalidated.get()) {
+            finish(NativeSpreadHandshake(false, "module_invalidated"))
+            return
+        }
+        if (nativeSpreadConfigurationGeneration.get() != configurationGeneration) {
+            finish(NativeSpreadHandshake(false, "stale_operation"))
+            return
+        }
+
+        try {
+            val task = FutureTask<Unit>(
+                Runnable {
+                    val expectedPath = try {
+                        pdfFile.canonicalPath
+                    } catch (_: Throwable) {
+                        null
+                    }
+                    val queued = mainHandler.post {
+                        if (completed.get()) {
+                            return@post
+                        }
+                        if (nativeSpreadModuleInvalidated.get()) {
+                            finish(NativeSpreadHandshake(false, "module_invalidated"))
+                            return@post
+                        }
+                        if (nativeSpreadConfigurationGeneration.get() !=
+                            configurationGeneration
+                        ) {
+                            finish(NativeSpreadHandshake(false, "stale_operation"))
+                            return@post
+                        }
+                        if (expectedPath == null) {
+                            finish(
+                                NativeSpreadHandshake(
+                                    false,
+                                    "document_path_unavailable",
+                                ),
+                            )
+                        } else {
+                            requestNativeSpreadHandshakeCanonical(
+                                expectedPath,
+                                configurationGeneration,
+                                completed,
+                                receiver,
+                                finish,
+                            )
+                        }
+                    }
+                    if (!queued) {
+                        completed.compareAndSet(false, true)
+                    }
+                },
+                Unit,
+            )
+            pathTask.set(task)
+            nativeSpreadHandshakeTasks.add(task)
+            if (completed.get()) {
+                nativeSpreadHandshakeTasks.remove(task)
+                pathTask.compareAndSet(task, null)
+                task.cancel(true)
+                return
+            }
+            NATIVE_SPREAD_HANDSHAKE_EXECUTOR.execute(task)
+        } catch (_: Throwable) {
+            finish(NativeSpreadHandshake(false, "request_busy"))
+        }
+    }
+
+    private fun requestNativeSpreadHandshakeCanonical(
+        expectedPath: String,
+        configurationGeneration: Long,
+        completed: AtomicBoolean,
+        receiver: AtomicReference<BroadcastReceiver?>,
+        finish: (NativeSpreadHandshake) -> Unit,
+    ) {
+        check(Looper.myLooper() == Looper.getMainLooper()) {
+            "Native Reader v2 handshake registration must run on the main thread"
+        }
+        if (completed.get()) return
+        if (nativeSpreadModuleInvalidated.get()) {
+            finish(NativeSpreadHandshake(false, "module_invalidated"))
+            return
+        }
+        if (nativeSpreadConfigurationGeneration.get() != configurationGeneration) {
+            finish(NativeSpreadHandshake(false, "stale_operation"))
+            return
+        }
+        val nonce = UUID.randomUUID().toString()
+        val registered = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 if (intent?.action != NATIVE_SPREAD_HANDSHAKE_RESPONSE ||
                     intent.getStringExtra(HANDSHAKE_EXTRA_NONCE) != nonce
                 ) {
+                    return
+                }
+                if (nativeSpreadModuleInvalidated.get()) {
+                    finish(NativeSpreadHandshake(false, "module_invalidated"))
+                    return
+                }
+                if (nativeSpreadConfigurationGeneration.get() !=
+                    configurationGeneration
+                ) {
+                    finish(NativeSpreadHandshake(false, "stale_operation"))
                     return
                 }
 
@@ -1708,18 +1962,13 @@ class ReaderPreferencesModule(
                 val reportedPath = intent.getStringExtra(
                     HANDSHAKE_EXTRA_DOCUMENT_PATH,
                 )
-                val canonicalReportedPath = try {
-                    reportedPath?.let { File(it).canonicalPath }
-                } catch (_: Throwable) {
-                    null
-                }
 
                 val valid = hooksReady &&
                     protocol == NATIVE_SPREAD_HANDSHAKE_PROTOCOL &&
                     moduleVersionCode == NATIVE_READER_V2_MIN_VERSION_CODE &&
                     documentApkLength == SUPPORTED_DOCUMENT_APK_LENGTH &&
                     processId > 0 &&
-                    canonicalReportedPath == expectedPath
+                    reportedPath == expectedPath
                 finish(
                     NativeSpreadHandshake(
                         valid,
@@ -1730,19 +1979,13 @@ class ReaderPreferencesModule(
                 )
             }
         }
-
-        timeout = Runnable {
-            finish(NativeSpreadHandshake(false, "timeout"))
-        }
+        receiver.set(registered)
+        nativeSpreadHandshakeReceivers.add(registered)
 
         try {
             reactApplicationContext.registerReceiver(
-                receiver,
+                registered,
                 IntentFilter(NATIVE_SPREAD_HANDSHAKE_RESPONSE),
-            )
-            handler.postDelayed(
-                timeout,
-                NATIVE_SPREAD_HANDSHAKE_TIMEOUT_MS,
             )
             reactApplicationContext.sendBroadcast(
                 Intent(NATIVE_SPREAD_HANDSHAKE_REQUEST).apply {
@@ -1766,6 +2009,30 @@ class ReaderPreferencesModule(
                 error,
             )
             finish(NativeSpreadHandshake(false, "request_failed"))
+        }
+    }
+
+    private fun beginNativeSpreadConfiguration(): Long =
+        synchronized(nativeSpreadConfigurationIntentLock) {
+            nativeSpreadConfigurationGeneration.incrementAndGet()
+        }
+
+    private inline fun <T> withNativeSpreadConfigurationAuthority(
+        expected: Long,
+        action: () -> T,
+    ): T = synchronized(nativeSpreadConfigurationIntentLock) {
+        requireNativeSpreadConfigurationGeneration(expected)
+        action()
+    }
+
+    private fun requireNativeSpreadConfigurationGeneration(expected: Long) {
+        synchronized(nativeSpreadConfigurationIntentLock) {
+            check(
+                !nativeSpreadModuleInvalidated.get() &&
+                    nativeSpreadConfigurationGeneration.get() == expected
+            ) {
+                "Native Spread configuration was superseded"
+            }
         }
     }
 
@@ -3127,6 +3394,7 @@ class ReaderPreferencesModule(
         pdfFile: File,
         marker: File,
         handshake: NativeSpreadHandshake,
+        configurationGeneration: Long,
     ): NativeAnnotationBackup {
         check(handshake.active) {
             "Native Spread live safety check was not active for legacy migration"
@@ -3160,6 +3428,7 @@ class ReaderPreferencesModule(
                     .equals("native_fill", ignoreCase = true)
             ) "native_fill" else "fit",
             handshake,
+            configurationGeneration,
         )
         // activateNativeSpreadEditableWithStableBackup returns only after the
         // committed rename. Do not introduce a fallible post-commit state
@@ -3394,6 +3663,7 @@ class ReaderPreferencesModule(
         showHeader: Boolean,
         spreadSizing: String,
         handshake: NativeSpreadHandshake,
+        configurationGeneration: Long,
     ): NativeAnnotationBackup {
         val previousMarkerBytes = readPersistedBytesIfFile(marker)
         val backupManifestExisted = nativeAnnotationBackupManifest(pdfFile).isFile
@@ -3435,6 +3705,7 @@ class ReaderPreferencesModule(
                 NATIVE_SPREAD_PENDING_ENABLE_EDITABLE,
                 previousMarkerBytes,
                 previousMarkerProtected,
+                configurationGeneration,
             ) {
                 markerPublishedByActivation = true
             }
@@ -3461,6 +3732,7 @@ class ReaderPreferencesModule(
                     spreadSizing,
                     publishedBackup,
                     requireLiveBaselineMatch = !backupManifestExisted,
+                    configurationGeneration = configurationGeneration,
                 ) {
                     markerCommittedByActivation = true
                 }

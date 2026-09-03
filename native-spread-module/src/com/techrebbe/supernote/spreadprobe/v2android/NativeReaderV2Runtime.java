@@ -268,6 +268,10 @@ public final class NativeReaderV2Runtime
                     });
                 } catch (Throwable failure) {
                     postGuarded("activation_evidence_failure", () -> {
+                        if (lifecycleSuspended
+                            || lifecycleEpoch != activationLifecycleEpoch) {
+                            return;
+                        }
                         Log.e(TAG, "activation evidence check failed", failure);
                         containFailClosed(
                             "activation_publication_evidence_failed"

@@ -723,6 +723,13 @@ def main() -> None:
         ],
         "runtime activation evidence revalidation",
     )
+    activation_start_segment = runtime[start_method:start_end]
+    if activation_start_segment.count("lifecycleSuspended") != 2:
+        fail("activation success and failure callbacks are not lifecycle-suspended fenced")
+    if activation_start_segment.count(
+        "lifecycleEpoch != activationLifecycleEpoch"
+    ) != 2:
+        fail("activation success and failure callbacks are not lifecycle-epoch fenced")
     if "inspectCurrent(" in runtime:
         fail("runtime still performs filesystem authority checks on the UI thread")
     if len(re.findall(r"fastEvidenceStillCurrent\(\s*evidence", runtime)) != 4:
@@ -1516,7 +1523,7 @@ def main() -> None:
             "NATIVE_READER_V2_SIGNER_SHA256 =",
             "NATIVE_READER_V2_APK_LENGTH = 254491L",
             "NATIVE_READER_V2_APK_SHA256 =",
-            "7ea8b945e2fbd3e5aac53c63f9eb37ce1662ff0afb551cd8421ba938f050e586",
+            "a6b83b1cdb0bfd739b702a456f45c11a3c13e859a8b9997c9a6f884652bb68c1",
             "PackageManager.GET_SIGNING_CERTIFICATES",
             "signing.hasMultipleSigners()",
             "Native Reader signer set is not exact",
@@ -1627,8 +1634,12 @@ def main() -> None:
         [
             "private data class NativeMarkPublication(",
             "private data class DisplacedRegularFile(",
+            "private data class NativeMarkRecoveryJournal(",
             "private class NativeMarkRecoveryRequiredException(",
-            "private val nativeMarkRecoveryRequiredPending = AtomicBoolean(false)",
+            "private val NATIVE_MARK_RECOVERY_REQUIRED_PATHS = HashSet<String>()",
+            "private fun inspectNativeMarkRecoveryFence(",
+            "private fun publishNativeMarkRecoveryJournal(",
+            "private fun retireNativeMarkRecoveryJournal(",
             "private fun readPinnedRegularBytes(",
             "private fun openPinnedRegularFile(",
             "private fun publishNativeAnnotationRestore(",
@@ -1644,7 +1655,9 @@ def main() -> None:
             "Os.rename(file.absolutePath, displaced.absolutePath)",
             "OsConstants.O_EXCL",
             "raced with destination preservation; displaced inode retained",
-            "withNativeSpreadPublicationLock(nativeSpreadMarker(pdfFile))",
+            "withNativeSpreadPublicationLock(marker)",
+            "publishNativeMarkRecoveryJournal(",
+            "retireNativeMarkRecoveryJournal(",
             "RTL_READER_NATIVE_BACKUP_RESTORE_POST_PUBLICATION_ROLLED_BACK",
             "restorePrePublicationMark(value)",
             "publishedIdentity",
@@ -1746,6 +1759,24 @@ def main() -> None:
         ],
         "failed publication exact-state recovery fence",
     )
+    journal_retire_start = plugin.find("private fun retireNativeMarkRecoveryJournal(")
+    journal_retire_end = plugin.find(
+        "private fun nativeAnnotationBackupSourceFilesMatch(",
+        journal_retire_start,
+    )
+    if journal_retire_start < 0 or journal_retire_end < 0:
+        fail("could not isolate native mark recovery journal retirement")
+    ordered(
+        plugin[journal_retire_start:journal_retire_end],
+        [
+            "val inspection = inspectNativeMarkRecoveryFence(pdfFile, expected.marker)",
+            "samePersistedAuthority(expected.authority, current.authority)",
+            "require(liveNativeAnnotationMatchesRecoveryJournal(expected))",
+            "onCommitProven()",
+            "preserveRegularDestinationNoClobber(",
+        ],
+        "fresh journal and live-mark proof precede irreversible recovery commit",
+    )
     restore_worker_start = plugin.find("private fun scheduleAnnotationRestore(")
     restore_helpers_start = plugin.find(
         "private fun requireBackupDocumentIdentity(",
@@ -1757,14 +1788,18 @@ def main() -> None:
     ordered(
         restore_worker,
         [
+            "publishNativeMarkRecoveryJournal(",
             "publication = publishNativeAnnotationRestore(",
             '"after-mark-verification"',
-            '"before-backup-retirement"',
-            "removeNativeAnnotationBackupFiles(pdfFile, revalidatedBackup)",
+            '"before-recovery-journal-retirement"',
+            "retireNativeMarkRecoveryJournal(",
+            "recoveryCommitProven = true",
+            "if (!recoveryCommitProven)",
             "restorePrePublicationMark(value)",
             "throw restoreError",
+            "removeNativeAnnotationBackupFiles(pdfFile, revalidatedBackup)",
             "val committed = persistenceError == null",
-            "val recoveryRequired = nativeMarkRecoveryRequiredPending.get() ||\n"
+            "val recoveryRequired = nativeMarkRecoveryRequiredPending() ||\n"
             "                nativeMarkRecoveryRequired(persistenceError)",
             "if (recoveryRequired)",
             "RTL_READER_NATIVE_BACKUP_RESTORE_RECOVERY_REQUIRED_NOT_REOPENED",
@@ -1776,24 +1811,24 @@ def main() -> None:
     require(
         restore_worker,
         [
-            "nativeMarkRecoveryRequiredPending.set(true)",
-            "if (persistenceError == null)",
-            "nativeMarkRecoveryRequiredPending.set(false)",
+            "registerNativeMarkRecoveryRequired(nativeSpreadMarker(pdfFile))",
+            "nativeMarkRecoveryRequiredPending()",
+            "val journalInspection = inspectNativeMarkRecoveryFence(pdfFile, marker)",
         ],
-        "recovery-required restart latch publication and safe clearing",
+        "durable and process-global recovery-required restart fencing",
     )
     handoff_start = plugin.find("fun handoffLastSavedPage(promise: Promise)")
     handoff_end = plugin.find("private fun findMatchingConfig(", handoff_start)
-    restart_start = plugin.find("private fun scheduleDocumentRestart()")
+    restart_start = plugin.find("private fun scheduleDocumentRestart(pdfFile: File)")
     restart_end = plugin.find("private fun scheduleAnnotationRestore(", restart_start)
     if min(handoff_start, handoff_end, restart_start, restart_end) < 0:
         fail("could not isolate native-reader handoff and restart gates")
     require(
         plugin[handoff_start:handoff_end],
         [
-            "if (nativeMarkRecoveryRequiredPending.get() ||\n"
+            "if (nativeMarkRecoveryRequiredPending() || durableRecovery ||\n"
             "            annotationRecoveryPending.get() ||",
-            "nativeMarkRecoveryRequiredPending.get()",
+            "inspectNativeMarkRecoveryFence(pdfFile).blocking",
             '"native_mark_recovery_required"',
         ],
         "handoff recovery-required gate",
@@ -1802,12 +1837,17 @@ def main() -> None:
         plugin[restart_start:restart_end],
         [
             "synchronized(nativeSpreadConfigurationLock)",
-            "nativeMarkRecoveryRequiredPending.get()",
+            "nativeMarkRecoveryRequiredPending()",
+            "inspectNativeMarkRecoveryFence(pdfFile).blocking",
             "RTL_READER_HANDOFF_RESTART_BLOCKED reason=native_mark_recovery_required",
             "reactApplicationContext.startActivity(intent)",
         ],
         "queued restart recovery-required gate",
     )
+    if plugin[restart_start:restart_end].count(
+        "inspectNativeMarkRecoveryFence(pdfFile).blocking"
+    ) != 2:
+        fail("queued restart does not rescan durable recovery before both process actions")
     rollback_start = plugin.find("private fun restorePrePublicationMark(")
     rollback_end = plugin.find("private fun requireDisplacedRegularFileIntact(", rollback_start)
     if rollback_start < 0 or rollback_end < 0:
@@ -1815,6 +1855,9 @@ def main() -> None:
     require(
         plugin[rollback_start:rollback_end],
         [
+            "var rejected: DisplacedRegularFile? = null",
+            "try {",
+            "rejected = preserveRegularDestinationNoClobber(",
             "val restoredIdentity = createRegularFileNoClobber(",
             "samePersistedFileVersion(restoredIdentity, restored.identity)",
             "requireDisplacedRegularFileIntact(",
@@ -2009,7 +2052,7 @@ def main() -> None:
             "Remove-Item -LiteralPath $keystore -Force",
             "release-output/SupernoteNativeSpreadProbe-v0.0.137.apk",
             "$expectedSignedLength = 254491L",
-            "7ea8b945e2fbd3e5aac53c63f9eb37ce1662ff0afb551cd8421ba938f050e586",
+            "a6b83b1cdb0bfd739b702a456f45c11a3c13e859a8b9997c9a6f884652bb68c1",
             "Signed APK length differs from the reviewed upgrade identity",
             "Signed APK SHA-256 differs from the reviewed upgrade identity.",
         ],

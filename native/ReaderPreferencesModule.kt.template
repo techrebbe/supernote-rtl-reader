@@ -56,11 +56,14 @@ class ReaderPreferencesModule(
             "a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67"
         private const val NATIVE_READER_V2_APK_LENGTH = 254491L
         private const val NATIVE_READER_V2_APK_SHA256 =
-            "7ea8b945e2fbd3e5aac53c63f9eb37ce1662ff0afb551cd8421ba938f050e586"
+            "a6b83b1cdb0bfd739b702a456f45c11a3c13e859a8b9997c9a6f884652bb68c1"
         private const val NATIVE_SPREAD_MARKER_SUFFIX = ".snspread"
         private const val NATIVE_SPREAD_BACKUP_SUFFIX = ".snspread-backup.properties"
         private const val NATIVE_SPREAD_BACKUP_MARK_SUFFIX = ".snspread-backup.mark"
         private const val NATIVE_SPREAD_BACKUP_VERSION = 1
+        private const val NATIVE_MARK_RECOVERY_JOURNAL_VERSION = 1
+        private const val NATIVE_MARK_RECOVERY_JOURNAL_KIND =
+            "native-mark-recovery-fence"
         private const val NATIVE_SPREAD_FAILED_ARCHIVE_VERSION = 1
         private const val NATIVE_SPREAD_FAILED_ARCHIVE_KIND =
             "failed-protected-editable-activation"
@@ -107,6 +110,8 @@ class ReaderPreferencesModule(
         private const val NATIVE_SPREAD_PUBLICATION_LOCK_SUFFIX =
             ".snspread-publication.lock"
         private val NATIVE_SPREAD_PUBLICATION_PROCESS_LOCK = Any()
+        private val NATIVE_MARK_RECOVERY_PROCESS_LOCK = Any()
+        private val NATIVE_MARK_RECOVERY_REQUIRED_PATHS = HashSet<String>()
         private val NATIVE_READER_V2_COMMITTED_FIELDS = setOf(
             "nativeReaderEngine",
             "enabled",
@@ -160,6 +165,24 @@ class ReaderPreferencesModule(
             "snapshotPath",
             "createdAt",
         )
+        private val NATIVE_MARK_RECOVERY_JOURNAL_FIELDS = setOf(
+            "version",
+            "managedBy",
+            "kind",
+            "operationId",
+            "documentPath",
+            "documentLength",
+            "documentSha256",
+            "markPath",
+            "desiredMarkPresent",
+            "desiredMarkLength",
+            "desiredMarkSha256",
+            "backupManifestPath",
+            "backupManifestLength",
+            "backupManifestSha256",
+            "backupSnapshotPath",
+            "createdAt",
+        )
     }
 
     private val preferences by lazy {
@@ -171,7 +194,6 @@ class ReaderPreferencesModule(
 
     private val annotationRecoveryPending = AtomicBoolean(false)
     private val annotationRecoveryHandoffPending = AtomicBoolean(false)
-    private val nativeMarkRecoveryRequiredPending = AtomicBoolean(false)
     private val nativeSpreadConfigurationLock = Any()
 
     override fun getName(): String = "ReaderPreferencesModule"
@@ -522,6 +544,7 @@ class ReaderPreferencesModule(
                                 "Annotation recovery is already in progress",
                             )
                         }
+                        requireNoNativeMarkRecoveryFence(pdfFile)
                         reconcileFailedActivationBackupForExplicitActivation(
                             pdfFile,
                             marker,
@@ -705,6 +728,7 @@ class ReaderPreferencesModule(
                                 "Annotation recovery is already in progress",
                             )
                         }
+                        requireNoNativeMarkRecoveryFence(pdfFile)
                         reconcileFailedActivationBackupForExplicitActivation(
                             pdfFile,
                             marker,
@@ -759,22 +783,41 @@ class ReaderPreferencesModule(
                         "No verified annotation recovery snapshot is available: ${result.status}",
                     )
                 val marker = nativeSpreadMarker(pdfFile)
+                val recoveryInspection = inspectNativeMarkRecoveryFence(pdfFile, marker)
+                val recoveryJournal = recoveryInspection.journal
+                if (recoveryInspection.blocking && recoveryJournal == null) {
+                    throw NativeMarkRecoveryRequiredException(
+                        "Native mark recovery journal is not safely readable: " +
+                            recoveryInspection.reason,
+                        IllegalStateException(recoveryInspection.reason),
+                    )
+                }
+                if (recoveryJournal != null &&
+                    !nativeMarkRecoveryJournalMatchesBackup(recoveryJournal, backup)
+                ) {
+                    throw NativeMarkRecoveryRequiredException(
+                        "Native mark recovery journal disagrees with the verified backup",
+                        IllegalStateException("journal_backup_mismatch"),
+                    )
+                }
                 // An explicit restore consumes a pending activation directly:
                 // disabling its never-authorized marker preserves the canonical
                 // recovery bytes for the restore worker instead of archiving them.
-                withNativeSpreadPublicationLock(marker) {
-                    val markerAuthority = readPersistedAuthorityIfFile(marker)
-                    if (markerAuthority != null) {
-                        deleteRegularFileCas(
-                            marker,
-                            markerAuthority.identity,
-                            "Native Spread recovery disable",
-                        )
-                    }
-                    if (readPersistedAuthorityIfFile(marker) != null) {
-                        throw IllegalStateException(
-                            "Could not disable Native Spread before recovery",
-                        )
+                if (recoveryJournal == null) {
+                    withNativeSpreadPublicationLock(marker) {
+                        val markerAuthority = readPersistedAuthorityIfFile(marker)
+                        if (markerAuthority != null) {
+                            deleteRegularFileCas(
+                                marker,
+                                markerAuthority.identity,
+                                "Native Spread recovery disable",
+                            )
+                        }
+                        if (readPersistedAuthorityIfFile(marker) != null) {
+                            throw IllegalStateException(
+                                "Could not disable Native Spread before recovery",
+                            )
+                        }
                     }
                 }
                 scheduleAnnotationRestore(pdfFile, backup) { error ->
@@ -1324,6 +1367,37 @@ class ReaderPreferencesModule(
         val status: String,
     )
 
+    /**
+     * Durable, fail-closed authority for a native `.mark` restore.  The journal
+     * deliberately occupies the ordinary `.snspread` marker path: the injected
+     * companion treats any malformed/non-admitted marker there as an input
+     * fence, so an Android relaunch after a PluginHost crash cannot write
+     * through an unfinished restore.
+     */
+    private data class NativeMarkRecoveryJournal(
+        val marker: File,
+        val authority: PersistedFileAuthority,
+        val operationId: String,
+        val documentPath: String,
+        val documentLength: Long,
+        val documentSha256: String,
+        val markPath: String,
+        val desiredMarkPresent: Boolean,
+        val desiredMarkLength: Long,
+        val desiredMarkSha256: String,
+        val backupManifestPath: String,
+        val backupManifestLength: Long,
+        val backupManifestSha256: String,
+        val backupSnapshotPath: String,
+        val createdAt: Long,
+    )
+
+    private data class NativeMarkRecoveryInspection(
+        val journal: NativeMarkRecoveryJournal?,
+        val blocking: Boolean,
+        val reason: String,
+    )
+
     private data class PersistedFileAuthority(
         val bytes: ByteArray,
         val identity: StructStat,
@@ -1374,6 +1448,16 @@ class ReaderPreferencesModule(
         marker: File,
         backupResult: NativeAnnotationBackupResult,
     ): NativeSpreadAuthorityAssessment {
+        val recoveryInspection = inspectNativeMarkRecoveryFence(pdfFile, marker)
+        if (recoveryInspection.blocking) {
+            return NativeSpreadAuthorityAssessment(
+                "recovery",
+                "native_mark_recovery:${recoveryInspection.reason}",
+                false,
+                true,
+                recoveryInspection.journal != null && backupResult.backup != null,
+            )
+        }
         val markerProperties = try {
             readPropertiesIfFile(marker)
         } catch (error: Throwable) {
@@ -1721,6 +1805,196 @@ class ReaderPreferencesModule(
         val parent = pdfFile.parentFile
             ?: throw IllegalStateException("Current PDF has no parent directory")
         return File(parent, ".${pdfFile.name}$NATIVE_SPREAD_MARKER_SUFFIX")
+    }
+
+    private fun nativeMarkRecoveryPathKey(marker: File): String = marker.absolutePath
+
+    private fun registerNativeMarkRecoveryRequired(marker: File) {
+        synchronized(NATIVE_MARK_RECOVERY_PROCESS_LOCK) {
+            NATIVE_MARK_RECOVERY_REQUIRED_PATHS.add(nativeMarkRecoveryPathKey(marker))
+        }
+    }
+
+    private fun clearNativeMarkRecoveryRequired(marker: File) {
+        synchronized(NATIVE_MARK_RECOVERY_PROCESS_LOCK) {
+            NATIVE_MARK_RECOVERY_REQUIRED_PATHS.remove(nativeMarkRecoveryPathKey(marker))
+        }
+    }
+
+    private fun nativeMarkRecoveryRequiredPending(): Boolean =
+        synchronized(NATIVE_MARK_RECOVERY_PROCESS_LOCK) {
+            NATIVE_MARK_RECOVERY_REQUIRED_PATHS.isNotEmpty()
+        }
+
+    private fun nativeMarkRecoveryPathRegistered(marker: File): Boolean =
+        synchronized(NATIVE_MARK_RECOVERY_PROCESS_LOCK) {
+            NATIVE_MARK_RECOVERY_REQUIRED_PATHS.contains(
+                nativeMarkRecoveryPathKey(marker),
+            )
+        }
+
+    /**
+     * Reads the durable restore journal through the same no-follow authority
+     * boundary used for every marker.  A malformed journal, an unexpected
+     * replacement of a journal already observed in this process, or an
+     * unreadable marker remains blocking.  An ordinary exact Native Spread
+     * marker is not a recovery journal.
+     */
+    private fun inspectNativeMarkRecoveryFence(
+        pdfFile: File,
+        marker: File = nativeSpreadMarker(pdfFile),
+    ): NativeMarkRecoveryInspection {
+        val authority = try {
+            readPersistedAuthorityIfFile(marker)
+        } catch (error: Throwable) {
+            registerNativeMarkRecoveryRequired(marker)
+            return NativeMarkRecoveryInspection(
+                null,
+                true,
+                "journal_unreadable:${error.message}",
+            )
+        }
+        if (authority == null) {
+            return if (nativeMarkRecoveryPathRegistered(marker)) {
+                NativeMarkRecoveryInspection(null, true, "journal_disappeared")
+            } else {
+                NativeMarkRecoveryInspection(null, false, "absent")
+            }
+        }
+
+        val properties = try {
+            strictProperties(authority.bytes)
+        } catch (error: Throwable) {
+            registerNativeMarkRecoveryRequired(marker)
+            return NativeMarkRecoveryInspection(
+                null,
+                true,
+                "journal_or_marker_invalid:${error.message}",
+            )
+        }
+        val recoveryShaped = properties.getProperty("kind", "") ==
+            NATIVE_MARK_RECOVERY_JOURNAL_KIND ||
+            properties.containsKey("operationId") ||
+            properties.containsKey("desiredMarkPresent")
+        if (!recoveryShaped) {
+            if (nativeMarkRecoveryPathRegistered(marker)) {
+                return NativeMarkRecoveryInspection(
+                    null,
+                    true,
+                    "journal_replaced",
+                )
+            }
+            return try {
+                requireNativeReaderV2MarkerSchema(properties)
+                NativeMarkRecoveryInspection(null, false, "ordinary_marker")
+            } catch (error: Throwable) {
+                registerNativeMarkRecoveryRequired(marker)
+                NativeMarkRecoveryInspection(
+                    null,
+                    true,
+                    "journal_or_marker_invalid:${error.message}",
+                )
+            }
+        }
+
+        val journal = try {
+            val exact = strictProperties(
+                authority.bytes,
+                NATIVE_MARK_RECOVERY_JOURNAL_FIELDS,
+            )
+            require(
+                exact.getProperty("version") ==
+                    NATIVE_MARK_RECOVERY_JOURNAL_VERSION.toString() &&
+                    exact.getProperty("managedBy") == "supernote-rtl-reader" &&
+                    exact.getProperty("kind") == NATIVE_MARK_RECOVERY_JOURNAL_KIND
+            ) {
+                "unsupported native mark recovery journal"
+            }
+            val operationId = exact.getProperty("operationId", "")
+            UUID.fromString(operationId)
+            val documentPath = exact.getProperty("documentPath", "")
+            val documentLength = exact.getProperty("documentLength")?.toLongOrNull()
+                ?: throw IllegalStateException("journal document length is invalid")
+            val documentSha256 = exact.getProperty("documentSha256", "")
+            val markPath = exact.getProperty("markPath", "")
+            val desiredPresent = when (exact.getProperty("desiredMarkPresent", "")) {
+                "true" -> true
+                "false" -> false
+                else -> throw IllegalStateException("journal desired presence is invalid")
+            }
+            val desiredLength = exact.getProperty("desiredMarkLength")?.toLongOrNull()
+                ?: throw IllegalStateException("journal desired length is invalid")
+            val desiredSha256 = exact.getProperty("desiredMarkSha256", "")
+            val backupManifestPath = exact.getProperty("backupManifestPath", "")
+            val backupManifestLength =
+                exact.getProperty("backupManifestLength")?.toLongOrNull()
+                    ?: throw IllegalStateException("journal backup length is invalid")
+            val backupManifestSha256 =
+                exact.getProperty("backupManifestSha256", "")
+            val backupSnapshotPath = exact.getProperty("backupSnapshotPath", "")
+            val createdAt = exact.getProperty("createdAt")?.toLongOrNull()
+                ?: throw IllegalStateException("journal creation time is invalid")
+            val expectedDocumentPath = pdfFile.canonicalPath
+            val expectedMarkPath = nativeAnnotationMark(pdfFile).canonicalPath
+            val expectedManifestPath = nativeAnnotationBackupManifest(pdfFile).canonicalPath
+            val expectedSnapshotPath = nativeAnnotationBackupSnapshot(pdfFile).canonicalPath
+            require(
+                documentPath == expectedDocumentPath &&
+                    documentLength == pdfFile.length() &&
+                    documentSha256.matches(Regex("[0-9a-f]{64}")) &&
+                    documentSha256 == sha256(pdfFile) &&
+                    markPath == expectedMarkPath &&
+                    desiredLength >= 0L &&
+                    (
+                        desiredPresent && desiredSha256.matches(Regex("[0-9a-f]{64}")) ||
+                            !desiredPresent && desiredLength == 0L &&
+                            desiredSha256 == "ABSENT"
+                        ) &&
+                    backupManifestPath == expectedManifestPath &&
+                    backupManifestLength in 1..STRICT_PROPERTIES_MAX_BYTES.toLong() &&
+                    backupManifestSha256.matches(Regex("[0-9a-f]{64}")) &&
+                    backupSnapshotPath == expectedSnapshotPath &&
+                    createdAt > 0L
+            ) {
+                "native mark recovery journal authority is invalid"
+            }
+            NativeMarkRecoveryJournal(
+                marker,
+                authority,
+                operationId,
+                documentPath,
+                documentLength,
+                documentSha256,
+                markPath,
+                desiredPresent,
+                desiredLength,
+                desiredSha256,
+                backupManifestPath,
+                backupManifestLength,
+                backupManifestSha256,
+                backupSnapshotPath,
+                createdAt,
+            )
+        } catch (error: Throwable) {
+            registerNativeMarkRecoveryRequired(marker)
+            return NativeMarkRecoveryInspection(
+                null,
+                true,
+                "journal_invalid:${error.message}",
+            )
+        }
+        registerNativeMarkRecoveryRequired(marker)
+        return NativeMarkRecoveryInspection(journal, true, "journal_verified")
+    }
+
+    private fun requireNoNativeMarkRecoveryFence(pdfFile: File) {
+        val inspection = inspectNativeMarkRecoveryFence(pdfFile)
+        if (inspection.blocking) {
+            throw NativeMarkRecoveryRequiredException(
+                "Native annotation recovery remains fenced: ${inspection.reason}",
+                IllegalStateException(inspection.reason),
+            )
+        }
     }
 
     private fun nativeAnnotationMark(pdfFile: File): File =
@@ -3518,6 +3792,167 @@ class ReaderPreferencesModule(
             expected.markSha256 == actual.markSha256 &&
             expected.createdAt == actual.createdAt
 
+    private fun nativeMarkRecoveryJournalMatchesBackup(
+        journal: NativeMarkRecoveryJournal,
+        backup: NativeAnnotationBackup,
+    ): Boolean =
+        journal.documentPath == backup.documentPath &&
+            journal.documentLength == backup.documentLength &&
+            journal.documentSha256 == backup.documentSha256 &&
+            journal.markPath == backup.mark.canonicalPath &&
+            journal.desiredMarkPresent == backup.originalMarkPresent &&
+            journal.desiredMarkLength == backup.markLength &&
+            journal.desiredMarkSha256 == backup.markSha256 &&
+            journal.backupManifestPath == backup.manifest.canonicalPath &&
+            journal.backupManifestLength == backup.manifestLength &&
+            journal.backupManifestSha256 == backup.manifestSha256 &&
+            journal.backupSnapshotPath == backup.snapshot.canonicalPath &&
+            journal.createdAt == backup.createdAt
+
+    private fun liveNativeAnnotationMatchesRecoveryJournal(
+        journal: NativeMarkRecoveryJournal,
+    ): Boolean = runCatching {
+        val live = readRegularFileAuthorityIfFile(
+            File(journal.markPath),
+            Int.MAX_VALUE.toLong(),
+            requireNonEmpty = false,
+            authorityLabel = "recovery-journal live annotation",
+        )
+        if (journal.desiredMarkPresent) {
+            live != null &&
+                live.bytes.size.toLong() == journal.desiredMarkLength &&
+                sha256(live.bytes) == journal.desiredMarkSha256
+        } else {
+            live == null
+        }
+    }.getOrDefault(false)
+
+    private fun publishNativeMarkRecoveryJournal(
+        pdfFile: File,
+        marker: File,
+        backup: NativeAnnotationBackup,
+    ): NativeMarkRecoveryJournal {
+        require(readPersistedAuthorityIfFile(marker) == null) {
+            "Native mark recovery journal destination is not absent"
+        }
+        require(nativeAnnotationBackupSourceFilesMatch(backup)) {
+            "Native mark recovery journal backup authority changed"
+        }
+        val properties = Properties().apply {
+            setProperty("version", NATIVE_MARK_RECOVERY_JOURNAL_VERSION.toString())
+            setProperty("managedBy", "supernote-rtl-reader")
+            setProperty("kind", NATIVE_MARK_RECOVERY_JOURNAL_KIND)
+            setProperty("operationId", UUID.randomUUID().toString())
+            setProperty("documentPath", backup.documentPath)
+            setProperty("documentLength", backup.documentLength.toString())
+            setProperty("documentSha256", backup.documentSha256)
+            setProperty("markPath", backup.mark.canonicalPath)
+            setProperty("desiredMarkPresent", backup.originalMarkPresent.toString())
+            setProperty("desiredMarkLength", backup.markLength.toString())
+            setProperty("desiredMarkSha256", backup.markSha256)
+            setProperty("backupManifestPath", backup.manifest.canonicalPath)
+            setProperty("backupManifestLength", backup.manifestLength.toString())
+            setProperty("backupManifestSha256", backup.manifestSha256)
+            setProperty("backupSnapshotPath", backup.snapshot.canonicalPath)
+            setProperty("createdAt", backup.createdAt.toString())
+        }
+        val bytes = propertiesBytes(
+            properties,
+            "Supernote RTL native mark recovery fence",
+        )
+        registerNativeMarkRecoveryRequired(marker)
+        try {
+            val identity = createRegularFileNoClobber(
+                marker,
+                bytes,
+                "native mark recovery journal",
+            )
+            val published = readPersistedAuthorityIfFile(marker)
+                ?: throw IllegalStateException(
+                    "Native mark recovery journal disappeared after publication",
+                )
+            require(
+                samePersistedFileVersion(identity, published.identity) &&
+                    published.bytes.contentEquals(bytes)
+            ) {
+                "Native mark recovery journal changed after publication"
+            }
+            val inspection = inspectNativeMarkRecoveryFence(pdfFile, marker)
+            val journal = inspection.journal ?: throw IllegalStateException(
+                "Published native mark recovery journal was not re-admitted: " +
+                    inspection.reason,
+            )
+            require(nativeMarkRecoveryJournalMatchesBackup(journal, backup)) {
+                "Published native mark recovery journal disagrees with backup"
+            }
+            Log.i(
+                LOG_TAG,
+                "RTL_READER_NATIVE_MARK_RECOVERY_JOURNAL_PUBLISHED operation=${journal.operationId}",
+            )
+            return journal
+        } catch (error: Throwable) {
+            throw NativeMarkRecoveryRequiredException(
+                "Native mark recovery fence could not be proven durable; " +
+                    "DocumentActivity must remain stopped",
+                error,
+            )
+        }
+    }
+
+    private fun retireNativeMarkRecoveryJournal(
+        pdfFile: File,
+        expected: NativeMarkRecoveryJournal,
+        onCommitProven: () -> Unit,
+    ) {
+        val inspection = inspectNativeMarkRecoveryFence(pdfFile, expected.marker)
+        val current = inspection.journal ?: throw NativeMarkRecoveryRequiredException(
+            "Native mark recovery journal is not available for exact retirement",
+            IllegalStateException(inspection.reason),
+        )
+        require(
+            current.operationId == expected.operationId &&
+                samePersistedAuthority(expected.authority, current.authority)
+        ) {
+            "Native mark recovery journal changed before retirement"
+        }
+        require(liveNativeAnnotationMatchesRecoveryJournal(expected)) {
+            "Restored native annotation no longer matches its recovery journal"
+        }
+        // Both durable authority objects have now been freshly re-read and
+        // proven exact. Publish the irreversible commit boundary immediately
+        // before attempting the no-clobber journal retirement.
+        onCommitProven()
+        val displaced = try {
+            preserveRegularDestinationNoClobber(
+                expected.marker,
+                current.authority,
+                "native mark recovery journal retirement",
+            ) {}
+        } catch (error: Throwable) {
+            throw NativeMarkRecoveryRequiredException(
+                "Native mark recovery journal could not be retired exactly",
+                error,
+            )
+        }
+        require(pathIdentityNoFollow(expected.marker) == null) {
+            "Native mark recovery journal reappeared after retirement"
+        }
+        clearNativeMarkRecoveryRequired(expected.marker)
+        runCatching {
+            retireDisplacedRegularFile(displaced, "native mark recovery journal")
+        }.onFailure { cleanupError ->
+            Log.w(
+                LOG_TAG,
+                "RTL_READER_NATIVE_MARK_RECOVERY_JOURNAL_CLEANUP_DEFERRED",
+                cleanupError,
+            )
+        }
+        Log.i(
+            LOG_TAG,
+            "RTL_READER_NATIVE_MARK_RECOVERY_JOURNAL_RETIRED operation=${expected.operationId}",
+        )
+    }
+
     private fun nativeAnnotationBackupSourceFilesMatch(
         backup: NativeAnnotationBackup,
     ): Boolean = runCatching {
@@ -3857,10 +4292,7 @@ class ReaderPreferencesModule(
         onPublished: () -> Unit = {},
         beforePublish: () -> Unit = {},
     ) {
-        val bytes = ByteArrayOutputStream().use { buffer ->
-            properties.store(buffer, comment)
-            buffer.toByteArray()
-        }
+        val bytes = propertiesBytes(properties, comment)
         writeBytesAtomically(
             file,
             bytes,
@@ -3974,10 +4406,7 @@ class ReaderPreferencesModule(
         onPublished: () -> Unit = {},
         beforePublish: () -> Unit = {},
     ) {
-        val bytes = ByteArrayOutputStream().use { buffer ->
-            properties.store(buffer, comment)
-            buffer.toByteArray()
-        }
+        val bytes = propertiesBytes(properties, comment)
         writeBytesAtomicallyCas(
             file,
             bytes,
@@ -3986,6 +4415,12 @@ class ReaderPreferencesModule(
             beforePublish,
         )
     }
+
+    private fun propertiesBytes(properties: Properties, comment: String): ByteArray =
+        ByteArrayOutputStream().use { buffer ->
+            properties.store(buffer, comment)
+            buffer.toByteArray()
+        }
 
     /**
      * Publishes only over the exact destination inode/version observed by the
@@ -4732,11 +5167,17 @@ class ReaderPreferencesModule(
      */
     @ReactMethod
     fun handoffLastSavedPage(promise: Promise) {
-        if (nativeMarkRecoveryRequiredPending.get() ||
+        val durableRecovery = lastSavedFilePath?.let { filePath ->
+            runCatching {
+                val pdfFile = requirePdf(filePath)
+                inspectNativeMarkRecoveryFence(pdfFile).blocking
+            }.getOrDefault(true)
+        } == true
+        if (nativeMarkRecoveryRequiredPending() || durableRecovery ||
             annotationRecoveryPending.get() ||
             annotationRecoveryHandoffPending.compareAndSet(true, false)
         ) {
-            val reason = if (nativeMarkRecoveryRequiredPending.get()) {
+            val reason = if (nativeMarkRecoveryRequiredPending() || durableRecovery) {
                 "native_mark_recovery_required"
             } else {
                 "annotation_recovery"
@@ -4799,7 +5240,7 @@ class ReaderPreferencesModule(
                 "RTL_READER_HANDOFF_CONFIG_WRITTEN page=${pageIndex + 1} uid=${android.os.Process.myUid()} config=${configFile.absolutePath}",
             )
 
-            scheduleDocumentRestart()
+            scheduleDocumentRestart(pdfFile)
 
             val result = Arguments.createMap().apply {
                 putString("filePath", pdfFile.absolutePath)
@@ -5017,7 +5458,7 @@ class ReaderPreferencesModule(
         )
     }
 
-    private fun scheduleDocumentRestart() {
+    private fun scheduleDocumentRestart(pdfFile: File) {
         Thread {
             try {
                 Log.i(
@@ -5030,7 +5471,9 @@ class ReaderPreferencesModule(
                 SystemClock.sleep(900)
 
                 synchronized(nativeSpreadConfigurationLock) {
-                    if (nativeMarkRecoveryRequiredPending.get()) {
+                    if (nativeMarkRecoveryRequiredPending() ||
+                        inspectNativeMarkRecoveryFence(pdfFile).blocking
+                    ) {
                         Log.e(
                             LOG_TAG,
                             "RTL_READER_HANDOFF_RESTART_BLOCKED reason=native_mark_recovery_required",
@@ -5089,7 +5532,9 @@ class ReaderPreferencesModule(
 
                     SystemClock.sleep(450)
 
-                    if (nativeMarkRecoveryRequiredPending.get()) {
+                    if (nativeMarkRecoveryRequiredPending() ||
+                        inspectNativeMarkRecoveryFence(pdfFile).blocking
+                    ) {
                         Log.e(
                             LOG_TAG,
                             "RTL_READER_HANDOFF_RESTART_BLOCKED reason=native_mark_recovery_required",
@@ -5195,12 +5640,8 @@ class ReaderPreferencesModule(
                     running = documentPidsOrThrow(activityManager, "restore-quiescence")
                 }
 
-                withNativeSpreadPublicationLock(nativeSpreadMarker(pdfFile)) {
-                    if (readPersistedAuthorityIfFile(nativeSpreadMarker(pdfFile)) != null) {
-                        throw IllegalStateException(
-                            "Native Spread marker reappeared while annotation recovery was pending",
-                        )
-                    }
+                val marker = nativeSpreadMarker(pdfFile)
+                withNativeSpreadPublicationLock(marker) {
                     val revalidatedBackup = readNativeAnnotationBackup(pdfFile).backup
                         ?: throw IllegalStateException(
                             "Document or recovery snapshot changed while preparing restore",
@@ -5210,8 +5651,45 @@ class ReaderPreferencesModule(
                             "Recovery snapshot identity changed while preparing restore",
                         )
                     }
+                    val journalInspection = inspectNativeMarkRecoveryFence(pdfFile, marker)
+                    val recoveryJournal = journalInspection.journal?.also { journal ->
+                        if (!nativeMarkRecoveryJournalMatchesBackup(
+                                journal,
+                                revalidatedBackup,
+                            )
+                        ) {
+                            throw NativeMarkRecoveryRequiredException(
+                                "Durable native mark recovery journal disagrees with backup",
+                                IllegalStateException("journal_backup_mismatch"),
+                            )
+                        }
+                    } ?: run {
+                        if (journalInspection.blocking) {
+                            throw NativeMarkRecoveryRequiredException(
+                                "Durable native mark recovery journal is ambiguous: " +
+                                    journalInspection.reason,
+                                IllegalStateException(journalInspection.reason),
+                            )
+                        }
+                        if (readPersistedAuthorityIfFile(marker) != null) {
+                            throw IllegalStateException(
+                                "Native Spread marker reappeared while annotation recovery was pending",
+                            )
+                        }
+                        // This fsynced marker is published before the first
+                        // destructive `.mark` rename. Besides surviving a
+                        // PluginHost/process restart, its marker-path presence
+                        // keeps the injected companion's admission/input fence
+                        // closed until exact recovery is verified.
+                        publishNativeMarkRecoveryJournal(
+                            pdfFile,
+                            marker,
+                            revalidatedBackup,
+                        )
+                    }
 
                     var publication: NativeMarkPublication? = null
+                    var recoveryCommitProven = false
                     try {
                         publication = publishNativeAnnotationRestore(
                             revalidatedBackup,
@@ -5291,27 +5769,55 @@ class ReaderPreferencesModule(
                         requireBackupDocumentIdentity(
                             pdfFile,
                             revalidatedBackup,
-                            "before-backup-retirement",
+                            "before-recovery-journal-retirement",
                         )
-                        removeNativeAnnotationBackupFiles(pdfFile, revalidatedBackup)
+                        // The retirement helper freshly re-reads both the live
+                        // journal and exact restored `.mark`, then publishes
+                        // this irreversible commit boundary immediately before
+                        // attempting journal displacement. A retirement race
+                        // may retain cleanup evidence and keep recovery fenced,
+                        // but it can never roll these exact bytes backward.
+                        retireNativeMarkRecoveryJournal(
+                            pdfFile,
+                            recoveryJournal,
+                        ) {
+                            recoveryCommitProven = true
+                        }
                     } catch (restoreError: Throwable) {
-                        publication?.takeIf { value -> value.changed }?.let { value ->
-                            try {
-                                restorePrePublicationMark(value)
-                                Log.w(
-                                    LOG_TAG,
-                                    "RTL_READER_NATIVE_BACKUP_RESTORE_POST_PUBLICATION_ROLLED_BACK",
-                                )
-                            } catch (rollbackError: Throwable) {
-                                restoreError.addSuppressed(rollbackError)
-                                Log.e(
-                                    LOG_TAG,
-                                    "RTL_READER_NATIVE_BACKUP_RESTORE_POST_PUBLICATION_ROLLBACK_FAILED",
-                                    rollbackError,
-                                )
+                        if (!recoveryCommitProven) {
+                            publication?.takeIf { value -> value.changed }?.let { value ->
+                                try {
+                                    restorePrePublicationMark(value)
+                                    Log.w(
+                                        LOG_TAG,
+                                        "RTL_READER_NATIVE_BACKUP_RESTORE_POST_PUBLICATION_ROLLED_BACK",
+                                    )
+                                } catch (rollbackError: Throwable) {
+                                    restoreError.addSuppressed(rollbackError)
+                                    Log.e(
+                                        LOG_TAG,
+                                        "RTL_READER_NATIVE_BACKUP_RESTORE_POST_PUBLICATION_ROLLBACK_FAILED",
+                                        rollbackError,
+                                    )
+                                }
                             }
                         }
                         throw restoreError
+                    }
+                    // Fence retirement is the commit point: the live mark has
+                    // already been re-read and proven exact. A crash or cleanup
+                    // error from here can leave only an orphaned backup, which
+                    // existing reconciliation safely retires; it must never
+                    // roll the committed `.mark` back to the discarded working
+                    // copy after the companion fence has opened.
+                    runCatching {
+                        removeNativeAnnotationBackupFiles(pdfFile, revalidatedBackup)
+                    }.onFailure { cleanupError ->
+                        Log.w(
+                            LOG_TAG,
+                            "RTL_READER_NATIVE_BACKUP_RETIREMENT_DEFERRED_AFTER_MARK_COMMIT",
+                            cleanupError,
+                        )
                     }
                     publication?.let { committedPublication ->
                         runCatching {
@@ -5337,11 +5843,8 @@ class ReaderPreferencesModule(
                     )
                     persistenceError = error
                     if (nativeMarkRecoveryRequired(error)) {
-                        nativeMarkRecoveryRequiredPending.set(true)
+                        registerNativeMarkRecoveryRequired(nativeSpreadMarker(pdfFile))
                     }
-                }
-                if (persistenceError == null) {
-                    nativeMarkRecoveryRequiredPending.set(false)
                 }
             }
 
@@ -5351,7 +5854,7 @@ class ReaderPreferencesModule(
             // ActivityManager failure must never restore the discarded working
             // .mark after its recovery backup has been retired.
             val committed = persistenceError == null
-            val recoveryRequired = nativeMarkRecoveryRequiredPending.get() ||
+            val recoveryRequired = nativeMarkRecoveryRequiredPending() ||
                 nativeMarkRecoveryRequired(persistenceError)
             if (recoveryRequired) {
                 Log.e(
@@ -5658,12 +6161,18 @@ class ReaderPreferencesModule(
                 identity,
             )
         }
-        val rejected = preserveRegularDestinationNoClobber(
-            publication.mark,
-            publishedAuthority,
-            "rejected annotation publication rollback",
-        ) {}
+        var rejected: DisplacedRegularFile? = null
         try {
+            // The initial authority check/preservation is part of rollback, not
+            // a precondition outside it. A racer already occupying the live
+            // path is retained in place and forces recovery-required
+            // containment; it must never fall through to the ordinary failure
+            // relaunch path.
+            rejected = preserveRegularDestinationNoClobber(
+                publication.mark,
+                publishedAuthority,
+                "rejected annotation publication rollback",
+            ) {}
             if (publication.previousPresent) {
                 val bytes = publication.previousBytes ?: throw IllegalStateException(
                     "Missing pre-publication mark rollback bytes",

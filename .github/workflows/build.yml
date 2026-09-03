@@ -341,7 +341,7 @@ jobs:
             }
             $expectedSignedLength = 254491L
             $expectedSignedSha256 = `
-              '7ea8b945e2fbd3e5aac53c63f9eb37ce1662ff0afb551cd8421ba938f050e586'
+              'a6b83b1cdb0bfd739b702a456f45c11a3c13e859a8b9997c9a6f884652bb68c1'
             $actualSignedLength = (Get-Item `
               -LiteralPath $outputApk `
               -Force

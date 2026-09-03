@@ -378,7 +378,7 @@ STATIC_MUTATIONS = (
     ),
     (
         ".github/workflows/build.yml",
-        "7ea8b945e2fbd3e5aac53c63f9eb37ce1662ff0afb551cd8421ba938f050e586",
+        "a6b83b1cdb0bfd739b702a456f45c11a3c13e859a8b9997c9a6f884652bb68c1",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "published companion exact signed digest",
     ),
@@ -522,6 +522,17 @@ STATIC_MUTATIONS = (
         "                        .evidenceStillCurrent(evidence);",
         "                    final boolean current = true;",
         "activation publication freshness",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "                    postGuarded(\"activation_evidence_failure\", () -> {\n"
+        "                        if (lifecycleSuspended\n"
+        "                            || lifecycleEpoch != activationLifecycleEpoch) {\n"
+        "                            return;\n"
+        "                        }",
+        "                    postGuarded(\"activation_evidence_failure\", () -> {",
+        "activation failure lifecycle epoch fence",
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
@@ -794,7 +805,7 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "7ea8b945e2fbd3e5aac53c63f9eb37ce1662ff0afb551cd8421ba938f050e586",
+        "a6b83b1cdb0bfd739b702a456f45c11a3c13e859a8b9997c9a6f884652bb68c1",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "installed companion APK digest pin",
     ),
@@ -836,10 +847,75 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "if (nativeMarkRecoveryRequiredPending.get() ||\n"
+        "if (nativeMarkRecoveryRequiredPending() || durableRecovery ||\n"
         "            annotationRecoveryPending.get() ||",
         "if (annotationRecoveryPending.get() ||",
         "handoff persistent recovery-required gate",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "private val NATIVE_MARK_RECOVERY_REQUIRED_PATHS = HashSet<String>()",
+        "private val NATIVE_MARK_RECOVERY_REQUIRED_PATHS = emptySet<String>()",
+        "process-global native mark recovery containment",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                        publishNativeMarkRecoveryJournal(\n"
+        "                            pdfFile,\n"
+        "                            marker,\n"
+        "                            revalidatedBackup,\n"
+        "                        )\n"
+        "                    }\n\n"
+        "                    var publication: NativeMarkPublication? = null",
+        "                        error(\"recovery journal skipped\")\n"
+        "                    }\n\n"
+        "                    var publication: NativeMarkPublication? = null",
+        "durable recovery journal precedes mark publication",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "require(liveNativeAnnotationMatchesRecoveryJournal(expected))",
+        "require(true || liveNativeAnnotationMatchesRecoveryJournal(expected))",
+        "exact live mark verification precedes recovery fence retirement",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "        onCommitProven()\n"
+        "        val displaced = try {",
+        "        val displaced = try {",
+        "fresh journal and live-mark proof publish recovery commit",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                        if (!recoveryCommitProven) {",
+        "                        if (true) {",
+        "post-commit journal retirement failure cannot roll mark backward",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                SystemClock.sleep(900)\n\n"
+        "                synchronized(nativeSpreadConfigurationLock) {\n"
+        "                    if (nativeMarkRecoveryRequiredPending() ||\n"
+        "                        inspectNativeMarkRecoveryFence(pdfFile).blocking\n"
+        "                    ) {",
+        "                SystemClock.sleep(900)\n\n"
+        "                synchronized(nativeSpreadConfigurationLock) {\n"
+        "                    if (nativeMarkRecoveryRequiredPending()) {",
+        "queued native reopen durable recovery rescan",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "        var rejected: DisplacedRegularFile? = null\n"
+        "        try {\n"
+        "            // The initial authority check/preservation is part of rollback",
+        "        val rejected = preserveRegularDestinationNoClobber(\n"
+        "            publication.mark,\n"
+        "            publishedAuthority,\n"
+        "            \"rejected annotation publication rollback\",\n"
+        "        ) {}\n"
+        "        try {\n"
+        "            // The initial authority check/preservation is part of rollback",
+        "initial rollback preservation is recovery-required contained",
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
@@ -1100,12 +1176,20 @@ def _model_no_clobber_rollback(
     previous: bytes | None,
     hook,
 ) -> pathlib.Path | None:
-    rejected = _model_preserve_regular_destination_no_clobber(
-        destination,
-        published,
-        ".rejected",
-        hook,
-    )
+    try:
+        rejected = _model_preserve_regular_destination_no_clobber(
+            destination,
+            published,
+            ".rejected",
+            hook,
+        )
+    except _InterleavingRejected as error:
+        raise _InterleavingRejected(
+            "pre-publication state is not proven restored",
+            error.preserved,
+            recovery_required=True,
+            live_restored=error.live_restored,
+        ) from error
     hook("after_preserve", destination, rejected)
     if previous is not None:
         try:
@@ -1125,6 +1209,215 @@ def _model_no_clobber_rollback(
             except _InterleavingRejected as rejected_error:
                 raise rejected_error from error
     return rejected
+
+
+_RECOVERY_FENCE_BYTES = b"native-mark-recovery-fence-v1"
+
+
+def _model_scan_recovery_fence(
+    marker: pathlib.Path,
+    process_latch: set[pathlib.Path],
+) -> bool:
+    """Model process recreation and fail-closed durable fence admission."""
+    marker_key = marker.resolve(strict=False)
+    observed = _read_if_file(marker)
+    if observed is None:
+        return marker_key in process_latch or os.path.lexists(marker)
+    process_latch.add(marker_key)
+    # Both an exact journal and malformed/replaced evidence are blocking. Only
+    # exact journal bytes are eligible for repair; callers check that separately.
+    return True
+
+
+def _model_publish_recovery_fence(
+    marker: pathlib.Path,
+    process_latch: set[pathlib.Path],
+) -> None:
+    process_latch.add(marker.resolve(strict=False))
+    with marker.open("xb") as output:
+        output.write(_RECOVERY_FENCE_BYTES)
+        output.flush()
+        os.fsync(output.fileno())
+    assert marker.read_bytes() == _RECOVERY_FENCE_BYTES
+
+
+def _model_resume_recovery_from_fence(
+    mark: pathlib.Path,
+    marker: pathlib.Path,
+    desired: bytes | None,
+    process_latch: set[pathlib.Path],
+) -> pathlib.Path | None:
+    """Model crash-safe exact repair and journal retirement.
+
+    Any extant live bytes are first moved to retained evidence. The desired
+    bytes are then created with O_EXCL, so an interleaving occupant is never
+    overwritten. The durable fence remains until the exact live state verifies.
+    """
+    marker_key = marker.resolve(strict=False)
+    if _read_if_file(marker) != _RECOVERY_FENCE_BYTES:
+        process_latch.add(marker_key)
+        raise _InterleavingRejected(
+            "recovery fence is not exact",
+            recovery_required=True,
+        )
+    process_latch.add(marker_key)
+    current = _read_if_file(mark)
+    displaced = None
+    if current != desired and current is not None:
+        displaced = _model_preserve_regular_destination_no_clobber(
+            mark,
+            current,
+            ".recovery-displaced",
+            lambda *_: None,
+        )
+    try:
+        if desired is not None and _read_if_file(mark) is None:
+            with mark.open("xb") as output:
+                output.write(desired)
+                output.flush()
+                os.fsync(output.fileno())
+        if _read_if_file(mark) != desired:
+            raise OSError("desired recovery state did not verify")
+        if displaced is not None and displaced.read_bytes() != current:
+            raise OSError("displaced recovery evidence changed")
+        retired = marker.with_name(marker.name + ".recovery-retired")
+        os.replace(marker, retired)
+        if marker.exists() or retired.read_bytes() != _RECOVERY_FENCE_BYTES:
+            raise OSError("recovery fence retirement did not verify")
+        process_latch.remove(marker_key)
+        return displaced
+    except (FileExistsError, FileNotFoundError, IsADirectoryError, OSError) as error:
+        process_latch.add(marker_key)
+        raise _InterleavingRejected(
+            "recovery remains fenced",
+            displaced,
+            recovery_required=True,
+        ) from error
+
+
+def run_durable_recovery_fence_tests(temp_root: pathlib.Path) -> None:
+    def scenario(name: str) -> pathlib.Path:
+        root = temp_root / "recovery-fence" / name
+        root.mkdir(parents=True)
+        return root
+
+    # Crash immediately after the durable fence: a fresh module instance finds
+    # it from disk, suppresses reopen, and can complete exact recovery.
+    root = scenario("crash-after-fence-publication")
+    mark = root / "book.pdf.mark"
+    marker = root / ".book.pdf.snspread"
+    mark.write_bytes(b"working")
+    process_latch: set[pathlib.Path] = set()
+    _model_publish_recovery_fence(marker, process_latch)
+    process_latch = set()  # process/context recreation
+    assert _model_scan_recovery_fence(marker, process_latch)
+    displaced = _model_resume_recovery_from_fence(
+        mark, marker, b"canonical", process_latch
+    )
+    assert mark.read_bytes() == b"canonical"
+    assert displaced is not None and displaced.read_bytes() == b"working"
+    assert not marker.exists() and not process_latch
+
+    # Crash after the live pathname was displaced but before O_EXCL
+    # publication. The fresh process sees the fence, repairs the absent live
+    # path, and leaves the exact moved inode as evidence.
+    root = scenario("crash-after-displacement")
+    mark = root / "book.pdf.mark"
+    marker = root / ".book.pdf.snspread"
+    mark.write_bytes(b"working")
+    process_latch = set()
+    _model_publish_recovery_fence(marker, process_latch)
+    prior = _model_preserve_regular_destination_no_clobber(
+        mark, b"working", ".pre-crash-displaced", lambda *_: None
+    )
+    assert not mark.exists() and prior is not None
+    process_latch = set()
+    assert _model_scan_recovery_fence(marker, process_latch)
+    _model_resume_recovery_from_fence(mark, marker, b"canonical", process_latch)
+    assert mark.read_bytes() == b"canonical"
+    assert prior.read_bytes() == b"working"
+    assert not marker.exists() and not process_latch
+
+    # Crash after desired publication but before journal retirement: recovery
+    # merely verifies the exact bytes and retires the durable fence.
+    root = scenario("crash-after-desired-publication")
+    mark = root / "book.pdf.mark"
+    marker = root / ".book.pdf.snspread"
+    mark.write_bytes(b"canonical")
+    process_latch = set()
+    _model_publish_recovery_fence(marker, process_latch)
+    process_latch = set()
+    assert _model_scan_recovery_fence(marker, process_latch)
+    assert _model_resume_recovery_from_fence(
+        mark, marker, b"canonical", process_latch
+    ) is None
+    assert mark.read_bytes() == b"canonical"
+    assert not marker.exists() and not process_latch
+
+    # A pathname replacement present at recovery is preserved byte-for-byte;
+    # desired publication remains O_EXCL and no evidence is destroyed.
+    root = scenario("racer-present-at-recovery")
+    mark = root / "book.pdf.mark"
+    marker = root / ".book.pdf.snspread"
+    mark.write_bytes(b"racer")
+    process_latch = set()
+    _model_publish_recovery_fence(marker, process_latch)
+    process_latch = set()
+    assert _model_scan_recovery_fence(marker, process_latch)
+    displaced = _model_resume_recovery_from_fence(
+        mark, marker, b"canonical", process_latch
+    )
+    assert mark.read_bytes() == b"canonical"
+    assert displaced is not None and displaced.read_bytes() == b"racer"
+    assert not marker.exists() and not process_latch
+
+    # Same-process deletion/replacement of an observed journal can never clear
+    # containment. A fresh process also treats malformed persisted evidence as
+    # blocking and ineligible for repair.
+    root = scenario("journal-deletion-and-replacement")
+    marker = root / ".book.pdf.snspread"
+    process_latch = set()
+    _model_publish_recovery_fence(marker, process_latch)
+    marker.unlink()
+    assert _model_scan_recovery_fence(marker, process_latch)
+    marker.write_bytes(b"replacement")
+    assert _model_scan_recovery_fence(marker, process_latch)
+    process_latch = set()
+    assert _model_scan_recovery_fence(marker, process_latch)
+    try:
+        _model_resume_recovery_from_fence(
+            root / "book.pdf.mark", marker, b"canonical", process_latch
+        )
+        raise AssertionError("malformed replacement journal was repaired")
+    except _InterleavingRejected as error:
+        assert error.recovery_required and not error.reopen_allowed
+        assert marker.read_bytes() == b"replacement"
+
+    # Once exact desired bytes and the still-live fence have both verified,
+    # journal retirement is the cleanup side of an irreversible commit. A
+    # replacement marker racing with retirement must not trigger rollback of
+    # the already repaired live mark; the displaced journal remains evidence.
+    root = scenario("marker-replacement-during-retirement")
+    mark = root / "book.pdf.mark"
+    marker = root / ".book.pdf.snspread"
+    mark.write_bytes(b"canonical")
+    process_latch = set()
+    _model_publish_recovery_fence(marker, process_latch)
+    recovery_commit_proven = (
+        mark.read_bytes() == b"canonical"
+        and marker.read_bytes() == _RECOVERY_FENCE_BYTES
+    )
+    retained_journal = marker.with_name(marker.name + ".retirement-displaced")
+    os.replace(marker, retained_journal)
+    marker.write_bytes(b"valid-ordinary-marker-racer")
+    retirement_failed = True
+    if retirement_failed and not recovery_commit_proven:
+        mark.write_bytes(b"discarded-working-copy")
+    assert mark.read_bytes() == b"canonical"
+    assert retained_journal.read_bytes() == _RECOVERY_FENCE_BYTES
+    assert marker.read_bytes() == b"valid-ordinary-marker-racer"
+
+    print("Native Reader v2 durable recovery fence tests: PASS")
 
 
 def run_no_clobber_interleaving_tests(temp_root: pathlib.Path) -> None:
@@ -1261,6 +1554,21 @@ def run_no_clobber_interleaving_tests(temp_root: pathlib.Path) -> None:
         assert (root / "book.pdf.mark.rollback-failed").read_bytes() == b"racer"
         assert error.live_restored and error.reopen_allowed
 
+    root = scenario("rollback-replacement-before-preserve")
+    mark = root / "book.pdf.mark"
+    mark.write_bytes(b"new")
+    def rollback_before_preserve(phase, destination, _preserved):
+        if phase == "before_check":
+            destination.write_bytes(b"racer")
+    try:
+        _model_no_clobber_rollback(
+            mark, b"new", b"old", rollback_before_preserve
+        )
+        raise AssertionError("rollback accepted a pre-preservation racer")
+    except _InterleavingRejected as error:
+        assert mark.read_bytes() == b"racer"
+        assert error.recovery_required and not error.reopen_allowed
+
     print("Native Reader v2 no-clobber interleavings: PASS")
 
 
@@ -1363,6 +1671,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="native-reader-v2-mut-") as temp:
         temp_root = pathlib.Path(temp)
         run_no_clobber_interleaving_tests(temp_root)
+        run_durable_recovery_fence_tests(temp_root)
         for filename, old, new, label in MUTATIONS:
             source_dir = temp_root / label / "src"
             test_dir = temp_root / label / "tests"

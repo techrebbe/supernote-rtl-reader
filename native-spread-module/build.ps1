@@ -11,7 +11,8 @@ param(
     [string]$DebugKeystore = $(
         Join-Path $env:USERPROFILE '.android\debug.keystore'
     ),
-    [string]$ExpectedSignerSha256,
+    [string]$ExpectedSignerSha256 = `
+        'a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67',
     [string]$PythonExecutable = $(
         if ($env:PYTHON_BIN) {
             $env:PYTHON_BIN

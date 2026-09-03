@@ -823,6 +823,12 @@ STATIC_MUTATIONS = (
     ),
     (
         "native-spread-module/build.ps1",
+        "a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67",
+        "b5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67",
+        "default upgrade signer pin",
+    ),
+    (
+        "native-spread-module/build.ps1",
         "if (-not ($verificationOutput -contains 'Number of signers: 1') -or",
         "if ($false -or",
         "packaged signer verification",

@@ -1448,7 +1448,8 @@ def main() -> None:
     require(
         build,
         [
-            "[string]$ExpectedSignerSha256",
+            "[string]$ExpectedSignerSha256 =",
+            "a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67",
             "Expected signer SHA-256 is not canonical lowercase hexadecimal.",
             "Number of signers: 1",
             "APK signer does not match the exact established upgrade identity",

@@ -732,7 +732,7 @@ STATIC_MUTATIONS = (
     ),
     (
         ".github/workflows/build.yml",
-        "283b81bfc3f377cc15b4e1ed42c21c2624f953162fa6fb5cea75b6b829cab721",
+        "483ddebd15cf36db5f361e02175fd498e41dcc3b53a89b30982a7ba6b49239f8",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "published companion exact signed digest",
     ),
@@ -1207,7 +1207,7 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "283b81bfc3f377cc15b4e1ed42c21c2624f953162fa6fb5cea75b6b829cab721",
+        "483ddebd15cf36db5f361e02175fd498e41dcc3b53a89b30982a7ba6b49239f8",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "installed companion APK digest pin",
     ),

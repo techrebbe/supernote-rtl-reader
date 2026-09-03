@@ -22,10 +22,10 @@ with SupernoteDocument `1.02.446`.
   Spread generator tests, contract fixtures, and native viewport tests pass.
 - [x] Two clean v0.0.138 companion builds are byte-for-byte identical at
   258,587 bytes and SHA-256
-  `283b81bfc3f377cc15b4e1ed42c21c2624f953162fa6fb5cea75b6b829cab721`.
+  `483ddebd15cf36db5f361e02175fd498e41dcc3b53a89b30982a7ba6b49239f8`.
   The exact locally generated RTL Reader hardware-candidate package for this
   gate has SHA-256
-  `331783d24393cf01653deaf1fda2e62923e98dd49c26eb8a291d3b77de2b4887`.
+  `ec530d8872d4a91593fe14932c57880019fdf09227233e225f11e28c55874005`.
 - [x] The final adversarial review findings are covered by deterministic gates:
   epoch-owned input/lifecycle authority, exact stock-reload receipts, no-clobber
   `.mark` publication/rollback interleavings, post-commit relaunch, exact

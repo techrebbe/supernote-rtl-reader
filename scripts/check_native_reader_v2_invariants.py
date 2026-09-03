@@ -1517,21 +1517,47 @@ def main() -> None:
         [
             'startNativeBackupWorker("RTLReaderNativeModeLoad")',
             "readNativeAnnotationBackup(pdfFile)",
-            "readPropertiesIfFile(marker)",
+            "val markerAuthority = readPersistedAuthorityIfFile(marker)",
+            "strictNativeSpreadMarkerProperties(authority.bytes)",
             "assessNativeSpreadAuthority(",
-            "Handler(Looper.getMainLooper()).post",
-            "resolveNativeSpreadMode(",
+            "publishNativeSpreadModeAfterRevalidation(",
         ],
-        "off-main-thread marker and recovery validation",
+        "single-snapshot off-main-thread marker and recovery validation",
     )
     require(
         load_segment,
         [
             "if (propertiesResult.isFailure)",
             'NativeSpreadHandshake(false, "marker_unreadable")',
-            "backupResult,\n                                authority,",
+            "markerAuthority,\n                            capability,",
+            "backupResult,\n                            authority,",
         ],
         "malformed-marker recovery-only state",
+    )
+    publish_start = plugin.find("private fun publishNativeSpreadModeAfterRevalidation(")
+    publish_end = plugin.find("private fun resolveNativeSpreadMode(", publish_start)
+    if publish_start < 0 or publish_end < 0:
+        fail("could not isolate native-mode snapshot publication")
+    publish_segment = plugin[publish_start:publish_end]
+    ordered(
+        publish_segment,
+        [
+            "val currentMarkerAuthority = readPersistedAuthorityIfFile(marker)",
+            "samePersistedAuthority(\n                        expectedMarkerAuthority,",
+            '"Native Spread marker changed while its settings were loading"',
+            "Handler(Looper.getMainLooper()).post",
+            "resolveNativeSpreadMode(",
+        ],
+        "post-handshake exact marker-snapshot revalidation",
+    )
+    require(
+        plugin,
+        [
+            "private fun inspectNativeMarkRecoveryFenceFromAuthority(",
+            "markerAuthority: PersistedFileAuthority?,",
+            "inspectNativeMarkRecoveryFenceFromAuthority(\n            pdfFile,",
+        ],
+        "recovery assessment consumes the loaded marker authority",
     )
     if "minimumVersion <" in marker or "minimumVersion >" in marker:
         fail("v2 marker admission permits a version range instead of exact contract")
@@ -2052,6 +2078,37 @@ def main() -> None:
         ],
         "post-rename descriptor capture precedes adversarial publication callback",
     )
+    activation_start = plugin.find(
+        "private fun activateNativeSpreadEditableWithStableBackup("
+    )
+    activation_end = plugin.find(
+        "private fun rollbackNativeSpreadEditableActivation(", activation_start
+    )
+    if activation_start < 0 or activation_end < 0:
+        fail("could not isolate protected editable activation")
+    activation = plugin[activation_start:activation_end]
+    ordered(
+        activation,
+        [
+            "var committedMarkerPublishedByActivation = false",
+            "var committedMarkerVerifiedByActivation = false",
+            "val committedBackup = commitNativeSpreadEditableMarker(",
+            "committedMarkerPublishedByActivation = true",
+            "committedMarkerVerifiedByActivation = true",
+            "return committedBackup",
+            "if (committedMarkerPublishedByActivation) {",
+            "RTL_READER_NATIVE_EDITABLE_COMMIT_VERIFICATION_FAILED",
+            "throw activationError",
+        ],
+        "committed publication is distinct from verified activation success",
+    )
+    if "if (markerCommittedByActivation" in activation or (
+        "if (committedMarkerPublishedByActivation" in activation
+        and "return backup" in activation[
+            activation.find("if (committedMarkerPublishedByActivation") :
+        ]
+    ):
+        fail("post-publication verification failure is converted into success")
     if plugin.count("LINUX_O_DIRECTORY or OsConstants.O_NOFOLLOW") != 1:
         fail("directory descriptors bypass the pinned FUSE-compatible opener")
     pending_publish_start = plugin.find("private fun writeNativeSpreadPendingMarker(")

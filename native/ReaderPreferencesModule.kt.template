@@ -288,108 +288,82 @@ class ReaderPreferencesModule(
             startNativeBackupWorker("RTLReaderNativeModeLoad") {
                 try {
                     val backupResult = readNativeAnnotationBackup(pdfFile)
+                    // Read the marker once through its descriptor-backed
+                    // authority and derive every returned setting and recovery
+                    // assessment from those exact bytes. A second path read
+                    // here could validate a newer marker while returning stale
+                    // settings from an older one.
+                    val markerAuthority = readPersistedAuthorityIfFile(marker)
                     val propertiesResult = runCatching {
-                        readPropertiesIfFile(marker)
+                        markerAuthority?.let { authority ->
+                            strictNativeSpreadMarkerProperties(authority.bytes)
+                        } ?: Properties()
                     }
                     if (propertiesResult.isFailure) {
                         val authority = assessNativeSpreadAuthority(
                             pdfFile,
                             marker,
                             backupResult,
+                            markerAuthority,
                         )
-                        Handler(Looper.getMainLooper()).post {
-                            resolveNativeSpreadMode(
-                                promise,
-                                pdfFile,
-                                false,
-                                false,
-                                false,
-                                true,
-                                true,
-                                "fit",
-                                marker,
-                                capability,
-                                NativeSpreadHandshake(false, "marker_unreadable"),
-                                backupResult,
-                                authority,
-                            )
-                        }
+                        publishNativeSpreadModeAfterRevalidation(
+                            promise,
+                            pdfFile,
+                            false,
+                            false,
+                            false,
+                            true,
+                            true,
+                            "fit",
+                            marker,
+                            markerAuthority,
+                            capability,
+                            NativeSpreadHandshake(false, "marker_unreadable"),
+                            backupResult,
+                            authority,
+                        )
                         return@startNativeBackupWorker
                     }
                     val properties = propertiesResult.getOrThrow()
-                    val pendingActivation =
-                        properties.getProperty("mode", "") ==
-                            NATIVE_SPREAD_EDITABLE_MODE &&
-                            properties.getProperty("activationState", "") ==
-                            NATIVE_SPREAD_ACTIVATION_PENDING
-                    val configured = !pendingActivation &&
-                        properties.getProperty("enabled", "false")
-                            .equals("true", ignoreCase = true) &&
-                        properties.getProperty("direction", "")
-                            .equals("rtl", ignoreCase = true)
-                    val configuredEditable = configured &&
-                        protectedEditableMarkerValid(
-                            pdfFile,
-                            properties,
-                            backupResult.backup,
-                        )
-                    val legacyConfiguredEditable = configured &&
-                        legacyProtectedEditableMarkerValid(
-                            pdfFile,
-                            properties,
-                            backupResult.backup,
-                        )
-                    val reportedConfigured = configured &&
-                        (
-                            !markerClaimsProtectedEditable(properties) ||
-                                configuredEditable ||
-                                legacyConfiguredEditable
-                            )
-                    val coverSeparate = properties
-                        .getProperty("coverSeparate", "false")
-                        .equals("true", ignoreCase = true)
-                    val showDivider = !properties
-                        .getProperty("showDivider", "true")
-                        .equals("false", ignoreCase = true)
-                    val showHeader = !properties
-                        .getProperty("showHeader", "true")
-                        .equals("false", ignoreCase = true)
-                    val spreadSizing = if (
-                        properties.getProperty("spreadSizing", "fit")
-                            .equals("native_fill", ignoreCase = true)
-                    ) "native_fill" else "fit"
+                    val settings = nativeSpreadMarkerSettings(
+                        pdfFile,
+                        properties,
+                        backupResult,
+                    )
                     val authority = assessNativeSpreadAuthority(
                         pdfFile,
                         marker,
                         backupResult,
+                        markerAuthority,
                     )
 
+                    if (!capability.compatible) {
+                        publishNativeSpreadModeAfterRevalidation(
+                            promise,
+                            pdfFile,
+                            settings.reportedConfigured,
+                            settings.configuredEditable,
+                            settings.coverSeparate,
+                            settings.showDivider,
+                            settings.showHeader,
+                            settings.spreadSizing,
+                            marker,
+                            markerAuthority,
+                            capability,
+                            NativeSpreadHandshake(false, "package_incompatible"),
+                            backupResult,
+                            authority,
+                        )
+                        return@startNativeBackupWorker
+                    }
                     Handler(Looper.getMainLooper()).post {
-                        if (!capability.compatible) {
-                            resolveNativeSpreadMode(
-                                promise,
-                                pdfFile,
-                                reportedConfigured,
-                                configuredEditable,
-                                coverSeparate,
-                                showDivider,
-                                showHeader,
-                                spreadSizing,
-                                marker,
-                                capability,
-                                NativeSpreadHandshake(false, "package_incompatible"),
-                                backupResult,
-                                authority,
-                            )
-                            return@post
-                        }
                         val handshakeGeneration =
                             nativeSpreadConfigurationGeneration.get()
                         requestNativeSpreadHandshake(
                             pdfFile,
                             handshakeGeneration,
                         ) { handshake ->
-                            if (handshake.active && legacyConfiguredEditable) {
+                            if (handshake.active && settings.legacyConfiguredEditable) {
                                 startNativeBackupWorker(
                                     "RTLReaderNativeEditableMigrate",
                                 ) {
@@ -406,29 +380,43 @@ class ReaderPreferencesModule(
                                                 migratedBackup,
                                                 "verified:migrated-legacy-session",
                                             )
+                                        val migratedMarkerAuthority =
+                                            readPersistedAuthorityIfFile(marker)
+                                        val migratedProperties =
+                                            migratedMarkerAuthority?.let { snapshot ->
+                                                strictNativeSpreadMarkerProperties(
+                                                    snapshot.bytes,
+                                                )
+                                            } ?: Properties()
+                                        val migratedSettings =
+                                            nativeSpreadMarkerSettings(
+                                                pdfFile,
+                                                migratedProperties,
+                                                migratedResult,
+                                            )
                                         val migratedAuthority =
                                             assessNativeSpreadAuthority(
                                                 pdfFile,
                                                 marker,
                                                 migratedResult,
+                                                migratedMarkerAuthority,
                                             )
-                                        Handler(Looper.getMainLooper()).post {
-                                            resolveNativeSpreadMode(
-                                                promise,
-                                                pdfFile,
-                                                reportedConfigured,
-                                                true,
-                                                coverSeparate,
-                                                showDivider,
-                                                showHeader,
-                                                spreadSizing,
-                                                marker,
-                                                capability,
-                                                handshake,
-                                                migratedResult,
-                                                migratedAuthority,
-                                            )
-                                        }
+                                        publishNativeSpreadModeAfterRevalidation(
+                                            promise,
+                                            pdfFile,
+                                            migratedSettings.reportedConfigured,
+                                            migratedSettings.configuredEditable,
+                                            migratedSettings.coverSeparate,
+                                            migratedSettings.showDivider,
+                                            migratedSettings.showHeader,
+                                            migratedSettings.spreadSizing,
+                                            marker,
+                                            migratedMarkerAuthority,
+                                            capability,
+                                            handshake,
+                                            migratedResult,
+                                            migratedAuthority,
+                                        )
                                     } catch (error: Throwable) {
                                         Log.e(
                                             LOG_TAG,
@@ -437,43 +425,58 @@ class ReaderPreferencesModule(
                                         )
                                         val failedResult =
                                             readNativeAnnotationBackup(pdfFile)
+                                        val failedMarkerAuthority =
+                                            readPersistedAuthorityIfFile(marker)
+                                        val failedProperties =
+                                            failedMarkerAuthority?.let { snapshot ->
+                                                strictNativeSpreadMarkerProperties(
+                                                    snapshot.bytes,
+                                                )
+                                            } ?: Properties()
+                                        val failedSettings =
+                                            nativeSpreadMarkerSettings(
+                                                pdfFile,
+                                                failedProperties,
+                                                failedResult,
+                                            )
                                         val failedAuthority =
                                             assessNativeSpreadAuthority(
                                                 pdfFile,
                                                 marker,
                                                 failedResult,
+                                                failedMarkerAuthority,
                                             )
-                                        Handler(Looper.getMainLooper()).post {
-                                            resolveNativeSpreadMode(
-                                                promise,
-                                                pdfFile,
-                                                reportedConfigured,
-                                                false,
-                                                coverSeparate,
-                                                showDivider,
-                                                showHeader,
-                                                spreadSizing,
-                                                marker,
-                                                capability,
-                                                handshake,
-                                                failedResult,
-                                                failedAuthority,
-                                            )
-                                        }
+                                        publishNativeSpreadModeAfterRevalidation(
+                                            promise,
+                                            pdfFile,
+                                            failedSettings.reportedConfigured,
+                                            failedSettings.configuredEditable,
+                                            failedSettings.coverSeparate,
+                                            failedSettings.showDivider,
+                                            failedSettings.showHeader,
+                                            failedSettings.spreadSizing,
+                                            marker,
+                                            failedMarkerAuthority,
+                                            capability,
+                                            handshake,
+                                            failedResult,
+                                            failedAuthority,
+                                        )
                                     }
                                 }
                                 return@requestNativeSpreadHandshake
                             }
-                            resolveNativeSpreadMode(
+                            publishNativeSpreadModeAfterRevalidation(
                                 promise,
                                 pdfFile,
-                                reportedConfigured,
-                                configuredEditable,
-                                coverSeparate,
-                                showDivider,
-                                showHeader,
-                                spreadSizing,
+                                settings.reportedConfigured,
+                                settings.configuredEditable,
+                                settings.coverSeparate,
+                                settings.showDivider,
+                                settings.showHeader,
+                                settings.spreadSizing,
                                 marker,
+                                markerAuthority,
                                 capability,
                                 handshake,
                                 backupResult,
@@ -1352,6 +1355,69 @@ class ReaderPreferencesModule(
         backup
     }
 
+    /**
+     * The handshake is asynchronous and may outlive the marker snapshot that
+     * supplied the UI settings. Revalidate that exact descriptor-backed
+     * authority off the main thread immediately before publishing the result;
+     * a concurrent replacement is a stale load, never permission to combine
+     * old settings with newer marker authority.
+     */
+    private fun publishNativeSpreadModeAfterRevalidation(
+        promise: Promise,
+        pdfFile: File,
+        configured: Boolean,
+        configuredEditable: Boolean,
+        coverSeparate: Boolean,
+        showDivider: Boolean,
+        showHeader: Boolean,
+        spreadSizing: String,
+        marker: File,
+        expectedMarkerAuthority: PersistedFileAuthority?,
+        capability: NativeSpreadCapability,
+        handshake: NativeSpreadHandshake,
+        backupResult: NativeAnnotationBackupResult,
+        authority: NativeSpreadAuthorityAssessment,
+    ) {
+        startNativeBackupWorker("RTLReaderNativeModePublish") {
+            try {
+                val currentMarkerAuthority = readPersistedAuthorityIfFile(marker)
+                require(
+                    samePersistedAuthority(
+                        expectedMarkerAuthority,
+                        currentMarkerAuthority,
+                    ),
+                ) {
+                    "Native Spread marker changed while its settings were loading"
+                }
+                Handler(Looper.getMainLooper()).post {
+                    resolveNativeSpreadMode(
+                        promise,
+                        pdfFile,
+                        configured,
+                        configuredEditable,
+                        coverSeparate,
+                        showDivider,
+                        showHeader,
+                        spreadSizing,
+                        marker,
+                        capability,
+                        handshake,
+                        backupResult,
+                        authority,
+                    )
+                }
+            } catch (error: Throwable) {
+                Handler(Looper.getMainLooper()).post {
+                    promise.reject(
+                        "NATIVE_SPREAD_LOAD_STALE",
+                        error.message,
+                        error,
+                    )
+                }
+            }
+        }
+    }
+
     private fun resolveNativeSpreadMode(
         promise: Promise,
         pdfFile: File,
@@ -1529,12 +1595,107 @@ class ReaderPreferencesModule(
         val reconciliationAvailable: Boolean,
     )
 
+    private data class NativeSpreadMarkerSettings(
+        val reportedConfigured: Boolean,
+        val configuredEditable: Boolean,
+        val legacyConfiguredEditable: Boolean,
+        val coverSeparate: Boolean,
+        val showDivider: Boolean,
+        val showHeader: Boolean,
+        val spreadSizing: String,
+    )
+
+    private fun nativeSpreadMarkerSettings(
+        pdfFile: File,
+        properties: Properties,
+        backupResult: NativeAnnotationBackupResult,
+    ): NativeSpreadMarkerSettings {
+        val pendingActivation =
+            properties.getProperty("mode", "") == NATIVE_SPREAD_EDITABLE_MODE &&
+                properties.getProperty("activationState", "") ==
+                NATIVE_SPREAD_ACTIVATION_PENDING
+        val configured = !pendingActivation &&
+            properties.getProperty("enabled", "false")
+                .equals("true", ignoreCase = true) &&
+            properties.getProperty("direction", "")
+                .equals("rtl", ignoreCase = true)
+        val configuredEditable = configured &&
+            protectedEditableMarkerValid(
+                pdfFile,
+                properties,
+                backupResult.backup,
+            )
+        val legacyConfiguredEditable = configured &&
+            legacyProtectedEditableMarkerValid(
+                pdfFile,
+                properties,
+                backupResult.backup,
+            )
+        val reportedConfigured = configured &&
+            (
+                !markerClaimsProtectedEditable(properties) ||
+                    configuredEditable ||
+                    legacyConfiguredEditable
+                )
+        val coverSeparate = properties
+            .getProperty("coverSeparate", "false")
+            .equals("true", ignoreCase = true)
+        val showDivider = !properties
+            .getProperty("showDivider", "true")
+            .equals("false", ignoreCase = true)
+        val showHeader = !properties
+            .getProperty("showHeader", "true")
+            .equals("false", ignoreCase = true)
+        val spreadSizing = if (
+            properties.getProperty("spreadSizing", "fit")
+                .equals("native_fill", ignoreCase = true)
+        ) "native_fill" else "fit"
+        return NativeSpreadMarkerSettings(
+            reportedConfigured,
+            configuredEditable,
+            legacyConfiguredEditable,
+            coverSeparate,
+            showDivider,
+            showHeader,
+            spreadSizing,
+        )
+    }
+
     private fun assessNativeSpreadAuthority(
         pdfFile: File,
         marker: File,
         backupResult: NativeAnnotationBackupResult,
     ): NativeSpreadAuthorityAssessment {
-        val recoveryInspection = inspectNativeMarkRecoveryFence(pdfFile, marker)
+        val markerAuthority = try {
+            readPersistedAuthorityIfFile(marker)
+        } catch (error: Throwable) {
+            return NativeSpreadAuthorityAssessment(
+                "error",
+                "marker_unreadable:${error.message}",
+                false,
+                true,
+                true,
+            )
+        }
+        return assessNativeSpreadAuthority(
+            pdfFile,
+            marker,
+            backupResult,
+            markerAuthority,
+        )
+    }
+
+    private fun assessNativeSpreadAuthority(
+        pdfFile: File,
+        marker: File,
+        backupResult: NativeAnnotationBackupResult,
+        markerAuthority: PersistedFileAuthority?,
+    ): NativeSpreadAuthorityAssessment {
+        val recoveryInspection = inspectNativeMarkRecoveryFenceFromAuthority(
+            pdfFile,
+            marker,
+            markerAuthority,
+        )
         if (recoveryInspection.blocking) {
             return NativeSpreadAuthorityAssessment(
                 "recovery",
@@ -1545,7 +1706,9 @@ class ReaderPreferencesModule(
             )
         }
         val markerProperties = try {
-            readPropertiesIfFile(marker)
+            markerAuthority?.let { authority ->
+                strictNativeSpreadMarkerProperties(authority.bytes)
+            } ?: Properties()
         } catch (error: Throwable) {
             return NativeSpreadAuthorityAssessment(
                 "error",
@@ -2060,6 +2223,18 @@ class ReaderPreferencesModule(
                 "journal_unreadable:${error.message}",
             )
         }
+        return inspectNativeMarkRecoveryFenceFromAuthority(
+            pdfFile,
+            marker,
+            authority,
+        )
+    }
+
+    private fun inspectNativeMarkRecoveryFenceFromAuthority(
+        pdfFile: File,
+        marker: File,
+        authority: PersistedFileAuthority?,
+    ): NativeMarkRecoveryInspection {
         if (authority == null) {
             return if (nativeMarkRecoveryPathRegistered(marker)) {
                 NativeMarkRecoveryInspection(null, true, "journal_disappeared")
@@ -3665,7 +3840,8 @@ class ReaderPreferencesModule(
         val activationToken = UUID.randomUUID().toString()
         var backup: NativeAnnotationBackup? = null
         var markerPublishedByActivation = false
-        var markerCommittedByActivation = false
+        var committedMarkerPublishedByActivation = false
+        var committedMarkerVerifiedByActivation = false
         var rollbackAttempted = false
         try {
             val activationBackup = ensureStableNativeAnnotationBackupForActivation(
@@ -3717,7 +3893,7 @@ class ReaderPreferencesModule(
                     LOG_TAG,
                     "RTL_READER_NATIVE_EDITABLE_PENDING_LIVE_MARK_VERIFIED token=$activationToken",
                 )
-                return commitNativeSpreadEditableMarker(
+                val committedBackup = commitNativeSpreadEditableMarker(
                     pdfFile,
                     marker,
                     activationToken,
@@ -3729,8 +3905,10 @@ class ReaderPreferencesModule(
                     requireLiveBaselineMatch = !backupManifestExisted,
                     configurationGeneration = configurationGeneration,
                 ) {
-                    markerCommittedByActivation = true
+                    committedMarkerPublishedByActivation = true
                 }
+                committedMarkerVerifiedByActivation = true
+                return committedBackup
             }
 
             val changed = IllegalStateException(
@@ -3753,10 +3931,20 @@ class ReaderPreferencesModule(
             // explicitly retry from a fresh snapshot of the newer live mark.
             throw changed
         } catch (activationError: Throwable) {
-            if (markerCommittedByActivation && backup != null) {
-                // The committed rename is final authorization. No later local
-                // bookkeeping failure may roll it back into an ambiguous state.
-                return backup
+            if (committedMarkerPublishedByActivation) {
+                // The committed rename is final authorization, so rollback is
+                // no longer safe. Publication alone is not a successful
+                // activation, however: a descriptor/path/bytes/fsync failure
+                // after rename must still reject the caller and be re-admitted
+                // from persisted authority on the next load.
+                Log.e(
+                    LOG_TAG,
+                    "RTL_READER_NATIVE_EDITABLE_COMMIT_VERIFICATION_FAILED " +
+                        "verified=$committedMarkerVerifiedByActivation: " +
+                        activationError.message,
+                    activationError,
+                )
+                throw activationError
             }
             if (backup != null && !rollbackAttempted) {
                 rollbackAttempted = true

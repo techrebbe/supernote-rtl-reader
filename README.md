@@ -55,6 +55,12 @@ storage legitimately advancing the renamed inode's `ctime`, while still
 requiring the exact inode, post-rename version, destination bytes, final path,
 and pinned parent directory to agree. The preceding v0.4.18 activation failed
 closed on this platform behavior and restored the original document state.
+Mode loading likewise carries one descriptor-backed marker snapshot through
+settings parsing and recovery assessment, then revalidates that exact snapshot
+after the asynchronous companion handshake before returning it to the UI.
+Committed publication and successful activation verification are separate:
+post-rename verification failures remain non-rollbackable but propagate as
+failures rather than being reported as a successful enable.
 
 The final adversarial review additionally made input freezes and lifecycle
 publication epoch-owned, so stale composition work cannot reopen input or

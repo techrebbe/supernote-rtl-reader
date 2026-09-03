@@ -7,7 +7,7 @@ with SupernoteDocument `1.02.446`.
 ## Native Reader v2 pre-hardware adversarial gate — PASS
 
 - [x] 85,071 deterministic controller/geometry/transaction assertions pass.
-- [x] 177 authority mutations are rejected, including exact firmware-declaration
+- [x] 179 authority mutations are rejected, including exact firmware-declaration
   and native pen-callback ownership drift, stale admission evidence,
   contained-runtime publication, contact-safe containment, three-layer stock
   restoration, projection drain ordering, and descriptor-backed marker
@@ -25,7 +25,7 @@ with SupernoteDocument `1.02.446`.
   `8a641a67be2b56acb4afbe0634bc6187d5e07ac230b50e02d87c93bdeb749f3c`.
   The exact locally generated v0.4.19 RTL Reader hardware-candidate package
   for this gate has SHA-256
-  `a2ab8ee29678642445e7d876fdaa1106f033843929b910c5e40df5e1b6d98964`.
+  `c572b26eaa3f60b8fc7450bd4a37d3471e056483902cb7a4cdd966bd001080a2`.
 - [x] The final adversarial review findings are covered by deterministic gates:
   epoch-owned input/lifecycle authority, exact stock-reload receipts, no-clobber
   `.mark` publication/rollback interleavings, post-commit relaunch, exact
@@ -66,6 +66,14 @@ with SupernoteDocument `1.02.446`.
   capture ordering and all three authority fences. An executable injected
   post-rename `fstat` failure additionally proves that the irreversible
   publication callback runs exactly once before the failure propagates.
+- [x] The final exact-head review's two concurrency findings are reproduced and
+  guarded. Mode loading now derives settings, configuration state, and recovery
+  assessment from one descriptor-backed marker snapshot and revalidates that
+  exact authority after the asynchronous companion handshake before resolving.
+  Committed-marker publication is tracked separately from verified activation:
+  a post-rename verification failure suppresses unsafe rollback but still
+  rejects activation instead of being converted into success. Executable race
+  models and two new static mutations cover both boundaries.
 - [ ] Exact-head independent review is clean.
 - [ ] Nomad hardware gate passes. No hardware result is claimed by this
   automated section.

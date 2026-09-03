@@ -750,6 +750,26 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
+        "                    samePersistedAuthority(\n"
+        "                        expectedMarkerAuthority,\n"
+        "                        currentMarkerAuthority,\n"
+        "                    ),",
+        "                    samePersistedAuthority(\n"
+        "                        currentMarkerAuthority,\n"
+        "                        currentMarkerAuthority,\n"
+        "                    ),",
+        "post-handshake marker snapshot revalidation",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "            if (committedMarkerPublishedByActivation) {\n"
+        "                // The committed rename is final authorization, so rollback is\n",
+        "            if (false) {\n"
+        "                // The committed rename is final authorization, so rollback is\n",
+        "committed-marker verification failure propagation",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
         '            startNativeBackupWorker("RTLReaderNativeModeLoad") {',
         "            run {",
         "native-mode validation background worker",
@@ -1512,6 +1532,76 @@ def run_post_rename_publication_boundary_tests() -> None:
     print("Native Reader v2 post-rename publication boundary: PASS")
 
 
+def run_marker_snapshot_revalidation_tests() -> None:
+    """Model the one-snapshot load fence across an asynchronous handshake."""
+    persisted = {"identity": 1, "bytes": b"coverSeparate=false"}
+    snapshot = dict(persisted)
+
+    def publish_loaded_settings() -> str:
+        if persisted != snapshot:
+            raise _InterleavingRejected("marker changed while settings loaded")
+        return "published"
+
+    assert publish_loaded_settings() == "published"
+    persisted["identity"] = 2
+    persisted["bytes"] = b"coverSeparate=true"
+    try:
+        publish_loaded_settings()
+        raise AssertionError("stale marker settings were published")
+    except _InterleavingRejected as error:
+        assert str(error) == "marker changed while settings loaded"
+    print("Native Reader v2 marker snapshot revalidation: PASS")
+
+
+def run_committed_marker_verification_failure_tests() -> None:
+    """Publication suppresses rollback but never turns failed verification into success."""
+    state = {"published": False, "verified": False, "rollbacks": 0}
+
+    def activate(commit) -> str:
+        try:
+            result = commit(lambda: state.update(published=True))
+            state["verified"] = True
+            return result
+        except OSError:
+            if state["published"]:
+                raise
+            state["rollbacks"] += 1
+            raise
+
+    def fail_after_publish(on_published):
+        on_published()
+        raise OSError("post-publication verification failed")
+
+    try:
+        activate(fail_after_publish)
+        raise AssertionError("post-publication verification failure became success")
+    except OSError as error:
+        assert str(error) == "post-publication verification failed"
+    assert state == {"published": True, "verified": False, "rollbacks": 0}
+
+    state.update(published=False, verified=False, rollbacks=0)
+
+    def fail_before_publish(_on_published):
+        raise OSError("pre-publication failure")
+
+    try:
+        activate(fail_before_publish)
+        raise AssertionError("pre-publication failure became success")
+    except OSError as error:
+        assert str(error) == "pre-publication failure"
+    assert state == {"published": False, "verified": False, "rollbacks": 1}
+
+    state.update(published=False, verified=False, rollbacks=0)
+
+    def succeed(on_published):
+        on_published()
+        return "verified"
+
+    assert activate(succeed) == "verified"
+    assert state == {"published": True, "verified": True, "rollbacks": 0}
+    print("Native Reader v2 committed marker verification failures: PASS")
+
+
 def run_configuration_generation_interleaving_tests() -> None:
     gate = _ConfigurationGenerationGate()
     state = {"marker": "off", "pending": None}
@@ -2243,6 +2333,8 @@ def main() -> None:
         temp_root = pathlib.Path(temp)
         run_configuration_generation_interleaving_tests()
         run_post_rename_publication_boundary_tests()
+        run_marker_snapshot_revalidation_tests()
+        run_committed_marker_verification_failure_tests()
         run_no_clobber_interleaving_tests(temp_root)
         run_durable_recovery_fence_tests(temp_root)
         for filename, old, new, label in MUTATIONS:

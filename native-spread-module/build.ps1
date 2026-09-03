@@ -11,7 +11,6 @@ param(
     [string]$DebugKeystore = $(
         Join-Path $env:USERPROFILE '.android\debug.keystore'
     ),
-    [Parameter(Mandatory = $true)]
     [string]$ExpectedSignerSha256,
     [string]$PythonExecutable = $(
         if ($env:PYTHON_BIN) {
@@ -21,7 +20,8 @@ param(
             if ($pythonCommand) { $pythonCommand.Source } else { '' }
         }
     ),
-    [switch]$InternalReproducibilityPass
+    [switch]$InternalReproducibilityPass,
+    [switch]$AlignedOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -138,14 +138,16 @@ $aapt2 = Join-Path $buildTools 'aapt2.exe'
 $d8 = Join-Path $buildTools 'd8.bat'
 $zipalign = Join-Path $buildTools 'zipalign.exe'
 $apksigner = Join-Path $buildTools 'apksigner.bat'
-foreach ($required in @(
+$requiredDependencies = @(
     $androidJar,
     $aapt2,
     $d8,
-    $zipalign,
-    $apksigner,
-    $DebugKeystore
-)) {
+    $zipalign
+)
+if (-not $AlignedOnly) {
+    $requiredDependencies += @($apksigner, $DebugKeystore)
+}
+foreach ($required in $requiredDependencies) {
     if (-not (Test-Path -LiteralPath $required)) {
         throw "Missing build dependency: $required"
     }
@@ -254,38 +256,42 @@ if ($LASTEXITCODE -ne 0) {
     throw "zipalign failed with exit code $LASTEXITCODE"
 }
 
-$outputApk = Join-Path $artifactDir `
-    "SupernoteNativeSpreadProbe-v$versionName.apk"
-& $apksigner sign `
-    --ks $DebugKeystore `
-    --ks-key-alias androiddebugkey `
-    --ks-pass pass:android `
-    --key-pass pass:android `
-    --out $outputApk `
-    $alignedApk
+$outputApk = $alignedApk
+$normalizedExpectedSigner = ''
+if (-not $AlignedOnly) {
+    $outputApk = Join-Path $artifactDir `
+        "SupernoteNativeSpreadProbe-v$versionName.apk"
+    & $apksigner sign `
+        --ks $DebugKeystore `
+        --ks-key-alias androiddebugkey `
+        --ks-pass pass:android `
+        --key-pass pass:android `
+        --out $outputApk `
+        $alignedApk
 
-if ($LASTEXITCODE -ne 0) {
-    throw "apksigner failed with exit code $LASTEXITCODE"
-}
+    if ($LASTEXITCODE -ne 0) {
+        throw "apksigner failed with exit code $LASTEXITCODE"
+    }
 
-$verificationOutput = @(
-    & $apksigner verify --verbose --print-certs $outputApk 2>&1
-)
-$verificationOutput | ForEach-Object { Write-Host $_ }
-if ($LASTEXITCODE -ne 0) {
-    throw "apksigner verification failed with exit code $LASTEXITCODE"
-}
-$normalizedExpectedSigner = $ExpectedSignerSha256.Trim().ToLowerInvariant()
-if ($normalizedExpectedSigner -notmatch '^[0-9a-f]{64}$') {
-    throw 'Expected signer SHA-256 is not canonical lowercase hexadecimal.'
-}
-$signerLine = "Signer #1 certificate SHA-256 digest: $normalizedExpectedSigner"
-if (-not ($verificationOutput -contains 'Number of signers: 1') -or
-    -not ($verificationOutput -contains $signerLine)) {
-    throw (
-        'APK signer does not match the exact established upgrade identity: ' +
-        $normalizedExpectedSigner
+    $verificationOutput = @(
+        & $apksigner verify --verbose --print-certs $outputApk 2>&1
     )
+    $verificationOutput | ForEach-Object { Write-Host $_ }
+    if ($LASTEXITCODE -ne 0) {
+        throw "apksigner verification failed with exit code $LASTEXITCODE"
+    }
+    $normalizedExpectedSigner = $ExpectedSignerSha256.Trim().ToLowerInvariant()
+    if ($normalizedExpectedSigner -notmatch '^[0-9a-f]{64}$') {
+        throw 'Expected signer SHA-256 is not canonical lowercase hexadecimal.'
+    }
+    $signerLine = "Signer #1 certificate SHA-256 digest: $normalizedExpectedSigner"
+    if (-not ($verificationOutput -contains 'Number of signers: 1') -or
+        -not ($verificationOutput -contains $signerLine)) {
+        throw (
+            'APK signer does not match the exact established upgrade identity: ' +
+            $normalizedExpectedSigner
+        )
+    }
 }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -366,18 +372,30 @@ $firstBuildHash = (Get-FileHash `
     -Algorithm SHA256 `
     -LiteralPath $outputApk
 ).Hash
-Write-Host "Native Reader APK SHA-256: $firstBuildHash"
+if ($AlignedOnly) {
+    Write-Host "Native Reader aligned APK SHA-256: $firstBuildHash"
+} else {
+    Write-Host "Native Reader APK SHA-256: $firstBuildHash"
+}
 
 if (-not $InternalReproducibilityPass) {
-    & $windowsPowerShell `
-        -NoProfile `
-        -ExecutionPolicy Bypass `
-        -File $PSCommandPath `
-        -AndroidSdk $AndroidSdk `
-        -DebugKeystore $DebugKeystore `
-        -ExpectedSignerSha256 $normalizedExpectedSigner `
-        -PythonExecutable $PythonExecutable `
-        -InternalReproducibilityPass
+    $rebuildArguments = @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', $PSCommandPath,
+        '-AndroidSdk', $AndroidSdk,
+        '-PythonExecutable', $PythonExecutable,
+        '-InternalReproducibilityPass'
+    )
+    if ($AlignedOnly) {
+        $rebuildArguments += '-AlignedOnly'
+    } else {
+        $rebuildArguments += @(
+            '-DebugKeystore', $DebugKeystore,
+            '-ExpectedSignerSha256', $normalizedExpectedSigner
+        )
+    }
+    & $windowsPowerShell @rebuildArguments
     if ($LASTEXITCODE -ne 0) {
         throw "Second clean reproducibility build failed with exit code $LASTEXITCODE"
     }

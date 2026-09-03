@@ -3,6 +3,8 @@ package com.techrebbe.supernote.spreadprobe.v2android;
 import android.graphics.Bitmap;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.IBinder;
 import android.os.Parcel;
@@ -514,6 +516,32 @@ public final class NativeReaderV2FirmwareAccess {
                 exception
             );
         }
+    }
+
+    /**
+     * Proves that all three stock replacements acknowledged after a reload are
+     * still the exact objects installed in the native presentation.  The
+     * background and digest are read from their ImageViews; the HandWriteView
+     * and presenter share the live writer bitmap established by loadPage.
+     */
+    public boolean stockPresentationLayersMatch(
+        Components components,
+        Bitmap background,
+        Bitmap ink,
+        Bitmap digest
+    ) {
+        return components != null
+            && installedBitmap(components.image) == background
+            && liveHandwritingBitmap(components) == ink
+            && installedBitmap(components.digestImage) == digest;
+    }
+
+    private static Bitmap installedBitmap(ImageView view) {
+        if (view == null) return null;
+        Drawable drawable = view.getDrawable();
+        if (!(drawable instanceof BitmapDrawable)) return null;
+        Bitmap bitmap = ((BitmapDrawable) drawable).getBitmap();
+        return bitmap == null || bitmap.isRecycled() ? null : bitmap;
     }
 
     /**

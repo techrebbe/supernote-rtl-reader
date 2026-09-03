@@ -479,15 +479,19 @@ public final class NativeReaderV2CoreTests {
             "finger wins unfrozen ingress");
         check(!gate.begin(AtomicInputAdmission.Contact.STYLUS),
             "second physical contact rejected");
-        check(gate.freezeIfIdle() < 0L,
+        check(gate.freezeIfIdle() == null,
             "transaction cannot cross admitted contact");
-        long draining = gate.freeze();
-        check(draining > 0L && gate.frozen(),
+        AtomicInputAdmission.FreezeToken draining = gate.freeze();
+        check(draining.generation > 0L && gate.frozen(),
             "containment freezes while admitted contact drains");
         gate.end(AtomicInputAdmission.Contact.FINGER);
         check(!gate.begin(AtomicInputAdmission.Contact.STYLUS),
             "new contact remains blocked after prior terminal");
-        gate.release();
+        AtomicInputAdmission.FreezeToken lifecycle = gate.freeze();
+        check(!gate.release(draining),
+            "superseded completion cannot release lifecycle freeze");
+        check(gate.release(lifecycle),
+            "current lifecycle owner releases exact freeze epoch");
         check(gate.begin(AtomicInputAdmission.Contact.STYLUS),
             "stylus admitted after explicit release");
         gate.end(AtomicInputAdmission.Contact.STYLUS);
@@ -505,7 +509,7 @@ public final class NativeReaderV2CoreTests {
             });
             Thread freeze = new Thread(() -> {
                 await(start);
-                if (raced.freezeIfIdle() >= 0L) freezeWins.incrementAndGet();
+                if (raced.freezeIfIdle() != null) freezeWins.incrementAndGet();
             });
             contact.start();
             freeze.start();
@@ -515,6 +519,17 @@ public final class NativeReaderV2CoreTests {
             equal(1, contactWins.get() + freezeWins.get(),
                 "contact/freeze boundary has exactly one winner");
         }
+
+        AtomicInputAdmission replacement = new AtomicInputAdmission();
+        AtomicInputAdmission.FreezeToken first = replacement.freezeIfIdle();
+        AtomicInputAdmission.FreezeToken restore = replacement.supersedeIfIdle();
+        check(first != null && restore != null
+                && restore.generation > first.generation,
+            "restoration supersedes an older frozen epoch");
+        check(!replacement.release(first) && replacement.frozen(),
+            "old asynchronous owner cannot thaw restoration");
+        check(replacement.release(restore),
+            "restoration owner releases its exact epoch");
     }
 
     private static void testNativeAsyncSaveFence() {
@@ -552,24 +567,39 @@ public final class NativeReaderV2CoreTests {
         Object oldDigest = new Object();
         NativePresentationRestoreWitness witness =
             new NativePresentationRestoreWitness();
+        long reload = 4L;
+        Object nextBackground = new Object();
+        Object nextInk = new Object();
+        Object nextDigest = new Object();
         NativePresentationRestoreWitness.Token token = witness.begin(
             source, background, ink, digest,
-            oldBackground, oldInk, oldDigest, 20L
+            oldBackground, oldInk, oldDigest, 20L, reload
         );
         check(witness.observe(token,
             NativePresentationRestoreWitness.Layer.BACKGROUND,
-            21L, background, new Object(), source),
+            reload, 21L, background, nextBackground, source),
             "stock background replacement witnessed");
         check(witness.observe(token,
             NativePresentationRestoreWitness.Layer.INK,
-            22L, ink, new Object(), source),
+            reload, 22L, ink, nextInk, source),
             "stock ink replacement witnessed");
         check(witness.observe(token,
             NativePresentationRestoreWitness.Layer.DIGEST,
-            23L, digest, new Object(), source),
+            reload, 23L, digest, nextDigest, source),
             "stock digest replacement witnessed");
+        check(!witness.ready(token),
+            "stock layers alone cannot impersonate reload completion");
+        check(witness.observePageReady(
+                token, reload, 24L, digest, source, 2),
+            "exact native page-ready receipt witnessed");
+        check(witness.installedLayersMatch(
+                token, nextBackground, nextInk, nextDigest),
+            "exact installed replacement identities retained");
+        check(!witness.installedLayersMatch(
+                token, new Object(), nextInk, nextDigest),
+            "mixed-generation installed layer identity rejected");
         check(witness.ready(token),
-            "all exact stock layers satisfy restoration");
+            "reload-bound page-ready and exact layers satisfy restoration");
         check(witness.finish(token),
             "versioned stock restoration completes once");
         check(!witness.finish(token),
@@ -579,11 +609,11 @@ public final class NativeReaderV2CoreTests {
             new NativePresentationRestoreWitness();
         NativePresentationRestoreWitness.Token wrong = wrongReceiver.begin(
             source, background, ink, digest,
-            oldBackground, oldInk, oldDigest, 30L
+            oldBackground, oldInk, oldDigest, 30L, 5L
         );
         check(!wrongReceiver.observe(wrong,
             NativePresentationRestoreWitness.Layer.BACKGROUND,
-            31L, new Object(), new Object(), source),
+            5L, 31L, new Object(), new Object(), source),
             "wrong stock receiver rejected");
         check(!wrongReceiver.ready(wrong),
             "mismatched receipt permanently invalidates restoration");
@@ -592,23 +622,44 @@ public final class NativeReaderV2CoreTests {
             new NativePresentationRestoreWitness();
         NativePresentationRestoreWitness.Token reused = oldBitmap.begin(
             source, background, ink, digest,
-            oldBackground, oldInk, oldDigest, 40L
+            oldBackground, oldInk, oldDigest, 40L, 6L
         );
         check(!oldBitmap.observe(reused,
             NativePresentationRestoreWitness.Layer.INK,
-            41L, ink, oldInk, source),
+            6L, 41L, ink, oldInk, source),
             "v2 ink bitmap reuse is not stock restoration");
 
         NativePresentationRestoreWitness wrongGeneration =
             new NativePresentationRestoreWitness();
         NativePresentationRestoreWitness.Token stale = wrongGeneration.begin(
             source, background, ink, digest,
-            oldBackground, oldInk, oldDigest, 50L
+            oldBackground, oldInk, oldDigest, 50L, 7L
         );
         check(!wrongGeneration.observe(stale,
             NativePresentationRestoreWitness.Layer.DIGEST,
-            51L, digest, new Object(), spread(1, 7L, 12L, true)),
+            7L, 51L, digest, new Object(), spread(1, 7L, 12L, true)),
             "different layout generation cannot acknowledge stock restore");
+
+        NativePresentationRestoreWitness wrongReload =
+            new NativePresentationRestoreWitness();
+        NativePresentationRestoreWitness.Token oldEpoch = wrongReload.begin(
+            source, background, ink, digest,
+            oldBackground, oldInk, oldDigest, 60L, 8L
+        );
+        check(!wrongReload.observe(oldEpoch,
+                NativePresentationRestoreWitness.Layer.BACKGROUND,
+                7L, 61L, background, new Object(), source),
+            "layer callback from older reload generation rejected");
+
+        NativePresentationRestoreWitness wrongPageReady =
+            new NativePresentationRestoreWitness();
+        NativePresentationRestoreWitness.Token wrongPage = wrongPageReady.begin(
+            source, background, ink, digest,
+            oldBackground, oldInk, oldDigest, 70L, 9L
+        );
+        check(!wrongPageReady.observePageReady(
+                wrongPage, 9L, 71L, digest, source, 3),
+            "page-ready receipt with wrong presenter page rejected");
     }
 
     private static void testNativeWriterGeometry() {

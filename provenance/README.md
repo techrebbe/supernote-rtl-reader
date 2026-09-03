@@ -15,4 +15,6 @@ The plugin bootstrap is intentionally fail-closed.
   template or any dependency requires an explicit provenance update and review.
 
 No signing key or signing-key encoding belongs in this directory. Stable APK
-signing material is supplied only through the encrypted GitHub Actions secret.
+signing material is supplied only as an environment-scoped GitHub Actions
+secret. The protected release job has no repository checkout or repository
+script execution, and a repository-wide copy of the secret is forbidden.

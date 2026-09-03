@@ -525,8 +525,10 @@ STATIC_MUTATIONS = (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2Runtime.java",
         "        if (retired || containedFailClosed || detachmentPrepared\n"
+        "            || lifecycleSuspended\n"
         "            || generation != refreshGeneration) return;",
         "        if (retired || detachmentPrepared\n"
+        "            || lifecycleSuspended\n"
         "            || generation != refreshGeneration) return;",
         "contained runtime publication fence",
     ),
@@ -570,9 +572,54 @@ STATIC_MUTATIONS = (
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2/AtomicInputAdmission.java",
-        "        if (frozen || fingerActive || stylusActive) return -1L;",
-        "        if (frozen) return -1L;",
+        "        if (freezeToken != null || fingerActive || stylusActive) return null;",
+        "        if (freezeToken != null) return null;",
         "atomic freeze rejects live contact",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2/AtomicInputAdmission.java",
+        "        if (token == null || token != freezeToken) return false;",
+        "        if (token == null) return false;",
+        "freeze release token identity",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "            || lifecycleEpoch != compositionLifecycleEpoch\n"
+        "            || !inputAdmission.current(compositionFreeze)) {",
+        "            || !inputAdmission.current(compositionFreeze)) {",
+        "composition lifecycle epoch",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "                            expectedRuntime.onLifecycleResumeRevalidated();",
+        "                            expectedRuntime.scheduleRefresh(\n"
+        "                                \"resume_authority_revalidated\"\n"
+        "                            );",
+        "resume requires runtime lifecycle revalidation",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2/NativePresentationRestoreWitness.java",
+        "            || observed == null || reloadGeneration != token.reloadGeneration",
+        "            || observed == null",
+        "stock restoration reload generation",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2/NativePresentationRestoreWitness.java",
+        "            && !token.invalid && token.mask == 7 && token.pageReady;",
+        "            && !token.invalid && token.mask == 7;",
+        "stock restoration native page-ready receipt",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "                || !firmware.stockPresentationLayersMatch(\n",
+        "                || false && !firmware.stockPresentationLayersMatch(\n",
+        "stock restoration installed layer identities",
     ),
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
@@ -700,6 +747,44 @@ STATIC_MUTATIONS = (
         "Native Reader build completed",
         "two-clean-build reproducibility gate",
     ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "NATIVE_READER_V2_APK_LENGTH = 250395L",
+        "NATIVE_READER_V2_APK_LENGTH = 250394L",
+        "installed companion APK length pin",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "59474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
+        "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
+        "installed companion APK digest pin",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "applicationInfo.splitSourceDirs.isNullOrEmpty()",
+        "true",
+        "installed companion split rejection",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "Os.rename(file.absolutePath, displaced.absolutePath)",
+        "Os.rename(displaced.absolutePath, file.absolutePath)",
+        "mark displaced-inode preservation",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "OsConstants.O_EXCL or OsConstants.O_CLOEXEC or\n"
+        "                OsConstants.O_NOFOLLOW,",
+        "OsConstants.O_CLOEXEC or\n"
+        "                OsConstants.O_NOFOLLOW,",
+        "mark no-clobber final creation",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "val committed = persistenceError == null",
+        "val committed = true",
+        "post-commit relaunch boundary",
+    ),
 )
 
 
@@ -744,6 +829,166 @@ def compile_and_run(
         stderr=subprocess.PIPE,
         check=False,
     )
+
+
+class _InterleavingRejected(RuntimeError):
+    def __init__(self, message: str, preserved: pathlib.Path | None = None):
+        super().__init__(message)
+        self.preserved = preserved
+
+
+def _read_if_file(path: pathlib.Path) -> bytes | None:
+    try:
+        return path.read_bytes()
+    except FileNotFoundError:
+        return None
+
+
+def _model_no_clobber_publish(
+    destination: pathlib.Path,
+    expected: bytes | None,
+    replacement: bytes,
+    hook,
+) -> pathlib.Path | None:
+    """Executable model of the Kotlin preserve + O_EXCL protocol."""
+    hook("before_check", destination, None)
+    if _read_if_file(destination) != expected:
+        raise _InterleavingRejected("destination changed before preservation")
+    hook("after_check", destination, None)
+    displaced = None
+    if expected is not None:
+        displaced = destination.with_name(destination.name + ".displaced")
+        if displaced.exists():
+            raise AssertionError("test displacement path unexpectedly exists")
+        os.replace(destination, displaced)
+        if displaced.read_bytes() != expected:
+            raise _InterleavingRejected(
+                "race moved a foreign inode; it was preserved", displaced
+            )
+        if destination.exists():
+            raise _InterleavingRejected("destination reappeared", displaced)
+    hook("after_preserve", destination, displaced)
+    try:
+        with destination.open("xb") as output:
+            output.write(replacement)
+            output.flush()
+            os.fsync(output.fileno())
+    except FileExistsError as error:
+        raise _InterleavingRejected(
+            "O_EXCL preserved a racing destination", displaced
+        ) from error
+    return displaced
+
+
+def _model_no_clobber_rollback(
+    destination: pathlib.Path,
+    published: bytes | None,
+    previous: bytes | None,
+    hook,
+) -> pathlib.Path | None:
+    hook("before_check", destination, None)
+    if _read_if_file(destination) != published:
+        raise _InterleavingRejected("published destination changed")
+    hook("after_check", destination, None)
+    rejected = None
+    if published is not None:
+        rejected = destination.with_name(destination.name + ".rejected")
+        os.replace(destination, rejected)
+        if rejected.read_bytes() != published:
+            raise _InterleavingRejected(
+                "rollback preserved a racing inode", rejected
+            )
+    hook("after_preserve", destination, rejected)
+    if previous is not None:
+        try:
+            with destination.open("xb") as output:
+                output.write(previous)
+                output.flush()
+                os.fsync(output.fileno())
+        except FileExistsError as error:
+            raise _InterleavingRejected(
+                "rollback O_EXCL preserved a racing destination", rejected
+            ) from error
+    return rejected
+
+
+def run_no_clobber_interleaving_tests(temp_root: pathlib.Path) -> None:
+    def scenario(name: str) -> pathlib.Path:
+        root = temp_root / "no-clobber" / name
+        root.mkdir(parents=True)
+        return root
+
+    no_hook = lambda *_: None
+
+    root = scenario("normal-and-rollback")
+    mark = root / "book.pdf.mark"
+    mark.write_bytes(b"old")
+    displaced = _model_no_clobber_publish(mark, b"old", b"new", no_hook)
+    assert mark.read_bytes() == b"new"
+    assert displaced is not None and displaced.read_bytes() == b"old"
+    rejected = _model_no_clobber_rollback(mark, b"new", b"old", no_hook)
+    assert mark.read_bytes() == b"old"
+    assert rejected is not None and rejected.read_bytes() == b"new"
+
+    root = scenario("replacement-before-check")
+    mark = root / "book.pdf.mark"
+    mark.write_bytes(b"old")
+    def before_check(phase, destination, _preserved):
+        if phase == "before_check":
+            destination.write_bytes(b"racer")
+    try:
+        _model_no_clobber_publish(mark, b"old", b"new", before_check)
+        raise AssertionError("pre-check replacement was accepted")
+    except _InterleavingRejected:
+        assert mark.read_bytes() == b"racer"
+
+    root = scenario("replacement-between-check-and-preserve")
+    mark = root / "book.pdf.mark"
+    mark.write_bytes(b"old")
+    saved_old = root / "attacker-preserved-old"
+    def after_check(phase, destination, _preserved):
+        if phase == "after_check":
+            os.replace(destination, saved_old)
+            destination.write_bytes(b"racer")
+    try:
+        _model_no_clobber_publish(mark, b"old", b"new", after_check)
+        raise AssertionError("mid-preservation replacement was accepted")
+    except _InterleavingRejected as error:
+        assert saved_old.read_bytes() == b"old"
+        assert error.preserved is not None
+        assert error.preserved.read_bytes() == b"racer"
+
+    root = scenario("replacement-after-preserve")
+    mark = root / "book.pdf.mark"
+    mark.write_bytes(b"old")
+    def after_preserve(phase, destination, _preserved):
+        if phase == "after_preserve":
+            destination.write_bytes(b"racer")
+    try:
+        _model_no_clobber_publish(mark, b"old", b"new", after_preserve)
+        raise AssertionError("O_EXCL did not reject a late publication racer")
+    except _InterleavingRejected as error:
+        assert mark.read_bytes() == b"racer"
+        assert error.preserved is not None
+        assert error.preserved.read_bytes() == b"old"
+
+    root = scenario("rollback-replacement-after-preserve")
+    mark = root / "book.pdf.mark"
+    mark.write_bytes(b"new")
+    def rollback_after_preserve(phase, destination, _preserved):
+        if phase == "after_preserve":
+            destination.write_bytes(b"racer")
+    try:
+        _model_no_clobber_rollback(
+            mark, b"new", b"old", rollback_after_preserve
+        )
+        raise AssertionError("rollback O_EXCL did not reject a late racer")
+    except _InterleavingRejected as error:
+        assert mark.read_bytes() == b"racer"
+        assert error.preserved is not None
+        assert error.preserved.read_bytes() == b"new"
+
+    print("Native Reader v2 no-clobber interleavings: PASS")
 
 
 def prepare_static_tree(root: pathlib.Path, destination: pathlib.Path) -> None:
@@ -844,6 +1089,7 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory(prefix="native-reader-v2-mut-") as temp:
         temp_root = pathlib.Path(temp)
+        run_no_clobber_interleaving_tests(temp_root)
         for filename, old, new, label in MUTATIONS:
             source_dir = temp_root / label / "src"
             test_dir = temp_root / label / "tests"

@@ -112,8 +112,12 @@ public final class NativeReaderV2Runtime
     private long layoutGeneration;
     private long markRevision;
     private long refreshGeneration;
+    private long lifecycleEpoch = 1L;
+    private volatile boolean lifecycleSuspended;
     private boolean writerDisabled;
     private volatile boolean inputFrozen;
+    private volatile AtomicInputAdmission.FreezeToken inputFreezeToken;
+    private AtomicInputAdmission.FreezeToken transactionInputFreezeToken;
     private volatile boolean retired;
     private volatile boolean projectionShutdown;
     // Published on the firmware callback thread before Supernote receives
@@ -135,6 +139,11 @@ public final class NativeReaderV2Runtime
     private String pendingContainmentReason;
     private boolean stockPresentationRestorePending;
     private long stockPresentationSignalGeneration;
+    private long stockPresentationReloadGeneration;
+    private long activeStockPresentationReloadGeneration;
+    private Bitmap stockRestoreBackground;
+    private Bitmap stockRestoreInk;
+    private Bitmap stockRestoreDigest;
     private NativePresentationRestoreWitness.Token stockRestoreToken;
     private String pendingRetirementReason;
     private volatile Object expectedWriterDisablePresenter;
@@ -234,6 +243,7 @@ public final class NativeReaderV2Runtime
         assertOwnerThread();
         if (retired || containedFailClosed) return;
         freezeInputIngress();
+        final long activationLifecycleEpoch = lifecycleEpoch;
         executeProjection("activation_evidence", new Runnable() {
             @Override public void run() {
                 try {
@@ -241,6 +251,10 @@ public final class NativeReaderV2Runtime
                         .evidenceStillCurrent(evidence);
                     postGuarded("activation_evidence", new Runnable() {
                         @Override public void run() {
+                            if (lifecycleSuspended
+                                || lifecycleEpoch != activationLifecycleEpoch) {
+                                return;
+                            }
                             if (!current) {
                                 containFailClosed(
                                     "activation_publication_evidence_changed"
@@ -276,7 +290,8 @@ public final class NativeReaderV2Runtime
 
     public boolean isLandscapeActive() {
         assertOwnerThread();
-        return !retired && session != null && session.snapshot() != null
+        return !retired && !lifecycleSuspended
+            && session != null && session.snapshot() != null
             && session.snapshot().mode == SpreadSnapshot.Mode.SPREAD;
     }
 
@@ -298,7 +313,7 @@ public final class NativeReaderV2Runtime
     public boolean requestNavigation(int targetPage) {
         assertOwnerThread();
         SpreadSnapshot snapshot = session == null ? null : session.snapshot();
-        if (retired || snapshot == null || targetPage < 0
+        if (retired || lifecycleSuspended || snapshot == null || targetPage < 0
             || targetPage >= snapshot.pageCount) return false;
         if (tryStartNavigationAtomically(targetPage)) return true;
         return enqueueNavigation(DeferredNavigation.absolute(
@@ -310,7 +325,8 @@ public final class NativeReaderV2Runtime
     public boolean requestNativeTurn(int nativeOffset) {
         assertOwnerThread();
         SpreadSnapshot snapshot = session == null ? null : session.snapshot();
-        if (retired || snapshot == null || nativeOffset == 0) return false;
+        if (retired || lifecycleSuspended || snapshot == null
+            || nativeOffset == 0) return false;
         int target = NativeReaderV2Navigation.offsetTarget(
             snapshot,
             claim.config,
@@ -368,11 +384,12 @@ public final class NativeReaderV2Runtime
      */
     public boolean prepareSamePageReload() {
         assertOwnerThread();
-        if (retired || !isLandscapeActive() || latestObservation == null
+        if (retired || lifecycleSuspended || !isLandscapeActive()
+            || latestObservation == null
             || port == null || port.phase() != NativeReaderFirmwarePort.Phase.IDLE) {
             return false;
         }
-        if (!reserveInputIngressIfIdle()) return false;
+        if (reserveInputIngressIfIdle() == null) return false;
         ++refreshGeneration;
         if (!saveCurrentSourceNow()) {
             disableNativeReaderV2("same_page_reload_save_failed");
@@ -464,7 +481,8 @@ public final class NativeReaderV2Runtime
 
     public boolean suppressNativePresentation() {
         assertOwnerThread();
-        return !retired && !stockPresentationRestorePending
+        return !retired && !lifecycleSuspended
+            && !stockPresentationRestorePending
             && (isLandscapeActive() || samePageReloadPrepared);
     }
 
@@ -497,7 +515,7 @@ public final class NativeReaderV2Runtime
         // receive it.  Only a live, frozen landscape transaction fails
         // closed.
         if (retired) return true;
-        if (nativeLifecycleHandoffPending) return false;
+        if (lifecycleSuspended || nativeLifecycleHandoffPending) return false;
         if (inputFrozen) return false;
         SpreadSession currentSession = session;
         SpreadSnapshot snapshot = currentSession == null
@@ -920,7 +938,8 @@ public final class NativeReaderV2Runtime
     /** Called after setImage/configuration/page-ready firmware callbacks. */
     public void scheduleRefresh(String reason) {
         assertOwnerThread();
-        if (retired || containedFailClosed || detachmentPrepared) return;
+        if (retired || containedFailClosed || detachmentPrepared
+            || lifecycleSuspended) return;
         long generation = ++refreshGeneration;
         final String refreshReason = reason == null ? "signal" : reason;
         postGuarded("refresh:" + refreshReason, new Runnable() {
@@ -940,7 +959,8 @@ public final class NativeReaderV2Runtime
             );
             return;
         }
-        if (!reserveInputIngressIfIdle()) {
+        advanceLifecycleEpoch();
+        if (supersedeInputIngressIfIdle() == null) {
             beginNativeLifecycleHandoff(
                 "configuration_change_during_contact",
                 false
@@ -982,17 +1002,22 @@ public final class NativeReaderV2Runtime
 
     public void beforeLifecyclePause() {
         assertOwnerThread();
-        if (retired || latestObservation == null) return;
+        if (retired) return;
+        lifecycleSuspended = true;
+        advanceLifecycleEpoch();
+        cancelActiveSourceSave();
+        freezeInputIngress();
+        ++refreshGeneration;
+        if (latestObservation == null) return;
         if (hasLiveInputContact()) {
             beginNativeLifecycleHandoff("pause_during_contact", true);
             return;
         }
-        if (!reserveInputIngressIfIdle()) {
+        if (supersedeInputIngressIfIdle() == null) {
             beginNativeLifecycleHandoff("pause_during_contact", true);
             return;
         }
         samePageReloadPrepared = false;
-        ++refreshGeneration;
         if (port != null && port.phase() != NativeReaderFirmwarePort.Phase.IDLE) {
             disableNativeReaderV2("pause_during_writer_transfer");
             return;
@@ -1009,6 +1034,18 @@ public final class NativeReaderV2Runtime
         restorePageGeometry();
         restorePresentationScale();
         retireTransactionalCore();
+    }
+
+    /**
+     * Called only after the hook worker revalidates the persisted admission
+     * evidence for the current resumed Activity generation.
+     */
+    public void onLifecycleResumeRevalidated() {
+        assertOwnerThread();
+        if (retired || containedFailClosed || !lifecycleSuspended) return;
+        lifecycleSuspended = false;
+        advanceLifecycleEpoch();
+        scheduleRefresh("resume_authority_revalidated");
     }
 
     /** Completes a live-contact pause only after stock onPause has settled it. */
@@ -1240,7 +1277,10 @@ public final class NativeReaderV2Runtime
         String retirementReason,
         String operation
     ) {
-        if (!reserveInputIngressIfIdle()) return false;
+        // A stock reload owns a new ingress epoch even if an older projection
+        // already held the gate. No completion from that projection may thaw
+        // the restoration boundary.
+        if (supersedeInputIngressIfIdle() == null) return false;
         samePageReloadPrepared = false;
         ++refreshGeneration;
         try {
@@ -1277,6 +1317,11 @@ public final class NativeReaderV2Runtime
                     "stock restoration lacks prior presentation authority"
                 );
             }
+            activeStockPresentationReloadGeneration =
+                nextStockPresentationReloadGeneration();
+            stockRestoreBackground = null;
+            stockRestoreInk = null;
+            stockRestoreDigest = null;
             stockRestoreToken = stockRestoreWitness.begin(
                 oldSnapshot,
                 current.image,
@@ -1285,7 +1330,8 @@ public final class NativeReaderV2Runtime
                 oldPresentation.background,
                 oldPresentation.ink,
                 oldPresentation.digest,
-                stockPresentationSignalGeneration
+                stockPresentationSignalGeneration,
+                activeStockPresentationReloadGeneration
             );
             stockPresentationRestorePending = true;
             pendingRetirementReason = retirementReason;
@@ -1300,9 +1346,7 @@ public final class NativeReaderV2Runtime
             // or v2 bitmap is released at this point.
             return true;
         } catch (RuntimeException failure) {
-            stockPresentationRestorePending = false;
-            stockRestoreWitness.abort();
-            stockRestoreToken = null;
+            abortStockPresentationRestoration();
             Log.e(TAG, "stock presentation restoration failed operation="
                 + operation, failure);
             return false;
@@ -1324,17 +1368,66 @@ public final class NativeReaderV2Runtime
             || !stockRestoreWitness.observe(
                 token,
                 layer,
+                activeStockPresentationReloadGeneration,
                 stockPresentationSignalGeneration,
                 receiver,
                 replacement,
                 observed
             )) {
-            stockPresentationRestorePending = false;
-            stockRestoreWitness.abort();
-            stockRestoreToken = null;
+            abortStockPresentationRestoration();
             containFailClosed("stock_presentation_receipt_mismatch");
             return;
         }
+        if (layer == NativePresentationRestoreWitness.Layer.BACKGROUND) {
+            stockRestoreBackground = replacement;
+        } else if (layer == NativePresentationRestoreWitness.Layer.INK) {
+            stockRestoreInk = replacement;
+        } else {
+            stockRestoreDigest = replacement;
+        }
+        finishStockPresentationRestorationIfReady(token);
+    }
+
+    /** Acknowledges only a native load-completion callback, never setImage. */
+    public void onNativeStockPageReady(Object receiver, String signalName) {
+        assertOwnerThread();
+        if (retired || !stockPresentationRestorePending
+            || !("displayChanged".equals(signalName)
+                || "loadPageChanged".equals(signalName))) return;
+        NativePresentationRestoreWitness.Token token = stockRestoreToken;
+        if (stockRestoreWitness.pageReadyObserved(token)) return;
+        SpreadSnapshot observed = latestObservation == null
+            ? null : latestObservation.snapshot;
+        NativeReaderV2FirmwareAccess.Components current;
+        try {
+            current = inspectNativeCurrent();
+        } catch (RuntimeException failure) {
+            abortStockPresentationRestoration();
+            containFailClosed("stock_presentation_page_ready_inspection_failed");
+            return;
+        }
+        ++stockPresentationSignalGeneration;
+        if (token == null || observed == null
+            || current.activity != receiver
+            || current.readerPage != token.page
+            || !stockRestoreWitness.observePageReady(
+                token,
+                activeStockPresentationReloadGeneration,
+                stockPresentationSignalGeneration,
+                receiver,
+                observed,
+                current.presenterMarkPage
+            )) {
+            abortStockPresentationRestoration();
+            containFailClosed("stock_presentation_page_ready_mismatch");
+            return;
+        }
+        finishStockPresentationRestorationIfReady(token);
+    }
+
+    private void finishStockPresentationRestorationIfReady(
+        NativePresentationRestoreWitness.Token token
+    ) {
         if (!stockRestoreWitness.ready(token)) return;
         try {
             NativeReaderV2FirmwareAccess.Components current =
@@ -1344,7 +1437,20 @@ public final class NativeReaderV2Runtime
                 || current.image != components.image
                 || current.handWriteView != components.handWriteView
                 || current.readerPage != token.page
+                || current.presenterMarkPage != token.page + 1
                 || activityGeneration != token.activityGeneration
+                || !stockRestoreWitness.installedLayersMatch(
+                    token,
+                    stockRestoreBackground,
+                    stockRestoreInk,
+                    stockRestoreDigest
+                )
+                || !firmware.stockPresentationLayersMatch(
+                    current,
+                    stockRestoreBackground,
+                    stockRestoreInk,
+                    stockRestoreDigest
+                )
                 || !stockRestoreWitness.finish(token)) {
                 throw new IllegalStateException(
                     "stock presentation receipts lost native authority"
@@ -1352,6 +1458,7 @@ public final class NativeReaderV2Runtime
             }
             stockPresentationRestorePending = false;
             stockRestoreToken = null;
+            clearStockPresentationReceipts();
             retireTransactionalCore();
             recycleVisible();
             latestObservation = null;
@@ -1368,12 +1475,33 @@ public final class NativeReaderV2Runtime
             }
             Log.i(TAG, "stock presentation restoration acknowledged");
         } catch (RuntimeException failure) {
-            stockPresentationRestorePending = false;
-            stockRestoreWitness.abort();
-            stockRestoreToken = null;
+            abortStockPresentationRestoration();
             Log.e(TAG, "stock presentation acknowledgment failed", failure);
             containFailClosed("stock_presentation_acknowledgment_failed");
         }
+    }
+
+    private long nextStockPresentationReloadGeneration() {
+        if (stockPresentationReloadGeneration == Long.MAX_VALUE) {
+            throw new IllegalStateException(
+                "stock presentation reload generation exhausted"
+            );
+        }
+        return ++stockPresentationReloadGeneration;
+    }
+
+    private void abortStockPresentationRestoration() {
+        stockPresentationRestorePending = false;
+        stockRestoreWitness.abort();
+        stockRestoreToken = null;
+        clearStockPresentationReceipts();
+    }
+
+    private void clearStockPresentationReceipts() {
+        activeStockPresentationReloadGeneration = 0L;
+        stockRestoreBackground = null;
+        stockRestoreInk = null;
+        stockRestoreDigest = null;
     }
 
     private boolean ownsModifiedNativePresentation() {
@@ -1598,7 +1726,13 @@ public final class NativeReaderV2Runtime
     public void freezeDocumentInput() {
         assertOwnerThread();
         requireLive();
-        freezeInputIngress();
+        AtomicInputAdmission.FreezeToken current = inputFreezeToken;
+        if (current != null && inputAdmission.current(current)
+            && !inputAdmission.contactActive()) {
+            transactionInputFreezeToken = current;
+        } else {
+            transactionInputFreezeToken = freezeInputIngress();
+        }
     }
 
     @Override
@@ -1826,12 +1960,16 @@ public final class NativeReaderV2Runtime
         requireLive();
         if (pendingRetirementReason != null) {
             freezeInputIngress();
+            transactionInputFreezeToken = null;
             postGuarded(
                 "pending_stock_restoration_release",
                 this::settlePendingStockRestoration
             );
         } else {
-            releaseInputIngress();
+            AtomicInputAdmission.FreezeToken transaction =
+                transactionInputFreezeToken;
+            transactionInputFreezeToken = null;
+            releaseInputIngress(transaction);
             postGuarded("deferred_navigation_release", this::drainNavigation);
         }
     }
@@ -1860,6 +1998,7 @@ public final class NativeReaderV2Runtime
 
     private void refreshWhenReady(long generation, int attempt, String reason) {
         if (retired || containedFailClosed || detachmentPrepared
+            || lifecycleSuspended
             || generation != refreshGeneration) return;
         SpreadSession currentSession = session;
         if (nativePenCallbackContact || currentSession != null
@@ -1938,6 +2077,9 @@ public final class NativeReaderV2Runtime
         int attempt,
         String reason
     ) {
+        if (lifecycleSuspended || generation != refreshGeneration) {
+            return false;
+        }
         long nextLayout = layoutGeneration + 1L;
         RectD canvas = new RectD(
             0,
@@ -1975,7 +2117,10 @@ public final class NativeReaderV2Runtime
         }
 
         boolean inputWasFrozen = inputFrozen;
-        if (!reserveInputIngressIfIdle()) return false;
+        AtomicInputAdmission.FreezeToken compositionFreeze =
+            reserveInputIngressIfIdle();
+        if (compositionFreeze == null) return false;
+        final long compositionLifecycleEpoch = lifecycleEpoch;
         compositionGeneration = generation;
         try {
             boolean accepted = executeProjection("spread_composition", new Runnable() {
@@ -2025,6 +2170,8 @@ public final class NativeReaderV2Runtime
                                     attempt,
                                     reason,
                                     inputWasFrozen,
+                                    compositionFreeze,
+                                    compositionLifecycleEpoch,
                                     result,
                                     projectionFailure
                                 );
@@ -2046,10 +2193,12 @@ public final class NativeReaderV2Runtime
                     if (!posted && result != null) result.recycle();
                 }
             });
-            if (!accepted) setInputIngressFrozen(inputWasFrozen);
+            if (!accepted && !inputWasFrozen) {
+                releaseInputIngress(compositionFreeze);
+            }
             return accepted;
         } catch (RuntimeException failure) {
-            setInputIngressFrozen(inputWasFrozen);
+            if (!inputWasFrozen) releaseInputIngress(compositionFreeze);
             throw failure;
         }
     }
@@ -2064,22 +2213,26 @@ public final class NativeReaderV2Runtime
         int attempt,
         String reason,
         boolean inputWasFrozen,
+        AtomicInputAdmission.FreezeToken compositionFreeze,
+        long compositionLifecycleEpoch,
         NativeReaderV2Compositor.Result next,
         Throwable projectionFailure
     ) {
         assertOwnerThread();
-        if (retired || generation != refreshGeneration
+        if (retired || lifecycleSuspended
+            || lifecycleEpoch != compositionLifecycleEpoch
+            || generation != refreshGeneration
             || compositionGeneration != generation) {
             if (next != null) next.recycle();
             if (!retired && !containedFailClosed
                 && compositionGeneration == generation) {
-                setInputIngressFrozen(inputWasFrozen);
+                if (!inputWasFrozen) releaseInputIngress(compositionFreeze);
             }
             return;
         }
         if (projectionFailure != null || next == null) {
             if (next != null) next.recycle();
-            setInputIngressFrozen(inputWasFrozen);
+            if (!inputWasFrozen) releaseInputIngress(compositionFreeze);
             if (projectionFailure instanceof AdmissionEvidenceChangedException) {
                 Log.e(TAG, "projection authority revoked", projectionFailure);
                 containFailClosed("projection_authority_changed");
@@ -2111,11 +2264,13 @@ public final class NativeReaderV2Runtime
                 canvas,
                 nextLayout,
                 reason,
+                compositionFreeze,
+                compositionLifecycleEpoch,
                 next
             );
         } catch (RuntimeException failure) {
             if (next != visible) next.recycle();
-            setInputIngressFrozen(inputWasFrozen);
+            if (!inputWasFrozen) releaseInputIngress(compositionFreeze);
             Log.e(TAG, "projection publication failed", failure);
             containFailClosed("projection_publication_failed");
         }
@@ -2128,9 +2283,14 @@ public final class NativeReaderV2Runtime
         RectD canvas,
         long nextLayout,
         String reason,
+        AtomicInputAdmission.FreezeToken compositionFreeze,
+        long compositionLifecycleEpoch,
         NativeReaderV2Compositor.Result next
     ) {
-        if (retired || containedFailClosed || detachmentPrepared) {
+        if (retired || containedFailClosed || detachmentPrepared
+            || lifecycleSuspended
+            || lifecycleEpoch != compositionLifecycleEpoch
+            || !inputAdmission.current(compositionFreeze)) {
             throw new IllegalStateException(
                 "contained or detached runtime cannot publish a composition"
             );
@@ -2216,7 +2376,7 @@ public final class NativeReaderV2Runtime
                 port = new NativeReaderFirmwarePort(this, observation);
                 controller = new NativeReaderController(session, port);
                 port.attachController(controller);
-                releaseInputIngress();
+                releaseInputIngress(compositionFreeze);
             } else if (port.phase() == NativeReaderFirmwarePort.Phase.IDLE) {
                 if (!session.publish(snapshot)) {
                     throw new IllegalStateException(
@@ -2224,7 +2384,7 @@ public final class NativeReaderV2Runtime
                     );
                 }
                 port.publishStableObservation(observation);
-                releaseInputIngress();
+                releaseInputIngress(compositionFreeze);
             } else {
                 port.onFirmwarePageReady(observation);
             }
@@ -2293,7 +2453,7 @@ public final class NativeReaderV2Runtime
         components = current;
         latestObservation = null;
         writerDisabled = false;
-        releaseInputIngress();
+        releaseInputIngress(inputFreezeToken);
         reportActivationReady();
         removeStatusOverlayQuietly("portrait");
         Log.i(TAG, "portrait native reader restored reason=" + reason);
@@ -2625,6 +2785,7 @@ public final class NativeReaderV2Runtime
         controller = null;
         port = null;
         session = null;
+        transactionInputFreezeToken = null;
         latestObservation = null;
         deferredReplayLoadTarget = null;
         deferredNavigation.clear();
@@ -2671,8 +2832,10 @@ public final class NativeReaderV2Runtime
             || session.gestures().hasActiveGesture()) {
             return false;
         }
-        if (inputAdmission.freezeIfIdle() < 0L) return false;
-        inputFrozen = true;
+        AtomicInputAdmission.FreezeToken navigationFreeze =
+            reserveInputIngressIfIdle();
+        if (navigationFreeze == null) return false;
+        transactionInputFreezeToken = navigationFreeze;
         boolean started = false;
         try {
             if (!retired && !containedFailClosed
@@ -2682,7 +2845,12 @@ public final class NativeReaderV2Runtime
             }
             return started;
         } finally {
-            if (!started) releaseInputIngress();
+            if (!started) {
+                if (transactionInputFreezeToken == navigationFreeze) {
+                    transactionInputFreezeToken = null;
+                }
+                releaseInputIngress(navigationFreeze);
+            }
         }
     }
 
@@ -2839,27 +3007,58 @@ public final class NativeReaderV2Runtime
         penSuppressed = false;
     }
 
-    private void freezeInputIngress() {
-        inputAdmission.freeze();
+    private AtomicInputAdmission.FreezeToken freezeInputIngress() {
+        AtomicInputAdmission.FreezeToken token = inputAdmission.freeze();
+        inputFreezeToken = token;
         inputFrozen = true;
+        return token;
     }
 
     /** Atomically reserves a contact-free boundary for native mutation. */
-    private boolean reserveInputIngressIfIdle() {
-        if (inputFrozen) return !inputAdmission.contactActive();
-        if (inputAdmission.freezeIfIdle() < 0L) return false;
+    private AtomicInputAdmission.FreezeToken reserveInputIngressIfIdle() {
+        AtomicInputAdmission.FreezeToken current = inputFreezeToken;
+        if (inputFrozen) {
+            return current != null && inputAdmission.current(current)
+                && !inputAdmission.contactActive() ? current : null;
+        }
+        AtomicInputAdmission.FreezeToken token = inputAdmission.freezeIfIdle();
+        if (token == null) return null;
+        inputFreezeToken = token;
         inputFrozen = true;
+        return token;
+    }
+
+    /** Replaces an older freeze epoch without crossing a live contact. */
+    private AtomicInputAdmission.FreezeToken supersedeInputIngressIfIdle() {
+        AtomicInputAdmission.FreezeToken token =
+            inputAdmission.supersedeIfIdle();
+        if (token == null) return null;
+        inputFreezeToken = token;
+        inputFrozen = true;
+        return token;
+    }
+
+    /** A stale owner can never release a later lifecycle/restoration epoch. */
+    private boolean releaseInputIngress(
+        AtomicInputAdmission.FreezeToken token
+    ) {
+        if (token == null || retired || containedFailClosed
+            || lifecycleSuspended || nativeLifecycleHandoffPending
+            || stockPresentationRestorePending || detachmentPrepared
+            || pendingRetirementReason != null) {
+            return false;
+        }
+        if (!inputAdmission.release(token)) return false;
+        if (inputFreezeToken == token) inputFreezeToken = null;
+        inputFrozen = inputAdmission.frozen();
         return true;
     }
 
-    private void releaseInputIngress() {
-        inputAdmission.release();
-        inputFrozen = false;
-    }
-
-    private void setInputIngressFrozen(boolean frozen) {
-        if (frozen) freezeInputIngress();
-        else releaseInputIngress();
+    private void advanceLifecycleEpoch() {
+        if (lifecycleEpoch == Long.MAX_VALUE) {
+            throw new IllegalStateException("lifecycle epoch exhausted");
+        }
+        lifecycleEpoch++;
     }
 
     private void updateStatusOverlay(SpreadSnapshot snapshot) {
@@ -2885,14 +3084,16 @@ public final class NativeReaderV2Runtime
     }
 
     private void requireLive() {
-        if (retired || containedFailClosed || components == null
+        if (retired || containedFailClosed || lifecycleSuspended
+            || components == null
             || latestObservation == null) {
             throw new IllegalStateException("Native Reader v2 is not live");
         }
     }
 
     private void reportActivationReady() {
-        if (activationReported || retired || containedFailClosed) return;
+        if (activationReported || retired || containedFailClosed
+            || lifecycleSuspended) return;
         activationReported = true;
         activationListener.onRuntimeInputAuthorityReady(this);
     }

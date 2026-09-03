@@ -6,8 +6,8 @@ with SupernoteDocument `1.02.446`.
 
 ## Native Reader v2 pre-hardware adversarial gate — PASS
 
-- [x] 85,031 deterministic controller/geometry/transaction assertions pass.
-- [x] 89 authority mutations are rejected, including stale admission evidence,
+- [x] 85,042 deterministic controller/geometry/transaction assertions pass.
+- [x] 101 authority mutations are rejected, including stale admission evidence,
   contained-runtime publication, contact-safe containment, three-layer stock
   restoration, projection drain ordering, and descriptor-backed marker
   recovery.
@@ -20,9 +20,14 @@ with SupernoteDocument `1.02.446`.
   `81942105e60e1b5498a7fb790762a3b750371a2d` is integrated; all 189 Virtual
   Spread generator tests, contract fixtures, and native viewport tests pass.
 - [x] Two clean v0.0.137 companion builds are byte-for-byte identical at
-  SHA-256 `73ce3b7424b9b5d061afef049c5a017285fd2fcfc710b0415f9338df264e62bc`.
+  250,395 bytes and SHA-256
+  `59474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817`.
   The strict provenance-bound RTL Reader package has SHA-256
-  `cc7a3777495957bd242fea82e5aa5014130dbbe73c4c22a81e15d3bac7f2d784`.
+  `e17ef0cc71c80ee4cf32c0459e3f544b2a15a3f259148e9df84abb55ccb5aba5`.
+- [x] The final adversarial review findings are covered by deterministic gates:
+  epoch-owned input/lifecycle authority, exact stock-reload receipts, no-clobber
+  `.mark` publication/rollback interleavings, post-commit relaunch, exact
+  installed-companion identity, and protected two-stage release signing.
 - [ ] Exact-head independent review is clean.
 - [ ] Nomad hardware gate passes. No hardware result is claimed by this
   automated section.

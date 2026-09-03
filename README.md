@@ -33,8 +33,9 @@ detachment; cancels and asynchronously drains projections before releasing
 native component identities; keeps a native finger route immutable through a
 multi-pointer contact; and reads companion marker/recovery bytes through a
 bounded, single-link, no-symlink descriptor boundary. The stable Actions
-signer is available only to trusted `main` pushes or a repository-owner manual
-run of the exact `main` ref.
+signer is isolated behind the `main`-only, approval-gated release environment;
+the secret-bearing job has no repository checkout and runs no repository-owned
+script.
 
 The final pre-hardware hardening batch makes pen admission and transaction
 freeze one atomic decision, requires observed firmware receipts before writer
@@ -47,6 +48,17 @@ post-publication failure. Build inputs are locked to Supernote template 1.0.12
 and its complete dependency graph; package verification authenticates the real
 manifest, DEX class descriptors, signer, JavaScript bundle, and embedded APK.
 Two clean companion builds must be byte-for-byte identical before release.
+
+The final adversarial review additionally made input freezes and lifecycle
+publication epoch-owned, so stale composition work cannot reopen input or
+publish a writer after pause. Stock restoration now requires the exact reload
+generation, native page-ready receipt, and installed layer identities. Native
+`.mark` replacement preserves the displaced inode and recreates the final path
+with `O_EXCL`, with executable interleaving tests for publication and rollback.
+Recovery relaunch occurs only after persistence has committed, and plugin-side
+admission independently pins the installed companion base APK by no-follow
+descriptor, exact length, SHA-256, package, version, and signer while rejecting
+split APKs.
 
 ## Stable baseline
 

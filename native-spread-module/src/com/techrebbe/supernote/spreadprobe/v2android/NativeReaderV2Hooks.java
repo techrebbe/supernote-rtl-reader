@@ -249,8 +249,14 @@ public final class NativeReaderV2Hooks {
                 maybeAdmit(entry, false);
                 reindex(entry);
                 if (entry.runtime != null && !entry.admitting) {
+                    String signalName =
+                        ((java.lang.reflect.Method) param.method).getName();
+                    entry.runtime.onNativeStockPageReady(
+                        param.thisObject,
+                        signalName
+                    );
                     entry.runtime.onNativePresentationChanged(
-                        ((java.lang.reflect.Method) param.method).getName()
+                        signalName
                     );
                 }
             }
@@ -1053,9 +1059,7 @@ public final class NativeReaderV2Hooks {
                                 rejected);
                         }
                         if (current) {
-                            expectedRuntime.scheduleRefresh(
-                                "resume_authority_revalidated"
-                            );
+                            expectedRuntime.onLifecycleResumeRevalidated();
                             return;
                         }
                         if (!resetRuntime(

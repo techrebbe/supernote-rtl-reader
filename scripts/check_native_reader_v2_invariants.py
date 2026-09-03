@@ -477,7 +477,7 @@ def main() -> None:
             "private NativeReaderV2FirmwareAccess.Components inspectNativeCurrent()",
             "Revoking the external marker must stop all new authorized work",
             "disableNativeReaderV2(\"admission_evidence_changed\")",
-            "if (nativeLifecycleHandoffPending) return false;",
+            "if (lifecycleSuspended || nativeLifecycleHandoffPending) return false;",
             "if (inputFrozen) return false;",
             "scheduleActivationTimeout",
             "saveWitness.abort(token);",
@@ -516,24 +516,56 @@ def main() -> None:
             "fingerIngressAdmitted = inputAdmission.begin(",
             "inputAdmission.begin(AtomicInputAdmission.Contact.STYLUS)",
             "inputAdmission.freezeIfIdle()",
+            "inputAdmission.current(compositionFreeze)",
+            "releaseInputIngress(compositionFreeze)",
+            "supersedeInputIngressIfIdle()",
             "inputAdmission.end(AtomicInputAdmission.Contact.FINGER)",
             "inputAdmission.end(AtomicInputAdmission.Contact.STYLUS)",
             "if (pressure > 0 && !penContact)",
-            "if (inputFrozen) {",
             "preservingUnsavedSource",
             "transactionAllowsStockRestoration()",
         ],
         "runtime concurrency and input containment",
     )
+    native_pen_route_start = runtime.find(
+        "public boolean routeNativePenPosition("
+    )
+    native_pen_route_end = runtime.find(
+        "public void cancelMissingNativePenTerminal()",
+        native_pen_route_start,
+    )
+    if native_pen_route_start < 0 or native_pen_route_end < 0:
+        fail("could not isolate native pen route")
+    require(
+        runtime[native_pen_route_start:native_pen_route_end],
+        ["if (inputFrozen) {"],
+        "frozen native pen-down admission",
+    )
     require(
         input_admission,
         [
             "public synchronized boolean begin(Contact contact)",
-            "frozen || fingerActive || stylusActive",
-            "public synchronized long freezeIfIdle()",
-            "if (frozen || fingerActive || stylusActive) return -1L;",
+            "public synchronized FreezeToken freezeIfIdle()",
+            "public synchronized FreezeToken supersedeIfIdle()",
+            "public synchronized boolean release(FreezeToken token)",
+            "token != freezeToken",
+            "public synchronized boolean current(FreezeToken token)",
         ],
-        "atomic contact/freeze admission",
+        "token-owned atomic contact/freeze admission",
+    )
+    freeze_idle_start = input_admission.find(
+        "public synchronized FreezeToken freezeIfIdle()"
+    )
+    supersede_freeze_start = input_admission.find(
+        "public synchronized FreezeToken supersedeIfIdle()",
+        freeze_idle_start,
+    )
+    if freeze_idle_start < 0 or supersede_freeze_start < 0:
+        fail("could not isolate contact-free freeze admission")
+    require(
+        input_admission[freeze_idle_start:supersede_freeze_start],
+        ["if (freezeToken != null || fingerActive || stylusActive) return null;"],
+        "contact-free freeze admission",
     )
     require(
         async_save_fence,
@@ -555,16 +587,59 @@ def main() -> None:
         ],
         "queued source-save token containment",
     )
+    restore_observe_start = restore_witness.find("public boolean observe(")
+    restore_page_ready_start = restore_witness.find(
+        "public boolean observePageReady(", restore_observe_start
+    )
+    restore_installed_start = restore_witness.find(
+        "public boolean installedLayersMatch(", restore_page_ready_start
+    )
+    restore_ready_start = restore_witness.find(
+        "public boolean ready(", restore_installed_start
+    )
+    restore_finish_start = restore_witness.find(
+        "public boolean finish(", restore_ready_start
+    )
+    if min(
+        restore_observe_start,
+        restore_page_ready_start,
+        restore_installed_start,
+        restore_ready_start,
+        restore_finish_start,
+    ) < 0:
+        fail("could not isolate stock presentation witness methods")
     require(
-        restore_witness,
+        restore_witness[restore_observe_start:restore_page_ready_start],
         [
             "token.activityGeneration != observed.activityGeneration",
             "token.layoutGeneration != observed.layoutGeneration",
             "receiver != expectedReceiver",
             "replacement == oldBitmap",
-            "token.mask == 7",
+            "reloadGeneration != token.reloadGeneration",
         ],
-        "versioned stock presentation receipts",
+        "reload-bound stock layer receipts",
+    )
+    require(
+        restore_witness[restore_page_ready_start:restore_installed_start],
+        [
+            "reloadGeneration != token.reloadGeneration",
+            "presenterMarkPage != token.page + 1",
+        ],
+        "reload-bound native page-ready receipt",
+    )
+    require(
+        restore_witness[restore_installed_start:restore_ready_start],
+        [
+            "background == token.backgroundReplacement",
+            "ink == token.inkReplacement",
+            "digest == token.digestReplacement",
+        ],
+        "exact installed stock layer identities",
+    )
+    require(
+        restore_witness[restore_ready_start:restore_finish_start],
+        ["token.mask == 7 && token.pageReady"],
+        "three-layer and page-ready stock restoration witness",
     )
     require(
         controller,
@@ -727,7 +802,7 @@ def main() -> None:
         runtime[compose_start:publish_end],
         [
             "boolean inputWasFrozen = inputFrozen;",
-            "setInputIngressFrozen(inputWasFrozen);",
+            "if (!inputWasFrozen) releaseInputIngress(compositionFreeze);",
             "next.recycle();",
         ],
         "composition preflight rollback",
@@ -822,13 +897,72 @@ def main() -> None:
             "onNativeStockBackgroundPresented(",
             "onNativeStockInkPresented(",
             "onNativeStockDigestPresented(",
+            "onNativeStockPageReady(",
             "stockRestoreWitness.observe(",
+            "stockRestoreWitness.observePageReady(",
             "stockRestoreWitness.ready(token)",
             "stockRestoreWitness.finish(token)",
             "stock presentation restoration acknowledged",
             "detachmentListener.onRuntimeDetachmentReady(this, reason)",
         ],
-        "three-layer stock presentation acknowledgement",
+        "reload-bound three-layer stock presentation acknowledgement",
+    )
+    stock_finish_start = runtime.find(
+        "private void finishStockPresentationRestorationIfReady("
+    )
+    stock_finish_end = runtime.find(
+        "private long nextStockPresentationReloadGeneration()",
+        stock_finish_start,
+    )
+    if stock_finish_start < 0 or stock_finish_end < 0:
+        fail("could not isolate stock restoration authorization")
+    require(
+        runtime[stock_finish_start:stock_finish_end],
+        [
+            "|| !firmware.stockPresentationLayersMatch(\n",
+            "current.presenterMarkPage != token.page + 1",
+            "|| !stockRestoreWitness.finish(token)",
+        ],
+        "stock restoration exact native authorization",
+    )
+
+    require(
+        runtime,
+        [
+            "private long lifecycleEpoch = 1L;",
+            "private volatile boolean lifecycleSuspended;",
+            "lifecycleSuspended = true;",
+            "advanceLifecycleEpoch();",
+            "public void onLifecycleResumeRevalidated()",
+            "lifecycleSuspended = false;",
+        ],
+        "lifecycle-suspended publication epoch",
+    )
+    composition_publish_start = runtime.find(
+        "private boolean publishPreparedComposition("
+    )
+    composition_publish_end = runtime.find(
+        "private void leaveSpreadForPortrait(",
+        composition_publish_start,
+    )
+    if composition_publish_start < 0 or composition_publish_end < 0:
+        fail("could not isolate prepared-composition publication")
+    require(
+        runtime[composition_publish_start:composition_publish_end],
+        [
+            "lifecycleSuspended",
+            "lifecycleEpoch != compositionLifecycleEpoch",
+            "!inputAdmission.current(compositionFreeze)",
+        ],
+        "prepared composition lifecycle/freeze publication fence",
+    )
+    require(
+        hooks,
+        [
+            "expectedRuntime.onLifecycleResumeRevalidated();",
+            "entry.runtime.onNativeStockPageReady(",
+        ],
+        "revalidated lifecycle and native page-ready hook delivery",
     )
     reset_start = hooks.find("private static boolean resetRuntime(")
     reset_end = hooks.find("private static void releaseDestroyedEntry(", reset_start)
@@ -1263,6 +1397,9 @@ def main() -> None:
             "'lib/arm64-v8a/libspreadprobe.so'",
             "v2 APK contains forbidden legacy payload",
             "spread-probe-unsigned-normalized.apk",
+            "[switch]$AlignedOnly",
+            "$outputApk = $alignedApk",
+            "if (-not $AlignedOnly)",
             "APK entry timestamp is not canonical",
             "APK entry order is not canonical",
             "Two clean Native Reader builds are byte-for-byte reproducible",
@@ -1353,9 +1490,18 @@ def main() -> None:
         [
             "NATIVE_READER_V2_MIN_VERSION_CODE = 137L",
             "NATIVE_READER_V2_SIGNER_SHA256 =",
+            "NATIVE_READER_V2_APK_LENGTH = 250395L",
+            "NATIVE_READER_V2_APK_SHA256 =",
+            "59474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
             "PackageManager.GET_SIGNING_CERTIFICATES",
             "signing.hasMultipleSigners()",
             "Native Reader signer set is not exact",
+            "applicationInfo.sourceDir",
+            "applicationInfo.splitSourceDirs.isNullOrEmpty()",
+            'openPinnedRegularFile(',
+            '"Native Reader base APK"',
+            "sourceBytes.size.toLong() != NATIVE_READER_V2_APK_LENGTH",
+            "sha256(sourceBytes) != NATIVE_READER_V2_APK_SHA256",
             "moduleVersionCode == NATIVE_READER_V2_MIN_VERSION_CODE",
             "module.first == NATIVE_READER_V2_MIN_VERSION_CODE",
             "module.third == NATIVE_READER_V2_SIGNER_SHA256",
@@ -1456,15 +1602,22 @@ def main() -> None:
         plugin,
         [
             "private data class NativeMarkPublication(",
+            "private data class DisplacedRegularFile(",
             "private fun readPinnedRegularBytes(",
             "private fun openPinnedRegularFile(",
             "private fun publishNativeAnnotationRestore(",
             'Os.fstat(snapshotDescriptor)',
             'Os.lstat(backup.snapshot.absolutePath)',
             'Os.fstat(previousDescriptor)',
-            "private fun writeRegularFileAtomicallyCas(",
-            "private fun deleteRegularFileCas(",
-            "requireExpectedRegularDestination(file, expected, authorityLabel)",
+            "private fun preserveRegularDestinationNoClobber(",
+            "private fun createRegularFileNoClobber(",
+            "private fun publishRegularFileNoClobber(",
+            "private fun publishRegularFileAbsenceNoClobber(",
+            "Files.createDirectory(transactionDirectory.toPath())",
+            'File(transactionDirectory, "displaced")',
+            "Os.rename(file.absolutePath, displaced.absolutePath)",
+            "OsConstants.O_EXCL",
+            "raced with destination preservation; displaced inode retained",
             "withNativeSpreadPublicationLock(nativeSpreadMarker(pdfFile))",
             "RTL_READER_NATIVE_BACKUP_RESTORE_POST_PUBLICATION_ROLLED_BACK",
             "restorePrePublicationMark(value)",
@@ -1476,6 +1629,24 @@ def main() -> None:
         fail("annotation restore reads the live .mark without no-follow descriptor authority")
     if "copyFileAtomically(\n                        revalidatedBackup.snapshot" in plugin:
         fail("annotation restore reopens its snapshot by path during publication")
+    no_clobber_create_start = plugin.find("private fun createRegularFileNoClobber(")
+    no_clobber_create_end = plugin.find(
+        "private fun publishRegularFileNoClobber(",
+        no_clobber_create_start,
+    )
+    if no_clobber_create_start < 0 or no_clobber_create_end < 0:
+        fail("could not isolate native annotation no-clobber creation")
+    require(
+        plugin[no_clobber_create_start:no_clobber_create_end],
+        [
+            "OsConstants.O_CREAT",
+            "OsConstants.O_EXCL",
+            "OsConstants.O_NOFOLLOW",
+            "samePersistedFileVersion(",
+            "syncParentDirectory(file)",
+        ],
+        "native annotation no-clobber final creation",
+    )
     restore_worker_start = plugin.find("private fun scheduleAnnotationRestore(")
     restore_helpers_start = plugin.find(
         "private fun requireBackupDocumentIdentity(",
@@ -1491,12 +1662,19 @@ def main() -> None:
             '"after-mark-verification"',
             '"before-backup-retirement"',
             "removeNativeAnnotationBackupFiles(pdfFile, revalidatedBackup)",
-            "reactApplicationContext.startActivity(Intent().apply",
             "restorePrePublicationMark(value)",
             "throw restoreError",
+            "val committed = persistenceError == null",
+            "reactApplicationContext.startActivity(Intent().apply",
         ],
-        "all post-publication restore failures roll back before escape",
+        "persistence rollback completes before fallible relaunch",
     )
+    committed_scope = restore_worker[
+        restore_worker.find("withNativeSpreadPublicationLock("):
+        restore_worker.find("val committed = persistenceError == null")
+    ]
+    if "startActivity(" in committed_scope:
+        fail("fallible native-reader relaunch remains inside persistence rollback scope")
     require(
         gate,
         [
@@ -1576,8 +1754,14 @@ def main() -> None:
             "github.event_name == 'workflow_dispatch'",
             "github.actor == github.repository_owner",
             "secrets.NATIVE_SPREAD_KEYSTORE_B64",
-            "-ExpectedSignerSha256 $runnerSigner",
-            "-ExpectedSignerSha256 a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67",
+            "-AlignedOnly",
+            "supernote-native-reader-v2-release-input-v1",
+            "native-reader-v2-release-input-${{ github.sha }}",
+            "environment: virtual-spread-release",
+            "NATIVE_SPREAD_KEYSTORE_B64 must exist only as an environment",
+            "never as a repository-scoped secret",
+            "Verify aligned APK provenance without signing credentials",
+            "Sign, verify, and remove protected Native Reader signing key",
             "supernote-native-reader-v2-v0.0.137",
         ],
         "CI v2 gates",
@@ -1616,7 +1800,7 @@ def main() -> None:
     if "ndk;" in workflow or "-AndroidNdk" in workflow:
         fail("release CI still provisions the retired legacy native hook toolchain")
     stable_job = workflow[workflow.find("native-spread-upgrade-artifact:"):]
-    stable_job = stable_job.split("\n  build:", 1)[0]
+    stable_job = stable_job.split("\n  virtual-spread-tests:", 1)[0]
     stable_condition = stable_job.split("    needs:", 1)[0]
     require(
         stable_condition,
@@ -1633,6 +1817,37 @@ def main() -> None:
             "needs:\n      - native-spread-build\n      - build",
         ],
         "stable APK waits for both companion and plugin gates",
+    )
+    unsigned_job = workflow[workflow.find("  native-spread-build:") :]
+    unsigned_job = unsigned_job.split("\n  native-spread-upgrade-artifact:", 1)[0]
+    if "secrets." in unsigned_job or "NATIVE_SPREAD_KEYSTORE_B64" in unsigned_job:
+        fail("checked-out Native Reader build receives the stable signing credential")
+    if "NATIVE_SPREAD_KEYSTORE_B64" in workflow.replace(stable_job, ""):
+        fail("Native Reader signing credential is referenced outside its protected job")
+    if "actions/checkout@" in stable_job:
+        fail("secret-bearing Native Reader signing job checks out repository code")
+    for forbidden in (
+        "native-spread-module",
+        "scripts/",
+        "scripts\\",
+        ".ps1",
+        ".py",
+        "GITHUB_ENV",
+    ):
+        if forbidden in stable_job:
+            fail(
+                "secret-bearing Native Reader signing job may execute repository "
+                f"content: {forbidden!r}"
+            )
+    require(
+        stable_job,
+        [
+            "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+            "$env:NATIVE_SPREAD_KEYSTORE_B64 = $null",
+            "Remove-Item -LiteralPath $keystore -Force",
+            "release-output/SupernoteNativeSpreadProbe-v0.0.137.apk",
+        ],
+        "checkout-free protected Native Reader signing boundary",
     )
 
     print("Native Reader v2 invariants: PASS")

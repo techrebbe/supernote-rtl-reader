@@ -7,7 +7,7 @@ with SupernoteDocument `1.02.446`.
 ## Native Reader v2 pre-hardware adversarial gate — PASS
 
 - [x] 85,071 deterministic controller/geometry/transaction assertions pass.
-- [x] 176 authority mutations are rejected, including exact firmware-declaration
+- [x] 177 authority mutations are rejected, including exact firmware-declaration
   and native pen-callback ownership drift, stale admission evidence,
   contained-runtime publication, contact-safe containment, three-layer stock
   restoration, projection drain ordering, and descriptor-backed marker
@@ -15,7 +15,7 @@ with SupernoteDocument `1.02.446`.
 - [x] Ordinary native/plugin invariants, packaging fail-closed tests, and trace
   helper fail-closed tests pass.
 - [x] Companion v0.0.138 compiles and verifies with the upgrade-compatible
-  signer; RTL Reader v0.4.18 compiles and packages with the hardened native
+  signer; RTL Reader v0.4.19 compiles and packages with the hardened native
   module.
 - [x] The current stable `origin/main` baseline at
   `81942105e60e1b5498a7fb790762a3b750371a2d` is integrated; all 189 Virtual

@@ -405,7 +405,7 @@ credential.
 
 Install the APK, enable **Supernote Native Reader v2** in LSPosed, scope it only
 to `com.supernote.document`, and restart the document reader. The v0.0.138 APK
-requires Supernote RTL Reader v0.4.18 and refuses every other companion
+requires Supernote RTL Reader v0.4.19 and refuses every other companion
 contract version. Stylus contacts that
 begin inside the current visible native toolbar, page bar, selection menu, or
 popup are passed to Supernote for that exact gesture without publishing a

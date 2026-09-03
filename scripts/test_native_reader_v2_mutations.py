@@ -318,6 +318,12 @@ MUTATIONS = (
 # into deterministic regression coverage instead of relying on prose review.
 STATIC_MUTATIONS = (
     (
+        "native-spread-module/README.md",
+        "requires Supernote RTL Reader v0.4.19 and refuses every other companion",
+        "requires Supernote RTL Reader v0.4.18 and refuses every other companion",
+        "documented companion plugin pairing",
+    ),
+    (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2/android/NativeReaderFirmwareAdmission.java",
         'field(VIEW_MODEL, "documentAnnotationMap", "java.util.Map")',

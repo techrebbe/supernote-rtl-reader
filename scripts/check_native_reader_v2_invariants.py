@@ -40,6 +40,7 @@ def normalized_sha256(path: Path) -> str:
 def main() -> None:
     root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
     module = root / "native-spread-module"
+    module_readme = read(module / "README.md")
     source = module / "src/com/techrebbe/supernote/spreadprobe"
     entry = read(source / "v2android/NativeReaderV2EntryPoint.java")
     hooks = read(source / "v2android/NativeReaderV2Hooks.java")
@@ -127,6 +128,15 @@ def main() -> None:
         plugin_config,
         ['"versionCode": "38"', '"versionName": "0.4.19"'],
         "plugin version",
+    )
+    require(
+        module_readme,
+        [
+            "The v0.0.138 APK\n"
+            "requires Supernote RTL Reader v0.4.19 and refuses every other companion\n"
+            "contract version."
+        ],
+        "documented Native Reader v2 pairing",
     )
     if (
         '"${PYTHON_CMD[@]}" '

@@ -1683,6 +1683,90 @@ STATIC_MUTATIONS = (
         "            expected.length == actual.length",
         "backup fingerprint content equality",
     ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "            val marker = nativeSpreadMarker(pdfFile)\n"
+        "            val configurationGeneration = beginNativeSpreadRecovery()",
+        "            val marker = nativeSpreadMarker(pdfFile)\n"
+        "            val configurationGeneration = captureNativeSpreadConfigurationGeneration()",
+        "reconciliation recovery-generation admission",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "            val pdfFile = requirePdf(filePath)\n"
+        "            val configurationGeneration = beginNativeSpreadRecovery()\n"
+        "            recoveryGeneration = configurationGeneration\n"
+        "            recoveryClaimed = true",
+        "            val pdfFile = requirePdf(filePath)\n"
+        "            val configurationGeneration = captureNativeSpreadConfigurationGeneration()\n"
+        "            recoveryGeneration = configurationGeneration\n"
+        "            recoveryClaimed = true",
+        "restore recovery-generation admission",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                    if (!completeNativeSpreadRecovery(configurationGeneration)) {\n"
+        "                        throw IllegalStateException(\n"
+        "                            \"Native Spread recovery was superseded before completion\",",
+        "                    if (false) {\n"
+        "                        throw IllegalStateException(\n"
+        "                            \"Native Spread recovery was superseded before completion\",",
+        "reconciliation terminal recovery-generation fence",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                        if (!completeNativeSpreadRecovery(configurationGeneration)) {\n"
+        "                            annotationRecoveryHandoffPending.set(false)",
+        "                        if (false) {\n"
+        "                            annotationRecoveryHandoffPending.set(false)",
+        "restore terminal recovery-generation fence",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "    private fun beginNativeSpreadRecovery(): Long =\n"
+        "        synchronized(nativeSpreadConfigurationIntentLock) {\n"
+        "            check(!nativeSpreadModuleInvalidated.get())",
+        "    private fun beginNativeSpreadRecovery(): Long =\n"
+        "        synchronized(nativeSpreadConfigurationIntentLock) {\n"
+        "            check(true)",
+        "recovery admission module-validity fence",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "            if (!annotationRecoveryPending.compareAndSet(false, true)) {",
+        "            if (false) {",
+        "recovery single-owner admission",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "            val owned = annotationRecoveryPending.compareAndSet(true, false)",
+        "            val owned = true",
+        "recovery exact-owner release",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "    ) {\n"
+        "        try {\n"
+        "            val configurationGeneration = beginNativeSpreadConfiguration()\n"
+        "            if (enabled) {",
+        "    ) {\n"
+        "        val configurationGeneration = beginNativeSpreadConfiguration()\n"
+        "        try {\n"
+        "            if (enabled) {",
+        "read-only configuration recovery rejection settlement",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "    ) {\n"
+        "        try {\n"
+        "            val configurationGeneration = beginNativeSpreadConfiguration()\n"
+        "            val pdfFile = requirePdf(filePath)",
+        "    ) {\n"
+        "        val configurationGeneration = beginNativeSpreadConfiguration()\n"
+        "        try {\n"
+        "            val pdfFile = requirePdf(filePath)",
+        "editable configuration recovery rejection settlement",
+    ),
 )
 
 
@@ -1754,10 +1838,40 @@ class _ConfigurationGenerationGate:
     def __init__(self) -> None:
         self.generation = 0
         self.invalidated = False
+        self.recovery_pending = False
 
     def begin(self) -> int:
+        if self.invalidated:
+            raise _InterleavingRejected("module was invalidated")
+        if self.recovery_pending:
+            raise _InterleavingRejected("recovery is in progress")
         self.generation += 1
         return self.generation
+
+    def capture(self) -> int:
+        if self.invalidated:
+            raise _InterleavingRejected("module was invalidated")
+        if self.recovery_pending:
+            raise _InterleavingRejected("recovery is in progress")
+        return self.generation
+
+    def begin_recovery(self) -> int:
+        if self.invalidated:
+            raise _InterleavingRejected("module was invalidated")
+        if self.recovery_pending:
+            raise _InterleavingRejected("recovery is in progress")
+        self.recovery_pending = True
+        self.generation += 1
+        return self.generation
+
+    def complete_recovery(self, expected: int) -> bool:
+        if not self.recovery_pending:
+            return False
+        self.recovery_pending = False
+        current = not self.invalidated and self.generation == expected
+        if current:
+            self.generation += 1
+        return current
 
     def require(self, expected: int) -> None:
         if self.invalidated or self.generation != expected:
@@ -1955,6 +2069,29 @@ def run_committed_marker_verification_failure_tests() -> None:
 def run_configuration_generation_interleaving_tests() -> None:
     gate = _ConfigurationGenerationGate()
     state = {"marker": "off", "pending": None}
+
+    # Recovery entry advances the same generation that guards a mode-load
+    # publication. While the mutation is active, neither a new load nor a
+    # competing configuration can join its generation. Completion advances it
+    # again so no load sampled during recovery can publish afterward.
+    load_generation = gate.capture()
+    recovery_generation = gate.begin_recovery()
+    stale_load = {"results": []}
+    gate.complete(
+        load_generation,
+        "ready",
+        lambda result: stale_load["results"].append(result),
+    )
+    assert stale_load == {"results": ["stale_operation"]}
+    for blocked in (gate.capture, gate.begin):
+        try:
+            blocked()
+            raise AssertionError("recovery allowed overlapping configuration")
+        except _InterleavingRejected as error:
+            assert str(error) == "recovery is in progress"
+    assert gate.complete_recovery(recovery_generation)
+    assert gate.generation == recovery_generation + 1
+    assert not gate.recovery_pending
 
     # Supersession after preliminary work but before pending publication.
     first = gate.begin()

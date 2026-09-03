@@ -1645,6 +1645,120 @@ def main() -> None:
         ],
         "native-mode load generation authority",
     )
+    reconcile_start = plugin.find("fun reconcileNativeSpreadRecovery(")
+    reconcile_end = plugin.find("fun configureNativeSpreadReadOnly(", reconcile_start)
+    restore_start = plugin.find("fun restoreNativeAnnotationBackup(")
+    restore_end = plugin.find("private fun writeNativeSpreadReadOnlyMarker(", restore_start)
+    if min(reconcile_start, reconcile_end, restore_start, restore_end) < 0:
+        fail("could not isolate native recovery configuration entrypoints")
+    ordered(
+        plugin[reconcile_start:reconcile_end],
+        [
+            "val configurationGeneration = beginNativeSpreadRecovery()",
+            "requireNativeSpreadConfigurationGeneration(\n"
+            "                        configurationGeneration,",
+            "withNativeSpreadConfigurationAuthority(\n"
+            "                            configurationGeneration,",
+            "reconcileFailedActivationBackupForExplicitActivation(",
+            "completeNativeSpreadRecovery(configurationGeneration)",
+            "promise.resolve(true)",
+        ],
+        "recovery reconciliation generation ownership",
+    )
+    ordered(
+        plugin[restore_start:restore_end],
+        [
+            "val configurationGeneration = beginNativeSpreadRecovery()",
+            "requireNativeSpreadConfigurationGeneration(\n"
+            "                    configurationGeneration,",
+            "withNativeSpreadConfigurationAuthority(\n"
+            "                        configurationGeneration,",
+            "scheduleAnnotationRestore(\n"
+            "                    pdfFile,\n"
+            "                    backup,\n"
+            "                    configurationGeneration,",
+            "completeNativeSpreadRecovery(configurationGeneration)",
+            "promise.resolve(nativeAnnotationBackupMap(backup, \"restored\"))",
+        ],
+        "annotation restore generation ownership",
+    )
+    recovery_helpers_start = plugin.find("private fun beginNativeSpreadConfiguration(): Long =")
+    recovery_helpers_end = plugin.find("private fun nativeSpreadCapability(", recovery_helpers_start)
+    if recovery_helpers_start < 0 or recovery_helpers_end < 0:
+        fail("could not isolate native recovery generation helpers")
+    recovery_helpers = plugin[recovery_helpers_start:recovery_helpers_end]
+    begin_recovery_start = recovery_helpers.find(
+        "private fun beginNativeSpreadRecovery(): Long ="
+    )
+    complete_recovery_start = recovery_helpers.find(
+        "private fun completeNativeSpreadRecovery(expected: Long): Boolean ="
+    )
+    capture_generation_start = recovery_helpers.find(
+        "private fun captureNativeSpreadConfigurationGeneration(): Long ="
+    )
+    if min(
+        begin_recovery_start,
+        complete_recovery_start,
+        capture_generation_start,
+    ) < 0:
+        fail("could not isolate native recovery generation phases")
+    ordered(
+        recovery_helpers[:begin_recovery_start],
+        [
+            "check(!nativeSpreadModuleInvalidated.get())",
+            "check(!annotationRecoveryPending.get())",
+            "nativeSpreadConfigurationGeneration.incrementAndGet()",
+        ],
+        "configuration admission excludes active recovery",
+    )
+    ordered(
+        recovery_helpers[begin_recovery_start:complete_recovery_start],
+        [
+            "check(!nativeSpreadModuleInvalidated.get())",
+            "annotationRecoveryPending.compareAndSet(false, true)",
+            "nativeSpreadConfigurationGeneration.incrementAndGet()",
+        ],
+        "recovery admission generation advance",
+    )
+    ordered(
+        recovery_helpers[complete_recovery_start:capture_generation_start],
+        [
+            "annotationRecoveryPending.compareAndSet(true, false)",
+            "nativeSpreadConfigurationGeneration.get() == expected",
+            "Invalidate any load that began while recovery was active",
+            "nativeSpreadConfigurationGeneration.incrementAndGet()",
+        ],
+        "recovery completion generation advance",
+    )
+    ordered(
+        recovery_helpers[capture_generation_start:],
+        [
+            "check(!nativeSpreadModuleInvalidated.get())",
+            "check(!annotationRecoveryPending.get())",
+            "nativeSpreadConfigurationGeneration.get()",
+        ],
+        "mode-load admission excludes active recovery",
+    )
+    if plugin.count("val configurationGeneration = beginNativeSpreadRecovery()") != 2:
+        fail("both recovery mutation entrypoints must acquire a fresh generation")
+    readonly_start = plugin.find("fun configureNativeSpreadReadOnly(")
+    readonly_end = plugin.find("fun configureNativeSpreadEditable(", readonly_start)
+    editable_start = readonly_end
+    editable_end = plugin.find("fun restoreNativeAnnotationBackup(", editable_start)
+    if min(readonly_start, readonly_end, editable_start, editable_end) < 0:
+        fail("could not isolate Native Spread configuration entrypoints")
+    for segment, label in (
+        (plugin[readonly_start:readonly_end], "read-only/off configuration"),
+        (plugin[editable_start:editable_end], "editable configuration"),
+    ):
+        ordered(
+            segment,
+            [
+                "try {",
+                "val configurationGeneration = beginNativeSpreadConfiguration()",
+            ],
+            f"{label} promise-safe recovery exclusion",
+        )
     require(
         plugin,
         [

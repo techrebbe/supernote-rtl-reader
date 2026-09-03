@@ -502,16 +502,19 @@ class ReaderPreferencesModule(
 
     @ReactMethod
     fun reconcileNativeSpreadRecovery(filePath: String, promise: Promise) {
+        var recoveryGeneration: Long? = null
+        var recoveryWorkerStarted = false
         try {
             val pdfFile = requirePdf(filePath)
             val marker = nativeSpreadMarker(pdfFile)
+            val configurationGeneration = beginNativeSpreadRecovery()
+            recoveryGeneration = configurationGeneration
             startNativeBackupWorker("RTLReaderNativeRecoveryReconcile") {
+                var recoveryCompleted = false
                 try {
-                    if (annotationRecoveryPending.get()) {
-                        throw IllegalStateException(
-                            "Annotation recovery is already in progress",
-                        )
-                    }
+                    requireNativeSpreadConfigurationGeneration(
+                        configurationGeneration,
+                    )
                     val before = assessNativeSpreadAuthority(
                         pdfFile,
                         marker,
@@ -521,10 +524,14 @@ class ReaderPreferencesModule(
                         // This routine never guesses: every destructive branch is
                         // gated by the pending token, document/marker identity, and
                         // exact backup/archive hashes. Ambiguous evidence is kept.
-                        reconcileFailedActivationBackupForExplicitActivation(
-                            pdfFile,
-                            marker,
-                        )
+                        withNativeSpreadConfigurationAuthority(
+                            configurationGeneration,
+                        ) {
+                            reconcileFailedActivationBackupForExplicitActivation(
+                                pdfFile,
+                                marker,
+                            )
+                        }
                     }
                     val after = assessNativeSpreadAuthority(
                         pdfFile,
@@ -536,12 +543,21 @@ class ReaderPreferencesModule(
                             "Native Spread recovery authority remains unresolved: ${after.reason}",
                         )
                     }
+                    if (!completeNativeSpreadRecovery(configurationGeneration)) {
+                        throw IllegalStateException(
+                            "Native Spread recovery was superseded before completion",
+                        )
+                    }
+                    recoveryCompleted = true
                     Log.i(
                         LOG_TAG,
                         "RTL_READER_NATIVE_RECOVERY_RECONCILED previous=${before.reason}",
                     )
                     promise.resolve(true)
                 } catch (error: Throwable) {
+                    if (!recoveryCompleted) {
+                        completeNativeSpreadRecovery(configurationGeneration)
+                    }
                     Log.e(
                         LOG_TAG,
                         "RTL_READER_NATIVE_RECOVERY_RECONCILE_FAILED: ${error.message}",
@@ -554,7 +570,13 @@ class ReaderPreferencesModule(
                     )
                 }
             }
+            recoveryWorkerStarted = true
         } catch (error: Throwable) {
+            if (!recoveryWorkerStarted) {
+                recoveryGeneration?.let { generation ->
+                    completeNativeSpreadRecovery(generation)
+                }
+            }
             promise.reject(
                 "NATIVE_SPREAD_RECOVERY_RECONCILE_FAILED",
                 error.message,
@@ -573,8 +595,8 @@ class ReaderPreferencesModule(
         spreadSizing: String,
         promise: Promise,
     ) {
-        val configurationGeneration = beginNativeSpreadConfiguration()
         try {
+            val configurationGeneration = beginNativeSpreadConfiguration()
             if (enabled) {
                 throw IllegalStateException(
                     "RTL read-only belonged to the retired Native Spread engine. Native Reader v2 supports only Off or protected native editing.",
@@ -772,8 +794,8 @@ class ReaderPreferencesModule(
         spreadSizing: String,
         promise: Promise,
     ) {
-        val configurationGeneration = beginNativeSpreadConfiguration()
         try {
+            val configurationGeneration = beginNativeSpreadConfiguration()
             val pdfFile = requirePdf(filePath)
             val marker = nativeSpreadMarker(pdfFile)
             val capability = nativeSpreadCapability()
@@ -849,15 +871,16 @@ class ReaderPreferencesModule(
     fun restoreNativeAnnotationBackup(filePath: String, promise: Promise) {
         var recoveryClaimed = false
         var restoreWorkerStarted = false
+        var recoveryGeneration: Long? = null
         try {
             val pdfFile = requirePdf(filePath)
+            val configurationGeneration = beginNativeSpreadRecovery()
+            recoveryGeneration = configurationGeneration
+            recoveryClaimed = true
             synchronized(nativeSpreadConfigurationLock) {
-                if (!annotationRecoveryPending.compareAndSet(false, true)) {
-                    throw IllegalStateException(
-                        "Annotation recovery is already in progress",
-                    )
-                }
-                recoveryClaimed = true
+                requireNativeSpreadConfigurationGeneration(
+                    configurationGeneration,
+                )
                 annotationRecoveryHandoffPending.set(false)
                 val result = readNativeAnnotationBackup(pdfFile)
                 val backup = result.backup
@@ -886,23 +909,31 @@ class ReaderPreferencesModule(
                 // disabling its never-authorized marker preserves the canonical
                 // recovery bytes for the restore worker instead of archiving them.
                 if (recoveryJournal == null) {
-                    withNativeSpreadPublicationLock(marker) {
-                        val markerAuthority = readPersistedAuthorityIfFile(marker)
-                        if (markerAuthority != null) {
-                            deleteRegularFileCas(
-                                marker,
-                                markerAuthority.identity,
-                                "Native Spread recovery disable",
-                            )
-                        }
-                        if (readPersistedAuthorityIfFile(marker) != null) {
-                            throw IllegalStateException(
-                                "Could not disable Native Spread before recovery",
-                            )
+                    withNativeSpreadConfigurationAuthority(
+                        configurationGeneration,
+                    ) {
+                        withNativeSpreadPublicationLock(marker) {
+                            val markerAuthority = readPersistedAuthorityIfFile(marker)
+                            if (markerAuthority != null) {
+                                deleteRegularFileCas(
+                                    marker,
+                                    markerAuthority.identity,
+                                    "Native Spread recovery disable",
+                                )
+                            }
+                            if (readPersistedAuthorityIfFile(marker) != null) {
+                                throw IllegalStateException(
+                                    "Could not disable Native Spread before recovery",
+                                )
+                            }
                         }
                     }
                 }
-                scheduleAnnotationRestore(pdfFile, backup) { error ->
+                scheduleAnnotationRestore(
+                    pdfFile,
+                    backup,
+                    configurationGeneration,
+                ) { error ->
                     Handler(Looper.getMainLooper()).post {
                         if (error == null) {
                             // Publish the one-shot handoff suppression before
@@ -911,7 +942,18 @@ class ReaderPreferencesModule(
                             // can restart DocumentActivity between restore
                             // completion and suppression publication.
                             annotationRecoveryHandoffPending.set(true)
-                            annotationRecoveryPending.set(false)
+                        } else {
+                            annotationRecoveryHandoffPending.set(false)
+                        }
+                        if (!completeNativeSpreadRecovery(configurationGeneration)) {
+                            annotationRecoveryHandoffPending.set(false)
+                            promise.reject(
+                                "NATIVE_SPREAD_BACKUP_RESTORE_STALE",
+                                "Native Spread recovery was superseded before completion",
+                            )
+                            return@post
+                        }
+                        if (error == null) {
                             promise.resolve(nativeAnnotationBackupMap(backup, "restored"))
                             // App.js normally consumes this one-shot handoff skip
                             // immediately while closing. Avoid leaving it behind
@@ -926,8 +968,6 @@ class ReaderPreferencesModule(
                                 5000L,
                             )
                         } else {
-                            annotationRecoveryPending.set(false)
-                            annotationRecoveryHandoffPending.set(false)
                             val message =
                                 "Annotation restore failed: ${error.message ?: "unknown error"}"
                             Toast.makeText(
@@ -953,7 +993,9 @@ class ReaderPreferencesModule(
             }
         } catch (error: Throwable) {
             if (recoveryClaimed && !restoreWorkerStarted) {
-                annotationRecoveryPending.set(false)
+                recoveryGeneration?.let { generation ->
+                    completeNativeSpreadRecovery(generation)
+                }
                 annotationRecoveryHandoffPending.set(false)
             }
             Log.e(LOG_TAG, "RTL_READER_NATIVE_BACKUP_RESTORE_FAILED: ${error.message}", error)
@@ -2163,13 +2205,49 @@ class ReaderPreferencesModule(
 
     private fun beginNativeSpreadConfiguration(): Long =
         synchronized(nativeSpreadConfigurationIntentLock) {
+            check(!nativeSpreadModuleInvalidated.get()) {
+                "Native Spread module was invalidated"
+            }
+            check(!annotationRecoveryPending.get()) {
+                "Annotation recovery is already in progress"
+            }
             nativeSpreadConfigurationGeneration.incrementAndGet()
+        }
+
+    private fun beginNativeSpreadRecovery(): Long =
+        synchronized(nativeSpreadConfigurationIntentLock) {
+            check(!nativeSpreadModuleInvalidated.get()) {
+                "Native Spread module was invalidated"
+            }
+            if (!annotationRecoveryPending.compareAndSet(false, true)) {
+                throw IllegalStateException(
+                    "Annotation recovery is already in progress",
+                )
+            }
+            nativeSpreadConfigurationGeneration.incrementAndGet()
+        }
+
+    private fun completeNativeSpreadRecovery(expected: Long): Boolean =
+        synchronized(nativeSpreadConfigurationIntentLock) {
+            val owned = annotationRecoveryPending.compareAndSet(true, false)
+            val current = owned &&
+                !nativeSpreadModuleInvalidated.get() &&
+                nativeSpreadConfigurationGeneration.get() == expected
+            if (current) {
+                // Invalidate any load that began while recovery was active but
+                // had not yet reached its final publication fence.
+                nativeSpreadConfigurationGeneration.incrementAndGet()
+            }
+            current
         }
 
     private fun captureNativeSpreadConfigurationGeneration(): Long =
         synchronized(nativeSpreadConfigurationIntentLock) {
             check(!nativeSpreadModuleInvalidated.get()) {
                 "Native Spread module was invalidated"
+            }
+            check(!annotationRecoveryPending.get()) {
+                "Annotation recovery is already in progress"
             }
             nativeSpreadConfigurationGeneration.get()
         }
@@ -6212,17 +6290,24 @@ class ReaderPreferencesModule(
     private fun scheduleAnnotationRestore(
         pdfFile: File,
         backup: NativeAnnotationBackup,
+        configurationGeneration: Long,
         completion: (Throwable?) -> Unit,
     ) {
         Thread {
             var persistenceError: Throwable? = null
             synchronized(nativeSpreadConfigurationLock) {
                 try {
+                requireNativeSpreadConfigurationGeneration(
+                    configurationGeneration,
+                )
                 // The promise remains pending while this worker runs. Kill the
                 // native reader before touching its working .mark so an
                 // in-memory annotation model cannot overwrite the recovery
                 // snapshot while DocumentActivity is resuming.
                 SystemClock.sleep(350)
+                requireNativeSpreadConfigurationGeneration(
+                    configurationGeneration,
+                )
                 val activityManager = reactApplicationContext.getSystemService(
                     Context.ACTIVITY_SERVICE,
                 ) as ActivityManager
@@ -6288,6 +6373,9 @@ class ReaderPreferencesModule(
                 }
 
                 val marker = nativeSpreadMarker(pdfFile)
+                requireNativeSpreadConfigurationGeneration(
+                    configurationGeneration,
+                )
                 withNativeSpreadPublicationLock(marker) {
                     val revalidatedBackup = readNativeAnnotationBackup(pdfFile).backup
                         ?: throw IllegalStateException(

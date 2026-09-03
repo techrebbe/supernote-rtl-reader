@@ -65,7 +65,10 @@ descriptor authority and compared exactly before backup capability or editable
 authority is published. Large annotation snapshots are streamed through the
 pinned descriptor rather than retained in the plug-in heap, and the final
 worker-to-UI publication remains fenced by the configuration generation that
-started the load.
+started the load. Restore and reconciliation claim that same process-wide
+generation, exclude concurrent mode loads/configuration during their mutation,
+and advance it again at completion; stale UI state therefore cannot escape
+across a recovery boundary.
 Committed publication and successful activation verification are separate:
 post-rename verification failures remain non-rollbackable but propagate as
 failures rather than being reported as a successful enable.

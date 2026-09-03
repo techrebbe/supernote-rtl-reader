@@ -1470,7 +1470,7 @@ def main() -> None:
     require(
         marker,
         [
-            "MINIMUM_COMPANION_MODULE_VERSION = 137L",
+            "MINIMUM_COMPANION_MODULE_VERSION = 138L",
             "COMMITTED_FIELDS.equals(properties.stringPropertyNames())",
             "minimumVersion != MINIMUM_COMPANION_MODULE_VERSION",
             'requireExact(properties, "activationState", "committed")',
@@ -1917,7 +1917,7 @@ def main() -> None:
             "NATIVE_READER_V2_SIGNER_SHA256 =",
             "NATIVE_READER_V2_APK_LENGTH = 258587L",
             "NATIVE_READER_V2_APK_SHA256 =",
-            "483ddebd15cf36db5f361e02175fd498e41dcc3b53a89b30982a7ba6b49239f8",
+            "8a641a67be2b56acb4afbe0634bc6187d5e07ac230b50e02d87c93bdeb749f3c",
             "PackageManager.GET_SIGNING_CERTIFICATES",
             "signing.hasMultipleSigners()",
             "Native Reader signer set is not exact",
@@ -2448,7 +2448,7 @@ def main() -> None:
             "Remove-Item -LiteralPath $keystore -Force",
             "release-output/SupernoteNativeSpreadProbe-v0.0.138.apk",
             "$expectedSignedLength = 258587L",
-            "483ddebd15cf36db5f361e02175fd498e41dcc3b53a89b30982a7ba6b49239f8",
+            "8a641a67be2b56acb4afbe0634bc6187d5e07ac230b50e02d87c93bdeb749f3c",
             "Signed APK length differs from the reviewed upgrade identity",
             "Signed APK SHA-256 differs from the reviewed upgrade identity.",
         ],

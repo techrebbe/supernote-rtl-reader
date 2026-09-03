@@ -73,6 +73,12 @@ MUTATIONS = (
     ),
     (
         "NativeReaderV2MarkerClaim.java",
+        "MINIMUM_COMPANION_MODULE_VERSION = 138L",
+        "MINIMUM_COMPANION_MODULE_VERSION = 137L",
+        "companion marker and handshake version authority",
+    ),
+    (
+        "NativeReaderV2MarkerClaim.java",
         "if (claimedLength != observedDocumentLength\n"
         "            || !isCanonicalSha256(claimedSha256)",
         "if (claimedLength == observedDocumentLength\n"
@@ -732,7 +738,7 @@ STATIC_MUTATIONS = (
     ),
     (
         ".github/workflows/build.yml",
-        "483ddebd15cf36db5f361e02175fd498e41dcc3b53a89b30982a7ba6b49239f8",
+        "8a641a67be2b56acb4afbe0634bc6187d5e07ac230b50e02d87c93bdeb749f3c",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "published companion exact signed digest",
     ),
@@ -1207,7 +1213,7 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "483ddebd15cf36db5f361e02175fd498e41dcc3b53a89b30982a7ba6b49239f8",
+        "8a641a67be2b56acb4afbe0634bc6187d5e07ac230b50e02d87c93bdeb749f3c",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "installed companion APK digest pin",
     ),

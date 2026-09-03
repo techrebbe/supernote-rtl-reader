@@ -7,7 +7,7 @@ with SupernoteDocument `1.02.446`.
 ## Native Reader v2 pre-hardware adversarial gate — PASS
 
 - [x] 85,071 deterministic controller/geometry/transaction assertions pass.
-- [x] 171 authority mutations are rejected, including exact firmware-declaration
+- [x] 172 authority mutations are rejected, including exact firmware-declaration
   and native pen-callback ownership drift, stale admission evidence,
   contained-runtime publication, contact-safe containment, three-layer stock
   restoration, projection drain ordering, and descriptor-backed marker
@@ -22,10 +22,10 @@ with SupernoteDocument `1.02.446`.
   Spread generator tests, contract fixtures, and native viewport tests pass.
 - [x] Two clean v0.0.138 companion builds are byte-for-byte identical at
   258,587 bytes and SHA-256
-  `483ddebd15cf36db5f361e02175fd498e41dcc3b53a89b30982a7ba6b49239f8`.
+  `8a641a67be2b56acb4afbe0634bc6187d5e07ac230b50e02d87c93bdeb749f3c`.
   The exact locally generated RTL Reader hardware-candidate package for this
   gate has SHA-256
-  `ec530d8872d4a91593fe14932c57880019fdf09227233e225f11e28c55874005`.
+  `cf1c75f4e3248796a4f69fc3895745fd2964a1d3c149e5a58a5d0499fca07c40`.
 - [x] The final adversarial review findings are covered by deterministic gates:
   epoch-owned input/lifecycle authority, exact stock-reload receipts, no-clobber
   `.mark` publication/rollback interleavings, post-commit relaunch, exact

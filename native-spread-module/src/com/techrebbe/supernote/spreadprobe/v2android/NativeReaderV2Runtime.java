@@ -54,6 +54,14 @@ public final class NativeReaderV2Runtime
     /** Immediate cross-stream contact authority owned by the hook shell. */
     public interface PhysicalContactFence {
         boolean stylusContactActive();
+
+        /**
+         * Runs a native-presentation publication while holding the same lock
+         * that publishes physical stylus DOWN. This makes the boundary
+         * atomic: either the presentation finishes before the contact starts,
+         * or the caller observes the live contact and defers publication.
+         */
+        boolean runWhenStylusIdle(Runnable publication);
     }
 
     /** Releases the hook-level admission fence only after native authority exists. */
@@ -126,6 +134,7 @@ public final class NativeReaderV2Runtime
     // the first sample. The owner-thread GestureRouter token may be posted a
     // little later, so refresh also consults this zero-work contact latch.
     private volatile boolean nativePenCallbackContact;
+    private boolean compositionDeferredForPhysicalContact;
     private volatile List<RectD> nativeChromeMasks = Collections.emptyList();
     private volatile List<RectD> trackedChromeMasks = Collections.emptyList();
     private boolean internalPageLoad;
@@ -574,6 +583,14 @@ public final class NativeReaderV2Runtime
                 }
                 settlePendingContainment();
                 completeNativeLifecycleHandoffIfReady();
+                if (compositionDeferredForPhysicalContact
+                    && !physicalContactFence.stylusContactActive()) {
+                    compositionDeferredForPhysicalContact = false;
+                    if (!retired && !containedFailClosed
+                        && !lifecycleSuspended && isLandscape()) {
+                        scheduleRefresh("physical_contact_publication_released");
+                    }
+                }
             }
         });
     }
@@ -2274,17 +2291,31 @@ public final class NativeReaderV2Runtime
                     "projection authority changed before publication"
                 );
             }
-            publishPreparedComposition(
-                current,
-                snapshot,
-                authority,
-                canvas,
-                nextLayout,
-                reason,
-                compositionFreeze,
-                compositionLifecycleEpoch,
-                next
+            boolean publicationAdmitted = physicalContactFence.runWhenStylusIdle(
+                new Runnable() {
+                    @Override public void run() {
+                        publishPreparedComposition(
+                            current,
+                            snapshot,
+                            authority,
+                            canvas,
+                            nextLayout,
+                            reason,
+                            compositionFreeze,
+                            compositionLifecycleEpoch,
+                            next
+                        );
+                    }
+                }
             );
+            if (!publicationAdmitted) {
+                if (next != visible) next.recycle();
+                if (!inputWasFrozen) releaseInputIngress(compositionFreeze);
+                compositionDeferredForPhysicalContact = true;
+                Log.d(TAG,
+                    "composition publication deferred until physical stylus "
+                        + "contact ends reason=" + reason);
+            }
         } catch (RuntimeException failure) {
             if (next != visible) next.recycle();
             if (!inputWasFrozen) releaseInputIngress(compositionFreeze);
@@ -2307,7 +2338,8 @@ public final class NativeReaderV2Runtime
         if (retired || containedFailClosed || detachmentPrepared
             || lifecycleSuspended
             || lifecycleEpoch != compositionLifecycleEpoch
-            || !inputAdmission.current(compositionFreeze)) {
+            || !inputAdmission.current(compositionFreeze)
+            || physicalContactFence.stylusContactActive()) {
             throw new IllegalStateException(
                 "contained or detached runtime cannot publish a composition"
             );

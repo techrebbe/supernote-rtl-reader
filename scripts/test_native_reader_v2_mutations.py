@@ -794,7 +794,7 @@ STATIC_MUTATIONS = (
     ),
     (
         ".github/workflows/build.yml",
-        "8a641a67be2b56acb4afbe0634bc6187d5e07ac230b50e02d87c93bdeb749f3c",
+        "aeaddb2e682e3b2a2eaf4c9abe531ea40fa7ead25dab1871c637892d048fce5f",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "published companion exact signed digest",
     ),
@@ -1083,8 +1083,10 @@ STATIC_MUTATIONS = (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2Runtime.java",
         "            || lifecycleEpoch != compositionLifecycleEpoch\n"
-        "            || !inputAdmission.current(compositionFreeze)) {",
-        "            || !inputAdmission.current(compositionFreeze)) {",
+        "            || !inputAdmission.current(compositionFreeze)\n"
+        "            || physicalContactFence.stylusContactActive()) {",
+        "            || !inputAdmission.current(compositionFreeze)\n"
+        "            || physicalContactFence.stylusContactActive()) {",
         "composition lifecycle epoch",
     ),
     (
@@ -1162,23 +1164,185 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
+        "    private fun readRegularFileAuthorityIfFile(\n"
+        "        file: File,\n"
+        "        maximumBytes: Long,\n"
+        "        requireNonEmpty: Boolean,\n"
+        "        authorityLabel: String,\n"
+        "    ): PersistedFileAuthority? {\n"
+        "        val path = file.absolutePath\n"
+        "        val pathBefore = try {\n"
+        "            Os.lstat(path)\n"
+        "        } catch (missing: ErrnoException) {\n"
+        "            if (missing.errno == OsConstants.ENOENT) return null\n"
+        "            throw missing\n"
+        "        }\n"
+        "        require(\n"
+        "            OsConstants.S_ISREG(pathBefore.st_mode) &&\n"
         "                pathBefore.st_nlink == 1L &&",
+        "    private fun readRegularFileAuthorityIfFile(\n"
+        "        file: File,\n"
+        "        maximumBytes: Long,\n"
+        "        requireNonEmpty: Boolean,\n"
+        "        authorityLabel: String,\n"
+        "    ): PersistedFileAuthority? {\n"
+        "        val path = file.absolutePath\n"
+        "        val pathBefore = try {\n"
+        "            Os.lstat(path)\n"
+        "        } catch (missing: ErrnoException) {\n"
+        "            if (missing.errno == OsConstants.ENOENT) return null\n"
+        "            throw missing\n"
+        "        }\n"
+        "        require(\n"
+        "            OsConstants.S_ISREG(pathBefore.st_mode) &&\n"
         "                pathBefore.st_nlink >= 1L &&",
         "companion single-link marker authority",
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
         (
+            "    private fun readRegularFileAuthorityIfFile(\n"
+            "        file: File,\n"
+            "        maximumBytes: Long,\n"
+            "        requireNonEmpty: Boolean,\n"
+            "        authorityLabel: String,\n"
+            "    ): PersistedFileAuthority? {\n"
+            "        val path = file.absolutePath\n"
+            "        val pathBefore = try {\n"
+            "            Os.lstat(path)\n"
+            "        } catch (missing: ErrnoException) {\n"
+            "            if (missing.errno == OsConstants.ENOENT) return null\n"
+            "            throw missing\n"
+            "        }\n"
+            "        require(\n"
+            "            OsConstants.S_ISREG(pathBefore.st_mode) &&\n"
+            "                pathBefore.st_nlink == 1L &&\n"
+            "                pathBefore.st_size >= (if (requireNonEmpty) 1L else 0L) &&\n"
+            "                pathBefore.st_size <= maximumBytes &&\n"
+            "                pathBefore.st_size <= Int.MAX_VALUE.toLong(),\n"
+            "        ) {\n"
+            "            \"$authorityLabel authority is not one bounded single-link file\"\n"
+            "        }\n"
             "        val descriptor = Os.open(\n"
             "            path,\n"
             "            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or OsConstants.O_NOFOLLOW,"
         ),
         (
+            "    private fun readRegularFileAuthorityIfFile(\n"
+            "        file: File,\n"
+            "        maximumBytes: Long,\n"
+            "        requireNonEmpty: Boolean,\n"
+            "        authorityLabel: String,\n"
+            "    ): PersistedFileAuthority? {\n"
+            "        val path = file.absolutePath\n"
+            "        val pathBefore = try {\n"
+            "            Os.lstat(path)\n"
+            "        } catch (missing: ErrnoException) {\n"
+            "            if (missing.errno == OsConstants.ENOENT) return null\n"
+            "            throw missing\n"
+            "        }\n"
+            "        require(\n"
+            "            OsConstants.S_ISREG(pathBefore.st_mode) &&\n"
+            "                pathBefore.st_nlink == 1L &&\n"
+            "                pathBefore.st_size >= (if (requireNonEmpty) 1L else 0L) &&\n"
+            "                pathBefore.st_size <= maximumBytes &&\n"
+            "                pathBefore.st_size <= Int.MAX_VALUE.toLong(),\n"
+            "        ) {\n"
+            "            \"$authorityLabel authority is not one bounded single-link file\"\n"
+            "        }\n"
             "        val descriptor = Os.open(\n"
             "            path,\n"
             "            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC,"
         ),
         "companion no-follow marker authority",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "    private fun readRegularFileFingerprintIfFile(\n"
+        "        file: File,\n"
+        "        maximumBytes: Long,\n"
+        "        requireNonEmpty: Boolean,\n"
+        "        authorityLabel: String,\n"
+        "    ): PersistedFileFingerprint? {\n"
+        "        val path = file.absolutePath\n"
+        "        val pathBefore = try {\n"
+        "            Os.lstat(path)\n"
+        "        } catch (missing: ErrnoException) {\n"
+        "            if (missing.errno == OsConstants.ENOENT) return null\n"
+        "            throw missing\n"
+        "        }\n"
+        "        require(\n"
+        "            OsConstants.S_ISREG(pathBefore.st_mode) &&\n"
+        "                pathBefore.st_nlink == 1L &&",
+        "    private fun readRegularFileFingerprintIfFile(\n"
+        "        file: File,\n"
+        "        maximumBytes: Long,\n"
+        "        requireNonEmpty: Boolean,\n"
+        "        authorityLabel: String,\n"
+        "    ): PersistedFileFingerprint? {\n"
+        "        val path = file.absolutePath\n"
+        "        val pathBefore = try {\n"
+        "            Os.lstat(path)\n"
+        "        } catch (missing: ErrnoException) {\n"
+        "            if (missing.errno == OsConstants.ENOENT) return null\n"
+        "            throw missing\n"
+        "        }\n"
+        "        require(\n"
+        "            OsConstants.S_ISREG(pathBefore.st_mode) &&\n"
+        "                pathBefore.st_nlink >= 1L &&",
+        "backup fingerprint single-link authority",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "    private fun readRegularFileFingerprintIfFile(\n"
+        "        file: File,\n"
+        "        maximumBytes: Long,\n"
+        "        requireNonEmpty: Boolean,\n"
+        "        authorityLabel: String,\n"
+        "    ): PersistedFileFingerprint? {\n"
+        "        val path = file.absolutePath\n"
+        "        val pathBefore = try {\n"
+        "            Os.lstat(path)\n"
+        "        } catch (missing: ErrnoException) {\n"
+        "            if (missing.errno == OsConstants.ENOENT) return null\n"
+        "            throw missing\n"
+        "        }\n"
+        "        require(\n"
+        "            OsConstants.S_ISREG(pathBefore.st_mode) &&\n"
+        "                pathBefore.st_nlink == 1L &&\n"
+        "                pathBefore.st_size >= (if (requireNonEmpty) 1L else 0L) &&\n"
+        "                pathBefore.st_size <= maximumBytes,\n"
+        "        ) {\n"
+        "            \"$authorityLabel authority is not one bounded single-link file\"\n"
+        "        }\n"
+        "        val descriptor = Os.open(\n"
+        "            path,\n"
+        "            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or OsConstants.O_NOFOLLOW,",
+        "    private fun readRegularFileFingerprintIfFile(\n"
+        "        file: File,\n"
+        "        maximumBytes: Long,\n"
+        "        requireNonEmpty: Boolean,\n"
+        "        authorityLabel: String,\n"
+        "    ): PersistedFileFingerprint? {\n"
+        "        val path = file.absolutePath\n"
+        "        val pathBefore = try {\n"
+        "            Os.lstat(path)\n"
+        "        } catch (missing: ErrnoException) {\n"
+        "            if (missing.errno == OsConstants.ENOENT) return null\n"
+        "            throw missing\n"
+        "        }\n"
+        "        require(\n"
+        "            OsConstants.S_ISREG(pathBefore.st_mode) &&\n"
+        "                pathBefore.st_nlink == 1L &&\n"
+        "                pathBefore.st_size >= (if (requireNonEmpty) 1L else 0L) &&\n"
+        "                pathBefore.st_size <= maximumBytes,\n"
+        "        ) {\n"
+        "            \"$authorityLabel authority is not one bounded single-link file\"\n"
+        "        }\n"
+        "        val descriptor = Os.open(\n"
+        "            path,\n"
+        "            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC,",
+        "backup fingerprint no-follow authority",
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
@@ -1269,7 +1433,7 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "8a641a67be2b56acb4afbe0634bc6187d5e07ac230b50e02d87c93bdeb749f3c",
+        "aeaddb2e682e3b2a2eaf4c9abe531ea40fa7ead25dab1871c637892d048fce5f",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "installed companion APK digest pin",
     ),
@@ -1400,6 +1564,124 @@ STATIC_MUTATIONS = (
         "val committed = persistenceError == null",
         "val committed = true",
         "post-commit relaunch boundary",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "            boolean publicationAdmitted = physicalContactFence.runWhenStylusIdle(\n",
+        "            boolean publicationAdmitted = true;\n"
+        "            physicalContactFence.runWhenStylusIdle(\n",
+        "physical stylus publication admission",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Runtime.java",
+        "            || !inputAdmission.current(compositionFreeze)\n"
+        "            || physicalContactFence.stylusContactActive()) {",
+        "            || !inputAdmission.current(compositionFreeze)) {",
+        "prepared publication physical-contact assertion",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "                                            publication.run();\n"
+        "                                            return true;",
+        "                                            return true;",
+        "hook-level atomic publication execution",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                val currentBackupResult = readNativeAnnotationBackup(pdfFile)",
+        "                val currentBackupResult = backupResult",
+        "post-handshake backup evidence reread",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                require(currentAuthority == authority) {",
+        "                require(true) {",
+        "post-handshake recovery authority equality",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "            samePersistedAuthority(backup.manifestAuthority, currentManifest) &&",
+        "            currentManifest != null &&",
+        "backup manifest descriptor identity",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                    samePersistedFingerprint(\n"
+        "                        backup.snapshotAuthority,\n"
+        "                        currentSnapshot,\n"
+        "                    )",
+        "                    currentSnapshot != null",
+        "backup snapshot fingerprint identity",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "            val snapshotAuthority = readRegularFileFingerprintIfFile(\n"
+        "                snapshot,",
+        "            val snapshotAuthority = readRegularFileAuthorityIfFile(\n"
+        "                snapshot,",
+        "backup snapshot streaming admission authority",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "        val currentSnapshot = readRegularFileFingerprintIfFile(\n"
+        "            backup.snapshot,",
+        "        val currentSnapshot = readRegularFileAuthorityIfFile(\n"
+        "            backup.snapshot,",
+        "backup snapshot streaming revalidation authority",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "                    if (contactStart) {\n"
+        "                        synchronized (entry.stylusRouteLock) {",
+        "                    if (contactStart) {\n"
+        "                        if (true) {",
+        "native callback DOWN publication lock",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "        if (action == MotionEvent.ACTION_DOWN) {\n"
+        "            int index = event.getActionIndex();\n"
+        "            synchronized (entry.stylusRouteLock) {",
+        "        if (action == MotionEvent.ACTION_DOWN) {\n"
+        "            int index = event.getActionIndex();\n"
+        "            if (true) {",
+        "Android DOWN publication lock",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "            val loadGeneration = captureNativeSpreadConfigurationGeneration()",
+        "            val loadGeneration = nativeSpreadConfigurationGeneration.get()",
+        "native-mode load generation capture",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                Handler(Looper.getMainLooper()).post {\n"
+        "                    try {\n"
+        "                        withNativeSpreadConfigurationAuthority(\n"
+        "                            configurationGeneration,\n"
+        "                        ) {",
+        "                Handler(Looper.getMainLooper()).post {\n"
+        "                    try {\n"
+        "                        run {",
+        "native-mode main publication generation fence",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                        digest.update(buffer, 0, count)",
+        "                        digest.update(buffer, 0, count - 1)",
+        "backup fingerprint complete-byte digest",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "            expected.length == actual.length &&\n"
+        "            expected.sha256 == actual.sha256",
+        "            expected.length == actual.length",
+        "backup fingerprint content equality",
     ),
 )
 
@@ -1551,6 +1833,74 @@ def run_marker_snapshot_revalidation_tests() -> None:
     except _InterleavingRejected as error:
         assert str(error) == "marker changed while settings loaded"
     print("Native Reader v2 marker snapshot revalidation: PASS")
+
+
+def run_backup_snapshot_revalidation_tests() -> None:
+    """Model recovery-evidence revalidation across an asynchronous handshake."""
+    persisted = {
+        "status": "verified",
+        "manifest_identity": 11,
+        "manifest_sha256": "manifest-a",
+        "snapshot_identity": 12,
+        "snapshot_sha256": "snapshot-a",
+    }
+    snapshot = dict(persisted)
+
+    def publish_loaded_recovery() -> str:
+        if persisted != snapshot:
+            raise _InterleavingRejected(
+                "recovery evidence changed while settings loaded"
+            )
+        return "published"
+
+    assert publish_loaded_recovery() == "published"
+    persisted["manifest_identity"] = 21
+    persisted["manifest_sha256"] = "manifest-b"
+    try:
+        publish_loaded_recovery()
+        raise AssertionError("stale backup capability was published")
+    except _InterleavingRejected as error:
+        assert str(error) == "recovery evidence changed while settings loaded"
+
+    persisted.clear()
+    persisted.update(snapshot)
+    persisted["status"] = "invalid:snapshot_missing"
+    persisted.pop("snapshot_identity")
+    persisted.pop("snapshot_sha256")
+    try:
+        publish_loaded_recovery()
+        raise AssertionError("removed recovery snapshot was published as available")
+    except _InterleavingRejected as error:
+        assert str(error) == "recovery evidence changed while settings loaded"
+    print("Native Reader v2 backup snapshot revalidation: PASS")
+
+
+def run_physical_contact_publication_fence_tests() -> None:
+    """Model an atomic choice between stylus DOWN and native publication."""
+    state = {"stylus": False, "deferred": False, "publications": 0}
+
+    def publish_if_idle() -> bool:
+        if state["stylus"]:
+            state["deferred"] = True
+            return False
+        state["publications"] += 1
+        return True
+
+    # DOWN wins the shared hook lock: publication waits for the terminal edge.
+    state["stylus"] = True
+    assert not publish_if_idle()
+    assert state == {"stylus": True, "deferred": True, "publications": 0}
+    state["stylus"] = False
+    if state["deferred"]:
+        state["deferred"] = False
+        assert publish_if_idle()
+    assert state == {"stylus": False, "deferred": False, "publications": 1}
+
+    # Publication wins the same lock: a later DOWN begins only after commit.
+    assert publish_if_idle()
+    state["stylus"] = True
+    assert state == {"stylus": True, "deferred": False, "publications": 2}
+    print("Native Reader v2 physical-contact publication fence: PASS")
 
 
 def run_committed_marker_verification_failure_tests() -> None:
@@ -2334,6 +2684,8 @@ def main() -> None:
         run_configuration_generation_interleaving_tests()
         run_post_rename_publication_boundary_tests()
         run_marker_snapshot_revalidation_tests()
+        run_backup_snapshot_revalidation_tests()
+        run_physical_contact_publication_fence_tests()
         run_committed_marker_verification_failure_tests()
         run_no_clobber_interleaving_tests(temp_root)
         run_durable_recovery_fence_tests(temp_root)

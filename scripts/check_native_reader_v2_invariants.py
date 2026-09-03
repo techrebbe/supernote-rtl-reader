@@ -883,6 +883,9 @@ def main() -> None:
             "stable.snapshot,\n                true,\n                markRevision",
             "PhysicalContactFence physicalContactFence",
             "physicalContactFence.stylusContactActive()",
+            "boolean runWhenStylusIdle(Runnable publication);",
+            "private boolean compositionDeferredForPhysicalContact;",
+            'scheduleRefresh("physical_contact_publication_released");',
             "MotionEvent.ACTION_POINTER_DOWN",
             "cancelFingerGesture(event.getEventTime());",
             "cancelMissingNativePenTerminal()",
@@ -1166,6 +1169,78 @@ def main() -> None:
         ],
         "off-thread composition and evidence bracketing",
     )
+    completion_start = runtime.find("private void completeComposition(")
+    completion_end = runtime.find(
+        "private boolean publishPreparedComposition(", completion_start
+    )
+    if completion_start < 0 or completion_end < 0:
+        fail("could not isolate guarded composition publication")
+    ordered(
+        runtime[completion_start:completion_end],
+        [
+            "boolean publicationAdmitted = physicalContactFence.runWhenStylusIdle(",
+            "publishPreparedComposition(",
+            "if (!publicationAdmitted) {",
+            "if (next != visible) next.recycle();",
+            "compositionDeferredForPhysicalContact = true;",
+        ],
+        "physical-contact-atomic composition publication",
+    )
+    require(
+        runtime[completion_start:completion_end],
+        [
+            "if (!publicationAdmitted) {\n"
+            "                if (next != visible) next.recycle();\n"
+            "                if (!inputWasFrozen) releaseInputIngress(compositionFreeze);\n"
+            "                compositionDeferredForPhysicalContact = true;",
+        ],
+        "deferred composition cleanup and terminal retry",
+    )
+    require(
+        hooks,
+        [
+            "@Override public boolean runWhenStylusIdle(",
+            "synchronized (entry.stylusRouteLock) {",
+            "if (entry.penContact",
+            "|| entry.androidPenContact",
+            "|| entry.stylusRouteActive",
+            "publication.run();",
+        ],
+        "hook-owned physical stylus publication lock",
+    )
+    native_pen_down_start = hooks.find("if (contactStart) {")
+    native_pen_down_end = hooks.find("if (entry.penContact) {", native_pen_down_start)
+    if native_pen_down_start < 0 or native_pen_down_end < 0:
+        fail("could not isolate native callback stylus DOWN admission")
+    ordered(
+        hooks[native_pen_down_start:native_pen_down_end],
+        [
+            "synchronized (entry.stylusRouteLock) {",
+            "if (!entry.penContact) {",
+            "entry.penContact = true;",
+            "entry.penPass = beginStylusRoute(",
+        ],
+        "native callback DOWN shares the presentation-publication lock",
+    )
+    android_pen_down_start = hooks.find(
+        "private static boolean routeAndroidPen("
+    )
+    android_pen_down_end = hooks.find(
+        "if (!entry.androidPenContact) return false;",
+        android_pen_down_start,
+    )
+    if android_pen_down_start < 0 or android_pen_down_end < 0:
+        fail("could not isolate Android stylus DOWN admission")
+    ordered(
+        hooks[android_pen_down_start:android_pen_down_end],
+        [
+            "if (action == MotionEvent.ACTION_DOWN) {",
+            "synchronized (entry.stylusRouteLock) {",
+            "entry.androidPenContact = true;",
+            "entry.androidPenPass = beginStylusRoute(",
+        ],
+        "Android DOWN shares the presentation-publication lock",
+    )
     publish_start = runtime.find("private boolean publishPreparedComposition(")
     publish_end = runtime.find("private void leaveSpreadForPortrait(", publish_start)
     if publish_start < 0 or publish_end < 0:
@@ -1173,6 +1248,7 @@ def main() -> None:
     ordered(
         runtime[publish_start:publish_end],
         [
+            "|| physicalContactFence.stylusContactActive()) {",
             'disableWriterWithWitness(current, "SN_NATIVE_READER_V2 compose")',
             "restoreWriterGeometry();",
             "restorePageGeometry();",
@@ -1542,14 +1618,78 @@ def main() -> None:
     ordered(
         publish_segment,
         [
+            "requireNativeSpreadConfigurationGeneration(\n"
+            "                    configurationGeneration,",
             "val currentMarkerAuthority = readPersistedAuthorityIfFile(marker)",
             "samePersistedAuthority(\n                        expectedMarkerAuthority,",
             '"Native Spread marker changed while its settings were loading"',
+            "val currentBackupResult = readNativeAnnotationBackup(pdfFile)",
+            "sameNativeAnnotationBackupResult(\n                        backupResult,",
+            '"Native Spread recovery evidence changed while its settings were loading"',
+            "val currentAuthority = assessNativeSpreadAuthority(",
+            "require(currentAuthority == authority)",
             "Handler(Looper.getMainLooper()).post",
+            "withNativeSpreadConfigurationAuthority(\n"
+            "                            configurationGeneration,",
             "resolveNativeSpreadMode(",
         ],
-        "post-handshake exact marker-snapshot revalidation",
+        "post-handshake exact marker and recovery-snapshot revalidation",
     )
+    require(
+        plugin,
+        [
+            "val loadGeneration = captureNativeSpreadConfigurationGeneration()",
+            "val handshakeGeneration = loadGeneration",
+            "private fun captureNativeSpreadConfigurationGeneration(): Long =",
+            "check(!nativeSpreadModuleInvalidated.get())",
+        ],
+        "native-mode load generation authority",
+    )
+    require(
+        plugin,
+        [
+            "private fun sameNativeAnnotationBackupResult(",
+            "expected.status == actual.status",
+            "else -> sameNativeAnnotationBackup(expected.backup, actual.backup)",
+            "val manifestAuthority: PersistedFileAuthority,",
+            "val snapshotAuthority: PersistedFileFingerprint?,",
+            "private data class PersistedFileFingerprint(",
+            'authorityLabel = "annotation-backup manifest"',
+            'authorityLabel = "annotation-backup snapshot"',
+            "samePersistedAuthority(\n                expected.manifestAuthority,",
+            "samePersistedFingerprint(\n                expected.snapshotAuthority,",
+            "private fun readRegularFileFingerprintIfFile(",
+            'MessageDigest.getInstance("SHA-256")',
+            "FileInputStream(Os.dup(descriptor)).use",
+            "length == opened.st_size",
+            'authorityLabel = "annotation-backup manifest revalidation"',
+            'authorityLabel = "annotation-backup snapshot revalidation"',
+        ],
+        "descriptor-backed complete native backup result identity",
+    )
+    backup_match_start = plugin.find(
+        "private fun nativeAnnotationBackupSourceFilesMatch("
+    )
+    backup_match_end = plugin.find(
+        "private fun protectedEditableSessionMarkerValid(", backup_match_start
+    )
+    if backup_match_start < 0 or backup_match_end < 0:
+        fail("could not isolate native backup source-file revalidation")
+    require(
+        plugin[backup_match_start:backup_match_end],
+        [
+            "val currentSnapshot = readRegularFileFingerprintIfFile(\n"
+            "            backup.snapshot,",
+            "samePersistedAuthority(backup.manifestAuthority, currentManifest)",
+            "samePersistedFingerprint(\n"
+            "                        backup.snapshotAuthority,\n"
+            "                        currentSnapshot,\n"
+            "                    )",
+        ],
+        "native backup manifest and snapshot descriptor revalidation",
+    )
+    if "snapshotAuthority.bytes" in plugin:
+        fail("large annotation backup snapshot is retained in the plug-in heap")
     require(
         plugin,
         [
@@ -1953,7 +2093,7 @@ def main() -> None:
             "NATIVE_READER_V2_SIGNER_SHA256 =",
             "NATIVE_READER_V2_APK_LENGTH = 258587L",
             "NATIVE_READER_V2_APK_SHA256 =",
-            "8a641a67be2b56acb4afbe0634bc6187d5e07ac230b50e02d87c93bdeb749f3c",
+            "aeaddb2e682e3b2a2eaf4c9abe531ea40fa7ead25dab1871c637892d048fce5f",
             "PackageManager.GET_SIGNING_CERTIFICATES",
             "signing.hasMultipleSigners()",
             "Native Reader signer set is not exact",
@@ -2441,15 +2581,76 @@ def main() -> None:
         ["|| physicalContactFence.stylusContactActive();"],
         "Android stylus contact included in lifecycle gates",
     )
+    marker_authority_start = plugin.find(
+        "private fun readRegularFileAuthorityIfFile("
+    )
+    fingerprint_authority_start = plugin.find(
+        "private fun readRegularFileFingerprintIfFile("
+    )
+    fingerprint_authority_end = plugin.find(
+        "private fun sameFileObject(", fingerprint_authority_start
+    )
+    if min(
+        marker_authority_start,
+        fingerprint_authority_start,
+        fingerprint_authority_end,
+    ) < 0:
+        fail("could not isolate persisted-file descriptor authorities")
     require(
-        plugin,
+        plugin[marker_authority_start:fingerprint_authority_start],
         [
             "OsConstants.O_NOFOLLOW",
             "pathBefore.st_nlink == 1L",
             "samePersistedFileVersion(opened, pathAfter)",
-            "private fun readPersistedBytesIfFile(file: File): ByteArray?",
         ],
         "single-link descriptor-backed companion marker reads",
+    )
+    require(
+        plugin[fingerprint_authority_start:fingerprint_authority_end],
+        [
+            "OsConstants.O_NOFOLLOW",
+            "pathBefore.st_nlink == 1L",
+            "samePersistedFileVersion(opened, pathAfter)",
+            "digest.update(buffer, 0, count)",
+            "length == opened.st_size",
+        ],
+        "single-link descriptor-backed backup fingerprint reads",
+    )
+    fingerprint_match_start = plugin.find("private fun samePersistedFingerprint(")
+    fingerprint_match_end = plugin.find(
+        "private fun writePropertiesAtomicallyCas(", fingerprint_match_start
+    )
+    if fingerprint_match_start < 0 or fingerprint_match_end < 0:
+        fail("could not isolate persisted-file fingerprint equality")
+    require(
+        plugin[fingerprint_match_start:fingerprint_match_end],
+        [
+            "samePersistedFileVersion(expected.identity, actual.identity)",
+            "expected.length == actual.length",
+            "expected.sha256 == actual.sha256",
+        ],
+        "backup fingerprint exact identity/content equality",
+    )
+    backup_read_start = plugin.find("private fun readNativeAnnotationBackup(")
+    backup_read_end = plugin.find(
+        "private fun sameNativeAnnotationBackup(", backup_read_start
+    )
+    if backup_read_start < 0 or backup_read_end < 0:
+        fail("could not isolate native annotation backup admission")
+    require(
+        plugin[backup_read_start:backup_read_end],
+        [
+            "val snapshotAuthority = readRegularFileFingerprintIfFile(\n"
+            "                snapshot,",
+            "snapshotAuthority.length != markLength",
+            "snapshotAuthority.sha256 != markHash",
+        ],
+        "streaming backup snapshot admission",
+    )
+    require(
+        plugin,
+        ["private fun readPersistedBytesIfFile(file: File): ByteArray?"],
+        "descriptor-backed companion marker byte routing",
     )
     if "marker.readBytes()" in plugin:
         fail("companion marker recovery bypasses descriptor-backed authority")
@@ -2561,7 +2762,7 @@ def main() -> None:
             "Remove-Item -LiteralPath $keystore -Force",
             "release-output/SupernoteNativeSpreadProbe-v0.0.138.apk",
             "$expectedSignedLength = 258587L",
-            "8a641a67be2b56acb4afbe0634bc6187d5e07ac230b50e02d87c93bdeb749f3c",
+            "aeaddb2e682e3b2a2eaf4c9abe531ea40fa7ead25dab1871c637892d048fce5f",
             "Signed APK length differs from the reviewed upgrade identity",
             "Signed APK SHA-256 differs from the reviewed upgrade identity.",
         ],

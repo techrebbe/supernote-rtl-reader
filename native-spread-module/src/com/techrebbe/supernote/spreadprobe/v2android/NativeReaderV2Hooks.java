@@ -696,14 +696,18 @@ public final class NativeReaderV2Hooks {
                         }
                     }
                     if (contactStart) {
-                        entry.penContact = true;
-                        entry.penPass = beginStylusRoute(
-                            entry,
-                            runtime,
-                            x,
-                            y,
-                            chrome
-                        );
+                        synchronized (entry.stylusRouteLock) {
+                            if (!entry.penContact) {
+                                entry.penContact = true;
+                                entry.penPass = beginStylusRoute(
+                                    entry,
+                                    runtime,
+                                    x,
+                                    y,
+                                    chrome
+                                );
+                            }
+                        }
                     }
                     if (entry.penContact) {
                         pass = entry.penPass;
@@ -942,6 +946,20 @@ public final class NativeReaderV2Hooks {
                                             return entry.penContact
                                                 || entry.androidPenContact
                                                 || entry.stylusRouteActive;
+                                        }
+                                    }
+
+                                    @Override public boolean runWhenStylusIdle(
+                                        Runnable publication
+                                    ) {
+                                        synchronized (entry.stylusRouteLock) {
+                                            if (entry.penContact
+                                                || entry.androidPenContact
+                                                || entry.stylusRouteActive) {
+                                                return false;
+                                            }
+                                            publication.run();
+                                            return true;
                                         }
                                     }
                                 },
@@ -1430,16 +1448,18 @@ public final class NativeReaderV2Hooks {
         int action = event.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN) {
             int index = event.getActionIndex();
-            entry.androidPenContact = true;
-            entry.nativeTerminalGeneration++;
-            entry.androidPenPointerId = event.getPointerId(index);
-            entry.androidPenPass = beginStylusRoute(
-                entry,
-                runtime,
-                event.getX(index),
-                event.getY(index),
-                chrome
-            );
+            synchronized (entry.stylusRouteLock) {
+                entry.androidPenContact = true;
+                entry.nativeTerminalGeneration++;
+                entry.androidPenPointerId = event.getPointerId(index);
+                entry.androidPenPass = beginStylusRoute(
+                    entry,
+                    runtime,
+                    event.getX(index),
+                    event.getY(index),
+                    chrome
+                );
+            }
             return !entry.androidPenPass;
         }
         if (!entry.androidPenContact) return false;

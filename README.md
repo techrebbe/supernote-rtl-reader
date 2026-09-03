@@ -27,7 +27,9 @@ full contract and release gate.
 
 The current hardening pass also prevents a contained runtime from republishing
 writer authority; defers fail-closed writer disable until a live physical pen
-contact ends; revalidates persisted evidence before activation publication;
+contact ends; serializes every prepared presentation publication against the
+hook-level physical stylus DOWN boundary and retries only after terminal
+release; revalidates persisted evidence before activation publication;
 requires acknowledged stock background/ink/digest replacement before hook
 detachment; cancels and asynchronously drains projections before releasing
 native component identities; keeps a native finger route immutable through a
@@ -57,7 +59,13 @@ and pinned parent directory to agree. The preceding v0.4.18 activation failed
 closed on this platform behavior and restored the original document state.
 Mode loading likewise carries one descriptor-backed marker snapshot through
 settings parsing and recovery assessment, then revalidates that exact snapshot
-after the asynchronous companion handshake before returning it to the UI.
+after the asynchronous companion handshake before returning it to the UI. The
+paired recovery manifest and snapshot are also reread through no-follow
+descriptor authority and compared exactly before backup capability or editable
+authority is published. Large annotation snapshots are streamed through the
+pinned descriptor rather than retained in the plug-in heap, and the final
+worker-to-UI publication remains fenced by the configuration generation that
+started the load.
 Committed publication and successful activation verification are separate:
 post-rename verification failures remain non-rollbackable but propagate as
 failures rather than being reported as a successful enable.

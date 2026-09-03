@@ -60,7 +60,7 @@ class ReaderPreferencesModule(
             "a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67"
         private const val NATIVE_READER_V2_APK_LENGTH = 258587L
         private const val NATIVE_READER_V2_APK_SHA256 =
-            "8a641a67be2b56acb4afbe0634bc6187d5e07ac230b50e02d87c93bdeb749f3c"
+            "aeaddb2e682e3b2a2eaf4c9abe531ea40fa7ead25dab1871c637892d048fce5f"
         private const val NATIVE_SPREAD_MARKER_SUFFIX = ".snspread"
         private const val NATIVE_SPREAD_BACKUP_SUFFIX = ".snspread-backup.properties"
         private const val NATIVE_SPREAD_BACKUP_MARK_SUFFIX = ".snspread-backup.mark"
@@ -282,6 +282,7 @@ class ReaderPreferencesModule(
             val pdfFile = requirePdf(filePath)
             val marker = nativeSpreadMarker(pdfFile)
             val capability = nativeSpreadCapability()
+            val loadGeneration = captureNativeSpreadConfigurationGeneration()
             // Marker parsing, PDF hashing, and recovery-snapshot hashing are
             // forbidden on PluginHost's main thread. Publish only immutable
             // validated results back to the receiver/UI callback.
@@ -321,6 +322,7 @@ class ReaderPreferencesModule(
                             NativeSpreadHandshake(false, "marker_unreadable"),
                             backupResult,
                             authority,
+                            loadGeneration,
                         )
                         return@startNativeBackupWorker
                     }
@@ -353,12 +355,12 @@ class ReaderPreferencesModule(
                             NativeSpreadHandshake(false, "package_incompatible"),
                             backupResult,
                             authority,
+                            loadGeneration,
                         )
                         return@startNativeBackupWorker
                     }
                     Handler(Looper.getMainLooper()).post {
-                        val handshakeGeneration =
-                            nativeSpreadConfigurationGeneration.get()
+                        val handshakeGeneration = loadGeneration
                         requestNativeSpreadHandshake(
                             pdfFile,
                             handshakeGeneration,
@@ -416,6 +418,7 @@ class ReaderPreferencesModule(
                                             handshake,
                                             migratedResult,
                                             migratedAuthority,
+                                            handshakeGeneration,
                                         )
                                     } catch (error: Throwable) {
                                         Log.e(
@@ -461,6 +464,7 @@ class ReaderPreferencesModule(
                                             handshake,
                                             failedResult,
                                             failedAuthority,
+                                            handshakeGeneration,
                                         )
                                     }
                                 }
@@ -481,6 +485,7 @@ class ReaderPreferencesModule(
                                 handshake,
                                 backupResult,
                                 authority,
+                                handshakeGeneration,
                             )
                         }
                     }
@@ -1377,9 +1382,13 @@ class ReaderPreferencesModule(
         handshake: NativeSpreadHandshake,
         backupResult: NativeAnnotationBackupResult,
         authority: NativeSpreadAuthorityAssessment,
+        configurationGeneration: Long,
     ) {
         startNativeBackupWorker("RTLReaderNativeModePublish") {
             try {
+                requireNativeSpreadConfigurationGeneration(
+                    configurationGeneration,
+                )
                 val currentMarkerAuthority = readPersistedAuthorityIfFile(marker)
                 require(
                     samePersistedAuthority(
@@ -1389,22 +1398,52 @@ class ReaderPreferencesModule(
                 ) {
                     "Native Spread marker changed while its settings were loading"
                 }
-                Handler(Looper.getMainLooper()).post {
-                    resolveNativeSpreadMode(
-                        promise,
-                        pdfFile,
-                        configured,
-                        configuredEditable,
-                        coverSeparate,
-                        showDivider,
-                        showHeader,
-                        spreadSizing,
-                        marker,
-                        capability,
-                        handshake,
+                val currentBackupResult = readNativeAnnotationBackup(pdfFile)
+                require(
+                    sameNativeAnnotationBackupResult(
                         backupResult,
-                        authority,
-                    )
+                        currentBackupResult,
+                    ),
+                ) {
+                    "Native Spread recovery evidence changed while its settings were loading"
+                }
+                val currentAuthority = assessNativeSpreadAuthority(
+                    pdfFile,
+                    marker,
+                    currentBackupResult,
+                    currentMarkerAuthority,
+                )
+                require(currentAuthority == authority) {
+                    "Native Spread recovery authority changed while its settings were loading"
+                }
+                Handler(Looper.getMainLooper()).post {
+                    try {
+                        withNativeSpreadConfigurationAuthority(
+                            configurationGeneration,
+                        ) {
+                            resolveNativeSpreadMode(
+                                promise,
+                                pdfFile,
+                                configured,
+                                configuredEditable,
+                                coverSeparate,
+                                showDivider,
+                                showHeader,
+                                spreadSizing,
+                                marker,
+                                capability,
+                                handshake,
+                                currentBackupResult,
+                                currentAuthority,
+                            )
+                        }
+                    } catch (error: Throwable) {
+                        promise.reject(
+                            "NATIVE_SPREAD_LOAD_STALE",
+                            error.message,
+                            error,
+                        )
+                    }
                 }
             } catch (error: Throwable) {
                 Handler(Looper.getMainLooper()).post {
@@ -1501,7 +1540,9 @@ class ReaderPreferencesModule(
 
     private data class NativeAnnotationBackup(
         val manifest: File,
+        val manifestAuthority: PersistedFileAuthority,
         val snapshot: File,
+        val snapshotAuthority: PersistedFileFingerprint?,
         val mark: File,
         val manifestLength: Long,
         val manifestSha256: String,
@@ -1552,6 +1593,12 @@ class ReaderPreferencesModule(
 
     private data class PersistedFileAuthority(
         val bytes: ByteArray,
+        val identity: StructStat,
+    )
+
+    private data class PersistedFileFingerprint(
+        val length: Long,
+        val sha256: String,
         val identity: StructStat,
     )
 
@@ -2117,6 +2164,14 @@ class ReaderPreferencesModule(
     private fun beginNativeSpreadConfiguration(): Long =
         synchronized(nativeSpreadConfigurationIntentLock) {
             nativeSpreadConfigurationGeneration.incrementAndGet()
+        }
+
+    private fun captureNativeSpreadConfigurationGeneration(): Long =
+        synchronized(nativeSpreadConfigurationIntentLock) {
+            check(!nativeSpreadModuleInvalidated.get()) {
+                "Native Spread module was invalidated"
+            }
+            nativeSpreadConfigurationGeneration.get()
         }
 
     private inline fun <T> withNativeSpreadConfigurationAuthority(
@@ -3362,6 +3417,76 @@ class ReaderPreferencesModule(
         }
     }
 
+    /**
+     * Pins and hashes a potentially large regular file without retaining its
+     * payload in the plug-in heap. The descriptor/path identity checks make
+     * the returned digest authoritative for one exact inode version.
+     */
+    private fun readRegularFileFingerprintIfFile(
+        file: File,
+        maximumBytes: Long,
+        requireNonEmpty: Boolean,
+        authorityLabel: String,
+    ): PersistedFileFingerprint? {
+        val path = file.absolutePath
+        val pathBefore = try {
+            Os.lstat(path)
+        } catch (missing: ErrnoException) {
+            if (missing.errno == OsConstants.ENOENT) return null
+            throw missing
+        }
+        require(
+            OsConstants.S_ISREG(pathBefore.st_mode) &&
+                pathBefore.st_nlink == 1L &&
+                pathBefore.st_size >= (if (requireNonEmpty) 1L else 0L) &&
+                pathBefore.st_size <= maximumBytes,
+        ) {
+            "$authorityLabel authority is not one bounded single-link file"
+        }
+        val descriptor = Os.open(
+            path,
+            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or OsConstants.O_NOFOLLOW,
+            0,
+        )
+        try {
+            val opened = Os.fstat(descriptor)
+            require(samePersistedFileVersion(pathBefore, opened)) {
+                "$authorityLabel descriptor disagrees with its path"
+            }
+            val digest = MessageDigest.getInstance("SHA-256")
+            var length = 0L
+            FileInputStream(Os.dup(descriptor)).use { input ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    if (count > 0) {
+                        require(length <= maximumBytes - count.toLong()) {
+                            "$authorityLabel file exceeded its size bound"
+                        }
+                        digest.update(buffer, 0, count)
+                        length += count.toLong()
+                    }
+                }
+            }
+            val openedAfter = Os.fstat(descriptor)
+            val pathAfter = Os.lstat(path)
+            require(
+                samePersistedFileVersion(opened, openedAfter) &&
+                    samePersistedFileVersion(opened, pathAfter) &&
+                    length == opened.st_size,
+            ) {
+                "$authorityLabel authority changed or was replaced while hashing"
+            }
+            val sha256 = digest.digest().joinToString("") { byte ->
+                "%02x".format(byte.toInt() and 0xff)
+            }
+            return PersistedFileFingerprint(length, sha256, opened)
+        } finally {
+            Os.close(descriptor)
+        }
+    }
+
     private fun sameFileObject(first: StructStat, second: StructStat): Boolean =
         first.st_dev == second.st_dev &&
             first.st_ino == second.st_ino &&
@@ -4128,7 +4253,13 @@ class ReaderPreferencesModule(
                     "RTL_READER_NATIVE_BACKUP_RETIREMENT_ROLLED_BACK file=${snapshot.absolutePath}",
                 )
             }
-            if (!manifest.isFile) {
+            val manifestAuthority = readRegularFileAuthorityIfFile(
+                manifest,
+                STRICT_PROPERTIES_MAX_BYTES.toLong(),
+                requireNonEmpty = true,
+                authorityLabel = "annotation-backup manifest",
+            )
+            if (manifestAuthority == null) {
                 return@synchronized NativeAnnotationBackupResult(
                     null,
                     if (retiring.exists()) {
@@ -4138,10 +4269,7 @@ class ReaderPreferencesModule(
                     },
                 )
             }
-            if (manifest.length() !in 1..STRICT_PROPERTIES_MAX_BYTES.toLong()) {
-                throw IllegalStateException("manifest_length_invalid")
-            }
-            val manifestBytes = manifest.readBytes()
+            val manifestBytes = manifestAuthority.bytes
             val manifestHash = sha256(manifestBytes)
             val properties = strictProperties(
                 manifestBytes,
@@ -4184,20 +4312,31 @@ class ReaderPreferencesModule(
             val markLength = properties.getProperty("markLength")?.toLongOrNull()
                 ?: throw IllegalStateException("mark_length_invalid")
             val markHash = properties.getProperty("markSha256", "")
+            val snapshotAuthority = readRegularFileFingerprintIfFile(
+                snapshot,
+                Long.MAX_VALUE,
+                requireNonEmpty = false,
+                authorityLabel = "annotation-backup snapshot",
+            )
             if (originalPresent) {
-                if (!snapshot.isFile || snapshot.length() != markLength ||
-                    sha256(snapshot) != markHash
+                if (snapshotAuthority == null ||
+                    snapshotAuthority.length != markLength ||
+                    snapshotAuthority.sha256 != markHash
                 ) {
                     throw IllegalStateException("snapshot_bytes_invalid")
                 }
-            } else if (markLength != 0L || markHash != "ABSENT" || snapshot.exists()) {
+            } else if (markLength != 0L || markHash != "ABSENT" ||
+                snapshotAuthority != null
+            ) {
                 throw IllegalStateException("absent_snapshot_invalid")
             }
             val createdAt = properties.getProperty("createdAt")?.toLongOrNull()
                 ?: throw IllegalStateException("created_at_invalid")
             val backup = NativeAnnotationBackup(
                 manifest,
+                manifestAuthority,
                 snapshot,
+                snapshotAuthority,
                 mark,
                 manifestBytes.size.toLong(),
                 manifestHash,
@@ -4235,7 +4374,15 @@ class ReaderPreferencesModule(
         actual: NativeAnnotationBackup,
     ): Boolean =
         expected.manifest.canonicalPath == actual.manifest.canonicalPath &&
+            samePersistedAuthority(
+                expected.manifestAuthority,
+                actual.manifestAuthority,
+            ) &&
             expected.snapshot.canonicalPath == actual.snapshot.canonicalPath &&
+            samePersistedFingerprint(
+                expected.snapshotAuthority,
+                actual.snapshotAuthority,
+            ) &&
             expected.mark.canonicalPath == actual.mark.canonicalPath &&
             expected.manifestLength == actual.manifestLength &&
             expected.manifestSha256 == actual.manifestSha256 &&
@@ -4246,6 +4393,17 @@ class ReaderPreferencesModule(
             expected.markLength == actual.markLength &&
             expected.markSha256 == actual.markSha256 &&
             expected.createdAt == actual.createdAt
+
+    private fun sameNativeAnnotationBackupResult(
+        expected: NativeAnnotationBackupResult,
+        actual: NativeAnnotationBackupResult,
+    ): Boolean =
+        expected.status == actual.status &&
+            when {
+                expected.backup == null -> actual.backup == null
+                actual.backup == null -> false
+                else -> sameNativeAnnotationBackup(expected.backup, actual.backup)
+            }
 
     private fun nativeMarkRecoveryJournalMatchesBackup(
         journal: NativeMarkRecoveryJournal,
@@ -4411,17 +4569,28 @@ class ReaderPreferencesModule(
     private fun nativeAnnotationBackupSourceFilesMatch(
         backup: NativeAnnotationBackup,
     ): Boolean = runCatching {
+        val currentManifest = readRegularFileAuthorityIfFile(
+            backup.manifest,
+            STRICT_PROPERTIES_MAX_BYTES.toLong(),
+            requireNonEmpty = true,
+            authorityLabel = "annotation-backup manifest revalidation",
+        )
+        val currentSnapshot = readRegularFileFingerprintIfFile(
+            backup.snapshot,
+            Long.MAX_VALUE,
+            requireNonEmpty = false,
+            authorityLabel = "annotation-backup snapshot revalidation",
+        )
         !File("${backup.snapshot.absolutePath}.retiring").exists() &&
-            backup.manifest.isFile &&
-            backup.manifest.length() == backup.manifestLength &&
-            sha256(backup.manifest) == backup.manifestSha256 &&
+            samePersistedAuthority(backup.manifestAuthority, currentManifest) &&
             (
                 if (backup.originalMarkPresent) {
-                    backup.snapshot.isFile &&
-                        backup.snapshot.length() == backup.markLength &&
-                        sha256(backup.snapshot) == backup.markSha256
+                    samePersistedFingerprint(
+                        backup.snapshotAuthority,
+                        currentSnapshot,
+                    )
                 } else {
-                    !backup.snapshot.exists() &&
+                    currentSnapshot == null &&
                         backup.markLength == 0L &&
                         backup.markSha256 == "ABSENT"
                 }
@@ -4849,6 +5018,17 @@ class ReaderPreferencesModule(
         actual == null -> false
         else -> samePersistedFileVersion(expected.identity, actual.identity) &&
             expected.bytes.contentEquals(actual.bytes)
+    }
+
+    private fun samePersistedFingerprint(
+        expected: PersistedFileFingerprint?,
+        actual: PersistedFileFingerprint?,
+    ): Boolean = when {
+        expected == null -> actual == null
+        actual == null -> false
+        else -> samePersistedFileVersion(expected.identity, actual.identity) &&
+            expected.length == actual.length &&
+            expected.sha256 == actual.sha256
     }
 
     private fun writePropertiesAtomicallyCas(

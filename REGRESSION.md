@@ -7,7 +7,7 @@ with SupernoteDocument `1.02.446`.
 ## Native Reader v2 pre-hardware adversarial gate — PASS
 
 - [x] 85,071 deterministic controller/geometry/transaction assertions pass.
-- [x] 179 authority mutations are rejected, including exact firmware-declaration
+- [x] 196 authority mutations are rejected, including exact firmware-declaration
   and native pen-callback ownership drift, stale admission evidence,
   contained-runtime publication, contact-safe containment, three-layer stock
   restoration, projection drain ordering, and descriptor-backed marker
@@ -22,10 +22,10 @@ with SupernoteDocument `1.02.446`.
   Spread generator tests, contract fixtures, and native viewport tests pass.
 - [x] Two clean v0.0.138 companion builds are byte-for-byte identical at
   258,587 bytes and SHA-256
-  `8a641a67be2b56acb4afbe0634bc6187d5e07ac230b50e02d87c93bdeb749f3c`.
+  `aeaddb2e682e3b2a2eaf4c9abe531ea40fa7ead25dab1871c637892d048fce5f`.
   The exact locally generated v0.4.19 RTL Reader hardware-candidate package
   for this gate has SHA-256
-  `c572b26eaa3f60b8fc7450bd4a37d3471e056483902cb7a4cdd966bd001080a2`.
+  `43f514ba4e5fc27b3a399eb6ae631fe3103adb9486b86c75ae2e6b2f3cab8481`.
 - [x] The final adversarial review findings are covered by deterministic gates:
   epoch-owned input/lifecycle authority, exact stock-reload receipts, no-clobber
   `.mark` publication/rollback interleavings, post-commit relaunch, exact
@@ -74,6 +74,18 @@ with SupernoteDocument `1.02.446`.
   a post-rename verification failure suppresses unsafe rollback but still
   rejects activation instead of being converted into success. Executable race
   models and two new static mutations cover both boundaries.
+- [x] The subsequent exact-head review's two additional concurrency findings
+  are also reproduced and guarded. Prepared background composition now acquires
+  the hook's physical-stylus publication lock before disabling or reprogramming
+  DrawPath; a DOWN that wins that lock defers composition until both stylus
+  streams reach terminal release. Mode-load publication now rereads and exactly
+  compares the document-bound recovery result, including no-follow descriptor
+  identities for both manifest and snapshot, then rederives and compares the
+  full recovery authority before resolving. Large `.mark` snapshots are hashed
+  through pinned descriptors without retaining their payloads in the plug-in
+  heap. Both physical DOWN streams and the final worker-to-main publication
+  retain their shared generation/lock authority. Two executable interleaving
+  models and seventeen new static mutations cover these boundaries.
 - [ ] Exact-head independent review is clean.
 - [ ] Nomad hardware gate passes. No hardware result is claimed by this
   automated section.

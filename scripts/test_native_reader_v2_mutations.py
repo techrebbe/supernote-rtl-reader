@@ -1796,6 +1796,56 @@ STATIC_MUTATIONS = (
         "            val pdfFile = requirePdf(filePath)",
         "editable configuration recovery rejection settlement",
     ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "        val currentMarkerAuthority = readPersistedAuthorityIfFile(marker)\n"
+        "        if (!samePersistedAuthority(expectedMarkerAuthority, currentMarkerAuthority)) {",
+        "        val currentMarkerAuthority = readPersistedAuthorityIfFile(marker)\n"
+        "        if (currentMarkerAuthority == null) {",
+        "pending-marker restoration exact authority comparison",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "            deleteRegularFileCas(\n"
+        "                marker,\n"
+        "                expectedMarkerAuthority.identity,\n"
+        "                \"interrupted pending activation marker\",\n"
+        "            )",
+        "            marker.delete()",
+        "pending-marker null restoration compare-and-delete",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "            writeBytesAtomicallyCas(\n"
+        "                marker,\n"
+        "                previousBytes,\n"
+        "                expectedMarkerAuthority,\n"
+        "            )",
+        "            writeBytesAtomically(marker, previousBytes)",
+        "pending-marker bytes restoration compare-and-swap",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "        val markerAuthority = readPersistedAuthorityIfFile(marker)\n"
+        "        val markerProperties = markerAuthority?.let { authority ->\n"
+        "            strictNativeSpreadMarkerProperties(authority.bytes)\n"
+        "        } ?: Properties()",
+        "        val markerProperties = readPropertiesIfFile(marker)\n"
+        "        val markerAuthority = readPersistedAuthorityIfFile(marker)",
+        "reconciliation exact pending-marker descriptor snapshot",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                        // This routine never guesses: every destructive branch is\n"
+        "                        // gated by the pending token, document/marker identity, and\n"
+        "                        // exact backup/archive hashes. Ambiguous evidence is kept.\n"
+        "                        withNativeSpreadPublicationLock(marker) {",
+        "                        // This routine never guesses: every destructive branch is\n"
+        "                        // gated by the pending token, document/marker identity, and\n"
+        "                        // exact backup/archive hashes. Ambiguous evidence is kept.\n"
+        "                        run {",
+        "reconciliation cross-process publication lock",
+    ),
 )
 
 
@@ -1932,6 +1982,65 @@ class _ConfigurationGenerationGate:
         if self.invalidated:
             return
         callback(result if self.generation == expected else "stale_operation")
+
+
+class _PendingMarkerAuthorityStore:
+    """Executable model of descriptor identity plus pathname CAS restoration."""
+
+    def __init__(self, value: bytes):
+        self._serial = 1
+        self.current = (self._serial, value)
+
+    def replace(self, value: bytes) -> tuple[int, bytes]:
+        self._serial += 1
+        self.current = (self._serial, value)
+        return self.current
+
+    def restore(self, expected, previous: bytes | None, before_cas=lambda: None) -> None:
+        # The Kotlin helper performs both checks: descriptor-backed equality
+        # rejects an already-stale caller, while the path CAS closes a
+        # replacement that races between that check and publication.
+        if self.current != expected:
+            raise _InterleavingRejected("pending marker changed before restoration")
+        before_cas()
+        if self.current != expected:
+            raise _InterleavingRejected("pending marker changed at restoration CAS")
+        if previous is None:
+            self.current = None
+        else:
+            self.replace(previous)
+
+
+def run_pending_marker_restore_interleaving_tests() -> None:
+    store = _PendingMarkerAuthorityStore(b"pending-a")
+    stale_authority = store.current
+    replacement = store.replace(b"pending-b")
+    try:
+        store.restore(stale_authority, b"previous-a")
+        raise AssertionError("stale reconciler overwrote a newer pending marker")
+    except _InterleavingRejected:
+        assert store.current == replacement
+
+    exact_authority = store.current
+    store.restore(exact_authority, b"previous-b")
+    assert store.current[1] == b"previous-b"
+
+    exact_delete_authority = store.current
+    store.restore(exact_delete_authority, None)
+    assert store.current is None
+
+    store = _PendingMarkerAuthorityStore(b"pending-c")
+    raced_authority = store.current
+    try:
+        store.restore(
+            raced_authority,
+            b"previous-c",
+            before_cas=lambda: store.replace(b"pending-d"),
+        )
+        raise AssertionError("pathname replacement raced through restoration CAS")
+    except _InterleavingRejected:
+        assert store.current[1] == b"pending-d"
+    print("Native Reader v2 pending-marker restoration interleavings: PASS")
 
 
 def _model_post_rename_identity_capture(identity_reader, on_published):
@@ -2868,6 +2977,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="native-reader-v2-mut-") as temp:
         temp_root = pathlib.Path(temp)
         run_configuration_generation_interleaving_tests()
+        run_pending_marker_restore_interleaving_tests()
         run_post_rename_publication_boundary_tests()
         run_marker_snapshot_revalidation_tests()
         run_backup_snapshot_revalidation_tests()

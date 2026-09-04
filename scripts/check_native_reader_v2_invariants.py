@@ -1657,8 +1657,8 @@ def main() -> None:
             "val configurationGeneration = beginNativeSpreadRecovery()",
             "requireNativeSpreadConfigurationGeneration(\n"
             "                        configurationGeneration,",
-            "withNativeSpreadConfigurationAuthority(\n"
-            "                            configurationGeneration,",
+            "withNativeSpreadPublicationLock(marker)",
+            "withNativeSpreadConfigurationAuthority(",
             "reconcileFailedActivationBackupForExplicitActivation(",
             "completeNativeSpreadRecovery(configurationGeneration)",
             "promise.resolve(true)",
@@ -1766,6 +1766,80 @@ def main() -> None:
             ],
             f"{label} promise-safe recovery exclusion",
         )
+        ordered(
+            segment,
+            [
+                "withNativeSpreadPublicationLock(marker)",
+                "withNativeSpreadConfigurationAuthority(",
+                "reconcileFailedActivationBackupForExplicitActivation(",
+            ],
+            f"{label} cross-process reconciliation authority",
+        )
+    restore_pending_start = plugin.find(
+        "private fun restorePendingActivationPreviousMarker("
+    )
+    reconcile_pending_start = plugin.find(
+        "private fun reconcileFailedActivationBackupForExplicitActivation("
+    )
+    reconcile_pending_end = plugin.find(
+        "private fun nativeAnnotationBackupMap(", reconcile_pending_start
+    )
+    if min(
+        restore_pending_start,
+        reconcile_pending_start,
+        reconcile_pending_end,
+    ) < 0 or restore_pending_start >= reconcile_pending_start:
+        fail("could not isolate pending-marker reconciliation authority")
+    restore_pending_segment = plugin[
+        restore_pending_start:reconcile_pending_start
+    ]
+    ordered(
+        restore_pending_segment,
+        [
+            "expectedMarkerAuthority: PersistedFileAuthority,",
+            "val currentMarkerAuthority = readPersistedAuthorityIfFile(marker)",
+            "samePersistedAuthority(expectedMarkerAuthority, currentMarkerAuthority)",
+            "val previousBytes = pending.previousMarkerBytes",
+            "deleteRegularFileCas(",
+            "expectedMarkerAuthority.identity,",
+            "writeBytesAtomicallyCas(",
+            "                expectedMarkerAuthority,\n"
+            "            )",
+        ],
+        "pending-marker exact-authority restore",
+    )
+    if restore_pending_segment.count("deleteRegularFileCas(") != 1:
+        fail("pending-marker deletion must use exactly one exact-authority CAS")
+    if restore_pending_segment.count("writeBytesAtomicallyCas(") != 1:
+        fail("pending-marker restoration must use exactly one exact-authority CAS")
+    reconcile_pending_segment = plugin[
+        reconcile_pending_start:reconcile_pending_end
+    ]
+    ordered(
+        reconcile_pending_segment,
+        [
+            "val markerAuthority = readPersistedAuthorityIfFile(marker)",
+            "strictNativeSpreadMarkerProperties(authority.bytes)",
+            "val pendingMarkerPresent =",
+            "val pendingMarkerAuthority = markerAuthority",
+        ],
+        "pending-marker descriptor authority capture",
+    )
+    if reconcile_pending_segment.count(
+        "restorePendingActivationPreviousMarker("
+    ) != 4:
+        fail("all four pending-marker restoration branches must retain exact authority")
+    if reconcile_pending_segment.count("pendingMarkerAuthority,") != 4:
+        fail("a pending-marker restoration branch dropped its exact authority")
+    require(
+        reconcile_pending_segment,
+        [
+            "deleteRegularFileCas(\n"
+            "                    marker,\n"
+            "                    pendingMarkerAuthority.identity,",
+        ],
+        "pending-retirement exact-authority deletion",
+    )
     restore_worker_start = plugin.find("private fun scheduleAnnotationRestore(")
     restore_worker_end = plugin.find(
         "private fun nativeMarkRecoveryRequired(", restore_worker_start

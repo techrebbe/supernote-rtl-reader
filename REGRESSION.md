@@ -7,7 +7,7 @@ with SupernoteDocument `1.02.446`.
 ## Native Reader v2 pre-hardware adversarial gate — PASS
 
 - [x] 85,071 deterministic controller/geometry/transaction assertions pass.
-- [x] 208 authority mutations are rejected, including exact firmware-declaration
+- [x] 213 authority mutations are rejected, including exact firmware-declaration
   and native pen-callback ownership drift, stale admission evidence,
   contained-runtime publication, contact-safe containment, three-layer stock
   restoration, projection drain ordering, and descriptor-backed marker
@@ -24,8 +24,8 @@ with SupernoteDocument `1.02.446`.
   258,587 bytes and SHA-256
   `aeaddb2e682e3b2a2eaf4c9abe531ea40fa7ead25dab1871c637892d048fce5f`.
   The exact locally generated v0.4.19 RTL Reader hardware-candidate package
-  for this gate has SHA-256
-  `3a2883677d6032737745bccc17f72ecb3b036599770101e8243a54b11bdd2dbd`.
+  for this gate is 7,332,079 bytes and has SHA-256
+  `4be70036a51ee91207933183a9130ebfb117b8e57221f27f4953cbb566dcd993`.
 - [x] The final adversarial review findings are covered by deterministic gates:
   epoch-owned input/lifecycle authority, exact stock-reload receipts, no-clobber
   `.mark` publication/rollback interleavings, post-commit relaunch, exact
@@ -97,6 +97,14 @@ with SupernoteDocument `1.02.446`.
   executable interleaving model and twelve independent static mutations cover
   recovery admission, owner retry, irreversible publication, both terminal
   fences, and Promise-safe configuration rejection.
+- [x] Pending-marker reconciliation now holds the cross-process publication
+  lock before configuration-generation authority and parses one exact
+  descriptor-backed marker snapshot. All restore/delete branches compare that
+  same identity at their pathname mutation, so a stale PluginHost cannot
+  overwrite or clear a newer process's marker. A two-process executable race
+  model covers both precheck and compare-and-swap replacements; five additional
+  static mutations guard the lock, descriptor snapshot, exact comparison,
+  compare-and-delete, and compare-and-swap boundaries.
 - [ ] Exact-head independent review is clean.
 - [ ] Nomad hardware gate passes. No hardware result is claimed by this
   automated section.

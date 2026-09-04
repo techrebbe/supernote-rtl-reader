@@ -527,13 +527,15 @@ class ReaderPreferencesModule(
                         // This routine never guesses: every destructive branch is
                         // gated by the pending token, document/marker identity, and
                         // exact backup/archive hashes. Ambiguous evidence is kept.
-                        withNativeSpreadConfigurationAuthority(
-                            configurationGeneration,
-                        ) {
-                            reconcileFailedActivationBackupForExplicitActivation(
-                                pdfFile,
-                                marker,
-                            )
+                        withNativeSpreadPublicationLock(marker) {
+                            withNativeSpreadConfigurationAuthority(
+                                configurationGeneration,
+                            ) {
+                                reconcileFailedActivationBackupForExplicitActivation(
+                                    pdfFile,
+                                    marker,
+                                )
+                            }
                         }
                     }
                     val after = assessNativeSpreadAuthority(
@@ -627,13 +629,15 @@ class ReaderPreferencesModule(
                             )
                         }
                         requireNoNativeMarkRecoveryFence(pdfFile)
-                        withNativeSpreadConfigurationAuthority(
-                            configurationGeneration,
-                        ) {
-                            reconcileFailedActivationBackupForExplicitActivation(
-                                pdfFile,
-                                marker,
-                            )
+                        withNativeSpreadPublicationLock(marker) {
+                            withNativeSpreadConfigurationAuthority(
+                                configurationGeneration,
+                            ) {
+                                reconcileFailedActivationBackupForExplicitActivation(
+                                    pdfFile,
+                                    marker,
+                                )
+                            }
                         }
                         val previousMarkerBytes = readPersistedBytesIfFile(marker)
                         val previousMarkerProperties = readPropertiesIfFile(marker)
@@ -831,13 +835,15 @@ class ReaderPreferencesModule(
                             )
                         }
                         requireNoNativeMarkRecoveryFence(pdfFile)
-                        withNativeSpreadConfigurationAuthority(
-                            configurationGeneration,
-                        ) {
-                            reconcileFailedActivationBackupForExplicitActivation(
-                                pdfFile,
-                                marker,
-                            )
+                        withNativeSpreadPublicationLock(marker) {
+                            withNativeSpreadConfigurationAuthority(
+                                configurationGeneration,
+                            ) {
+                                reconcileFailedActivationBackupForExplicitActivation(
+                                    pdfFile,
+                                    marker,
+                                )
+                            }
                         }
                         val backup = activateNativeSpreadEditableWithStableBackup(
                             pdfFile,
@@ -2985,16 +2991,27 @@ class ReaderPreferencesModule(
     private fun restorePendingActivationPreviousMarker(
         marker: File,
         pending: PendingEditableActivation,
+        expectedMarkerAuthority: PersistedFileAuthority,
     ) {
+        val currentMarkerAuthority = readPersistedAuthorityIfFile(marker)
+        if (!samePersistedAuthority(expectedMarkerAuthority, currentMarkerAuthority)) {
+            throw IllegalStateException(
+                "Interrupted pending activation marker changed before restoration",
+            )
+        }
         val previousBytes = pending.previousMarkerBytes
         if (previousBytes == null) {
-            if (!deleteFileDurably(marker)) {
-                throw IllegalStateException(
-                    "Could not remove the interrupted pending activation marker",
-                )
-            }
+            deleteRegularFileCas(
+                marker,
+                expectedMarkerAuthority.identity,
+                "interrupted pending activation marker",
+            )
         } else {
-            writeBytesAtomically(marker, previousBytes)
+            writeBytesAtomicallyCas(
+                marker,
+                previousBytes,
+                expectedMarkerAuthority,
+            )
         }
         val restored = if (previousBytes == null) {
             !marker.exists()
@@ -3086,7 +3103,13 @@ class ReaderPreferencesModule(
         pdfFile: File,
         marker: File,
     ) {
-        val markerProperties = readPropertiesIfFile(marker)
+        // Every caller holds the cross-process publication lock followed by the
+        // process-local configuration authority. Retain this exact descriptor
+        // snapshot through any pending-marker restore/delete CAS.
+        val markerAuthority = readPersistedAuthorityIfFile(marker)
+        val markerProperties = markerAuthority?.let { authority ->
+            strictNativeSpreadMarkerProperties(authority.bytes)
+        } ?: Properties()
         val pendingMarkerPresent =
             markerProperties.getProperty("mode", "") ==
                 NATIVE_SPREAD_EDITABLE_MODE &&
@@ -3103,6 +3126,10 @@ class ReaderPreferencesModule(
             ) ?: throw IllegalStateException(
                 "Interrupted protected activation is invalid; recovery files were not changed",
             )
+            val pendingMarkerAuthority = markerAuthority
+                ?: throw IllegalStateException(
+                    "Interrupted protected activation marker disappeared",
+                )
 
             if (pending.intent != NATIVE_SPREAD_PENDING_ENABLE_EDITABLE) {
                 if (!pending.previousMarkerProtected) {
@@ -3111,7 +3138,11 @@ class ReaderPreferencesModule(
                     )
                 }
                 if (canonicalBackup != null) {
-                    restorePendingActivationPreviousMarker(marker, pending)
+                    restorePendingActivationPreviousMarker(
+                        marker,
+                        pending,
+                        pendingMarkerAuthority,
+                    )
                     if (!nativeAnnotationBackupSourceFilesMatch(canonicalBackup) ||
                         !protectedEditableSessionMarkerValid(
                             pdfFile,
@@ -3156,11 +3187,11 @@ class ReaderPreferencesModule(
                         "Interrupted protected-session retirement could not finish",
                     )
                 }
-                if (!deleteFileDurably(marker)) {
-                    throw IllegalStateException(
-                        "Interrupted protected-session retirement marker could not be cleared",
-                    )
-                }
+                deleteRegularFileCas(
+                    marker,
+                    pendingMarkerAuthority.identity,
+                    "interrupted protected-session retirement marker",
+                )
                 if (nativeAnnotationBackupManifest(pdfFile).exists() ||
                     nativeAnnotationBackupSnapshot(pdfFile).exists() ||
                     nativeAnnotationRetiringSnapshot(pdfFile).exists() ||
@@ -3179,7 +3210,11 @@ class ReaderPreferencesModule(
 
             if (canonicalBackup != null) {
                 if (pending.previousMarkerProtected) {
-                    restorePendingActivationPreviousMarker(marker, pending)
+                    restorePendingActivationPreviousMarker(
+                        marker,
+                        pending,
+                        pendingMarkerAuthority,
+                    )
                     if (!nativeAnnotationBackupSourceFilesMatch(canonicalBackup) ||
                         !protectedEditableSessionMarkerValid(
                             pdfFile,
@@ -3203,7 +3238,11 @@ class ReaderPreferencesModule(
                     canonicalBackup,
                     pending.activationToken,
                 )
-                restorePendingActivationPreviousMarker(marker, pending)
+                restorePendingActivationPreviousMarker(
+                    marker,
+                    pending,
+                    pendingMarkerAuthority,
+                )
                 if (nativeAnnotationBackupManifest(pdfFile).exists() ||
                     nativeAnnotationBackupSnapshot(pdfFile).exists() ||
                     nativeAnnotationRetiringSnapshot(pdfFile).exists() ||
@@ -3271,7 +3310,11 @@ class ReaderPreferencesModule(
                     "Interrupted activation's exact retiring snapshot could not be removed",
                 )
             }
-            restorePendingActivationPreviousMarker(marker, pending)
+            restorePendingActivationPreviousMarker(
+                marker,
+                pending,
+                pendingMarkerAuthority,
+            )
             if (nativeAnnotationBackupManifest(pdfFile).exists() ||
                 nativeAnnotationBackupSnapshot(pdfFile).exists() ||
                 nativeAnnotationRetiringSnapshot(pdfFile).exists() ||

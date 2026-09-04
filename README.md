@@ -71,7 +71,11 @@ retain an exact owner-generation token, and advance the generation again at
 completion; a stale completion retry cannot release a replacement recovery.
 Annotation restore also holds generation authority across `.mark` publication
 and recovery-evidence retirement, so invalidation cannot linearize inside its
-irreversible commit. Stale UI or persistence state therefore cannot escape
+irreversible commit. Pending-marker reconciliation additionally takes the
+cross-process publication lock before generation authority and carries the
+exact descriptor-backed marker snapshot into compare-and-swap restoration or
+deletion. A stale PluginHost process therefore cannot overwrite or remove a
+newer process's committed marker. Stale UI or persistence state cannot escape
 across a recovery boundary.
 Committed publication and successful activation verification are separate:
 post-rename verification failures remain non-rollbackable but propagate as

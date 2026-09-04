@@ -73,8 +73,8 @@ MUTATIONS = (
     ),
     (
         "NativeReaderV2MarkerClaim.java",
+        "MINIMUM_COMPANION_MODULE_VERSION = 139L",
         "MINIMUM_COMPANION_MODULE_VERSION = 138L",
-        "MINIMUM_COMPANION_MODULE_VERSION = 137L",
         "companion marker and handshake version authority",
     ),
     (
@@ -319,8 +319,8 @@ MUTATIONS = (
 STATIC_MUTATIONS = (
     (
         "native-spread-module/README.md",
+        "requires Supernote RTL Reader v0.4.20 and refuses every other companion",
         "requires Supernote RTL Reader v0.4.19 and refuses every other companion",
-        "requires Supernote RTL Reader v0.4.18 and refuses every other companion",
         "documented companion plugin pairing",
     ),
     (
@@ -364,6 +364,49 @@ STATIC_MUTATIONS = (
         "BY_COMPONENT.get(signal.eventCallback) != entry",
         "BY_COMPONENT.get(signal.eventCallback) == entry",
         "native event callback component authority",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "entry.fenceAndroidPass = pointInsideChrome(\n"
+        "                    event.getX(index), event.getY(index), chrome\n"
+        "                );",
+        "entry.fenceAndroidPass = true;",
+        "admission fence Android document exclusion",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "entry.fenceNativePenPass = pointInsideChrome(x, y, chrome);",
+        "entry.fenceNativePenPass = true;",
+        "admission fence native-pen document exclusion",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "Entry entry = entry(param.thisObject);\n"
+        "                    if (entry == null) return;\n"
+        "                    if (entry.runtime == null\n"
+        "                        || admissionFenceContactActive(entry)",
+        "Entry entry = entry(param.thisObject);\n"
+        "                    if (entry == null) return;\n"
+        "                    if (entry.runtime == null",
+        "admission fence contact terminal continuity",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "        ensureChromeTracker(entry);\n"
+        "        entry.attemptedPath = path;",
+        "        entry.attemptedPath = path;",
+        "pre-admission native chrome recovery authority",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        'committedMarker.getProperty("activationState", "") !=\n'
+        "                NATIVE_SPREAD_ACTIVATION_COMMITTED",
+        "false",
+        "durable committed-marker success state",
     ),
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
@@ -788,13 +831,13 @@ STATIC_MUTATIONS = (
     ),
     (
         ".github/workflows/build.yml",
-        "$expectedSignedLength = 258587L",
+        "$expectedSignedLength = 262683L",
         "$expectedSignedLength = 250394L",
         "published companion exact signed length",
     ),
     (
         ".github/workflows/build.yml",
-        "aeaddb2e682e3b2a2eaf4c9abe531ea40fa7ead25dab1871c637892d048fce5f",
+        "fb826c482c1b5a97dbf1a95ca8e1987df00f0310cd1660be62f2f43fa556a736",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "published companion exact signed digest",
     ),
@@ -1427,13 +1470,13 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "NATIVE_READER_V2_APK_LENGTH = 258587L",
+        "NATIVE_READER_V2_APK_LENGTH = 262683L",
         "NATIVE_READER_V2_APK_LENGTH = 250394L",
         "installed companion APK length pin",
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "aeaddb2e682e3b2a2eaf4c9abe531ea40fa7ead25dab1871c637892d048fce5f",
+        "fb826c482c1b5a97dbf1a95ca8e1987df00f0310cd1660be62f2f43fa556a736",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "installed companion APK digest pin",
     ),

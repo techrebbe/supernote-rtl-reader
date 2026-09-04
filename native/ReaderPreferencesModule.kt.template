@@ -55,12 +55,12 @@ class ReaderPreferencesModule(
         private const val NATIVE_SPREAD_PACKAGE =
             "com.techrebbe.supernote.spreadprobe"
         private const val PLUGIN_HOST_PACKAGE = "com.ratta.supernote.pluginhost"
-        private const val NATIVE_READER_V2_MIN_VERSION_CODE = 138L
+        private const val NATIVE_READER_V2_MIN_VERSION_CODE = 139L
         private const val NATIVE_READER_V2_SIGNER_SHA256 =
             "a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67"
-        private const val NATIVE_READER_V2_APK_LENGTH = 258587L
+        private const val NATIVE_READER_V2_APK_LENGTH = 262683L
         private const val NATIVE_READER_V2_APK_SHA256 =
-            "aeaddb2e682e3b2a2eaf4c9abe531ea40fa7ead25dab1871c637892d048fce5f"
+            "fb826c482c1b5a97dbf1a95ca8e1987df00f0310cd1660be62f2f43fa556a736"
         private const val NATIVE_SPREAD_MARKER_SUFFIX = ".snspread"
         private const val NATIVE_SPREAD_BACKUP_SUFFIX = ".snspread-backup.properties"
         private const val NATIVE_SPREAD_BACKUP_MARK_SUFFIX = ".snspread-backup.mark"
@@ -1358,10 +1358,10 @@ class ReaderPreferencesModule(
             )
         }
 
-        // This rename is the sole authorization/linearization point. There is
-        // deliberately no fallible reread after it: pending is always rejected
-        // by the companion, while a committed marker is final and must never be
-        // rolled back merely because the publisher died after the rename.
+        // This rename is the sole authorization/linearization point. A
+        // descriptor-backed reread below is a success postcondition, not a
+        // rollback boundary: once onCommitted runs, a later verification
+        // failure must remain fail-closed and must never restore older bytes.
         withNativeSpreadConfigurationAuthority(configurationGeneration) {
             writePropertiesAtomicallyCas(
                 marker,
@@ -1408,7 +1408,44 @@ class ReaderPreferencesModule(
                 },
             )
         }
-        backup
+        val committedMarkerAuthority = readPersistedAuthorityIfFile(marker)
+            ?: throw IllegalStateException(
+                "Protected editable committed marker disappeared after publication",
+            )
+        val committedMarker = strictNativeSpreadMarkerProperties(
+            committedMarkerAuthority.bytes,
+        )
+        val committedBackup = readNativeAnnotationBackup(pdfFile).backup
+            ?: throw IllegalStateException(
+                "Annotation recovery identity disappeared after committed publication",
+            )
+        if (committedMarker.getProperty("activationToken", "") != activationToken ||
+            committedMarker.getProperty("activationState", "") !=
+                NATIVE_SPREAD_ACTIVATION_COMMITTED ||
+            !sameNativeAnnotationBackup(backup, committedBackup) ||
+            !protectedEditableMarkerValid(
+                pdfFile,
+                committedMarker,
+                committedBackup,
+            ) ||
+            !editableMarkerPresentationMatches(
+                committedMarker,
+                coverSeparate,
+                showDivider,
+                showHeader,
+                spreadSizing,
+            )
+        ) {
+            throw IllegalStateException(
+                "Protected editable committed marker failed its durable success postcondition",
+            )
+        }
+        Log.i(
+            LOG_TAG,
+            "RTL_READER_NATIVE_EDITABLE_COMMIT_VERIFIED token=$activationToken " +
+                "markerSha256=${sha256(committedMarkerAuthority.bytes)}",
+        )
+        committedBackup
     }
 
     /**

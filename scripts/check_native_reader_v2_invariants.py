@@ -118,22 +118,22 @@ def main() -> None:
     require(
         manifest,
         [
-            'android:versionCode="138"',
-            'android:versionName="0.0.138"',
+            'android:versionCode="139"',
+            'android:versionName="0.0.139"',
             'android:label="Supernote Native Reader v2"',
         ],
         "v2 manifest",
     )
     require(
         plugin_config,
-        ['"versionCode": "38"', '"versionName": "0.4.19"'],
+        ['"versionCode": "39"', '"versionName": "0.4.20"'],
         "plugin version",
     )
     require(
         module_readme,
         [
-            "The v0.0.138 APK\n"
-            "requires Supernote RTL Reader v0.4.19 and refuses every other companion\n"
+            "The v0.0.139 APK\n"
+            "requires Supernote RTL Reader v0.4.20 and refuses every other companion\n"
             "contract version."
         ],
         "documented Native Reader v2 pairing",
@@ -144,7 +144,7 @@ def main() -> None:
         not in root_build
     ):
         fail("plugin build does not execute the exclusive v2 invariant gate")
-    if "RTL_READER_OPEN v0.4.19-native-reader-v2" not in index:
+    if "RTL_READER_OPEN v0.4.20-native-reader-v2" not in index:
         fail("runtime marker does not identify the v2 plugin build")
     require(
         guidance,
@@ -268,6 +268,21 @@ def main() -> None:
             ".candidateMarkerPresent(path);",
             "entry.admissionFence = true;",
             "indexAdmissionComponents(entry, components);",
+            "ensureChromeTracker(entry);",
+            "routeAdmissionFenceAndroidContact(",
+            "routeAdmissionFenceNativePen(",
+            "admissionFenceContactActive(entry)",
+            "Entry entry = entry(param.thisObject);\n"
+            "                    if (entry == null) return;\n"
+            "                    if (entry.runtime == null\n"
+            "                        || admissionFenceContactActive(entry)",
+            "entry.fenceAndroidPass = pointInsideChrome(",
+            "entry.fenceNativePenPass = pointInsideChrome(x, y, chrome);",
+            "if (!entry.fenceAndroidContact) return true;",
+            "boolean consume = !entry.fenceAndroidPass;",
+            "boolean consume = !entry.fenceNativePenContact\n"
+            "                || !entry.fenceNativePenPass;",
+            "retireChromeTrackerWhenUnfenced(entry);",
             "onRuntimeInputAuthorityReady(",
             "entry.admissionFence = false;",
             "fingerPhysicalContact = true;",
@@ -299,8 +314,24 @@ def main() -> None:
     )
     if "refreshChromeAtContactStart" in hooks or "tracker.refresh();" in hooks:
         fail("input hooks still traverse native chrome at contact start")
-    if hooks.count("if (entry.admissionFence)") < 5:
+    if hooks.count("if (entry.admissionFence)") < 3:
         fail("configured-document admission fence does not cover all write/navigation hooks")
+    admission_start = hooks.find("private static void maybeAdmit(")
+    admission_end = hooks.find(
+        "private static void revalidateExistingRuntime(", admission_start
+    )
+    if admission_start < 0 or admission_end < 0:
+        fail("could not isolate document admission")
+    ordered(
+        hooks[admission_start:admission_end],
+        [
+            "entry.admissionFence = true;",
+            "indexAdmissionComponents(entry, components);",
+            "ensureChromeTracker(entry);",
+            "candidate = NativeReaderV2DocumentGate",
+        ],
+        "pre-admission native chrome recovery authority",
+    )
     require(
         chrome_tracker,
         [
@@ -1556,7 +1587,7 @@ def main() -> None:
     require(
         marker,
         [
-            "MINIMUM_COMPANION_MODULE_VERSION = 138L",
+            "MINIMUM_COMPANION_MODULE_VERSION = 139L",
             "COMMITTED_FIELDS.equals(properties.stringPropertyNames())",
             "minimumVersion != MINIMUM_COMPANION_MODULE_VERSION",
             'requireExact(properties, "activationState", "committed")',
@@ -2301,11 +2332,11 @@ def main() -> None:
     require(
         plugin,
         [
-            "NATIVE_READER_V2_MIN_VERSION_CODE = 138L",
+            "NATIVE_READER_V2_MIN_VERSION_CODE = 139L",
             "NATIVE_READER_V2_SIGNER_SHA256 =",
-            "NATIVE_READER_V2_APK_LENGTH = 258587L",
+            "NATIVE_READER_V2_APK_LENGTH = 262683L",
             "NATIVE_READER_V2_APK_SHA256 =",
-            "aeaddb2e682e3b2a2eaf4c9abe531ea40fa7ead25dab1871c637892d048fce5f",
+            "fb826c482c1b5a97dbf1a95ca8e1987df00f0310cd1660be62f2f43fa556a736",
             "PackageManager.GET_SIGNING_CERTIFICATES",
             "signing.hasMultipleSigners()",
             "Native Reader signer set is not exact",
@@ -2357,6 +2388,17 @@ def main() -> None:
             "sameNativeAnnotationBackup(backup, immediateBackup)",
             "immediateMarker?.bytes?.contentEquals(pendingMarkerBytes)",
             "liveNativeAnnotationMatchesBackup(backup)",
+            "val committedMarkerAuthority = readPersistedAuthorityIfFile(marker)",
+            "strictNativeSpreadMarkerProperties(\n"
+            "            committedMarkerAuthority.bytes,",
+            'committedMarker.getProperty("activationState", "") !=\n'
+            "                NATIVE_SPREAD_ACTIVATION_COMMITTED",
+            "sameNativeAnnotationBackup(backup, committedBackup)",
+            "protectedEditableMarkerValid(\n"
+            "                pdfFile,\n"
+            "                committedMarker,\n"
+            "                committedBackup,",
+            "RTL_READER_NATIVE_EDITABLE_COMMIT_VERIFIED",
         ],
         "crash-durable compare-and-publish authority",
     )
@@ -2453,6 +2495,26 @@ def main() -> None:
             "throw activationError",
         ],
         "committed publication is distinct from verified activation success",
+    )
+    commit_start = plugin.find("private fun commitNativeSpreadEditableMarker(")
+    commit_end = plugin.find(
+        "private fun resolveNativeSpreadMode(", commit_start
+    )
+    if commit_start < 0 or commit_end < 0:
+        fail("could not isolate committed marker publication")
+    ordered(
+        plugin[commit_start:commit_end],
+        [
+            "writePropertiesAtomicallyCas(",
+            "val committedMarkerAuthority = readPersistedAuthorityIfFile(marker)",
+            "val committedBackup = readNativeAnnotationBackup(pdfFile).backup",
+            "!protectedEditableMarkerValid(\n"
+            "                pdfFile,\n"
+            "                committedMarker,",
+            "RTL_READER_NATIVE_EDITABLE_COMMIT_VERIFIED",
+            "        committedBackup\n    }",
+        ],
+        "durable committed-marker success postcondition",
     )
     if "if (markerCommittedByActivation" in activation or (
         "if (committedMarkerPublishedByActivation" in activation
@@ -2875,7 +2937,7 @@ def main() -> None:
             "python3 scripts/test_build_provenance.py .",
             "out/build-provenance/SupernoteRtlReader.bundle",
             "out/build-provenance/app.npk",
-            "supernote-rtl-reader-v0.4.19-native-reader-v2",
+            "supernote-rtl-reader-v0.4.20-native-reader-v2",
             "native-spread-upgrade-artifact:",
             "github.event_name == 'workflow_dispatch'",
             "github.actor == github.repository_owner",
@@ -2888,7 +2950,7 @@ def main() -> None:
             "never as a repository-scoped secret",
             "Verify aligned APK provenance without signing credentials",
             "Sign, verify, and remove protected Native Reader signing key",
-            "supernote-native-reader-v2-v0.0.138",
+            "supernote-native-reader-v2-v0.0.139",
         ],
         "CI v2 gates",
     )
@@ -2973,9 +3035,9 @@ def main() -> None:
             "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
             "$env:NATIVE_SPREAD_KEYSTORE_B64 = $null",
             "Remove-Item -LiteralPath $keystore -Force",
-            "release-output/SupernoteNativeSpreadProbe-v0.0.138.apk",
-            "$expectedSignedLength = 258587L",
-            "aeaddb2e682e3b2a2eaf4c9abe531ea40fa7ead25dab1871c637892d048fce5f",
+            "release-output/SupernoteNativeSpreadProbe-v0.0.139.apk",
+            "$expectedSignedLength = 262683L",
+            "fb826c482c1b5a97dbf1a95ca8e1987df00f0310cd1660be62f2f43fa556a736",
             "Signed APK length differs from the reviewed upgrade identity",
             "Signed APK SHA-256 differs from the reviewed upgrade identity.",
         ],
@@ -2985,7 +3047,7 @@ def main() -> None:
         stable_job,
         [
             "apksigner verification failed",
-            "$expectedSignedLength = 258587L",
+            "$expectedSignedLength = 262683L",
             "Signed APK SHA-256 differs from the reviewed upgrade identity.",
             "} finally {",
             "Upload upgrade-compatible Native Reader APK",

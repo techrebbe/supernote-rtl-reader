@@ -70,7 +70,7 @@ PluginManager.registerButtonListener({
   onButtonPress: event => {
     if (event?.id === RTL_READER_BUTTON_ID) {
       handoffAttemptedThisActivation = false;
-      console.log('RTL_READER_OPEN v0.4.19-native-reader-v2');
+      console.log('RTL_READER_OPEN v0.4.20-native-reader-v2');
       DeviceEventEmitter.emit(RTL_READER_ACTIVATE_EVENT);
     }
   },

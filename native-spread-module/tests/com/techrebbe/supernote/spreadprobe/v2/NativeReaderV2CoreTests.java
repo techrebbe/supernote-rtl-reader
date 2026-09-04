@@ -1058,7 +1058,7 @@ public final class NativeReaderV2CoreTests {
         properties.setProperty("managedBy", "supernote-rtl-reader");
         properties.setProperty("mode", NativeReaderV2MarkerClaim.MODE);
         properties.setProperty("transactionProtocol", "2");
-        properties.setProperty("minimumModuleVersionCode", "138");
+        properties.setProperty("minimumModuleVersionCode", "139");
         properties.setProperty("activationState", "committed");
         properties.setProperty("backupVerified", "true");
         properties.setProperty(

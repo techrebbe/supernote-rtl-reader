@@ -592,9 +592,16 @@ public final class NativeReaderV2Hooks {
                     }
                     Entry entry = entry(param.thisObject);
                     if (entry == null) return;
-                    if (entry.runtime == null) {
-                        if (entry.admissionFence) {
-                            param.setResult(Boolean.TRUE);
+                    if (entry.runtime == null
+                        || admissionFenceContactActive(entry)) {
+                        if (entry.admissionFence
+                            || admissionFenceContactActive(entry)) {
+                            List<RectD> chrome = chromeSnapshot(entry);
+                            if (chrome == null || routeAdmissionFenceAndroidContact(
+                                entry, event, chrome
+                            )) {
+                                param.setResult(Boolean.TRUE);
+                            }
                         }
                         return;
                     }
@@ -666,8 +673,21 @@ public final class NativeReaderV2Hooks {
                         }
                         return;
                     }
-                    if (entry.runtime == null) {
-                        if (entry.admissionFence) param.setResult(null);
+                    if (entry.runtime == null
+                        || admissionFenceContactActive(entry)) {
+                        if (entry.admissionFence
+                            || admissionFenceContactActive(entry)) {
+                            List<RectD> chrome = chromeSnapshot(entry);
+                            if (chrome == null || routeAdmissionFenceNativePen(
+                                entry,
+                                (Integer) param.args[0],
+                                (Integer) param.args[1],
+                                signal.pressure,
+                                chrome
+                            )) {
+                                param.setResult(null);
+                            }
+                        }
                         return;
                     }
                     NativeReaderV2Runtime runtime = entry.runtime;
@@ -856,6 +876,7 @@ public final class NativeReaderV2Hooks {
         entry.admissionFence = true;
         entry.admissionFencePath = path;
         indexAdmissionComponents(entry, components);
+        ensureChromeTracker(entry);
         entry.attemptedPath = path;
         entry.admitting = true;
         final long admissionLifecycleGeneration = entry.lifecycleGeneration;
@@ -919,10 +940,14 @@ public final class NativeReaderV2Hooks {
                         if (accepted == null) {
                             Log.i(TAG, "document not admitted path=" + path
                                 + " reason=" + (rejected == null
-                                    ? "unknown" : rejected.getClass().getSimpleName()));
+                                    ? "unknown" : rejected.getClass().getSimpleName())
+                                + " detail=" + (rejected == null
+                                    || rejected.getMessage() == null
+                                    ? "none" : rejected.getMessage()));
                             if (!markerCandidate && rejected == null) {
                                 entry.admissionFence = false;
                                 entry.admissionFencePath = null;
+                                retireChromeTrackerWhenUnfenced(entry);
                             }
                             return;
                         }
@@ -1013,29 +1038,9 @@ public final class NativeReaderV2Hooks {
                             );
                             final NativeReaderV2Runtime admittedRuntime =
                                 entry.runtime;
-                            entry.chrome = new NativeReaderV2ChromeTracker(
-                                entry.activity,
-                                new Runnable() {
-                                    @Override public void run() {
-                                        if (entry.runtime == admittedRuntime) {
-                                            retire(
-                                                entry,
-                                                "native_chrome_discovery_failed"
-                                            );
-                                        }
-                                    }
-                                },
-                                new Runnable() {
-                                    @Override public void run() {
-                                        if (entry.runtime == admittedRuntime
-                                            && entry.chrome != null) {
-                                            admittedRuntime
-                                                .onTrackedNativeChromeChanged(
-                                                    entry.chrome.snapshot()
-                                                );
-                                        }
-                                    }
-                                }
+                            ensureChromeTracker(entry);
+                            admittedRuntime.onTrackedNativeChromeChanged(
+                                chromeSnapshot(entry)
                             );
                             reindex(entry);
                             entry.runtime.start();
@@ -1568,6 +1573,11 @@ public final class NativeReaderV2Hooks {
             entry.stylusRoutePass = false;
             entry.suppressNativeUntilTerminal = false;
             entry.fingerPhysicalContact = false;
+            entry.fenceAndroidContact = false;
+            entry.fenceAndroidPass = false;
+            entry.fenceAndroidPointerId = -1;
+            entry.fenceNativePenContact = false;
+            entry.fenceNativePenPass = false;
             entry.nativeTerminalGeneration++;
         }
     }
@@ -1680,6 +1690,154 @@ public final class NativeReaderV2Hooks {
     private static List<RectD> chromeSnapshot(Entry entry) {
         NativeReaderV2ChromeTracker tracker = entry == null ? null : entry.chrome;
         return tracker == null ? Collections.<RectD>emptyList() : tracker.snapshot();
+    }
+
+    private static void ensureChromeTracker(final Entry entry) {
+        if (entry == null || entry.retired || entry.chrome != null) return;
+        try {
+            entry.chrome = new NativeReaderV2ChromeTracker(
+                entry.activity,
+                new Runnable() {
+                    @Override public void run() {
+                        entry.admissionFence = true;
+                        entry.chrome = null;
+                        NativeReaderV2Runtime runtime = entry.runtime;
+                        if (runtime != null) {
+                            retire(entry, "native_chrome_discovery_failed");
+                        } else {
+                            Log.e(TAG,
+                                "native chrome discovery failed while admission fenced");
+                        }
+                    }
+                },
+                new Runnable() {
+                    @Override public void run() {
+                        NativeReaderV2Runtime runtime = entry.runtime;
+                        NativeReaderV2ChromeTracker tracker = entry.chrome;
+                        if (runtime != null && tracker != null) {
+                            runtime.onTrackedNativeChromeChanged(tracker.snapshot());
+                        }
+                    }
+                }
+            );
+        } catch (RuntimeException failure) {
+            entry.chrome = null;
+            entry.admissionFence = true;
+            Log.e(TAG, "native chrome tracker could not start", failure);
+        }
+    }
+
+    private static void retireChromeTracker(Entry entry) {
+        if (entry == null) return;
+        NativeReaderV2ChromeTracker tracker = entry.chrome;
+        entry.chrome = null;
+        if (tracker != null) tracker.retire();
+    }
+
+    private static boolean admissionFenceContactActive(Entry entry) {
+        if (entry == null) return false;
+        synchronized (entry.stylusRouteLock) {
+            return entry.fenceAndroidContact || entry.fenceNativePenContact;
+        }
+    }
+
+    private static void retireChromeTrackerWhenUnfenced(final Entry entry) {
+        if (entry == null || entry.admissionFence || entry.runtime != null
+            || admissionFenceContactActive(entry)) return;
+        if (Looper.myLooper() == entry.activity.getMainLooper()) {
+            retireChromeTracker(entry);
+            return;
+        }
+        entry.activity.getWindow().getDecorView().post(
+            guardedHookContinuation(
+                entry,
+                "retire_unfenced_chrome_tracker",
+                new Runnable() {
+                    @Override public void run() {
+                        if (!entry.admissionFence && entry.runtime == null
+                            && !admissionFenceContactActive(entry)) {
+                            retireChromeTracker(entry);
+                        }
+                    }
+                }
+            )
+        );
+    }
+
+    private static boolean pointInsideChrome(
+        double x,
+        double y,
+        List<RectD> chrome
+    ) {
+        if (chrome == null) return false;
+        for (RectD rect : chrome) {
+            if (rect != null && rect.contains(x, y)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * A rejected marker must fence the document without making the native
+     * recovery controls unreachable. Classify once at DOWN and retain that
+     * decision through the matching terminal event.
+     */
+    private static boolean routeAdmissionFenceAndroidContact(
+        Entry entry,
+        MotionEvent event,
+        List<RectD> chrome
+    ) {
+        int action = event.getActionMasked();
+        synchronized (entry.stylusRouteLock) {
+            if (action == MotionEvent.ACTION_DOWN) {
+                int index = event.getActionIndex();
+                entry.fenceAndroidContact = true;
+                entry.fenceAndroidPointerId = event.getPointerId(index);
+                entry.fenceAndroidPass = pointInsideChrome(
+                    event.getX(index), event.getY(index), chrome
+                );
+                Log.i(TAG, "admission fence contact route="
+                    + (entry.fenceAndroidPass
+                        ? "native_chrome" : "blocked_document"));
+            }
+            if (!entry.fenceAndroidContact) return true;
+            boolean consume = !entry.fenceAndroidPass;
+            if (action == MotionEvent.ACTION_UP
+                || action == MotionEvent.ACTION_CANCEL
+                || event.findPointerIndex(entry.fenceAndroidPointerId) < 0) {
+                entry.fenceAndroidContact = false;
+                entry.fenceAndroidPass = false;
+                entry.fenceAndroidPointerId = -1;
+            }
+            if (!entry.fenceAndroidContact) {
+                retireChromeTrackerWhenUnfenced(entry);
+            }
+            return consume;
+        }
+    }
+
+    private static boolean routeAdmissionFenceNativePen(
+        Entry entry,
+        int x,
+        int y,
+        int pressure,
+        List<RectD> chrome
+    ) {
+        synchronized (entry.stylusRouteLock) {
+            if (pressure > 0 && !entry.fenceNativePenContact) {
+                entry.fenceNativePenContact = true;
+                entry.fenceNativePenPass = pointInsideChrome(x, y, chrome);
+            }
+            boolean consume = !entry.fenceNativePenContact
+                || !entry.fenceNativePenPass;
+            if (pressure <= 0) {
+                entry.fenceNativePenContact = false;
+                entry.fenceNativePenPass = false;
+            }
+            if (!entry.fenceNativePenContact) {
+                retireChromeTrackerWhenUnfenced(entry);
+            }
+            return consume;
+        }
     }
 
     private static Entry entry(Object activity) {
@@ -1818,6 +1976,11 @@ public final class NativeReaderV2Hooks {
         boolean stylusRoutePass;
         boolean suppressNativeUntilTerminal;
         boolean fingerPhysicalContact;
+        boolean fenceAndroidContact;
+        boolean fenceAndroidPass;
+        int fenceAndroidPointerId = -1;
+        boolean fenceNativePenContact;
+        boolean fenceNativePenPass;
         long nativeTerminalGeneration;
 
         Entry(Activity activity, long generation) {

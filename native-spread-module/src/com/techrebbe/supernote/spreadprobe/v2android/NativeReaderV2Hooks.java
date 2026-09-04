@@ -30,6 +30,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
@@ -851,6 +852,11 @@ public final class NativeReaderV2Hooks {
     private static void maybeAdmit(Entry entry, boolean forceRetry) {
         if (entry == null || entry.retired || entry.admitting
             || !entry.resumed) return;
+        if (entry.retryAdmissionAfterAuthorityOff) {
+            entry.retryAdmissionAfterAuthorityOff = false;
+            entry.attemptedPath = null;
+            forceRetry = true;
+        }
         NativeReaderV2FirmwareAccess.Components components;
         try {
             components = firmware.inspect(entry.activity);
@@ -917,6 +923,12 @@ public final class NativeReaderV2Hooks {
                         entry.admitting = false;
                         if (entry.retired || BY_ACTIVITY.get(entry.activity) != entry) {
                             releaseEvidence(accepted);
+                            return;
+                        }
+                        if (entry.retryAdmissionAfterAuthorityOff
+                            && entry.resumed) {
+                            releaseEvidence(accepted);
+                            maybeAdmit(entry, true);
                             return;
                         }
                         PendingNativeOpen pendingOpen = entry.pendingNativeOpen;
@@ -1197,9 +1209,14 @@ public final class NativeReaderV2Hooks {
                 }
                 final long handshakeDeadlineUptimeMs =
                     SystemClock.uptimeMillis() + HANDSHAKE_PROVIDER_EXPIRY_MS;
+                final AtomicReference<Thread> authorityObservationWorker =
+                    new AtomicReference<>();
                 final Runnable handshakeExpiry = new Runnable() {
                     @Override public void run() {
                         if (HANDSHAKE_SINGLE_FLIGHT.finish(handshakeToken)) {
+                            Thread worker = authorityObservationWorker
+                                .getAndSet(null);
+                            if (worker != null) worker.interrupt();
                             Log.w(TAG, "v2 handshake admission expired");
                         }
                     }
@@ -1236,7 +1253,7 @@ public final class NativeReaderV2Hooks {
                                 expectedJournalState,
                                 expectedActivationToken
                             );
-                        ADMISSION.execute(new Runnable() {
+                        Thread worker = new Thread(new Runnable() {
                             @Override public void run() {
                                 NativeReaderV2DocumentGate.AuthorityObservation
                                     observation = null;
@@ -1288,8 +1305,22 @@ public final class NativeReaderV2Hooks {
                                     Log.w(TAG,
                                         "v2 authority ACK rejected without main publication");
                                 }
+                                authorityObservationWorker.compareAndSet(
+                                    Thread.currentThread(),
+                                    null
+                                );
                             }
-                        });
+                        }, "sn-v2-authority-ack-" + handshakeToken);
+                        worker.setDaemon(true);
+                        if (!authorityObservationWorker.compareAndSet(
+                                null,
+                                worker
+                            )) {
+                            throw new IllegalStateException(
+                                "authority observation worker already exists"
+                            );
+                        }
+                        worker.start();
                         asynchronousAck = true;
                     } else {
                         publishHandshakeResponse(
@@ -1432,6 +1463,16 @@ public final class NativeReaderV2Hooks {
             receiverContext.sendBroadcast(response);
             Log.i(TAG, "v2 handshake response path="
                 + resolution.rawPath);
+            if (observation != null && "off".equals(observation.state)) {
+                Entry entry = resolution.candidate.entry;
+                if (entry != null && !entry.retired
+                    && resolution.rawPath.equals(currentPath(entry))) {
+                    entry.retryAdmissionAfterAuthorityOff = true;
+                    if (!entry.admitting && entry.resumed) {
+                        maybeAdmit(entry, true);
+                    }
+                }
+            }
         } catch (RuntimeException failure) {
             Log.w(TAG, "v2 handshake response send failed", failure);
         }
@@ -2131,6 +2172,7 @@ public final class NativeReaderV2Hooks {
         volatile boolean resumed;
         volatile boolean admissionFence;
         volatile String admissionFencePath;
+        volatile boolean retryAdmissionAfterAuthorityOff;
         volatile PendingNativeOpen pendingNativeOpen;
         volatile boolean retireAfterDetachment;
         volatile boolean retryAdmissionAfterDetachment;

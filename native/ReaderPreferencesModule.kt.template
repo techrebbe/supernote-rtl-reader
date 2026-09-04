@@ -61,9 +61,9 @@ class ReaderPreferencesModule(
         private const val NATIVE_READER_V2_MIN_VERSION_CODE = 140L
         private const val NATIVE_READER_V2_SIGNER_SHA256 =
             "a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67"
-        private const val NATIVE_READER_V2_APK_LENGTH = 274971L
+        private const val NATIVE_READER_V2_APK_LENGTH = 287259L
         private const val NATIVE_READER_V2_APK_SHA256 =
-            "dd40b89f4bbc6d161b90ea631efccac8c185e3ae8b2cc0cb13d5791f35464c48"
+            "af6b0b88f0622504471660d5db877ba9472860b67e845b5560caac3e9374e017"
         private const val NATIVE_SPREAD_MARKER_SUFFIX = ".snspread-v3"
         private const val NATIVE_SPREAD_LEGACY_MARKER_SUFFIX = ".snspread"
         private const val NATIVE_SPREAD_BACKUP_SUFFIX = ".snspread-backup.properties"

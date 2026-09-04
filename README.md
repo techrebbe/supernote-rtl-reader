@@ -68,9 +68,12 @@ annotation restore finds exactly one valid slot and one malformed slot after
 the Document process has stopped, it may overwrite only that malformed slot
 with a newer authenticated RECOVERY record on the same inode; zero valid slots,
 two malformed slots, replacement, or version drift remain non-repairable and
-fail closed. PluginHost requires the live Document process to acknowledge the exact
-journal path, generation, record digest, state, and activation token before a
-transition succeeds.
+fail closed. PluginHost requires the live Document process to acknowledge the
+exact journal path, generation, record digest, state, and activation token
+before a transition succeeds. Each acknowledgement hashes the live PDF and
+rereads the same journal after that hash, runs in a replaceable per-request
+worker so a stalled FUSE read cannot exhaust admission, and automatically
+retries admission after an acknowledged recovery-to-OFF transition.
 Mode loading likewise carries one descriptor-backed marker snapshot through
 settings parsing and recovery assessment, then revalidates that exact snapshot
 after the asynchronous companion handshake before returning it to the UI. The
@@ -94,6 +97,18 @@ across a recovery boundary.
 Committed publication and successful activation verification are separate:
 failures after the committed journal header is durable remain non-rollbackable
 but propagate as failures rather than being reported as a successful enable.
+
+The immutable backup remains rollback-only evidence. After every successful
+dirty native save, the Document process publishes a separate exact-schema,
+descriptor-verified live-mark checkpoint bound to the original PDF and backup
+hashes. This permits a cold process restart to re-admit the newer witnessed
+`.mark` without rewriting the original snapshot. Checkpoint publication holds
+the exclusive writer lease, supports the Nomad's FUSE directory-open behavior,
+and fails closed on a torn file, stale backup, unwitnessed mark change, or
+interrupted publication. If shutdown outlives the bounded foreground wait, a
+daemon drain retains that lease until the worker has actually exited. An
+existing zero-byte `.mark` is valid evidence and is distinguished from an
+absent file.
 
 The final adversarial review additionally made input freezes and lifecycle
 publication epoch-owned, so stale composition work cannot reopen input or

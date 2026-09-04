@@ -34,10 +34,11 @@ python scripts/test_native_reader_v2_mutations.py .
 python scripts/test_plugin_packaging_fail_closed.py
 ```
 
-`scripts/check_native_spread_invariants.py` is the frozen v0.0.135 legacy-engine
-gate. The exclusive Native Reader v2 package intentionally removes that engine,
-so the legacy gate is expected to reject the v2 workflow and must not be treated
-as a v2 release check. Its preserved source digests remain review evidence.
+`scripts/check_native_spread_invariants.py` is the current cross-layer package
+and provenance gate. It preserves the frozen v0.0.135 source-digest evidence
+while also validating that the exclusive Native Reader v2 package contains no
+legacy executable entry point or native payload. It is required for a v2
+release check; the legacy source itself must remain non-executable.
 
 For Native Spread changes, also build and verify the companion APK with
 `native-spread-module/build.ps1`. For plug-in changes, run the normal plug-in

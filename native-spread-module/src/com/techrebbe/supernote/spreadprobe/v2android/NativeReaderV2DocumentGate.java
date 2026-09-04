@@ -1,10 +1,12 @@
 package com.techrebbe.supernote.spreadprobe.v2android;
 
 import android.os.Looper;
+import android.os.Process;
 import android.system.ErrnoException;
 import android.system.Os;
 import android.system.OsConstants;
 import android.system.StructStat;
+import android.util.Log;
 
 import com.techrebbe.supernote.spreadprobe.v2.NativeReaderV2MarkerClaim;
 import com.techrebbe.supernote.spreadprobe.v2.NativeReaderV2AuthorityJournal;
@@ -18,6 +20,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
+import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.Collections;
@@ -26,15 +29,45 @@ import java.util.Locale;
 import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 
 /** Descriptor-backed, off-UI-thread admission of one exact original PDF. */
 public final class NativeReaderV2DocumentGate {
+    private static final String TAG = "SN_NATIVE_READER_V2";
     public static final String MARKER_SUFFIX = ".snspread-v3";
     public static final String LEGACY_MARKER_SUFFIX = ".snspread";
     private static final String BACKUP_MANIFEST_SUFFIX =
         ".snspread-backup.properties";
     private static final String BACKUP_SNAPSHOT_SUFFIX =
         ".snspread-backup.mark";
+    private static final String LIVE_MARK_CHECKPOINT_SUFFIX =
+        ".snspread-live-mark-v1";
+    private static final int LINUX_O_DIRECTORY = 0x10000;
+    private static final Set<String> LIVE_MARK_CHECKPOINT_FIELDS =
+        Collections.unmodifiableSet(new HashSet<String>(Arrays.asList(
+            "version",
+            "kind",
+            "managedBy",
+            "documentPath",
+            "documentLength",
+            "documentSha256",
+            "backupManifestPath",
+            "backupManifestLength",
+            "backupManifestSha256",
+            "backupSnapshotPath",
+            "markPath",
+            "originalMarkPresent",
+            "recoveryMarkLength",
+            "recoveryMarkSha256",
+            "backupCreatedAt",
+            "liveMarkPresent",
+            "liveMarkLength",
+            "liveMarkSha256",
+            "witnessGeneration"
+        )));
     private static final Set<String> RECOVERY_MANIFEST_FIELDS =
         Collections.unmodifiableSet(new HashSet<String>(Arrays.asList(
             "version",
@@ -325,6 +358,11 @@ public final class NativeReaderV2DocumentGate {
             String expectedState = snapshot.current.state.name()
                 .toLowerCase(Locale.ROOT);
             String activationToken = payload.getProperty("activationToken");
+            StableDigest documentIdentity = hashRegularFile(canonical);
+            StableBytes bytesAfter = readRegularFile(
+                journalPath,
+                NativeReaderV2AuthorityJournal.FILE_SIZE
+            );
             if (!NativeReaderV2Config.ENGINE_VALUE.equals(
                     payload.getProperty(NativeReaderV2Config.ENGINE_KEY))
                 || !"supernote-rtl-reader".equals(
@@ -336,8 +374,14 @@ public final class NativeReaderV2DocumentGate {
                     NativeReaderV2MarkerClaim.MINIMUM_COMPANION_MODULE_VERSION
                 ).equals(payload.getProperty("minimumModuleVersionCode"))
                 || !canonical.equals(payload.getProperty("documentPath"))
+                || !Long.toString(documentIdentity.identity.size).equals(
+                    payload.getProperty("documentLength"))
+                || !documentIdentity.sha256.equals(
+                    payload.getProperty("documentSha256"))
                 || !expectedState.equals(payload.getProperty("activationState"))
-                || !isCanonicalUuid(activationToken)) {
+                || !isCanonicalUuid(activationToken)
+                || !bytes.identity.sameVersion(bytesAfter.identity)
+                || !Arrays.equals(bytes.bytes, bytesAfter.bytes)) {
                 throw new IllegalStateException(
                     "journal payload does not bind observed authority"
                 );
@@ -478,6 +522,372 @@ public final class NativeReaderV2DocumentGate {
             );
         }
         return new RecoveryIdentity(manifest.identity, null);
+    }
+
+    /**
+     * Reads authority advanced only after a witnessed native save. This is
+     * separate from the immutable rollback snapshot, which must never be
+     * rewritten merely because stock editing committed newer live bytes.
+     */
+    private static LiveMarkCheckpoint readLiveMarkCheckpoint(
+        NativeReaderV2MarkerClaim claim
+    ) throws Exception {
+        String checkpointPath = claim.markPath + LIVE_MARK_CHECKPOINT_SUFFIX;
+        StableBytes checkpoint = readRegularFile(
+            checkpointPath,
+            NativeReaderV2StrictProperties.MAX_BYTES
+        );
+        Properties properties = NativeReaderV2StrictProperties.parse(
+            checkpoint.bytes
+        );
+        if (!LIVE_MARK_CHECKPOINT_FIELDS.equals(
+                properties.stringPropertyNames())
+            || !"1".equals(properties.getProperty("version"))
+            || !"native-reader-v2-live-mark-checkpoint".equals(
+                properties.getProperty("kind"))
+            || !"supernote-rtl-reader".equals(
+                properties.getProperty("managedBy"))
+            || !claim.canonicalDocumentPath.equals(
+                properties.getProperty("documentPath"))
+            || !Long.toString(claim.documentLength).equals(
+                properties.getProperty("documentLength"))
+            || !claim.documentSha256.equals(
+                properties.getProperty("documentSha256"))
+            || !claim.backupManifestPath.equals(
+                properties.getProperty("backupManifestPath"))
+            || !Long.toString(claim.backupManifestLength).equals(
+                properties.getProperty("backupManifestLength"))
+            || !claim.backupManifestSha256.equals(
+                properties.getProperty("backupManifestSha256"))
+            || !claim.backupSnapshotPath.equals(
+                properties.getProperty("backupSnapshotPath"))
+            || !claim.markPath.equals(properties.getProperty("markPath"))
+            || !Boolean.toString(claim.originalMarkPresent).equals(
+                properties.getProperty("originalMarkPresent"))
+            || !Long.toString(claim.markLength).equals(
+                properties.getProperty("recoveryMarkLength"))
+            || !claim.markSha256.equals(
+                properties.getProperty("recoveryMarkSha256"))
+            || !Long.toString(claim.backupCreatedAt).equals(
+                properties.getProperty("backupCreatedAt"))) {
+            throw new IllegalStateException(
+                "live mark checkpoint does not bind recovery authority"
+            );
+        }
+        boolean present = strictCheckpointBoolean(
+            properties,
+            "liveMarkPresent"
+        );
+        long length = strictCheckpointLong(properties, "liveMarkLength", true);
+        String sha256 = properties.getProperty("liveMarkSha256");
+        long generation = strictCheckpointLong(
+            properties,
+            "witnessGeneration",
+            false
+        );
+        if (present ? !isCanonicalSha256(sha256) : length != 0L
+            || !"ABSENT".equals(sha256)) {
+            throw new IllegalStateException(
+                "live mark checkpoint identity is inconsistent"
+            );
+        }
+        return new LiveMarkCheckpoint(
+            checkpointPath,
+            checkpoint.identity,
+            present,
+            length,
+            sha256,
+            generation
+        );
+    }
+
+    private static boolean strictCheckpointBoolean(
+        Properties properties,
+        String key
+    ) {
+        String value = properties.getProperty(key);
+        if ("true".equals(value)) return true;
+        if ("false".equals(value)) return false;
+        throw new IllegalStateException("invalid checkpoint boolean " + key);
+    }
+
+    private static long strictCheckpointLong(
+        Properties properties,
+        String key,
+        boolean allowZero
+    ) {
+        String value = properties.getProperty(key);
+        if (value == null || value.isEmpty() || value.charAt(0) == '+'
+            || value.charAt(0) == '-' || value.length() > 1
+            && value.charAt(0) == '0') {
+            throw new IllegalStateException(
+                "invalid checkpoint integer " + key
+            );
+        }
+        try {
+            long parsed = Long.parseLong(value);
+            if (parsed < 0L || !allowZero && parsed == 0L) {
+                throw new IllegalStateException(
+                    "checkpoint integer is outside bounds " + key
+                );
+            }
+            return parsed;
+        } catch (NumberFormatException invalid) {
+            throw new IllegalStateException(
+                "invalid checkpoint integer " + key,
+                invalid
+            );
+        }
+    }
+
+    private static boolean isCanonicalSha256(String value) {
+        if (value == null || value.length() != 64
+            || !value.equals(value.toLowerCase(Locale.ROOT))) {
+            return false;
+        }
+        for (int index = 0; index < value.length(); index++) {
+            char item = value.charAt(index);
+            if (!((item >= '0' && item <= '9')
+                || (item >= 'a' && item <= 'f'))) return false;
+        }
+        return true;
+    }
+
+    private static LiveMarkState readLiveMarkState(String markPath)
+        throws Exception {
+        Identity identity = optionalRegularIdentity(markPath);
+        if (identity == null) return LiveMarkState.absent();
+        StableDigest digest = hashRegularFile(markPath);
+        if (!identity.sameVersion(digest.identity)) {
+            throw new IllegalStateException(
+                "live mark changed while its checkpoint was captured"
+            );
+        }
+        return new LiveMarkState(
+            true,
+            digest.identity,
+            digest.identity.size,
+            digest.sha256
+        );
+    }
+
+    private static boolean liveMarkMatchesRecovery(
+        NativeReaderV2MarkerClaim claim,
+        LiveMarkState live
+    ) {
+        return claim.originalMarkPresent == live.present
+            && (live.present
+                ? live.length == claim.markLength
+                    && claim.markSha256.equals(live.sha256)
+                : claim.markLength == 0L
+                    && "ABSENT".equals(claim.markSha256));
+    }
+
+    private static boolean liveMarkMatchesCheckpoint(
+        LiveMarkState live,
+        LiveMarkCheckpoint checkpoint
+    ) {
+        return live.present == checkpoint.present
+            && live.length == checkpoint.length
+            && live.sha256.equals(checkpoint.sha256);
+    }
+
+    private static byte[] liveMarkCheckpointBytes(
+        NativeReaderV2MarkerClaim claim,
+        LiveMarkState live,
+        long witnessGeneration
+    ) throws Exception {
+        Properties properties = new Properties();
+        properties.setProperty("version", "1");
+        properties.setProperty(
+            "kind",
+            "native-reader-v2-live-mark-checkpoint"
+        );
+        properties.setProperty("managedBy", "supernote-rtl-reader");
+        properties.setProperty("documentPath", claim.canonicalDocumentPath);
+        properties.setProperty(
+            "documentLength",
+            Long.toString(claim.documentLength)
+        );
+        properties.setProperty("documentSha256", claim.documentSha256);
+        properties.setProperty("backupManifestPath", claim.backupManifestPath);
+        properties.setProperty(
+            "backupManifestLength",
+            Long.toString(claim.backupManifestLength)
+        );
+        properties.setProperty(
+            "backupManifestSha256",
+            claim.backupManifestSha256
+        );
+        properties.setProperty("backupSnapshotPath", claim.backupSnapshotPath);
+        properties.setProperty("markPath", claim.markPath);
+        properties.setProperty(
+            "originalMarkPresent",
+            Boolean.toString(claim.originalMarkPresent)
+        );
+        properties.setProperty(
+            "recoveryMarkLength",
+            Long.toString(claim.markLength)
+        );
+        properties.setProperty("recoveryMarkSha256", claim.markSha256);
+        properties.setProperty(
+            "backupCreatedAt",
+            Long.toString(claim.backupCreatedAt)
+        );
+        properties.setProperty(
+            "liveMarkPresent",
+            Boolean.toString(live.present)
+        );
+        properties.setProperty(
+            "liveMarkLength",
+            Long.toString(live.length)
+        );
+        properties.setProperty("liveMarkSha256", live.sha256);
+        properties.setProperty(
+            "witnessGeneration",
+            Long.toString(witnessGeneration)
+        );
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        properties.store(output, "Native Reader v2 witnessed mark authority");
+        return output.toByteArray();
+    }
+
+    private static void writeLiveMarkCheckpointAtomically(
+        File checkpoint,
+        byte[] bytes
+    ) throws Exception {
+        File parent = checkpoint.getParentFile();
+        if (parent == null) {
+            throw new IllegalStateException("checkpoint has no parent");
+        }
+        FileDescriptor parentDescriptor = openPinnedDirectory(
+            parent.getAbsolutePath()
+        );
+        File temporary = new File(
+            parent,
+            "." + checkpoint.getName() + ".tmp-" + Process.myPid()
+                + "-" + UUID.randomUUID()
+        );
+        FileDescriptor temporaryDescriptor = null;
+        try {
+            Identity parentIdentity = Identity.from(
+                Os.fstat(parentDescriptor)
+            );
+            if (!OsConstants.S_ISDIR(parentIdentity.mode)
+                || !parentIdentity.sameFile(Identity.from(
+                    Os.lstat(parent.getAbsolutePath())
+                ))) {
+                throw new IllegalStateException(
+                    "checkpoint parent authority is invalid"
+                );
+            }
+            temporaryDescriptor = Os.open(
+                temporary.getAbsolutePath(),
+                OsConstants.O_WRONLY | OsConstants.O_CREAT
+                    | OsConstants.O_EXCL | OsConstants.O_CLOEXEC
+                    | OsConstants.O_NOFOLLOW,
+                0600
+            );
+            Identity temporaryIdentity = Identity.from(
+                Os.fstat(temporaryDescriptor)
+            );
+            temporaryIdentity.requireRegular();
+            try (FileOutputStream output = new FileOutputStream(
+                    Os.dup(temporaryDescriptor))) {
+                output.write(bytes);
+                output.flush();
+            }
+            Os.fsync(temporaryDescriptor);
+            Identity written = Identity.from(Os.fstat(temporaryDescriptor));
+            if (!temporaryIdentity.sameFile(written)
+                || written.size != bytes.length
+                || !written.sameVersion(Identity.from(
+                    Os.lstat(temporary.getAbsolutePath())
+                ))) {
+                throw new IllegalStateException(
+                    "checkpoint staging authority changed"
+                );
+            }
+            Os.rename(
+                temporary.getAbsolutePath(),
+                checkpoint.getAbsolutePath()
+            );
+            Identity published = Identity.from(
+                Os.lstat(checkpoint.getAbsolutePath())
+            );
+            if (!written.sameFile(published)
+                || !parentIdentity.sameFile(Identity.from(
+                    Os.fstat(parentDescriptor)
+                ))
+                || !parentIdentity.sameFile(Identity.from(
+                    Os.lstat(parent.getAbsolutePath())
+                ))) {
+                throw new IllegalStateException(
+                    "checkpoint publication authority changed"
+                );
+            }
+            Os.fsync(parentDescriptor);
+            StableBytes verified = readRegularFile(
+                checkpoint.getAbsolutePath(),
+                NativeReaderV2StrictProperties.MAX_BYTES
+            );
+            if (!Arrays.equals(bytes, verified.bytes)) {
+                throw new IllegalStateException(
+                    "checkpoint publication bytes changed"
+                );
+            }
+        } finally {
+            if (temporaryDescriptor != null) {
+                try { Os.close(temporaryDescriptor); } catch (Exception ignored) {}
+            }
+            try {
+                if (pathExistsNoFollow(temporary.getAbsolutePath())) {
+                    Files.deleteIfExists(temporary.toPath());
+                    Os.fsync(parentDescriptor);
+                }
+            } catch (Exception ignored) {}
+            Os.close(parentDescriptor);
+        }
+    }
+
+    /**
+     * Opens one exact directory without following a replacement symlink.
+     * Android shared storage is commonly FUSE-backed and may reject Linux's
+     * O_DIRECTORY flag with EINVAL, so the fallback pins and rechecks the
+     * no-follow descriptor instead of weakening path authority.
+     */
+    private static FileDescriptor openPinnedDirectory(String path)
+        throws Exception {
+        int commonFlags = OsConstants.O_RDONLY | OsConstants.O_CLOEXEC
+            | OsConstants.O_NOFOLLOW;
+        try {
+            return Os.open(path, commonFlags | LINUX_O_DIRECTORY, 0);
+        } catch (ErrnoException failure) {
+            if (failure.errno != OsConstants.EINVAL) throw failure;
+        }
+        Identity before = Identity.from(Os.lstat(path));
+        if (!OsConstants.S_ISDIR(before.mode)) {
+            throw new IllegalStateException(
+                "checkpoint parent is not a directory"
+            );
+        }
+        FileDescriptor descriptor = Os.open(path, commonFlags, 0);
+        try {
+            Identity pinned = Identity.from(Os.fstat(descriptor));
+            Identity after = Identity.from(Os.lstat(path));
+            if (!OsConstants.S_ISDIR(pinned.mode)
+                || !OsConstants.S_ISDIR(after.mode)
+                || !before.sameFile(pinned)
+                || !before.sameFile(after)) {
+                throw new IllegalStateException(
+                    "checkpoint parent changed during FUSE fallback"
+                );
+            }
+            return descriptor;
+        } catch (Throwable failure) {
+            try { Os.close(descriptor); } catch (Exception ignored) {}
+            throw failure;
+        }
     }
 
     private static void requireManifestValue(
@@ -887,30 +1297,51 @@ public final class NativeReaderV2DocumentGate {
      * file identity transitions after a witnessed native save.
      */
     private static final class MarkAuthority {
+        private final NativeReaderV2MarkerClaim claim;
         private final String markPath;
         private final String leasePath;
         private final FileOutputStream leaseStream;
         private final FileLock lease;
         private final Identity leaseIdentity;
+        private final ExecutorService checkpointExecutor;
         private Identity markIdentity;
+        private long witnessGeneration;
         private boolean expectedTransition;
         private boolean unsafe;
+        private boolean closing;
         private boolean closed;
+        private boolean leaseReleased;
 
         private MarkAuthority(
+            NativeReaderV2MarkerClaim claim,
             String markPath,
             String leasePath,
             FileOutputStream leaseStream,
             FileLock lease,
             Identity leaseIdentity,
-            Identity markIdentity
+            Identity markIdentity,
+            long witnessGeneration
         ) {
+            this.claim = claim;
             this.markPath = markPath;
             this.leasePath = leasePath;
             this.leaseStream = leaseStream;
             this.lease = lease;
             this.leaseIdentity = leaseIdentity;
             this.markIdentity = markIdentity;
+            this.witnessGeneration = witnessGeneration;
+            this.checkpointExecutor = Executors.newSingleThreadExecutor(
+                new java.util.concurrent.ThreadFactory() {
+                    @Override public Thread newThread(Runnable runnable) {
+                        Thread thread = new Thread(
+                            runnable,
+                            "sn-v2-mark-checkpoint"
+                        );
+                        thread.setDaemon(true);
+                        return thread;
+                    }
+                }
+            );
         }
 
         static MarkAuthority acquire(NativeReaderV2MarkerClaim claim)
@@ -959,33 +1390,28 @@ public final class NativeReaderV2DocumentGate {
                         "another process owns the live mark writer lease"
                     );
                 }
-                Identity liveMark = optionalRegularIdentity(claim.markPath);
-                if (claim.originalMarkPresent) {
-                    if (liveMark == null) {
-                        throw new IllegalStateException(
-                            "live mark disappeared after recovery snapshot"
-                        );
-                    }
-                    StableDigest digest = hashRegularFile(claim.markPath);
-                    if (!liveMark.sameVersion(digest.identity)
-                        || digest.identity.size != claim.markLength
-                        || !claim.markSha256.equals(digest.sha256)) {
-                        throw new IllegalStateException(
-                            "live mark disagrees with admitted recovery snapshot"
-                        );
-                    }
-                } else if (liveMark != null) {
-                    throw new IllegalStateException(
-                        "live mark appeared after absent-mark recovery"
+                LiveMarkState liveMark = readLiveMarkState(claim.markPath);
+                long witnessGeneration = 0L;
+                if (!liveMarkMatchesRecovery(claim, liveMark)) {
+                    LiveMarkCheckpoint checkpoint = readLiveMarkCheckpoint(
+                        claim
                     );
+                    if (!liveMarkMatchesCheckpoint(liveMark, checkpoint)) {
+                        throw new IllegalStateException(
+                            "live mark lacks witnessed persisted authority"
+                        );
+                    }
+                    witnessGeneration = checkpoint.generation;
                 }
                 return new MarkAuthority(
+                    claim,
                     claim.markPath,
                     leasePath,
                     stream,
                     lock,
                     descriptorIdentity,
-                    liveMark
+                    liveMark.identity,
+                    witnessGeneration
                 );
             } catch (Exception failure) {
                 if (lock != null) {
@@ -1000,24 +1426,121 @@ public final class NativeReaderV2DocumentGate {
             }
         }
 
-        synchronized void noteWitnessedSave(boolean dirty, boolean success) {
-            if (closed || unsafe || expectedTransition) {
-                unsafe = true;
+        void noteWitnessedSave(boolean dirty, boolean success) {
+            final long generation;
+            synchronized (this) {
+                if (closing || closed || unsafe) {
+                    unsafe = true;
+                    throw new IllegalStateException(
+                        "live mark save authority is not exclusive"
+                    );
+                }
+                if (!dirty) return;
+                if (!success || witnessGeneration == Long.MAX_VALUE) {
+                    unsafe = true;
+                    throw new IllegalStateException(
+                        "witnessed live mark save did not commit safely"
+                    );
+                }
+                expectedTransition = true;
+                generation = ++witnessGeneration;
+            }
+            try {
+                checkpointExecutor.execute(new Runnable() {
+                    @Override public void run() {
+                        persistWitnessedCheckpoint(generation);
+                    }
+                });
+            } catch (RejectedExecutionException rejected) {
+                synchronized (this) { unsafe = true; }
                 throw new IllegalStateException(
-                    "live mark save authority is not exclusive"
+                    "live mark checkpoint worker is unavailable",
+                    rejected
                 );
             }
-            if (dirty) {
-                if (!success) {
-                    unsafe = true;
-                } else {
-                    expectedTransition = true;
+        }
+
+        private void persistWitnessedCheckpoint(long generation) {
+            try {
+                synchronized (this) {
+                    if (closed || unsafe || generation != witnessGeneration) {
+                        return;
+                    }
                 }
+                if (!revalidateForCheckpoint()) {
+                    throw new IllegalStateException(
+                        "live mark writer lease changed before checkpoint"
+                    );
+                }
+                StableDigest document = hashRegularFile(
+                    claim.canonicalDocumentPath
+                );
+                if (document.identity.size != claim.documentLength
+                    || !document.sha256.equals(claim.documentSha256)) {
+                    throw new IllegalStateException(
+                        "document changed before live mark checkpoint"
+                    );
+                }
+                verifyRecoveryEvidence(
+                    claim,
+                    new File(claim.canonicalDocumentPath)
+                );
+                LiveMarkState live = readLiveMarkState(markPath);
+                synchronized (this) {
+                    if (closed || unsafe || generation != witnessGeneration) {
+                        return;
+                    }
+                }
+                byte[] bytes = liveMarkCheckpointBytes(
+                    claim,
+                    live,
+                    generation
+                );
+                File checkpoint = new File(
+                    markPath + LIVE_MARK_CHECKPOINT_SUFFIX
+                );
+                writeLiveMarkCheckpointAtomically(checkpoint, bytes);
+                LiveMarkCheckpoint persisted = readLiveMarkCheckpoint(claim);
+                LiveMarkState after = readLiveMarkState(markPath);
+                if (!revalidateForCheckpoint()) {
+                    throw new IllegalStateException(
+                        "live mark writer lease changed across checkpoint"
+                    );
+                }
+                synchronized (this) {
+                    if (closed || generation != witnessGeneration) return;
+                    if (!liveMarkMatchesCheckpoint(after, persisted)
+                        || persisted.generation != generation) {
+                        throw new IllegalStateException(
+                            "live mark changed across checkpoint publication"
+                        );
+                    }
+                    markIdentity = after.identity;
+                    expectedTransition = false;
+                }
+                Log.i(TAG, "witnessed live mark checkpoint generation="
+                    + generation);
+            } catch (Throwable failure) {
+                synchronized (this) {
+                    if (!closed && generation == witnessGeneration) {
+                        unsafe = true;
+                    }
+                }
+                Log.e(TAG, "witnessed live mark checkpoint failed", failure);
             }
         }
 
         synchronized boolean revalidate() {
-            if (closed || unsafe || lease == null || !lease.isValid()) {
+            return revalidateLocked(false);
+        }
+
+        private synchronized boolean revalidateForCheckpoint() {
+            return revalidateLocked(true);
+        }
+
+        private boolean revalidateLocked(boolean allowClosing) {
+            if (closed || (closing && !allowClosing) || unsafe
+                || lease == null || !lease.isValid()) {
                 return false;
             }
             try {
@@ -1054,9 +1577,57 @@ public final class NativeReaderV2DocumentGate {
             return first == null ? second == null : first.sameVersion(second);
         }
 
-        synchronized void close() {
-            if (closed) return;
-            closed = true;
+        void close() {
+            synchronized (this) {
+                if (closing || closed) return;
+                closing = true;
+            }
+            checkpointExecutor.shutdown();
+            boolean drained = false;
+            try {
+                drained = checkpointExecutor.awaitTermination(
+                    3L,
+                    TimeUnit.SECONDS
+                );
+            } catch (InterruptedException interrupted) {
+                synchronized (this) { unsafe = true; }
+                Thread.currentThread().interrupt();
+            }
+            if (drained) {
+                releaseLeaseAfterCheckpointDrain();
+                return;
+            }
+            synchronized (this) { unsafe = true; }
+            checkpointExecutor.shutdownNow();
+            Thread cleanup = new Thread(new Runnable() {
+                @Override public void run() {
+                    boolean interrupted = false;
+                    while (true) {
+                        try {
+                            if (checkpointExecutor.awaitTermination(
+                                    1L,
+                                    TimeUnit.DAYS
+                                )) {
+                                break;
+                            }
+                        } catch (InterruptedException retry) {
+                            interrupted = true;
+                        }
+                    }
+                    releaseLeaseAfterCheckpointDrain();
+                    if (interrupted) Thread.currentThread().interrupt();
+                }
+            }, "sn-v2-mark-lease-cleanup");
+            cleanup.setDaemon(true);
+            cleanup.start();
+        }
+
+        private void releaseLeaseAfterCheckpointDrain() {
+            synchronized (this) {
+                if (leaseReleased) return;
+                leaseReleased = true;
+                closed = true;
+            }
             try { lease.release(); } catch (Exception ignored) {}
             try { leaseStream.close(); } catch (Exception ignored) {}
         }
@@ -1069,6 +1640,54 @@ public final class NativeReaderV2DocumentGate {
         RecoveryIdentity(Identity manifest, Identity snapshot) {
             this.manifest = manifest;
             this.snapshot = snapshot;
+        }
+    }
+
+    private static final class LiveMarkState {
+        final boolean present;
+        final Identity identity;
+        final long length;
+        final String sha256;
+
+        LiveMarkState(
+            boolean present,
+            Identity identity,
+            long length,
+            String sha256
+        ) {
+            this.present = present;
+            this.identity = identity;
+            this.length = length;
+            this.sha256 = sha256;
+        }
+
+        static LiveMarkState absent() {
+            return new LiveMarkState(false, null, 0L, "ABSENT");
+        }
+    }
+
+    private static final class LiveMarkCheckpoint {
+        final String path;
+        final Identity identity;
+        final boolean present;
+        final long length;
+        final String sha256;
+        final long generation;
+
+        LiveMarkCheckpoint(
+            String path,
+            Identity identity,
+            boolean present,
+            long length,
+            String sha256,
+            long generation
+        ) {
+            this.path = path;
+            this.identity = identity;
+            this.present = present;
+            this.length = length;
+            this.sha256 = sha256;
+            this.generation = generation;
         }
     }
 

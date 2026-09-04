@@ -37,6 +37,22 @@ generation, record digest, state, and activation token back to PluginHost as
 the transition acknowledgement. A valid v3 OFF record safely supersedes any
 preserved legacy `.snspread` file.
 
+An acknowledgement worker is isolated per request, authenticates the live PDF
+bytes, and rereads the exact journal after the PDF hash. An expired or blocked
+worker can therefore be retired without occupying the admission executor, and
+an acknowledged OFF record triggers a fresh admission attempt for the still
+open document.
+
+The original recovery snapshot is immutable rollback evidence. A successful
+dirty Supernote save instead advances a separate
+`.snspread-live-mark-v1` checkpoint whose exact field set binds the original
+PDF, backup manifest/snapshot, and current live `.mark`. The checkpoint is
+published atomically while the process-shared writer lease remains valid, with
+a descriptor-pinned FUSE-safe parent directory. Cold admission accepts a live
+mark that differs from the rollback baseline only when this persisted witness
+matches exactly. Empty regular `.mark` files remain valid and distinct from an
+absent mark.
+
 Normal Document-process admission never uses an older valid slot when its peer
 is malformed. The plugin may classify exactly one valid slot plus one malformed
 slot only for an explicit, verified annotation restore after stopping the

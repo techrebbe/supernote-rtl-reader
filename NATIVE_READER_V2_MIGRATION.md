@@ -76,6 +76,21 @@ thread; component identities are released only after that drain. Lifecycle UI
 callbacks never wait on the projection lock, and late or stale results recycle
 their bitmaps instead of publishing them.
 
+Native saves do not rewrite the immutable recovery snapshot. Each witnessed
+dirty save publishes a separate exact-schema live-mark checkpoint while the
+exclusive writer lease remains current. The checkpoint binds the original PDF,
+the precise recovery manifest/snapshot evidence, and the resulting live `.mark`
+hash. On a cold process restart, a live mark newer than the rollback baseline
+is admitted only through that exact persisted witness; missing, stale, torn, or
+unwitnessed state remains fenced. Directory publication uses a no-follow,
+descriptor-pinned FUSE fallback, and a zero-byte regular `.mark` is treated as
+valid content rather than absence.
+
+Authority acknowledgements are similarly restart-safe: each request uses a
+replaceable worker, hashes the live PDF, and rereads the exact journal before
+replying. An acknowledged recovery-to-OFF transition immediately retries the
+still-open activity's ordinary admission.
+
 ## Hardware gate
 
 v0.0.140 is a pre-hardware candidate. It must not replace the stable baseline

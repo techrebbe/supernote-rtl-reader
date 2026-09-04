@@ -921,13 +921,13 @@ STATIC_MUTATIONS = (
     ),
     (
         ".github/workflows/build.yml",
-        "$expectedSignedLength = 274971L",
+        "$expectedSignedLength = 287259L",
         "$expectedSignedLength = 250394L",
         "published companion exact signed length",
     ),
     (
         ".github/workflows/build.yml",
-        "dd40b89f4bbc6d161b90ea631efccac8c185e3ae8b2cc0cb13d5791f35464c48",
+        "af6b0b88f0622504471660d5db877ba9472860b67e845b5560caac3e9374e017",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "published companion exact signed digest",
     ),
@@ -1560,13 +1560,13 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "NATIVE_READER_V2_APK_LENGTH = 274971L",
+        "NATIVE_READER_V2_APK_LENGTH = 287259L",
         "NATIVE_READER_V2_APK_LENGTH = 250394L",
         "installed companion APK length pin",
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "dd40b89f4bbc6d161b90ea631efccac8c185e3ae8b2cc0cb13d5791f35464c48",
+        "af6b0b88f0622504471660d5db877ba9472860b67e845b5560caac3e9374e017",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "installed companion APK digest pin",
     ),
@@ -1986,6 +1986,130 @@ STATIC_MUTATIONS = (
         "                        // exact backup/archive hashes. Ambiguous evidence is kept.\n"
         "                        run {",
         "reconciliation cross-process publication lock",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "Thread worker = authorityObservationWorker\n"
+        "                                .getAndSet(null);\n"
+        "                            if (worker != null) worker.interrupt();",
+        "Thread worker = authorityObservationWorker.get();",
+        "expired authority observation worker replacement",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "Thread worker = new Thread(new Runnable() {",
+        "ADMISSION.execute(new Runnable() {",
+        "authority ACK isolation from admission worker",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "|| !documentIdentity.sha256.equals(\n"
+        "                    payload.getProperty(\"documentSha256\"))",
+        "|| false && !documentIdentity.sha256.equals(\n"
+        "                    payload.getProperty(\"documentSha256\"))",
+        "authority ACK live PDF digest binding",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "|| !Arrays.equals(bytes.bytes, bytesAfter.bytes))",
+        "|| false)",
+        "authority ACK journal reread binding",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2Hooks.java",
+        "entry.retryAdmissionAfterAuthorityOff = true;",
+        "entry.retryAdmissionAfterAuthorityOff = false;",
+        "recovery OFF re-admission trigger",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2/NativeReaderV2MarkerClaim.java",
+        "originalMarkPresent && (markLength < 0L",
+        "originalMarkPresent && (markLength <= 0L",
+        "empty regular mark acceptance",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "LIVE_MARK_CHECKPOINT_FIELDS.equals(\n"
+        "                properties.stringPropertyNames())",
+        "properties.stringPropertyNames().containsAll(\n"
+        "                LIVE_MARK_CHECKPOINT_FIELDS)",
+        "witness checkpoint exact schema",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "|| !claim.backupManifestSha256.equals(\n"
+        "                properties.getProperty(\"backupManifestSha256\"))",
+        "|| false && !claim.backupManifestSha256.equals(\n"
+        "                properties.getProperty(\"backupManifestSha256\"))",
+        "witness checkpoint recovery binding",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "if (!liveMarkMatchesRecovery(claim, liveMark)) {",
+        "if (false) {",
+        "cold admission requires witnessed changed mark authority",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "checkpointExecutor.execute(new Runnable() {",
+        "return; // checkpoint publication removed\n"
+        "                checkpointExecutor.execute(new Runnable() {",
+        "witnessed save checkpoint scheduling",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "FileDescriptor parentDescriptor = openPinnedDirectory(\n"
+        "            parent.getAbsolutePath()\n"
+        "        );",
+        "FileDescriptor parentDescriptor = Os.open(\n"
+        "            parent.getAbsolutePath(),\n"
+        "            OsConstants.O_RDONLY | OsConstants.O_CLOEXEC,\n"
+        "            0\n"
+        "        );",
+        "witness checkpoint FUSE-safe pinned parent",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "if (!revalidateForCheckpoint()) {\n"
+        "                    throw new IllegalStateException(\n"
+        "                        \"live mark writer lease changed before checkpoint\"",
+        "if (true) {\n"
+        "                    throw new IllegalStateException(\n"
+        "                        \"live mark writer lease changed before checkpoint\"",
+        "witness checkpoint live writer lease binding",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "if (drained) {\n"
+        "                releaseLeaseAfterCheckpointDrain();\n"
+        "                return;\n"
+        "            }",
+        "if (drained) {\n"
+        "                return;\n"
+        "            }",
+        "checkpoint drain retains writer lease",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "if (closed || (closing && !allowClosing) || unsafe\n"
+        "                || lease == null || !lease.isValid()) {",
+        "if (closed || unsafe\n"
+        "                || lease == null || !lease.isValid()) {",
+        "closing mark authority rejects new runtime work",
     ),
 )
 

@@ -191,7 +191,7 @@ public final class NativeReaderV2MarkerClaim {
         );
         if (backupManifestLength <= 0L
             || !isCanonicalSha256(backupManifestSha256)
-            || originalMarkPresent && (markLength <= 0L
+            || originalMarkPresent && (markLength < 0L
                 || !isCanonicalSha256(markSha256))
             || !originalMarkPresent && (markLength != 0L
                 || !"ABSENT".equals(markSha256))) {

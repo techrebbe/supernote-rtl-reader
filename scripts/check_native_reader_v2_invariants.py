@@ -171,7 +171,7 @@ def main() -> None:
             "python scripts/test_native_reader_v2_core.py .",
             "python scripts/test_native_reader_v2_mutations.py .",
             "python scripts/test_plugin_packaging_fail_closed.py",
-            "legacy gate is expected to reject the v2 workflow",
+            "It is required for a v2",
         ],
         "Native Reader v2 repository validation guidance",
     )
@@ -348,6 +348,18 @@ def main() -> None:
             "candidate = NativeReaderV2DocumentGate",
         ],
         "pre-admission native chrome recovery authority",
+    )
+    require(
+        hooks[admission_start:admission_end],
+        [
+            "if (entry.retryAdmissionAfterAuthorityOff)",
+            "entry.retryAdmissionAfterAuthorityOff = false;",
+            "if (entry.retryAdmissionAfterAuthorityOff\n"
+            "                            && entry.resumed)",
+            "releaseEvidence(accepted);",
+            "maybeAdmit(entry, true);",
+        ],
+        "post-recovery OFF admission retry",
     )
     require(
         chrome_tracker,
@@ -621,26 +633,35 @@ def main() -> None:
             "final long handshakeToken = HANDSHAKE_SINGLE_FLIGHT.tryBegin();",
             "final long handshakeDeadlineUptimeMs =",
             "SystemClock.uptimeMillis() + HANDSHAKE_PROVIDER_EXPIRY_MS;",
+            "final AtomicReference<Thread> authorityObservationWorker =",
             "final Runnable handshakeExpiry = new Runnable()",
             "if (!MAIN_HANDLER.postAtTime(",
             "HandshakeSnapshot snapshot = captureHandshakeSnapshot();",
             "HandshakeResolution resolution = resolveHandshake(",
             "if (authorityAckRequested)",
-            "ADMISSION.execute(new Runnable()",
+            "Thread worker = new Thread(new Runnable()",
             ".observeAuthority(requestedPath);",
             "boolean posted = MAIN_HANDLER.post(new Runnable()",
             "publishHandshakeResponse(",
             "finishHandshake(",
+            "worker.setDaemon(true);",
+            "worker.start();",
             "new IntentFilter(HANDSHAKE_REQUEST)",
         ],
         "main-thread snapshot, raw-path binding, and final publication",
     )
-    if "getCanonicalPath(" in handshake or "HandlerThread" in handshake:
+    if (
+        "getCanonicalPath(" in handshake
+        or "HandlerThread" in handshake
+        or "ADMISSION.execute(new Runnable()" in handshake
+    ):
         fail("handshake provider can enter blocking filesystem worker state")
     require(
         handshake,
         [
             "HANDSHAKE_SINGLE_FLIGHT.finish(handshakeToken)",
+            "authorityObservationWorker\n                                .getAndSet(null)",
+            "if (worker != null) worker.interrupt();",
             "if (!posted)",
             "finishHandshake(handshakeToken, handshakeExpiry)",
             "MAIN_HANDLER.removeCallbacks(expiry)",
@@ -722,6 +743,9 @@ def main() -> None:
             "                SystemClock.uptimeMillis(),\n"
             "                handshakeDeadlineUptimeMs",
             "receiverContext.sendBroadcast(response);",
+            'if (observation != null && "off".equals(observation.state))',
+            "entry.retryAdmissionAfterAuthorityOff = true;",
+            "maybeAdmit(entry, true);",
         ],
         "main-thread handshake response publication",
     )
@@ -1579,6 +1603,15 @@ def main() -> None:
             "StableBytes markerAfter",
             "RecoveryIdentity recovery = verifyRecoveryEvidence(",
             "MarkAuthority.acquire(claim)",
+            "StableDigest documentIdentity = hashRegularFile(canonical);",
+            "StableBytes bytesAfter = readRegularFile(",
+            "Long.toString(documentIdentity.identity.size).equals(",
+            (
+                "|| !documentIdentity.sha256.equals(\n"
+                "                    payload.getProperty(\"documentSha256\"))"
+            ),
+            "!bytes.identity.sameVersion(bytesAfter.identity)",
+            "!Arrays.equals(bytes.bytes, bytesAfter.bytes)",
             "public static boolean fastEvidenceStillCurrent(Evidence evidence)",
             "if (!evidence.markAuthorityCurrent()) return false;",
             "evidence.recoveryManifestIdentity.sameVersion(",
@@ -1596,11 +1629,55 @@ def main() -> None:
                 "                    | OsConstants.O_CLOEXEC | OsConstants.O_NOFOLLOW,"
             ),
             "tryLock()",
-            "live mark disagrees with admitted recovery snapshot",
+            "native-reader-v2-live-mark-checkpoint",
+            "LIVE_MARK_CHECKPOINT_FIELDS.equals(",
+            (
+                "|| !claim.backupManifestSha256.equals(\n"
+                "                properties.getProperty(\"backupManifestSha256\"))"
+            ),
+            "live mark checkpoint does not bind recovery authority",
+            "if (!liveMarkMatchesRecovery(claim, liveMark)) {",
+            "live mark lacks witnessed persisted authority",
+            (
+                "try {\n"
+                "                checkpointExecutor.execute(new Runnable()"
+            ),
+            "persistWitnessedCheckpoint(generation)",
+            "writeLiveMarkCheckpointAtomically(checkpoint, bytes)",
+            "FileDescriptor parentDescriptor = openPinnedDirectory(",
+            "commonFlags | LINUX_O_DIRECTORY",
+            "failure.errno != OsConstants.EINVAL",
+            "checkpoint parent changed during FUSE fallback",
+            (
+                "if (!revalidateForCheckpoint()) {\n"
+                "                    throw new IllegalStateException(\n"
+                "                        \"live mark writer lease changed before checkpoint\""
+            ),
+            "live mark writer lease changed across checkpoint",
+            "return revalidateLocked(false);",
+            "return revalidateLocked(true);",
+            "if (closed || (closing && !allowClosing) || unsafe",
+            "drained = checkpointExecutor.awaitTermination(",
+            (
+                "if (drained) {\n"
+                "                releaseLeaseAfterCheckpointDrain();\n"
+                "                return;\n"
+                "            }"
+            ),
+            "checkpointExecutor.shutdownNow();",
+            '}, "sn-v2-mark-lease-cleanup");',
+            "if (leaseReleased) return;",
             "another process owns the live mark writer lease",
             "expectedTransition",
         ],
         "document and recovery admission",
+    )
+    require(
+        marker,
+        [
+            "originalMarkPresent && (markLength < 0L",
+        ],
+        "empty regular mark authority",
     )
     require(
         authority_journal,
@@ -2492,9 +2569,9 @@ def main() -> None:
         [
             "NATIVE_READER_V2_MIN_VERSION_CODE = 140L",
             "NATIVE_READER_V2_SIGNER_SHA256 =",
-            "NATIVE_READER_V2_APK_LENGTH = 274971L",
+            "NATIVE_READER_V2_APK_LENGTH = 287259L",
             "NATIVE_READER_V2_APK_SHA256 =",
-            "dd40b89f4bbc6d161b90ea631efccac8c185e3ae8b2cc0cb13d5791f35464c48",
+            "af6b0b88f0622504471660d5db877ba9472860b67e845b5560caac3e9374e017",
             "PackageManager.GET_SIGNING_CERTIFICATES",
             "signing.hasMultipleSigners()",
             "Native Reader signer set is not exact",
@@ -3238,8 +3315,8 @@ def main() -> None:
             "$env:NATIVE_SPREAD_KEYSTORE_B64 = $null",
             "Remove-Item -LiteralPath $keystore -Force",
             "release-output/SupernoteNativeSpreadProbe-v0.0.140.apk",
-            "$expectedSignedLength = 274971L",
-            "dd40b89f4bbc6d161b90ea631efccac8c185e3ae8b2cc0cb13d5791f35464c48",
+            "$expectedSignedLength = 287259L",
+            "af6b0b88f0622504471660d5db877ba9472860b67e845b5560caac3e9374e017",
             "Signed APK length differs from the reviewed upgrade identity",
             "Signed APK SHA-256 differs from the reviewed upgrade identity.",
         ],
@@ -3249,7 +3326,7 @@ def main() -> None:
         stable_job,
         [
             "apksigner verification failed",
-            "$expectedSignedLength = 274971L",
+            "$expectedSignedLength = 287259L",
             "Signed APK SHA-256 differs from the reviewed upgrade identity.",
             "} finally {",
             "Upload upgrade-compatible Native Reader APK",

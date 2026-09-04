@@ -1739,9 +1739,38 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "            val owned = annotationRecoveryPending.compareAndSet(true, false)",
-        "            val owned = true",
+        "            val exactOwner = nativeSpreadRecoveryOwnerGeneration.compareAndSet(\n"
+        "                expected,\n"
+        "                NATIVE_SPREAD_NO_RECOVERY_OWNER,\n"
+        "            )",
+        "            val exactOwner = true",
         "recovery exact-owner release",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "            nativeSpreadRecoveryOwnerGeneration.set(generation)\n"
+        "            generation",
+        "            nativeSpreadRecoveryOwnerGeneration.get()\n"
+        "            generation",
+        "recovery owner recorded at admission",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "            if (!exactOwner) return@synchronized false\n"
+        "            val owned = annotationRecoveryPending.compareAndSet(true, false)",
+        "            if (false) return@synchronized false\n"
+        "            val owned = annotationRecoveryPending.compareAndSet(true, false)",
+        "stale recovery retry cannot release replacement owner",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                withNativeSpreadPublicationLock(marker) {\n"
+        "                withNativeSpreadConfigurationAuthority(configurationGeneration) {\n"
+        "                    val revalidatedBackup",
+        "                withNativeSpreadPublicationLock(marker) {\n"
+        "                run {\n"
+        "                    val revalidatedBackup",
+        "restore publication generation authority",
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
@@ -1839,6 +1868,7 @@ class _ConfigurationGenerationGate:
         self.generation = 0
         self.invalidated = False
         self.recovery_pending = False
+        self.recovery_owner = None
 
     def begin(self) -> int:
         if self.invalidated:
@@ -1860,11 +1890,17 @@ class _ConfigurationGenerationGate:
             raise _InterleavingRejected("module was invalidated")
         if self.recovery_pending:
             raise _InterleavingRejected("recovery is in progress")
+        if self.recovery_owner is not None:
+            raise _InterleavingRejected("recovery owner is inconsistent")
         self.recovery_pending = True
         self.generation += 1
+        self.recovery_owner = self.generation
         return self.generation
 
     def complete_recovery(self, expected: int) -> bool:
+        if self.recovery_owner != expected:
+            return False
+        self.recovery_owner = None
         if not self.recovery_pending:
             return False
         self.recovery_pending = False
@@ -2092,6 +2128,19 @@ def run_configuration_generation_interleaving_tests() -> None:
     assert gate.complete_recovery(recovery_generation)
     assert gate.generation == recovery_generation + 1
     assert not gate.recovery_pending
+    assert gate.recovery_owner is None
+
+    # A superseded owner may retry its completion after a replacement recovery
+    # has entered. The retry must compare the exact owner token before clearing
+    # the replacement's public pending fence.
+    superseded_recovery = gate.begin_recovery()
+    gate.generation += 1
+    assert not gate.complete_recovery(superseded_recovery)
+    replacement_recovery = gate.begin_recovery()
+    assert not gate.complete_recovery(superseded_recovery)
+    assert gate.recovery_pending
+    assert gate.recovery_owner == replacement_recovery
+    assert gate.complete_recovery(replacement_recovery)
 
     # Supersession after preliminary work but before pending publication.
     first = gate.begin()

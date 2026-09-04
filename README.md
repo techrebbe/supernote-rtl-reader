@@ -67,7 +67,11 @@ pinned descriptor rather than retained in the plug-in heap, and the final
 worker-to-UI publication remains fenced by the configuration generation that
 started the load. Restore and reconciliation claim that same process-wide
 generation, exclude concurrent mode loads/configuration during their mutation,
-and advance it again at completion; stale UI state therefore cannot escape
+retain an exact owner-generation token, and advance the generation again at
+completion; a stale completion retry cannot release a replacement recovery.
+Annotation restore also holds generation authority across `.mark` publication
+and recovery-evidence retirement, so invalidation cannot linearize inside its
+irreversible commit. Stale UI or persistence state therefore cannot escape
 across a recovery boundary.
 Committed publication and successful activation verification are separate:
 post-rename verification failures remain non-rollbackable but propagate as

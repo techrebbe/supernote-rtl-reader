@@ -1671,8 +1671,8 @@ def main() -> None:
             "val configurationGeneration = beginNativeSpreadRecovery()",
             "requireNativeSpreadConfigurationGeneration(\n"
             "                    configurationGeneration,",
-            "withNativeSpreadConfigurationAuthority(\n"
-            "                        configurationGeneration,",
+            "withNativeSpreadPublicationLock(marker)",
+            "withNativeSpreadConfigurationAuthority(",
             "scheduleAnnotationRestore(\n"
             "                    pdfFile,\n"
             "                    backup,\n"
@@ -1715,14 +1715,21 @@ def main() -> None:
         recovery_helpers[begin_recovery_start:complete_recovery_start],
         [
             "check(!nativeSpreadModuleInvalidated.get())",
+            "nativeSpreadRecoveryOwnerGeneration.get() ==\n"
+            "                    NATIVE_SPREAD_NO_RECOVERY_OWNER",
             "annotationRecoveryPending.compareAndSet(false, true)",
             "nativeSpreadConfigurationGeneration.incrementAndGet()",
+            "nativeSpreadRecoveryOwnerGeneration.set(generation)",
         ],
-        "recovery admission generation advance",
+        "recovery admission exact-owner generation advance",
     )
     ordered(
         recovery_helpers[complete_recovery_start:capture_generation_start],
         [
+            "nativeSpreadRecoveryOwnerGeneration.compareAndSet(\n"
+            "                expected,\n"
+            "                NATIVE_SPREAD_NO_RECOVERY_OWNER,",
+            "if (!exactOwner) return@synchronized false",
             "annotationRecoveryPending.compareAndSet(true, false)",
             "nativeSpreadConfigurationGeneration.get() == expected",
             "Invalidate any load that began while recovery was active",
@@ -1759,6 +1766,23 @@ def main() -> None:
             ],
             f"{label} promise-safe recovery exclusion",
         )
+    restore_worker_start = plugin.find("private fun scheduleAnnotationRestore(")
+    restore_worker_end = plugin.find(
+        "private fun nativeMarkRecoveryRequired(", restore_worker_start
+    )
+    if restore_worker_start < 0 or restore_worker_end < 0:
+        fail("could not isolate annotation restore worker")
+    ordered(
+        plugin[restore_worker_start:restore_worker_end],
+        [
+            "withNativeSpreadPublicationLock(marker) {\n"
+            "                withNativeSpreadConfigurationAuthority(configurationGeneration) {",
+            "publication = publishNativeAnnotationRestore(",
+            "retireNativeMarkRecoveryJournal(",
+            "removeNativeAnnotationBackupFiles(pdfFile, revalidatedBackup)",
+        ],
+        "restore publication retains generation authority through commit",
+    )
     require(
         plugin,
         [
@@ -2384,6 +2408,7 @@ def main() -> None:
             section,
             [
                 "withNativeSpreadPublicationLock(marker)",
+                "withNativeSpreadConfigurationAuthority(configurationGeneration)",
                 "readPersistedAuthorityIfFile(marker)",
                 "writePropertiesAtomicallyCas(",
             ],

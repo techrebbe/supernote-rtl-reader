@@ -116,8 +116,11 @@ class ReaderPreferencesModule(
         private val NATIVE_SPREAD_PUBLICATION_PROCESS_LOCK = Any()
         private val NATIVE_MARK_RECOVERY_PROCESS_LOCK = Any()
         private val NATIVE_MARK_RECOVERY_REQUIRED_PATHS = HashSet<String>()
+        private const val NATIVE_SPREAD_NO_RECOVERY_OWNER = -1L
         private val annotationRecoveryPending = AtomicBoolean(false)
         private val annotationRecoveryHandoffPending = AtomicBoolean(false)
+        private val nativeSpreadRecoveryOwnerGeneration =
+            AtomicLong(NATIVE_SPREAD_NO_RECOVERY_OWNER)
         private val nativeSpreadConfigurationGeneration = AtomicLong(0L)
         private val nativeSpreadConfigurationIntentLock = Any()
         private val nativeSpreadConfigurationLock = Any()
@@ -909,10 +912,10 @@ class ReaderPreferencesModule(
                 // disabling its never-authorized marker preserves the canonical
                 // recovery bytes for the restore worker instead of archiving them.
                 if (recoveryJournal == null) {
-                    withNativeSpreadConfigurationAuthority(
-                        configurationGeneration,
-                    ) {
-                        withNativeSpreadPublicationLock(marker) {
+                    withNativeSpreadPublicationLock(marker) {
+                        withNativeSpreadConfigurationAuthority(
+                            configurationGeneration,
+                        ) {
                             val markerAuthority = readPersistedAuthorityIfFile(marker)
                             if (markerAuthority != null) {
                                 deleteRegularFileCas(
@@ -2219,16 +2222,31 @@ class ReaderPreferencesModule(
             check(!nativeSpreadModuleInvalidated.get()) {
                 "Native Spread module was invalidated"
             }
+            check(
+                nativeSpreadRecoveryOwnerGeneration.get() ==
+                    NATIVE_SPREAD_NO_RECOVERY_OWNER
+            ) {
+                "Native Spread recovery owner is inconsistent"
+            }
             if (!annotationRecoveryPending.compareAndSet(false, true)) {
                 throw IllegalStateException(
                     "Annotation recovery is already in progress",
                 )
             }
-            nativeSpreadConfigurationGeneration.incrementAndGet()
+            val generation = nativeSpreadConfigurationGeneration.incrementAndGet()
+            nativeSpreadRecoveryOwnerGeneration.set(generation)
+            generation
         }
 
     private fun completeNativeSpreadRecovery(expected: Long): Boolean =
         synchronized(nativeSpreadConfigurationIntentLock) {
+            // A stale completion/retry must not clear a replacement recovery.
+            // Compare the exact owner before releasing the public pending fence.
+            val exactOwner = nativeSpreadRecoveryOwnerGeneration.compareAndSet(
+                expected,
+                NATIVE_SPREAD_NO_RECOVERY_OWNER,
+            )
+            if (!exactOwner) return@synchronized false
             val owned = annotationRecoveryPending.compareAndSet(true, false)
             val current = owned &&
                 !nativeSpreadModuleInvalidated.get() &&
@@ -6376,7 +6394,12 @@ class ReaderPreferencesModule(
                 requireNativeSpreadConfigurationGeneration(
                     configurationGeneration,
                 )
+                // Publication lock precedes configuration authority everywhere.
+                // Holding both across .mark publication, journal retirement, and
+                // backup retirement prevents invalidate/configuration from
+                // linearizing inside an irreversible recovery commit.
                 withNativeSpreadPublicationLock(marker) {
+                withNativeSpreadConfigurationAuthority(configurationGeneration) {
                     val revalidatedBackup = readNativeAnnotationBackup(pdfFile).backup
                         ?: throw IllegalStateException(
                             "Document or recovery snapshot changed while preparing restore",
@@ -6569,6 +6592,7 @@ class ReaderPreferencesModule(
                             )
                         }
                     }
+                }
                 }
                 } catch (error: Throwable) {
                     Log.e(

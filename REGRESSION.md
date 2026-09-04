@@ -7,7 +7,7 @@ with SupernoteDocument `1.02.446`.
 ## Native Reader v2 pre-hardware adversarial gate — PASS
 
 - [x] 85,071 deterministic controller/geometry/transaction assertions pass.
-- [x] 205 authority mutations are rejected, including exact firmware-declaration
+- [x] 208 authority mutations are rejected, including exact firmware-declaration
   and native pen-callback ownership drift, stale admission evidence,
   contained-runtime publication, contact-safe containment, three-layer stock
   restoration, projection drain ordering, and descriptor-backed marker
@@ -25,7 +25,7 @@ with SupernoteDocument `1.02.446`.
   `aeaddb2e682e3b2a2eaf4c9abe531ea40fa7ead25dab1871c637892d048fce5f`.
   The exact locally generated v0.4.19 RTL Reader hardware-candidate package
   for this gate has SHA-256
-  `6b8cdf84b2675c4c755ed2ab2609b28d89bd08ca50a6877955e9bb0231d2e841`.
+  `3a2883677d6032737745bccc17f72ecb3b036599770101e8243a54b11bdd2dbd`.
 - [x] The final adversarial review findings are covered by deterministic gates:
   epoch-owned input/lifecycle authority, exact stock-reload receipts, no-clobber
   `.mark` publication/rollback interleavings, post-commit relaunch, exact
@@ -91,10 +91,12 @@ with SupernoteDocument `1.02.446`.
   They exclude overlapping loads/configuration while mutation is active and
   advance the generation again on exact completion, so a load checked before
   or during recovery cannot publish stale marker, settings, or backup authority
-  afterward. The executable interleaving model and seven independent static
-  mutations cover recovery admission, exact-owner release, and both terminal
-  publication fences; two additional guards require configuration rejection to
-  settle through its Promise rather than escape the React method.
+  afterward. Recovery carries an exact owner-generation token, so a stale retry
+  cannot release a replacement owner, and annotation restore retains generation
+  authority across `.mark` publication and recovery-evidence retirement. The
+  executable interleaving model and twelve independent static mutations cover
+  recovery admission, owner retry, irreversible publication, both terminal
+  fences, and Promise-safe configuration rejection.
 - [ ] Exact-head independent review is clean.
 - [ ] Nomad hardware gate passes. No hardware result is claimed by this
   automated section.

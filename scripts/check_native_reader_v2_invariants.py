@@ -55,6 +55,7 @@ def main() -> None:
         source / "v2/android/NativeReaderFirmwareAdmission.java"
     )
     marker = read(source / "v2/NativeReaderV2MarkerClaim.java")
+    authority_journal = read(source / "v2/NativeReaderV2AuthorityJournal.java")
     config = read(source / "v2/NativeReaderV2Config.java")
     transform = read(source / "v2/NativePageTransform.java")
     input_admission = read(source / "v2/AtomicInputAdmission.java")
@@ -82,6 +83,10 @@ def main() -> None:
     workflow = read(root / ".github/workflows/build.yml")
     guidance = read(root / "AGENTS.md")
     plugin = read(root / "native/ReaderPreferencesModule.kt.template")
+    plugin_authority_journal = read(
+        root / "native/NativeReaderV2AuthorityJournal.kt.template"
+    )
+    native_installer = read(root / "scripts/install_native.py")
     app = read(root / "overlay/App.js")
     index = read(root / "overlay/index.js")
     plugin_config = read(root / "PluginConfig.json")
@@ -122,30 +127,30 @@ def main() -> None:
     require(
         manifest,
         [
-            'android:versionCode="139"',
-            'android:versionName="0.0.139"',
+            'android:versionCode="140"',
+            'android:versionName="0.0.140"',
             'android:label="Supernote Native Reader v2"',
         ],
         "v2 manifest",
     )
     require(
         plugin_config,
-        ['"versionCode": "40"', '"versionName": "0.4.21"'],
+        ['"versionCode": "41"', '"versionName": "0.4.22"'],
         "plugin version",
     )
     require(
         core_tests,
         [
-            'olderContract.setProperty("minimumModuleVersionCode", "138")',
-            'futureContract.setProperty("minimumModuleVersionCode", "140")',
+            'olderContract.setProperty("minimumModuleVersionCode", "139")',
+            'futureContract.setProperty("minimumModuleVersionCode", "141")',
         ],
         "adjacent companion contract rejection tests",
     )
     require(
         module_readme,
         [
-            "The v0.0.139 APK\n"
-            "requires Supernote RTL Reader v0.4.21 and refuses every other companion\n"
+            "The v0.0.140 APK\n"
+            "requires Supernote RTL Reader v0.4.22 and refuses every other companion\n"
             "contract version."
         ],
         "documented Native Reader v2 pairing",
@@ -156,7 +161,7 @@ def main() -> None:
         not in root_build
     ):
         fail("plugin build does not execute the exclusive v2 invariant gate")
-    if "RTL_READER_OPEN v0.4.21-native-reader-v2" not in index:
+    if "RTL_READER_OPEN v0.4.22-native-reader-v2" not in index:
         fail("runtime marker does not identify the v2 plugin build")
     require(
         guidance,
@@ -587,9 +592,9 @@ def main() -> None:
     require(
         hooks,
         [
-            "private static final int HANDSHAKE_PROTOCOL = 3;",
+            "private static final int HANDSHAKE_PROTOCOL = 4;",
             "private static final NativeHandshakeSingleFlight HANDSHAKE_SINGLE_FLIGHT",
-            "private static final long HANDSHAKE_PROVIDER_EXPIRY_MS = 1_200L",
+            "private static final long HANDSHAKE_PROVIDER_EXPIRY_MS = 2_500L",
             "final long handshakeToken = HANDSHAKE_SINGLE_FLIGHT.tryBegin()",
             "if (handshakeToken == 0L)",
         ],
@@ -616,18 +621,33 @@ def main() -> None:
             "final long handshakeToken = HANDSHAKE_SINGLE_FLIGHT.tryBegin();",
             "final long handshakeDeadlineUptimeMs =",
             "SystemClock.uptimeMillis() + HANDSHAKE_PROVIDER_EXPIRY_MS;",
+            "final Runnable handshakeExpiry = new Runnable()",
+            "if (!MAIN_HANDLER.postAtTime(",
             "HandshakeSnapshot snapshot = captureHandshakeSnapshot();",
             "HandshakeResolution resolution = resolveHandshake(",
+            "if (authorityAckRequested)",
+            "ADMISSION.execute(new Runnable()",
+            ".observeAuthority(requestedPath);",
+            "boolean posted = MAIN_HANDLER.post(new Runnable()",
             "publishHandshakeResponse(",
-            "} finally {\n                    HANDSHAKE_SINGLE_FLIGHT.finish(handshakeToken);",
+            "finishHandshake(",
             "new IntentFilter(HANDSHAKE_REQUEST)",
         ],
         "main-thread snapshot, raw-path binding, and final publication",
     )
     if "getCanonicalPath(" in handshake or "HandlerThread" in handshake:
         fail("handshake provider can enter blocking filesystem worker state")
-    if handshake.count("HANDSHAKE_SINGLE_FLIGHT.finish(handshakeToken)") != 1:
-        fail("synchronous handshake admission is not exactly terminally released")
+    require(
+        handshake,
+        [
+            "HANDSHAKE_SINGLE_FLIGHT.finish(handshakeToken)",
+            "if (!posted)",
+            "finishHandshake(handshakeToken, handshakeExpiry)",
+            "MAIN_HANDLER.removeCallbacks(expiry)",
+            "HANDSHAKE_SINGLE_FLIGHT.finish(token)",
+        ],
+        "bounded sync/async handshake admission release",
+    )
 
     snapshot_start = hooks.find(
         "private static HandshakeSnapshot captureHandshakeSnapshot("
@@ -868,7 +888,7 @@ def main() -> None:
     require(
         plugin,
         [
-            "private const val NATIVE_SPREAD_HANDSHAKE_PROTOCOL = 3",
+            "private const val NATIVE_SPREAD_HANDSHAKE_PROTOCOL = 4",
             "private val nativeSpreadConfigurationGeneration = AtomicLong(0L)",
             "private val nativeSpreadConfigurationIntentLock = Any()",
             "private val nativeSpreadConfigurationLock = Any()",
@@ -1551,7 +1571,7 @@ def main() -> None:
             "document revalidation is forbidden on the main thread",
             "document identity revalidation is forbidden on the main thread",
             "public static boolean candidateMarkerPresent(String documentPath)",
-            "Os.lstat(markerPath);",
+            "NativeReaderV2AuthorityJournal.inspect(journal.bytes);",
             "return failure.errno != OsConstants.ENOENT;",
             "catch (Throwable ambiguous)",
             "StableBytes markerBefore",
@@ -1582,6 +1602,128 @@ def main() -> None:
         ],
         "document and recovery admission",
     )
+    require(
+        authority_journal,
+        [
+            "public static final int FORMAT_VERSION = 3;",
+            "public static final int SLOT_COUNT = 2;",
+            "public static final int SLOT_SIZE = 16 * 1024;",
+            "public static final int HEADER_SIZE = 128;",
+            '"supernote-native-reader-v2-authority-slot-v3\\0"',
+            "Any non-zero invalid slot rejects the whole file",
+            "journal slots reuse one generation",
+            "journal slot has unauthenticated tail",
+            "MessageDigest.isEqual(",
+        ],
+        "fixed authority journal wire contract",
+    )
+    require(
+        plugin_authority_journal,
+        [
+            "const val FORMAT_VERSION = 3",
+            "const val SLOT_COUNT = 2",
+            "const val SLOT_SIZE = 16 * 1024",
+            "const val HEADER_SIZE = 128",
+            '"supernote-native-reader-v2-authority-slot-v3\\u0000"',
+            "OsConstants.O_NOFOLLOW",
+            "Os.pread(",
+            "Os.pwrite(",
+            "writeExactly(descriptor, ByteArray(HEADER_SIZE), slotOffset)",
+            "encoded.copyOfRange(HEADER_SIZE, SLOT_SIZE)",
+            "encoded.copyOfRange(0, HEADER_SIZE)",
+            "requireRegularSingleLink(after)",
+            "sameStableFileMetadata(before, after)",
+            "first.st_uid == second.st_uid",
+            "first.st_gid == second.st_gid",
+            "strictFailure.errno != OsConstants.EINVAL",
+            "sameVersion(before, opened) && sameVersion(opened, path)",
+            "New journal path does not name its created inode",
+            "New journal was replaced before admission",
+            "fun readRepairCandidate(file: File): RepairCandidate?",
+            "fun repairWithRecovery(",
+            "if (valid.size != 1 || malformed.size != 1) return null",
+            "sameVersion(expected.identity, before)",
+            "sha256(currentBytes) == expected.fileSha256",
+            "val encoded = encodeSlot(slotIndex, State.RECOVERY, generation, payload)",
+            "sameRecord(current.first, expected.trusted)",
+            "first.st_mtim.tv_nsec == second.st_mtim.tv_nsec",
+            "first.st_ctim.tv_nsec == second.st_ctim.tv_nsec",
+        ],
+        "Android fixed-inode journal implementation",
+    )
+    publication_segment = plugin_authority_journal[
+        plugin_authority_journal.find("fun publish("):
+        plugin_authority_journal.find("fun repairWithRecovery(")
+    ]
+    if publication_segment.count("Os.fsync(descriptor)") != 3:
+        fail("authority journal does not sync all three publication stages")
+    for forbidden in ("Os.rename", "Files.delete", "ftruncate", "FileOutputStream"):
+        if forbidden in publication_segment:
+            fail(f"authority journal publication uses forbidden mutation: {forbidden}")
+    repair_segment = plugin_authority_journal[
+        plugin_authority_journal.find("fun repairWithRecovery("):
+        plugin_authority_journal.find("private fun encodeSlot(")
+    ]
+    if repair_segment.count("Os.fsync(descriptor)") != 3:
+        fail("authority journal recovery repair does not sync all three stages")
+    for forbidden in ("Os.rename", "Files.delete", "ftruncate", "FileOutputStream"):
+        if forbidden in repair_segment:
+            fail(f"authority journal recovery repair uses forbidden mutation: {forbidden}")
+    require(
+        plugin,
+        [
+            "NativeReaderV2AuthorityJournal.readRepairCandidate(marker) != null",
+            "if (unreadableJournal != null) {",
+            "NativeReaderV2AuthorityJournal.repairWithRecovery(",
+            "if (journalInspection.blocking &&\n                            !repairableInterruptedPublication",
+            "Native mark recovery authority changed before repair",
+        ],
+        "explicit interrupted-journal recovery containment",
+    )
+    require(
+        plugin,
+        [
+            '"Acknowledged Native Reader journal disappeared"',
+            "currentAuthority.journalGeneration == expectation.generation",
+            "currentAuthority.journalAuthoritySha256 ==",
+            "expectation.authoritySha256",
+            "currentAuthority.journalState?.name?.lowercase(Locale.ROOT) ==",
+            '"Native Reader journal changed after Document acknowledgement"',
+        ],
+        "post-ACK live journal revalidation",
+    )
+    require(
+        plugin,
+        [
+            "val payloadState = journalState(strictProperties(current.payload))",
+            "require(payloadState == current.state)",
+            "Native Reader journal header and payload states disagree",
+            "private fun nativeSpreadLegacyMarker(pdfFile: File): File",
+            "LegacyNativeSpreadAuthority(",
+            "legacy_protected_authority_requires_migration",
+            "legacy_authority_requires_supersession",
+            "must not\n                                        // strand the React promise",
+            "                                        }.getOrElse { Properties() }",
+            "require(samePersistedAuthority(\n"
+            "                            legacyMigration.authority,\n"
+            "                            exactLegacy,\n"
+            "                        )) {\n"
+            "                            \"Legacy Native Spread authority changed at migration publication\"",
+            "Legacy Native Spread authority changed at migration publication",
+            "legacyMigration = legacy",
+            "preserved backup evidence remains an",
+            "independent recovery blocker",
+        ],
+        "journal semantic state and legacy-authority migration",
+    )
+    require(
+        native_installer,
+        [
+            '"NativeReaderV2AuthorityJournal.kt.template"',
+            '"NativeReaderV2AuthorityJournal.kt"',
+        ],
+        "authority journal template installation",
+    )
     if "getCanonicalFile()" in gate[gate.find("candidateMarkerPresent"):gate.find("public static Evidence admit")]:
         fail("early marker fence performs canonical filesystem resolution")
     ordered(
@@ -1599,7 +1741,7 @@ def main() -> None:
     require(
         marker,
         [
-            "MINIMUM_COMPANION_MODULE_VERSION = 139L",
+            "MINIMUM_COMPANION_MODULE_VERSION = 140L",
             "COMMITTED_FIELDS.equals(properties.stringPropertyNames())",
             "minimumVersion != MINIMUM_COMPANION_MODULE_VERSION",
             'requireExact(properties, "activationState", "committed")',
@@ -1714,8 +1856,7 @@ def main() -> None:
             "val configurationGeneration = beginNativeSpreadRecovery()",
             "requireNativeSpreadConfigurationGeneration(\n"
             "                    configurationGeneration,",
-            "withNativeSpreadPublicationLock(marker)",
-            "withNativeSpreadConfigurationAuthority(",
+            "val recoveryInspection = inspectNativeMarkRecoveryFence(pdfFile, marker)",
             "scheduleAnnotationRestore(\n"
             "                    pdfFile,\n"
             "                    backup,\n"
@@ -1839,20 +1980,24 @@ def main() -> None:
     ordered(
         restore_pending_segment,
         [
+            "pdfFile: File,",
             "expectedMarkerAuthority: PersistedFileAuthority,",
             "val currentMarkerAuthority = readPersistedAuthorityIfFile(marker)",
             "samePersistedAuthority(expectedMarkerAuthority, currentMarkerAuthority)",
             "val previousBytes = pending.previousMarkerBytes",
-            "deleteRegularFileCas(",
-            "expectedMarkerAuthority.identity,",
+            "val off = nativeSpreadOffMarkerProperties(",
+            "writePropertiesAtomicallyCas(",
+            '"Interrupted Native Reader activation OFF authority",\n'
+            "                expectedMarkerAuthority,",
             "writeBytesAtomicallyCas(",
-            "                expectedMarkerAuthority,\n"
-            "            )",
+            "previousBytes,\n                expectedMarkerAuthority,",
         ],
         "pending-marker exact-authority restore",
     )
-    if restore_pending_segment.count("deleteRegularFileCas(") != 1:
-        fail("pending-marker deletion must use exactly one exact-authority CAS")
+    if "deleteRegularFileCas(" in restore_pending_segment:
+        fail("fixed Native Reader journal must not be deleted during rollback")
+    if restore_pending_segment.count("writePropertiesAtomicallyCas(") != 1:
+        fail("absent prior authority must restore as one durable OFF record")
     if restore_pending_segment.count("writeBytesAtomicallyCas(") != 1:
         fail("pending-marker restoration must use exactly one exact-authority CAS")
     reconcile_pending_segment = plugin[
@@ -1872,16 +2017,16 @@ def main() -> None:
         "restorePendingActivationPreviousMarker("
     ) != 4:
         fail("all four pending-marker restoration branches must retain exact authority")
-    if reconcile_pending_segment.count("pendingMarkerAuthority,") != 4:
+    if reconcile_pending_segment.count("pendingMarkerAuthority,") != 5:
         fail("a pending-marker restoration branch dropped its exact authority")
     require(
         reconcile_pending_segment,
         [
-            "deleteRegularFileCas(\n"
-            "                    marker,\n"
-            "                    pendingMarkerAuthority.identity,",
+            "val off = nativeSpreadOffMarkerProperties(",
+            '"Interrupted protected-session retirement OFF authority",',
+            "NativeReaderV2AuthorityJournal.State.OFF",
         ],
-        "pending-retirement exact-authority deletion",
+        "pending-retirement durable OFF authority",
     )
     restore_worker_start = plugin.find("private fun scheduleAnnotationRestore(")
     restore_worker_end = plugin.find(
@@ -1892,11 +2037,12 @@ def main() -> None:
     ordered(
         plugin[restore_worker_start:restore_worker_end],
         [
-            "withNativeSpreadPublicationLock(marker) {\n"
-            "                withNativeSpreadConfigurationAuthority(configurationGeneration) {",
+            "withNativeSpreadPublicationLock(marker) {",
+            "withNativeSpreadConfigurationAuthority(",
+            "publishNativeMarkRecoveryJournal(",
             "publication = publishNativeAnnotationRestore(",
             "retireNativeMarkRecoveryJournal(",
-            "removeNativeAnnotationBackupFiles(pdfFile, revalidatedBackup)",
+            "removeNativeAnnotationBackupFiles(",
         ],
         "restore publication retains generation authority through commit",
     )
@@ -2344,11 +2490,11 @@ def main() -> None:
     require(
         plugin,
         [
-            "NATIVE_READER_V2_MIN_VERSION_CODE = 139L",
+            "NATIVE_READER_V2_MIN_VERSION_CODE = 140L",
             "NATIVE_READER_V2_SIGNER_SHA256 =",
-            "NATIVE_READER_V2_APK_LENGTH = 262683L",
+            "NATIVE_READER_V2_APK_LENGTH = 274971L",
             "NATIVE_READER_V2_APK_SHA256 =",
-            "fb826c482c1b5a97dbf1a95ca8e1987df00f0310cd1660be62f2f43fa556a736",
+            "dd40b89f4bbc6d161b90ea631efccac8c185e3ae8b2cc0cb13d5791f35464c48",
             "PackageManager.GET_SIGNING_CERTIFICATES",
             "signing.hasMultipleSigners()",
             "Native Reader signer set is not exact",
@@ -2382,13 +2528,11 @@ def main() -> None:
             "Files.deleteIfExists(file.toPath())",
             "if (!deleted) return true",
             "requireBackupDocumentIdentity(",
-            (
-                "requireBackupDocumentIdentity(\n"
-                "                                    pdfFile,\n"
-                "                                    revalidatedBackup,\n"
-                "                                    if (revalidatedBackup.originalMarkPresent) {\n"
-                '                                        "before-mark-publish"'
-            ),
+            "                                    requireBackupDocumentIdentity(\n"
+            "                                        pdfFile,\n"
+            "                                        revalidatedBackup,\n"
+            "                                        if (revalidatedBackup.originalMarkPresent) {\n"
+            "                                            \"before-mark-publish\"",
             '"before-mark-publish"',
             '"after-mark-publish"',
             '"after-mark-verification"',
@@ -2471,8 +2615,9 @@ def main() -> None:
     publication = plugin[publication_start:publication_end]
     if "samePersistedFileVersion(stagedIdentity, published.identity)" in publication:
         fail("atomic publication compares pre-rename ctime to published ctime")
+    rename_publication = publication[publication.find("val parent ="):]
     ordered(
-        publication,
+        rename_publication,
         [
             "Os.rename(temporary.absolutePath, file.absolutePath)",
             (
@@ -2728,10 +2873,25 @@ def main() -> None:
             "val inspection = inspectNativeMarkRecoveryFence(pdfFile, expected.marker)",
             "samePersistedAuthority(expected.authority, current.authority)",
             "require(liveNativeAnnotationMatchesRecoveryJournal(expected))",
-            "onCommitProven()",
-            "preserveRegularDestinationNoClobber(",
+            "startDocumentAuthorityProviderForRecovery(configurationGeneration)",
+            "requireDocumentAuthorityAck(",
+            '"recovery",',
+            "publishNativeSpreadOffMarkerLocked(",
+            "current.authority,\n            onCommitProven,",
         ],
         "fresh journal and live-mark proof precede irreversible recovery commit",
+    )
+    require(
+        plugin[journal_retire_start:journal_retire_end],
+        [
+            "private fun startDocumentAuthorityProviderForRecovery(",
+            "Intent.FLAG_ACTIVITY_NEW_TASK",
+            "DOCUMENT_PROVIDER_START_TIMEOUT_MS",
+            '"recovery-authority-provider"',
+            "DOCUMENT_PROVIDER_SETTLE_MS",
+            "document_provider_start_timeout",
+        ],
+        "recovery-fenced Document authority-provider bootstrap",
     )
     restore_worker_start = plugin.find("private fun scheduleAnnotationRestore(")
     restore_helpers_start = plugin.find(
@@ -2753,7 +2913,7 @@ def main() -> None:
             "if (!recoveryCommitProven)",
             "restorePrePublicationMark(value)",
             "throw restoreError",
-            "removeNativeAnnotationBackupFiles(pdfFile, revalidatedBackup)",
+            "removeNativeAnnotationBackupFiles(",
             "val committed = persistenceError == null",
             "val recoveryRequired = nativeMarkRecoveryRequiredPending() ||\n"
             "                nativeMarkRecoveryRequired(persistenceError)",
@@ -2770,6 +2930,11 @@ def main() -> None:
             "registerNativeMarkRecoveryRequired(nativeSpreadMarker(pdfFile))",
             "nativeMarkRecoveryRequiredPending()",
             "val journalInspection = inspectNativeMarkRecoveryFence(pdfFile, marker)",
+            "                    try {\n"
+            "                        withNativeSpreadConfigurationAuthority(\n"
+            "                            configurationGeneration,\n"
+            "                        ) {\n"
+            "                            publication = publishNativeAnnotationRestore(",
         ],
         "durable and process-global recovery-required restart fencing",
     )
@@ -2832,7 +2997,7 @@ def main() -> None:
         gate,
         [
             "candidate marker lookup is forbidden on the main thread",
-            "Os.lstat(markerPath);",
+            "NativeReaderV2AuthorityJournal.inspect(journal.bytes);",
         ],
         "worker-only candidate marker lookup",
     )
@@ -2971,7 +3136,7 @@ def main() -> None:
             "python3 scripts/test_build_provenance.py .",
             "out/build-provenance/SupernoteRtlReader.bundle",
             "out/build-provenance/app.npk",
-            "supernote-rtl-reader-v0.4.21-native-reader-v2",
+            "supernote-rtl-reader-v0.4.22-native-reader-v2",
             "native-spread-upgrade-artifact:",
             "github.event_name == 'workflow_dispatch'",
             "github.actor == github.repository_owner",
@@ -2984,7 +3149,7 @@ def main() -> None:
             "never as a repository-scoped secret",
             "Verify aligned APK provenance without signing credentials",
             "Sign, verify, and remove protected Native Reader signing key",
-            "supernote-native-reader-v2-v0.0.139",
+            "supernote-native-reader-v2-v0.0.140",
         ],
         "CI v2 gates",
     )
@@ -3019,8 +3184,11 @@ def main() -> None:
     v2_invariant_job = workflow.split("  invariant-suites:", 1)[1].split(
         "  native-spread-build:", 1
     )[0]
-    if "check_native_spread_invariants.py ." in v2_invariant_job:
-        fail("Native Reader v2 CI still treats the retired legacy engine as runtime authority")
+    if "check_native_spread_invariants.py ." not in v2_invariant_job:
+        fail(
+            "Native Reader v2 CI does not run the cross-layer handshake, "
+            "lifecycle, packaging, and trace safety invariants"
+        )
     if "ndk;" in workflow or "-AndroidNdk" in workflow:
         fail("release CI still provisions the retired legacy native hook toolchain")
     stable_job = workflow[workflow.find("native-spread-upgrade-artifact:"):]
@@ -3069,9 +3237,9 @@ def main() -> None:
             "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
             "$env:NATIVE_SPREAD_KEYSTORE_B64 = $null",
             "Remove-Item -LiteralPath $keystore -Force",
-            "release-output/SupernoteNativeSpreadProbe-v0.0.139.apk",
-            "$expectedSignedLength = 262683L",
-            "fb826c482c1b5a97dbf1a95ca8e1987df00f0310cd1660be62f2f43fa556a736",
+            "release-output/SupernoteNativeSpreadProbe-v0.0.140.apk",
+            "$expectedSignedLength = 274971L",
+            "dd40b89f4bbc6d161b90ea631efccac8c185e3ae8b2cc0cb13d5791f35464c48",
             "Signed APK length differs from the reviewed upgrade identity",
             "Signed APK SHA-256 differs from the reviewed upgrade identity.",
         ],
@@ -3081,7 +3249,7 @@ def main() -> None:
         stable_job,
         [
             "apksigner verification failed",
-            "$expectedSignedLength = 262683L",
+            "$expectedSignedLength = 274971L",
             "Signed APK SHA-256 differs from the reviewed upgrade identity.",
             "} finally {",
             "Upload upgrade-compatible Native Reader APK",

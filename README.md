@@ -4,13 +4,14 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 
 ## Native Reader v2 candidate
 
-The current development branch contains the hardware-rejected, fail-closed
-RTL Reader v0.4.21 checkpoint with rooted Native Reader v2 companion v0.0.139.
-It is not the merged stable release and must not be shipped. Nomad testing
-proved that rename-over-existing on emulated storage can leave PluginHost and
-DocumentActivity observing different marker generations. The next paired build
-must use a new fixed-size journal path and exact Document-process publication
-acknowledgement before activation or revocation is reported successful.
+The current development branch contains RTL Reader v0.4.22 with rooted Native
+Reader v2 companion v0.0.140. It is a pre-hardware candidate, not the merged
+stable release, and must not be shipped yet. Nomad testing of v0.4.21 proved
+that rename-over-existing on emulated storage can leave PluginHost and
+DocumentActivity observing different marker generations. This replacement uses
+a new fixed-size journal path and requires an exact Document-process
+acknowledgement before activation, recovery, or revocation is reported
+successful.
 
 Unlike Virtual Spread, v2 opens the original PDF directly. Portrait is the
 ordinary native full-page reader; landscape composes two original source pages
@@ -55,12 +56,21 @@ and its complete dependency graph; package verification authenticates the real
 manifest, DEX class descriptors, signer, JavaScript bundle, and embedded APK.
 Two clean companion builds must be byte-for-byte identical before release.
 
-The v0.4.21 plug-in also verifies an atomic publication against the staged
-file descriptor's post-rename identity. This accommodates Android emulated
-storage legitimately advancing the renamed inode's `ctime`, while still
-requiring the exact inode, post-rename version, destination bytes, final path,
-and pinned parent directory to agree. The preceding v0.4.18 activation failed
-closed on this platform behavior and restored the original document state.
+The v0.4.22 plug-in stores authority in a 32 KiB, two-slot `.snspread-v3`
+journal. Initialization creates and sizes the file once; later transitions use
+only fixed-offset writes and `fsync` on the same inode. A transition first
+invalidates and syncs the inactive header, then writes and syncs its payload,
+and publishes the authenticated header last. Any nonzero malformed or torn
+slot rejects the whole journal rather than reviving older authority. A valid
+OFF record supersedes preserved legacy `.snspread` evidence without deleting
+it. Normal opening never falls back to the older slot. If an explicit verified
+annotation restore finds exactly one valid slot and one malformed slot after
+the Document process has stopped, it may overwrite only that malformed slot
+with a newer authenticated RECOVERY record on the same inode; zero valid slots,
+two malformed slots, replacement, or version drift remain non-repairable and
+fail closed. PluginHost requires the live Document process to acknowledge the exact
+journal path, generation, record digest, state, and activation token before a
+transition succeeds.
 Mode loading likewise carries one descriptor-backed marker snapshot through
 settings parsing and recovery assessment, then revalidates that exact snapshot
 after the asynchronous companion handshake before returning it to the UI. The
@@ -82,8 +92,8 @@ deletion. A stale PluginHost process therefore cannot overwrite or remove a
 newer process's committed marker. Stale UI or persistence state cannot escape
 across a recovery boundary.
 Committed publication and successful activation verification are separate:
-post-rename verification failures remain non-rollbackable but propagate as
-failures rather than being reported as a successful enable.
+failures after the committed journal header is durable remain non-rollbackable
+but propagate as failures rather than being reported as a successful enable.
 
 The final adversarial review additionally made input freezes and lifecycle
 publication epoch-owned, so stale composition work cannot reopen input or
@@ -952,7 +962,7 @@ out/*.snplg
 ```
 
 GitHub Actions uploads the current stabilization build as the
-`supernote-rtl-reader-v0.4.21-native-reader-v2` artifact.
+`supernote-rtl-reader-v0.4.22-native-reader-v2` artifact.
 
 ## Install and diagnostics
 

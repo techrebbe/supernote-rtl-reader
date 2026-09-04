@@ -1,14 +1,14 @@
 # Supernote Native Reader v2 companion module
 
 This LSPosed module supplies the rooted native-reader enhancement controlled by
-Supernote RTL Reader. v0.0.139 is a pre-hardware, exact-firmware candidate. It
+Supernote RTL Reader. v0.0.140 is a pre-hardware, exact-firmware candidate. It
 opens the original PDF and keeps Supernote's own writer, links, text tools,
 highlights, and page-local `.mark` annotation data while adding:
 
 - RTL page progression in portrait;
 - automatic two-page RTL spreads in landscape;
 - optional separate-cover parity;
-- per-document opt-in through a hidden authenticated `.snspread` marker;
+- per-document opt-in through a hidden authenticated `.snspread-v3` journal;
 - protected per-document editing backed by a verified annotation recovery snapshot.
 
 The v0.0.135 experimental `SpreadProbe` and native interception source are
@@ -27,14 +27,29 @@ hardware-tested environment:
 - `SupernoteDocument` version code `102446`;
 - document APK length `138486560` bytes;
 - LSPosed scope limited to `com.supernote.document`;
-- an enabled marker beside the current PDF.
+- an authenticated committed journal record beside the current PDF.
+
+The current authority is a fixed-size, two-slot journal. After one exclusive
+initial creation, PluginHost publishes every transition by fixed-offset writes
+to the same inode; it does not rename or delete the journal. The Document
+process fail-closes on a torn or malformed slot and reports the exact path,
+generation, record digest, state, and activation token back to PluginHost as
+the transition acknowledgement. A valid v3 OFF record safely supersedes any
+preserved legacy `.snspread` file.
+
+Normal Document-process admission never uses an older valid slot when its peer
+is malformed. The plugin may classify exactly one valid slot plus one malformed
+slot only for an explicit, verified annotation restore after stopping the
+Document process. It overwrites the malformed slot with a higher-generation
+RECOVERY record on the same inode; this classification is not an authorization
+path, and every other malformed shape remains non-repairable.
 
 ## Archived experimental engine history
 
 The remainder of this version-by-version section describes the retired
 v0.0.75-v0.0.135 `SpreadProbe` experiment. It is retained to preserve the
 hardware evidence and design lessons that informed v2; none of these legacy
-hooks are executable in the v0.0.139 package. The authoritative current v2
+hooks are executable in the v0.0.140 package. The authoritative current v2
 behavior is the architecture and compatibility contract above.
 
 The read-only marker sets `editable=false`. In that mode v0.0.75
@@ -398,14 +413,14 @@ package, and verify the APK; it does not upload that non-upgrade-compatible
 build. Trusted `main` pushes—and repository-owner manual runs of the exact
 `main` ref—restore the repository's stable signing identity from an encrypted
 Actions secret and publish the verified upgrade-compatible APK as
-`supernote-native-reader-v2-v0.0.139`. Review branches never receive that
+`supernote-native-reader-v2-v0.0.140`. Review branches never receive that
 credential.
 
 ## Install
 
 Install the APK, enable **Supernote Native Reader v2** in LSPosed, scope it only
-to `com.supernote.document`, and restart the document reader. The v0.0.139 APK
-requires Supernote RTL Reader v0.4.21 and refuses every other companion
+to `com.supernote.document`, and restart the document reader. The v0.0.140 APK
+requires Supernote RTL Reader v0.4.22 and refuses every other companion
 contract version. Stylus contacts that
 begin inside the current visible native toolbar, page bar, selection menu, or
 popup are passed to Supernote for that exact gesture without publishing a

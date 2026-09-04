@@ -48,10 +48,12 @@ jobs:
 
       - name: Run Native Reader v2 invariant suites
         run: |
+          python3 -m pip install --disable-pip-version-check --no-deps PyYAML==6.0.2
           python3 scripts/test_native_reader_v2_core.py .
           python3 scripts/test_native_reader_v2_mutations.py .
           python3 scripts/check_native_reader_v2_invariants.py .
           python3 scripts/check_native_invariants.py .
+          python3 scripts/check_native_spread_invariants.py .
           python3 scripts/test_build_provenance.py .
           python3 scripts/test_plugin_packaging_fail_closed.py
 
@@ -119,7 +121,7 @@ jobs:
           $releaseInput = Join-Path $env:GITHUB_WORKSPACE `
             'native-spread-module\build\release-input'
           New-Item -ItemType Directory -Force -Path $releaseInput | Out-Null
-          $artifactName = 'SupernoteNativeReaderV2-v0.0.139-aligned.apk'
+          $artifactName = 'SupernoteNativeReaderV2-v0.0.140-aligned.apk'
           $artifactPath = Join-Path $releaseInput $artifactName
           Copy-Item -LiteralPath $inputApk -Destination $artifactPath
           $artifactSha256 = (Get-FileHash `
@@ -133,8 +135,8 @@ jobs:
             artifactFile = $artifactName
             artifactSha256 = $artifactSha256
             packageName = 'com.techrebbe.supernote.spreadprobe'
-            versionCode = 139
-            versionName = '0.0.139'
+            versionCode = 140
+            versionName = '0.0.140'
             expectedSignerSha256 = 'a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67'
           }
           $json = $provenance | ConvertTo-Json -Compress
@@ -195,7 +197,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $inputApk = Join-Path $env:GITHUB_WORKSPACE `
-            'release-input\SupernoteNativeReaderV2-v0.0.139-aligned.apk'
+            'release-input\SupernoteNativeReaderV2-v0.0.140-aligned.apk'
           $provenancePath = Join-Path $env:GITHUB_WORKSPACE `
             'release-input\provenance.json'
           foreach ($path in @($inputApk, $provenancePath)) {
@@ -236,10 +238,10 @@ jobs:
           if ($provenance.schemaVersion -cne 1 -or
               $provenance.authority -cne 'supernote-native-reader-v2-release-input-v1' -or
               $provenance.sourceCommit -cne '${{ github.sha }}' -or
-              $provenance.artifactFile -cne 'SupernoteNativeReaderV2-v0.0.139-aligned.apk' -or
+              $provenance.artifactFile -cne 'SupernoteNativeReaderV2-v0.0.140-aligned.apk' -or
               $provenance.packageName -cne 'com.techrebbe.supernote.spreadprobe' -or
-              $provenance.versionCode -cne 139 -or
-              $provenance.versionName -cne '0.0.139' -or
+              $provenance.versionCode -cne 140 -or
+              $provenance.versionName -cne '0.0.140' -or
               $provenance.expectedSignerSha256 -cne 'a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67') {
             throw 'Release provenance does not match the reviewed release authority.'
           }
@@ -264,7 +266,7 @@ jobs:
           }
           $packageLine = @($badging | Where-Object { $_ -like 'package:*' })
           if ($packageLine.Count -ne 1 -or
-              $packageLine[0] -cnotmatch "^package: name='com\.techrebbe\.supernote\.spreadprobe' versionCode='139' versionName='0\.0\.139'") {
+              $packageLine[0] -cnotmatch "^package: name='com\.techrebbe\.supernote\.spreadprobe' versionCode='140' versionName='0\.0\.140'") {
             throw 'Release input APK package/version authority does not match.'
           }
           & $apksigner verify $inputApk 2>$null
@@ -298,10 +300,10 @@ jobs:
               'build-tools\35.0.0'
             $apksigner = Join-Path $buildTools 'apksigner.bat'
             $inputApk = Join-Path $env:GITHUB_WORKSPACE `
-              'release-input\SupernoteNativeReaderV2-v0.0.139-aligned.apk'
+              'release-input\SupernoteNativeReaderV2-v0.0.140-aligned.apk'
             $outputDir = Join-Path $env:GITHUB_WORKSPACE 'release-output'
             $outputApk = Join-Path $outputDir `
-              'SupernoteNativeSpreadProbe-v0.0.139.apk'
+              'SupernoteNativeSpreadProbe-v0.0.140.apk'
             New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
             & $apksigner sign `
               --ks $keystore `
@@ -339,9 +341,9 @@ jobs:
                 -not ($verification -contains 'Verified using v3 scheme (APK Signature Scheme v3): true')) {
               throw 'Signed APK is missing required modern signature schemes.'
             }
-            $expectedSignedLength = 262683L
+            $expectedSignedLength = 274971L
             $expectedSignedSha256 = `
-              'fb826c482c1b5a97dbf1a95ca8e1987df00f0310cd1660be62f2f43fa556a736'
+              'dd40b89f4bbc6d161b90ea631efccac8c185e3ae8b2cc0cb13d5791f35464c48'
             $actualSignedLength = (Get-Item `
               -LiteralPath $outputApk `
               -Force
@@ -369,8 +371,8 @@ jobs:
       - name: Upload upgrade-compatible Native Reader APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: supernote-native-reader-v2-v0.0.139
-          path: release-output/SupernoteNativeSpreadProbe-v0.0.139.apk
+          name: supernote-native-reader-v2-v0.0.140
+          path: release-output/SupernoteNativeSpreadProbe-v0.0.140.apk
           if-no-files-found: error
           retention-days: 7
 
@@ -688,6 +690,7 @@ jobs:
 
       - name: Build plugin
         run: |
+          python3 -m pip install --disable-pip-version-check --no-deps PyYAML==6.0.2
           chmod +x build.sh
           set +e
           ./build.sh > build.log 2>&1
@@ -719,7 +722,7 @@ jobs:
       - name: Upload plugin package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: supernote-rtl-reader-v0.4.21-native-reader-v2
+          name: supernote-rtl-reader-v0.4.22-native-reader-v2
           path: out/*.snplg
           if-no-files-found: error
           retention-days: 3

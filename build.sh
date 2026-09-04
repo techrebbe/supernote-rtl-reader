@@ -25,6 +25,7 @@ else
 fi
 
 "${PYTHON_CMD[@]}" "$ROOT/scripts/check_native_reader_v2_invariants.py" "$ROOT"
+"${PYTHON_CMD[@]}" "$ROOT/scripts/check_native_spread_invariants.py" "$ROOT"
 
 PROJECT="$WORK_ROOT/SupernoteRtlReader"
 TEMPLATE_DOWNLOAD="$WORK_ROOT/template-download"

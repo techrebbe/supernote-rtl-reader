@@ -18,13 +18,14 @@ callback, bitmap, gesture, annotation, or writer state is shared with v2.
 ## Admission and cutover rule
 
 Behavioral cutover is all-or-nothing for one exact PDF and
-`DocumentActivity` generation. The companion must first publish a committed
-v2 marker and verified recovery snapshot. The injected reader then verifies:
+`DocumentActivity` generation. The plugin must first publish a committed
+record in the fixed-inode `.snspread-v3` authority journal and a verified
+recovery snapshot. The injected companion then verifies:
 
 - the exact supported firmware fingerprint and system Document APK bytes;
 - the exact companion package version and signer;
 - the original PDF inode/version, SHA-256, and canonical path;
-- an exact committed marker and immutable recovery evidence;
+- an exact committed journal record and immutable recovery evidence;
 - the live PDF and `.mark` paths;
 - the current reader, presenter, note, DrawPath, bitmap-view, page, and layout
   identities; and
@@ -77,6 +78,22 @@ their bitmaps instead of publishing them.
 
 ## Hardware gate
 
-v0.0.139 is a pre-hardware candidate. It must not replace the stable baseline
+v0.0.140 is a pre-hardware candidate. It must not replace the stable baseline
 until the exact-head automated review is clean and the full matrix in
 `NATIVE_READER_V2_REVIEW_GATES.md` passes on the Nomad.
+
+The paired v0.4.22 plugin never renames, deletes, truncates, resizes, or
+recreates an initialized authority journal. It publishes PENDING, COMMITTED,
+RECOVERY, and OFF records into alternating fixed slots and requires an exact
+Document-process acknowledgement of the current record before completing a
+state transition. Legacy `.snspread` files are preserved as migration evidence;
+a valid v3 record is the only authority that supersedes them.
+
+Normal admission rejects the complete journal if either nonzero slot is torn or
+malformed. Explicit annotation restore has one narrower recovery operation: once
+DocumentActivity is proven stopped and the recovery snapshot is revalidated, it
+may repair exactly one valid-slot/one-malformed-slot journal by overwriting only
+the malformed slot with a higher-generation RECOVERY record on the same inode.
+The valid older slot supplies only monotonic generation evidence and is never
+used to authorize reader behavior. Every other malformed shape remains
+non-repairable and preserves the fail-closed fence.

@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.Configuration;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.Looper;
 import android.os.Process;
 import android.os.SystemClock;
@@ -56,8 +57,8 @@ public final class NativeReaderV2Hooks {
         "com.techrebbe.supernote.spreadprobe.HANDSHAKE_REQUEST";
     private static final String HANDSHAKE_RESPONSE =
         "com.techrebbe.supernote.spreadprobe.HANDSHAKE_RESPONSE";
-    private static final int HANDSHAKE_PROTOCOL = 3;
-    private static final long HANDSHAKE_PROVIDER_EXPIRY_MS = 1_200L;
+    private static final int HANDSHAKE_PROTOCOL = 4;
+    private static final long HANDSHAKE_PROVIDER_EXPIRY_MS = 2_500L;
     private static final long NATIVE_PEN_TERMINAL_GRACE_MS = 250L;
 
     private static final ConcurrentHashMap<Object, Entry> BY_ACTIVITY =
@@ -67,6 +68,7 @@ public final class NativeReaderV2Hooks {
     private static final AtomicLong ACTIVITY_GENERATIONS = new AtomicLong(1L);
     private static final NativeHandshakeSingleFlight HANDSHAKE_SINGLE_FLIGHT =
         new NativeHandshakeSingleFlight();
+    private static final Handler MAIN_HANDLER = new Handler(Looper.getMainLooper());
     private static final ExecutorService ADMISSION =
         Executors.newSingleThreadExecutor();
     private static final ThreadLocal<Boolean> INTERNAL_PRESENTATION =
@@ -1151,10 +1153,40 @@ public final class NativeReaderV2Hooks {
                 String nonce = request.getStringExtra("nonce");
                 String requestedPath = request.getStringExtra("rawDocumentPath");
                 int protocol = request.getIntExtra("protocol", -1);
+                String expectedJournalPath = request.getStringExtra(
+                    "expectedJournalPath"
+                );
+                long expectedJournalGeneration = request.getLongExtra(
+                    "expectedJournalGeneration",
+                    -1L
+                );
+                String expectedJournalAuthoritySha256 = request.getStringExtra(
+                    "expectedJournalAuthoritySha256"
+                );
+                String expectedJournalState = request.getStringExtra(
+                    "expectedJournalState"
+                );
+                String expectedActivationToken = request.getStringExtra(
+                    "expectedActivationToken"
+                );
+                boolean authorityAckRequested = expectedJournalPath != null
+                    || expectedJournalGeneration >= 0L
+                    || expectedJournalAuthoritySha256 != null
+                    || expectedJournalState != null
+                    || expectedActivationToken != null;
                 if (nonce == null || nonce.length() < 16
                     || protocol != HANDSHAKE_PROTOCOL
                     || requestedPath == null
-                    || requestedPath.indexOf('\0') >= 0) {
+                    || requestedPath.indexOf('\0') >= 0
+                    || authorityAckRequested && (
+                        expectedJournalPath == null
+                        || expectedJournalPath.indexOf('\0') >= 0
+                        || expectedJournalGeneration <= 0L
+                        || expectedJournalAuthoritySha256 == null
+                        || expectedJournalAuthoritySha256.length() != 64
+                        || expectedJournalState == null
+                        || expectedActivationToken == null
+                    )) {
                     Log.w(TAG, "v2 handshake rejected protocol=" + protocol);
                     return;
                 }
@@ -1165,6 +1197,22 @@ public final class NativeReaderV2Hooks {
                 }
                 final long handshakeDeadlineUptimeMs =
                     SystemClock.uptimeMillis() + HANDSHAKE_PROVIDER_EXPIRY_MS;
+                final Runnable handshakeExpiry = new Runnable() {
+                    @Override public void run() {
+                        if (HANDSHAKE_SINGLE_FLIGHT.finish(handshakeToken)) {
+                            Log.w(TAG, "v2 handshake admission expired");
+                        }
+                    }
+                };
+                if (!MAIN_HANDLER.postAtTime(
+                        handshakeExpiry,
+                        handshakeDeadlineUptimeMs
+                    )) {
+                    HANDSHAKE_SINGLE_FLIGHT.finish(handshakeToken);
+                    Log.w(TAG, "v2 handshake rejected without expiry scheduling");
+                    return;
+                }
+                boolean asynchronousAck = false;
                 try {
                     HandshakeSnapshot snapshot = captureHandshakeSnapshot();
                     if (snapshot == null) {
@@ -1179,18 +1227,87 @@ public final class NativeReaderV2Hooks {
                         Log.w(TAG, "v2 handshake rejected path authority");
                         return;
                     }
-                    publishHandshakeResponse(
-                        receiverContext,
-                        nonce,
-                        snapshot,
-                        resolution,
-                        handshakeToken,
-                        handshakeDeadlineUptimeMs
-                    );
+                    if (authorityAckRequested) {
+                        final HandshakeExpectation expectation =
+                            new HandshakeExpectation(
+                                expectedJournalPath,
+                                expectedJournalGeneration,
+                                expectedJournalAuthoritySha256,
+                                expectedJournalState,
+                                expectedActivationToken
+                            );
+                        ADMISSION.execute(new Runnable() {
+                            @Override public void run() {
+                                NativeReaderV2DocumentGate.AuthorityObservation
+                                    observation = null;
+                                try {
+                                    NativeReaderV2DocumentGate.AuthorityObservation
+                                        candidate = NativeReaderV2DocumentGate
+                                            .observeAuthority(requestedPath);
+                                    if (expectation.matches(candidate)) {
+                                        observation = candidate;
+                                    } else {
+                                        Log.w(TAG,
+                                            "v2 authority ACK rejected exact record");
+                                    }
+                                } catch (Throwable failure) {
+                                    Log.w(TAG,
+                                        "v2 authority ACK observation failed closed",
+                                        failure);
+                                }
+                                final NativeReaderV2DocumentGate
+                                    .AuthorityObservation acceptedObservation =
+                                        observation;
+                                boolean posted = MAIN_HANDLER.post(new Runnable() {
+                                        @Override public void run() {
+                                            try {
+                                                if (acceptedObservation != null) {
+                                                    publishHandshakeResponse(
+                                                        receiverContext,
+                                                        nonce,
+                                                        snapshot,
+                                                        resolution,
+                                                        handshakeToken,
+                                                        handshakeDeadlineUptimeMs,
+                                                        acceptedObservation
+                                                    );
+                                                }
+                                            } finally {
+                                                finishHandshake(
+                                                    handshakeToken,
+                                                    handshakeExpiry
+                                                );
+                                            }
+                                        }
+                                    });
+                                if (!posted) {
+                                    finishHandshake(
+                                        handshakeToken,
+                                        handshakeExpiry
+                                    );
+                                    Log.w(TAG,
+                                        "v2 authority ACK rejected without main publication");
+                                }
+                            }
+                        });
+                        asynchronousAck = true;
+                    } else {
+                        publishHandshakeResponse(
+                            receiverContext,
+                            nonce,
+                            snapshot,
+                            resolution,
+                            handshakeToken,
+                            handshakeDeadlineUptimeMs,
+                            null
+                        );
+                    }
                 } catch (Throwable failure) {
                     Log.w(TAG, "v2 handshake failed closed", failure);
                 } finally {
-                    HANDSHAKE_SINGLE_FLIGHT.finish(handshakeToken);
+                    if (!asynchronousAck) {
+                        finishHandshake(handshakeToken, handshakeExpiry);
+                    }
                 }
             }
         };
@@ -1205,6 +1322,11 @@ public final class NativeReaderV2Hooks {
         handshakeReceiver = receiver;
         handshakeReceiverRegistered = true;
         Log.i(TAG, "v2 handshake receiver registered with in-memory path binding");
+    }
+
+    private static void finishHandshake(long token, Runnable expiry) {
+        MAIN_HANDLER.removeCallbacks(expiry);
+        HANDSHAKE_SINGLE_FLIGHT.finish(token);
     }
 
     private static HandshakeSnapshot captureHandshakeSnapshot() {
@@ -1258,7 +1380,8 @@ public final class NativeReaderV2Hooks {
         HandshakeSnapshot snapshot,
         HandshakeResolution resolution,
         long handshakeToken,
-        long handshakeDeadlineUptimeMs
+        long handshakeDeadlineUptimeMs,
+        NativeReaderV2DocumentGate.AuthorityObservation observation
     ) {
         if (Looper.myLooper() != Looper.getMainLooper()
             || receiverContext == null
@@ -1284,6 +1407,19 @@ public final class NativeReaderV2Hooks {
             NativeReaderV2PackageAdmission.EXPECTED_APK_LENGTH
         );
         response.putExtra("processId", Process.myPid());
+        if (observation != null) {
+            response.putExtra("journalPath", observation.journalPath);
+            response.putExtra("journalGeneration", observation.generation);
+            response.putExtra(
+                "journalAuthoritySha256",
+                observation.authoritySha256
+            );
+            response.putExtra("journalState", observation.state);
+            response.putExtra(
+                "activationToken",
+                observation.activationToken
+            );
+        }
         if (!HANDSHAKE_SINGLE_FLIGHT.currentBefore(
                 handshakeToken,
                 SystemClock.uptimeMillis(),
@@ -1406,6 +1542,39 @@ public final class NativeReaderV2Hooks {
         ) {
             this.candidate = candidate;
             this.rawPath = rawPath;
+        }
+    }
+
+    private static final class HandshakeExpectation {
+        final String journalPath;
+        final long generation;
+        final String authoritySha256;
+        final String state;
+        final String activationToken;
+
+        HandshakeExpectation(
+            String journalPath,
+            long generation,
+            String authoritySha256,
+            String state,
+            String activationToken
+        ) {
+            this.journalPath = journalPath;
+            this.generation = generation;
+            this.authoritySha256 = authoritySha256;
+            this.state = state;
+            this.activationToken = activationToken;
+        }
+
+        boolean matches(
+            NativeReaderV2DocumentGate.AuthorityObservation observation
+        ) {
+            return observation != null
+                && generation == observation.generation
+                && journalPath.equals(observation.journalPath)
+                && authoritySha256.equals(observation.authoritySha256)
+                && state.equals(observation.state)
+                && activationToken.equals(observation.activationToken);
         }
     }
 

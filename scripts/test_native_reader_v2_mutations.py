@@ -73,8 +73,8 @@ MUTATIONS = (
     ),
     (
         "NativeReaderV2MarkerClaim.java",
+        "MINIMUM_COMPANION_MODULE_VERSION = 140L",
         "MINIMUM_COMPANION_MODULE_VERSION = 139L",
-        "MINIMUM_COMPANION_MODULE_VERSION = 138L",
         "companion marker and handshake version authority",
     ),
     (
@@ -319,9 +319,70 @@ MUTATIONS = (
 STATIC_MUTATIONS = (
     (
         "native-spread-module/README.md",
-        "requires Supernote RTL Reader v0.4.21 and refuses every other companion",
+        "requires Supernote RTL Reader v0.4.22 and refuses every other companion",
         "requires Supernote RTL Reader v0.4.19 and refuses every other companion",
         "documented companion plugin pairing",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "            require(payloadState == current.state) {",
+        "            require(true) {",
+        "journal header/payload state binding",
+    ),
+    (
+        "native/NativeReaderV2AuthorityJournal.kt.template",
+        "        if (strictFailure.errno != OsConstants.EINVAL) throw strictFailure",
+        "        if (false) throw strictFailure",
+        "journal directory FUSE fallback scope",
+    ),
+    (
+        "native/NativeReaderV2AuthorityJournal.kt.template",
+        "        if (valid.size != 1 || malformed.size != 1) return null",
+        "        if (valid.isEmpty() && malformed.isEmpty()) return null",
+        "interrupted-journal repair requires exactly one valid and one malformed slot",
+    ),
+    (
+        "native/NativeReaderV2AuthorityJournal.kt.template",
+        "                sameVersion(expected.identity, before) &&",
+        "                sameStableFileMetadata(expected.identity, before) &&",
+        "interrupted-journal repair exact-version authority",
+    ),
+    (
+        "native/NativeReaderV2AuthorityJournal.kt.template",
+        "            val encoded = encodeSlot(slotIndex, State.RECOVERY, generation, payload)",
+        "            val encoded = encodeSlot(slotIndex, State.COMMITTED, generation, payload)",
+        "interrupted-journal repair can publish only recovery authority",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                        if (journalInspection.blocking &&\n"
+        "                            !repairableInterruptedPublication\n"
+        "                        ) {",
+        "                        if (false) {",
+        "ambiguous journal remains blocked outside exact repair classification",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "            currentAuthority.journalGeneration == expectation.generation &&",
+        "            true &&",
+        "post-ACK live journal generation revalidation",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                        require(samePersistedAuthority(\n"
+        "                            legacyMigration.authority,\n"
+        "                            exactLegacy,\n"
+        "                        )) {\n"
+        "                            \"Legacy Native Spread authority changed at migration publication\"",
+        "                        require(true) {\n"
+        "                            \"Legacy Native Spread authority changed at migration publication\"",
+        "legacy authority migration publication fence",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                                        }.getOrElse { Properties() }",
+        "                                        }.getOrThrow()",
+        "legacy migration failure completes its React promise",
     ),
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
@@ -489,29 +550,28 @@ STATIC_MUTATIONS = (
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2Hooks.java",
+        "    private static final int HANDSHAKE_PROTOCOL = 4;",
         "    private static final int HANDSHAKE_PROTOCOL = 3;",
-        "    private static final int HANDSHAKE_PROTOCOL = 2;",
-        "native handshake protocol v3",
+        "native handshake protocol v4",
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
+        "        private const val NATIVE_SPREAD_HANDSHAKE_PROTOCOL = 4",
         "        private const val NATIVE_SPREAD_HANDSHAKE_PROTOCOL = 3",
-        "        private const val NATIVE_SPREAD_HANDSHAKE_PROTOCOL = 2",
-        "plugin handshake protocol v3",
+        "plugin handshake protocol v4",
     ),
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2Hooks.java",
-        "    private static final long HANDSHAKE_PROVIDER_EXPIRY_MS = 1_200L;",
+        "    private static final long HANDSHAKE_PROVIDER_EXPIRY_MS = 2_500L;",
         "    private static final long HANDSHAKE_PROVIDER_EXPIRY_MS = Long.MAX_VALUE;",
         "handshake provider bounded expiry",
     ),
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2Hooks.java",
-        "                    || requestedPath == null\n"
-        "                    || requestedPath.indexOf('\\0') >= 0)",
-        "                    || false)",
+        "                    || requestedPath.indexOf('\\0') >= 0",
+        "                    || false",
         "handshake required raw-path request authority",
     ),
     (
@@ -720,11 +780,13 @@ STATIC_MUTATIONS = (
         "        withNativeSpreadConfigurationAuthority(configurationGeneration) {\n"
         "            writePropertiesAtomicallyCas(\n"
         "                marker,\n"
-        "                properties,",
+        "                properties,\n"
+        "                \"Supernote RTL protected editable pending activation\",",
         "        run {\n"
         "            writePropertiesAtomicallyCas(\n"
         "                marker,\n"
-        "                properties,",
+        "                properties,\n"
+        "                \"Supernote RTL protected editable pending activation\",",
         "plugin persisted-state publication linearization",
     ),
     (
@@ -834,9 +896,9 @@ STATIC_MUTATIONS = (
     (
         "native/ReaderPreferencesModule.kt.template",
         "            if (committedMarkerPublishedByActivation) {\n"
-        "                // The committed rename is final authorization, so rollback is\n",
+        "                // The committed journal header is final authorization, so rollback is\n",
         "            if (false) {\n"
-        "                // The committed rename is final authorization, so rollback is\n",
+        "                // The committed journal header is final authorization, so rollback is\n",
         "committed-marker verification failure propagation",
     ),
     (
@@ -859,13 +921,13 @@ STATIC_MUTATIONS = (
     ),
     (
         ".github/workflows/build.yml",
-        "$expectedSignedLength = 262683L",
+        "$expectedSignedLength = 274971L",
         "$expectedSignedLength = 250394L",
         "published companion exact signed length",
     ),
     (
         ".github/workflows/build.yml",
-        "fb826c482c1b5a97dbf1a95ca8e1987df00f0310cd1660be62f2f43fa556a736",
+        "dd40b89f4bbc6d161b90ea631efccac8c185e3ae8b2cc0cb13d5791f35464c48",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "published companion exact signed digest",
     ),
@@ -914,18 +976,18 @@ STATIC_MUTATIONS = (
     (
         "native/ReaderPreferencesModule.kt.template",
         (
-            "                                requireBackupDocumentIdentity(\n"
-            "                                    pdfFile,\n"
-            "                                    revalidatedBackup,\n"
-            "                                    if (revalidatedBackup.originalMarkPresent) {\n"
-            '                                        "before-mark-publish"'
+            "                                    requireBackupDocumentIdentity(\n"
+            "                                        pdfFile,\n"
+            "                                        revalidatedBackup,\n"
+            "                                        if (revalidatedBackup.originalMarkPresent) {\n"
+            '                                            "before-mark-publish"'
         ),
         (
-            "                                requireBackupDocumentIdentity(\n"
-            "                                    pdfFile,\n"
-            "                                    revalidatedBackup,\n"
-            "                                    if (revalidatedBackup.originalMarkPresent) {\n"
-            '                                        "before-mark-publish-disabled"'
+            "                                    requireBackupDocumentIdentity(\n"
+            "                                        pdfFile,\n"
+            "                                        revalidatedBackup,\n"
+            "                                        if (revalidatedBackup.originalMarkPresent) {\n"
+            '                                            "before-mark-publish-disabled"'
         ),
         "restore PDF publication revalidation",
     ),
@@ -1498,13 +1560,13 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "NATIVE_READER_V2_APK_LENGTH = 262683L",
+        "NATIVE_READER_V2_APK_LENGTH = 274971L",
         "NATIVE_READER_V2_APK_LENGTH = 250394L",
         "installed companion APK length pin",
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "fb826c482c1b5a97dbf1a95ca8e1987df00f0310cd1660be62f2f43fa556a736",
+        "dd40b89f4bbc6d161b90ea631efccac8c185e3ae8b2cc0cb13d5791f35464c48",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "installed companion APK digest pin",
     ),
@@ -1559,11 +1621,16 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "                        publishNativeMarkRecoveryJournal(\n"
-        "                            pdfFile,\n"
-        "                            marker,\n"
-        "                            revalidatedBackup,\n"
-        "                        )\n"
+        "                        withNativeSpreadConfigurationAuthority(\n"
+        "                            configurationGeneration,\n"
+        "                        ) {\n"
+        "                            publishNativeMarkRecoveryJournal(\n"
+        "                                pdfFile,\n"
+        "                                marker,\n"
+        "                                revalidatedBackup,\n"
+        "                                configurationGeneration,\n"
+        "                            )\n"
+        "                        }\n"
         "                    }\n\n"
         "                    var publication: NativeMarkPublication? = null",
         "                        error(\"recovery journal skipped\")\n"
@@ -1579,9 +1646,10 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "        onCommitProven()\n"
-        "        val displaced = try {",
-        "        val displaced = try {",
+        "            current.authority,\n"
+        "            onCommitProven,",
+        "            current.authority,\n"
+        "            {},",
         "fresh journal and live-mark proof publish recovery commit",
     ),
     (
@@ -1835,12 +1903,14 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "                withNativeSpreadPublicationLock(marker) {\n"
-        "                withNativeSpreadConfigurationAuthority(configurationGeneration) {\n"
-        "                    val revalidatedBackup",
-        "                withNativeSpreadPublicationLock(marker) {\n"
-        "                run {\n"
-        "                    val revalidatedBackup",
+        "                    try {\n"
+        "                        withNativeSpreadConfigurationAuthority(\n"
+        "                            configurationGeneration,\n"
+        "                        ) {\n"
+        "                            publication = publishNativeAnnotationRestore(",
+        "                    try {\n"
+        "                        run {\n"
+        "                            publication = publishNativeAnnotationRestore(",
         "restore publication generation authority",
     ),
     (
@@ -1877,13 +1947,13 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "            deleteRegularFileCas(\n"
-        "                marker,\n"
-        "                expectedMarkerAuthority.identity,\n"
-        "                \"interrupted pending activation marker\",\n"
+        "                \"Interrupted Native Reader activation OFF authority\",\n"
+        "                expectedMarkerAuthority,\n"
         "            )",
-        "            marker.delete()",
-        "pending-marker null restoration compare-and-delete",
+        "                \"Interrupted Native Reader activation OFF authority\",\n"
+        "                null,\n"
+        "            )",
+        "pending-marker null restoration compare-and-publish",
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
@@ -2978,6 +3048,7 @@ def prepare_static_tree(root: pathlib.Path, destination: pathlib.Path) -> None:
         scripts / "check_native_reader_v2_invariants.py",
     )
     for name in (
+        "install_native.py",
         "materialize_plugin_template.py",
         "normalize_apk_zip.py",
         "patch_plugin_packager.py",

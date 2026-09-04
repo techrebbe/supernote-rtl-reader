@@ -11,9 +11,9 @@ import java.util.UUID;
 
 /** Pure validation of the companion's committed editable v2 authority. */
 public final class NativeReaderV2MarkerClaim {
-    public static final int TRANSACTION_PROTOCOL = 2;
-    public static final long MINIMUM_COMPANION_MODULE_VERSION = 139L;
-    public static final String MODE = "protected-editable-transactional-v1";
+    public static final int TRANSACTION_PROTOCOL = 3;
+    public static final long MINIMUM_COMPANION_MODULE_VERSION = 140L;
+    public static final String MODE = "protected-editable-transactional-v2";
     private static final Set<String> COMMITTED_FIELDS =
         Collections.unmodifiableSet(new HashSet<String>(Arrays.asList(
             NativeReaderV2Config.ENGINE_KEY,

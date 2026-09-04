@@ -508,6 +508,28 @@ def check(repo_root: Path) -> None:
         / "spreadprobe"
         / "SpreadProbe.java"
     )
+    v2_hooks_path = (
+        repo_root
+        / "native-spread-module"
+        / "src"
+        / "com"
+        / "techrebbe"
+        / "supernote"
+        / "spreadprobe"
+        / "v2android"
+        / "NativeReaderV2Hooks.java"
+    )
+    v2_marker_claim_path = (
+        repo_root
+        / "native-spread-module"
+        / "src"
+        / "com"
+        / "techrebbe"
+        / "supernote"
+        / "spreadprobe"
+        / "v2"
+        / "NativeReaderV2MarkerClaim.java"
+    )
     manifest_path = repo_root / "native-spread-module" / "AndroidManifest.xml"
     native_build_path = repo_root / "native-spread-module" / "build.ps1"
     native_cpp_path = (
@@ -532,6 +554,8 @@ def check(repo_root: Path) -> None:
 
     plugin = plugin_path.read_text(encoding="utf-8")
     module = module_path.read_text(encoding="utf-8")
+    v2_hooks = v2_hooks_path.read_text(encoding="utf-8")
+    v2_marker_claim = v2_marker_claim_path.read_text(encoding="utf-8")
     manifest = manifest_path.read_text(encoding="utf-8")
     native_build = native_build_path.read_text(encoding="utf-8")
     native_cpp = native_cpp_path.read_text(encoding="utf-8")
@@ -556,14 +580,30 @@ def check(repo_root: Path) -> None:
     jobs = parsed_workflow.get("jobs")
     if not isinstance(jobs, dict):
         fail("workflow jobs must decode to an object")
+    native_assembly_job = jobs.get("native-spread-build")
+    native_release_job = jobs.get("native-spread-upgrade-artifact")
+    plugin_job_definition = jobs.get("build")
     test_job = jobs.get("virtual-spread-tests")
     assembly_job = jobs.get("virtual-spread-release-assembly")
     release_job = jobs.get("virtual-spread-release-apk")
     if any(
         not isinstance(job, dict)
-        for job in (test_job, assembly_job, release_job)
+        for job in (
+            native_assembly_job,
+            native_release_job,
+            plugin_job_definition,
+            test_job,
+            assembly_job,
+            release_job,
+        )
     ):
-        fail("workflow must contain test, clean assembly, and release jobs")
+        fail(
+            "workflow must contain Native Reader, plugin, Virtual Spread test, "
+            "clean assembly, and protected release jobs"
+        )
+    assert isinstance(native_assembly_job, dict)
+    assert isinstance(native_release_job, dict)
+    assert isinstance(plugin_job_definition, dict)
     assert isinstance(assembly_job, dict)
     if release_job.get("if") != (
         "github.event_name == 'push' && github.ref == 'refs/heads/main'"
@@ -617,6 +657,154 @@ def check(repo_root: Path) -> None:
         if len(matches) != 1:
             fail(f"workflow must contain exactly one step named {name!r}")
         return matches[0]
+
+    native_condition = " ".join(str(native_release_job.get("if", "")).split())
+    expected_native_condition = (
+        "(github.event_name == 'push' && github.ref == 'refs/heads/main') || "
+        "(github.event_name == 'workflow_dispatch' && "
+        "github.ref == 'refs/heads/main' && "
+        "github.actor == github.repository_owner)"
+    )
+    if native_condition != expected_native_condition:
+        fail(
+            "Native Reader stable-signer job must be restricted to trusted "
+            "main pushes or owner-triggered main dispatches"
+        )
+    if native_assembly_job.get("needs") != [
+        "invariant-suites",
+        "trace-helper-tests",
+    ]:
+        fail("Native Reader unsigned assembly must follow both safety jobs")
+    if native_release_job.get("needs") != ["native-spread-build", "build"]:
+        fail(
+            "Native Reader protected signing must follow unsigned assembly "
+            "and the finished plugin build"
+        )
+    if native_release_job.get("environment") != "virtual-spread-release":
+        fail("Native Reader protected signing must use the release environment")
+    if plugin_job_definition.get("needs") != [
+        "native-spread-build",
+        "virtual-spread-tests",
+    ]:
+        fail("plugin publication must follow Native Reader and Virtual Spread gates")
+
+    native_assembly_steps = native_assembly_job.get("steps")
+    native_release_steps = native_release_job.get("steps")
+    plugin_steps = plugin_job_definition.get("steps")
+    if any(
+        not isinstance(steps, list)
+        for steps in (native_assembly_steps, native_release_steps, plugin_steps)
+    ):
+        fail("Native Reader and plugin workflow steps must be lists")
+    assert isinstance(native_assembly_steps, list)
+    assert isinstance(native_release_steps, list)
+    assert isinstance(plugin_steps, list)
+
+    native_compile = named_step(
+        native_assembly_steps,
+        "Compile deterministic aligned Native Reader v2 package",
+    )
+    native_prepare = named_step(
+        native_assembly_steps,
+        "Prepare aligned APK and machine-readable provenance",
+    )
+    native_upload_input = named_step(
+        native_assembly_steps,
+        "Upload aligned APK for protected signing",
+    )
+    native_compile_run = str(native_compile.get("run", ""))
+    native_prepare_run = str(native_prepare.get("run", ""))
+    if (
+        "-File .\\native-spread-module\\build.ps1 `" not in native_compile_run
+        or "-AlignedOnly" not in native_compile_run
+        or "if ($LASTEXITCODE -ne 0)" not in native_compile_run
+        or "SupernoteNativeReaderV2-v0.0.140-aligned.apk"
+        not in native_prepare_run
+        or "sourceCommit = '${{ github.sha }}'" not in native_prepare_run
+        or "artifactSha256 = $artifactSha256" not in native_prepare_run
+        or "versionCode = 140" not in native_prepare_run
+        or "versionName = '0.0.140'" not in native_prepare_run
+        or native_upload_input.get("uses")
+        != "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
+        or "native-reader-v2-release-input-${{ github.sha }}"
+        not in str(native_upload_input.get("with", {}))
+    ):
+        fail(
+            "Native Reader unsigned assembly must publish exact aligned APK "
+            "and commit-bound provenance"
+        )
+    native_assembly_text = str(native_assembly_job)
+    if "secrets." in native_assembly_text or "environment" in native_assembly_job:
+        fail("Native Reader unsigned assembly must not access signing credentials")
+
+    native_download = named_step(
+        native_release_steps, "Download tested aligned APK"
+    )
+    native_verify = named_step(
+        native_release_steps,
+        "Verify aligned APK provenance without signing credentials",
+    )
+    native_signer = named_step(
+        native_release_steps,
+        "Sign, verify, and remove protected Native Reader signing key",
+    )
+    native_upload = named_step(
+        native_release_steps, "Upload upgrade-compatible Native Reader APK"
+    )
+    native_verify_run = str(native_verify.get("run", ""))
+    native_signer_run = str(native_signer.get("run", ""))
+    native_signer_env = native_signer.get("env")
+    native_secret = "secrets.NATIVE_SPREAD_KEYSTORE_B64"
+    if (
+        native_download.get("uses")
+        != "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093"
+        or "native-reader-v2-release-input-${{ github.sha }}"
+        not in str(native_download.get("with", {}))
+        or "sourceCommit" not in native_verify_run
+        or "artifactSha256" not in native_verify_run
+        or "Release input contains unexpected files." not in native_verify_run
+        or "versionCode='140' versionName='0\\.0\\.140'" not in native_verify_run
+        or "unexpectedly already signed" not in native_verify_run
+        or not isinstance(native_signer_env, dict)
+        or native_secret
+        not in str(native_signer_env.get("NATIVE_SPREAD_KEYSTORE_B64", ""))
+        or "$expectedSignedLength = 274971L" not in native_signer_run
+        or "dd40b89f4bbc6d161b90ea631efccac8c185e3ae8b2cc0cb13d5791f35464c48"
+        not in native_signer_run
+        or "[Array]::Clear($keyBytes, 0, $keyBytes.Length)"
+        not in native_signer_run
+        or "Remove-Item -LiteralPath $keystore -Force" not in native_signer_run
+        or native_upload.get("uses")
+        != "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
+        or "SupernoteNativeSpreadProbe-v0.0.140.apk"
+        not in str(native_upload.get("with", {}))
+    ):
+        fail(
+            "Native Reader protected signer must verify exact provenance, "
+            "signer identity, final bytes, cleanup, and publication"
+        )
+    native_release_text = str(native_release_job)
+    if "actions/checkout@" in native_release_text or "build.ps1" in native_release_text:
+        fail("Native Reader protected signer must not checkout or build project code")
+    native_secret_steps = [
+        step for step in all_steps if native_secret in str(step)
+    ]
+    if native_secret_steps != [native_signer]:
+        fail("Native Reader stable signer must appear only in its protected step")
+
+    plugin_verify = named_step(plugin_steps, "Verify package")
+    plugin_upload = named_step(plugin_steps, "Upload plugin package")
+    plugin_verify_run = str(plugin_verify.get("run", ""))
+    if (
+        "scripts/verify_plugin_package.py" not in plugin_verify_run
+        or "out/build-provenance/SupernoteRtlReader.bundle"
+        not in plugin_verify_run
+        or "out/build-provenance/app.npk" not in plugin_verify_run
+        or plugin_upload.get("uses")
+        != "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
+        or "path': 'out/*.snplg'" not in str(plugin_upload.get("with", {}))
+    ):
+        fail("plugin publication must verify exact bundle/APK provenance first")
 
     ephemeral = named_step(
         test_steps, "Prepare ephemeral companion signing key"
@@ -764,7 +952,7 @@ def check(repo_root: Path) -> None:
     frozen_source_digests = (
         (
             plugin_path,
-            "c5760e283b065afc05be683122051090c0a534e0e33c187350dbfbea127db006",
+            "485bf036775d1c553f366a1c8c00e144be335e03a423463e302d4cc373f86c86",
             "ReaderPreferencesModule.kt.template",
         ),
         (
@@ -774,7 +962,7 @@ def check(repo_root: Path) -> None:
         ),
         (
             native_build_path,
-            "c1360bc500d645109b45826897a6d9fe658803cf05e2c34e8afebe80798044e1",
+            "c69aed736866691f77d2c92655c8ec22ed13407b3049d2d40b15992fb14bccd1",
             "native build script",
         ),
         (
@@ -789,32 +977,32 @@ def check(repo_root: Path) -> None:
         ),
         (
             app_path,
-            "96e2fcab663fb2d2bb470c433048740773991254713c49e7c2a489644b85f0f1",
+            "6606708256234c109530d03b8de7888179bb3886bc2def6bbde3b6f549dd6123",
             "Native Spread UI authority source",
         ),
         (
             workflow_path,
-            "fca41cc3d40cd1ffe30328a9e622a187969baf93defd1606c746aa8e23e0833f",
+            "275fd959afc4db9754c5bb1418125b1473d7840f8eddc1dc492e0235b727a08f",
             "Native Spread companion-build workflow",
         ),
         (
             plugin_build_path,
-            "8f5a1d8ebcf07b500f8cb2a7720326680eb86a8855723b0d4b166028d6917197",
+            "cab3726f8249eee4c7cc31dc14934b8d7b164e86d7a152cd6807b4863ebbe5e9",
             "native plugin build entrypoint",
         ),
         (
             packager_patch_path,
-            "386893f12a9db1ccb4fb77e57a63c65ab1b778bdd90803ae59c3e12ba8cd2a24",
+            "6bf380d6ca8bde781523a6e3e49c70c7612cb4fe74a51d43afa61974301698fb",
             "generated plugin-packager hardening",
         ),
         (
             package_verifier_path,
-            "2761190e1096a0c8f5ac0b0a0aecdf88f522a250023117aa387f8d5978e98b03",
+            "b7cf13aaea2df510772e7e25ad8ff2dd51c49e3a29bbe35ab52f591c76728e52",
             "finished native plugin package verifier",
         ),
         (
             package_test_path,
-            "acfea38a966b7d5553571bf93478bf1a0c5382ebf554f3e03e994fbbbb08c028",
+            "d01d274cb40907a834e446476a33c19cb2cbb42a4978d1f4d88ddd1dadb48598",
             "native plugin packaging failure-injection tests",
         ),
     )
@@ -863,130 +1051,30 @@ def check(repo_root: Path) -> None:
     if "V2ShadowState v2State = V2_SHADOW_STATES.remove(activity);" not in module:
         fail("Native Reader v2 shadow state is not retired with its Activity")
 
-    workflow_code = mask_yaml_comments(workflow)
-    require_markers(
-        workflow_code,
-        (
-            "trace-helper-tests:",
-            "invariant-suites:",
-            "native-spread-build:",
-            "python3 scripts/test_native_reader_v2_core.py .",
-            "python3 scripts/test_native_reader_v2_mutations.py .",
-            "python3 scripts/check_native_invariants.py .",
-            "python3 scripts/check_native_spread_invariants.py .",
-            "python3 scripts/test_plugin_packaging_fail_closed.py",
-            "name: Native Spread compile and verification only",
-            "- invariant-suites",
-            "- trace-helper-tests",
-            "uses: actions/checkout@v4",
-            "uses: actions/setup-java@v4",
-            "java-version: '17'",
-            "uses: android-actions/setup-android@v4",
-            "ndk;27.0.12077973",
-            "-File .\\native-spread-module\\build.ps1 `",
-            "if ($LASTEXITCODE -ne 0)",
-            "no APK is published by this workflow",
-            'python3 scripts/verify_plugin_package.py "${packages[0]}" .',
-        ),
-        "Native Spread companion-build provenance",
-    )
-    if workflow_code.count("  trace-helper-tests:") != 1:
-        fail("workflow must define exactly one Native Spread trace-test job")
-    if workflow_code.count("  invariant-suites:") != 1:
-        fail("workflow must define exactly one invariant-suite job")
-    if workflow_code.count("  native-spread-build:") != 1:
-        fail("workflow must define exactly one Native Spread companion build job")
-    trace_job_start = workflow_code.find("  trace-helper-tests:")
-    invariant_job_start = workflow_code.find("  invariant-suites:")
-    companion_job_start = workflow_code.find("  native-spread-build:")
-    plugin_job_start = workflow_code.find("  build:", companion_job_start)
-    if not (
-        0 <= trace_job_start < invariant_job_start
-        < companion_job_start < plugin_job_start
+    invariant_commands = str(jobs["invariant-suites"])
+    for command in (
+        "python3 scripts/test_native_reader_v2_core.py .",
+        "python3 scripts/test_native_reader_v2_mutations.py .",
+        "python3 scripts/check_native_reader_v2_invariants.py .",
+        "python3 scripts/check_native_invariants.py .",
+        "python3 scripts/check_native_spread_invariants.py .",
+        "python3 scripts/test_build_provenance.py .",
+        "python3 scripts/test_plugin_packaging_fail_closed.py",
     ):
-        fail("could not isolate Native Spread companion build workflow job")
-    trace_job = workflow_code[trace_job_start:invariant_job_start]
-    invariant_job = workflow_code[invariant_job_start:companion_job_start]
-    companion_job = workflow_code[companion_job_start:plugin_job_start]
-    plugin_job = workflow_code[plugin_job_start:]
-    disabled_job_pattern = re.compile(
-        r"(?m)^\s*if:\s*\$\{\{\s*false\s*\}\}\s*$"
-    )
-    job_override_pattern = re.compile(r"(?m)^ {4}if:\s*")
-    if (
-        "continue-on-error:" in trace_job
-        or disabled_job_pattern.search(trace_job)
-        or job_override_pattern.search(trace_job)
+        if invariant_commands.count(command) != 1:
+            fail(f"workflow invariant gate must execute exactly once: {command}")
+    for guarded_job_name in (
+        "trace-helper-tests",
+        "invariant-suites",
+        "native-spread-build",
+        "build",
     ):
-        fail("Native Spread trace regression job can be disabled")
-    if (
-        "continue-on-error:" in invariant_job
-        or disabled_job_pattern.search(invariant_job)
-        or job_override_pattern.search(invariant_job)
-        or invariant_job.count(
-            "python3 scripts/test_native_reader_v2_core.py ."
-        ) != 1
-        or invariant_job.count(
-            "python3 scripts/test_native_reader_v2_mutations.py ."
-        ) != 1
-        or invariant_job.count("python3 scripts/check_native_invariants.py .") != 1
-        or invariant_job.count(
-            "python3 scripts/check_native_spread_invariants.py ."
-        ) != 1
-        or invariant_job.count(
-            "python3 scripts/test_plugin_packaging_fail_closed.py"
-        ) != 1
-    ):
-        fail("Native Spread invariant-suite workflow gate can be bypassed")
-    if (
-        "continue-on-error:" in companion_job
-        or disabled_job_pattern.search(companion_job)
-        or job_override_pattern.search(companion_job)
-    ):
-        fail("Native Spread companion build or publication can be disabled")
-    if re.search(r"(?m)^\s*ref:\s*", companion_job):
-        fail("Native Spread companion checkout must use the triggering revision")
-    if companion_job.count("-File .\\native-spread-module\\build.ps1 `") != 1:
-        fail("workflow must invoke the reviewed Native Spread build exactly once")
-    needs_invariants = companion_job.find("- invariant-suites")
-    needs_trace_tests = companion_job.find("- trace-helper-tests", needs_invariants)
-    runs_on = companion_job.find("runs-on: windows-latest", needs_trace_tests)
-    if not 0 <= needs_invariants < needs_trace_tests < runs_on:
-        fail("Native Spread companion build is not gated by both safety jobs")
-    if "actions/upload-artifact" in companion_job or re.search(
-        r"(?m)^\s*path:\s*.*\.apk\s*$",
-        companion_job,
-    ):
-        fail("Native Spread verification workflow may not publish its APK")
-    if (
-        "continue-on-error:" in plugin_job
-        or disabled_job_pattern.search(plugin_job)
-        or job_override_pattern.search(plugin_job)
-    ):
-        fail("plugin build or publication can bypass its Native Spread gate")
-    if re.search(r"(?m)^\s*ref:\s*", plugin_job):
-        fail("plugin build checkout must use the triggering revision")
-    plugin_needs_native = plugin_job.find("- native-spread-build")
-    plugin_runs_on = plugin_job.find("runs-on: ubuntu-latest")
-    plugin_build = plugin_job.find("./build.sh", plugin_runs_on)
-    plugin_verify = plugin_job.find(
-        'python3 scripts/verify_plugin_package.py "${packages[0]}" .',
-        plugin_build,
-    )
-    plugin_upload = plugin_job.find("uses: actions/upload-artifact@v4", plugin_verify)
-    plugin_artifact = plugin_job.find("path: out/*.snplg", plugin_upload)
-    if not (
-        0 <= plugin_needs_native < plugin_runs_on < plugin_build
-        < plugin_verify < plugin_upload < plugin_artifact
-    ):
-        fail(
-            "plugin artifact is not built, verified, and uploaded strictly "
-            "after the Native Spread compile/safety gate"
-        )
-    if plugin_job.count("- native-spread-build") != 1:
-        fail("plugin build must depend on Native Spread verification exactly once")
-    if plugin_job.count("python3 scripts/verify_plugin_package.py") != 1:
-        fail("workflow must strictly verify the finished plugin package exactly once")
+        guarded_job = jobs[guarded_job_name]
+        if (
+            "continue-on-error" in guarded_job
+            or guarded_job.get("if") is not None
+        ):
+            fail(f"required workflow job can be bypassed: {guarded_job_name}")
 
     plugin_build_code = mask_shell_comments(plugin_build_script)
     require_markers(
@@ -998,7 +1086,8 @@ def check(repo_root: Path) -> None:
             './buildPlugin.sh',
             'mapfile -t PACKAGES < <(find "$PROJECT/build/outputs"',
             'if [[ "${#PACKAGES[@]}" -ne 1 ]]',
-            '"${PYTHON_CMD[@]}" "$ROOT/scripts/verify_plugin_package.py" "${PACKAGES[0]}" "$ROOT"',
+            '"${PYTHON_CMD[@]}" "$ROOT/scripts/verify_plugin_package.py"',
+            '"$EXPECTED_BUNDLE" "$EXPECTED_NATIVE_APK"',
             'cp "${PACKAGES[0]}" "$ROOT/out/"',
         ),
         "fail-closed native plugin build",
@@ -1030,6 +1119,10 @@ def check(repo_root: Path) -> None:
             'if ! build_android_apk "$project_root" "$gen_cfg"',
             'if ! copy_apk_and_update_config "$project_root" "$gen_dir" "$gen_cfg"',
             'write_color_output "Required RTL Reader native build was not selected" "Red"',
+            'signed_apk="$(sign_compacted_apk "$project_root" "$apk_path")"',
+            '"$apksigner" verify --verbose --print-certs "$signed"',
+            'Final compacted APK signer is not the reviewed identity',
+            'for required_scheme in 2 3; do',
             "return 1",
         ),
         "generated native packager fail-closed patch",
@@ -1040,9 +1133,15 @@ def check(repo_root: Path) -> None:
             'EXPECTED_REACT_PACKAGES = ["com.supernotertlreader.PdfRendererPackage"]',
             '"nativeCodePackage"] = "/app.npk"',
             'expected_config["iconPath"] = "/icon.png"',
-            'verify_native_apk(require_single_entry(package, "app.npk"))',
+            'native_apk = require_single_entry(package, "app.npk")',
+            'native_apk_validator(native_apk)',
             '"lib/arm64-v8a/libnative-lib.so"',
-            'EXPECTED_NATIVE_CLASSES',
+            'EXPECTED_NATIVE_CLASS_DESCRIPTORS',
+            'verify_apk_tools(Path(temporary_name))',
+            'EXPECTED_NATIVE_APK_SIGNER_SHA256',
+            'embedded app.npk must have verified v2 and v3 APK signatures',
+            'JavaScript bundle does not match the independently named build output',
+            'embedded app.npk does not match the independently named build output',
             'expected_runtime_marker(repo_root)',
         ),
         "finished native plugin package verification",
@@ -1061,6 +1160,15 @@ def check(repo_root: Path) -> None:
             "missing reviewed native classes",
             "invalid embedded APK",
             "duplicate PluginConfig.json",
+            "bundle provenance mismatch",
+            "native APK provenance mismatch",
+            "missing signer digest",
+            "multiple signer digests",
+            "unexpected signer identity",
+            "missing v2 signature scheme",
+            "missing v3 signature scheme",
+            "application-class decoy in nested activity",
+            "plugin verifier selected unpinned Android build-tools",
             "Native plugin packaging fail-closed tests: PASS",
         ),
         "native plugin packaging failure-injection coverage",
@@ -1601,33 +1709,34 @@ def check(repo_root: Path) -> None:
     require_markers(
         plugin,
         (
-            "NATIVE_SPREAD_MIN_VERSION_CODE = 120L",
-            "private const val NATIVE_SPREAD_HANDSHAKE_PROTOCOL = 2",
-            "private const val NATIVE_SPREAD_EDITABLE_MARKER_PROTOCOL = 2",
-            '"protected-editable-transactional-v1"',
+            "NATIVE_READER_V2_MIN_VERSION_CODE = 140L",
+            "private const val NATIVE_SPREAD_HANDSHAKE_PROTOCOL = 4",
+            "private const val NATIVE_SPREAD_EDITABLE_MARKER_PROTOCOL = 3",
+            '"protected-editable-transactional-v2"',
             'private const val NATIVE_SPREAD_ACTIVATION_PENDING = "pending"',
             'private const val NATIVE_SPREAD_ACTIVATION_COMMITTED = "committed"',
             'setProperty("documentSha256", backup.documentSha256)',
             'backup.documentSha256 == sha256(pdfFile)',
             "NATIVE_SPREAD_HANDSHAKE_REQUEST",
             "NATIVE_SPREAD_HANDSHAKE_RESPONSE",
-            "requestNativeSpreadHandshake(pdfFile) { handshake ->",
+            "requestNativeSpreadHandshake(",
             "if (!handshake.active)",
             "writeNativeSpreadReadOnlyMarker(",
             "check(handshake.active)",
-            "canonicalReportedPath == expectedPath",
+            "reportedPath == expectedPath",
             "documentApkLength == SUPPORTED_DOCUMENT_APK_LENGTH",
             "RTL_READER_NATIVE_SPREAD_HANDSHAKE_REQUEST",
             'putBoolean("configured", configured)',
             'putBoolean("configuredEditable", configuredEditable)',
-            'putBoolean("enabled", configured && runtimeCompatible)',
+            'configuredEditable && runtimeCompatible',
             "fun configureNativeSpreadEditable(",
             "ensureNativeAnnotationBackup(pdfFile)",
             'startNativeBackupWorker("RTLReaderNativeBackupCreate")',
             'startNativeBackupWorker("RTLReaderNativeBackupRetire")',
             "retireNativeAnnotationBackup(",
-            "val previousMarkerBytes = if (marker.isFile) marker.readBytes() else null",
-            "writeBytesAtomically(marker, previousMarkerBytes)",
+            "val previousMarkerBytes = readPersistedBytesIfFile(marker)",
+            "publishNativeSpreadOffMarkerLocked(",
+            "NativeReaderV2AuthorityJournal.publish(",
             "RTL_READER_NATIVE_SPREAD_TRANSITION_PENDING",
             "RTL_READER_NATIVE_EDITABLE_ACTIVATION_ROLLED_BACK",
             "sameNativeAnnotationBackup(backup, revalidatedBackup)",
@@ -1635,8 +1744,8 @@ def check(repo_root: Path) -> None:
             "writeNativeSpreadPendingMarker(",
             "commitNativeSpreadEditableMarker(",
             "fun restoreNativeAnnotationBackup(",
-            "scheduleAnnotationRestore(pdfFile, backup)",
-            "Recovery snapshot changed before restore",
+            "scheduleAnnotationRestore(",
+            "nativeMarkRecoveryJournalMatchesBackup(recoveryJournal, backup)",
             "private fun documentPids(activityManager: ActivityManager): List<Int>?",
             "activityManager.runningAppProcesses ?: return null",
             "documentPids(activityManager) ?: run {",
@@ -1654,7 +1763,7 @@ def check(repo_root: Path) -> None:
             "removeNativeAnnotationBackupFiles(pdfFile, backup)",
             "NATIVE_SPREAD_LEGACY_EDITABLE_MODE",
             "legacyConfiguredEditable",
-            'startNativeBackupWorker("RTLReaderNativeEditableMigrate")',
+            '"RTLReaderNativeEditableMigrate",',
             "migrateLegacyProtectedEditableSession(",
             "protectedEditableSessionMarkerValid(",
             "RTL_READER_NATIVE_LEGACY_SESSION_MIGRATED",
@@ -1707,7 +1816,7 @@ def check(repo_root: Path) -> None:
             '"transactionProtocol"',
             "NATIVE_SPREAD_EDITABLE_MARKER_PROTOCOL.toString()",
             '"minimumModuleVersionCode"',
-            "NATIVE_SPREAD_MIN_VERSION_CODE.toString()",
+            "NATIVE_READER_V2_MIN_VERSION_CODE.toString()",
             'setProperty("activationToken", activationToken)',
             'setProperty("activationState", activationState)',
             "NATIVE_SPREAD_ACTIVATION_PENDING",
@@ -1722,7 +1831,7 @@ def check(repo_root: Path) -> None:
             '"Supernote RTL protected editable committed activation"',
             "onCommitted",
         ),
-        "protocol-2 pending/committed protected-editable publication",
+        "protocol-3 pending/committed protected-editable publication",
     )
     if "NATIVE_SPREAD_LEGACY_EDITABLE_MODE" in editable_marker_writer:
         fail("protected editable marker writer can republish the legacy mode")
@@ -1736,18 +1845,30 @@ def check(repo_root: Path) -> None:
         committed_writer_start:committed_writer_end
     ]
     committed_writer_masked = mask_cpp_comments_and_literals(committed_writer)
-    committed_publish = committed_writer_masked.find("writePropertiesAtomically(")
+    committed_publish = committed_writer_masked.find("writePropertiesAtomicallyCas(")
     committed_publish_open = committed_writer_masked.find("(", committed_publish)
     committed_publish_close = matching_parenthesis(
         committed_writer_masked,
         committed_publish_open,
         "committed editable atomic publication",
     )
-    committed_return = committed_writer_masked.find(
-        "return backup", committed_publish_close
+    committed_postcondition = committed_writer_masked.find(
+        "val committedMarkerAuthority =", committed_publish_close
     )
-    if not 0 <= committed_publish < committed_publish_close < committed_return:
-        fail("committed editable marker does not end at its atomic publication")
+    committed_ack = committed_writer_masked.find(
+        "requireDocumentAuthorityAck(", committed_postcondition
+    )
+    committed_return = committed_writer_masked.find(
+        "committedBackup", committed_ack
+    )
+    if not (
+        0 <= committed_publish < committed_publish_close
+        < committed_postcondition < committed_ack < committed_return
+    ):
+        fail(
+            "committed editable publication must be followed by durable "
+            "journal revalidation and exact Document acknowledgement"
+        )
     committed_call = committed_writer[
         committed_publish:committed_publish_close + 1
     ]
@@ -1764,23 +1885,16 @@ def check(repo_root: Path) -> None:
     before_publish_body = committed_call_masked[
         before_publish_open + 1:before_publish_close
     ]
-    normalized_before_publish = re.sub(r"\s+", "", before_publish_body)
-    expected_before_publish = (
-        "if(requireLiveBaselineMatch&&"
-        "!liveNativeAnnotationMatchesBackup(backup)){"
-        "throwIllegalStateException(,)}"
-    )
-    if normalized_before_publish != expected_before_publish:
-        fail(
-            "the committed editable authorization does not perform only the "
-            "required first-activation live-baseline guard immediately before "
-            "publication"
-        )
     require_markers(
         committed_call,
         (
+            "expected = pendingMarkerAuthority",
             "onPublished = onCommitted",
             "beforePublish = {",
+            "requireNativeSpreadConfigurationGeneration(",
+            "samePersistedAuthority(",
+            "sameNativeAnnotationBackup(backup, immediateBackup)",
+            "nativeAnnotationBackupSourceFilesMatch(immediateBackup)",
             "if (requireLiveBaselineMatch &&",
             "!liveNativeAnnotationMatchesBackup(backup)",
             "Supernote annotations changed immediately before protected editing authorization",
@@ -1792,19 +1906,19 @@ def check(repo_root: Path) -> None:
             "committed editable live-baseline authority must appear only in "
             "the helper parameter and its before-publish guard"
         )
-    fallible_committed_tail = tuple(
+    unsafe_committed_tail = tuple(
         marker for marker in (
-            "readPropertiesIfFile(",
-            "readNativeAnnotationBackup(",
-            "sha256(",
-            "throw IllegalStateException(",
+            "rollbackNativeSpreadEditableActivation(",
+            "writeBytesAtomically(",
+            "Os.rename(",
+            "marker.delete(",
         )
         if marker in committed_writer[committed_publish_close + 1:committed_return]
     )
-    if fallible_committed_tail:
+    if unsafe_committed_tail:
         fail(
-            "fallible work remains after the committed editable marker's "
-            f"authorization rename: {fallible_committed_tail}"
+            "committed authority can be rolled back or replaced after its "
+            f"journal publication: {unsafe_committed_tail}"
         )
 
     properties_writer_start = plugin.find(
@@ -1824,6 +1938,12 @@ def check(repo_root: Path) -> None:
         properties_writer,
         (
             "beforePublish: () -> Unit = {}",
+            "if (file.name.endsWith(NATIVE_SPREAD_MARKER_SUFFIX))",
+            "NativeReaderV2AuthorityJournal.initialize(file)",
+            "NativeReaderV2AuthorityJournal.publish(",
+            "current?.journalGeneration",
+            "current?.journalAuthoritySha256",
+            "onPublished()",
             "writeBytesAtomically(",
             "onPublished = onPublished",
             "beforePublish = beforePublish",
@@ -1862,7 +1982,7 @@ def check(repo_root: Path) -> None:
             'properties.getProperty("transactionProtocol", "") ==',
             "NATIVE_SPREAD_EDITABLE_MARKER_PROTOCOL.toString()",
             'properties.getProperty("minimumModuleVersionCode", "") ==',
-            "NATIVE_SPREAD_MIN_VERSION_CODE.toString()",
+            "NATIVE_READER_V2_MIN_VERSION_CODE.toString()",
             'val activationToken = properties.getProperty("activationToken", "")',
             "UUID.fromString(activationToken).toString() == activationToken",
             'properties.getProperty("activationState", "") == activationState',
@@ -1873,7 +1993,7 @@ def check(repo_root: Path) -> None:
             "NATIVE_SPREAD_ACTIVATION_PENDING",
             "pendingActivationMatchesEvidence(",
         ),
-        "strict protocol-2 marker-state and backup validation",
+        "strict protocol-3 marker-state and backup validation",
     )
     load_mode_start = plugin.find("fun loadNativeSpreadMode(")
     configure_read_only_start = plugin.find(
@@ -1882,15 +2002,15 @@ def check(repo_root: Path) -> None:
     if load_mode_start < 0 or configure_read_only_start < 0:
         fail("could not isolate Native Spread load-time legacy migration")
     load_mode = plugin[load_mode_start:configure_read_only_start]
-    legacy_detect = load_mode.find("val legacyConfiguredEditable =")
+    legacy_detect = load_mode.find("val settings = nativeSpreadMarkerSettings(")
     handshake_start = load_mode.find(
-        "requestNativeSpreadHandshake(pdfFile) { handshake ->", legacy_detect
+        "requestNativeSpreadHandshake(", legacy_detect
     )
     migration_guard = load_mode.find(
-        "if (handshake.active && legacyConfiguredEditable)", handshake_start
+        "if (handshake.active && settings.legacyConfiguredEditable)", handshake_start
     )
     migration_worker = load_mode.find(
-        'startNativeBackupWorker("RTLReaderNativeEditableMigrate")',
+        '"RTLReaderNativeEditableMigrate",',
         migration_guard,
     )
     migration_call = load_mode.find(
@@ -2034,18 +2154,31 @@ def check(repo_root: Path) -> None:
         "IllegalStateException",
         "Log.e",
         "Log.i",
+        "UUID.randomUUID",
         "annotationRecoveryPending.get",
         "assessNativeSpreadAuthority",
+        "beginNativeSpreadRecovery",
         "catch",
+        "completeNativeSpreadRecovery",
+        "finalProperties.getProperty",
         "if",
+        "journalExpectation",
         "nativeSpreadMarker",
+        "publishNativeSpreadOffMarkerLocked",
         "promise.reject",
         "promise.resolve",
+        "readPersistedAuthorityIfFile",
         "readNativeAnnotationBackup",
         "reconcileFailedActivationBackupForExplicitActivation",
         "reconcileNativeSpreadRecovery",
+        "requireDocumentAuthorityAck",
+        "requireNativeSpreadConfigurationGeneration",
         "requirePdf",
         "startNativeBackupWorker",
+        "strictNativeSpreadMarkerProperties",
+        "toString",
+        "withNativeSpreadConfigurationAuthority",
+        "withNativeSpreadPublicationLock",
     }
     unexpected_recovery_calls = sorted(
         set(recovery_calls) - allowed_recovery_calls
@@ -2081,19 +2214,19 @@ def check(repo_root: Path) -> None:
         fail("could not isolate annotation recovery worker ownership")
     restore_backup = plugin_code[restore_start:restore_end]
     recovery_claim = restore_backup.find(
-        "annotationRecoveryPending.compareAndSet(false, true)"
+        "beginNativeSpreadRecovery()"
     )
     stale_handoff_clear = restore_backup.find(
         "annotationRecoveryHandoffPending.set(false)", recovery_claim
     )
     restore_schedule = restore_backup.find(
-        "scheduleAnnotationRestore(pdfFile, backup)", stale_handoff_clear
+        "scheduleAnnotationRestore(", stale_handoff_clear
     )
     handoff_publish = restore_backup.find(
         "annotationRecoveryHandoffPending.set(true)", restore_schedule
     )
     worker_release = restore_backup.find(
-        "annotationRecoveryPending.set(false)", handoff_publish
+        "completeNativeSpreadRecovery(configurationGeneration)", handoff_publish
     )
     recovery_resolve = restore_backup.find(
         'promise.resolve(nativeAnnotationBackupMap(backup, "restored"))',
@@ -2112,10 +2245,10 @@ def check(repo_root: Path) -> None:
             "publish a separate one-shot handoff skip before releasing that "
             "ownership, and only then resolve"
         )
-    if restore_backup.count("annotationRecoveryPending.set(false)") != 3:
+    if restore_backup.count("completeNativeSpreadRecovery(") != 2:
         fail(
-            "annotation recovery pending ownership must be released only by the "
-            "success, worker-failure, and pre-worker-failure paths"
+            "annotation recovery ownership must be released exactly by the "
+            "completion callback or the pre-worker-failure path"
         )
     handoff_start = plugin_code.find("fun handoffLastSavedPage(promise: Promise)")
     handoff_end = plugin_code.find(
@@ -2125,7 +2258,8 @@ def check(repo_root: Path) -> None:
         fail("could not isolate native-reader handoff recovery guard")
     handoff = re.sub(r"\s+", "", plugin_code[handoff_start:handoff_end])
     if (
-        "if(annotationRecoveryPending.get()||"
+        "if(nativeMarkRecoveryRequiredPending()||durableRecovery||"
+        "annotationRecoveryPending.get()||"
         "annotationRecoveryHandoffPending.compareAndSet(true,false))"
         not in handoff
         or "annotationRecoveryPending.compareAndSet(true,false)" in handoff
@@ -2187,7 +2321,7 @@ def check(repo_root: Path) -> None:
     require_markers(
         authority_result,
         (
-            "val authority = assessNativeSpreadAuthority(",
+            "authority: NativeSpreadAuthorityAssessment",
             'putBoolean("activationPending", authority.activationPending)',
             'putBoolean("recoveryNeeded", authority.recoveryNeeded)',
             'putBoolean("reconciliationAvailable", authority.reconciliationAvailable)',
@@ -2223,7 +2357,7 @@ def check(repo_root: Path) -> None:
             "!nativeSpreadConfiguredEditable",
             "setNativeSpreadConfigured(enabled);",
             "nativeSpreadAuthorityResolved && !nativeSpreadConfigured",
-            "RTL read-only remains configured, but the compatible hooks are inactive.",
+            "RTL editable remains configured, but its verified hooks are inactive.",
             "RTL editable",
             "Back up & enable",
             "restoreNativeAnnotationBackup",
@@ -2528,7 +2662,7 @@ def check(repo_root: Path) -> None:
         "nativeSpreadBusy || !nativeSpreadAuthorityResolved"
     ) != 3:
         fail("direction/native Off controls are not locked by native authority")
-    if authority_settings.count("!nativeSpreadAuthorityResolved ||") != 10:
+    if authority_settings.count("!nativeSpreadAuthorityResolved ||") != 9:
         fail("state-dependent local/native controls are not authority-locked")
     require_markers(
         app_code,
@@ -2810,7 +2944,7 @@ def check(repo_root: Path) -> None:
 
     activation_helper = plugin[activation_helper_start:rollback_helper_start]
     marker_snapshot = activation_helper.find(
-        "val previousMarkerBytes = if (marker.isFile) marker.readBytes() else null"
+        "val previousMarkerBytes = readPersistedBytesIfFile(marker)"
     )
     backup_existed = activation_helper.find(
         "val backupManifestExisted = nativeAnnotationBackupManifest(pdfFile).isFile"
@@ -2834,21 +2968,21 @@ def check(repo_root: Path) -> None:
         "commitNativeSpreadEditableMarker(", post_publication_live_check
     )
     final_revalidation_required = activation_helper.find(
-        "requireLiveBaselineMatch = !backupManifestExisted", committed_write
+        "requireLiveBaselineMatch =", committed_write
     )
     committed_published = activation_helper.find(
-        "markerCommittedByActivation = true", final_revalidation_required
+        "committedMarkerPublishedByActivation = true", final_revalidation_required
     )
     rollback = activation_helper.find(
         "rollbackNativeSpreadEditableActivation(", committed_published
     )
     fail_closed_throw = activation_helper.find("throw changed", rollback)
     committed_catch_guard = activation_helper.find(
-        "if (markerCommittedByActivation && backup != null)",
+        "if (committedMarkerPublishedByActivation)",
         fail_closed_throw,
     )
     committed_catch_return = activation_helper.find(
-        "return backup", committed_catch_guard
+        "throw activationError", committed_catch_guard
     )
     if not (
         0 <= marker_snapshot < backup_existed < activation_token
@@ -2862,12 +2996,12 @@ def check(repo_root: Path) -> None:
             "editable activation is not linearized as pending publication, "
             "final live-mark check, committed authorization, and fail-closed rollback"
         )
-    if activation_helper.count(
-        "requireLiveBaselineMatch = !backupManifestExisted"
+    if compact_code(activation_helper).count(
+        "requireLiveBaselineMatch=!backupManifestExisted&&legacyMigration==null"
     ) != 1:
         fail(
             "editable activation must require final live-baseline matching "
-            "exactly for first-time backup creation"
+            "exactly for first-time backup creation outside legacy migration"
         )
     if "Thread.sleep(100L)" in activation_helper or "retrying activation" in activation_helper:
         fail("post-publication .mark divergence is retried from changed bytes")
@@ -2886,7 +3020,10 @@ def check(repo_root: Path) -> None:
             "if (markerOwnershipLost && !archiveNewBackup)",
             "RTL_READER_NATIVE_EDITABLE_ACTIVATION_ROLLBACK_SKIPPED reason=marker_ownership_lost",
             "fun restorePublishedMarkerIfOwned()",
-            "writeBytesAtomically(marker, previousMarkerBytes)",
+            "publishNativeSpreadOffMarkerLocked(",
+            "writeBytesAtomicallyCas(",
+            "currentMarkerAuthority",
+            "requireDocumentAuthorityAck(",
             "failedActivationArchive = archiveFailedActivationBackup(",
             "restorePublishedMarkerIfOwned()",
             "removeNativeAnnotationBackupFiles(pdfFile, backup)",
@@ -2894,13 +3031,12 @@ def check(repo_root: Path) -> None:
             "sameNativeAnnotationBackup(backup, preserved)",
             "failedActivationBackupArchived(pdfFile, archive)",
             "failedActivationEvidenceMatchesBackup(evidence, backup)",
-            "marker.readBytes().contentEquals(previousMarkerBytes)",
+            "readPersistedBytesIfFile(marker)",
+            "?.contentEquals(previousMarkerBytes) == true",
             "!nativeAnnotationBackupManifest(pdfFile).exists()",
             "!nativeAnnotationBackupSnapshot(pdfFile).exists()",
             "!nativeAnnotationRetiringSnapshot(pdfFile).exists()",
             '"Protected editable activation rollback could not be verified"',
-            "return true",
-            "return false",
             "RTL_READER_NATIVE_EDITABLE_ACTIVATION_ROLLED_BACK",
         ),
         "verified post-publication editable activation rollback",
@@ -3168,8 +3304,11 @@ def check(repo_root: Path) -> None:
     backup_identity_check = restore_worker.find(
         "sameNativeAnnotationBackup(backup, revalidatedBackup)"
     )
+    recovery_fence = restore_worker.find(
+        "publishNativeMarkRecoveryJournal(", backup_identity_check
+    )
     mark_write = restore_worker.find(
-        "copyFileAtomically(", backup_identity_check
+        "publishNativeAnnotationRestore(", recovery_fence
     )
     before_publish_callback = restore_worker.find(
         "beforePublish = {", mark_write
@@ -3178,7 +3317,7 @@ def check(repo_root: Path) -> None:
         '"before-mark-publish"', before_publish_callback
     )
     after_publish_callback = restore_worker.find(
-        "onPublished = {", before_publish_guard
+        "afterPublish = {", before_publish_guard
     )
     after_publish_guard = restore_worker.find(
         '"after-mark-publish"', after_publish_callback
@@ -3188,7 +3327,8 @@ def check(repo_root: Path) -> None:
     )
     if not (
         0 <= replacement_generation < repeated_pid_generation < stable_absence
-        < document_revalidation < backup_identity_check < mark_write
+        < document_revalidation < backup_identity_check < recovery_fence
+        < mark_write
         < before_publish_callback < before_publish_guard
         < after_publish_callback < after_publish_guard < mark_verification
     ):
@@ -3215,19 +3355,30 @@ def check(repo_root: Path) -> None:
     if not 0 <= helper_before < helper_rename < helper_after:
         fail("atomic annotation copy does not guard both sides of publication")
     retirement_guard = restore_worker.find(
-        'requireDocumentProcessAbsent(activityManager, "before-backup-retirement")',
+        '"before-backup-retirement"',
         mark_verification,
     )
-    transactional_cleanup = restore_worker.find(
-        "removeNativeAnnotationBackupFiles(pdfFile, revalidatedBackup)",
-        retirement_guard,
+    journal_retirement = restore_worker.find(
+        "retireNativeMarkRecoveryJournal(", retirement_guard
     )
-    restore_success = restore_worker.find("completion(null)", transactional_cleanup)
+    recovery_commit = restore_worker.find(
+        "recoveryCommitProven = true", journal_retirement
+    )
+    transactional_cleanup = restore_worker.find(
+        "removeNativeAnnotationBackupFiles(",
+        recovery_commit,
+    )
+    restore_success = restore_worker.find(
+        "completion(persistenceError)", transactional_cleanup
+    )
     if not (
-        0 <= mark_verification < retirement_guard
-        < transactional_cleanup < restore_success
+        0 <= mark_verification < retirement_guard < journal_retirement
+        < recovery_commit < transactional_cleanup < restore_success
     ):
-        fail("annotation restore cleanup is not transactional before success")
+        fail(
+            "annotation restore does not commit the exact RECOVERY journal to "
+            "acknowledged OFF authority before retiring backup evidence"
+        )
 
     restore_api_start = plugin.find("fun restoreNativeAnnotationBackup(")
     marker_writer_start = plugin.find(
@@ -3236,7 +3387,7 @@ def check(repo_root: Path) -> None:
     if restore_api_start < 0 or marker_writer_start < 0:
         fail("could not isolate annotation restore API")
     restore_api = plugin[restore_api_start:marker_writer_start]
-    scheduled = restore_api.find("scheduleAnnotationRestore(pdfFile, backup) { error ->")
+    scheduled = restore_api.find("scheduleAnnotationRestore(")
     completed = restore_api.find(
         'promise.resolve(nativeAnnotationBackupMap(backup, "restored"))'
     )
@@ -3275,11 +3426,11 @@ def check(repo_root: Path) -> None:
         fail("could not isolate transactional annotation backup cleanup")
     cleanup = plugin[cleanup_start:ensure_start]
     stage_snapshot = cleanup.find(
-        "Os.rename(backup.snapshot.absolutePath, retiring.absolutePath)"
+        "renameFileDurably(backup.snapshot, retiring)"
     )
-    delete_manifest = cleanup.find("backup.manifest.delete()")
+    delete_manifest = cleanup.find("deleteFileDurably(backup.manifest)")
     rollback_snapshot = cleanup.find(
-        "Os.rename(retiring.absolutePath, backup.snapshot.absolutePath)"
+        "renameFileDurably(retiring, backup.snapshot)"
     )
     if not (0 <= stage_snapshot < delete_manifest < rollback_snapshot):
         fail("annotation backup retirement can lose its manifest before safe staging")
@@ -3902,21 +4053,32 @@ def check(repo_root: Path) -> None:
         cover_controls_start,
     )
     cover_controls = app[cover_controls_start:appearance_controls_start]
-    unavailable_guard = "nativeSpreadConfigured && !nativeSpreadCompatible"
+    cover_controls_compact = compact_code(cover_controls)
+    unavailable_guard = (
+        "nativeSpreadConfigured&&"
+        "(!nativeSpreadCompatible||!nativeSpreadConfiguredEditable)"
+    )
     if cover_controls.count("nativeSpreadBusy ||") != 2:
         fail("both Cover controls must be disabled during native mode transitions")
-    if cover_controls.count(unavailable_guard) != 2:
-        fail("Cover controls remain enabled for an unavailable configured marker")
+    if cover_controls_compact.count(unavailable_guard) != 2:
+        fail(
+            "Cover controls remain enabled for unavailable or legacy "
+            "configured authority"
+        )
 
     native_controls_start = app.find(
         "<Text style={styles.settingLabel}>Supernote native reader</Text>",
         appearance_controls_start,
     )
     appearance_controls = app[appearance_controls_start:native_controls_start]
+    appearance_controls_compact = compact_code(appearance_controls)
     if appearance_controls.count("nativeSpreadBusy ||") != 6:
         fail("all native spread appearance controls must be transition-safe")
-    if appearance_controls.count(unavailable_guard) != 6:
-        fail("native spread appearance controls ignore unavailable hooks")
+    if appearance_controls_compact.count(unavailable_guard) != 6:
+        fail(
+            "native spread appearance controls ignore unavailable hooks or "
+            "legacy read-only authority"
+        )
     for required in (
         "showSpreadDivider",
         "showNativeSpreadHeader",
@@ -11992,25 +12154,29 @@ def check(repo_root: Path) -> None:
     require_markers(
         native_build,
         (
-            "$nativeSource = Join-Path $projectRoot 'native\\spread_probe_native.cpp'",
             "$verifiedTraceSources = @(",
             "Trace safety source digest mismatch for",
-            "$expectedNativeSourceSha256 =",
-            "$nativeSourceSha256 = Get-NormalizedTextSha256 -LiteralPath $nativeSource",
-            "(Get-NormalizedTextSha256 -LiteralPath $nativeSource) -ne",
-            "-o $nativeOutput",
-            "$nativeSource",
-            "$compiledNativeSha256 = (",
-            "Native eraser source or compiled library changed before packaging.",
+            "$legacySource = [System.IO.Path]::GetFullPath((Join-Path",
+            "$javaSources = @(",
+            "-not [System.IO.Path]::GetFullPath($_).Equals(",
+            "$legacySource,",
+            "$javaSources",
+            "Legacy SpreadProbe executable classes entered the v2 build.",
             "jar class packaging failed with exit code",
             "jar dex/metadata update failed with exit code",
-            "jar native-library update failed with exit code",
+            "APK normalization failed with exit code",
+            "zipalign failed with exit code",
             "APK contains duplicate entry",
             "APK required entry is empty",
-            "$nativeEntry.CompressedLength -ne $nativeEntry.Length",
-            "$apkNativeSha256 -ne $compiledNativeSha256",
+            "APK entry timestamp is not canonical",
+            "APK entry order is not canonical.",
+            "APK payload entry appears after signature metadata.",
+            "'assets/native_init'",
+            "'lib/arm64-v8a/libspreadprobe.so'",
+            "v2 APK contains forbidden legacy payload",
+            "Two clean Native Reader builds were not byte-for-byte reproducible",
         ),
-        "Native Spread canonical-source and APK payload build gate",
+        "Native Reader v2 exclusive Java source and canonical APK build gate",
     )
     native_build_tokens = tokenize_powershell(native_build)
     native_build_depths = powershell_brace_depths(native_build_tokens)
@@ -12087,94 +12253,70 @@ if ($LASTEXITCODE -ne 0) {
         "trace-helper regression-test gate",
     )
 
-    native_source_review_gate = r'''
-$nativeSource = Join-Path $projectRoot 'native\spread_probe_native.cpp'
-$expectedNativeSourceSha256 =
-    '9584855FDEFAC7E7795D8AD34DDE6B0D17ECFD8C93518D309F170AF2BB882221'
-$nativeSourceSha256 = Get-NormalizedTextSha256 -LiteralPath $nativeSource
-if ($nativeSourceSha256 -ne $expectedNativeSourceSha256) {
-    throw (
-        'Frozen native eraser source digest mismatch: expected ' +
-        "$expectedNativeSourceSha256, got $nativeSourceSha256"
+    legacy_source_exclusion_gate = r'''
+$legacySource = [System.IO.Path]::GetFullPath((Join-Path `
+    $projectRoot `
+    'src\com\techrebbe\supernote\spreadprobe\SpreadProbe.java'
+))
+$javaSources = @(
+    Get-ChildItem -LiteralPath (Join-Path $projectRoot 'src') -Recurse -Filter '*.java' -File
+    Get-ChildItem -LiteralPath (Join-Path $projectRoot 'stubs') -Recurse -Filter '*.java' -File
+) | ForEach-Object FullName | Where-Object {
+    -not [System.IO.Path]::GetFullPath($_).Equals(
+        $legacySource,
+        [System.StringComparison]::OrdinalIgnoreCase
     )
 }
 '''
-    native_source_review = require_unique_powershell_sequence(
+    legacy_source_exclusion = require_unique_powershell_sequence(
         native_build_tokens,
-        native_source_review_gate,
-        "pre-compile native-source review gate",
+        legacy_source_exclusion_gate,
+        "legacy engine source-exclusion gate",
     )
 
-    native_compile_gate = r'''
-$nativeOutput = Join-Path $arm64LibDir 'libspreadprobe.so'
-& $clang `
-    -shared `
-    -fPIC `
-    -std=c++17 `
-    -O2 `
-    -fvisibility=hidden `
-    '-Wl,--build-id=sha1' `
-    -llog `
-    -ldl `
-    -o $nativeOutput `
-    $nativeSource
+    java_compile_gate = r'''
+& javac `
+    -source 8 `
+    -target 8 `
+    -encoding UTF-8 `
+    -cp $androidJar `
+    -d $classesDir `
+    $javaSources
 if ($LASTEXITCODE -ne 0) {
-    throw "NDK compilation failed with exit code $LASTEXITCODE"
+    throw "javac failed with exit code $LASTEXITCODE"
 }
-$compiledNativeSha256 = (
-    Get-FileHash -Algorithm SHA256 -LiteralPath $nativeOutput
-).Hash
 '''
-    native_compile = require_unique_powershell_sequence(
+    java_compile = require_unique_powershell_sequence(
         native_build_tokens,
-        native_compile_gate,
-        "native compiler-input and raw-output digest gate",
+        java_compile_gate,
+        "exclusive v2 Java compiler-input gate",
     )
 
-    prepackage_review_gate = r'''
-if (
-    (Get-NormalizedTextSha256 -LiteralPath $nativeSource) -ne
-        $expectedNativeSourceSha256 -or
-    (Get-FileHash -Algorithm SHA256 -LiteralPath $nativeOutput).Hash -ne
-        $compiledNativeSha256
-) {
-    throw 'Native eraser source or compiled library changed before packaging.'
-}
-& jar u0f $unsignedApk `
-    -C $nativeLibRoot lib
-if ($LASTEXITCODE -ne 0) {
-    throw "jar native-library update failed with exit code $LASTEXITCODE"
+    legacy_class_rejection_gate = r'''
+if (Get-ChildItem -LiteralPath $legacyClassRoot -Filter 'SpreadProbe*.class' -File) {
+    throw 'Legacy SpreadProbe executable classes entered the v2 build.'
 }
 '''
-    prepackage_review = require_unique_powershell_sequence(
+    legacy_class_rejection = require_unique_powershell_sequence(
         native_build_tokens,
-        prepackage_review_gate,
-        "prepackage source and raw-binary review gate",
+        legacy_class_rejection_gate,
+        "post-compile legacy class rejection gate",
     )
 
-    apk_native_review_gate = r'''
-$nativeEntry = $entriesByName['lib/arm64-v8a/libspreadprobe.so']
-if ($nativeEntry.CompressedLength -ne $nativeEntry.Length) {
-    throw 'APK native library is compressed and cannot be mmap-loaded.'
-}
-$nativeEntryStream = $nativeEntry.Open()
-try {
-    $apkNativeSha256 = [BitConverter]::ToString(
-        [Security.Cryptography.SHA256]::Create().ComputeHash(
-            $nativeEntryStream
-        )
-    ).Replace('-', '')
-} finally {
-    $nativeEntryStream.Dispose()
-}
-if ($apkNativeSha256 -ne $compiledNativeSha256) {
-    throw 'APK native library does not match the verified compiler output.'
+    forbidden_payload_gate = r'''
+foreach ($forbiddenEntry in @(
+    'assets/native_init',
+    'lib/arm64-v8a/libspreadprobe.so'
+)) {
+    if ($entriesByName.ContainsKey($forbiddenEntry)) {
+        throw "v2 APK contains forbidden legacy payload: $forbiddenEntry"
+    }
 }
 '''
-    apk_native_review = require_unique_powershell_sequence(
+    forbidden_payload_review = require_unique_powershell_sequence(
         native_build_tokens,
-        apk_native_review_gate,
-        "raw APK native-entry digest and compiler-output comparison",
+        forbidden_payload_gate,
+        "forbidden legacy APK payload gate",
     )
 
     apk_archive_header = r'''
@@ -12206,54 +12348,66 @@ try {
 
     final_apk_hash = require_unique_powershell_sequence(
         native_build_tokens,
-        "Get-FileHash -Algorithm SHA256 -LiteralPath $outputApk",
-        "raw final-APK digest command",
+        r'''
+$firstBuildHash = (Get-FileHash `
+    -Algorithm SHA256 `
+    -LiteralPath $outputApk
+).Hash
+''',
+        "first raw final-APK digest command",
+    )
+    reproducibility_guard = require_unique_powershell_sequence(
+        native_build_tokens,
+        r'''
+if ($secondBuildHash -cne $firstBuildHash) {
+    throw (
+        'Two clean Native Reader builds were not byte-for-byte reproducible: ' +
+        "$firstBuildHash != $secondBuildHash"
+    )
+}
+''',
+        "two-clean-build reproducibility guard",
     )
 
     top_level_gates = (
         digest_function,
         trace_review,
         trace_test,
-        native_source_review,
-        native_compile,
-        prepackage_review,
+        legacy_source_exclusion,
+        java_compile,
+        legacy_class_rejection,
         apk_archive,
         final_apk_hash,
     )
     if any(native_build_depths[position] != 0 for position in top_level_gates):
         fail("native build review gates must execute at top level")
     if (
-        native_build_depths[apk_native_review] != 1
-        or not apk_archive_opening < apk_native_review < apk_archive_closing
+        native_build_depths[forbidden_payload_review] != 1
+        or not apk_archive_opening < forbidden_payload_review < apk_archive_closing
         or apk_archive_closing != apk_archive_finally
     ):
-        fail("APK native-entry digest gate must execute directly in archive review")
+        fail("forbidden legacy payload gate must execute directly in APK review")
     if not (
-        digest_function < trace_review < trace_test < native_source_review
-        < native_compile < prepackage_review < apk_archive
-        < apk_native_review < apk_archive_closing < final_apk_hash
+        digest_function < trace_review < trace_test < legacy_source_exclusion
+        < java_compile < legacy_class_rejection < apk_archive
+        < forbidden_payload_review < apk_archive_closing < final_apk_hash
+        < reproducibility_guard
     ):
-        fail("frozen native source is not bound through compile and APK packaging")
+        fail("exclusive v2 sources are not bound through canonical APK packaging")
 
     executable_words = [
         value
         for kind, value, _start, _end in native_build_tokens
         if kind == "word"
     ]
-    if executable_words.count("get-normalizedtextsha256") != 4:
-        fail("normalized text hashing must be limited to reviewed text sources")
-    if executable_words.count("get-filehash") != 3:
-        fail("native compiler output and APK outputs must use exactly three raw hashes")
-    if executable_words.count("computehash") != 2:
-        fail("raw SHA-256 must hash exactly the helper bytes and APK native stream")
-    for assignment, label in (
-        ("$nativeSource =", "native source"),
-        ("$nativeOutput =", "native compiler output"),
-        ("$compiledNativeSha256 =", "compiled-native digest"),
-        ("$apkNativeSha256 =", "APK-native digest"),
-    ):
-        if len(powershell_sequence_positions(native_build_tokens, assignment)) != 1:
-            fail(f"native build must assign {label} exactly once")
+    if executable_words.count("get-normalizedtextsha256") != 2:
+        fail("normalized text hashing must be limited to reviewed trace sources")
+    if executable_words.count("get-filehash") != 2:
+        fail("Native Reader reproducibility must compare exactly two APK hashes")
+    if executable_words.count("computehash") != 1:
+        fail("raw SHA-256 must hash only the normalized helper bytes")
+    if len(powershell_sequence_positions(native_build_tokens, "$legacySource =")) != 1:
+        fail("native build must identify the excluded legacy source exactly once")
 
     pointer_reader_start = trace_script.find("function Read-RemotePointer")
     publication_reader_start = trace_script.find(
@@ -12655,48 +12809,66 @@ try {
     if '"$remoteRoot/$Session/screenshots"' in trace_script:
         fail("desktop screenshots can mutate an already-published trace bundle")
 
-    if 'android:versionCode="135"' not in manifest:
-        fail("companion manifest must use versionCode 135")
-    if 'android:versionName="0.0.135"' not in manifest:
-        fail("companion manifest must use versionName 0.0.135")
+    if 'android:versionCode="140"' not in manifest:
+        fail("companion manifest must use versionCode 140")
+    if 'android:versionName="0.0.140"' not in manifest:
+        fail("companion manifest must use versionName 0.0.140")
 
     manifest_version = re.search(
         r'android:versionCode="(\d+)"', manifest
     )
-    handshake_version = re.search(
-        r'private static final long MODULE_VERSION_CODE = (\d+)L;', module
-    )
     plugin_minimum = re.search(
-        r'NATIVE_SPREAD_MIN_VERSION_CODE = (\d+)L', plugin
+        r'NATIVE_READER_V2_MIN_VERSION_CODE = (\d+)L', plugin
     )
-    transactional_minimum = re.search(
-        r'TRANSACTIONAL_MIN_MODULE_VERSION_CODE = (\d+)L;', module
+    companion_minimum = re.search(
+        r'MINIMUM_COMPANION_MODULE_VERSION = (\d+)L;', v2_marker_claim
+    )
+    plugin_handshake = re.search(
+        r'NATIVE_SPREAD_HANDSHAKE_PROTOCOL = (\d+)', plugin
+    )
+    companion_handshake = re.search(
+        r'private static final int HANDSHAKE_PROTOCOL = (\d+);', v2_hooks
+    )
+    plugin_transaction = re.search(
+        r'NATIVE_SPREAD_EDITABLE_MARKER_PROTOCOL = (\d+)', plugin
+    )
+    companion_transaction = re.search(
+        r'public static final int TRANSACTION_PROTOCOL = (\d+);',
+        v2_marker_claim,
     )
     if (
         not manifest_version
-        or not handshake_version
         or not plugin_minimum
-        or not transactional_minimum
+        or not companion_minimum
+        or not plugin_handshake
+        or not companion_handshake
+        or not plugin_transaction
+        or not companion_transaction
     ):
-        fail("could not read packaged, handshake, and supported module versions")
+        fail("could not read packaged, handshake, and authority protocol versions")
     packaged_version = int(manifest_version.group(1))
-    reported_version = int(handshake_version.group(1))
     required_version = int(plugin_minimum.group(1))
-    oldest_transactional_version = int(transactional_minimum.group(1))
-    if packaged_version != reported_version:
+    companion_version = int(companion_minimum.group(1))
+    if not packaged_version == required_version == companion_version:
         fail(
-            "packaged and handshake module versions must match: "
+            "packaged, plugin-required, and companion-reported versions "
+            "must match exactly: "
             f"manifest={manifest_version.group(1)} "
-            f"handshake={handshake_version.group(1)}"
+            f"plugin={plugin_minimum.group(1)} "
+            f"companion={companion_minimum.group(1)}"
         )
-    if not (
-        oldest_transactional_version <= required_version <= reported_version
-    ):
+    if plugin_handshake.group(1) != companion_handshake.group(1):
         fail(
-            "plugin minimum must remain inside the companion's supported "
-            "transactional range: "
-            f"oldest={oldest_transactional_version} "
-            f"required={required_version} current={reported_version}"
+            "plugin and companion handshake protocols must match exactly: "
+            f"plugin={plugin_handshake.group(1)} "
+            f"companion={companion_handshake.group(1)}"
+        )
+    if plugin_transaction.group(1) != companion_transaction.group(1):
+        fail(
+            "plugin and companion journal payload protocols must match "
+            "exactly: "
+            f"plugin={plugin_transaction.group(1)} "
+            f"companion={companion_transaction.group(1)}"
         )
 
     print("Native Spread safety invariants: PASS")

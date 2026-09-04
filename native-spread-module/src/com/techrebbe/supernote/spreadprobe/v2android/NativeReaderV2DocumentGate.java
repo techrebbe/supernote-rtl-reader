@@ -7,6 +7,8 @@ import android.system.OsConstants;
 import android.system.StructStat;
 
 import com.techrebbe.supernote.spreadprobe.v2.NativeReaderV2MarkerClaim;
+import com.techrebbe.supernote.spreadprobe.v2.NativeReaderV2AuthorityJournal;
+import com.techrebbe.supernote.spreadprobe.v2.NativeReaderV2Config;
 import com.techrebbe.supernote.spreadprobe.v2.NativeReaderV2StrictProperties;
 
 import java.io.ByteArrayOutputStream;
@@ -23,10 +25,12 @@ import java.util.HashSet;
 import java.util.Locale;
 import java.util.Properties;
 import java.util.Set;
+import java.util.UUID;
 
 /** Descriptor-backed, off-UI-thread admission of one exact original PDF. */
 public final class NativeReaderV2DocumentGate {
-    public static final String MARKER_SUFFIX = ".snspread";
+    public static final String MARKER_SUFFIX = ".snspread-v3";
+    public static final String LEGACY_MARKER_SUFFIX = ".snspread";
     private static final String BACKUP_MANIFEST_SUFFIX =
         ".snspread-backup.properties";
     private static final String BACKUP_SNAPSHOT_SUFFIX =
@@ -75,17 +79,106 @@ public final class NativeReaderV2DocumentGate {
                 parent,
                 "." + document.getName() + MARKER_SUFFIX
             ).getAbsolutePath();
-            Os.lstat(markerPath);
-            // Any filesystem object at the authority path installs the early
-            // fence. The worker decides whether it is the one exact regular,
-            // bounded, descriptor-stable marker; malformed candidates may not
-            // fall through to stock writing during that decision.
-            return true;
+            String legacyPath = new File(
+                parent,
+                "." + document.getName() + LEGACY_MARKER_SUFFIX
+            ).getAbsolutePath();
+            boolean legacyPresent = pathExistsNoFollow(legacyPath);
+            try {
+                StableBytes journal = readRegularFile(
+                    markerPath,
+                    NativeReaderV2AuthorityJournal.FILE_SIZE
+                );
+                if (journal.bytes.length
+                    != NativeReaderV2AuthorityJournal.FILE_SIZE) {
+                    return true;
+                }
+                NativeReaderV2AuthorityJournal.Snapshot snapshot =
+                    NativeReaderV2AuthorityJournal.inspect(journal.bytes);
+                if (snapshot.isEmpty()) return legacyPresent;
+                // A valid v3 record supersedes legacy path evidence without
+                // deleting or renaming it. OFF is trusted only when its exact
+                // payload binds this document and protocol; malformed OFF data
+                // remains a fail-closed candidate just like a torn slot.
+                if (snapshot.current.state
+                    == NativeReaderV2AuthorityJournal.State.OFF) {
+                    Properties payload = NativeReaderV2StrictProperties.parse(
+                        snapshot.current.payload
+                    );
+                    return !validOffAuthorityPayload(
+                        payload,
+                        document.getCanonicalPath()
+                    );
+                }
+                return true;
+            } catch (ErrnoException missing) {
+                if (missing.errno == OsConstants.ENOENT) return legacyPresent;
+                return true;
+            }
         } catch (ErrnoException failure) {
             return failure.errno != OsConstants.ENOENT;
         } catch (Throwable ambiguous) {
             return true;
         }
+    }
+
+    private static boolean validOffAuthorityPayload(
+        Properties payload,
+        String canonicalDocumentPath
+    ) {
+        Set<String> expected = new HashSet<String>(Arrays.asList(
+            NativeReaderV2Config.ENGINE_KEY,
+            "enabled",
+            "editable",
+            "disposable",
+            "managedBy",
+            "mode",
+            "transactionProtocol",
+            "minimumModuleVersionCode",
+            "activationToken",
+            "activationState",
+            "documentPath",
+            "documentLength",
+            "documentSha256"
+        ));
+        if (!expected.equals(payload.stringPropertyNames())) return false;
+        if (!NativeReaderV2Config.ENGINE_VALUE.equals(
+                payload.getProperty(NativeReaderV2Config.ENGINE_KEY))
+            || !"false".equals(payload.getProperty("enabled"))
+            || !"false".equals(payload.getProperty("editable"))
+            || !"false".equals(payload.getProperty("disposable"))
+            || !"supernote-rtl-reader".equals(payload.getProperty("managedBy"))
+            || !NativeReaderV2MarkerClaim.MODE.equals(payload.getProperty("mode"))
+            || !Integer.toString(NativeReaderV2MarkerClaim.TRANSACTION_PROTOCOL)
+                .equals(payload.getProperty("transactionProtocol"))
+            || !Long.toString(
+                NativeReaderV2MarkerClaim.MINIMUM_COMPANION_MODULE_VERSION
+            ).equals(payload.getProperty("minimumModuleVersionCode"))
+            || !"off".equals(payload.getProperty("activationState"))
+            || !canonicalDocumentPath.equals(payload.getProperty("documentPath"))
+            || !isCanonicalUuid(payload.getProperty("activationToken"))) {
+            return false;
+        }
+        String length = payload.getProperty("documentLength");
+        String digest = payload.getProperty("documentSha256");
+        if (length == null || length.isEmpty() || length.charAt(0) == '+'
+            || length.charAt(0) == '-' || length.length() > 1
+            && length.charAt(0) == '0' || digest == null
+            || digest.length() != 64
+            || !digest.equals(digest.toLowerCase(Locale.ROOT))) {
+            return false;
+        }
+        try {
+            Long.parseLong(length);
+        } catch (NumberFormatException invalid) {
+            return false;
+        }
+        for (int index = 0; index < digest.length(); index++) {
+            char item = digest.charAt(index);
+            if (!((item >= '0' && item <= '9')
+                || (item >= 'a' && item <= 'f'))) return false;
+        }
+        return true;
     }
 
     public static Evidence admit(String documentPath) {
@@ -122,10 +215,19 @@ public final class NativeReaderV2DocumentGate {
             ).getAbsolutePath();
             StableBytes markerBefore = readRegularFile(
                 markerPath,
-                NativeReaderV2StrictProperties.MAX_BYTES
+                NativeReaderV2AuthorityJournal.FILE_SIZE
             );
+            NativeReaderV2AuthorityJournal.Snapshot journalBefore =
+                NativeReaderV2AuthorityJournal.inspect(markerBefore.bytes);
+            if (journalBefore.current == null
+                || journalBefore.current.state
+                    != NativeReaderV2AuthorityJournal.State.COMMITTED) {
+                throw new IllegalStateException(
+                    "Native Reader v2 journal is not committed"
+                );
+            }
             Properties properties = NativeReaderV2StrictProperties.parse(
-                markerBefore.bytes
+                journalBefore.current.payload
             );
             StableDigest document = hashRegularFile(canonical);
 
@@ -134,7 +236,7 @@ public final class NativeReaderV2DocumentGate {
             // smuggle mixed-time configuration into the accepted claim.
             StableBytes markerAfter = readRegularFile(
                 markerPath,
-                NativeReaderV2StrictProperties.MAX_BYTES
+                NativeReaderV2AuthorityJournal.FILE_SIZE
             );
             if (!markerBefore.identity.sameFile(markerAfter.identity)
                 || !Arrays.equals(markerBefore.bytes, markerAfter.bytes)) {
@@ -166,6 +268,8 @@ public final class NativeReaderV2DocumentGate {
                     document.identity,
                     markerAfter.identity,
                     sha256(markerAfter.bytes),
+                    journalBefore.current.generation,
+                    journalBefore.current.authoritySha256,
                     recovery.manifest,
                     recovery.snapshot,
                     markAuthority
@@ -181,6 +285,86 @@ public final class NativeReaderV2DocumentGate {
                 "Native Reader v2 document admission failed",
                 exception
             );
+        }
+    }
+
+    /** Exact worker-thread observation returned to PluginHost as an ACK. */
+    public static AuthorityObservation observeAuthority(String documentPath) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            throw new IllegalStateException(
+                "authority observation is forbidden on the main thread"
+            );
+        }
+        try {
+            if (documentPath == null || documentPath.indexOf('\0') >= 0) {
+                throw new IllegalArgumentException("invalid document path");
+            }
+            String canonical = new File(documentPath).getCanonicalPath();
+            File document = new File(canonical);
+            File parent = document.getParentFile();
+            if (parent == null || !canonical.toLowerCase(Locale.ROOT)
+                    .endsWith(".pdf")) {
+                throw new IllegalArgumentException("invalid PDF authority path");
+            }
+            String journalPath = new File(
+                parent,
+                "." + document.getName() + MARKER_SUFFIX
+            ).getAbsolutePath();
+            StableBytes bytes = readRegularFile(
+                journalPath,
+                NativeReaderV2AuthorityJournal.FILE_SIZE
+            );
+            NativeReaderV2AuthorityJournal.Snapshot snapshot =
+                NativeReaderV2AuthorityJournal.inspect(bytes.bytes);
+            if (snapshot.current == null) {
+                throw new IllegalStateException("authority journal is empty");
+            }
+            Properties payload = NativeReaderV2StrictProperties.parse(
+                snapshot.current.payload
+            );
+            String expectedState = snapshot.current.state.name()
+                .toLowerCase(Locale.ROOT);
+            String activationToken = payload.getProperty("activationToken");
+            if (!NativeReaderV2Config.ENGINE_VALUE.equals(
+                    payload.getProperty(NativeReaderV2Config.ENGINE_KEY))
+                || !"supernote-rtl-reader".equals(
+                    payload.getProperty("managedBy"))
+                || !Integer.toString(
+                    NativeReaderV2MarkerClaim.TRANSACTION_PROTOCOL
+                ).equals(payload.getProperty("transactionProtocol"))
+                || !Long.toString(
+                    NativeReaderV2MarkerClaim.MINIMUM_COMPANION_MODULE_VERSION
+                ).equals(payload.getProperty("minimumModuleVersionCode"))
+                || !canonical.equals(payload.getProperty("documentPath"))
+                || !expectedState.equals(payload.getProperty("activationState"))
+                || !isCanonicalUuid(activationToken)) {
+                throw new IllegalStateException(
+                    "journal payload does not bind observed authority"
+                );
+            }
+            return new AuthorityObservation(
+                journalPath,
+                snapshot.current.generation,
+                snapshot.current.authoritySha256,
+                expectedState,
+                activationToken
+            );
+        } catch (RuntimeException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new IllegalStateException(
+                "Native Reader v2 authority observation failed",
+                exception
+            );
+        }
+    }
+
+    private static boolean isCanonicalUuid(String value) {
+        if (value == null) return false;
+        try {
+            return UUID.fromString(value).toString().equals(value);
+        } catch (IllegalArgumentException invalid) {
+            return false;
         }
     }
 
@@ -362,10 +546,21 @@ public final class NativeReaderV2DocumentGate {
             if (!fastEvidenceStillCurrent(evidence)) return false;
             StableBytes marker = readRegularFile(
                 evidence.markerPath,
-                NativeReaderV2StrictProperties.MAX_BYTES
+                NativeReaderV2AuthorityJournal.FILE_SIZE
             );
             if (!evidence.markerIdentity.sameVersion(marker.identity)
                 || !evidence.markerSha256.equals(sha256(marker.bytes))) {
+                return false;
+            }
+            NativeReaderV2AuthorityJournal.Snapshot journal =
+                NativeReaderV2AuthorityJournal.inspect(marker.bytes);
+            if (journal.current == null
+                || journal.current.state
+                    != NativeReaderV2AuthorityJournal.State.COMMITTED
+                || journal.current.generation != evidence.journalGeneration
+                || !journal.current.authoritySha256.equals(
+                    evidence.journalAuthoritySha256
+                )) {
                 return false;
             }
             verifyRecoveryEvidence(
@@ -611,6 +806,8 @@ public final class NativeReaderV2DocumentGate {
         public final Identity documentIdentity;
         public final Identity markerIdentity;
         public final String markerSha256;
+        public final long journalGeneration;
+        public final String journalAuthoritySha256;
         public final Identity recoveryManifestIdentity;
         public final Identity recoverySnapshotIdentity;
         private final MarkAuthority markAuthority;
@@ -621,6 +818,8 @@ public final class NativeReaderV2DocumentGate {
             Identity documentIdentity,
             Identity markerIdentity,
             String markerSha256,
+            long journalGeneration,
+            String journalAuthoritySha256,
             Identity recoveryManifestIdentity,
             Identity recoverySnapshotIdentity,
             MarkAuthority markAuthority
@@ -630,6 +829,8 @@ public final class NativeReaderV2DocumentGate {
             this.documentIdentity = documentIdentity;
             this.markerIdentity = markerIdentity;
             this.markerSha256 = markerSha256;
+            this.journalGeneration = journalGeneration;
+            this.journalAuthoritySha256 = journalAuthoritySha256;
             this.recoveryManifestIdentity = recoveryManifestIdentity;
             this.recoverySnapshotIdentity = recoverySnapshotIdentity;
             this.markAuthority = markAuthority;
@@ -655,6 +856,28 @@ public final class NativeReaderV2DocumentGate {
 
         @Override public void close() {
             if (markAuthority != null) markAuthority.close();
+        }
+    }
+
+    public static final class AuthorityObservation {
+        public final String journalPath;
+        public final long generation;
+        public final String authoritySha256;
+        public final String state;
+        public final String activationToken;
+
+        private AuthorityObservation(
+            String journalPath,
+            long generation,
+            String authoritySha256,
+            String state,
+            String activationToken
+        ) {
+            this.journalPath = journalPath;
+            this.generation = generation;
+            this.authoritySha256 = authoritySha256;
+            this.state = state;
+            this.activationToken = activationToken;
         }
     }
 

@@ -21,6 +21,7 @@ public final class NativeReaderV2CoreTests {
         testNativeReaderV2LayoutFactory();
         testPairingMatrix();
         testV2ConfigAdmission();
+        testAuthorityJournal();
         testStrictMarkerProperties();
         testNativeMarkPageInventory();
         testNativeSaveWitness();
@@ -986,7 +987,7 @@ public final class NativeReaderV2CoreTests {
             hash.toUpperCase(java.util.Locale.ROOT)
         ), "noncanonical uppercase digest rejected");
         java.util.Properties olderContract = committedV2Marker(hash);
-        olderContract.setProperty("minimumModuleVersionCode", "138");
+        olderContract.setProperty("minimumModuleVersionCode", "139");
         expectThrows(() -> NativeReaderV2MarkerClaim.admit(
             olderContract,
             "/storage/emulated/0/Document/book.pdf",
@@ -994,13 +995,184 @@ public final class NativeReaderV2CoreTests {
             hash
         ), "older companion contract rejected");
         java.util.Properties futureContract = committedV2Marker(hash);
-        futureContract.setProperty("minimumModuleVersionCode", "140");
+        futureContract.setProperty("minimumModuleVersionCode", "141");
         expectThrows(() -> NativeReaderV2MarkerClaim.admit(
             futureContract,
             "/storage/emulated/0/Document/book.pdf",
             123456L,
             hash
         ), "future companion contract rejected");
+    }
+
+    private static void testAuthorityJournal() {
+        byte[] empty = NativeReaderV2AuthorityJournal.emptyFile();
+        NativeReaderV2AuthorityJournal.Snapshot snapshot =
+            NativeReaderV2AuthorityJournal.inspect(empty);
+        check(snapshot.isEmpty(), "empty journal has no authority");
+        equal(1L, snapshot.nextGeneration(),
+            "empty journal starts at generation one");
+        equal(0, snapshot.inactiveSlotIndex(),
+            "empty journal starts in slot zero");
+
+        byte[] pendingPayload = "activationState=pending\n".getBytes(
+            java.nio.charset.StandardCharsets.ISO_8859_1
+        );
+        byte[] pending = NativeReaderV2AuthorityJournal.withRecord(
+            empty,
+            0,
+            NativeReaderV2AuthorityJournal.State.PENDING,
+            1L,
+            pendingPayload
+        );
+        snapshot = NativeReaderV2AuthorityJournal.inspect(pending);
+        equal(NativeReaderV2AuthorityJournal.State.PENDING,
+            snapshot.current.state, "pending journal state");
+        equal(1L, snapshot.current.generation,
+            "pending journal generation");
+        check(Arrays.equals(pendingPayload, snapshot.current.payload),
+            "pending payload round trips");
+        equal("4dbff0abeb29a7a99b862de451f3a126887abf13f39a830aa65888fa75881361",
+            snapshot.current.payloadSha256,
+            "journal payload digest golden vector");
+        equal("969f356582e63fec40117178d3f691ea333d50424e9e1adc6a2cbc05003891f3",
+            snapshot.current.authoritySha256,
+            "journal authority digest golden vector");
+        equal(1, snapshot.inactiveSlotIndex(),
+            "pending journal advances to other slot");
+
+        byte[] committedPayload = "activationState=committed\n".getBytes(
+            java.nio.charset.StandardCharsets.ISO_8859_1
+        );
+        byte[] committed = NativeReaderV2AuthorityJournal.withRecord(
+            pending,
+            1,
+            NativeReaderV2AuthorityJournal.State.COMMITTED,
+            2L,
+            committedPayload
+        );
+        snapshot = NativeReaderV2AuthorityJournal.inspect(committed);
+        equal(NativeReaderV2AuthorityJournal.State.COMMITTED,
+            snapshot.current.state, "newer committed state wins");
+        equal(2L, snapshot.current.generation,
+            "newer committed generation wins");
+        equal(NativeReaderV2AuthorityJournal.State.PENDING,
+            snapshot.other.state, "older pending fence is retained");
+
+        byte[] offPayload = "activationState=off\n".getBytes(
+            java.nio.charset.StandardCharsets.ISO_8859_1
+        );
+        byte[] off = NativeReaderV2AuthorityJournal.withRecord(
+            committed,
+            0,
+            NativeReaderV2AuthorityJournal.State.OFF,
+            3L,
+            offPayload
+        );
+        snapshot = NativeReaderV2AuthorityJournal.inspect(off);
+        equal(NativeReaderV2AuthorityJournal.State.OFF,
+            snapshot.current.state, "durable off outranks committed authority");
+
+        byte[] corruptPayload = committed.clone();
+        corruptPayload[NativeReaderV2AuthorityJournal.HEADER_SIZE + 3] ^= 1;
+        expectThrows(() -> NativeReaderV2AuthorityJournal.inspect(corruptPayload),
+            "payload corruption rejects the whole journal");
+
+        byte[] corruptHeader = committed.clone();
+        corruptHeader[72] ^= 1;
+        expectThrows(() -> NativeReaderV2AuthorityJournal.inspect(corruptHeader),
+            "header digest corruption rejects the whole journal");
+
+        byte[] corruptTail = committed.clone();
+        corruptTail[NativeReaderV2AuthorityJournal.SLOT_SIZE - 1] = 1;
+        expectThrows(() -> NativeReaderV2AuthorityJournal.inspect(corruptTail),
+            "unauthenticated tail rejects the whole journal");
+
+        byte[] tornInactive = committed.clone();
+        int inactiveOffset = 0;
+        Arrays.fill(
+            tornInactive,
+            inactiveOffset,
+            inactiveOffset + NativeReaderV2AuthorityJournal.HEADER_SIZE,
+            (byte) 0
+        );
+        tornInactive[
+            inactiveOffset + NativeReaderV2AuthorityJournal.HEADER_SIZE
+        ] = 1;
+        expectThrows(() -> NativeReaderV2AuthorityJournal.inspect(tornInactive),
+            "torn newer slot cannot revive older committed authority");
+
+        byte[] duplicateGeneration = NativeReaderV2AuthorityJournal.withRecord(
+            pending,
+            1,
+            NativeReaderV2AuthorityJournal.State.COMMITTED,
+            1L,
+            committedPayload
+        );
+        expectThrows(() -> NativeReaderV2AuthorityJournal.inspect(
+            duplicateGeneration
+        ), "generation reuse across slots is rejected");
+
+        // Mutate the beginning/end of every wire field and authenticated
+        // region in both the current and retained slot. Any changed byte must
+        // reject the complete journal rather than revive the other
+        // otherwise-valid generation.
+        int[] fieldBoundaries = new int[] {
+            0, 7, 8, 11, 12, 15, 16, 19, 20, 23, 24, 31,
+            32, 35, 36, 39, 40, 71, 72, 103, 104, 127,
+            NativeReaderV2AuthorityJournal.HEADER_SIZE,
+            NativeReaderV2AuthorityJournal.HEADER_SIZE
+                + pendingPayload.length - 1,
+            NativeReaderV2AuthorityJournal.HEADER_SIZE
+                + committedPayload.length - 1,
+            NativeReaderV2AuthorityJournal.HEADER_SIZE
+                + committedPayload.length,
+            NativeReaderV2AuthorityJournal.SLOT_SIZE - 1
+        };
+        for (int slotIndex = 0; slotIndex < 2; slotIndex++) {
+            int slotOffset = slotIndex * NativeReaderV2AuthorityJournal.SLOT_SIZE;
+            for (int relative : fieldBoundaries) {
+                byte[] mutated = committed.clone();
+                mutated[slotOffset + relative] ^= 1;
+                expectThrows(
+                    () -> NativeReaderV2AuthorityJournal.inspect(mutated),
+                    "journal wire-field mutation rejects all authority"
+                );
+            }
+            for (int relative = 0;
+                 relative < NativeReaderV2AuthorityJournal.SLOT_SIZE;
+                 relative += 127) {
+                byte[] mutated = committed.clone();
+                mutated[slotOffset + relative] ^= 1;
+                expectThrows(
+                    () -> NativeReaderV2AuthorityJournal.inspect(mutated),
+                    "journal sampled byte mutation rejects all authority"
+                );
+            }
+        }
+
+        expectThrows(() -> NativeReaderV2AuthorityJournal.withRecord(
+            empty,
+            2,
+            NativeReaderV2AuthorityJournal.State.PENDING,
+            1L,
+            pendingPayload
+        ), "invalid slot index rejected");
+        expectThrows(() -> NativeReaderV2AuthorityJournal.withRecord(
+            empty,
+            0,
+            NativeReaderV2AuthorityJournal.State.PENDING,
+            0L,
+            pendingPayload
+        ), "nonpositive generation rejected");
+        expectThrows(() -> NativeReaderV2AuthorityJournal.withRecord(
+            empty,
+            0,
+            NativeReaderV2AuthorityJournal.State.PENDING,
+            1L,
+            new byte[NativeReaderV2AuthorityJournal.MAX_PAYLOAD_SIZE + 1]
+        ), "oversize payload rejected");
+        expectThrows(() -> NativeReaderV2AuthorityJournal.inspect(new byte[1]),
+            "wrong journal size rejected");
     }
 
     private static void testStrictMarkerProperties() {
@@ -1057,8 +1229,8 @@ public final class NativeReaderV2CoreTests {
         properties.setProperty("disposable", "false");
         properties.setProperty("managedBy", "supernote-rtl-reader");
         properties.setProperty("mode", NativeReaderV2MarkerClaim.MODE);
-        properties.setProperty("transactionProtocol", "2");
-        properties.setProperty("minimumModuleVersionCode", "139");
+        properties.setProperty("transactionProtocol", "3");
+        properties.setProperty("minimumModuleVersionCode", "140");
         properties.setProperty("activationState", "committed");
         properties.setProperty("backupVerified", "true");
         properties.setProperty(

@@ -36,6 +36,58 @@ with SupernoteDocument `1.02.446`.
   authorization with a new-path, fixed-size journal, a durable OFF state, and
   exact Document-process acknowledgement for activation and revocation.
 
+## Native Reader v2 v0.4.22 fixed-journal pre-hardware gate — LOCAL PASS
+
+- [x] RTL Reader v0.4.22 (`versionCode=41`) and companion v0.0.140
+  (`versionCode=140`) use handshake protocol 4 and protected-editable marker
+  protocol 3. The companion is 274,971 bytes with SHA-256
+  `dd40b89f4bbc6d161b90ea631efccac8c185e3ae8b2cc0cb13d5791f35464c48`
+  and the upgrade-compatible signer certificate SHA-256 remains
+  `a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`.
+- [x] Authority moved to a never-reused `.snspread-v3` path containing one
+  fixed 32 KiB, two-slot journal. Initialization exclusively creates and sizes
+  the inode once; later PENDING, COMMITTED, RECOVERY, and OFF transitions use
+  fixed-offset writes and three fsync stages without rename, delete, truncate,
+  resize, or recreation.
+- [x] A nonzero malformed/torn slot rejects the complete journal. Header state
+  is required to equal the exact payload activation state, and a valid OFF
+  record is the only v3 authority that supersedes retained legacy `.snspread`
+  evidence.
+- [x] A torn inactive-slot publication is repairable only during explicit
+  verified annotation restore, after DocumentActivity is stopped, and only
+  when the same exact inode contains one valid generation plus one malformed
+  slot. The malformed slot is replaced by a newer authenticated RECOVERY
+  record using the same three-fsync sequence. Empty/valid journals, zero valid
+  slots, two malformed slots, replacement/version drift, and every ordinary
+  open remain fail closed.
+- [x] Every reported transition requires the live Document process to
+  acknowledge the exact journal path, generation, authenticated record digest,
+  state, and activation token. Handshakes are generation-owned, single-flight,
+  raw-path bound, main-thread registered, and expire on one absolute deadline.
+  PluginHost re-reads the live journal after receiving the ACK and rejects a
+  disappearance or generation/digest/state change during the observation-to-
+  response interval.
+- [x] Restore publishes RECOVERY before touching `.mark`, keeps the document
+  process stopped during replacement, starts a fresh authority provider while
+  RECOVERY remains fenced, and opens the fence only through an exact-ACKed OFF
+  transition. Post-commit cleanup cannot roll restored bytes backward.
+- [x] Valid protected legacy sessions migrate only after two exact authority
+  checks, including immediately at v3 publication. Malformed legacy evidence
+  stays fail closed, while reconciliation publishes durable v3 OFF authority
+  before reassessment so legacy path evidence cannot silently regain control.
+- [x] The Java/Kotlin journal golden vectors agree. The core suite passes
+  85,407 assertions, including mutations at both ends of every wire field and
+  authenticated region. All 231 executable/static authority mutations are
+  rejected, and native/plugin invariants, provenance, and fail-closed package
+  tests pass.
+- [x] The full RTL Reader package compiles through the authenticated Supernote
+  template and verifies at 7,360,211 bytes with SHA-256
+  `2065a4935b9bb17c02157b1ce7d69c2e148e7848cebf75947619570ac6782bab`.
+- [ ] Exact-head PR CI and Codex review are clean.
+- [ ] The Nomad proves same-inode visibility and exact ACKs for enable,
+  disable, restore, interrupted recovery, cold process reopen, and ordinary-PDF
+  isolation. No hardware result is claimed by this local section.
+
 ## Native Reader v2 pre-hardware adversarial gate — PASS
 
 - [x] 85,071 deterministic controller/geometry/transaction assertions pass.

@@ -5475,165 +5475,89 @@ class ReaderPreferencesModule(
             }
             if (immediate == null) return null
 
-            val transactionDirectory = File(
-                parent,
-                ".${file.name}.transaction-${android.os.Process.myPid()}-${UUID.randomUUID()}",
-            )
-            Files.createDirectory(transactionDirectory.toPath())
-            val transactionDirectoryDescriptor = openPinnedDirectory(
-                transactionDirectory,
-                "$authorityLabel transaction directory",
+            // Keep the admitted destination inode pinned across rename. Android's
+            // emulated-storage FUSE layer legitimately advances ctime when an
+            // inode is renamed, so the pre-rename PersistedFileAuthority cannot
+            // be compared directly with the displaced path's post-rename
+            // version. The still-open descriptor proves that the renamed object
+            // is the admitted inode; its post-rename fstat is then the exact
+            // version authority for the displaced-path read.
+            val admittedDescriptor = Os.open(
+                file.absolutePath,
+                OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or
+                    OsConstants.O_NOFOLLOW,
+                0,
             )
             try {
-                val transactionDirectoryIdentity = Os.fstat(transactionDirectoryDescriptor)
-                val displaced = File(transactionDirectory, "displaced")
-                var renameCompleted = false
-                var movedAuthority: PersistedFileAuthority? = null
+                val admittedIdentity = Os.fstat(admittedDescriptor)
+                require(
+                    samePersistedFileVersion(immediate.identity, admittedIdentity) &&
+                        samePersistedFileVersion(
+                            admittedIdentity,
+                            Os.lstat(file.absolutePath),
+                        )
+                ) {
+                    "$authorityLabel destination changed while pinning preservation authority"
+                }
+
+                val transactionDirectory = File(
+                    parent,
+                    ".${file.name}.transaction-${android.os.Process.myPid()}-${UUID.randomUUID()}",
+                )
+                Files.createDirectory(transactionDirectory.toPath())
+                val transactionDirectoryDescriptor = openPinnedDirectory(
+                    transactionDirectory,
+                    "$authorityLabel transaction directory",
+                )
                 try {
-                    require(
-                        OsConstants.S_ISDIR(transactionDirectoryIdentity.st_mode) &&
-                            samePersistedFileVersion(
-                                transactionDirectoryIdentity,
-                                Os.lstat(transactionDirectory.absolutePath),
-                            ) &&
-                            sameFileObject(parentIdentity, Os.fstat(parentDescriptor)) &&
-                            sameFileObject(parentIdentity, Os.lstat(parent.absolutePath)) &&
-                            pathIdentityNoFollow(displaced) == null
-                    ) {
-                        "$authorityLabel private displacement directory is invalid"
-                    }
-                    Os.rename(file.absolutePath, displaced.absolutePath)
-                    renameCompleted = true
-                    Os.fsync(transactionDirectoryDescriptor)
-                    Os.fsync(parentDescriptor)
-                    val moved = readRegularFileAuthorityIfFile(
-                        displaced,
-                        Int.MAX_VALUE.toLong(),
-                        requireNonEmpty = false,
-                        authorityLabel = "$authorityLabel displaced destination",
-                    ) ?: throw IllegalStateException(
-                        "$authorityLabel displaced destination disappeared",
-                    )
-                    movedAuthority = moved
-                    require(
-                        sameRegularFileAuthority(expected, moved) &&
-                            sameFileObject(parentIdentity, Os.fstat(parentDescriptor)) &&
-                            sameFileObject(parentIdentity, Os.lstat(parent.absolutePath)) &&
-                            sameFileObject(
-                                transactionDirectoryIdentity,
-                                Os.fstat(transactionDirectoryDescriptor),
-                            ) &&
-                            sameFileObject(
-                                transactionDirectoryIdentity,
-                                Os.lstat(transactionDirectory.absolutePath),
-                            )
-                    ) {
-                        "$authorityLabel raced with destination preservation; displaced inode retained"
-                    }
-                    require(pathIdentityNoFollow(file) == null) {
-                        "$authorityLabel destination reappeared after preservation"
-                    }
-                    return DisplacedRegularFile(
-                        displaced,
-                        moved.identity,
-                        moved.bytes,
-                        transactionDirectory,
-                        transactionDirectoryIdentity,
-                    )
-                } catch (failure: Throwable) {
-                    if (!renameCompleted) throw failure
-
-                    // A process can start immediately after the sampled
-                    // process-absence fence and mutate or replace the .mark
-                    // before rename(2). A rejected rename must never leave an
-                    // absent live annotation path when its moved bytes can be
-                    // restored without clobbering. The displaced inode remains
-                    // retained recovery evidence until a later explicit
-                    // retirement transaction.
-                    val pathAuthoritiesStillOwned = runCatching {
-                        sameFileObject(parentIdentity, Os.fstat(parentDescriptor)) &&
-                            sameFileObject(parentIdentity, Os.lstat(parent.absolutePath)) &&
-                            sameFileObject(
-                                transactionDirectoryIdentity,
-                                Os.fstat(transactionDirectoryDescriptor),
-                            ) &&
-                            sameFileObject(
-                                transactionDirectoryIdentity,
-                                Os.lstat(transactionDirectory.absolutePath),
-                            )
-                    }.getOrDefault(false)
-                    val retained = movedAuthority ?: runCatching {
-                        readRegularFileAuthorityIfFile(
-                            displaced,
-                            Int.MAX_VALUE.toLong(),
-                            requireNonEmpty = false,
-                            authorityLabel =
-                                "$authorityLabel rejected displaced destination",
-                        )
-                    }.getOrNull()
-                    val live = runCatching {
-                        readRegularFileAuthorityIfFile(
-                            file,
-                            Int.MAX_VALUE.toLong(),
-                            requireNonEmpty = false,
-                            authorityLabel = "$authorityLabel recovery destination",
-                        )
-                    }.getOrElse { recoveryReadError ->
-                        throw NativeMarkRecoveryRequiredException(
-                            "$authorityLabel requires explicit recovery; " +
-                                "the live annotation path is ambiguous and " +
-                                "displaced evidence was retained",
-                            failure,
-                        ).apply { addSuppressed(recoveryReadError) }
-                    }
-
-                    if (!pathAuthoritiesStillOwned || retained == null || live != null) {
-                        throw NativeMarkRecoveryRequiredException(
-                            "$authorityLabel requires explicit recovery; no live " +
-                                "annotation path was overwritten and displaced " +
-                                "evidence was retained",
-                            failure,
-                        )
-                    }
-
+                    val transactionDirectoryIdentity = Os.fstat(transactionDirectoryDescriptor)
+                    val displaced = File(transactionDirectory, "displaced")
+                    var renameCompleted = false
+                    var movedAuthority: PersistedFileAuthority? = null
                     try {
-                        val restoredIdentity = createRegularFileNoClobber(
-                            file,
-                            retained.bytes,
-                            "$authorityLabel rejected-preservation recovery",
-                        )
-                        val restored = readRegularFileAuthorityIfFile(
-                            file,
-                            Int.MAX_VALUE.toLong(),
-                            requireNonEmpty = false,
-                            authorityLabel = "$authorityLabel recovered destination",
-                        ) ?: throw IllegalStateException(
-                            "$authorityLabel recovered destination disappeared",
-                        )
-                        val retainedAfterRestore = readRegularFileAuthorityIfFile(
+                        require(
+                            OsConstants.S_ISDIR(transactionDirectoryIdentity.st_mode) &&
+                                samePersistedFileVersion(
+                                    transactionDirectoryIdentity,
+                                    Os.lstat(transactionDirectory.absolutePath),
+                                ) &&
+                                sameFileObject(parentIdentity, Os.fstat(parentDescriptor)) &&
+                                sameFileObject(parentIdentity, Os.lstat(parent.absolutePath)) &&
+                                samePersistedFileVersion(
+                                    admittedIdentity,
+                                    Os.fstat(admittedDescriptor),
+                                ) &&
+                                samePersistedFileVersion(
+                                    admittedIdentity,
+                                    Os.lstat(file.absolutePath),
+                                ) &&
+                                pathIdentityNoFollow(displaced) == null
+                        ) {
+                            "$authorityLabel private displacement directory is invalid"
+                        }
+                        Os.rename(file.absolutePath, displaced.absolutePath)
+                        renameCompleted = true
+                        val renamedAdmittedIdentity = Os.fstat(admittedDescriptor)
+                        Os.fsync(transactionDirectoryDescriptor)
+                        Os.fsync(parentDescriptor)
+                        val moved = readRegularFileAuthorityIfFile(
                             displaced,
                             Int.MAX_VALUE.toLong(),
                             requireNonEmpty = false,
-                            authorityLabel =
-                                "$authorityLabel retained displaced destination",
+                            authorityLabel = "$authorityLabel displaced destination",
                         ) ?: throw IllegalStateException(
-                            "$authorityLabel retained displaced destination disappeared",
+                            "$authorityLabel displaced destination disappeared",
                         )
+                        movedAuthority = moved
                         require(
-                            samePersistedFileVersion(
-                                restoredIdentity,
-                                restored.identity,
-                            ) &&
-                                retained.bytes.contentEquals(restored.bytes) &&
-                                sameRegularFileAuthority(retained, retainedAfterRestore) &&
-                                sameFileObject(
-                                    parentIdentity,
-                                    Os.fstat(parentDescriptor),
+                            sameFileObject(admittedIdentity, renamedAdmittedIdentity) &&
+                                samePersistedFileVersion(
+                                    renamedAdmittedIdentity,
+                                    moved.identity,
                                 ) &&
-                                sameFileObject(
-                                    parentIdentity,
-                                    Os.lstat(parent.absolutePath),
-                                ) &&
+                                immediate.bytes.contentEquals(moved.bytes) &&
+                                sameFileObject(parentIdentity, Os.fstat(parentDescriptor)) &&
+                                sameFileObject(parentIdentity, Os.lstat(parent.absolutePath)) &&
                                 sameFileObject(
                                     transactionDirectoryIdentity,
                                     Os.fstat(transactionDirectoryDescriptor),
@@ -5643,28 +5567,149 @@ class ReaderPreferencesModule(
                                     Os.lstat(transactionDirectory.absolutePath),
                                 )
                         ) {
-                            "$authorityLabel recovered destination or displaced " +
-                                "evidence changed"
+                            "$authorityLabel raced with destination preservation; displaced inode retained"
                         }
-                    } catch (recoveryError: Throwable) {
-                        throw NativeMarkRecoveryRequiredException(
-                            "$authorityLabel requires explicit recovery; exact " +
-                                "displaced bytes could not be restored without " +
-                                "clobbering and evidence was retained",
-                            failure,
-                        ).apply { addSuppressed(recoveryError) }
-                    }
+                        require(pathIdentityNoFollow(file) == null) {
+                            "$authorityLabel destination reappeared after preservation"
+                        }
+                        return DisplacedRegularFile(
+                            displaced,
+                            moved.identity,
+                            moved.bytes,
+                            transactionDirectory,
+                            transactionDirectoryIdentity,
+                        )
+                    } catch (failure: Throwable) {
+                        if (!renameCompleted) throw failure
 
-                    // The live path again contains the exact bytes moved aside,
-                    // and the original displaced inode remains intact as
-                    // evidence. Preserve the rejection but permit the ordinary
-                    // failure relaunch path.
-                    throw failure
+                        // A process can start immediately after the sampled
+                        // process-absence fence and mutate or replace the .mark
+                        // before rename(2). A rejected rename must never leave an
+                        // absent live annotation path when its moved bytes can be
+                        // restored without clobbering. The displaced inode remains
+                        // retained recovery evidence until a later explicit
+                        // retirement transaction.
+                        val pathAuthoritiesStillOwned = runCatching {
+                            sameFileObject(parentIdentity, Os.fstat(parentDescriptor)) &&
+                                sameFileObject(parentIdentity, Os.lstat(parent.absolutePath)) &&
+                                sameFileObject(
+                                    transactionDirectoryIdentity,
+                                    Os.fstat(transactionDirectoryDescriptor),
+                                ) &&
+                                sameFileObject(
+                                    transactionDirectoryIdentity,
+                                    Os.lstat(transactionDirectory.absolutePath),
+                                )
+                        }.getOrDefault(false)
+                        val retained = movedAuthority ?: runCatching {
+                            readRegularFileAuthorityIfFile(
+                                displaced,
+                                Int.MAX_VALUE.toLong(),
+                                requireNonEmpty = false,
+                                authorityLabel =
+                                    "$authorityLabel rejected displaced destination",
+                            )
+                        }.getOrNull()
+                        val live = runCatching {
+                            readRegularFileAuthorityIfFile(
+                                file,
+                                Int.MAX_VALUE.toLong(),
+                                requireNonEmpty = false,
+                                authorityLabel = "$authorityLabel recovery destination",
+                            )
+                        }.getOrElse { recoveryReadError ->
+                            throw NativeMarkRecoveryRequiredException(
+                                "$authorityLabel requires explicit recovery; " +
+                                    "the live annotation path is ambiguous and " +
+                                    "displaced evidence was retained",
+                                failure,
+                            ).apply { addSuppressed(recoveryReadError) }
+                        }
+
+                        if (!pathAuthoritiesStillOwned || retained == null || live != null) {
+                            throw NativeMarkRecoveryRequiredException(
+                                "$authorityLabel requires explicit recovery; no live " +
+                                    "annotation path was overwritten and displaced " +
+                                    "evidence was retained",
+                                failure,
+                            )
+                        }
+
+                        try {
+                            val restoredIdentity = createRegularFileNoClobber(
+                                file,
+                                retained.bytes,
+                                "$authorityLabel rejected-preservation recovery",
+                            )
+                            val restored = readRegularFileAuthorityIfFile(
+                                file,
+                                Int.MAX_VALUE.toLong(),
+                                requireNonEmpty = false,
+                                authorityLabel = "$authorityLabel recovered destination",
+                            ) ?: throw IllegalStateException(
+                                "$authorityLabel recovered destination disappeared",
+                            )
+                            val retainedAfterRestore = readRegularFileAuthorityIfFile(
+                                displaced,
+                                Int.MAX_VALUE.toLong(),
+                                requireNonEmpty = false,
+                                authorityLabel =
+                                    "$authorityLabel retained displaced destination",
+                            ) ?: throw IllegalStateException(
+                                "$authorityLabel retained displaced destination disappeared",
+                            )
+                            require(
+                                samePersistedFileVersion(
+                                    restoredIdentity,
+                                    restored.identity,
+                                ) &&
+                                    retained.bytes.contentEquals(restored.bytes) &&
+                                    sameRegularFileAuthority(retained, retainedAfterRestore) &&
+                                    sameFileObject(
+                                        parentIdentity,
+                                        Os.fstat(parentDescriptor),
+                                    ) &&
+                                    sameFileObject(
+                                        parentIdentity,
+                                        Os.lstat(parent.absolutePath),
+                                    ) &&
+                                    sameFileObject(
+                                        transactionDirectoryIdentity,
+                                        Os.fstat(transactionDirectoryDescriptor),
+                                    ) &&
+                                    sameFileObject(
+                                        transactionDirectoryIdentity,
+                                        Os.lstat(transactionDirectory.absolutePath),
+                                    )
+                            ) {
+                                "$authorityLabel recovered destination or displaced " +
+                                    "evidence changed"
+                            }
+                        } catch (recoveryError: Throwable) {
+                            throw NativeMarkRecoveryRequiredException(
+                                "$authorityLabel requires explicit recovery; exact " +
+                                    "displaced bytes could not be restored without " +
+                                    "clobbering and evidence was retained",
+                                failure,
+                            ).apply { addSuppressed(recoveryError) }
+                        }
+
+                        // The live path again contains the exact bytes moved aside,
+                        // and the original displaced inode remains intact as
+                        // evidence. Preserve the rejection but permit the ordinary
+                        // failure relaunch path.
+                        throw failure
+                    }
+                } finally {
+                    closeDescriptorWithoutMaskingRecovery(
+                        transactionDirectoryDescriptor,
+                        "$authorityLabel displacement directory",
+                    )
                 }
             } finally {
                 closeDescriptorWithoutMaskingRecovery(
-                    transactionDirectoryDescriptor,
-                    "$authorityLabel displacement directory",
+                    admittedDescriptor,
+                    "$authorityLabel admitted destination",
                 )
             }
         } finally {
@@ -5680,7 +5725,7 @@ class ReaderPreferencesModule(
         authorityLabel: String,
     ) {
         runCatching { Os.close(descriptor) }.onFailure { closeError ->
-            // A read-only directory descriptor has no unflushed payload. A
+            // A read-only descriptor has no unflushed payload. A
             // cleanup failure must not replace a recovery-required exception or
             // prevent a successfully returned displacement from being followed
             // by its O_EXCL publication.

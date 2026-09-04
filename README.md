@@ -4,9 +4,13 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 
 ## Native Reader v2 candidate
 
-The current development branch contains RTL Reader v0.4.20 with the rooted
-Native Reader v2 companion v0.0.139. This is an exact-firmware, pre-hardware
-candidate—not the merged stable release.
+The current development branch contains the hardware-rejected, fail-closed
+RTL Reader v0.4.21 checkpoint with rooted Native Reader v2 companion v0.0.139.
+It is not the merged stable release and must not be shipped. Nomad testing
+proved that rename-over-existing on emulated storage can leave PluginHost and
+DocumentActivity observing different marker generations. The next paired build
+must use a new fixed-size journal path and exact Document-process publication
+acknowledgement before activation or revocation is reported successful.
 
 Unlike Virtual Spread, v2 opens the original PDF directly. Portrait is the
 ordinary native full-page reader; landscape composes two original source pages
@@ -51,7 +55,7 @@ and its complete dependency graph; package verification authenticates the real
 manifest, DEX class descriptors, signer, JavaScript bundle, and embedded APK.
 Two clean companion builds must be byte-for-byte identical before release.
 
-The v0.4.20 plug-in also verifies an atomic publication against the staged
+The v0.4.21 plug-in also verifies an atomic publication against the staged
 file descriptor's post-rename identity. This accommodates Android emulated
 storage legitimately advancing the renamed inode's `ctime`, while still
 requiring the exact inode, post-rename version, destination bytes, final path,
@@ -948,7 +952,7 @@ out/*.snplg
 ```
 
 GitHub Actions uploads the current stabilization build as the
-`supernote-rtl-reader-v0.4.14-transactional-hardening` artifact.
+`supernote-rtl-reader-v0.4.21-native-reader-v2` artifact.
 
 ## Install and diagnostics
 

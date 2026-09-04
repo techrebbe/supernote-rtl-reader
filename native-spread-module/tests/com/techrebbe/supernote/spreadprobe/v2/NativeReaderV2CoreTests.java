@@ -986,7 +986,7 @@ public final class NativeReaderV2CoreTests {
             hash.toUpperCase(java.util.Locale.ROOT)
         ), "noncanonical uppercase digest rejected");
         java.util.Properties olderContract = committedV2Marker(hash);
-        olderContract.setProperty("minimumModuleVersionCode", "137");
+        olderContract.setProperty("minimumModuleVersionCode", "138");
         expectThrows(() -> NativeReaderV2MarkerClaim.admit(
             olderContract,
             "/storage/emulated/0/Document/book.pdf",
@@ -994,7 +994,7 @@ public final class NativeReaderV2CoreTests {
             hash
         ), "older companion contract rejected");
         java.util.Properties futureContract = committedV2Marker(hash);
-        futureContract.setProperty("minimumModuleVersionCode", "139");
+        futureContract.setProperty("minimumModuleVersionCode", "140");
         expectThrows(() -> NativeReaderV2MarkerClaim.admit(
             futureContract,
             "/storage/emulated/0/Document/book.pdf",

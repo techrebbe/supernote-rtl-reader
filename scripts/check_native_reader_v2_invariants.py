@@ -85,6 +85,10 @@ def main() -> None:
     app = read(root / "overlay/App.js")
     index = read(root / "overlay/index.js")
     plugin_config = read(root / "PluginConfig.json")
+    core_tests = read(
+        module
+        / "tests/com/techrebbe/supernote/spreadprobe/v2/NativeReaderV2CoreTests.java"
+    )
     template_materializer = read(
         root / "scripts/materialize_plugin_template.py"
     )
@@ -126,14 +130,22 @@ def main() -> None:
     )
     require(
         plugin_config,
-        ['"versionCode": "39"', '"versionName": "0.4.20"'],
+        ['"versionCode": "40"', '"versionName": "0.4.21"'],
         "plugin version",
+    )
+    require(
+        core_tests,
+        [
+            'olderContract.setProperty("minimumModuleVersionCode", "138")',
+            'futureContract.setProperty("minimumModuleVersionCode", "140")',
+        ],
+        "adjacent companion contract rejection tests",
     )
     require(
         module_readme,
         [
             "The v0.0.139 APK\n"
-            "requires Supernote RTL Reader v0.4.20 and refuses every other companion\n"
+            "requires Supernote RTL Reader v0.4.21 and refuses every other companion\n"
             "contract version."
         ],
         "documented Native Reader v2 pairing",
@@ -144,7 +156,7 @@ def main() -> None:
         not in root_build
     ):
         fail("plugin build does not execute the exclusive v2 invariant gate")
-    if "RTL_READER_OPEN v0.4.20-native-reader-v2" not in index:
+    if "RTL_READER_OPEN v0.4.21-native-reader-v2" not in index:
         fail("runtime marker does not identify the v2 plugin build")
     require(
         guidance,
@@ -2626,9 +2638,21 @@ def main() -> None:
             '"$authorityLabel preservation parent"',
             "beforePublish()",
             "val immediate = readRegularFileAuthorityIfFile(",
+            "val admittedDescriptor = Os.open(",
+            "val admittedIdentity = Os.fstat(admittedDescriptor)",
+            "samePersistedFileVersion(immediate.identity, admittedIdentity)",
             "var renameCompleted = false",
+            "samePersistedFileVersion(\n"
+            "                                    admittedIdentity,\n"
+            "                                    Os.fstat(admittedDescriptor),",
             "Os.rename(file.absolutePath, displaced.absolutePath)",
             "renameCompleted = true",
+            "val renamedAdmittedIdentity = Os.fstat(admittedDescriptor)",
+            "sameFileObject(admittedIdentity, renamedAdmittedIdentity)",
+            "samePersistedFileVersion(\n"
+            "                                    renamedAdmittedIdentity,\n"
+            "                                    moved.identity,",
+            "immediate.bytes.contentEquals(moved.bytes)",
             "Os.fsync(transactionDirectoryDescriptor)",
             "Os.fsync(parentDescriptor)",
             "if (!renameCompleted) throw failure",
@@ -2640,17 +2664,27 @@ def main() -> None:
             "retained.bytes.contentEquals(restored.bytes)",
             "sameRegularFileAuthority(retained, retainedAfterRestore)",
             "closeDescriptorWithoutMaskingRecovery(",
+            '"$authorityLabel admitted destination"',
             "throw failure",
         ],
-        "post-rename annotation recovery and retained evidence",
+        "FUSE-safe post-rename annotation recovery and retained evidence",
     )
+    if "sameRegularFileAuthority(expected, moved)" in preserve:
+        fail("displaced-file preservation compares pre-rename ctime after FUSE rename")
+    if "true || immediate.bytes.contentEquals(moved.bytes)" in preserve:
+        fail("displaced-file preservation bypasses byte continuity")
     ordered(
         preserve,
         [
             "beforePublish()",
             "val immediate = readRegularFileAuthorityIfFile(",
+            "val admittedDescriptor = Os.open(",
+            "val admittedIdentity = Os.fstat(admittedDescriptor)",
             "Os.rename(file.absolutePath, displaced.absolutePath)",
             "renameCompleted = true",
+            "val renamedAdmittedIdentity = Os.fstat(admittedDescriptor)",
+            "val moved = readRegularFileAuthorityIfFile(",
+            "sameFileObject(admittedIdentity, renamedAdmittedIdentity)",
             "catch (failure: Throwable)",
             "val live = runCatching",
             "retained == null || live != null",
@@ -2658,7 +2692,7 @@ def main() -> None:
             "val retainedAfterRestore = readRegularFileAuthorityIfFile(",
             "The live path again contains the exact bytes moved aside",
         ],
-        "capture, rename, no-clobber recovery, and rejection order",
+        "capture, FUSE rename authority, no-clobber recovery, and rejection order",
     )
     failed_publish_start = plugin.find("private fun publishRegularFileNoClobber(")
     failed_publish_end = plugin.find(
@@ -2937,7 +2971,7 @@ def main() -> None:
             "python3 scripts/test_build_provenance.py .",
             "out/build-provenance/SupernoteRtlReader.bundle",
             "out/build-provenance/app.npk",
-            "supernote-rtl-reader-v0.4.20-native-reader-v2",
+            "supernote-rtl-reader-v0.4.21-native-reader-v2",
             "native-spread-upgrade-artifact:",
             "github.event_name == 'workflow_dispatch'",
             "github.actor == github.repository_owner",

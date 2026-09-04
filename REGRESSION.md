@@ -4,6 +4,38 @@ Device baseline: Supernote Nomad running firmware fingerprint
 `Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys`
 with SupernoteDocument `1.02.446`.
 
+## Native Reader v2 v0.4.21 hardware checkpoint — FAIL CLOSED
+
+- [x] The v0.4.21 recovery-retirement change restored an originally absent
+  calibration `.mark`, retired its first durable recovery fence, removed the
+  verified backup, and reopened the native reader without data loss.
+- [x] A subsequent fresh activation exposed a separate shared-storage
+  publication failure. PluginHost and `/data/media` observed the committed
+  marker SHA-256
+  `6d4b9f911efa7f704b5d6f3c39953055e764008e7826d8174e862cf2caac6333`,
+  while DocumentActivity and the shell `/storage/emulated` view retained the
+  prior pending marker SHA-256
+  `ded1599dc88a39443b09b4a6420117454d379ad3fd42c3a89f4c868d6dd832e7`.
+  The injected module rejected that stale pending schema and did not admit the
+  document.
+- [x] The cleanup retry also failed closed. Reusing the legacy marker pathname
+  with `O_EXCL` but without `O_TRUNC` produced a recovery-journal prefix plus a
+  retained pending-marker tail (SHA-256
+  `e368fff7cd12c910683ae5f774b6184be4bfe636f1f4b081a34982545778d220`).
+  Strict duplicate-key parsing rejected the mixed file; the verified backup
+  remained, the live `.mark` remained absent, and the reader was not reopened
+  by the recovery worker.
+- [x] A disposable Nomad mount-namespace probe used never-before-seen paths and
+  found identical 8,192-byte hashes through PluginHost, DocumentActivity,
+  shell `/storage/emulated`, and root `/data/media` after both initial
+  publication and a fixed-offset, same-inode update. The stable file retained
+  inode `179295`; its hash changed coherently from
+  `170dfe93c5a733e1d711c57bcfff7ca2c09ca541bad265985514fde5c73e3081`
+  to `aaf78b2e2c8f3e8e89609a6f022ee60035a96bf0f2663f1755b9509d14bdadca`.
+- [ ] v0.4.21 is not releasable. v0.4.22 must replace rename-over-existing
+  authorization with a new-path, fixed-size journal, a durable OFF state, and
+  exact Document-process acknowledgement for activation and revocation.
+
 ## Native Reader v2 pre-hardware adversarial gate — PASS
 
 - [x] 85,071 deterministic controller/geometry/transaction assertions pass.

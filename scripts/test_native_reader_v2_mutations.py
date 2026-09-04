@@ -319,7 +319,7 @@ MUTATIONS = (
 STATIC_MUTATIONS = (
     (
         "native-spread-module/README.md",
-        "requires Supernote RTL Reader v0.4.20 and refuses every other companion",
+        "requires Supernote RTL Reader v0.4.21 and refuses every other companion",
         "requires Supernote RTL Reader v0.4.19 and refuses every other companion",
         "documented companion plugin pairing",
     ),
@@ -778,6 +778,34 @@ STATIC_MUTATIONS = (
         "                        published.identity,\n"
         "                        published.identity,",
         "post-publication destination path recheck",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "sameFileObject(admittedIdentity, renamedAdmittedIdentity)",
+        "sameFileObject(admittedIdentity, admittedIdentity)",
+        "displaced-file post-rename descriptor identity",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                                    renamedAdmittedIdentity,\n"
+        "                                    moved.identity,",
+        "                                    admittedIdentity,\n"
+        "                                    moved.identity,",
+        "FUSE-safe displaced-file post-rename version authority",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "immediate.bytes.contentEquals(moved.bytes)",
+        "true || immediate.bytes.contentEquals(moved.bytes)",
+        "displaced-file byte continuity",
+    ),
+    (
+        "native/ReaderPreferencesModule.kt.template",
+        "                                    admittedIdentity,\n"
+        "                                    Os.fstat(admittedDescriptor),",
+        "                                    admittedIdentity,\n"
+        "                                    admittedIdentity,",
+        "pre-rename displaced-file descriptor revalidation",
     ),
     (
         "native/ReaderPreferencesModule.kt.template",

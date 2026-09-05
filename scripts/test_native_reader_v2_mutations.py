@@ -927,7 +927,7 @@ STATIC_MUTATIONS = (
     ),
     (
         ".github/workflows/build.yml",
-        "be400e348de1d03dbb2d8d6d391bec60555f022fd699402388a5c2a698d89152",
+        "a576ba581a77f0438814ec13c1b1db211ebdd558d1042227db0ae62a0e085798",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "published companion exact signed digest",
     ),
@@ -1566,7 +1566,7 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "be400e348de1d03dbb2d8d6d391bec60555f022fd699402388a5c2a698d89152",
+        "a576ba581a77f0438814ec13c1b1db211ebdd558d1042227db0ae62a0e085798",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "installed companion APK digest pin",
     ),
@@ -2333,9 +2333,26 @@ STATIC_MUTATIONS = (
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2DocumentGate.java",
-        "                    retireSupersededCheckpoint(generation);",
+        "                    retireSupersededCheckpoint(\n"
+        "                        generation,\n"
+        "                        attemptedCheckpointBytes\n"
+        "                    );",
         "                    throw superseded;",
         "superseded checkpoint fence is retired before queued save",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "|| !Arrays.equals(\n"
+        "                        attemptedCheckpointBytes,\n"
+        "                        pendingBytes.bytes)\n"
+        "                    || !Arrays.equals(\n"
+        "                        attemptedCheckpointBytes,\n"
+        "                        checkpointBytes.bytes)",
+        "|| !Arrays.equals(\n"
+        "                        pendingBytes.bytes,\n"
+        "                        checkpointBytes.bytes)",
+        "superseded retirement binds exact attempted checkpoint bytes",
     ),
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
@@ -3495,6 +3512,22 @@ def run_live_mark_checkpoint_recovery_tests(temp_root: pathlib.Path) -> None:
             raise _InterleavingRejected("superseded fence changed")
         pending.unlink()
         raise AssertionError("replaced superseded fence was retired")
+    except _InterleavingRejected:
+        assert pending.exists()
+
+    root = scenario("superseded-pair-replaced-with-same-generation")
+    pending = root / "book.pdf.mark.snspread-live-mark-v1.pending"
+    checkpoint = root / "book.pdf.mark.snspread-live-mark-v1"
+    replacement = b"different-checkpoint-generation-7"
+    pending.write_bytes(replacement)
+    checkpoint.write_bytes(replacement)
+    try:
+        if pending.read_bytes() != older or checkpoint.read_bytes() != older:
+            raise _InterleavingRejected(
+                "replacement pair does not match attempted publication"
+            )
+        pending.unlink()
+        raise AssertionError("replacement checkpoint pair was retired")
     except _InterleavingRejected:
         assert pending.exists()
 

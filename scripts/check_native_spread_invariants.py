@@ -769,7 +769,7 @@ def check(repo_root: Path) -> None:
         or native_secret
         not in str(native_signer_env.get("NATIVE_SPREAD_KEYSTORE_B64", ""))
         or "$expectedSignedLength = 295451L" not in native_signer_run
-        or "be400e348de1d03dbb2d8d6d391bec60555f022fd699402388a5c2a698d89152"
+        or "a576ba581a77f0438814ec13c1b1db211ebdd558d1042227db0ae62a0e085798"
         not in native_signer_run
         or "[Array]::Clear($keyBytes, 0, $keyBytes.Length)"
         not in native_signer_run
@@ -952,7 +952,7 @@ def check(repo_root: Path) -> None:
     frozen_source_digests = (
         (
             plugin_path,
-            "3c746414e159d395e242d9ea9db5db9207f162ccd6cb4b8794292b39af6d8619",
+            "5d44b7c8c1c6baa9eee9ae3a9f06a5047889f5452072b40d1f50d7340e2b5930",
             "ReaderPreferencesModule.kt.template",
         ),
         (
@@ -982,7 +982,7 @@ def check(repo_root: Path) -> None:
         ),
         (
             workflow_path,
-            "f73b69eab1e1b1b743eca91a589786bad6c040bf103331361257c373cb6f0af5",
+            "3642c66f4a0b0b0cb437f97c9e297ef91bceacb674e8b9bcf406d192864aab3f",
             "Native Spread companion-build workflow",
         ),
         (

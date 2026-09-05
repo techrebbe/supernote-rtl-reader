@@ -1841,12 +1841,16 @@ def main() -> None:
             "live mark changed across checkpoint publication",
             "markIdentity = liveResult[0].identity;",
             "catch (CheckpointSupersededException superseded)",
-            "retireSupersededCheckpoint(generation);",
+            "retireSupersededCheckpoint(\n"
+            "                        generation,\n"
+            "                        attemptedCheckpointBytes",
         ],
         "serialized witnessed-checkpoint publication",
     )
     retire_start = gate.find(
-        "private void retireSupersededCheckpoint(long generation)",
+        "private void retireSupersededCheckpoint(\n"
+        "            long generation,\n"
+        "            byte[] attemptedCheckpointBytes",
         persist_start,
     )
     retire_end = gate.find(
@@ -1863,6 +1867,10 @@ def main() -> None:
             "StableBytes checkpointBytes = readRegularFile(",
             "requireLiveMarkWriterLeaseCurrent(",
             "witnessGeneration <= generation",
+            "attemptedCheckpointBytes,\n"
+            "                        pendingBytes.bytes",
+            "attemptedCheckpointBytes,\n"
+            "                        checkpointBytes.bytes",
             "superseded checkpoint authority changed",
             "RecoveryIdentity recoveryAtCommit = verifyRecoveryEvidence(",
             "StableDigest documentAtCommit = hashRegularFile(",
@@ -2785,7 +2793,7 @@ def main() -> None:
             "NATIVE_READER_V2_SIGNER_SHA256 =",
             "NATIVE_READER_V2_APK_LENGTH = 295451L",
             "NATIVE_READER_V2_APK_SHA256 =",
-            "be400e348de1d03dbb2d8d6d391bec60555f022fd699402388a5c2a698d89152",
+            "a576ba581a77f0438814ec13c1b1db211ebdd558d1042227db0ae62a0e085798",
             "PackageManager.GET_SIGNING_CERTIFICATES",
             "signing.hasMultipleSigners()",
             "Native Reader signer set is not exact",
@@ -3530,7 +3538,7 @@ def main() -> None:
             "Remove-Item -LiteralPath $keystore -Force",
             "release-output/SupernoteNativeSpreadProbe-v0.0.140.apk",
             "$expectedSignedLength = 295451L",
-            "be400e348de1d03dbb2d8d6d391bec60555f022fd699402388a5c2a698d89152",
+            "a576ba581a77f0438814ec13c1b1db211ebdd558d1042227db0ae62a0e085798",
             "Signed APK length differs from the reviewed upgrade identity",
             "Signed APK SHA-256 differs from the reviewed upgrade identity.",
         ],

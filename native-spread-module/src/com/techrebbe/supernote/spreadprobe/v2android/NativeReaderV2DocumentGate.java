@@ -1987,6 +1987,7 @@ public final class NativeReaderV2DocumentGate {
         }
 
         private void persistWitnessedCheckpoint(long generation) {
+            byte[] attemptedCheckpointBytes = null;
             try {
                 synchronized (this) {
                     if (closed || unsafe || generation != witnessGeneration) {
@@ -2017,11 +2018,12 @@ public final class NativeReaderV2DocumentGate {
                         return;
                     }
                 }
-                byte[] bytes = liveMarkCheckpointBytes(
+                attemptedCheckpointBytes = liveMarkCheckpointBytes(
                     claim,
                     live,
                     generation
                 );
+                final byte[] bytes = attemptedCheckpointBytes;
                 File checkpoint = new File(
                     markPath + LIVE_MARK_CHECKPOINT_SUFFIX
                 );
@@ -2078,7 +2080,10 @@ public final class NativeReaderV2DocumentGate {
                     + generation);
             } catch (CheckpointSupersededException superseded) {
                 try {
-                    retireSupersededCheckpoint(generation);
+                    retireSupersededCheckpoint(
+                        generation,
+                        attemptedCheckpointBytes
+                    );
                     Log.i(
                         TAG,
                         "retired superseded live mark checkpoint generation="
@@ -2111,8 +2116,16 @@ public final class NativeReaderV2DocumentGate {
          * generation replaces it.  A crash in that interval therefore fails
          * closed without stranding a permanent pending fence.
          */
-        private void retireSupersededCheckpoint(long generation)
+        private void retireSupersededCheckpoint(
+            long generation,
+            byte[] attemptedCheckpointBytes
+        )
             throws Exception {
+            if (attemptedCheckpointBytes == null) {
+                throw new IllegalStateException(
+                    "superseded checkpoint lacks attempted publication bytes"
+                );
+            }
             File checkpoint = new File(
                 markPath + LIVE_MARK_CHECKPOINT_SUFFIX
             );
@@ -2173,6 +2186,12 @@ public final class NativeReaderV2DocumentGate {
                 }
                 if (pendingCheckpoint.generation != generation
                     || publishedCheckpoint.generation != generation
+                    || !Arrays.equals(
+                        attemptedCheckpointBytes,
+                        pendingBytes.bytes)
+                    || !Arrays.equals(
+                        attemptedCheckpointBytes,
+                        checkpointBytes.bytes)
                     || !Arrays.equals(
                         pendingBytes.bytes,
                         checkpointBytes.bytes)

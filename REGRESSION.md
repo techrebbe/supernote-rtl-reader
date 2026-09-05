@@ -41,7 +41,7 @@ with SupernoteDocument `1.02.446`.
 - [x] RTL Reader v0.4.22 (`versionCode=41`) and companion v0.0.140
   (`versionCode=140`) use handshake protocol 4 and protected-editable marker
   protocol 3. The companion is 295,451 bytes with SHA-256
-  `be400e348de1d03dbb2d8d6d391bec60555f022fd699402388a5c2a698d89152`
+  `a576ba581a77f0438814ec13c1b1db211ebdd558d1042227db0ae62a0e085798`
   and the upgrade-compatible signer certificate SHA-256 remains
   `a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`.
 - [x] Authority moved to a never-reused `.snspread-v3` path containing one
@@ -102,12 +102,12 @@ with SupernoteDocument `1.02.446`.
   before reassessment so legacy path evidence cannot silently regain control.
 - [x] The Java/Kotlin journal golden vectors agree. The core suite passes
   85,407 assertions, including mutations at both ends of every wire field and
-  authenticated region. All 263 executable/static authority mutations are
+  authenticated region. All 271 executable/static authority mutations are
   rejected, and native/plugin invariants, provenance, and fail-closed package
   tests pass.
 - [x] The full RTL Reader package compiles through the authenticated Supernote
-  template and verifies at 7,360,351 bytes with SHA-256
-  `fae89dd6f62b012581d041d3b99b90582611e4fe486347082ea254cc91ca2cd7`.
+  template and verifies at 7,360,267 bytes with SHA-256
+  `9cbf69cb275439b0985e829a52c7c30c5fa2ccda308db21beb58b80a5753ee01`.
 - [ ] Exact-head PR CI and Codex review are clean.
 - [ ] The Nomad proves same-inode visibility and exact ACKs for enable,
   disable, restore, interrupted recovery, cold process reopen, and ordinary-PDF

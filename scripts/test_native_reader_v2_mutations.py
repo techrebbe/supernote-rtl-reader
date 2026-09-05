@@ -319,7 +319,7 @@ MUTATIONS = (
 STATIC_MUTATIONS = (
     (
         "native-spread-module/README.md",
-        "requires Supernote RTL Reader v0.4.22 and refuses every other companion",
+        "requires Supernote RTL Reader v0.4.23 and refuses every other companion",
         "requires Supernote RTL Reader v0.4.19 and refuses every other companion",
         "documented companion plugin pairing",
     ),

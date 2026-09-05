@@ -593,27 +593,34 @@ class ReaderPreferencesModule(
                         // gated by the pending token, document/marker identity, and
                         // exact backup/archive hashes. Ambiguous evidence is kept.
                         withNativeSpreadPublicationLock(marker) {
-                            withNativeSpreadConfigurationAuthority(
-                                configurationGeneration,
-                            ) {
-                                reconcileFailedActivationBackupForExplicitActivation(
-                                    pdfFile,
-                                    marker,
-                                )
-                                if (readPersistedAuthorityIfFile(marker) == null) {
-                                    // A legacy marker without admissible v3
-                                    // authority still fences the Document
-                                    // process. Publish a durable OFF record in
-                                    // the new fixed inode before reassessing;
-                                    // preserved backup evidence remains an
-                                    // independent recovery blocker.
-                                    publishNativeSpreadOffMarkerLocked(
+                            val publishOffAuthority =
+                                withNativeSpreadConfigurationAuthority(
+                                    configurationGeneration,
+                                ) {
+                                    reconcileFailedActivationBackupForExplicitActivation(
                                         pdfFile,
                                         marker,
-                                        UUID.randomUUID().toString(),
-                                        configurationGeneration,
                                     )
+                                    readPersistedAuthorityIfFile(marker) == null
                                 }
+                            if (publishOffAuthority) {
+                                // A legacy marker without admissible v3
+                                // authority still fences the Document process.
+                                // The preserved backup evidence remains an
+                                // independent recovery blocker.
+                                // Publish a durable OFF record in the new fixed
+                                // inode before reassessing. The publication
+                                // helper obtains the process-local authority for
+                                // its CAS, then releases it before waiting for
+                                // the Document-process ACK. Holding that lock
+                                // across the ACK would deadlock its main-thread
+                                // callback.
+                                publishNativeSpreadOffMarkerLocked(
+                                    pdfFile,
+                                    marker,
+                                    UUID.randomUUID().toString(),
+                                    configurationGeneration,
+                                )
                             }
                         }
                     }
@@ -2203,6 +2210,9 @@ class ReaderPreferencesModule(
         val protectedMarkerValid = backupResult.backup?.let { backup ->
             protectedEditableSessionMarkerValid(pdfFile, markerProperties, backup)
         } == true
+        val offMarkerValid =
+            markerAuthority?.journalState == NativeReaderV2AuthorityJournal.State.OFF &&
+                nativeSpreadOffMarkerValid(pdfFile, markerProperties)
         val canonicalEvidencePresent = runCatching {
             nativeAnnotationBackupManifest(pdfFile).exists() ||
                 nativeAnnotationBackupSnapshot(pdfFile).exists() ||
@@ -2210,7 +2220,8 @@ class ReaderPreferencesModule(
         }.getOrDefault(true)
         val backupInvalid = backupResult.status.startsWith("invalid:")
         val unresolvedManagedMarker =
-            managedEditableMarker && !activationPending && !protectedMarkerValid
+            managedEditableMarker && !activationPending &&
+                !protectedMarkerValid && !offMarkerValid
         val orphanedVerifiedBackup =
             backupResult.backup != null && !activationPending && !protectedMarkerValid
         val incompleteCanonicalEvidence =

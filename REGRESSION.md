@@ -108,10 +108,53 @@ with SupernoteDocument `1.02.446`.
 - [x] The full RTL Reader package compiles through the authenticated Supernote
   template and verifies at 7,360,267 bytes with SHA-256
   `9cbf69cb275439b0985e829a52c7c30c5fa2ccda308db21beb58b80a5753ee01`.
-- [ ] Exact-head PR CI and Codex review are clean.
+- [x] Exact-head PR CI run `33996117655` and Codex review comment
+  `5555281921` were clean at head
+  `d9757f064e2454835f5569eb5756511b19d78cc8` before hardware testing.
 - [ ] The Nomad proves same-inode visibility and exact ACKs for enable,
   disable, restore, interrupted recovery, cold process reopen, and ordinary-PDF
-  isolation. No hardware result is claimed by this local section.
+  isolation. The first recovery test below failed closed and supersedes any
+  release claim for v0.4.22.
+
+## Native Reader v2 v0.4.23 recovery-ACK correction — HARDWARE FIX PENDING
+
+- [x] The exact-head v0.4.22 package and companion v0.0.140 were installed on
+  the Nomad. The disposable `NativeReaderV2-Calibration.pdf` opened normally,
+  the v3 journal was created at the fixed `.snspread-v3` path, and PluginHost,
+  shell `/storage/emulated`, and root `/data/media` observed the same journal.
+- [x] Explicit reconciliation preserved all ambiguous evidence and failed
+  closed. It retired the verified no-annotation rollback baseline and published
+  generation 1 OFF authority, but timed out waiting for the Document ACK. A
+  second reconciliation then rejected the same valid OFF record as
+  `managed_editable_authority_invalid`; neither failure admitted editing or
+  overwrote native annotation data.
+- [x] A manual protocol-4 handshake bound to the exact journal path,
+  generation, authority SHA-256, OFF state, activation token, document length,
+  and document SHA-256 received a native-process response. This proves the
+  companion can observe and authenticate the fixed journal; the timeout was in
+  PluginHost callback completion rather than shared-storage visibility.
+- [x] Root cause one: reconciliation called the OFF publication/ACK helper
+  while retaining `nativeSpreadConfigurationIntentLock`; the PluginHost main-
+  thread ACK callback requires that same lock before releasing the waiting
+  worker. v0.4.23 decides whether OFF publication is required under the mutex,
+  releases it, then publishes and waits while generation and cross-process file
+  authority remain held.
+- [x] Root cause two: authority assessment classified every managed editable-
+  mode record without a rollback backup as invalid, including a strict valid
+  journal-header/payload-matched OFF record. v0.4.23 explicitly recognizes
+  exact v3 OFF authority while continuing to reject malformed OFF payloads,
+  non-OFF headers, orphaned backup evidence, pending transitions, and invalid
+  protected sessions.
+- [x] Local Native Reader v2 core tests pass 85,407 assertions; all 271
+  authority mutations are rejected; Native Spread and v2 invariants, build
+  provenance, deterministic ZIP, packaging failure-injection, full plug-in
+  build, and finished-package verification pass. The v0.4.23 package is
+  7,360,370 bytes with SHA-256
+  `ee2f0623c878ea830a6d7b8c693efd7d4144194779c41f01808bd468cfc5cc96`.
+- [ ] Exact-head CI and Codex review pass for v0.4.23.
+- [ ] The Nomad proves a fresh legacy-to-v3 reconciliation receives its exact
+  ACK without timeout, the existing valid OFF journal loads as resolved, and
+  enable/disable/reopen behavior remains fail closed and data safe.
 
 ## Native Reader v2 pre-hardware adversarial gate — PASS
 

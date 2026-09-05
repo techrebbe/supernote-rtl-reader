@@ -952,7 +952,7 @@ def check(repo_root: Path) -> None:
     frozen_source_digests = (
         (
             plugin_path,
-            "5d44b7c8c1c6baa9eee9ae3a9f06a5047889f5452072b40d1f50d7340e2b5930",
+            "09f9a1df1f77b167a11ccd3df4f0a1f62d6138ed2925304a15e1fd602512f906",
             "ReaderPreferencesModule.kt.template",
         ),
         (
@@ -982,7 +982,7 @@ def check(repo_root: Path) -> None:
         ),
         (
             workflow_path,
-            "3642c66f4a0b0b0cb437f97c9e297ef91bceacb674e8b9bcf406d192864aab3f",
+            "80e7733a663c32e39a871aa5eb4aa11e7e6857635b2c5af4b2063b6083cd56a3",
             "Native Spread companion-build workflow",
         ),
         (
@@ -2128,6 +2128,27 @@ def check(repo_root: Path) -> None:
     recovery_delegate = recovery_reconcile.find(
         "reconcileFailedActivationBackupForExplicitActivation(", recovery_guard
     )
+    recovery_configuration = recovery_reconcile.find(
+        "withNativeSpreadConfigurationAuthority(", recovery_guard
+    )
+    recovery_configuration_open = recovery_reconcile.find(
+        "{", recovery_configuration
+    )
+    recovery_configuration_close = (
+        matching_brace(
+            recovery_reconcile,
+            recovery_configuration_open,
+            "recovery reconciliation configuration authority",
+        )
+        if recovery_configuration_open >= 0
+        else -1
+    )
+    recovery_off_decision = recovery_reconcile.find(
+        "val publishOffAuthority =", recovery_guard
+    )
+    recovery_off_publish = recovery_reconcile.find(
+        "publishNativeSpreadOffMarkerLocked(", recovery_off_decision
+    )
     recovery_after = recovery_reconcile.find(
         "val after = assessNativeSpreadAuthority(", recovery_delegate
     )
@@ -2145,6 +2166,16 @@ def check(repo_root: Path) -> None:
         fail(
             "explicit recovery does not delegate through exact reconciliation "
             "and re-assess ready authority before resolving"
+        )
+    if not (
+        recovery_guard < recovery_off_decision < recovery_configuration
+        < recovery_delegate < recovery_configuration_close
+        < recovery_off_publish < recovery_after
+    ):
+        fail(
+            "explicit recovery must decide OFF publication under process-local "
+            "configuration authority, release that authority before publishing "
+            "and waiting for the Document-process acknowledgement, then reassess"
         )
     recovery_calls_masked = mask_cpp_comments_and_literals(recovery_reconcile)
     recovery_calls = re.findall(
@@ -2295,10 +2326,13 @@ def check(repo_root: Path) -> None:
             '"marker_unreadable:${error.message}"',
             "NATIVE_SPREAD_ACTIVATION_PENDING",
             "protectedEditableSessionMarkerValid(",
+            "markerAuthority?.journalState == NativeReaderV2AuthorityJournal.State.OFF",
+            "nativeSpreadOffMarkerValid(pdfFile, markerProperties)",
             "nativeAnnotationRetiringSnapshot(pdfFile).exists()",
             ".getOrDefault(true)",
             'backupResult.status.startsWith("invalid:")',
-            "managedEditableMarker && !activationPending && !protectedMarkerValid",
+            "managedEditableMarker && !activationPending &&\n"
+            "                !protectedMarkerValid && !offMarkerValid",
             "backupResult.backup != null && !activationPending && !protectedMarkerValid",
             "canonicalEvidencePresent && backupResult.backup == null",
             'activationPending -> "pending_protected_transition"',

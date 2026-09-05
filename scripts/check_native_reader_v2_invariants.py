@@ -135,7 +135,7 @@ def main() -> None:
     )
     require(
         plugin_config,
-        ['"versionCode": "41"', '"versionName": "0.4.22"'],
+        ['"versionCode": "42"', '"versionName": "0.4.23"'],
         "plugin version",
     )
     require(
@@ -150,7 +150,7 @@ def main() -> None:
         module_readme,
         [
             "The v0.0.140 APK\n"
-            "requires Supernote RTL Reader v0.4.22 and refuses every other companion\n"
+            "requires Supernote RTL Reader v0.4.23 and refuses every other companion\n"
             "contract version."
         ],
         "documented Native Reader v2 pairing",
@@ -161,7 +161,7 @@ def main() -> None:
         not in root_build
     ):
         fail("plugin build does not execute the exclusive v2 invariant gate")
-    if "RTL_READER_OPEN v0.4.22-native-reader-v2" not in index:
+    if "RTL_READER_OPEN v0.4.23-native-reader-v2" not in index:
         fail("runtime marker does not identify the v2 plugin build")
     require(
         guidance,
@@ -3435,7 +3435,7 @@ def main() -> None:
             "python3 scripts/test_build_provenance.py .",
             "out/build-provenance/SupernoteRtlReader.bundle",
             "out/build-provenance/app.npk",
-            "supernote-rtl-reader-v0.4.22-native-reader-v2",
+            "supernote-rtl-reader-v0.4.23-native-reader-v2",
             "native-spread-upgrade-artifact:",
             "github.event_name == 'workflow_dispatch'",
             "github.actor == github.repository_owner",

@@ -4,7 +4,7 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 
 ## Native Reader v2 candidate
 
-The current development branch contains RTL Reader v0.4.22 with rooted Native
+The current development branch contains RTL Reader v0.4.23 with rooted Native
 Reader v2 companion v0.0.140. It is a pre-hardware candidate, not the merged
 stable release, and must not be shipped yet. Nomad testing of v0.4.21 proved
 that rename-over-existing on emulated storage can leave PluginHost and
@@ -56,7 +56,7 @@ and its complete dependency graph; package verification authenticates the real
 manifest, DEX class descriptors, signer, JavaScript bundle, and embedded APK.
 Two clean companion builds must be byte-for-byte identical before release.
 
-The v0.4.22 plug-in stores authority in a 32 KiB, two-slot `.snspread-v3`
+The v0.4.23 plug-in stores authority in a 32 KiB, two-slot `.snspread-v3`
 journal. Initialization creates and sizes the file once; later transitions use
 only fixed-offset writes and `fsync` on the same inode. A transition first
 invalidates and syncs the inactive header, then writes and syncs its payload,
@@ -86,6 +86,10 @@ started the load. Restore and reconciliation claim that same process-wide
 generation, exclude concurrent mode loads/configuration during their mutation,
 retain an exact owner-generation token, and advance the generation again at
 completion; a stale completion retry cannot release a replacement recovery.
+Recovery reconciliation recognizes an exact v3 OFF record as resolved managed
+authority and releases the process-local configuration mutex before waiting for
+the Document-process acknowledgement; the acknowledgement callback therefore
+cannot deadlock behind the worker that is awaiting it.
 Annotation restore also holds generation authority across `.mark` publication
 and recovery-evidence retirement, so invalidation cannot linearize inside its
 irreversible commit. Pending-marker reconciliation additionally takes the
@@ -984,7 +988,7 @@ out/*.snplg
 ```
 
 GitHub Actions uploads the current stabilization build as the
-`supernote-rtl-reader-v0.4.22-native-reader-v2` artifact.
+`supernote-rtl-reader-v0.4.23-native-reader-v2` artifact.
 
 ## Install and diagnostics
 

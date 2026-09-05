@@ -106,12 +106,15 @@ v0.0.140 is a pre-hardware candidate. It must not replace the stable baseline
 until the exact-head automated review is clean and the full matrix in
 `NATIVE_READER_V2_REVIEW_GATES.md` passes on the Nomad.
 
-The paired v0.4.22 plugin never renames, deletes, truncates, resizes, or
+The paired v0.4.23 plugin never renames, deletes, truncates, resizes, or
 recreates an initialized authority journal. It publishes PENDING, COMMITTED,
 RECOVERY, and OFF records into alternating fixed slots and requires an exact
 Document-process acknowledgement of the current record before completing a
-state transition. Legacy `.snspread` files are preserved as migration evidence;
-a valid v3 record is the only authority that supersedes them.
+state transition. The process-local configuration mutex is released before
+waiting for that acknowledgement, while generation ownership and the
+cross-process publication lock retain transition authority. Legacy `.snspread`
+files are preserved as migration evidence; a valid v3 OFF record is resolved
+authority and the only authority that supersedes them.
 
 Normal admission rejects the complete journal if either nonzero slot is torn or
 malformed. Explicit annotation restore has one narrower recovery operation: once

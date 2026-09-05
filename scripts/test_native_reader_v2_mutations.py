@@ -921,13 +921,13 @@ STATIC_MUTATIONS = (
     ),
     (
         ".github/workflows/build.yml",
-        "$expectedSignedLength = 291355L",
+        "$expectedSignedLength = 295451L",
         "$expectedSignedLength = 250394L",
         "published companion exact signed length",
     ),
     (
         ".github/workflows/build.yml",
-        "848c05a4697c600278159c97442b81ecb7241134e993e115509ee0d797b43984",
+        "be400e348de1d03dbb2d8d6d391bec60555f022fd699402388a5c2a698d89152",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "published companion exact signed digest",
     ),
@@ -1560,13 +1560,13 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "NATIVE_READER_V2_APK_LENGTH = 291355L",
+        "NATIVE_READER_V2_APK_LENGTH = 295451L",
         "NATIVE_READER_V2_APK_LENGTH = 250394L",
         "installed companion APK length pin",
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "848c05a4697c600278159c97442b81ecb7241134e993e115509ee0d797b43984",
+        "be400e348de1d03dbb2d8d6d391bec60555f022fd699402388a5c2a698d89152",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "installed companion APK digest pin",
     ),
@@ -2287,6 +2287,74 @@ STATIC_MUTATIONS = (
         "if (closed || unsafe\n"
         "                || lease == null || !lease.isValid()) {",
         "closing mark authority rejects new runtime work",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "commitValidator.validate();\n"
+        "            StableBytes checkpointAtCommit = readRegularFile(\n"
+        "                checkpoint.getAbsolutePath(),",
+        "commitValidator.validate();\n"
+        "            StableBytes checkpointAtCommit = checkpointAfterValidation;\n"
+        "            if (false) readRegularFile(\n"
+        "                checkpoint.getAbsolutePath(),",
+        "checkpoint publication revalidates exact file after final callback",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "|| !pendingIdentity.sameVersion(pendingAtCommit.identity)\n"
+        "                || !Arrays.equals(bytes, pendingAtCommit.bytes)",
+        "|| !Arrays.equals(bytes, pendingAtCommit.bytes)",
+        "checkpoint publication final pending inode authority",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "RecoveryIdentity recoveryAtCommit = verifyRecoveryEvidence(\n"
+        "                claim,\n"
+        "                new File(claim.canonicalDocumentPath)\n"
+        "            );",
+        "RecoveryIdentity recoveryAtCommit = recoveryAfter;",
+        "stopped-process recovery revalidates authority at unlink boundary",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "throw new CheckpointSupersededException(\n"
+        "                                        generation,\n"
+        "                                        witnessGeneration\n"
+        "                                    );",
+        "throw new IllegalStateException(\n"
+        "                                        \"checkpoint generation changed\"\n"
+        "                                    );",
+        "newer save receives recoverable checkpoint supersession",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "                    retireSupersededCheckpoint(generation);",
+        "                    throw superseded;",
+        "superseded checkpoint fence is retired before queued save",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "RecoveryIdentity recoveryAtCommit = verifyRecoveryEvidence(\n"
+        "                    claim,\n"
+        "                    new File(claim.canonicalDocumentPath)\n"
+        "                );",
+        "RecoveryIdentity recoveryAtCommit = recovery;",
+        "superseded fence retirement final recovery authority",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "// Final lease identity is checked after both exact file rereads.\n"
+        "                requireLiveMarkWriterLeaseCurrent(",
+        "// Final lease identity check removed.\n"
+        "                if (false) requireLiveMarkWriterLeaseCurrent(",
+        "superseded fence retirement final lease identity",
     ),
 )
 
@@ -3390,6 +3458,45 @@ def run_live_mark_checkpoint_recovery_tests(temp_root: pathlib.Path) -> None:
             raise AssertionError(f"unsafe checkpoint recovery accepted: {name}")
         except _InterleavingRejected:
             assert pending.exists()
+
+    # A later witnessed save may supersede an older publication while its
+    # fence is still present.  The single checkpoint worker retires only that
+    # exact older fence, leaves the now-stale checkpoint fail closed, and then
+    # publishes the queued newest generation.
+    root = scenario("newer-save-supersedes-published-checkpoint")
+    pending = root / "book.pdf.mark.snspread-live-mark-v1.pending"
+    checkpoint = root / "book.pdf.mark.snspread-live-mark-v1"
+    older = b"authenticated-checkpoint-generation-7"
+    newest = b"authenticated-checkpoint-generation-8"
+    pending.write_bytes(older)
+    checkpoint.write_bytes(older)
+    observed_pending = pending.read_bytes()
+    observed_checkpoint = checkpoint.read_bytes()
+    if observed_pending != older or observed_checkpoint != older:
+        raise AssertionError("superseded checkpoint setup changed")
+    pending.unlink()
+    assert checkpoint.read_bytes() == older
+    assert b"live:" + newest != b"live:" + checkpoint.read_bytes()
+    pending.write_bytes(newest)
+    checkpoint.write_bytes(newest)
+    assert pending.read_bytes() == checkpoint.read_bytes() == newest
+    pending.unlink()
+    assert checkpoint.read_bytes() == newest
+
+    root = scenario("superseded-fence-replaced-before-retirement")
+    pending = root / "book.pdf.mark.snspread-live-mark-v1.pending"
+    checkpoint = root / "book.pdf.mark.snspread-live-mark-v1"
+    pending.write_bytes(older)
+    checkpoint.write_bytes(older)
+    observed_pending = pending.read_bytes()
+    pending.write_bytes(b"replacement")
+    try:
+        if pending.read_bytes() != observed_pending:
+            raise _InterleavingRejected("superseded fence changed")
+        pending.unlink()
+        raise AssertionError("replaced superseded fence was retired")
+    except _InterleavingRejected:
+        assert pending.exists()
 
     print("Native Reader v2 live-mark checkpoint recovery tests: PASS")
 

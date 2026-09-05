@@ -40,8 +40,8 @@ with SupernoteDocument `1.02.446`.
 
 - [x] RTL Reader v0.4.22 (`versionCode=41`) and companion v0.0.140
   (`versionCode=140`) use handshake protocol 4 and protected-editable marker
-  protocol 3. The companion is 291,355 bytes with SHA-256
-  `848c05a4697c600278159c97442b81ecb7241134e993e115509ee0d797b43984`
+  protocol 3. The companion is 295,451 bytes with SHA-256
+  `be400e348de1d03dbb2d8d6d391bec60555f022fd699402388a5c2a698d89152`
   and the upgrade-compatible signer certificate SHA-256 remains
   `a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`.
 - [x] Authority moved to a never-reused `.snspread-v3` path containing one
@@ -83,9 +83,14 @@ with SupernoteDocument `1.02.446`.
   generation check. A new exclusive writer-lease owner can reconcile a stopped
   publication only when its pending record, published checkpoint, live mark,
   PDF, and immutable recovery authority agree exactly; an exact baseline restore
-  first removes the obsolete checkpoint. All other states remain blocked. A
-  slow shutdown
-  keeps the lease through an asynchronous worker drain. Existing zero-byte
+  first removes the obsolete checkpoint. All other states remain blocked.
+  Rapid consecutive saves are serialized:
+  a newer witnessed generation supersedes an older publication by retiring only
+  that exact older pending fence under the same writer lease before the queued
+  newest generation publishes. Both ordinary publication and stopped-process
+  recovery re-read their exact pending/checkpoint/PDF/recovery identities at the
+  irreversible unlink boundary, after every delayed validation callback. A
+  slow shutdown keeps the lease through an asynchronous worker drain. Existing zero-byte
   marks are admitted as regular files rather than mistaken for absence.
 - [x] Restore publishes RECOVERY before touching `.mark`, keeps the document
   process stopped during replacement, starts a fresh authority provider while
@@ -101,8 +106,8 @@ with SupernoteDocument `1.02.446`.
   rejected, and native/plugin invariants, provenance, and fail-closed package
   tests pass.
 - [x] The full RTL Reader package compiles through the authenticated Supernote
-  template and verifies at 7,360,154 bytes with SHA-256
-  `1f6061403099e3412e4a01492756ccdb1d1b773e5087333787a1fd5fcb5ed4a0`.
+  template and verifies at 7,360,351 bytes with SHA-256
+  `fae89dd6f62b012581d041d3b99b90582611e4fe486347082ea254cc91ca2cd7`.
 - [ ] Exact-head PR CI and Codex review are clean.
 - [ ] The Nomad proves same-inode visibility and exact ACKs for enable,
   disable, restore, interrupted recovery, cold process reopen, and ordinary-PDF

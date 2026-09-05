@@ -1725,6 +1725,13 @@ def main() -> None:
             "StableBytes checkpointAfterValidation = readRegularFile(",
             "checkpoint authority changed before final live validation",
             "commitValidator.validate();",
+            "StableBytes checkpointAtCommit = readRegularFile(",
+            "StableBytes pendingAtCommit = readRegularFile(",
+            "|| !pendingIdentity.sameVersion(Identity.from(\n"
+            "                    Os.fstat(pendingDescriptor)\n"
+            "                ))",
+            "|| !pendingIdentity.sameVersion(pendingAtCommit.identity)",
+            "checkpoint changed at verified commit boundary",
             "Os.remove(pending.getAbsolutePath());",
         ],
         "live mark checkpoint durable verified-commit fence",
@@ -1762,17 +1769,24 @@ def main() -> None:
             "Os.remove(checkpointPath);",
             "StableBytes pendingAfterRetirement = readRegularFile(",
             "baseline checkpoint retirement authority changed",
+            "RecoveryIdentity recoveryAtCommit = verifyRecoveryEvidence(",
+            "StableDigest documentAtCommit = hashRegularFile(",
+            "StableBytes pendingAtCommit = readRegularFile(",
+            "LiveMarkState liveAtCommit = readLiveMarkState(",
+            "pending checkpoint changed at recovery commit boundary",
+            "could let a second process recover the same publication.\n"
+            "            requireLiveMarkWriterLeaseCurrent(",
             "Os.remove(pendingPath);",
         ],
         "exclusive stopped-publisher checkpoint reconciliation",
     )
     if gate[checkpoint_recovery_start:checkpoint_recovery_end].count(
         "verifyRecoveryEvidence("
-    ) != 3:
+    ) != 4:
         fail(
             "pending checkpoint recovery must verify immutable recovery "
-            "authority before classification, before commit, and after "
-            "baseline checkpoint retirement"
+            "authority before classification, during validation, after "
+            "baseline retirement, and again at the unlink boundary"
         )
     if gate[checkpoint_recovery_start:checkpoint_recovery_end].count(
         "requireLiveMarkWriterLeaseCurrent("
@@ -1823,11 +1837,50 @@ def main() -> None:
             "readLiveMarkCheckpointAtPath(",
             "LiveMarkState after = readLiveMarkState(markPath);",
             "live mark writer lease changed across checkpoint",
+            "new CheckpointSupersededException(",
             "live mark changed across checkpoint publication",
             "markIdentity = liveResult[0].identity;",
+            "catch (CheckpointSupersededException superseded)",
+            "retireSupersededCheckpoint(generation);",
         ],
-        "pending fence spans final witnessed-checkpoint validation",
+        "serialized witnessed-checkpoint publication",
     )
+    retire_start = gate.find(
+        "private void retireSupersededCheckpoint(long generation)",
+        persist_start,
+    )
+    retire_end = gate.find(
+        "synchronized boolean revalidate()", retire_start
+    )
+    if retire_start < 0 or retire_end < 0:
+        fail("could not isolate superseded checkpoint retirement")
+    ordered(
+        gate[retire_start:retire_end],
+        [
+            "RecoveryIdentity recovery = verifyRecoveryEvidence(",
+            "StableDigest document = hashRegularFile(",
+            "StableBytes pendingBytes = readRegularFile(",
+            "StableBytes checkpointBytes = readRegularFile(",
+            "requireLiveMarkWriterLeaseCurrent(",
+            "witnessGeneration <= generation",
+            "superseded checkpoint authority changed",
+            "RecoveryIdentity recoveryAtCommit = verifyRecoveryEvidence(",
+            "StableDigest documentAtCommit = hashRegularFile(",
+            "StableBytes pendingAtCommit = readRegularFile(",
+            "StableBytes checkpointAtCommit = readRegularFile(",
+            "Final lease identity is checked after both exact file rereads.",
+            "superseded checkpoint changed at retirement boundary",
+            "Os.remove(pending.getAbsolutePath());",
+        ],
+        "newer-save checkpoint coalescing",
+    )
+    if gate[retire_start:retire_end].count(
+        "requireLiveMarkWriterLeaseCurrent("
+    ) != 2:
+        fail(
+            "superseded checkpoint retirement must retain the exact writer "
+            "lease before validation and again at the unlink boundary"
+        )
     if gate.count("requireNoPendingLiveMarkCheckpoint(") != 3:
         fail(
             "pending checkpoint fence must cover its helper plus both cold "
@@ -2730,9 +2783,9 @@ def main() -> None:
         [
             "NATIVE_READER_V2_MIN_VERSION_CODE = 140L",
             "NATIVE_READER_V2_SIGNER_SHA256 =",
-            "NATIVE_READER_V2_APK_LENGTH = 291355L",
+            "NATIVE_READER_V2_APK_LENGTH = 295451L",
             "NATIVE_READER_V2_APK_SHA256 =",
-            "848c05a4697c600278159c97442b81ecb7241134e993e115509ee0d797b43984",
+            "be400e348de1d03dbb2d8d6d391bec60555f022fd699402388a5c2a698d89152",
             "PackageManager.GET_SIGNING_CERTIFICATES",
             "signing.hasMultipleSigners()",
             "Native Reader signer set is not exact",
@@ -3476,8 +3529,8 @@ def main() -> None:
             "$env:NATIVE_SPREAD_KEYSTORE_B64 = $null",
             "Remove-Item -LiteralPath $keystore -Force",
             "release-output/SupernoteNativeSpreadProbe-v0.0.140.apk",
-            "$expectedSignedLength = 291355L",
-            "848c05a4697c600278159c97442b81ecb7241134e993e115509ee0d797b43984",
+            "$expectedSignedLength = 295451L",
+            "be400e348de1d03dbb2d8d6d391bec60555f022fd699402388a5c2a698d89152",
             "Signed APK length differs from the reviewed upgrade identity",
             "Signed APK SHA-256 differs from the reviewed upgrade identity.",
         ],
@@ -3487,7 +3540,7 @@ def main() -> None:
         stable_job,
         [
             "apksigner verification failed",
-            "$expectedSignedLength = 291355L",
+            "$expectedSignedLength = 295451L",
             "Signed APK SHA-256 differs from the reviewed upgrade identity.",
             "} finally {",
             "Upload upgrade-compatible Native Reader APK",

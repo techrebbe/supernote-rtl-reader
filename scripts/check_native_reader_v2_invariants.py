@@ -1603,12 +1603,14 @@ def main() -> None:
             "StableBytes markerAfter",
             "RecoveryIdentity recovery = verifyRecoveryEvidence(",
             "MarkAuthority.acquire(claim)",
-            "StableDigest documentIdentity = hashRegularFile(canonical);",
+            "OpenFile openedDocument = OpenFile.open(canonical);",
+            "StableDigest documentIdentity = hashOpenRegularFile(",
             "StableBytes bytesAfter = readRegularFile(",
+            "openedDocument.verifyUnchangedAndCurrent(canonical);",
             "Long.toString(documentIdentity.identity.size).equals(",
             (
                 "|| !documentIdentity.sha256.equals(\n"
-                "                    payload.getProperty(\"documentSha256\"))"
+                "                        payload.getProperty(\"documentSha256\"))"
             ),
             "!bytes.identity.sameVersion(bytesAfter.identity)",
             "!Arrays.equals(bytes.bytes, bytesAfter.bytes)",
@@ -1644,6 +1646,12 @@ def main() -> None:
             ),
             "persistWitnessedCheckpoint(generation)",
             "writeLiveMarkCheckpointAtomically(checkpoint, bytes)",
+            "LIVE_MARK_CHECKPOINT_PENDING_SUFFIX",
+            "requireNoPendingLiveMarkCheckpoint(checkpointPath);",
+            "live mark checkpoint publication is incomplete",
+            "checkpoint pending fence authority changed",
+            "checkpoint verified-commit fence changed",
+            "Os.remove(pending.getAbsolutePath());",
             "FileDescriptor parentDescriptor = openPinnedDirectory(",
             "commonFlags | LINUX_O_DIRECTORY",
             "failure.errno != OsConstants.EINVAL",
@@ -1672,6 +1680,52 @@ def main() -> None:
         ],
         "document and recovery admission",
     )
+    observe_start = gate.find(
+        "public static AuthorityObservation observeAuthority(String documentPath)"
+    )
+    observe_end = gate.find(
+        "private static boolean isCanonicalUuid(String value)", observe_start
+    )
+    if observe_start < 0 or observe_end < 0:
+        fail("could not isolate authority observation")
+    ordered(
+        gate[observe_start:observe_end],
+        [
+            "OpenFile openedDocument = OpenFile.open(canonical);",
+            "StableDigest documentIdentity = hashOpenRegularFile(",
+            "StableBytes bytesAfter = readRegularFile(",
+            "openedDocument.verifyUnchangedAndCurrent(canonical);",
+            "return new AuthorityObservation(",
+        ],
+        "authority ACK PDF and journal linearization",
+    )
+    checkpoint_write_start = gate.find(
+        "private static void writeLiveMarkCheckpointAtomically("
+    )
+    checkpoint_write_end = gate.find(
+        "private static FileDescriptor openPinnedDirectory(",
+        checkpoint_write_start,
+    )
+    if checkpoint_write_start < 0 or checkpoint_write_end < 0:
+        fail("could not isolate live mark checkpoint publication")
+    ordered(
+        gate[checkpoint_write_start:checkpoint_write_end],
+        [
+            "pendingDescriptor = Os.open(",
+            "Os.fsync(pendingDescriptor);",
+            "Os.fsync(parentDescriptor);",
+            "Os.rename(",
+            "StableBytes verified = readRegularFile(",
+            "checkpoint verified-commit fence changed",
+            "Os.remove(pending.getAbsolutePath());",
+        ],
+        "live mark checkpoint durable verified-commit fence",
+    )
+    if gate.count("requireNoPendingLiveMarkCheckpoint(") != 3:
+        fail(
+            "pending checkpoint fence must cover its helper plus both cold "
+            "admission paths"
+        )
     require(
         marker,
         [
@@ -2571,7 +2625,7 @@ def main() -> None:
             "NATIVE_READER_V2_SIGNER_SHA256 =",
             "NATIVE_READER_V2_APK_LENGTH = 287259L",
             "NATIVE_READER_V2_APK_SHA256 =",
-            "af6b0b88f0622504471660d5db877ba9472860b67e845b5560caac3e9374e017",
+            "ea42c5d754aa735cbfbc48a23ea7852caf9134d2ca9c1046a31c5073b1e8f924",
             "PackageManager.GET_SIGNING_CERTIFICATES",
             "signing.hasMultipleSigners()",
             "Native Reader signer set is not exact",
@@ -3316,7 +3370,7 @@ def main() -> None:
             "Remove-Item -LiteralPath $keystore -Force",
             "release-output/SupernoteNativeSpreadProbe-v0.0.140.apk",
             "$expectedSignedLength = 287259L",
-            "af6b0b88f0622504471660d5db877ba9472860b67e845b5560caac3e9374e017",
+            "ea42c5d754aa735cbfbc48a23ea7852caf9134d2ca9c1046a31c5073b1e8f924",
             "Signed APK length differs from the reviewed upgrade identity",
             "Signed APK SHA-256 differs from the reviewed upgrade identity.",
         ],

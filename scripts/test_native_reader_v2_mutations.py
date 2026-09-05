@@ -927,7 +927,7 @@ STATIC_MUTATIONS = (
     ),
     (
         ".github/workflows/build.yml",
-        "af6b0b88f0622504471660d5db877ba9472860b67e845b5560caac3e9374e017",
+        "ea42c5d754aa735cbfbc48a23ea7852caf9134d2ca9c1046a31c5073b1e8f924",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "published companion exact signed digest",
     ),
@@ -1566,7 +1566,7 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "af6b0b88f0622504471660d5db877ba9472860b67e845b5560caac3e9374e017",
+        "ea42c5d754aa735cbfbc48a23ea7852caf9134d2ca9c1046a31c5073b1e8f924",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "installed companion APK digest pin",
     ),
@@ -2007,9 +2007,9 @@ STATIC_MUTATIONS = (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
         "v2android/NativeReaderV2DocumentGate.java",
         "|| !documentIdentity.sha256.equals(\n"
-        "                    payload.getProperty(\"documentSha256\"))",
+        "                        payload.getProperty(\"documentSha256\"))",
         "|| false && !documentIdentity.sha256.equals(\n"
-        "                    payload.getProperty(\"documentSha256\"))",
+        "                        payload.getProperty(\"documentSha256\"))",
         "authority ACK live PDF digest binding",
     ),
     (
@@ -2018,6 +2018,14 @@ STATIC_MUTATIONS = (
         "|| !Arrays.equals(bytes.bytes, bytesAfter.bytes))",
         "|| false)",
         "authority ACK journal reread binding",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "openedDocument.verifyUnchangedAndCurrent(canonical);\n"
+        "                if (!NativeReaderV2Config.ENGINE_VALUE.equals(",
+        "if (!NativeReaderV2Config.ENGINE_VALUE.equals(",
+        "authority ACK post-journal PDF revalidation",
     ),
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
@@ -2078,6 +2086,34 @@ STATIC_MUTATIONS = (
         "            0\n"
         "        );",
         "witness checkpoint FUSE-safe pinned parent",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "String checkpointPath = claim.markPath + LIVE_MARK_CHECKPOINT_SUFFIX;\n"
+        "        requireNoPendingLiveMarkCheckpoint(checkpointPath);",
+        "String checkpointPath = claim.markPath + LIVE_MARK_CHECKPOINT_SUFFIX;",
+        "cold checkpoint admission pending-publication fence",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "requireNoPendingLiveMarkCheckpoint(\n"
+        "                    claim.markPath + LIVE_MARK_CHECKPOINT_SUFFIX\n"
+        "                );\n"
+        "                LiveMarkState liveMark",
+        "LiveMarkState liveMark",
+        "recovery-baseline admission pending-publication fence",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "StableBytes verified = readRegularFile(\n"
+        "                checkpoint.getAbsolutePath(),",
+        "Os.remove(pending.getAbsolutePath());\n"
+        "            StableBytes verified = readRegularFile(\n"
+        "                checkpoint.getAbsolutePath(),",
+        "verified checkpoint precedes pending-fence retirement",
     ),
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"

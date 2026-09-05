@@ -41,7 +41,7 @@ with SupernoteDocument `1.02.446`.
 - [x] RTL Reader v0.4.22 (`versionCode=41`) and companion v0.0.140
   (`versionCode=140`) use handshake protocol 4 and protected-editable marker
   protocol 3. The companion is 287,259 bytes with SHA-256
-  `af6b0b88f0622504471660d5db877ba9472860b67e845b5560caac3e9374e017`
+  `ea42c5d754aa735cbfbc48a23ea7852caf9134d2ca9c1046a31c5073b1e8f924`
   and the upgrade-compatible signer certificate SHA-256 remains
   `a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`.
 - [x] Authority moved to a never-reused `.snspread-v3` path containing one
@@ -67,18 +67,21 @@ with SupernoteDocument `1.02.446`.
   PluginHost re-reads the live journal after receiving the ACK and rejects a
   disappearance or generation/digest/state change during the observation-to-
   response interval.
-- [x] Authority ACK workers are isolated and replaceable, hash the live PDF,
-  reread the exact journal after that hash, and cannot permanently occupy the
-  admission executor. An acknowledged OFF transition schedules a fresh
-  admission attempt for the matching open Activity.
+- [x] Authority ACK workers are isolated and replaceable, keep the live PDF
+  descriptor pinned across hashing and the exact journal reread, and perform a
+  final PDF path/version check before publishing. They cannot permanently
+  occupy the admission executor. An acknowledged OFF transition schedules a
+  fresh admission attempt for the matching open Activity.
 - [x] The immutable rollback snapshot is never advanced by ordinary editing.
   Successful dirty native saves publish a separate exact-schema
   `.snspread-live-mark-v1` witness bound to the original PDF and exact backup
   evidence. Cold admission accepts only the rollback baseline or that exact
-  persisted witness; publication holds the writer lease and uses a no-follow,
-  descriptor-pinned FUSE directory fallback. A slow shutdown keeps the lease
-  through an asynchronous worker drain. Existing zero-byte marks are admitted
-  as regular files rather than mistaken for absence.
+  persisted witness; publication holds the writer lease, uses a no-follow,
+  descriptor-pinned FUSE directory fallback, and durably publishes a pending
+  fence before changing the checkpoint path. Cold admission remains blocked
+  until complete checkpoint verification retires that fence. A slow shutdown
+  keeps the lease through an asynchronous worker drain. Existing zero-byte
+  marks are admitted as regular files rather than mistaken for absence.
 - [x] Restore publishes RECOVERY before touching `.mark`, keeps the document
   process stopped during replacement, starts a fresh authority provider while
   RECOVERY remains fenced, and opens the fence only through an exact-ACKed OFF
@@ -89,12 +92,12 @@ with SupernoteDocument `1.02.446`.
   before reassessment so legacy path evidence cannot silently regain control.
 - [x] The Java/Kotlin journal golden vectors agree. The core suite passes
   85,407 assertions, including mutations at both ends of every wire field and
-  authenticated region. All 245 executable/static authority mutations are
+  authenticated region. All 249 executable/static authority mutations are
   rejected, and native/plugin invariants, provenance, and fail-closed package
   tests pass.
 - [x] The full RTL Reader package compiles through the authenticated Supernote
-  template and verifies at 7,360,262 bytes with SHA-256
-  `f9059d317d69f9df66746ef90c6491ae55f6fc9a6497e56f59f0c0ede111c49e`.
+  template and verifies at 7,360,337 bytes with SHA-256
+  `0e849996e3b87f47c748f562068bb94c18daa3749fd887eb076cbcb87dc960ae`.
 - [ ] Exact-head PR CI and Codex review are clean.
 - [ ] The Nomad proves same-inode visibility and exact ACKs for enable,
   disable, restore, interrupted recovery, cold process reopen, and ordinary-PDF

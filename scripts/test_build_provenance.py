@@ -22,7 +22,7 @@ from materialize_plugin_template import (
 from normalize_apk_zip import CANONICAL_TIMESTAMP, normalize
 
 EXPECTED_NATIVE_READER_SIGNING_JOB_SHA256 = (
-    "e05f740cf834a3a2b092f2e3b83c3e6a784c415c1ea65609c3eea99b14257c31"
+    "7294c17eb819d85e322721f2cd4ba17ab29a267bb036f6c78ff1b122a3779458"
 )
 
 
@@ -212,7 +212,7 @@ def validate_native_reader_signing_isolation(workflow: str) -> None:
         "Remove-Item -LiteralPath $keystore -Force",
         "release-output/SupernoteNativeSpreadProbe-v0.0.140.apk",
         "$expectedSignedLength = 287259L",
-        "af6b0b88f0622504471660d5db877ba9472860b67e845b5560caac3e9374e017",
+        "ea42c5d754aa735cbfbc48a23ea7852caf9134d2ca9c1046a31c5073b1e8f924",
         "Signed APK length differs from the reviewed upgrade identity",
         "Signed APK SHA-256 differs from the reviewed upgrade identity.",
     ):

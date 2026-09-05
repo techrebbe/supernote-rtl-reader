@@ -83,11 +83,15 @@ the precise recovery manifest/snapshot evidence, and the resulting live `.mark`
 hash. On a cold process restart, a live mark newer than the rollback baseline
 is admitted only through that exact persisted witness; missing, stale, torn, or
 unwitnessed state remains fenced. Directory publication uses a no-follow,
-descriptor-pinned FUSE fallback, and a zero-byte regular `.mark` is treated as
+descriptor-pinned FUSE fallback. A durable pending-publication fence is created
+before the checkpoint pathname changes and is retired only after complete
+post-rename verification, so an interrupted or ambiguously verified checkpoint
+cannot become cold-start authority. A zero-byte regular `.mark` is treated as
 valid content rather than absence.
 
 Authority acknowledgements are similarly restart-safe: each request uses a
-replaceable worker, hashes the live PDF, and rereads the exact journal before
+replaceable worker, keeps the live PDF descriptor pinned across hashing and the
+exact journal reread, and performs a final PDF path/version check before
 replying. An acknowledged recovery-to-OFF transition immediately retries the
 still-open activity's ordinary admission.
 

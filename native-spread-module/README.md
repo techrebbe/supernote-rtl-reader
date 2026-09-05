@@ -48,10 +48,12 @@ dirty Supernote save instead advances a separate
 `.snspread-live-mark-v1` checkpoint whose exact field set binds the original
 PDF, backup manifest/snapshot, and current live `.mark`. The checkpoint is
 published atomically while the process-shared writer lease remains valid, with
-a descriptor-pinned FUSE-safe parent directory. Cold admission accepts a live
-mark that differs from the rollback baseline only when this persisted witness
-matches exactly. Empty regular `.mark` files remain valid and distinct from an
-absent mark.
+a descriptor-pinned FUSE-safe parent directory. A durable `.pending` sibling is
+published before the checkpoint path changes and removed only after the new
+checkpoint passes complete post-rename verification; its presence blocks every
+cold admission path. Cold admission accepts a live mark that differs from the
+rollback baseline only when this persisted witness matches exactly. Empty
+regular `.mark` files remain valid and distinct from an absent mark.
 
 Normal Document-process admission never uses an older valid slot when its peer
 is malformed. The plugin may classify exactly one valid slot plus one malformed

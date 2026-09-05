@@ -45,6 +45,8 @@ public final class NativeReaderV2DocumentGate {
         ".snspread-backup.mark";
     private static final String LIVE_MARK_CHECKPOINT_SUFFIX =
         ".snspread-live-mark-v1";
+    private static final String LIVE_MARK_CHECKPOINT_PENDING_SUFFIX =
+        ".pending";
     private static final int LINUX_O_DIRECTORY = 0x10000;
     private static final Set<String> LIVE_MARK_CHECKPOINT_FIELDS =
         Collections.unmodifiableSet(new HashSet<String>(Arrays.asList(
@@ -358,41 +360,55 @@ public final class NativeReaderV2DocumentGate {
             String expectedState = snapshot.current.state.name()
                 .toLowerCase(Locale.ROOT);
             String activationToken = payload.getProperty("activationToken");
-            StableDigest documentIdentity = hashRegularFile(canonical);
-            StableBytes bytesAfter = readRegularFile(
-                journalPath,
-                NativeReaderV2AuthorityJournal.FILE_SIZE
-            );
-            if (!NativeReaderV2Config.ENGINE_VALUE.equals(
-                    payload.getProperty(NativeReaderV2Config.ENGINE_KEY))
-                || !"supernote-rtl-reader".equals(
-                    payload.getProperty("managedBy"))
-                || !Integer.toString(
-                    NativeReaderV2MarkerClaim.TRANSACTION_PROTOCOL
-                ).equals(payload.getProperty("transactionProtocol"))
-                || !Long.toString(
-                    NativeReaderV2MarkerClaim.MINIMUM_COMPANION_MODULE_VERSION
-                ).equals(payload.getProperty("minimumModuleVersionCode"))
-                || !canonical.equals(payload.getProperty("documentPath"))
-                || !Long.toString(documentIdentity.identity.size).equals(
-                    payload.getProperty("documentLength"))
-                || !documentIdentity.sha256.equals(
-                    payload.getProperty("documentSha256"))
-                || !expectedState.equals(payload.getProperty("activationState"))
-                || !isCanonicalUuid(activationToken)
-                || !bytes.identity.sameVersion(bytesAfter.identity)
-                || !Arrays.equals(bytes.bytes, bytesAfter.bytes)) {
-                throw new IllegalStateException(
-                    "journal payload does not bind observed authority"
+            OpenFile openedDocument = OpenFile.open(canonical);
+            try {
+                StableDigest documentIdentity = hashOpenRegularFile(
+                    openedDocument,
+                    canonical
                 );
+                StableBytes bytesAfter = readRegularFile(
+                    journalPath,
+                    NativeReaderV2AuthorityJournal.FILE_SIZE
+                );
+                // The PDF descriptor stays pinned across the delayed journal
+                // reread.  This final path/version check is the ACK
+                // linearization point: a replacement during that reread may
+                // never be acknowledged against the prior PDF bytes.
+                openedDocument.verifyUnchangedAndCurrent(canonical);
+                if (!NativeReaderV2Config.ENGINE_VALUE.equals(
+                        payload.getProperty(NativeReaderV2Config.ENGINE_KEY))
+                    || !"supernote-rtl-reader".equals(
+                        payload.getProperty("managedBy"))
+                    || !Integer.toString(
+                        NativeReaderV2MarkerClaim.TRANSACTION_PROTOCOL
+                    ).equals(payload.getProperty("transactionProtocol"))
+                    || !Long.toString(
+                        NativeReaderV2MarkerClaim.MINIMUM_COMPANION_MODULE_VERSION
+                    ).equals(payload.getProperty("minimumModuleVersionCode"))
+                    || !canonical.equals(payload.getProperty("documentPath"))
+                    || !Long.toString(documentIdentity.identity.size).equals(
+                        payload.getProperty("documentLength"))
+                    || !documentIdentity.sha256.equals(
+                        payload.getProperty("documentSha256"))
+                    || !expectedState.equals(
+                        payload.getProperty("activationState"))
+                    || !isCanonicalUuid(activationToken)
+                    || !bytes.identity.sameVersion(bytesAfter.identity)
+                    || !Arrays.equals(bytes.bytes, bytesAfter.bytes)) {
+                    throw new IllegalStateException(
+                        "journal payload does not bind observed authority"
+                    );
+                }
+                return new AuthorityObservation(
+                    journalPath,
+                    snapshot.current.generation,
+                    snapshot.current.authoritySha256,
+                    expectedState,
+                    activationToken
+                );
+            } finally {
+                openedDocument.close();
             }
-            return new AuthorityObservation(
-                journalPath,
-                snapshot.current.generation,
-                snapshot.current.authoritySha256,
-                expectedState,
-                activationToken
-            );
         } catch (RuntimeException exception) {
             throw exception;
         } catch (Exception exception) {
@@ -533,6 +549,7 @@ public final class NativeReaderV2DocumentGate {
         NativeReaderV2MarkerClaim claim
     ) throws Exception {
         String checkpointPath = claim.markPath + LIVE_MARK_CHECKPOINT_SUFFIX;
+        requireNoPendingLiveMarkCheckpoint(checkpointPath);
         StableBytes checkpoint = readRegularFile(
             checkpointPath,
             NativeReaderV2StrictProperties.MAX_BYTES
@@ -692,6 +709,18 @@ public final class NativeReaderV2DocumentGate {
             && live.sha256.equals(checkpoint.sha256);
     }
 
+    private static void requireNoPendingLiveMarkCheckpoint(
+        String checkpointPath
+    ) throws Exception {
+        String pendingPath = checkpointPath
+            + LIVE_MARK_CHECKPOINT_PENDING_SUFFIX;
+        if (pathExistsNoFollow(pendingPath)) {
+            throw new IllegalStateException(
+                "live mark checkpoint publication is incomplete"
+            );
+        }
+    }
+
     private static byte[] liveMarkCheckpointBytes(
         NativeReaderV2MarkerClaim claim,
         LiveMarkState live,
@@ -769,6 +798,11 @@ public final class NativeReaderV2DocumentGate {
                 + "-" + UUID.randomUUID()
         );
         FileDescriptor temporaryDescriptor = null;
+        File pending = new File(
+            checkpoint.getAbsolutePath()
+                + LIVE_MARK_CHECKPOINT_PENDING_SUFFIX
+        );
+        FileDescriptor pendingDescriptor = null;
         try {
             Identity parentIdentity = Identity.from(
                 Os.fstat(parentDescriptor)
@@ -781,6 +815,31 @@ public final class NativeReaderV2DocumentGate {
                     "checkpoint parent authority is invalid"
                 );
             }
+            // The pending fence is durable before the checkpoint pathname can
+            // change.  Cold admission rejects any filesystem object here.  It
+            // is removed only after the published checkpoint has passed every
+            // byte, inode, parent, and directory-durability check, making that
+            // unlink the persisted verified-commit boundary.
+            pendingDescriptor = Os.open(
+                pending.getAbsolutePath(),
+                OsConstants.O_WRONLY | OsConstants.O_CREAT
+                    | OsConstants.O_EXCL | OsConstants.O_CLOEXEC
+                    | OsConstants.O_NOFOLLOW,
+                0600
+            );
+            Identity pendingIdentity = Identity.from(
+                Os.fstat(pendingDescriptor)
+            );
+            pendingIdentity.requireRegular();
+            Os.fsync(pendingDescriptor);
+            if (!pendingIdentity.sameVersion(Identity.from(
+                    Os.lstat(pending.getAbsolutePath())
+                ))) {
+                throw new IllegalStateException(
+                    "checkpoint pending fence authority changed"
+                );
+            }
+            Os.fsync(parentDescriptor);
             temporaryDescriptor = Os.open(
                 temporary.getAbsolutePath(),
                 OsConstants.O_WRONLY | OsConstants.O_CREAT
@@ -836,7 +895,40 @@ public final class NativeReaderV2DocumentGate {
                     "checkpoint publication bytes changed"
                 );
             }
+            if (!pendingIdentity.sameVersion(Identity.from(
+                    Os.fstat(pendingDescriptor)
+                ))
+                || !pendingIdentity.sameVersion(Identity.from(
+                    Os.lstat(pending.getAbsolutePath())
+                ))
+                || !parentIdentity.sameFile(Identity.from(
+                    Os.fstat(parentDescriptor)
+                ))
+                || !parentIdentity.sameFile(Identity.from(
+                    Os.lstat(parent.getAbsolutePath())
+                ))) {
+                throw new IllegalStateException(
+                    "checkpoint verified-commit fence changed"
+                );
+            }
+            Os.remove(pending.getAbsolutePath());
+            // Successful unlink is the commit point.  If the following fsync
+            // is interrupted, either the pending fence survives a restart and
+            // admission fails closed, or its verified removal survives and
+            // the exact checkpoint is admissible.
+            try {
+                Os.fsync(parentDescriptor);
+            } catch (Exception durabilityAmbiguous) {
+                Log.w(
+                    TAG,
+                    "checkpoint commit directory fsync was ambiguous",
+                    durabilityAmbiguous
+                );
+            }
         } finally {
+            if (pendingDescriptor != null) {
+                try { Os.close(pendingDescriptor); } catch (Exception ignored) {}
+            }
             if (temporaryDescriptor != null) {
                 try { Os.close(temporaryDescriptor); } catch (Exception ignored) {}
             }
@@ -846,7 +938,7 @@ public final class NativeReaderV2DocumentGate {
                     Os.fsync(parentDescriptor);
                 }
             } catch (Exception ignored) {}
-            Os.close(parentDescriptor);
+            try { Os.close(parentDescriptor); } catch (Exception ignored) {}
         }
     }
 
@@ -1052,20 +1144,27 @@ public final class NativeReaderV2DocumentGate {
     private static StableDigest hashRegularFile(String path) throws Exception {
         OpenFile open = OpenFile.open(path);
         try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            FileDescriptor duplicate = Os.dup(open.descriptor);
-            try (FileInputStream input = new FileInputStream(duplicate)) {
-                byte[] buffer = new byte[1024 * 1024];
-                int count;
-                while ((count = input.read(buffer)) != -1) {
-                    digest.update(buffer, 0, count);
-                }
-            }
-            open.verifyUnchangedAndCurrent(path);
-            return new StableDigest(open.identity, hex(digest.digest()));
+            return hashOpenRegularFile(open, path);
         } finally {
             open.close();
         }
+    }
+
+    private static StableDigest hashOpenRegularFile(
+        OpenFile open,
+        String path
+    ) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        FileDescriptor duplicate = Os.dup(open.descriptor);
+        try (FileInputStream input = new FileInputStream(duplicate)) {
+            byte[] buffer = new byte[1024 * 1024];
+            int count;
+            while ((count = input.read(buffer)) != -1) {
+                digest.update(buffer, 0, count);
+            }
+        }
+        open.verifyUnchangedAndCurrent(path);
+        return new StableDigest(open.identity, hex(digest.digest()));
     }
 
     private static StableBytes readRegularFile(
@@ -1390,6 +1489,9 @@ public final class NativeReaderV2DocumentGate {
                         "another process owns the live mark writer lease"
                     );
                 }
+                requireNoPendingLiveMarkCheckpoint(
+                    claim.markPath + LIVE_MARK_CHECKPOINT_SUFFIX
+                );
                 LiveMarkState liveMark = readLiveMarkState(claim.markPath);
                 long witnessGeneration = 0L;
                 if (!liveMarkMatchesRecovery(claim, liveMark)) {

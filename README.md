@@ -104,8 +104,11 @@ descriptor-verified live-mark checkpoint bound to the original PDF and backup
 hashes. This permits a cold process restart to re-admit the newer witnessed
 `.mark` without rewriting the original snapshot. Checkpoint publication holds
 the exclusive writer lease, supports the Nomad's FUSE directory-open behavior,
-and fails closed on a torn file, stale backup, unwitnessed mark change, or
-interrupted publication. If shutdown outlives the bounded foreground wait, a
+and creates a durable pending fence before changing the checkpoint pathname.
+Cold admission remains blocked until the new checkpoint passes its complete
+post-rename verification and that fence is retired. Torn files, stale backups,
+unwitnessed mark changes, and interrupted publication therefore fail closed. If
+shutdown outlives the bounded foreground wait, a
 daemon drain retains that lease until the worker has actually exited. An
 existing zero-byte `.mark` is valid evidence and is distinguished from an
 absent file.

@@ -550,10 +550,31 @@ public final class NativeReaderV2DocumentGate {
     ) throws Exception {
         String checkpointPath = claim.markPath + LIVE_MARK_CHECKPOINT_SUFFIX;
         requireNoPendingLiveMarkCheckpoint(checkpointPath);
+        return readLiveMarkCheckpointAtPath(claim, checkpointPath);
+    }
+
+    /**
+     * Reads one exact checkpoint-shaped record from an explicit path.  The
+     * caller must already own the writer lease when this is used for a pending
+     * publication; ordinary cold admission must use readLiveMarkCheckpoint so
+     * an incomplete publication remains fail closed.
+     */
+    private static LiveMarkCheckpoint readLiveMarkCheckpointAtPath(
+        NativeReaderV2MarkerClaim claim,
+        String checkpointPath
+    ) throws Exception {
         StableBytes checkpoint = readRegularFile(
             checkpointPath,
             NativeReaderV2StrictProperties.MAX_BYTES
         );
+        return parseLiveMarkCheckpoint(claim, checkpointPath, checkpoint);
+    }
+
+    private static LiveMarkCheckpoint parseLiveMarkCheckpoint(
+        NativeReaderV2MarkerClaim claim,
+        String checkpointPath,
+        StableBytes checkpoint
+    ) throws Exception {
         Properties properties = NativeReaderV2StrictProperties.parse(
             checkpoint.bytes
         );
@@ -616,6 +637,239 @@ public final class NativeReaderV2DocumentGate {
             sha256,
             generation
         );
+    }
+
+    /**
+     * Reconciles only an exact-schema, hash-bound pending publication
+     * while holding the exclusive cross-process writer lease.  A completed
+     * checkpoint may be admitted only when the exact pending bytes, published
+     * checkpoint, live mark, document, and immutable recovery evidence agree.
+     * If annotation recovery has already restored the immutable baseline, that
+     * exact state is independently sufficient to retire the now-obsolete
+     * pending publication.  Every ambiguous case leaves the fence in place.
+     */
+    private static void reconcilePendingLiveMarkCheckpoint(
+        NativeReaderV2MarkerClaim claim,
+        String leasePath,
+        FileDescriptor leaseDescriptor,
+        Identity leaseIdentity
+    ) throws Exception {
+        String checkpointPath = claim.markPath + LIVE_MARK_CHECKPOINT_SUFFIX;
+        String pendingPath = checkpointPath
+            + LIVE_MARK_CHECKPOINT_PENDING_SUFFIX;
+        if (!pathExistsNoFollow(pendingPath)) return;
+
+        File parent = new File(checkpointPath).getAbsoluteFile().getParentFile();
+        if (parent == null) {
+            throw new IllegalStateException("checkpoint has no parent");
+        }
+        FileDescriptor parentDescriptor = openPinnedDirectory(
+            parent.getAbsolutePath()
+        );
+        try {
+            Identity parentIdentity = Identity.from(Os.fstat(parentDescriptor));
+            StableBytes pending = readRegularFile(
+                pendingPath,
+                NativeReaderV2StrictProperties.MAX_BYTES
+            );
+            StableDigest document = hashRegularFile(claim.canonicalDocumentPath);
+            if (document.identity.size != claim.documentLength
+                || !document.sha256.equals(claim.documentSha256)) {
+                throw new IllegalStateException(
+                    "document changed during pending checkpoint recovery"
+                );
+            }
+            verifyRecoveryEvidence(
+                claim,
+                new File(claim.canonicalDocumentPath)
+            );
+            LiveMarkState live = readLiveMarkState(claim.markPath);
+            boolean restoredBaseline = liveMarkMatchesRecovery(claim, live);
+            LiveMarkCheckpoint intended = null;
+            StableBytes published = null;
+            if (!restoredBaseline) {
+                intended = parseLiveMarkCheckpoint(
+                    claim,
+                    pendingPath,
+                    pending
+                );
+                published = readRegularFile(
+                    checkpointPath,
+                    NativeReaderV2StrictProperties.MAX_BYTES
+                );
+                LiveMarkCheckpoint committed = parseLiveMarkCheckpoint(
+                    claim,
+                    checkpointPath,
+                    published
+                );
+                if (!Arrays.equals(pending.bytes, published.bytes)
+                    || intended.generation != committed.generation
+                    || !liveMarkMatchesCheckpoint(live, committed)) {
+                    throw new IllegalStateException(
+                        "pending checkpoint cannot be reconciled"
+                    );
+                }
+            }
+
+            // Repeat every delayed authority read immediately before the
+            // irreversible unlink.  The exclusive writer lease prevents a
+            // second Native Reader v2 publisher, while these checks protect
+            // against path replacement and out-of-band shared-storage writes.
+            StableBytes pendingAfter = readRegularFile(
+                pendingPath,
+                NativeReaderV2StrictProperties.MAX_BYTES
+            );
+            LiveMarkState liveAfter = readLiveMarkState(claim.markPath);
+            StableBytes checkpointAfter = restoredBaseline
+                ? null
+                : readRegularFile(
+                    checkpointPath,
+                    NativeReaderV2StrictProperties.MAX_BYTES
+                );
+            StableDigest documentAfter = hashRegularFile(
+                claim.canonicalDocumentPath
+            );
+            verifyRecoveryEvidence(
+                claim,
+                new File(claim.canonicalDocumentPath)
+            );
+            if (!pending.identity.sameVersion(pendingAfter.identity)
+                || !Arrays.equals(pending.bytes, pendingAfter.bytes)
+                || documentAfter.identity.size != claim.documentLength
+                || !documentAfter.sha256.equals(claim.documentSha256)
+                || !parentIdentity.sameFile(Identity.from(
+                    Os.fstat(parentDescriptor)
+                ))
+                || !parentIdentity.sameFile(Identity.from(
+                    Os.lstat(parent.getAbsolutePath())
+                ))
+                || (!restoredBaseline
+                    && (!published.identity.sameVersion(
+                            checkpointAfter.identity)
+                        || !Arrays.equals(
+                            pending.bytes,
+                            checkpointAfter.bytes
+                        )))
+                || !(restoredBaseline
+                    ? liveMarkMatchesRecovery(claim, liveAfter)
+                    : liveMarkMatchesCheckpoint(liveAfter, intended))) {
+                throw new IllegalStateException(
+                    "pending checkpoint recovery authority changed"
+                );
+            }
+            if (restoredBaseline && pathExistsNoFollow(checkpointPath)) {
+                // A baseline restore supersedes every older witnessed state.
+                // Retire the stale checkpoint before removing the fence so a
+                // later out-of-band copy of old bytes cannot accidentally
+                // regain authority by matching that obsolete checkpoint.
+                StableBytes staleCheckpoint = readRegularFile(
+                    checkpointPath,
+                    NativeReaderV2StrictProperties.MAX_BYTES
+                );
+                if (!staleCheckpoint.identity.sameVersion(Identity.from(
+                        Os.lstat(checkpointPath)
+                    ))) {
+                    throw new IllegalStateException(
+                        "stale checkpoint changed before baseline retirement"
+                    );
+                }
+                requireLiveMarkWriterLeaseCurrent(
+                    leasePath,
+                    leaseDescriptor,
+                    leaseIdentity
+                );
+                Os.remove(checkpointPath);
+                try {
+                    Os.fsync(parentDescriptor);
+                } catch (Exception durabilityAmbiguous) {
+                    Log.w(
+                        TAG,
+                        "stale checkpoint retirement fsync was ambiguous",
+                        durabilityAmbiguous
+                    );
+                }
+                StableBytes pendingAfterRetirement = readRegularFile(
+                    pendingPath,
+                    NativeReaderV2StrictProperties.MAX_BYTES
+                );
+                LiveMarkState liveAfterRetirement = readLiveMarkState(
+                    claim.markPath
+                );
+                StableDigest documentAfterRetirement = hashRegularFile(
+                    claim.canonicalDocumentPath
+                );
+                verifyRecoveryEvidence(
+                    claim,
+                    new File(claim.canonicalDocumentPath)
+                );
+                if (!pending.identity.sameVersion(
+                        pendingAfterRetirement.identity)
+                    || !Arrays.equals(
+                        pending.bytes,
+                        pendingAfterRetirement.bytes)
+                    || !liveMarkMatchesRecovery(
+                        claim,
+                        liveAfterRetirement)
+                    || documentAfterRetirement.identity.size
+                        != claim.documentLength
+                    || !documentAfterRetirement.sha256.equals(
+                        claim.documentSha256)
+                    || !parentIdentity.sameFile(Identity.from(
+                        Os.fstat(parentDescriptor)
+                    ))
+                    || !parentIdentity.sameFile(Identity.from(
+                        Os.lstat(parent.getAbsolutePath())
+                    ))) {
+                    throw new IllegalStateException(
+                        "baseline checkpoint retirement authority changed"
+                    );
+                }
+            }
+            // The same pinned descriptor and pathname that won the exclusive
+            // lock must still identify one version immediately before the
+            // durable fence is retired.  Otherwise a replaced lease pathname
+            // could let a second process recover the same publication.
+            requireLiveMarkWriterLeaseCurrent(
+                leasePath,
+                leaseDescriptor,
+                leaseIdentity
+            );
+            Os.remove(pendingPath);
+            try {
+                Os.fsync(parentDescriptor);
+            } catch (Exception durabilityAmbiguous) {
+                Log.w(
+                    TAG,
+                    "pending checkpoint recovery fsync was ambiguous",
+                    durabilityAmbiguous
+                );
+            }
+            Log.i(
+                TAG,
+                restoredBaseline
+                    ? "retired pending checkpoint after exact baseline restore"
+                    : "completed exact pending checkpoint publication"
+            );
+        } finally {
+            try { Os.close(parentDescriptor); } catch (Exception ignored) {}
+        }
+    }
+
+    private static void requireLiveMarkWriterLeaseCurrent(
+        String leasePath,
+        FileDescriptor leaseDescriptor,
+        Identity leaseIdentity
+    ) throws Exception {
+        Identity descriptorCurrent = Identity.from(Os.fstat(leaseDescriptor));
+        Identity pathCurrent = Identity.from(Os.lstat(leasePath));
+        descriptorCurrent.requireRegular();
+        pathCurrent.requireRegular();
+        if (!leaseIdentity.sameVersion(descriptorCurrent)
+            || !leaseIdentity.sameVersion(pathCurrent)) {
+            throw new IllegalStateException(
+                "live mark writer lease changed during checkpoint recovery"
+            );
+        }
     }
 
     private static boolean strictCheckpointBoolean(
@@ -781,9 +1035,14 @@ public final class NativeReaderV2DocumentGate {
         return output.toByteArray();
     }
 
+    private interface LiveMarkCheckpointCommitValidator {
+        void validate() throws Exception;
+    }
+
     private static void writeLiveMarkCheckpointAtomically(
         File checkpoint,
-        byte[] bytes
+        byte[] bytes,
+        LiveMarkCheckpointCommitValidator commitValidator
     ) throws Exception {
         File parent = checkpoint.getParentFile();
         if (parent == null) {
@@ -827,11 +1086,31 @@ public final class NativeReaderV2DocumentGate {
                     | OsConstants.O_NOFOLLOW,
                 0600
             );
+            Identity pendingCreated = Identity.from(
+                Os.fstat(pendingDescriptor)
+            );
+            pendingCreated.requireRegular();
+            if (pendingCreated.size != 0L) {
+                throw new IllegalStateException(
+                    "checkpoint pending fence was not created empty"
+                );
+            }
+            try (FileOutputStream output = new FileOutputStream(
+                    Os.dup(pendingDescriptor))) {
+                output.write(bytes);
+                output.flush();
+            }
+            Os.fsync(pendingDescriptor);
             Identity pendingIdentity = Identity.from(
                 Os.fstat(pendingDescriptor)
             );
             pendingIdentity.requireRegular();
-            Os.fsync(pendingDescriptor);
+            if (!pendingCreated.sameFile(pendingIdentity)
+                || pendingIdentity.size != bytes.length) {
+                throw new IllegalStateException(
+                    "checkpoint pending fence bytes were not committed"
+                );
+            }
             if (!pendingIdentity.sameVersion(Identity.from(
                     Os.lstat(pending.getAbsolutePath())
                 ))) {
@@ -890,7 +1169,8 @@ public final class NativeReaderV2DocumentGate {
                 checkpoint.getAbsolutePath(),
                 NativeReaderV2StrictProperties.MAX_BYTES
             );
-            if (!Arrays.equals(bytes, verified.bytes)) {
+            if (!published.sameVersion(verified.identity)
+                || !Arrays.equals(bytes, verified.bytes)) {
                 throw new IllegalStateException(
                     "checkpoint publication bytes changed"
                 );
@@ -911,6 +1191,37 @@ public final class NativeReaderV2DocumentGate {
                     "checkpoint verified-commit fence changed"
                 );
             }
+            StableBytes checkpointAfterValidation = readRegularFile(
+                checkpoint.getAbsolutePath(),
+                NativeReaderV2StrictProperties.MAX_BYTES
+            );
+            StableBytes pendingAfterValidation = readRegularFile(
+                pending.getAbsolutePath(),
+                NativeReaderV2StrictProperties.MAX_BYTES
+            );
+            if (!verified.identity.sameVersion(
+                    checkpointAfterValidation.identity)
+                || !Arrays.equals(bytes, checkpointAfterValidation.bytes)
+                || !pendingIdentity.sameVersion(
+                    pendingAfterValidation.identity)
+                || !Arrays.equals(bytes, pendingAfterValidation.bytes)
+                || !parentIdentity.sameFile(Identity.from(
+                    Os.fstat(parentDescriptor)
+                ))
+                || !parentIdentity.sameFile(Identity.from(
+                    Os.lstat(parent.getAbsolutePath())
+                ))) {
+                throw new IllegalStateException(
+                    "checkpoint authority changed before final live validation"
+                );
+            }
+            // Keep the durable fence present while the caller performs every
+            // final live-mark, writer-lease, generation, and checkpoint
+            // validation.  Any exception leaves a self-describing recovery
+            // record that cold admission can reconcile only under the next
+            // exclusive writer lease.  This is deliberately the last
+            // validation callback before the irreversible unlink.
+            commitValidator.validate();
             Os.remove(pending.getAbsolutePath());
             // Successful unlink is the commit point.  If the following fsync
             // is interrupted, either the pending fence survives a restart and
@@ -1489,8 +1800,23 @@ public final class NativeReaderV2DocumentGate {
                         "another process owns the live mark writer lease"
                     );
                 }
+                // Exclusive lease ownership proves that no earlier companion
+                // checkpoint worker is still publishing.  Reconcile only an
+                // exact self-describing fence before ordinary cold admission;
+                // any mismatch remains a durable fail-closed blocker.
+                reconcilePendingLiveMarkCheckpoint(
+                    claim,
+                    leasePath,
+                    stream.getFD(),
+                    descriptorIdentity
+                );
                 requireNoPendingLiveMarkCheckpoint(
                     claim.markPath + LIVE_MARK_CHECKPOINT_SUFFIX
+                );
+                requireLiveMarkWriterLeaseCurrent(
+                    leasePath,
+                    stream.getFD(),
+                    descriptorIdentity
                 );
                 LiveMarkState liveMark = readLiveMarkState(claim.markPath);
                 long witnessGeneration = 0L;
@@ -1601,23 +1927,48 @@ public final class NativeReaderV2DocumentGate {
                 File checkpoint = new File(
                     markPath + LIVE_MARK_CHECKPOINT_SUFFIX
                 );
-                writeLiveMarkCheckpointAtomically(checkpoint, bytes);
-                LiveMarkCheckpoint persisted = readLiveMarkCheckpoint(claim);
-                LiveMarkState after = readLiveMarkState(markPath);
-                if (!revalidateForCheckpoint()) {
-                    throw new IllegalStateException(
-                        "live mark writer lease changed across checkpoint"
-                    );
-                }
+                final LiveMarkState[] liveResult = new LiveMarkState[1];
+                writeLiveMarkCheckpointAtomically(
+                    checkpoint,
+                    bytes,
+                    new LiveMarkCheckpointCommitValidator() {
+                        @Override public void validate() throws Exception {
+                            LiveMarkCheckpoint persisted =
+                                readLiveMarkCheckpointAtPath(
+                                    claim,
+                                    checkpoint.getAbsolutePath()
+                                );
+                            LiveMarkState after = readLiveMarkState(markPath);
+                            if (!revalidateForCheckpoint()) {
+                                throw new IllegalStateException(
+                                    "live mark writer lease changed across checkpoint"
+                                );
+                            }
+                            synchronized (MarkAuthority.this) {
+                                if (closed
+                                    || generation != witnessGeneration) {
+                                    throw new IllegalStateException(
+                                        "live mark checkpoint generation changed"
+                                    );
+                                }
+                                if (!liveMarkMatchesCheckpoint(
+                                        after,
+                                        persisted)
+                                    || persisted.generation != generation) {
+                                    throw new IllegalStateException(
+                                        "live mark changed across checkpoint publication"
+                                    );
+                                }
+                            }
+                            liveResult[0] = after;
+                        }
+                    }
+                );
                 synchronized (this) {
                     if (closed || generation != witnessGeneration) return;
-                    if (!liveMarkMatchesCheckpoint(after, persisted)
-                        || persisted.generation != generation) {
-                        throw new IllegalStateException(
-                            "live mark changed across checkpoint publication"
-                        );
-                    }
-                    markIdentity = after.identity;
+                    // Publication returned only after all fallible validation
+                    // completed and the durable pending fence was retired.
+                    markIdentity = liveResult[0].identity;
                     expectedTransition = false;
                 }
                 Log.i(TAG, "witnessed live mark checkpoint generation="

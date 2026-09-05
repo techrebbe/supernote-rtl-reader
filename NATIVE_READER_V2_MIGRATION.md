@@ -83,9 +83,14 @@ the precise recovery manifest/snapshot evidence, and the resulting live `.mark`
 hash. On a cold process restart, a live mark newer than the rollback baseline
 is admitted only through that exact persisted witness; missing, stale, torn, or
 unwitnessed state remains fenced. Directory publication uses a no-follow,
-descriptor-pinned FUSE fallback. A durable pending-publication fence is created
-before the checkpoint pathname changes and is retired only after complete
-post-rename verification, so an interrupted or ambiguously verified checkpoint
+descriptor-pinned FUSE fallback. A durable, exact-schema pending-publication
+fence is created before the checkpoint pathname changes and remains present
+through final checkpoint, live-mark, lease, and generation validation. After a
+process interruption, only the next exclusive writer-lease owner can reconcile
+it, and only when the pending bytes, published checkpoint, live mark, PDF, and
+immutable recovery evidence agree exactly. If explicit annotation recovery has
+already restored the rollback baseline, the stale checkpoint is retired before
+the fence. An interrupted, torn, or ambiguously verified checkpoint therefore
 cannot become cold-start authority. A zero-byte regular `.mark` is treated as
 valid content rather than absence.
 

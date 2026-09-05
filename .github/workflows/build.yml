@@ -341,9 +341,9 @@ jobs:
                 -not ($verification -contains 'Verified using v3 scheme (APK Signature Scheme v3): true')) {
               throw 'Signed APK is missing required modern signature schemes.'
             }
-            $expectedSignedLength = 287259L
+            $expectedSignedLength = 291355L
             $expectedSignedSha256 = `
-              'ea42c5d754aa735cbfbc48a23ea7852caf9134d2ca9c1046a31c5073b1e8f924'
+              '848c05a4697c600278159c97442b81ecb7241134e993e115509ee0d797b43984'
             $actualSignedLength = (Get-Item `
               -LiteralPath $outputApk `
               -Force

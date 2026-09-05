@@ -1645,9 +1645,12 @@ def main() -> None:
                 "                checkpointExecutor.execute(new Runnable()"
             ),
             "persistWitnessedCheckpoint(generation)",
-            "writeLiveMarkCheckpointAtomically(checkpoint, bytes)",
+            "writeLiveMarkCheckpointAtomically(",
             "LIVE_MARK_CHECKPOINT_PENDING_SUFFIX",
             "requireNoPendingLiveMarkCheckpoint(checkpointPath);",
+            "reconcilePendingLiveMarkCheckpoint(",
+            "pending checkpoint cannot be reconciled",
+            "retired pending checkpoint after exact baseline restore",
             "live mark checkpoint publication is incomplete",
             "checkpoint pending fence authority changed",
             "checkpoint verified-commit fence changed",
@@ -1711,15 +1714,119 @@ def main() -> None:
     ordered(
         gate[checkpoint_write_start:checkpoint_write_end],
         [
+            "FileDescriptor parentDescriptor = openPinnedDirectory(",
             "pendingDescriptor = Os.open(",
+            "output.write(bytes);",
             "Os.fsync(pendingDescriptor);",
             "Os.fsync(parentDescriptor);",
             "Os.rename(",
             "StableBytes verified = readRegularFile(",
             "checkpoint verified-commit fence changed",
+            "StableBytes checkpointAfterValidation = readRegularFile(",
+            "checkpoint authority changed before final live validation",
+            "commitValidator.validate();",
             "Os.remove(pending.getAbsolutePath());",
         ],
         "live mark checkpoint durable verified-commit fence",
+    )
+    checkpoint_recovery_start = gate.find(
+        "private static void reconcilePendingLiveMarkCheckpoint("
+    )
+    checkpoint_recovery_end = gate.find(
+        "private static boolean strictCheckpointBoolean(",
+        checkpoint_recovery_start,
+    )
+    if checkpoint_recovery_start < 0 or checkpoint_recovery_end < 0:
+        fail("could not isolate pending checkpoint reconciliation")
+    ordered(
+        gate[checkpoint_recovery_start:checkpoint_recovery_end],
+        [
+            "StableBytes pending = readRegularFile(",
+            "verifyRecoveryEvidence(",
+            "LiveMarkState live = readLiveMarkState(",
+            "boolean restoredBaseline = liveMarkMatchesRecovery(claim, live);",
+            "LiveMarkCheckpoint intended = null;",
+            "intended = parseLiveMarkCheckpoint(",
+            "!Arrays.equals(pending.bytes, published.bytes)",
+            "pending checkpoint cannot be reconciled",
+            "StableBytes pendingAfter = readRegularFile(",
+            "StableBytes checkpointAfter = restoredBaseline",
+            "StableDigest documentAfter = hashRegularFile(",
+            "!pending.identity.sameVersion(pendingAfter.identity)",
+            "!published.identity.sameVersion(\n                            checkpointAfter.identity)",
+            "!Arrays.equals(\n                            pending.bytes,\n                            checkpointAfter.bytes",
+            "pending checkpoint recovery authority changed",
+            "if (restoredBaseline && pathExistsNoFollow(checkpointPath))",
+            "StableBytes staleCheckpoint = readRegularFile(",
+            "requireLiveMarkWriterLeaseCurrent(",
+            "Os.remove(checkpointPath);",
+            "StableBytes pendingAfterRetirement = readRegularFile(",
+            "baseline checkpoint retirement authority changed",
+            "Os.remove(pendingPath);",
+        ],
+        "exclusive stopped-publisher checkpoint reconciliation",
+    )
+    if gate[checkpoint_recovery_start:checkpoint_recovery_end].count(
+        "verifyRecoveryEvidence("
+    ) != 3:
+        fail(
+            "pending checkpoint recovery must verify immutable recovery "
+            "authority before classification, before commit, and after "
+            "baseline checkpoint retirement"
+        )
+    if gate[checkpoint_recovery_start:checkpoint_recovery_end].count(
+        "requireLiveMarkWriterLeaseCurrent("
+    ) != 3:
+        fail(
+            "pending checkpoint recovery must define the exact lease check "
+            "and invoke it before both irreversible unlinks"
+        )
+    require(
+        gate[checkpoint_recovery_start:checkpoint_recovery_end],
+        ["live mark writer lease changed during checkpoint recovery"],
+        "pending checkpoint recovery lease identity enforcement",
+    )
+    acquire_start = gate.find(
+        "static MarkAuthority acquire(NativeReaderV2MarkerClaim claim)"
+    )
+    acquire_end = gate.find("void noteWitnessedSave(", acquire_start)
+    if acquire_start < 0 or acquire_end < 0:
+        fail("could not isolate live-mark writer acquisition")
+    ordered(
+        gate[acquire_start:acquire_end],
+        [
+            "lock = stream.getChannel().tryLock();",
+            "reconcilePendingLiveMarkCheckpoint(\n"
+            "                    claim,\n"
+            "                    leasePath,\n"
+            "                    stream.getFD(),\n"
+            "                    descriptorIdentity",
+            "requireNoPendingLiveMarkCheckpoint(",
+            "requireLiveMarkWriterLeaseCurrent(",
+            "LiveMarkState liveMark = readLiveMarkState(claim.markPath);",
+        ],
+        "exclusive-lease pending checkpoint recovery",
+    )
+    persist_start = gate.find(
+        "private void persistWitnessedCheckpoint(long generation)"
+    )
+    persist_end = gate.find(
+        "synchronized boolean revalidate()", persist_start
+    )
+    if persist_start < 0 or persist_end < 0:
+        fail("could not isolate witnessed checkpoint persistence")
+    ordered(
+        gate[persist_start:persist_end],
+        [
+            "writeLiveMarkCheckpointAtomically(",
+            "new LiveMarkCheckpointCommitValidator()",
+            "readLiveMarkCheckpointAtPath(",
+            "LiveMarkState after = readLiveMarkState(markPath);",
+            "live mark writer lease changed across checkpoint",
+            "live mark changed across checkpoint publication",
+            "markIdentity = liveResult[0].identity;",
+        ],
+        "pending fence spans final witnessed-checkpoint validation",
     )
     if gate.count("requireNoPendingLiveMarkCheckpoint(") != 3:
         fail(
@@ -2623,9 +2730,9 @@ def main() -> None:
         [
             "NATIVE_READER_V2_MIN_VERSION_CODE = 140L",
             "NATIVE_READER_V2_SIGNER_SHA256 =",
-            "NATIVE_READER_V2_APK_LENGTH = 287259L",
+            "NATIVE_READER_V2_APK_LENGTH = 291355L",
             "NATIVE_READER_V2_APK_SHA256 =",
-            "ea42c5d754aa735cbfbc48a23ea7852caf9134d2ca9c1046a31c5073b1e8f924",
+            "848c05a4697c600278159c97442b81ecb7241134e993e115509ee0d797b43984",
             "PackageManager.GET_SIGNING_CERTIFICATES",
             "signing.hasMultipleSigners()",
             "Native Reader signer set is not exact",
@@ -3369,8 +3476,8 @@ def main() -> None:
             "$env:NATIVE_SPREAD_KEYSTORE_B64 = $null",
             "Remove-Item -LiteralPath $keystore -Force",
             "release-output/SupernoteNativeSpreadProbe-v0.0.140.apk",
-            "$expectedSignedLength = 287259L",
-            "ea42c5d754aa735cbfbc48a23ea7852caf9134d2ca9c1046a31c5073b1e8f924",
+            "$expectedSignedLength = 291355L",
+            "848c05a4697c600278159c97442b81ecb7241134e993e115509ee0d797b43984",
             "Signed APK length differs from the reviewed upgrade identity",
             "Signed APK SHA-256 differs from the reviewed upgrade identity.",
         ],
@@ -3380,7 +3487,7 @@ def main() -> None:
         stable_job,
         [
             "apksigner verification failed",
-            "$expectedSignedLength = 287259L",
+            "$expectedSignedLength = 291355L",
             "Signed APK SHA-256 differs from the reviewed upgrade identity.",
             "} finally {",
             "Upload upgrade-compatible Native Reader APK",

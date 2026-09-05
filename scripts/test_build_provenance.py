@@ -22,7 +22,7 @@ from materialize_plugin_template import (
 from normalize_apk_zip import CANONICAL_TIMESTAMP, normalize
 
 EXPECTED_NATIVE_READER_SIGNING_JOB_SHA256 = (
-    "7294c17eb819d85e322721f2cd4ba17ab29a267bb036f6c78ff1b122a3779458"
+    "12e60c8769428fe0fdc39d5f384285811b6c04aef9f511fe2fe8bf2ee0f02496"
 )
 
 
@@ -211,8 +211,8 @@ def validate_native_reader_signing_isolation(workflow: str) -> None:
         "$env:NATIVE_SPREAD_KEYSTORE_B64 = $null",
         "Remove-Item -LiteralPath $keystore -Force",
         "release-output/SupernoteNativeSpreadProbe-v0.0.140.apk",
-        "$expectedSignedLength = 287259L",
-        "ea42c5d754aa735cbfbc48a23ea7852caf9134d2ca9c1046a31c5073b1e8f924",
+        "$expectedSignedLength = 291355L",
+        "848c05a4697c600278159c97442b81ecb7241134e993e115509ee0d797b43984",
         "Signed APK length differs from the reviewed upgrade identity",
         "Signed APK SHA-256 differs from the reviewed upgrade identity.",
     ):
@@ -223,7 +223,7 @@ def validate_native_reader_signing_isolation(workflow: str) -> None:
     ):
         fail("Native Reader signing secret is exposed before release input verification")
     if signing_job.index("apksigner verification failed") > signing_job.index(
-        "$expectedSignedLength = 287259L"
+        "$expectedSignedLength = 291355L"
     ):
         fail("final signed identity is checked before APK signature verification")
 

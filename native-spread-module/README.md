@@ -49,9 +49,15 @@ dirty Supernote save instead advances a separate
 PDF, backup manifest/snapshot, and current live `.mark`. The checkpoint is
 published atomically while the process-shared writer lease remains valid, with
 a descriptor-pinned FUSE-safe parent directory. A durable `.pending` sibling is
-published before the checkpoint path changes and removed only after the new
-checkpoint passes complete post-rename verification; its presence blocks every
-cold admission path. Cold admission accepts a live mark that differs from the
+published before the checkpoint path changes, contains the same exact bound
+intent, and remains through the final live-mark, lease, generation, and
+checkpoint checks. Its presence blocks ordinary cold admission. After a crash,
+the next exclusive writer-lease owner can finish the publication only when the
+pending record, published checkpoint, live mark, PDF, and immutable recovery
+evidence agree exactly. If explicit recovery already restored the immutable
+baseline, the obsolete checkpoint is removed before its pending fence. Every
+other pending shape remains fail closed. Cold admission accepts a live mark
+that differs from the
 rollback baseline only when this persisted witness matches exactly. Empty
 regular `.mark` files remain valid and distinct from an absent mark.
 

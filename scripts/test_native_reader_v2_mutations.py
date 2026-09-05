@@ -921,13 +921,13 @@ STATIC_MUTATIONS = (
     ),
     (
         ".github/workflows/build.yml",
-        "$expectedSignedLength = 287259L",
+        "$expectedSignedLength = 291355L",
         "$expectedSignedLength = 250394L",
         "published companion exact signed length",
     ),
     (
         ".github/workflows/build.yml",
-        "ea42c5d754aa735cbfbc48a23ea7852caf9134d2ca9c1046a31c5073b1e8f924",
+        "848c05a4697c600278159c97442b81ecb7241134e993e115509ee0d797b43984",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "published companion exact signed digest",
     ),
@@ -1560,13 +1560,13 @@ STATIC_MUTATIONS = (
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "NATIVE_READER_V2_APK_LENGTH = 287259L",
+        "NATIVE_READER_V2_APK_LENGTH = 291355L",
         "NATIVE_READER_V2_APK_LENGTH = 250394L",
         "installed companion APK length pin",
     ),
     (
         "native/ReaderPreferencesModule.kt.template",
-        "ea42c5d754aa735cbfbc48a23ea7852caf9134d2ca9c1046a31c5073b1e8f924",
+        "848c05a4697c600278159c97442b81ecb7241134e993e115509ee0d797b43984",
         "09474ec2ac115bf5bba7b936c1d1a63a4195056af3e048821dd36f28cba31817",
         "installed companion APK digest pin",
     ),
@@ -2079,12 +2079,14 @@ STATIC_MUTATIONS = (
         "v2android/NativeReaderV2DocumentGate.java",
         "FileDescriptor parentDescriptor = openPinnedDirectory(\n"
         "            parent.getAbsolutePath()\n"
-        "        );",
+        "        );\n"
+        "        File temporary = new File(",
         "FileDescriptor parentDescriptor = Os.open(\n"
         "            parent.getAbsolutePath(),\n"
         "            OsConstants.O_RDONLY | OsConstants.O_CLOEXEC,\n"
         "            0\n"
-        "        );",
+        "        );\n"
+        "        File temporary = new File(",
         "witness checkpoint FUSE-safe pinned parent",
     ),
     (
@@ -2101,6 +2103,11 @@ STATIC_MUTATIONS = (
         "requireNoPendingLiveMarkCheckpoint(\n"
         "                    claim.markPath + LIVE_MARK_CHECKPOINT_SUFFIX\n"
         "                );\n"
+        "                requireLiveMarkWriterLeaseCurrent(\n"
+        "                    leasePath,\n"
+        "                    stream.getFD(),\n"
+        "                    descriptorIdentity\n"
+        "                );\n"
         "                LiveMarkState liveMark",
         "LiveMarkState liveMark",
         "recovery-baseline admission pending-publication fence",
@@ -2114,6 +2121,140 @@ STATIC_MUTATIONS = (
         "            StableBytes verified = readRegularFile(\n"
         "                checkpoint.getAbsolutePath(),",
         "verified checkpoint precedes pending-fence retirement",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "Os.dup(pendingDescriptor))) {\n"
+        "                output.write(bytes);",
+        "Os.dup(pendingDescriptor))) {\n"
+        "                output.write(new byte[0]);",
+        "pending checkpoint fence carries authenticated intent",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "            commitValidator.validate();",
+        "            // final checkpoint validation removed",
+        "pending fence spans final checkpoint validation",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "                reconcilePendingLiveMarkCheckpoint(\n"
+        "                    claim,\n"
+        "                    leasePath,\n"
+        "                    stream.getFD(),\n"
+        "                    descriptorIdentity\n"
+        "                );\n"
+        "                requireNoPendingLiveMarkCheckpoint(",
+        "                requireNoPendingLiveMarkCheckpoint(",
+        "exclusive writer reconciles stopped checkpoint publication",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "                requireLiveMarkWriterLeaseCurrent(\n"
+        "                    leasePath,\n"
+        "                    leaseDescriptor,\n"
+        "                    leaseIdentity\n"
+        "                );\n"
+        "                Os.remove(checkpointPath);",
+        "                Os.remove(checkpointPath);",
+        "baseline checkpoint retirement retains writer lease authority",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "            requireLiveMarkWriterLeaseCurrent(\n"
+        "                leasePath,\n"
+        "                leaseDescriptor,\n"
+        "                leaseIdentity\n"
+        "            );\n"
+        "            Os.remove(pendingPath);",
+        "            Os.remove(pendingPath);",
+        "pending checkpoint retirement retains writer lease authority",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "                requireNoPendingLiveMarkCheckpoint(\n"
+        "                    claim.markPath + LIVE_MARK_CHECKPOINT_SUFFIX\n"
+        "                );\n"
+        "                requireLiveMarkWriterLeaseCurrent(\n"
+        "                    leasePath,\n"
+        "                    stream.getFD(),\n"
+        "                    descriptorIdentity\n"
+        "                );",
+        "                requireNoPendingLiveMarkCheckpoint(\n"
+        "                    claim.markPath + LIVE_MARK_CHECKPOINT_SUFFIX\n"
+        "                );",
+        "cold admission revalidates writer lease after reconciliation",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "if (!Arrays.equals(pending.bytes, published.bytes)\n"
+        "                    || intended.generation",
+        "if (false\n"
+        "                    || intended.generation",
+        "pending recovery exact checkpoint-byte authority",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "boolean restoredBaseline = liveMarkMatchesRecovery(claim, live);",
+        "boolean restoredBaseline = false;",
+        "pending recovery exact rollback-baseline authority",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "if (restoredBaseline && pathExistsNoFollow(checkpointPath)) {",
+        "if (false) {",
+        "baseline recovery retires obsolete checkpoint authority",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "                Os.remove(checkpointPath);",
+        "                // obsolete checkpoint retirement removed",
+        "baseline recovery removes obsolete checkpoint",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "StableBytes pendingAfterRetirement = readRegularFile(",
+        "StableBytes pendingAfterRetirement = pending; // final read removed\n"
+        "                if (false) readRegularFile(",
+        "baseline recovery revalidates pending fence after retirement",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "!pending.identity.sameVersion(pendingAfter.identity)\n"
+        "                || !Arrays.equals(pending.bytes, pendingAfter.bytes)",
+        "!Arrays.equals(pending.bytes, pendingAfter.bytes)",
+        "pending recovery final fence inode authority",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "!published.identity.sameVersion(\n"
+        "                            checkpointAfter.identity)\n"
+        "                        || !Arrays.equals(",
+        "false\n"
+        "                        || !Arrays.equals(",
+        "pending recovery final checkpoint-inode authority",
+    ),
+    (
+        "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
+        "v2android/NativeReaderV2DocumentGate.java",
+        "|| !Arrays.equals(\n"
+        "                            pending.bytes,\n"
+        "                            checkpointAfter.bytes",
+        "|| false",
+        "pending recovery final checkpoint-byte authority",
     ),
     (
         "native-spread-module/src/com/techrebbe/supernote/spreadprobe/"
@@ -3179,6 +3320,80 @@ def run_no_clobber_interleaving_tests(temp_root: pathlib.Path) -> None:
     print("Native Reader v2 no-clobber interleavings: PASS")
 
 
+def run_live_mark_checkpoint_recovery_tests(temp_root: pathlib.Path) -> None:
+    """Model the two safe stopped-publisher recovery outcomes."""
+
+    def reconcile(
+        root: pathlib.Path,
+        baseline: bytes,
+        live: bytes,
+        intended: bytes,
+    ) -> None:
+        pending = root / "book.pdf.mark.snspread-live-mark-v1.pending"
+        checkpoint = root / "book.pdf.mark.snspread-live-mark-v1"
+        pending_bytes = pending.read_bytes()
+        if live != baseline:
+            if pending_bytes != intended:
+                raise _InterleavingRejected("pending intent changed")
+            if not checkpoint.exists() or checkpoint.read_bytes() != intended:
+                raise _InterleavingRejected("checkpoint publication incomplete")
+            if live != b"live:" + intended:
+                raise _InterleavingRejected("live mark disagrees with checkpoint")
+        elif checkpoint.exists():
+            checkpoint.unlink()
+        if pending.read_bytes() != pending_bytes:
+            raise _InterleavingRejected("pending intent changed before commit")
+        pending.unlink()
+
+    def scenario(name: str) -> pathlib.Path:
+        root = temp_root / "live-mark-checkpoint" / name
+        root.mkdir(parents=True)
+        return root
+
+    intended = b"authenticated-checkpoint-v1"
+    baseline = b"rollback-baseline"
+
+    # Crash after canonical checkpoint publication: the exact checkpoint and
+    # exact live mark complete the interrupted publication under a new lease.
+    root = scenario("published-before-final-validation")
+    (root / "book.pdf.mark.snspread-live-mark-v1.pending").write_bytes(intended)
+    (root / "book.pdf.mark.snspread-live-mark-v1").write_bytes(intended)
+    reconcile(root, baseline, b"live:" + intended, intended)
+    assert not (root / "book.pdf.mark.snspread-live-mark-v1.pending").exists()
+
+    # Exact rollback restore independently makes the interrupted newer
+    # checkpoint obsolete, even if rename never published it.
+    root = scenario("rollback-baseline-restored")
+    pending = root / "book.pdf.mark.snspread-live-mark-v1.pending"
+    pending.write_bytes(b"torn-pending-record")
+    stale = root / "book.pdf.mark.snspread-live-mark-v1"
+    stale.write_bytes(b"obsolete-checkpoint")
+    reconcile(root, baseline, baseline, intended)
+    assert not pending.exists()
+    assert not stale.exists()
+
+    for name, checkpoint, live, pending_bytes in (
+        ("crash-before-rename", None, b"live:" + intended, intended),
+        ("wrong-published-checkpoint", b"other", b"live:" + intended, intended),
+        ("unwitnessed-live-mark", intended, b"unwitnessed", intended),
+        ("corrupt-pending-intent", intended, b"live:" + intended, b"corrupt"),
+    ):
+        root = scenario(name)
+        pending = root / "book.pdf.mark.snspread-live-mark-v1.pending"
+        pending.write_bytes(pending_bytes)
+        if checkpoint is not None:
+            (root / "book.pdf.mark.snspread-live-mark-v1").write_bytes(
+                checkpoint
+            )
+        try:
+            reconcile(root, baseline, live, intended)
+            raise AssertionError(f"unsafe checkpoint recovery accepted: {name}")
+        except _InterleavingRejected:
+            assert pending.exists()
+
+    print("Native Reader v2 live-mark checkpoint recovery tests: PASS")
+
+
 def prepare_static_tree(root: pathlib.Path, destination: pathlib.Path) -> None:
     destination.mkdir()
     for name in ("AGENTS.md", "build.sh", "PluginConfig.json"):
@@ -3287,6 +3502,7 @@ def main() -> None:
         run_committed_marker_verification_failure_tests()
         run_no_clobber_interleaving_tests(temp_root)
         run_durable_recovery_fence_tests(temp_root)
+        run_live_mark_checkpoint_recovery_tests(temp_root)
         for filename, old, new, label in MUTATIONS:
             source_dir = temp_root / label / "src"
             test_dir = temp_root / label / "tests"

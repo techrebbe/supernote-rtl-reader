@@ -40,8 +40,8 @@ with SupernoteDocument `1.02.446`.
 
 - [x] RTL Reader v0.4.22 (`versionCode=41`) and companion v0.0.140
   (`versionCode=140`) use handshake protocol 4 and protected-editable marker
-  protocol 3. The companion is 287,259 bytes with SHA-256
-  `ea42c5d754aa735cbfbc48a23ea7852caf9134d2ca9c1046a31c5073b1e8f924`
+  protocol 3. The companion is 291,355 bytes with SHA-256
+  `848c05a4697c600278159c97442b81ecb7241134e993e115509ee0d797b43984`
   and the upgrade-compatible signer certificate SHA-256 remains
   `a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`.
 - [x] Authority moved to a never-reused `.snspread-v3` path containing one
@@ -78,8 +78,13 @@ with SupernoteDocument `1.02.446`.
   evidence. Cold admission accepts only the rollback baseline or that exact
   persisted witness; publication holds the writer lease, uses a no-follow,
   descriptor-pinned FUSE directory fallback, and durably publishes a pending
-  fence before changing the checkpoint path. Cold admission remains blocked
-  until complete checkpoint verification retires that fence. A slow shutdown
+  fence containing the exact checkpoint intent before changing the checkpoint
+  path. The fence remains through every final checkpoint/live-mark/lease/
+  generation check. A new exclusive writer-lease owner can reconcile a stopped
+  publication only when its pending record, published checkpoint, live mark,
+  PDF, and immutable recovery authority agree exactly; an exact baseline restore
+  first removes the obsolete checkpoint. All other states remain blocked. A
+  slow shutdown
   keeps the lease through an asynchronous worker drain. Existing zero-byte
   marks are admitted as regular files rather than mistaken for absence.
 - [x] Restore publishes RECOVERY before touching `.mark`, keeps the document
@@ -92,12 +97,12 @@ with SupernoteDocument `1.02.446`.
   before reassessment so legacy path evidence cannot silently regain control.
 - [x] The Java/Kotlin journal golden vectors agree. The core suite passes
   85,407 assertions, including mutations at both ends of every wire field and
-  authenticated region. All 249 executable/static authority mutations are
+  authenticated region. All 263 executable/static authority mutations are
   rejected, and native/plugin invariants, provenance, and fail-closed package
   tests pass.
 - [x] The full RTL Reader package compiles through the authenticated Supernote
-  template and verifies at 7,360,337 bytes with SHA-256
-  `0e849996e3b87f47c748f562068bb94c18daa3749fd887eb076cbcb87dc960ae`.
+  template and verifies at 7,360,154 bytes with SHA-256
+  `1f6061403099e3412e4a01492756ccdb1d1b773e5087333787a1fd5fcb5ed4a0`.
 - [ ] Exact-head PR CI and Codex review are clean.
 - [ ] The Nomad proves same-inode visibility and exact ACKs for enable,
   disable, restore, interrupted recovery, cold process reopen, and ordinary-PDF

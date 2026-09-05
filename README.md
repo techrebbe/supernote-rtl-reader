@@ -105,9 +105,13 @@ hashes. This permits a cold process restart to re-admit the newer witnessed
 `.mark` without rewriting the original snapshot. Checkpoint publication holds
 the exclusive writer lease, supports the Nomad's FUSE directory-open behavior,
 and creates a durable pending fence before changing the checkpoint pathname.
-Cold admission remains blocked until the new checkpoint passes its complete
-post-rename verification and that fence is retired. Torn files, stale backups,
-unwitnessed mark changes, and interrupted publication therefore fail closed. If
+That self-describing fence remains through the caller's final checkpoint,
+live-mark, writer-lease, and generation validation. After a process interruption,
+the next exclusive writer-lease owner can retire it only when the exact pending
+bytes, published checkpoint, live mark, PDF, and immutable recovery evidence all
+agree. An exact rollback-baseline restore instead retires both the obsolete
+checkpoint and its fence. Torn files, stale backups, unwitnessed mark changes,
+and every ambiguous recovery therefore remain fail closed. If
 shutdown outlives the bounded foreground wait, a
 daemon drain retains that lease until the worker has actually exited. An
 existing zero-byte `.mark` is valid evidence and is distinguished from an

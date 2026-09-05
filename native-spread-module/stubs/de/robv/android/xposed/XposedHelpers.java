@@ -31,6 +31,13 @@ public final class XposedHelpers {
         return null;
     }
 
+    public static void setObjectField(
+        Object object,
+        String fieldName,
+        Object value
+    ) {
+    }
+
     public static int getIntField(Object object, String fieldName) {
         return 0;
     }

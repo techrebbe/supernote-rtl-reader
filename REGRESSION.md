@@ -4,6 +4,220 @@ Device baseline: Supernote Nomad running firmware fingerprint
 `Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys`
 with SupernoteDocument `1.02.446`.
 
+## Native Reader v2 v0.4.21 hardware checkpoint — FAIL CLOSED
+
+- [x] The v0.4.21 recovery-retirement change restored an originally absent
+  calibration `.mark`, retired its first durable recovery fence, removed the
+  verified backup, and reopened the native reader without data loss.
+- [x] A subsequent fresh activation exposed a separate shared-storage
+  publication failure. PluginHost and `/data/media` observed the committed
+  marker SHA-256
+  `6d4b9f911efa7f704b5d6f3c39953055e764008e7826d8174e862cf2caac6333`,
+  while DocumentActivity and the shell `/storage/emulated` view retained the
+  prior pending marker SHA-256
+  `ded1599dc88a39443b09b4a6420117454d379ad3fd42c3a89f4c868d6dd832e7`.
+  The injected module rejected that stale pending schema and did not admit the
+  document.
+- [x] The cleanup retry also failed closed. Reusing the legacy marker pathname
+  with `O_EXCL` but without `O_TRUNC` produced a recovery-journal prefix plus a
+  retained pending-marker tail (SHA-256
+  `e368fff7cd12c910683ae5f774b6184be4bfe636f1f4b081a34982545778d220`).
+  Strict duplicate-key parsing rejected the mixed file; the verified backup
+  remained, the live `.mark` remained absent, and the reader was not reopened
+  by the recovery worker.
+- [x] A disposable Nomad mount-namespace probe used never-before-seen paths and
+  found identical 8,192-byte hashes through PluginHost, DocumentActivity,
+  shell `/storage/emulated`, and root `/data/media` after both initial
+  publication and a fixed-offset, same-inode update. The stable file retained
+  inode `179295`; its hash changed coherently from
+  `170dfe93c5a733e1d711c57bcfff7ca2c09ca541bad265985514fde5c73e3081`
+  to `aaf78b2e2c8f3e8e89609a6f022ee60035a96bf0f2663f1755b9509d14bdadca`.
+- [ ] v0.4.21 is not releasable. v0.4.22 must replace rename-over-existing
+  authorization with a new-path, fixed-size journal, a durable OFF state, and
+  exact Document-process acknowledgement for activation and revocation.
+
+## Native Reader v2 v0.4.22 fixed-journal pre-hardware gate — LOCAL PASS
+
+- [x] RTL Reader v0.4.22 (`versionCode=41`) and companion v0.0.140
+  (`versionCode=140`) use handshake protocol 4 and protected-editable marker
+  protocol 3. The companion is 295,451 bytes with SHA-256
+  `be400e348de1d03dbb2d8d6d391bec60555f022fd699402388a5c2a698d89152`
+  and the upgrade-compatible signer certificate SHA-256 remains
+  `a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`.
+- [x] Authority moved to a never-reused `.snspread-v3` path containing one
+  fixed 32 KiB, two-slot journal. Initialization exclusively creates and sizes
+  the inode once; later PENDING, COMMITTED, RECOVERY, and OFF transitions use
+  fixed-offset writes and three fsync stages without rename, delete, truncate,
+  resize, or recreation.
+- [x] A nonzero malformed/torn slot rejects the complete journal. Header state
+  is required to equal the exact payload activation state, and a valid OFF
+  record is the only v3 authority that supersedes retained legacy `.snspread`
+  evidence.
+- [x] A torn inactive-slot publication is repairable only during explicit
+  verified annotation restore, after DocumentActivity is stopped, and only
+  when the same exact inode contains one valid generation plus one malformed
+  slot. The malformed slot is replaced by a newer authenticated RECOVERY
+  record using the same three-fsync sequence. Empty/valid journals, zero valid
+  slots, two malformed slots, replacement/version drift, and every ordinary
+  open remain fail closed.
+- [x] Every reported transition requires the live Document process to
+  acknowledge the exact journal path, generation, authenticated record digest,
+  state, and activation token. Handshakes are generation-owned, single-flight,
+  raw-path bound, main-thread registered, and expire on one absolute deadline.
+  PluginHost re-reads the live journal after receiving the ACK and rejects a
+  disappearance or generation/digest/state change during the observation-to-
+  response interval.
+- [x] Authority ACK workers are isolated and replaceable, keep the live PDF
+  descriptor pinned across hashing and the exact journal reread, and perform a
+  final PDF path/version check before publishing. They cannot permanently
+  occupy the admission executor. An acknowledged OFF transition schedules a
+  fresh admission attempt for the matching open Activity.
+- [x] The immutable rollback snapshot is never advanced by ordinary editing.
+  Successful dirty native saves publish a separate exact-schema
+  `.snspread-live-mark-v1` witness bound to the original PDF and exact backup
+  evidence. Cold admission accepts only the rollback baseline or that exact
+  persisted witness; publication holds the writer lease, uses a no-follow,
+  descriptor-pinned FUSE directory fallback, and durably publishes a pending
+  fence containing the exact checkpoint intent before changing the checkpoint
+  path. The fence remains through every final checkpoint/live-mark/lease/
+  generation check. A new exclusive writer-lease owner can reconcile a stopped
+  publication only when its pending record, published checkpoint, live mark,
+  PDF, and immutable recovery authority agree exactly; an exact baseline restore
+  first removes the obsolete checkpoint. All other states remain blocked.
+  Rapid consecutive saves are serialized:
+  a newer witnessed generation supersedes an older publication by retiring only
+  that exact older pending fence under the same writer lease before the queued
+  newest generation publishes. Both ordinary publication and stopped-process
+  recovery re-read their exact pending/checkpoint/PDF/recovery identities at the
+  irreversible unlink boundary, after every delayed validation callback. A
+  slow shutdown keeps the lease through an asynchronous worker drain. Existing zero-byte
+  marks are admitted as regular files rather than mistaken for absence.
+- [x] Restore publishes RECOVERY before touching `.mark`, keeps the document
+  process stopped during replacement, starts a fresh authority provider while
+  RECOVERY remains fenced, and opens the fence only through an exact-ACKed OFF
+  transition. Post-commit cleanup cannot roll restored bytes backward.
+- [x] Valid protected legacy sessions migrate only after two exact authority
+  checks, including immediately at v3 publication. Malformed legacy evidence
+  stays fail closed, while reconciliation publishes durable v3 OFF authority
+  before reassessment so legacy path evidence cannot silently regain control.
+- [x] The Java/Kotlin journal golden vectors agree. The core suite passes
+  85,407 assertions, including mutations at both ends of every wire field and
+  authenticated region. All 263 executable/static authority mutations are
+  rejected, and native/plugin invariants, provenance, and fail-closed package
+  tests pass.
+- [x] The full RTL Reader package compiles through the authenticated Supernote
+  template and verifies at 7,360,351 bytes with SHA-256
+  `fae89dd6f62b012581d041d3b99b90582611e4fe486347082ea254cc91ca2cd7`.
+- [ ] Exact-head PR CI and Codex review are clean.
+- [ ] The Nomad proves same-inode visibility and exact ACKs for enable,
+  disable, restore, interrupted recovery, cold process reopen, and ordinary-PDF
+  isolation. No hardware result is claimed by this local section.
+
+## Native Reader v2 pre-hardware adversarial gate — PASS
+
+- [x] 85,071 deterministic controller/geometry/transaction assertions pass.
+- [x] 213 authority mutations are rejected, including exact firmware-declaration
+  and native pen-callback ownership drift, stale admission evidence,
+  contained-runtime publication, contact-safe containment, three-layer stock
+  restoration, projection drain ordering, and descriptor-backed marker
+  recovery.
+- [x] Ordinary native/plugin invariants, packaging fail-closed tests, and trace
+  helper fail-closed tests pass.
+- [x] Companion v0.0.138 compiles and verifies with the upgrade-compatible
+  signer; RTL Reader v0.4.19 compiles and packages with the hardened native
+  module.
+- [x] The current stable `origin/main` baseline at
+  `81942105e60e1b5498a7fb790762a3b750371a2d` is integrated; all 189 Virtual
+  Spread generator tests, contract fixtures, and native viewport tests pass.
+- [x] Two clean v0.0.138 companion builds are byte-for-byte identical at
+  258,587 bytes and SHA-256
+  `aeaddb2e682e3b2a2eaf4c9abe531ea40fa7ead25dab1871c637892d048fce5f`.
+  The exact locally generated v0.4.19 RTL Reader hardware-candidate package
+  for this gate is 7,332,079 bytes and has SHA-256
+  `4be70036a51ee91207933183a9130ebfb117b8e57221f27f4953cbb566dcd993`.
+- [x] The final adversarial review findings are covered by deterministic gates:
+  epoch-owned input/lifecycle authority, exact stock-reload receipts, no-clobber
+  `.mark` publication/rollback interleavings, post-commit relaunch, exact
+  installed-companion identity, protected two-stage release signing, bounded
+  filesystem-free exact raw-path binding across the plug-in and native provider,
+  generation-owned provider admission with absolute-deadline publication,
+  plus
+  generation-linearized terminal plug-in callbacks.
+- [x] Delayed runtime retirement cannot remove component IDs leased by a new
+  same-Activity session, and every unproven post-rename `.mark` failure blocks
+  all native-reader relaunch paths while retaining displaced recovery evidence.
+- [x] The protected no-checkout signer verifies the final signed APK's fixed
+  258,587-byte length and SHA-256 before publishing it.
+- [x] The first v0.0.137 Nomad admission attempt failed closed before any hook
+  installation. An exact offline DEX audit of all 124 pinned symbols identified
+  and corrected all three declaration mismatches together: the annotation map
+  interface type, the link hit-test point type, and the native-event pressure
+  owner. The v6 symbol contract now matches the captured firmware APK with zero
+  mismatches, and future runtime admission reports every mismatch in one pass.
+- [x] Companion v0.0.138 admitted the exact Nomad firmware, installed all 24 v2
+  hooks, and left an ordinary PDF explicitly unadmitted. The first v0.4.17
+  editable attempt verified the live annotation backup and then failed closed
+  before marker publication because Android's emulated-storage FUSE mount
+  rejects `O_DIRECTORY` with `EINVAL`. A device probe proved that the same mount
+  accepts `O_NOFOLLOW` without `O_DIRECTORY`, preserves exact descriptor/path
+  identity, and supports directory `fsync`; v0.4.18 uses only that narrowly
+  validated fallback and retains the before/open/after inode checks.
+- [x] The first v0.4.18 retry admitted the companion and verified the live
+  annotation backup, then rejected pending-marker publication because Android
+  emulated storage legitimately advanced the staged inode's `ctime` during
+  atomic rename. Fail-closed rollback restored the original ABSENT `.mark`,
+  removed the unpublished marker, and retained exact recovery evidence under
+  token `6097c662-1947-4585-91e0-f6106560bceb`. A scoped Nomad probe proved the
+  rename preserved device/inode/mode/links/size/mtime while advancing only
+  `ctime`. v0.4.19 therefore anchors the post-publication check to the still-open
+  staged descriptor's post-rename identity, then rechecks the descriptor-backed
+  destination and final path exactly; four new mutation cases protect identity
+  capture ordering and all three authority fences. An executable injected
+  post-rename `fstat` failure additionally proves that the irreversible
+  publication callback runs exactly once before the failure propagates.
+- [x] The final exact-head review's two concurrency findings are reproduced and
+  guarded. Mode loading now derives settings, configuration state, and recovery
+  assessment from one descriptor-backed marker snapshot and revalidates that
+  exact authority after the asynchronous companion handshake before resolving.
+  Committed-marker publication is tracked separately from verified activation:
+  a post-rename verification failure suppresses unsafe rollback but still
+  rejects activation instead of being converted into success. Executable race
+  models and two new static mutations cover both boundaries.
+- [x] The subsequent exact-head review's two additional concurrency findings
+  are also reproduced and guarded. Prepared background composition now acquires
+  the hook's physical-stylus publication lock before disabling or reprogramming
+  DrawPath; a DOWN that wins that lock defers composition until both stylus
+  streams reach terminal release. Mode-load publication now rereads and exactly
+  compares the document-bound recovery result, including no-follow descriptor
+  identities for both manifest and snapshot, then rederives and compares the
+  full recovery authority before resolving. Large `.mark` snapshots are hashed
+  through pinned descriptors without retaining their payloads in the plug-in
+  heap. Both physical DOWN streams and the final worker-to-main publication
+  retain their shared generation/lock authority. Two executable interleaving
+  models and seventeen new static mutations cover these boundaries.
+- [x] Recovery restore and reconciliation now enter through the same
+  process-shared configuration-generation authority as ordinary mode changes.
+  They exclude overlapping loads/configuration while mutation is active and
+  advance the generation again on exact completion, so a load checked before
+  or during recovery cannot publish stale marker, settings, or backup authority
+  afterward. Recovery carries an exact owner-generation token, so a stale retry
+  cannot release a replacement owner, and annotation restore retains generation
+  authority across `.mark` publication and recovery-evidence retirement. The
+  executable interleaving model and twelve independent static mutations cover
+  recovery admission, owner retry, irreversible publication, both terminal
+  fences, and Promise-safe configuration rejection.
+- [x] Pending-marker reconciliation now holds the cross-process publication
+  lock before configuration-generation authority and parses one exact
+  descriptor-backed marker snapshot. All restore/delete branches compare that
+  same identity at their pathname mutation, so a stale PluginHost cannot
+  overwrite or clear a newer process's marker. A two-process executable race
+  model covers both precheck and compare-and-swap replacements; five additional
+  static mutations guard the lock, descriptor snapshot, exact comparison,
+  compare-and-delete, and compare-and-swap boundaries.
+- [ ] Exact-head independent review is clean.
+- [ ] Nomad hardware gate passes. No hardware result is claimed by this
+  automated section.
+
 v0.0.9 established the hardware-validated reading-engine baseline. v0.1.1 subsequently validated the polished UI and direction-aware footer. v0.4.2 is the current merged hardware-validated direct-render and direction-aware native bitmap-prefetch baseline.
 
 ## v0.0.9 full regression — PASS
@@ -352,11 +566,14 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   Fit foreground and prefetch renders skip it.
 - [x] Static invariant: a configured marker is authoritative for cover parity
   as well as divider, header, and page-sizing state during initialization.
-- [x] Static invariant: failed trace startup stops observers, cancels pending
-  work, and removes the stale `active.txt` session pointer.
+- [x] Static invariant: failed trace startup stops observers and cancels pending
+  work. A pre-publication attempt is cleaned up; after `active.txt` is durable,
+  that exact pointer remains guarded by `incomplete.txt` and
+  `publication-failed.txt`.
 - [x] Static invariant: `last.txt` is published only during successful trace
-  finalization, before `active.txt` is removed; failed startup preserves the
-  previous completed-session pointer.
+  finalization by atomically renaming `active.txt`; failed startup preserves the
+  previous completed-session pointer and no separate success event can disagree
+  with that single commit.
 - [x] Static invariant: every desktop trace-helper action recognizes an
   `active.txt` whose recorded PID is no longer the live document process.
   `Status` retains that pointer across invocations; `Stop` removes it only after
@@ -379,9 +596,9 @@ The protected `.mark` SHA-256 remained unchanged throughout.
 - [x] Static invariant: hook-thread event capture queues immutable records to a
   per-session serialized writer; only that writer opens `events.jsonl`, and
   finalization drains it before publishing a session pointer.
-- [x] Static invariant: completed/incomplete pointer publication always attempts
-  `active.txt` cleanup in `finally`; a failure preserves the exact session via
-  `publication-failed.txt`, which the helper checks before `last.txt`.
+- [x] Static invariant: completion removes `active.txt` only through the atomic
+  rename to `last.txt`; incomplete/publication failure retains exact active,
+  incomplete, and publication-failed guards, all checked before `last.txt`.
 - [x] Static invariant: completed publication rejects an undeletable stale
   `incomplete.txt` and preserves an explicit publication-failure session.
 - [x] Nomad helper simulation: `Stop` reported a disposable `incomplete.txt`
@@ -390,6 +607,14 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   marker and directory were then removed.
 - [x] The trace collection script waits for asynchronous finalization and
   verifies the completed session pointer before pulling the bundle.
+- [x] Local failure-injection regression: malformed active/incomplete/failure
+  pointers for every helper action, padded active bytes, multiline `last.txt`,
+  unreadable/nonregular nodes, missing/ambiguous owner metadata, `pidof`
+  failure, and ADB transport failure all retain state and cannot broadcast,
+  mutate, pull, or fall back to an older completed trace.
+- [x] Static invariant: checkpoint screenshots stage outside the remote session
+  directory; Checkpoint revalidates active identity on both sides, and Stop
+  revalidates completion before and after every remote pull.
 - [x] Ordered trail fingerprints cover all trails while detailed trace items
   remain capped at 256.
 - [x] Native Spread v0.0.116 active/inactive composition trace: two new active
@@ -414,6 +639,241 @@ The protected `.mark` SHA-256 remained unchanged throughout.
   need a focused smoke test with the new trim transform.
 - [ ] Return to Fit page and confirm all existing annotations return to their
   original whole-page positions.
+
+## v0.4.14 transactional single-active-page candidate
+
+Automated and build evidence:
+
+- [x] Work starts from stable `main` at `4e4d3ed`; the v0.0.117 inactive-page
+  merge experiment is preserved on `agent/v116-inactive-erase-regression` at
+  `818db1f` and is not in this branch's ancestry.
+- [x] Native PDF renderer invariants pass.
+- [x] Native Spread safety invariants pass and require exact transaction/input
+  guard publication -> thread-scoped source save -> writer disable -> target
+  native load ordering. Concurrent pen contact, UI/history actions, and all
+  other lifecycle saves remain blocked from publication through commit.
+- [x] Static invariants require the inactive-page pen coordinate to be rejected
+  in an Xposed `beforeHookedMethod`, before Supernote's native callback can add
+  it to the source page's DrawPath.
+- [x] Static invariants reject any live pen-activation route to the experimental
+  trail capture, normalization, manual `.mark` merge, or synthetic history path.
+- [x] Static invariants require reader-page and presenter-mark-page identity to
+  match the exact target before geometry commits.
+- [x] Static invariants require trigger-contact save and receive callbacks to be
+  blocked until pen-up, and require timeout/completion work to match the exact
+  transaction token.
+- [x] Static invariants serialize contact-start latching, activation startup,
+  and final guard removal under the same ownership lock, including contacts
+  that begin in a gutter/cropped margin or race a queued transfer/commit.
+- [x] Static invariants require the native pen-position callback and its queued
+  activation/interception helpers to use a UI-published immutable
+  document/page-geometry snapshot. Config parsing, file identity capture,
+  `stat`, and other filesystem work are rejected from the low-latency path.
+- [x] Static invariants keep a stroke that begins on the active page owned by
+  that page and discard any points that cross into the inactive half.
+- [x] Static invariants require source-page rollback to use bounded,
+  exact-transaction retries. A reload exception or convergence timeout cannot
+  leave UI/history/save guards published forever: after the final attempt, the
+  native writer must be disabled and pen geometry invalidated before the
+  transaction guard is released.
+- [x] Static invariants require an editable RTL spread turn rejected by a
+  temporary pen/geometry/transaction guard to be retained and replayed against
+  its exact document and source page rather than reported as handled and lost.
+- [x] Static invariants require the pen-lift completion path to republish ready
+  target-page geometry before releasing a held activation transaction.
+- [x] Static invariants reject synchronous logging, JSON serialization, and UI
+  context capture in the native pen-position hook/interceptor. Contact-boundary
+  trace data and coalesced block-state logs are enqueued to serialized workers.
+- [x] Static invariants require a partial transaction-start failure to retain
+  ownership through source rollback and suppress the legacy target-page
+  activation fallback.
+- [x] Static invariants require an explicit side-selection tap rejected during
+  transient geometry publication to be retained and replayed against its exact
+  document/source/target context.
+- [x] Static invariants require active-page ink coordinates crossing into the
+  other page, divider, or unmapped/cropped margins to remain blocked while the
+  terminal pen-up callback is preserved.
+- [x] Static invariants require a native-chrome-origin stylus contact to remain
+  blocked from DrawPath through pen-up, even if it drags into the page.
+- [x] Static invariants reject synchronous per-motion logging from the blocked
+  UI-input hook and require coalesced boundary diagnostics on the background
+  logger.
+- [x] Static invariants require deferred spread turns to bind and revalidate the
+  cover-parity value used to calculate their target.
+- [x] Static invariants require every deferred activation to be cancelled when
+  the latest validated document configuration explicitly disables editing or
+  Native Spread.
+- [x] A verified v0.4.12 `protected-editable-pilot` session is authorized only
+  for one-time marker migration or backup retirement. Load-time migration
+  retains the existing live `.mark` and recovery snapshot, publishes the
+  transactional marker atomically with rollback, and verifies the new marker
+  against the same backup before reporting editable mode.
+- [x] Static invariants require protocol-2 editable activation to publish a
+  non-authorizing `pending` marker before the final live-`.mark` check. Only the
+  atomic `committed` marker publication authorizes writing, and committed
+  markers cannot retain pending-only rollback fields.
+- [x] Static invariants require a failed new activation to archive and verify a
+  token-bound copy of its manifest and snapshot before restoring the previous
+  marker or freeing the canonical backup slot. Partial archive stages are
+  resumable; ambiguous or mismatched evidence remains non-mutating and
+  fail-closed.
+- [x] Static invariants require read-only and Off transitions to journal their
+  intent and exact previous-marker identity before retiring recovery data, then
+  revalidate that pending transaction before publishing the final state.
+- [x] Static invariants serialize configuration, retirement, restore, and
+  process-death reconciliation under one lock and require an exclusive restore
+  claim before `.mark` replacement.
+- [x] Native Spread v0.0.119 compiles, is v2/v3 signed, and reports matching
+  manifest, handshake, and plug-in minimum version 119. The tested APK is
+  164,524 bytes with SHA-256
+  `d001ddea28d93873413372f9a284e3b801d2ee043df645fd0a42b551e595e44f`.
+- [x] Static invariants require both firmware-specific eraser hooks before the
+  native readiness gate is published. The regular vector eraser wrapper is
+  restricted to pen type 16, color 255, and exact `932 x 1243` half-page
+  geometry; it temporarily supplies canonical `1872 x 2496` dimensions, calls
+  the original exactly once, restores both fields, and preserves its result.
+- [x] Deep-review hardening is compiled as Native Spread v0.0.120 and requires
+  RTL Reader v0.4.14. Hook readiness uses atomic attempted/installed state and
+  non-null original functions; ambiguous hook results cannot be installed a
+  second time. The v2/v3-signed local APK is 168,622 bytes with SHA-256
+  `4e03659bbd5d01861fd41982c1913689728f81da4e03e21f3261d7a6b0e3982e`.
+- [x] Native Spread v0.0.123 compiles, is v2/v3 signed, and reports matching
+  manifest and runtime handshake version 123. The installed APK is 185,004
+  bytes with SHA-256
+  `fe39832044eef51851c9aa4b3815e856959a0df3fc0609f5ba6d987f83b0761f`.
+- [x] A real Nomad interrupted-trace cycle atomically archived the exact
+  abandoned `active.txt` file under its session-specific recovery directory,
+  retained the partial trace, did not publish stale `last.txt`, and removed
+  only the verified empty recovery guard. A subsequent normal trace completed,
+  pulled, and produced a verified ZIP. After Stop, v0.0.123 restored the normal
+  `RTL SPREAD: ACTIVE RIGHT page 1` header instead of leaving a stale
+  `SPREAD TRACE: recording` banner.
+- [x] The v0.0.123 lasso failure was captured without changing the canonical
+  `.mark`: the moved preview remained correct until dismissal, where the stale
+  generic pen-contact timer rejected `areaSelectionTransition`. Native Spread
+  v0.0.124 gives the accepted selection its own immutable writer transaction,
+  bypasses generic handwriting contact/fallback admission for lasso UI pen
+  gestures, revalidates exact document/page/component identity at transition
+  and rewrite, and retires authority only after the final rewrite callback.
+  Document-identity resets and persisted-config reloads now also retire the
+  exact lasso authority so an interrupted transaction cannot block later page
+  activation.
+- [x] Native Spread v0.0.124 compiles, is v2/v3 signed, and reports matching
+  manifest and runtime handshake version 124. The local APK is 185,007 bytes
+  with SHA-256
+  `b02646ab4515d2e32c1df282fc75ae6197165328c98a575fe7ab271beff9b63c`.
+- [x] The focused v0.0.124 hardware trace proved that moved ink now survives a
+  delayed pen dismissal. It also isolated three follow-up defects: Supernote's
+  180-pixel lasso padding shifted the finalized ink up and left and reduced its
+  size; the native thinning pass made the floating ink disappear during the
+  drag; and a moved selection finalized at `areaSelectionTransition` without
+  reaching `reWriteTrails`, leaving its immutable authority active.
+- [x] Native Spread v0.0.125 maps the centered bitmap content rather than the
+  padded interaction frame, retains the original canonical selection bounds,
+  supplies an unthinned move bitmap, and retires a successful move transaction
+  from the transition callback. The checker structurally protects all four
+  behaviors. The APK compiles, is v2/v3 signed, reports version 125, is 185,005
+  bytes, and has SHA-256
+  `683f4d3f869b23da7852dc3d4d9b6136690803c40bded796cea0a218ca1499b4`.
+- [ ] On v0.0.125, select a short line, drag it to a different calibration box,
+  wait at least 20 seconds, and dismiss the selection with the pen. The ink must
+  remain visible throughout the drag, keep its original size, settle exactly at
+  the preview location, and leave page activation/navigation usable afterward.
+- [x] Canonical reloads after pen, eraser, Undo, and Redo require the exact root
+  `saveTrails()` hook to have been admitted, counted, and completed without a
+  throwable. The final writer proof and `loadHandWrite()` are linearized in
+  lifecycle-safe OWNER-then-PAGE lock order.
+- [x] Fresh-process startup and sequential document switching are distinguished:
+  only an earlier exact reset/presentation proof activates the late-receive
+  quarantine. Delayed orientation refreshes retain and revalidate exact
+  document, generation, presenter, and view-model identity.
+- [x] Restore-worker ownership and the post-restore handoff skip use separate
+  atomic states; the skip is published before worker ownership is released.
+- [x] A clean Windows plugin build embeds and verifies `app.npk`. CI and local
+  publication require one package, exact `/icon.png` and `/app.npk` metadata,
+  the exact ReactPackage, reviewed native classes, and the runtime marker.
+  Failure-injection tests reject missing/corrupt native payloads and softened
+  packager paths. A digest-advanced mutation audit rejected all eight targeted
+  authority, lock, hook, workflow, and package-verifier regressions.
+
+### Native Spread v0.0.126 ordinary-reader containment audit
+
+- [x] Every Java hook that can suppress a firmware call, alter arguments,
+  change page/selection geometry, or enter the writer lifecycle requires an
+  exact verified activity/document control claim.
+- [x] Ordinary activity startup and teardown do not enter Native Spread's
+  owner write lock, JNI eraser gate, or spread editing-state restoration.
+- [x] Missing, stale, or not-yet-bound presenter, view-model, handwriting view,
+  native callback, and native-note identities delegate to firmware when no
+  current/pending activity owns a control claim.
+- [x] Text selection, highlight creation, highlight overlay, digest rendering,
+  pen input, touch input, lasso, Undo/Redo, page turns, and embedded-link hooks
+  are inert without a claim.
+- [x] A verified transition to Off removes the claim before disabling the JNI
+  gate and asking the firmware to restore its writable/selection areas.
+- [x] Native C++ inspection confirms that the only detours are the two
+  firmware-specific eraser functions. With the Java gate false, they pass
+  unchanged arguments to the original exactly once and preserve its result.
+- [x] Both invariant suites and trace-helper regressions pass. Fourteen
+  digest-advanced adversarial mutations of claim, lifecycle, resolver,
+  highlighter, setImage, JNI, and publication guards were all rejected.
+- [x] The locally signed APK reports v0.0.126 / versionCode 126, verifies under
+  APK Signature Schemes v2 and v3, is 185,007 bytes, and has SHA-256
+  `c91d55613ceabb6b72c3c5240494373255e97eb1d55e92dd4748750465752b0f`.
+- [ ] With the module installed and LSPosed enabled, cold-open an ordinary PDF
+  with no `.snspread.properties` authority and verify native highlighter,
+  underline, pen, eraser, lasso, Undo/Redo, links, taps, and swipes.
+- [ ] Reboot and repeat highlighter creation/persistence before opening any
+  Native Spread document.
+- [ ] Open an enabled RTL editable document and verify spread navigation and
+  native tools, then switch it Off and immediately repeat the ordinary native
+  highlighter test without uninstalling or disabling LSPosed.
+
+Nomad hardware gate (in progress):
+
+- [ ] Finger-tap each inactive half. Existing annotations on both pages remain
+  unchanged; native focus and the ACTIVE banner move to the requested page.
+- [ ] Hover over the inactive page, wait for activation, then write. The first
+  real stroke uses normal native behavior and persists after away/back.
+- [ ] Draw several normal and quick connected strokes on the active page. Pen
+  samples remain smooth, no stroke is dropped, and the settled native ink
+  matches the gesture after away/back.
+- [ ] Touch the inactive page with the pen before activation can complete. The
+  trigger gesture creates no partial or wrong-page ink; after lifting, the
+  target is active and the next stroke persists normally.
+- [ ] Repeat the direct-contact test in both directions and confirm no source
+  page annotation count or visible ink changes.
+- [ ] Begin a stroke on the active page and drag across the divider. It remains
+  an active-page stroke, does not switch focus, and leaves no ink on the other
+  page.
+- [ ] On each active side, validate pen, stroke eraser, lasso move, top-toolbar
+  Undo/Redo, highlighting, and an embedded link through native controls.
+  Regular stroke erasure on active left page 2 passed with v0.0.119: the
+  accepted eraser contact published `active_eraser`, reloaded the canonical
+  page, remained visibly erased after Active Left -> Active Right -> Active
+  Left, and survived a cold document-reader restart. The post-erasure and
+  cold-reopen `.mark` SHA-256 both equal
+  `9a61d949f6437a0f55986ba85b5797ba2e01743e46402607faefe351fcd211dd`.
+  The trace recorded zero potential failures. The first eraser contact after
+  process restart was intentionally discarded by the pre-existing
+  document-context receive quarantine; a subsequent fresh contact retired the
+  quarantine and persisted normally. The opposite side and remaining tools are
+  still open. A v0.0.121 lasso trace isolated one remaining defect: the lasso
+  polygon reached the ordinary active-pen settled-ink save/reload path, which
+  resurrected the selected source trail beneath Supernote's floating selection.
+  v0.0.125 leaves that refresh under the native selection buffer, carries exact
+  selection authority through the real lasso transition/rewrite boundary,
+  accounts for Supernote's padded lasso frame, and completes moved selections
+  at their actual transition boundary. Static invariants and compilation pass;
+  the select-drag-pen-dismiss round trip remains the only required stylus
+  validation for this correction.
+- [ ] Advance and reverse spreads with taps and swipes. Every turn saves the
+  source, lands on the expected RTL spread, and leaves writing enabled only for
+  the focused page.
+- [ ] Rotate landscape -> portrait -> landscape and turn away/back. Canonical
+  annotations on both pages remain complete and correctly aligned.
+- [ ] Force an activation timeout or identity mismatch in a disposable test.
+  Writing visibly fails closed and no `.mark` merge fallback runs.
 
 ## v0.4.10 protected native editing pilot
 
@@ -545,6 +1005,198 @@ stroke after Supernote commits and redraws it. The saved `.mark` retains the
 canonical Supernote thickness and remains portable through InkBridge; matching
 the transient preview to the half-page scale is tracked as post-v0.4.10 polish.
 
+### Native Spread v0.0.130 native-control and lasso-persistence regression
+
+Automated pre-device checks:
+
+- [x] Visible native chrome is published from current global view rectangles,
+  including separate popup-window roots, and is refreshed on layout changes
+  and synchronously at stylus DOWN.
+- [x] A chrome-origin stylus contact receives one exact gesture token; the
+  Activity and low-latency native callbacks bypass handwriting ownership,
+  activation, remapping, trace mutation, and save/reload until its matching
+  UP/CANCEL.
+- [x] A document-origin contact is never reclassified when it crosses visible
+  chrome, and hiding or moving a toolbar invalidates its former rectangle on
+  the next DOWN.
+- [x] A verified visible-chrome DOWN is passed to firmware regardless of page
+  or writer authority; only malformed, mismatched, or raced gesture streams
+  are blocked. Native-first callbacks cannot reclassify an already-started
+  document contact.
+- [x] A canonical lasso move invokes Supernote's region rewrite, global-layout
+  flag, bitmap refresh, and writer clear before restoring the spread mark
+  origin or completing the exact lasso authority.
+- [x] Java compilation, native PDF invariants, Native Spread safety invariants,
+  trace-helper failure tests, and whitespace validation pass.
+
+Focused Nomad checks:
+
+- [ ] Select Pen, regular Eraser, Highlighter, and Lasso with the stylus; each
+  native control arms exactly as it does with a finger and creates no ink mark.
+- [ ] Move the native toolbar, repeat stylus selection, then hide it and verify
+  its former rectangle accepts ordinary document ink.
+- [ ] Start a document stroke and cross into the visible toolbar; it remains a
+  document gesture and does not activate a control.
+- [ ] Select and move a lassoed stroke, dismiss the floating selection, turn
+  away and back, and cold-reopen the document. The moved ink remains visible,
+  singular, correctly sized, and at the released location.
+- [ ] Undo and redo the lasso move affect only that selection; companion-page
+  ink remains unchanged.
+- [ ] Ordinary non-Native-Spread highlighting still works, and Close returns
+  the native reader to the correct active page.
+
+### Native Spread v0.0.131 text-selection contact regression
+
+Automated pre-device checks:
+
+- [x] Active-page text-selection DOWN is classified before Activity and native
+  handwriting ownership, and the exact contact remains firmware-owned through
+  UP/CANCEL.
+- [x] Native text-selection hardware is configured for the active page and is
+  never disabled by model change, stylus DOWN, or `handWriteSelectText` state 0.
+- [x] Text-selection contacts cannot publish ordinary pen ownership, start page
+  activation, or be reclassified as native chrome while crossing a toolbar.
+- [x] Native-only and Activity-routed terminal states retire the selection
+  token, and activity/global lifecycle reset clears all selection state.
+- [x] v0.0.131 compiles, verifies under APK Signature Schemes v2/v3, reports
+  matching manifest/runtime version 131, is 185,006 bytes, and has SHA-256
+  `89f2188fa04e5cb3e9e24d0aa90ec8a1d66b774565949cd1717413943d7a2237`.
+
+Focused Nomad checks:
+
+- [ ] Select Highlighter with the pen, highlight active-left text, and confirm
+  the live preview, final selection/menu, and persisted highlight are aligned.
+- [ ] Confirm the selection logs native `handWriteSelectText` states without
+  `pen_contact_activity_touch_latched` for the same gesture.
+- [ ] Close the selection, activate the right page immediately, and confirm no
+  `page activation waiting for pen/page state` banner appears.
+- [ ] Highlight active-right text, turn away/back, and confirm both pages retain
+  their annotations; repeat once outside Native Spread.
+
+Initial v0.0.131 hardware result:
+
+- [x] The failed active-left highlight no longer entered ordinary handwriting
+  ownership and no longer left page activation permanently waiting.
+- [x] The exact contact classified and retired cleanly, but Supernote emitted no
+  `handWriteSelectText` state because its native `isAllowTurnPage` prerequisite
+  remained true; the firmware gesture listener handled the contact instead.
+
+### Native Spread v0.0.132 native text-selection gate regression
+
+Automated pre-device checks:
+
+- [x] Activity DOWN applies the native `isAllowTurnPage=false` gate only after
+  exact active-page selection ownership is published/adopted and before the
+  unmodified event reaches Supernote.
+- [x] Exact Activity UP/CANCEL restores the prior native page-turn value only
+  after the firmware dispatch completes, then retires the selection token.
+- [x] A native terminal cannot prematurely remove an Activity-owned selection;
+  a bounded main-thread fallback restores and retires it only if Activity UP is
+  missing.
+- [x] Activity/global lifecycle cleanup restores any applied gate instead of
+  discarding the token, and structural invariants enforce these orderings.
+- [x] v0.0.132 compiles, verifies under APK Signature Schemes v2/v3, reports
+  matching manifest/runtime version 132, is 185,004 bytes, and has SHA-256
+  `ac200814f85ae091b1cf83438d62e3e6a983ac28f0cda675963329a45b7b5bc8`.
+
+Focused Nomad checks:
+
+- [x] Pen-select Highlighter, draw across active-left text, and confirm native
+  `handWriteSelectText` states plus an aligned live/final highlight.
+- [x] Confirm `text_selection_activity_gate_applied` precedes native selection
+  and `text_selection_activity_gate_restored` follows its terminal dispatch.
+- [x] Immediately activate the right page with a finger and confirm navigation
+  is not stuck or suppressed.
+- [x] Highlight active-right text, turn away/back, and confirm both pages retain
+  their annotations.
+- [ ] Repeat text selection and choose **Underline** from Supernote's result
+  menu; confirm alignment and persistence on both active sides.
+
+### Native Spread v0.0.135 early digital-down text-selection regression
+
+Automated pre-device checks:
+
+- [x] The Activity `ACTION_DOWN` classifier is authoritative and may adopt only
+  the exact otherwise-unowned physical digital-down emitted immediately before
+  that same text-selection gesture.
+- [x] The native-first classifier remains unable to adopt an already-down pen,
+  and competing handwriting, activation, lasso, page, or chrome ownership
+  rejects the selection fail closed.
+- [x] A rejected Activity selection returns the blocking route before ordinary
+  handwriting publication, while `onDigital(1)` rechecks text-selection
+  ownership under the same lock before publishing physical-contact state.
+- [x] Structural invariants enforce the classifier roles, atomic adoption,
+  rejection ordering, and digital-down recheck. Native PDF invariants, Native
+  Spread invariants, packaging failure tests, trace-helper tests, compilation,
+  signing verification, and whitespace validation pass.
+- [x] The locally signed APK reports v0.0.135 / versionCode 135, is 201,389
+  bytes, and has SHA-256
+  `d8ae6261d281e56851cf8af68548f91658041c7df4d244e3ee0cef8c69809b32`.
+
+Focused Nomad checks:
+
+- [x] Draw and settle ordinary ink on active left, then pen-select Supernote's
+  text-selection tool without creating stray ink or retaining handwriting
+  ownership.
+- [x] Underline active-left text. The trace records
+  `text_selection_preclassified_digital_down_adopted`, followed by gate apply,
+  Activity classification, gate restore, and exact contact retirement.
+- [x] Activate the right page immediately, pen-select the same native tool, and
+  apply Highlight with correct live/final alignment and no stuck page state.
+- [x] Both active sides retired their selection and result-menu contacts. No
+  `pen_contact_receive_expired` event occurred, and the finalized trace reports
+  zero potential failures with four changed `.mark` snapshots.
+- [x] Trace archive SHA-256:
+  `20b5462b58b46f4923d43c119867c8951b4bfe8dba174098a546831c569a7cb1`.
+
+### Native Spread v0.0.134 recognized-straight-line transaction
+
+Automated pre-device checks:
+
+- [x] Exact `straightLine` / two-point recognition begins an authority token
+  while the original receive contact, active writer, page, document, layout,
+  and native split offset are still current.
+- [x] The recognized-line `receiveTrials` branch defers the ordinary canonical
+  save/reload instead of replacing Supernote's live editor coordinate frame.
+- [x] `onEditLineMode` maps the native split-local editor geometry into the
+  active physical page slot and rejects invalid, missing, unclassified, or
+  stale transaction authority before Supernote can show its native editor.
+- [x] `onEditLineTransition` revalidates exact authority, maps final physical
+  endpoints back to Supernote's native split-local frame, lets the native
+  commit succeed, and only then performs the canonical save/reload.
+- [x] A recognized-line editor or commit in editable spread mode cannot fall
+  through to native coordinates when its exact transaction is absent; the
+  structural checker rejects both editor and commit fail-open regressions.
+- [x] Activity release, global editing reset, and a later ordinary receive
+  retire abandoned line authority; raw edit-line touch rewriting is forbidden.
+- [x] Native Spread safety invariants and the full native build pass. The
+  locally signed APK reports v0.0.134 / versionCode 134, verifies under APK
+  Signature Schemes v2/v3, is 185,004 bytes, and has SHA-256
+  `d27686f73729ae51f33a809ccdf32ba328b343a822a5dcde144c5f7778e783c7`.
+
+Focused Nomad checks:
+
+- [x] On active-right Box G, draw a short horizontal line and hold its endpoint
+  for about 1.5 seconds. Confirm the live editor remains horizontal/aligned and
+  does not jump into a large diagonal before or after pen lift.
+- [x] Turn away/back and cold-restart the document reader; confirm the line
+  remains horizontal, correctly placed, and singular.
+- [x] Repeat the held-line test on active left, then draw ordinary unheld lines
+  on both pages to confirm their existing path is unchanged.
+- [x] Repeat one highlight and the pending Underline selection to confirm the
+  v0.0.132 text-selection path remains aligned and persistent.
+
+Focused v0.0.135 hardware result:
+
+- [x] Seven recognized-line transactions across the right and left active
+  pages entered the remapped native editor, deferred canonical reload until
+  native commit, and logged `recognized_line_commit_persisted`.
+- [x] The first right-page line showed only a small native straightening snap;
+  no line became the former large diagonal or left its intended area. Later
+  right-page lines and every left-page line remained visually stable.
+- [x] A cold document-process reopen preserved every tested line in its
+  original position without duplication. Trace archive SHA-256:
+  `d857f14b7f41c5d482e027f2e7e26110f2f9090562c922b815837c1f4752fc96`.
 ## Native Virtual Spread v0.0.8 architecture validation — PASS
 
 Hardware validation was completed on 2026-08-21 on a Supernote Nomad running

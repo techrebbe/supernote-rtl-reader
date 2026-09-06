@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.techrebbe.supernote.viewportdisplayprobe"
+    android:versionCode="2" android:versionName="0.0.2-display-only">
+    <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="30" />
+    <!-- No storage, network, root, input-injection or LSPosed permissions/hooks. -->
+    <application android:allowBackup="false" android:usesCleartextTraffic="false"
+        android:label="Native Viewport Display Probe" android:supportsRtl="false"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <activity android:name=".DisplayProbeActivity" android:exported="true"
+            android:launchMode="singleTask" android:resizeableActivity="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity android:name=".CalibrationActivity" android:exported="false"
+            android:resizeableActivity="true" android:taskAffinity="com.techrebbe.supernote.viewportdisplayprobe.calibration"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density" />
+    </application>
+</manifest>

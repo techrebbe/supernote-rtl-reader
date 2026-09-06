@@ -2988,6 +2988,19 @@ not change the hardware-tested companion APK or runtime path.
 
 ## Failure capture
 
+### Isolated Android viewport substrate — 2026-09-06
+
+PASS for the separate `0.0.2-display-only` probe on Nomad SN078C10015092,
+Android 11; NOT a native Document/pen/tool/persistence pass. Root-assisted
+launch admitted only the probe's own calibration activity onto a fixed
+1404 x 1872 display. Full/left/right placement retained that display/task/canvas;
+portrait rotation round-trip screenshots were byte-identical. Duplicate and
+stale launches were rejected, calibration-close and host-close removed the
+owned display/tasks, and rotation did not restart a stopped probe. The temporary
+APK was removed, orientation restored and fixture PDF/mark hashes unchanged.
+Full source-only r4 confirmation review was clean. See
+[exact evidence and remaining gates](native-viewport-probe/DISPLAY_HARDWARE.md).
+
 Before reproducing a failure:
 
 ```powershell

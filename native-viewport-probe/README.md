@@ -1,6 +1,7 @@
 # Single native-page viewport experiment
 
-Status: host preparation; **no native viewport adapter installed or proven**.
+Status: saved-ink diagnostic and isolated Android display-substrate validated;
+**no native viewport adapter installed or proven**.
 Branch `agent/native-single-viewport-probe` starts at recorded merged main
 `69e2aa273b9d1943f19afaeac6a1e324abbf9481`. The earlier post-merge working patch
 and complete stock hardware evidence remain untouched in the sibling
@@ -25,7 +26,7 @@ disabled for the stock baseline. No production package includes these files.
   `getFilePageTrails` read interface, never live `getTrailContainer`. It does not
   attach to Document/DrawPath, install hooks, connect Binder, or write a mark.
   Native initialization/cleanup is private to its process. Firmware/copy hashes
-  are checked before and after. It is not yet device-validated.
+  are checked before and after. Its disposable-copy gate is recorded below.
   Read-only `fetchPagesOfMark` must admit the requested page first. A page with
   no saved mark record is explicitly unavailable to this diagnostic, not a
   successful empty capture, and no mark/page is created to change that result.
@@ -141,3 +142,69 @@ Three read-only temporary device files remain under
 diagnostic JAR; ~93 KB total). Nothing is installed or running. Original files
 and all prior worktrees/evidence are preserved. The native arbitrary-viewport
 adapter remains unimplemented, so left/right-half hardware testing is NOT ready.
+
+## Display-substrate preparation (later on 2026-09-06)
+
+`display-host/` now implements one fixed-size Android display presented FULL /
+LEFT / RIGHT, with an independent calibration activity. This is a built
+display-only probe, NOT yet a hosted native Document page or pen adapter.
+It has no storage/network permissions, native libraries, LSPosed hooks, input
+injection, Document launch or save operations. It does not replace any installed
+package. Its no-pen warning is not a direct-pen-service safety interlock.
+
+See [the bounded implementation and gates](DISPLAY_BOUNDARY_EXPERIMENT.md).
+The native firmware's special-case scale field and possible direct framebuffer
+path are explicit unresolved integration constraints, not hidden behind a tool
+fix. The exported function name alone does not prove physical framebuffer access.
+The independent native task/display boundary is the next candidate to prove;
+the old production architecture has not been discarded or replaced.
+
+Host validation: 280 existing viewport assertions, 45,453 display-fit/lifecycle assertions,
+15 Python tests, Android compilation and unsigned APK packaging pass. Windows
+packaging initially rejected a long artifact path; shorter generated filenames
+fixed it without moving or deleting any earlier evidence. No APK installed and
+no physical action requested. A calibration pass will not count as a native
+writing/tool/persistence pass.
+
+Independent display-probe review found two P2 defects: restored instances could
+restart a stopped experiment, and opaque controls covered calibration corners.
+Both are fixed together: restored admission starts in a sticky STOPPED state,
+and controls can be hidden/shown by finger without forwarding any input. Tests
+cover stopped/restored admission and the Android wiring/hidden-control route.
+The full updated r2 source-only confirmation review is now clean. All 15 Python
+tests also passed independently; Android task migration, teardown and compositing
+remain hardware gates. The reviewed source snapshot is preserved outside the
+worktree at `../../reviews/native-viewport-display-20260906-r2/` with its adjacent
+`-review.log`. It contains no firmware, PDFs, annotations or signing credentials.
+
+Prepared test artifact: `build/d-fce8d4538a354c81b4e81e41ca1e0b54/viewport.apk`.
+This is a separate `0.0.1-display-only` package, locally signed with a newly
+generated temporary test-only key. The user's existing debug keystore was not
+used or uploaded. APK SHA-256:
+`e9315eefec9ed0c4652e11575b09eb057a83b9832909f4eaf27c68356ab0e7a7`.
+Verified signer certificate SHA-256:
+`b0a6859721488d06624a90e4c077fee7ad379ce638d65a6535910b0696be75eb`.
+
+Device preflight found the correct Nomad connected, but a different document
+was open instead of the disposable stock fixture. Stopped before closing it,
+installing the probe or changing orientation. Asked whether the device is idle.
+No display-substrate hardware PASS is claimed. The stock fixture PDF/mark
+fingerprints remain unchanged; this does not establish the currently open
+document's save state. Evidence is local in `build/display-hardware-20260906/`.
+
+After the user released the device, the current document was closed normally.
+The v1 display probe created a 1404 x 1872 display but Android denied the
+ordinary calibration launch onto it. Its display was released and the probe
+uninstalled; File Manager is foreground, Document PID 2027 and the stock
+PDF/mark hashes are unchanged, and rotation settings remain 1 (automatic) / 0.
+No native pen actions or reader-module changes occurred.
+
+The prepared v2 display-only revision retains the live display for an explicit
+host-side root launch of its own non-exported calibration activity, checking
+the actual display and current owner UUID. No app-side root execution or global
+policy change is introduced. Its own full confirmation review and bounded
+display-only hardware gate are now complete: [evidence and limits](DISPLAY_HARDWARE.md).
+Duplicate launches are rejected by a single calibration claim; only the admitted
+calibration may signal termination. That signal clears attachment status and
+stops the display. Full/left/right presentation, rotation and cleanup passed.
+No native Document page or handwriting was tested. The temporary APK is removed.

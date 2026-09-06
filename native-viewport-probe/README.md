@@ -1,0 +1,143 @@
+# Single native-page viewport experiment
+
+Status: host preparation; **no native viewport adapter installed or proven**.
+Branch `agent/native-single-viewport-probe` starts at recorded merged main
+`69e2aa273b9d1943f19afaeac6a1e324abbf9481`. The earlier post-merge working patch
+and complete stock hardware evidence remain untouched in the sibling
+`supernote-rtl-reader-pr22-upload` worktree. The installed companion remains
+disabled for the stock baseline. No production package includes these files.
+
+## Implemented preparation
+
+- `ViewportFrame`: one immutable native-page-canvas to window transform and a
+  contact route classified at DOWN from current visible native chrome. It is
+  only a mathematical contract, **not** the missing native adapter. It neither
+  programs DrawPath nor changes saved coordinates, page state or global sizes.
+- `ink_oracle.py`: strict offline evidence validation and exact native-record
+  comparison. Includes point samples, pressure, thickness and all extra native
+  fields. No tolerance is invented. Diagnostic trail identities are not claimed
+  stable across native compaction. Invalid/missing evidence cannot become PASS.
+  All 62 top-level fields of the pinned native record are required; decimal
+  floats are rejected before parsing can round or underflow them. The field
+  inventory was independently compared with the pinned firmware source.
+- `SavedInkReader`: compiles as a standalone Android helper for a separate
+  `app_process` and a disposable `.mark` COPY only. It uses the pinned native
+  `getFilePageTrails` read interface, never live `getTrailContainer`. It does not
+  attach to Document/DrawPath, install hooks, connect Binder, or write a mark.
+  Native initialization/cleanup is private to its process. Firmware/copy hashes
+  are checked before and after. It is not yet device-validated.
+  Read-only `fetchPagesOfMark` must admit the requested page first. A page with
+  no saved mark record is explicitly unavailable to this diagnostic, not a
+  successful empty capture, and no mark/page is created to change that result.
+
+The evidence JSON files are local test results, NOT a new document conversion
+or InkBridge contract. The original PDF and native annotations stay authoritative.
+The source digest in a collector request must come from the host-verified source
+fixture; the helper does not claim to derive a PDF identity from a `.mark` file.
+Native float values use binary32/binary64 hex wrappers and longs use decimal
+strings so Android's JSON formatter does not discard precision or signed zero.
+`ViewportFrame` maps native presentation-canvas pixels, not the persisted EMR
+sample coordinates. Native records include their own axis, maximum-coordinate,
+resize and redraw metadata. Preserve that metadata; do not apply the canvas
+matrix directly to `m_points` or assume they are screen pixels.
+
+## Observed boundary constraints
+
+Pinned firmware source `DocumentConstants.getDisplayPoint()` returns1404x1872
+for Nomad, not current window dimensions. `loadHandWrite`/`refreshBitmap`,
+`setHandWriteRotation`, selection and page-hit testing independently consume
+that size plus native split/crop state. Shrinking an Android view is therefore
+not sufficient. The compiled frame must be consumed by a coherent replacement
+geometry producer; do not reuse the previous reassert/restore loop or claim that
+this host transform itself fixes native tools.
+
+For the calibration native canvas1404x1872, left/right936x1404 halves fit at
+2/3 scale with78px top/bottom margins. That is aspect-preserving Fit Page,
+not filling by distortion. Canonical sample(939,388) presents at(626,336 2/3)
+on the left and(1562,336 2/3) on the right. These arithmetic vectors do not
+establish the still-unproven native pen-service mapping.
+
+## Next gates, in order
+
+1. DONE for the saved calibration checkpoints below: review/build the isolated collector, then validate it on disposable copies
+   of existing saved baseline checkpoints without asking for another stroke.
+   Repeated capture must be identical and must leave both the copied file and
+   untouched native reader unaffected. A native initialization failure is a
+   collector blocker, not lost-ink evidence.
+2. Implement the scoped native geometry producer/consumer boundary for ONE
+   source page/one presenter/one note. Keep native saving/history authoritative.
+   Exclude legacy/v2 mutating routes. No page switch or second live writer yet.
+3. Automated/adversarial tests, full independent exact-head review, exact
+   package verification, then reversible disposable-file installation.
+4. One short physical batch in the left half, then the right: writing, both
+   erasers, native Undo/Redo, lasso move/resize/commit, text selection. Automate
+   capture at meaningful boundaries, analyze after the batch, and compare
+   saved native records after reopening in the unchanged native reader.
+5. Only after those gates pass, add two live page contexts and test focus changes.
+
+Do not operate the Nomad from a review session, install an incomplete probe,
+push/advance a PR on this preparatory subset, or merge without the user's decision.
+Do not repeat the complete stock tool suite just to obtain duplicate screenshots.
+
+## Host checks
+
+Run `check.ps1` with the explicit local JDK, Android SDK and Python paths.
+This compiles diagnostics/tests only; it does not package or install an APK.
+
+2026-09-06 preparation checkpoint:280 viewport assertions and13 evidence tests
+PASS; Android collector compiles. Actual Nomad system library hashes match the
+collector's pinned hashes. Device access this turn was read-only path/hash/PID
+inspection; no helper deployment, pen injection, module enable, or app restart.
+The initial review connection failed TLS validation and was terminated. The user
+then explicitly approved uploading only the probe source/tests and required
+geometry dependencies, excluding PDFs, saved annotations and credentials. The
+normal-host review of the isolated eleven-file bundle completed with three
+findings: incomplete record admission (P1), bare decimal precision loss (P2),
+and unbounded file allocation before the size check (P2). All three have fixes
+and deterministic regressions. The completed confirmation and device-copy gate
+are recorded below; neither certifies an arbitrary native viewport.
+
+## Completed review and disposable-copy hardware gate
+
+Final r3 source-only independent review: no actionable findings. The initial
+three findings were fixed and retested; a separate pinned-firmware check caught
+the native initialization enum offset before execution. The helper now follows
+stock `getDeviceType()+2` (Nomad 2 -> initialization argument 4), with the enum
+read from the pinned APK and other devices rejected before note creation.
+Review evidence is preserved outside this worktree at
+`../../reviews/native-viewport-host-20260906-confirmation.md`.
+
+Nomad `SN078C10015092`, 2026-09-06 ~20:22-20:24 device time:
+
+- Ran as ordinary ADB **shell UID 2000**, NOT root. No APK install, module enable,
+  app restart, hook attachment, UI manipulation or pen action. Future runs of
+  this diagnostic must retain that unprivileged execution condition. Native
+  initialization attempted input-device queries and logged access failures;
+  do not elevate it to bypass those denials.
+- Separate `app_process` instances read host-saved disposable calibration copies,
+  never the live document's mark. Before copy: 1 trail / 66 samples. After copy:
+  unchanged prior trail plus 1 new trail / 53 samples. All 62 fields of the
+  prior trail compare exactly, including samples, pressure and thickness.
+- Repeated after-capture: exact equality of both complete native records.
+- Deliberately absent page 999: rejected, exit 2, no success envelope.
+- Successful captures: ~2.1 seconds each, including process startup, firmware
+  checks, native initialization and cleanup. This is not a page-turn benchmark.
+- Copy hashes unchanged; live PDF and mark hashes and Document PID 2027 were
+  identical immediately before/after the gate. No diagnostic process remains.
+
+Artifacts (local, ignored): `build/hardware-r3/` contains raw diagnostic logs,
+live before/after fingerprints and a reproducible checkpoint verifier.
+Native mark identities in this fixture are `(1,0,0,5)` and `(1,0,0,6)`; these
+are diagnostic tuples, not stable cross-compaction IDs. The raw sample bounds
+are not screen bounds, consistent with native axis metadata.
+
+The live mark at this later gate had a different hash from the earlier archived
+checkpoints, before any helper execution. No cause is inferred; all comparisons
+use the explicitly identified archived copies, and the live hash remained
+unchanged during this gate.
+
+Three read-only temporary device files remain under
+`/data/local/tmp/native-viewport-ink-reader/` (two disposable marks and the
+diagnostic JAR; ~93 KB total). Nothing is installed or running. Original files
+and all prior worktrees/evidence are preserved. The native arbitrary-viewport
+adapter remains unimplemented, so left/right-half hardware testing is NOT ready.

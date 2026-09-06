@@ -5,8 +5,9 @@ A Supernote plugin focused on right-to-left PDF reading and landscape two-page s
 ## Native Reader v2 candidate
 
 The current development branch contains RTL Reader v0.4.23 with rooted Native
-Reader v2 companion v0.0.140. It is a pre-hardware candidate, not the merged
-stable release, and must not be shipped yet. Nomad testing of v0.4.21 proved
+Reader v2 companion v0.0.140. Its focused recovery/acknowledgement gate is
+hardware validated on the Nomad, but it is not the merged stable release and
+must not be shipped yet. Nomad testing of v0.4.21 proved
 that rename-over-existing on emulated storage can leave PluginHost and
 DocumentActivity observing different marker generations. This replacement uses
 a new fixed-size journal path and requires an exact Document-process

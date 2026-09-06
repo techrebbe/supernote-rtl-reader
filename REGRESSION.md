@@ -116,7 +116,7 @@ with SupernoteDocument `1.02.446`.
   isolation. The first recovery test below failed closed and supersedes any
   release claim for v0.4.22.
 
-## Native Reader v2 v0.4.23 recovery-ACK correction — HARDWARE FIX PENDING
+## Native Reader v2 v0.4.23 recovery-ACK correction — HARDWARE PASS
 
 - [x] The exact-head v0.4.22 package and companion v0.0.140 were installed on
   the Nomad. The disposable `NativeReaderV2-Calibration.pdf` opened normally,
@@ -151,10 +151,34 @@ with SupernoteDocument `1.02.446`.
   build, and finished-package verification pass. The v0.4.23 package is
   7,360,370 bytes with SHA-256
   `ee2f0623c878ea830a6d7b8c693efd7d4144194779c41f01808bd468cfc5cc96`.
-- [ ] Exact-head CI and Codex review pass for v0.4.23.
-- [ ] The Nomad proves a fresh legacy-to-v3 reconciliation receives its exact
-  ACK without timeout, the existing valid OFF journal loads as resolved, and
-  enable/disable/reopen behavior remains fail closed and data safe.
+- [x] Exact-head CI run `33999238781` and Codex review comment `5555589671`
+  pass at code head `7943a4d84bbececeed325e62747fa9461c899de2`.
+- [x] The exact v0.4.23 package installed as version code 42. It is 7,360,370
+  bytes with SHA-256
+  `ee2f0623c878ea830a6d7b8c693efd7d4144194779c41f01808bd468cfc5cc96`.
+  The already-published generation-1 OFF journal for
+  `NativeReaderV2-Calibration.pdf` loaded as resolved: Settings exposed neither
+  reconciliation nor restore controls and reported no unresolved authority.
+- [x] A separate no-annotation disposable copy,
+  `NativeReaderV2-Reconcile-v0423.pdf`, started with retained legacy authority
+  and no v3 journal. Explicit reconciliation published generation 1 OFF,
+  received exact Document-process ACKs without timeout, logged
+  `RTL_READER_NATIVE_RECOVERY_RECONCILED
+  previous=legacy_authority_requires_supersession`, and returned to resolved
+  authority. The activation token was
+  `62a83af1-709a-4fd5-ab14-a0f5613b7502` in Document process 8139.
+- [x] Protected editable activation on that disposable copy received exact
+  pending generation 2 and committed generation 3 ACKs. Disable received exact
+  pending generation 4 and OFF generation 5 ACKs, retired the verified
+  originally-no-annotation snapshot, and left no `.mark` or backup artifact.
+- [x] After cold-stopping only PluginHost and `com.supernote.document`, the
+  reopened document used a new Document process (10227), completed protocol-4
+  handshake with `active=true reason=ok`, and loaded generation-5 OFF as
+  resolved with no reconciliation, restore, or unresolved UI.
+- [x] Ordinary-PDF isolation remained fail closed. Opening
+  `VirtualSpread-v025-ordinary-source.pdf` logged `document not admitted`, kept
+  the stock `DocumentActivity` resumed, and created no `.snspread*` or `.mark`
+  sibling.
 
 ## Native Reader v2 pre-hardware adversarial gate — PASS
 

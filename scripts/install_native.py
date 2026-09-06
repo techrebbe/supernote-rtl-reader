@@ -82,6 +82,10 @@ def main() -> None:
     for source_name, output_name in (
         ("PdfRendererModule.kt.template", "PdfRendererModule.kt"),
         ("ReaderPreferencesModule.kt.template", "ReaderPreferencesModule.kt"),
+        (
+            "NativeReaderV2AuthorityJournal.kt.template",
+            "NativeReaderV2AuthorityJournal.kt",
+        ),
         ("PdfPageView.kt.template", "PdfPageView.kt"),
         ("PdfPageViewManager.kt.template", "PdfPageViewManager.kt"),
         ("PdfRendererPackage.kt.template", "PdfRendererPackage.kt"),

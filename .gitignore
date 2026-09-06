@@ -5,3 +5,9 @@ tmp/
 output/
 virtual-spread-module/build/
 artifacts/
+deliverables/
+out/
+test-builds/
+.npm-cache-provenance/
+.provenance-temp/
+.provenance-materialized/

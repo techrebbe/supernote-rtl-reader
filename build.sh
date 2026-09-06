@@ -4,16 +4,50 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_ROOT="$(mktemp -d)"
 trap 'rm -rf "$WORK_ROOT"' EXIT
+TEMPLATE_PACKAGE="@supernote-plugin/sn-plugin-template"
+TEMPLATE_VERSION="1.0.12"
+TEMPLATE_LOCK="$ROOT/provenance/plugin-template-package-lock.json.gz.b64"
 
-python3 "$ROOT/scripts/check_native_spread_invariants.py" "$ROOT"
+if [[ -n "${PYTHON_BIN:-}" ]]; then
+  if command -v cygpath >/dev/null 2>&1 && [[ "$PYTHON_BIN" =~ ^[A-Za-z]:[\\/] ]]; then
+    PYTHON_BIN="$(cygpath -u "$PYTHON_BIN")"
+  fi
+  PYTHON_CMD=("$PYTHON_BIN")
+elif command -v python3 >/dev/null 2>&1; then
+  PYTHON_CMD=(python3)
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_CMD=(python)
+elif command -v py >/dev/null 2>&1; then
+  PYTHON_CMD=(py -3)
+else
+  echo "Python 3 is required; set PYTHON_BIN to its executable path." >&2
+  exit 1
+fi
 
-pushd "$WORK_ROOT" >/dev/null
-npx --yes @react-native-community/cli@18.0.0 init SupernoteRtlReader \
-  --template @supernote-plugin/sn-plugin-template \
-  --version 0.79.2
-popd >/dev/null
+"${PYTHON_CMD[@]}" "$ROOT/scripts/check_native_reader_v2_invariants.py" "$ROOT"
+"${PYTHON_CMD[@]}" "$ROOT/scripts/check_native_spread_invariants.py" "$ROOT"
 
 PROJECT="$WORK_ROOT/SupernoteRtlReader"
+TEMPLATE_DOWNLOAD="$WORK_ROOT/template-download"
+mkdir -p "$TEMPLATE_DOWNLOAD"
+pushd "$WORK_ROOT" >/dev/null
+npm pack --ignore-scripts --silent \
+  --pack-destination "$TEMPLATE_DOWNLOAD" \
+  "$TEMPLATE_PACKAGE@$TEMPLATE_VERSION"
+popd >/dev/null
+mapfile -t TEMPLATE_ARCHIVES < <(
+  find "$TEMPLATE_DOWNLOAD" -maxdepth 1 -type f -name '*.tgz' -print
+)
+if [[ "${#TEMPLATE_ARCHIVES[@]}" -ne 1 ]]; then
+  echo "Expected exactly one downloaded template archive, found ${#TEMPLATE_ARCHIVES[@]}." >&2
+  exit 1
+fi
+"${PYTHON_CMD[@]}" "$ROOT/scripts/materialize_plugin_template.py" \
+  "${TEMPLATE_ARCHIVES[0]}" "$TEMPLATE_LOCK" "$PROJECT"
+pushd "$PROJECT" >/dev/null
+npm ci --ignore-scripts --no-audit --no-fund
+popd >/dev/null
+
 cp "$ROOT/overlay/App.js" "$PROJECT/App.js"
 cp "$ROOT/overlay/index.js" "$PROJECT/index.js"
 cp "$ROOT/overlay/app.json" "$PROJECT/app.json"
@@ -22,7 +56,7 @@ cp "$ROOT/PluginConfig.json" "$PROJECT/PluginConfig.json"
 # Keep the footer's visual slots tied to physical screen left/right even when
 # PluginHost/Android inherits an RTL UI layout direction. The button labels and
 # actions are still selected dynamically by App.js according to reader direction.
-python3 - "$PROJECT/App.js" <<'PY'
+"${PYTHON_CMD[@]}" - "$PROJECT/App.js" <<'PY'
 from pathlib import Path
 import sys
 
@@ -37,10 +71,11 @@ PY
 
 # Direct native foreground rendering plus the current bitmap prefetch/cache path.
 # Strict patch scripts fail CI if their expected stable source markers drift.
-python3 "$ROOT/scripts/patch_direct_view.py" "$PROJECT/App.js"
-python3 "$ROOT/scripts/install_native.py" "$PROJECT" "$ROOT"
-python3 "$ROOT/scripts/patch_transient_detach.py" "$PROJECT"
-python3 "$ROOT/scripts/patch_initial_layout.py" "$PROJECT/App.js"
+"${PYTHON_CMD[@]}" "$ROOT/scripts/patch_direct_view.py" "$PROJECT/App.js"
+"${PYTHON_CMD[@]}" "$ROOT/scripts/install_native.py" "$PROJECT" "$ROOT"
+"${PYTHON_CMD[@]}" "$ROOT/scripts/patch_transient_detach.py" "$PROJECT"
+"${PYTHON_CMD[@]}" "$ROOT/scripts/patch_initial_layout.py" "$PROJECT/App.js"
+"${PYTHON_CMD[@]}" "$ROOT/scripts/patch_plugin_packager.py" "$PROJECT/buildPlugin.sh"
 
 mkdir -p "$PROJECT/assets"
 cat > "$PROJECT/assets/icon.png.b64" <<'B64'
@@ -51,12 +86,37 @@ rm "$PROJECT/assets/icon.png.b64"
 
 pushd "$PROJECT" >/dev/null
 chmod +x buildPlugin.sh
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    # Preserve package-internal absolute paths passed through Windows jq.
+    export MSYS2_ARG_CONV_EXCL="${MSYS2_ARG_CONV_EXCL:+$MSYS2_ARG_CONV_EXCL;}/icon.png;/app.npk"
+    ;;
+esac
 ./buildPlugin.sh
 popd >/dev/null
 
+mapfile -t PACKAGES < <(find "$PROJECT/build/outputs" -maxdepth 1 -type f -name '*.snplg' -print)
+if [[ "${#PACKAGES[@]}" -ne 1 ]]; then
+  echo "Expected exactly one generated .snplg, found ${#PACKAGES[@]}." >&2
+  exit 1
+fi
+EXPECTED_BUNDLE="$PROJECT/build/generated/SupernoteRtlReader.bundle"
+EXPECTED_NATIVE_APK="$PROJECT/build/generated/app.npk"
+if [[ ! -f "$EXPECTED_BUNDLE" || ! -f "$EXPECTED_NATIVE_APK" ]]; then
+  echo "Generated bundle/native APK provenance inputs are missing." >&2
+  exit 1
+fi
+"${PYTHON_CMD[@]}" "$ROOT/scripts/verify_plugin_package.py" \
+  "${PACKAGES[0]}" "$ROOT" "$EXPECTED_BUNDLE" "$EXPECTED_NATIVE_APK"
+
 mkdir -p "$ROOT/out"
 rm -f "$ROOT/out"/*.snplg
-cp "$PROJECT"/build/outputs/*.snplg "$ROOT/out/"
+cp "${PACKAGES[0]}" "$ROOT/out/"
+PROVENANCE_OUTPUT="$ROOT/out/build-provenance"
+rm -rf "$PROVENANCE_OUTPUT"
+mkdir -p "$PROVENANCE_OUTPUT"
+cp "$EXPECTED_BUNDLE" "$PROVENANCE_OUTPUT/SupernoteRtlReader.bundle"
+cp "$EXPECTED_NATIVE_APK" "$PROVENANCE_OUTPUT/app.npk"
 
 echo "Built Supernote RTL Reader plugin:"
 ls -lh "$ROOT/out"/*.snplg

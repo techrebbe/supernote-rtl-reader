@@ -4,8 +4,9 @@
 
 - Keep behavior-changing pull requests in draft until the complete branch diff is
   implemented and the relevant automated and hardware evidence is recorded.
-- Before requesting GitHub review, run both invariant suites, the build affected
-  by the change, and a local Codex `/review` of the full branch against `main`.
+- Before requesting GitHub review, run every invariant and adversarial suite
+  listed below for the active engine, the build affected by the change, and a
+  local Codex `/review` of the full branch against `main`.
   Treat that independent review as additive to CI and hardware testing, not as
   a substitute for either.
 - Address a review's findings as one batch when practical. Then rerun the
@@ -27,8 +28,17 @@ Run the repository checks with an available Python 3 runtime:
 
 ```text
 python scripts/check_native_invariants.py .
-python scripts/check_native_spread_invariants.py .
+python scripts/check_native_reader_v2_invariants.py .
+python scripts/test_native_reader_v2_core.py .
+python scripts/test_native_reader_v2_mutations.py .
+python scripts/test_plugin_packaging_fail_closed.py
 ```
+
+`scripts/check_native_spread_invariants.py` is the current cross-layer package
+and provenance gate. It preserves the frozen v0.0.135 source-digest evidence
+while also validating that the exclusive Native Reader v2 package contains no
+legacy executable entry point or native payload. It is required for a v2
+release check; the legacy source itself must remain non-executable.
 
 For Native Spread changes, also build and verify the companion APK with
 `native-spread-module/build.ps1`. For plug-in changes, run the normal plug-in

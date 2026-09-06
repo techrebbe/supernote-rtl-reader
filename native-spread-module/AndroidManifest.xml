@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.techrebbe.supernote.spreadprobe"
-    android:versionCode="116"
-    android:versionName="0.0.116">
+    android:versionCode="140"
+    android:versionName="0.0.140">
 
     <uses-sdk
         android:minSdkVersion="27"
@@ -12,14 +12,14 @@
         android:allowBackup="false"
         android:extractNativeLibs="false"
         android:hasCode="true"
-        android:label="Supernote Native Spread Probe"
+        android:label="Supernote Native Reader v2"
         android:supportsRtl="true">
         <meta-data
             android:name="xposedmodule"
             android:value="true" />
         <meta-data
             android:name="xposeddescription"
-            android:value="Opt-in RTL native-reader spreads with verified annotation recovery" />
+            android:value="Exact-firmware transactional RTL and two-page native reader" />
         <meta-data
             android:name="xposedminversion"
             android:value="82" />

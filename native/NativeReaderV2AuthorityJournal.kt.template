@@ -1,0 +1,703 @@
+package __PACKAGE__
+
+import android.system.Os
+import android.system.OsConstants
+import android.system.StructStat
+import android.system.ErrnoException
+import java.io.ByteArrayOutputStream
+import java.io.DataOutputStream
+import java.io.File
+import java.io.FileDescriptor
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import java.util.Locale
+
+/** Fixed-inode two-slot authority shared with the injected Document process. */
+internal object NativeReaderV2AuthorityJournal {
+    const val FORMAT_VERSION = 3
+    const val SLOT_COUNT = 2
+    const val SLOT_SIZE = 16 * 1024
+    const val FILE_SIZE = SLOT_COUNT * SLOT_SIZE
+    const val HEADER_SIZE = 128
+    const val MAX_PAYLOAD_SIZE = SLOT_SIZE - HEADER_SIZE
+
+    private val MAGIC = byteArrayOf(
+        'S'.code.toByte(), 'N'.code.toByte(), 'R'.code.toByte(),
+        'V'.code.toByte(), '2'.code.toByte(), 'J'.code.toByte(),
+        '3'.code.toByte(), 0,
+    )
+    private val RECORD_DOMAIN =
+        "supernote-native-reader-v2-authority-slot-v3\u0000".toByteArray(
+            StandardCharsets.US_ASCII,
+        )
+    private const val PAYLOAD_DIGEST_OFFSET = 40
+    private const val RECORD_DIGEST_OFFSET = 72
+    private const val RESERVED_OFFSET = 104
+
+    enum class State(val code: Int) {
+        OFF(1),
+        PENDING(2),
+        COMMITTED(3),
+        RECOVERY(4);
+
+        companion object {
+            fun fromCode(code: Int): State = values().singleOrNull {
+                state -> state.code == code
+            } ?: throw IllegalArgumentException("Unknown journal state $code")
+        }
+    }
+
+    data class Record(
+        val slotIndex: Int,
+        val state: State,
+        val generation: Long,
+        val payload: ByteArray,
+        val payloadSha256: String,
+        val authoritySha256: String,
+    )
+
+    data class Snapshot(
+        val current: Record?,
+        val other: Record?,
+    ) {
+        fun nextGeneration(): Long {
+            val active = current ?: return 1L
+            check(active.generation != Long.MAX_VALUE) {
+                "Journal generation exhausted"
+            }
+            return active.generation + 1L
+        }
+
+        fun inactiveSlotIndex(): Int = current?.let {
+            record -> 1 - record.slotIndex
+        } ?: 0
+    }
+
+    data class Authority(
+        val file: File,
+        val identity: StructStat,
+        val fileSha256: String,
+        val snapshot: Snapshot,
+    )
+
+    /**
+     * Recovery-only evidence for one interrupted inactive-slot publication.
+     * Normal readers must never use [trusted] as current authority: the
+     * complete journal remains invalid until a new RECOVERY record is durably
+     * published over [damagedSlotIndex].
+     */
+    data class RepairCandidate(
+        val file: File,
+        val identity: StructStat,
+        val fileSha256: String,
+        val trusted: Record,
+        val damagedSlotIndex: Int,
+    )
+
+    private data class SlotInspection(
+        val record: Record?,
+        val malformed: Boolean,
+    )
+
+    fun inspect(journal: ByteArray): Snapshot {
+        require(journal.size == FILE_SIZE) { "Invalid journal file size" }
+        val first = parseSlot(journal, 0)
+        val second = parseSlot(journal, 1)
+        if (first == null && second == null) return Snapshot(null, null)
+        if (first == null) return Snapshot(second, null)
+        if (second == null) return Snapshot(first, null)
+        require(first.generation != second.generation) {
+            "Journal slots reuse one generation"
+        }
+        return if (first.generation > second.generation) {
+            Snapshot(first, second)
+        } else {
+            Snapshot(second, first)
+        }
+    }
+
+    fun read(file: File): Authority {
+        val descriptor = Os.open(
+            file.absolutePath,
+            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or
+                OsConstants.O_NOFOLLOW,
+            0,
+        )
+        try {
+            val before = Os.fstat(descriptor)
+            requireRegularSingleLink(before)
+            require(before.st_size == FILE_SIZE.toLong()) {
+                "Invalid journal size"
+            }
+            val bytes = readExactly(descriptor, FILE_SIZE)
+            val after = Os.fstat(descriptor)
+            val path = Os.lstat(file.absolutePath)
+            require(sameVersion(before, after) && sameVersion(after, path)) {
+                "Journal changed while it was read"
+            }
+            return Authority(file, after, sha256(bytes), inspect(bytes))
+        } finally {
+            Os.close(descriptor)
+        }
+    }
+
+    /**
+     * Classifies, but does not admit, a journal with exactly one valid slot
+     * and one non-zero malformed slot. This is used only after the normal
+     * fail-closed parser has rejected the file and only to prepare an explicit
+     * annotation restore while DocumentActivity remains fenced.
+     */
+    fun readRepairCandidate(file: File): RepairCandidate? {
+        val descriptor = Os.open(
+            file.absolutePath,
+            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or
+                OsConstants.O_NOFOLLOW,
+            0,
+        )
+        try {
+            val before = Os.fstat(descriptor)
+            requireRegularSingleLink(before)
+            require(before.st_size == FILE_SIZE.toLong()) {
+                "Invalid journal size"
+            }
+            val bytes = readExactly(descriptor, FILE_SIZE)
+            val after = Os.fstat(descriptor)
+            val path = Os.lstat(file.absolutePath)
+            require(sameVersion(before, after) && sameVersion(after, path)) {
+                "Journal changed while recovery evidence was read"
+            }
+            val candidate = inspectRepairCandidate(bytes) ?: return null
+            return RepairCandidate(
+                file,
+                after,
+                sha256(bytes),
+                candidate.first,
+                candidate.second,
+            )
+        } finally {
+            Os.close(descriptor)
+        }
+    }
+
+    fun initialize(file: File): Authority {
+        val parent = file.parentFile
+            ?: throw IllegalArgumentException("Journal has no parent")
+        var createdIdentity: StructStat? = null
+        val descriptor = Os.open(
+            file.absolutePath,
+            OsConstants.O_RDWR or OsConstants.O_CREAT or OsConstants.O_EXCL or
+                OsConstants.O_CLOEXEC or OsConstants.O_NOFOLLOW,
+            0x180,
+        )
+        try {
+            Os.ftruncate(descriptor, FILE_SIZE.toLong())
+            Os.fsync(descriptor)
+            val opened = Os.fstat(descriptor)
+            requireRegularSingleLink(opened)
+            require(opened.st_size == FILE_SIZE.toLong()) {
+                "New journal has the wrong size"
+            }
+            val path = Os.lstat(file.absolutePath)
+            require(sameVersion(opened, path)) {
+                "New journal path does not name its created inode"
+            }
+            createdIdentity = opened
+        } finally {
+            Os.close(descriptor)
+        }
+        fsyncDirectory(parent)
+        return read(file).also { authority ->
+            check(createdIdentity != null &&
+                sameStableFileMetadata(createdIdentity!!, authority.identity)
+            ) {
+                "New journal was replaced before admission"
+            }
+            check(authority.snapshot.current == null) {
+                "New journal was not empty"
+            }
+        }
+    }
+
+    /**
+     * Publishes one record without replacing or resizing the journal inode.
+     * The header is invalidated and synced before payload/tail replacement, so
+     * any reader observing a partial update rejects the complete journal.
+     */
+    fun publish(
+        file: File,
+        state: State,
+        payload: ByteArray,
+        expectedGeneration: Long?,
+        expectedAuthoritySha256: String?,
+    ): Authority {
+        require(payload.isNotEmpty() && payload.size <= MAX_PAYLOAD_SIZE) {
+            "Invalid journal payload"
+        }
+        val descriptor = Os.open(
+            file.absolutePath,
+            OsConstants.O_RDWR or OsConstants.O_CLOEXEC or
+                OsConstants.O_NOFOLLOW,
+            0,
+        )
+        try {
+            val before = Os.fstat(descriptor)
+            requireRegularSingleLink(before)
+            require(before.st_size == FILE_SIZE.toLong()) {
+                "Journal inode changed size"
+            }
+            val currentBytes = readExactly(descriptor, FILE_SIZE)
+            val beforeRead = Os.fstat(descriptor)
+            val pathBefore = Os.lstat(file.absolutePath)
+            require(sameVersion(before, beforeRead) &&
+                sameVersion(beforeRead, pathBefore)
+            ) {
+                "Journal changed before publication"
+            }
+            val snapshot = inspect(currentBytes)
+            require(snapshot.current?.generation == expectedGeneration &&
+                snapshot.current?.authoritySha256 == expectedAuthoritySha256
+            ) {
+                "Journal publication lost expected authority"
+            }
+            val generation = snapshot.nextGeneration()
+            val slotIndex = snapshot.inactiveSlotIndex()
+            val slotOffset = slotIndex.toLong() * SLOT_SIZE
+            val encoded = encodeSlot(slotIndex, state, generation, payload)
+
+            writeExactly(descriptor, ByteArray(HEADER_SIZE), slotOffset)
+            Os.fsync(descriptor)
+            writeExactly(
+                descriptor,
+                encoded.copyOfRange(HEADER_SIZE, SLOT_SIZE),
+                slotOffset + HEADER_SIZE,
+            )
+            Os.fsync(descriptor)
+            writeExactly(
+                descriptor,
+                encoded.copyOfRange(0, HEADER_SIZE),
+                slotOffset,
+            )
+            Os.fsync(descriptor)
+
+            val afterBytes = readExactly(descriptor, FILE_SIZE)
+            val after = Os.fstat(descriptor)
+            val pathAfter = Os.lstat(file.absolutePath)
+            requireRegularSingleLink(after)
+            require(sameStableFileMetadata(before, after) &&
+                sameVersion(after, pathAfter) &&
+                after.st_size == FILE_SIZE.toLong()
+            ) {
+                "Journal inode or stable metadata changed during publication"
+            }
+            val published = inspect(afterBytes)
+            require(published.current?.slotIndex == slotIndex &&
+                published.current?.generation == generation &&
+                published.current?.state == state &&
+                published.current?.payload?.contentEquals(payload) == true
+            ) {
+                "Journal publication was not re-admitted"
+            }
+            return Authority(file, after, sha256(afterBytes), published)
+        } finally {
+            Os.close(descriptor)
+        }
+    }
+
+    /**
+     * Repairs only the malformed inactive slot witnessed by [expected]. The
+     * older valid record is not re-admitted: it merely supplies the next
+     * monotonic generation. The replacement is always an authenticated
+     * RECOVERY record, published with the same three-fsync protocol and on the
+     * same inode, so a second interruption remains fail closed and retryable.
+     */
+    fun repairWithRecovery(
+        file: File,
+        payload: ByteArray,
+        expected: RepairCandidate,
+    ): Authority {
+        require(payload.isNotEmpty() && payload.size <= MAX_PAYLOAD_SIZE) {
+            "Invalid journal recovery payload"
+        }
+        require(file.canonicalPath == expected.file.canonicalPath) {
+            "Journal recovery path changed"
+        }
+        check(expected.trusted.generation != Long.MAX_VALUE) {
+            "Journal generation exhausted"
+        }
+        val descriptor = Os.open(
+            file.absolutePath,
+            OsConstants.O_RDWR or OsConstants.O_CLOEXEC or
+                OsConstants.O_NOFOLLOW,
+            0,
+        )
+        try {
+            val before = Os.fstat(descriptor)
+            requireRegularSingleLink(before)
+            require(before.st_size == FILE_SIZE.toLong() &&
+                sameVersion(expected.identity, before) &&
+                sameVersion(before, Os.lstat(file.absolutePath))
+            ) {
+                "Journal changed before recovery repair"
+            }
+            val currentBytes = readExactly(descriptor, FILE_SIZE)
+            val beforeRead = Os.fstat(descriptor)
+            require(sameVersion(before, beforeRead) &&
+                sameVersion(beforeRead, Os.lstat(file.absolutePath)) &&
+                sha256(currentBytes) == expected.fileSha256
+            ) {
+                "Journal recovery evidence changed before repair"
+            }
+            val current = inspectRepairCandidate(currentBytes)
+                ?: throw IllegalStateException(
+                    "Journal is no longer one repairable interrupted publication",
+                )
+            require(sameRecord(current.first, expected.trusted) &&
+                current.second == expected.damagedSlotIndex
+            ) {
+                "Journal repair candidate changed"
+            }
+
+            val generation = expected.trusted.generation + 1L
+            val slotIndex = expected.damagedSlotIndex
+            val slotOffset = slotIndex.toLong() * SLOT_SIZE
+            val encoded = encodeSlot(slotIndex, State.RECOVERY, generation, payload)
+            writeExactly(descriptor, ByteArray(HEADER_SIZE), slotOffset)
+            Os.fsync(descriptor)
+            writeExactly(
+                descriptor,
+                encoded.copyOfRange(HEADER_SIZE, SLOT_SIZE),
+                slotOffset + HEADER_SIZE,
+            )
+            Os.fsync(descriptor)
+            writeExactly(
+                descriptor,
+                encoded.copyOfRange(0, HEADER_SIZE),
+                slotOffset,
+            )
+            Os.fsync(descriptor)
+
+            val afterBytes = readExactly(descriptor, FILE_SIZE)
+            val after = Os.fstat(descriptor)
+            val pathAfter = Os.lstat(file.absolutePath)
+            requireRegularSingleLink(after)
+            require(sameStableFileMetadata(before, after) &&
+                sameVersion(after, pathAfter) &&
+                after.st_size == FILE_SIZE.toLong()
+            ) {
+                "Journal inode or stable metadata changed during recovery repair"
+            }
+            val repaired = inspect(afterBytes)
+            require(repaired.current?.slotIndex == slotIndex &&
+                repaired.current?.generation == generation &&
+                repaired.current?.state == State.RECOVERY &&
+                repaired.current?.payload?.contentEquals(payload) == true
+            ) {
+                "Journal recovery repair was not re-admitted"
+            }
+            return Authority(file, after, sha256(afterBytes), repaired)
+        } finally {
+            Os.close(descriptor)
+        }
+    }
+
+    private fun encodeSlot(
+        slotIndex: Int,
+        state: State,
+        generation: Long,
+        payload: ByteArray,
+    ): ByteArray {
+        require(slotIndex in 0 until SLOT_COUNT && generation > 0L)
+        val payloadDigest = sha256Bytes(payload)
+        val recordDigest = recordDigest(
+            slotIndex,
+            state,
+            generation,
+            payload.size,
+            payloadDigest,
+            payload,
+        )
+        val slot = ByteArray(SLOT_SIZE)
+        payload.copyInto(slot, HEADER_SIZE)
+        ByteBuffer.wrap(slot).order(ByteOrder.BIG_ENDIAN).apply {
+            put(MAGIC)
+            putInt(FORMAT_VERSION)
+            putInt(HEADER_SIZE)
+            putInt(SLOT_SIZE)
+            putInt(state.code)
+            putLong(generation)
+            putInt(payload.size)
+            putInt(0)
+            put(payloadDigest)
+            put(recordDigest)
+        }
+        return slot
+    }
+
+    private fun parseSlot(journal: ByteArray, slotIndex: Int): Record? {
+        val offset = slotIndex * SLOT_SIZE
+        if (allZero(journal, offset, SLOT_SIZE)) return null
+        val slot = journal.copyOfRange(offset, offset + SLOT_SIZE)
+        val header = ByteBuffer.wrap(slot).order(ByteOrder.BIG_ENDIAN)
+        val magic = ByteArray(MAGIC.size).also { header.get(it) }
+        require(magic.contentEquals(MAGIC) &&
+            header.int == FORMAT_VERSION &&
+            header.int == HEADER_SIZE &&
+            header.int == SLOT_SIZE
+        ) { "Invalid journal slot header $slotIndex" }
+        val state = State.fromCode(header.int)
+        val generation = header.long
+        val payloadLength = header.int
+        val reserved = header.int
+        require(generation > 0L && payloadLength in 1..MAX_PAYLOAD_SIZE &&
+            reserved == 0 &&
+            allZero(slot, RESERVED_OFFSET, HEADER_SIZE - RESERVED_OFFSET)
+        ) { "Invalid journal slot bounds $slotIndex" }
+        val claimedPayloadDigest = slot.copyOfRange(
+            PAYLOAD_DIGEST_OFFSET,
+            RECORD_DIGEST_OFFSET,
+        )
+        val claimedRecordDigest = slot.copyOfRange(
+            RECORD_DIGEST_OFFSET,
+            RESERVED_OFFSET,
+        )
+        val payload = slot.copyOfRange(
+            HEADER_SIZE,
+            HEADER_SIZE + payloadLength,
+        )
+        require(allZero(
+            slot,
+            HEADER_SIZE + payloadLength,
+            SLOT_SIZE - HEADER_SIZE - payloadLength,
+        )) { "Journal slot has unauthenticated tail $slotIndex" }
+        val actualPayloadDigest = sha256Bytes(payload)
+        require(MessageDigest.isEqual(
+            claimedPayloadDigest,
+            actualPayloadDigest,
+        )) { "Journal payload digest mismatch $slotIndex" }
+        val actualRecordDigest = recordDigest(
+            slotIndex,
+            state,
+            generation,
+            payloadLength,
+            actualPayloadDigest,
+            payload,
+        )
+        require(MessageDigest.isEqual(
+            claimedRecordDigest,
+            actualRecordDigest,
+        )) { "Journal record digest mismatch $slotIndex" }
+        return Record(
+            slotIndex,
+            state,
+            generation,
+            payload,
+            hex(actualPayloadDigest),
+            hex(actualRecordDigest),
+        )
+    }
+
+    private fun inspectRepairCandidate(journal: ByteArray): Pair<Record, Int>? {
+        require(journal.size == FILE_SIZE) { "Invalid journal file size" }
+        val slots = (0 until SLOT_COUNT).map { slotIndex ->
+            if (allZero(journal, slotIndex * SLOT_SIZE, SLOT_SIZE)) {
+                SlotInspection(null, false)
+            } else {
+                try {
+                    SlotInspection(parseSlot(journal, slotIndex), false)
+                } catch (_: IllegalArgumentException) {
+                    SlotInspection(null, true)
+                }
+            }
+        }
+        val valid = slots.mapIndexedNotNull { index, slot ->
+            slot.record?.let { record -> index to record }
+        }
+        val malformed = slots.mapIndexedNotNull { index, slot ->
+            index.takeIf { slot.malformed }
+        }
+        if (valid.size != 1 || malformed.size != 1) return null
+        return valid.single().second to malformed.single()
+    }
+
+    private fun sameRecord(first: Record, second: Record): Boolean =
+        first.slotIndex == second.slotIndex &&
+            first.state == second.state &&
+            first.generation == second.generation &&
+            first.payloadSha256 == second.payloadSha256 &&
+            first.authoritySha256 == second.authoritySha256 &&
+            first.payload.contentEquals(second.payload)
+
+    private fun recordDigest(
+        slotIndex: Int,
+        state: State,
+        generation: Long,
+        payloadLength: Int,
+        payloadDigest: ByteArray,
+        payload: ByteArray,
+    ): ByteArray = ByteArrayOutputStream(
+        RECORD_DOMAIN.size + 64 + payloadLength,
+    ).use { bytes ->
+        DataOutputStream(bytes).use { output ->
+            output.write(RECORD_DOMAIN)
+            output.writeInt(FORMAT_VERSION)
+            output.writeInt(SLOT_SIZE)
+            output.writeInt(slotIndex)
+            output.writeInt(state.code)
+            output.writeLong(generation)
+            output.writeInt(payloadLength)
+            output.write(payloadDigest)
+            output.write(payload)
+        }
+        sha256Bytes(bytes.toByteArray())
+    }
+
+    private fun readExactly(descriptor: FileDescriptor, size: Int): ByteArray {
+        val bytes = ByteArray(size)
+        var offset = 0
+        while (offset < size) {
+            val count = Os.pread(
+                descriptor,
+                bytes,
+                offset,
+                size - offset,
+                offset.toLong(),
+            )
+            if (count < 0) break
+            check(count > 0) { "Journal read made no progress" }
+            offset += count
+        }
+        require(offset == size) { "Journal length changed during read" }
+        return bytes
+    }
+
+    private fun writeExactly(
+        descriptor: FileDescriptor,
+        bytes: ByteArray,
+        position: Long,
+    ) {
+        var offset = 0
+        while (offset < bytes.size) {
+            val count = Os.pwrite(
+                descriptor,
+                bytes,
+                offset,
+                bytes.size - offset,
+                position + offset,
+            )
+            check(count > 0) { "Journal write made no progress" }
+            offset += count
+        }
+    }
+
+    private fun fsyncDirectory(directory: File) {
+        val strictFlags = OsConstants.O_RDONLY or 0x10000 or
+            OsConstants.O_CLOEXEC or OsConstants.O_NOFOLLOW
+        val strictFailure = try {
+            val strict = Os.open(directory.absolutePath, strictFlags, 0)
+            try {
+                val opened = Os.fstat(strict)
+                val path = Os.lstat(directory.absolutePath)
+                require(OsConstants.S_ISDIR(opened.st_mode) &&
+                    sameVersion(opened, path)
+                ) {
+                    "Journal parent changed before directory fsync"
+                }
+                Os.fsync(strict)
+                val after = Os.fstat(strict)
+                val pathAfter = Os.lstat(directory.absolutePath)
+                require(sameVersion(opened, after) &&
+                    sameVersion(after, pathAfter)
+                ) {
+                    "Journal parent changed during directory fsync"
+                }
+                return
+            } finally {
+                Os.close(strict)
+            }
+        } catch (failure: ErrnoException) {
+            failure
+        }
+        if (strictFailure.errno != OsConstants.EINVAL) throw strictFailure
+
+        // Android 11's emulated-storage FUSE accepts O_NOFOLLOW but rejects
+        // O_DIRECTORY. Drop only that flag and prove the opened object is the
+        // same directory before and after syncing it.
+        val before = Os.lstat(directory.absolutePath)
+        require(OsConstants.S_ISDIR(before.st_mode)) {
+            "Journal parent is not a directory"
+        }
+        val descriptor = Os.open(
+            directory.absolutePath,
+            OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or
+                OsConstants.O_NOFOLLOW,
+            0,
+        )
+        try {
+            val opened = Os.fstat(descriptor)
+            val path = Os.lstat(directory.absolutePath)
+            require(OsConstants.S_ISDIR(opened.st_mode) &&
+                sameVersion(before, opened) && sameVersion(opened, path)
+            ) {
+                "Journal parent changed during FUSE-compatible open"
+            }
+            Os.fsync(descriptor)
+            val after = Os.fstat(descriptor)
+            val pathAfter = Os.lstat(directory.absolutePath)
+            require(sameVersion(opened, after) &&
+                sameVersion(after, pathAfter)
+            ) {
+                "Journal parent changed during FUSE-compatible fsync"
+            }
+        } finally {
+            Os.close(descriptor)
+        }
+    }
+
+    private fun requireRegularSingleLink(identity: StructStat) {
+        require(OsConstants.S_ISREG(identity.st_mode) && identity.st_nlink == 1L) {
+            "Journal is not one regular file"
+        }
+    }
+
+    private fun sameFile(first: StructStat, second: StructStat): Boolean =
+        first.st_dev == second.st_dev && first.st_ino == second.st_ino
+
+    private fun sameStableFileMetadata(
+        first: StructStat,
+        second: StructStat,
+    ): Boolean = sameFile(first, second) &&
+        first.st_mode == second.st_mode &&
+        first.st_nlink == second.st_nlink &&
+        first.st_uid == second.st_uid &&
+        first.st_gid == second.st_gid
+
+    private fun sameVersion(first: StructStat, second: StructStat): Boolean =
+        sameFile(first, second) &&
+            first.st_mode == second.st_mode &&
+            first.st_nlink == second.st_nlink &&
+            first.st_size == second.st_size &&
+            first.st_mtime == second.st_mtime &&
+            first.st_mtim.tv_nsec == second.st_mtim.tv_nsec &&
+            first.st_ctime == second.st_ctime &&
+            first.st_ctim.tv_nsec == second.st_ctim.tv_nsec
+
+    private fun allZero(bytes: ByteArray, offset: Int, length: Int): Boolean {
+        for (index in offset until offset + length) {
+            if (bytes[index].toInt() != 0) return false
+        }
+        return true
+    }
+
+    private fun sha256Bytes(bytes: ByteArray): ByteArray =
+        MessageDigest.getInstance("SHA-256").digest(bytes)
+
+    private fun sha256(bytes: ByteArray): String = hex(sha256Bytes(bytes))
+
+    private fun hex(bytes: ByteArray): String = buildString(bytes.size * 2) {
+        bytes.forEach { item ->
+            append(String.format(Locale.ROOT, "%02x", item.toInt() and 0xff))
+        }
+    }
+}

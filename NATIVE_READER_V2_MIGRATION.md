@@ -102,8 +102,9 @@ still-open activity's ordinary admission.
 
 ## Hardware gate
 
-v0.0.140 is a pre-hardware candidate. It must not replace the stable baseline
-until the exact-head automated review is clean and the full matrix in
+v0.0.140 has passed the focused Nomad recovery and authority-acknowledgement
+hardware gate on its exact supported firmware. It must not replace the stable
+baseline until the exact-head automated review is clean and the full matrix in
 `NATIVE_READER_V2_REVIEW_GATES.md` passes on the Nomad.
 
 The paired v0.4.23 plugin never renames, deletes, truncates, resizes, or

@@ -1,9 +1,11 @@
 # Supernote Native Reader v2 companion module
 
 This LSPosed module supplies the rooted native-reader enhancement controlled by
-Supernote RTL Reader. v0.0.140 is a pre-hardware, exact-firmware candidate. It
-opens the original PDF and keeps Supernote's own writer, links, text tools,
-highlights, and page-local `.mark` annotation data while adding:
+Supernote RTL Reader. v0.0.140 has passed the focused Nomad recovery and
+authority-acknowledgement hardware gate on its exact supported firmware, but it
+remains a candidate pending the full hardware matrix. It opens the original PDF
+and keeps Supernote's own writer, links, text tools, highlights, and page-local
+`.mark` annotation data while adding:
 
 - RTL page progression in portrait;
 - automatic two-page RTL spreads in landscape;

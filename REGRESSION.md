@@ -3011,7 +3011,7 @@ The production module and plug-in remain unchanged; the module remains disabled.
 The exact reviewed observer confirmed DrawPath's three cached output planes
 reference the physical `/dev/ebc` mapping. The reviewed standalone C helper then
 passed 18 fake-operation failure/cleanup cases as ordinary adb UID 2000, followed
-by root-only exact-device idle/exclusive-grab/release/post-idle checks with File
+by exact-device idle/exclusive-grab/release/post-idle checks run as root with File
 Manager foreground. No input was generated and Document was not opened.
 Document/DrawPath processes and stock PDF/mark hashes remained unchanged.
 Both temporary device helpers and their empty directory were removed.
@@ -3020,6 +3020,24 @@ Independent source-only r1/r2 reviews were clean. The observer's 34 executable
 mock cases and existing full check matrix passed. A held handwriting interlock,
 native output redirection and genuine native page/tool viewport gate remain
 unproved. See [exact hashes and limitations](native-viewport-probe/NATIVE_PEN_BOUNDARY.md).
+
+### Offscreen engine isolation preparation — 2026-09-07, HOST ONLY
+
+The new diagnostic contains no firmware loader or reader adapter. Portable
+sequencing tests pass 16 cases; its actual BPF filter passes 56,376 interpreted
+vectors and 50 mutations. Android AArch64/API30 compilation and Clang static
+analysis pass. A translated x86-64 Linux kernel test passes 101 unprivileged
+child runs / 1,414 checks with no descriptor leak, including bounded cleanup
+after a child reports and then stalls. Existing viewport/evidence
+and five repository baseline suites also pass (85,407 v2 assertions / 271
+mutations). None of this proves a genuine native page/pen viewport.
+
+Independent review of the new notes and the smaller source-only alternative
+was rejected before execution for lack of specific external-disclosure approval.
+No new diagnostic has been staged or run on the Nomad. The full original PDF/
+mark hashes were rechecked unchanged with File Manager foreground; Document
+PID 2027 remains alive. No package, module or firmware changed. See
+[prepared source, exact scope and review blocker](native-viewport-probe/ISOLATION_PROBE.md).
 
 Before reproducing a failure:
 

@@ -2,9 +2,60 @@
 
 User authorized autonomous testing/fixes while sleeping, approximately through
 2026-09-07 05:30 Asia/Jerusalem. No physical-action requests or audible pings.
-Heartbeat `prepare-next-native-viewport-tests` is active every 30 minutes until
-02:30 UTC. Preserve a checkpoint and restore temporary device changes before
-pausing at the deadline. Do not merge or claim physical-pen validation.
+The original heartbeat was every 30 minutes until 02:30 UTC. Current continuation
+has reached an explicit review-disclosure approval gate and is being paused;
+do not retry the rejected review uploads or admit new device code. All local
+checks completed and temporary device helpers from the prior segment are gone.
+Do not merge or claim physical-pen validation.
+
+## Latest continuation — approximately 01:25 local
+
+- New pinned static findings: actual DrawService startup (not the no-op Activity
+  method), nested update-worker startup, both Java/native Binder caches, lasso
+  Android-Bitmap preview, and painter-retained physical EBC aliases. Erase also
+  consumes framebuffer/background data. See `NATIVE_ENGINE_STARTUP.md`.
+- Prepared `ISOLATION_PROBE.md` and the generic C diagnostic. No firmware loader,
+  Binder proxy, Document launch, physical input or native writer admission.
+- Portable tests: 16 sequencing cases, 56,376 actual-filter vectors, 50 mutations.
+  Android AArch64/API30 compile and Clang static analysis PASS.
+- Existing WSL kali-linux was available; used ordinary UID 1000, not root.
+  The translated Linux filter passed 101 kernel child runs / 1,414 checks with
+  no descriptor leaks. A post-report stall test protects the parent exit deadline.
+  No Linux mount/chroot or Nomad kernel pass is claimed.
+- Full prior host viewport/evidence and five baseline suites reran PASS,
+  including 85,407 v2 assertions / 271 mutations. No commands remain running.
+- Latest Android build `build/isolation-15a4b0ff6c874a8c8d9c99b945f699f5/`;
+  `isolation_probe` SHA-256
+  `01aa3493218f3ab8be23e1d5c7c923b64b59635b46b5ddaf23845f649031a28a`.
+  Never staged on the tablet. Source/build files remain separate from production.
+- Final read-only ADB check: exact Nomad connected, File Manager foreground,
+  Document PID 2027, both stock fixture hashes below unchanged. No new device
+  modifications, native hooks, input generation, package changes or pen activity.
+
+### Explicit blocker; do not route around it
+
+The external Codex review request for five architecture/evidence notes was
+rejected before execution. The provider was then verified as OpenAI from local
+configuration/existing logs; a fresh narrower review of seven generic authored
+source/build files, with all internal notes/history excluded, was ALSO rejected
+before execution for lack of specific payload-disclosure approval. No r3/new
+source review ran. Existing r2 clean review does not cover this new diagnostic.
+
+Ask the user when they return whether the diagnostic source and authored
+architecture notes may be sent to OpenAI's Codex review service, excluding PDF,
+annotation data, firmware binaries and credentials. Do not silently retransmit,
+delegate around the rejection, install/run the unreviewed diagnostic, or claim
+an independent review pass. Local source-only snapshots are preserved in
+`inspection/native-reader/reviews/native-viewport-engine-boundary-20260907-r3`
+and `inspection/native-reader/reviews/isolated-process-source-only-20260907`.
+
+After approval: prepare one exact complete current-source review, fix accepted
+findings and rerun relevant host checks. Only a clean source review admits the
+bounded isolation mechanism device test, with exact Nomad/ownership/cleanup
+checks. Even a successful mechanism test will NOT admit a native engine or
+Document writer: native startup virtualization and canonical background/output
+coupling still require the next bounded proof. Do not restart the old spread
+overrides or repeat completed stock/display/grab gates for duplicate evidence.
 
 ## Working boundary
 

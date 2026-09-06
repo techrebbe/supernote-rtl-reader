@@ -217,3 +217,13 @@ the reader closed, without generating input or changing annotations. The helper
 was removed. This is not a held pen barrier or permission to write on the
 display-only host. See [overnight continuation](OVERNIGHT_CHECKPOINT.md) for the
 exact remaining work and preserved evidence.
+
+The next host-only preparation records the actual service startup, separate
+Binder caches, painter-held EBC aliases and canonical-background dependency in
+[NATIVE_ENGINE_STARTUP.md](NATIVE_ENGINE_STARTUP.md). A disposable-process
+[isolation diagnostic](ISOLATION_PROBE.md) compiles for Android and passes its
+portable and unprivileged Linux host checks. It has NOT run on the Nomad and
+contains no firmware loader. Independent review of the new source/notes is
+blocked pending explicit external-review disclosure approval. Existing r2
+review does not cover these new files; do not use the host results as permission
+to start a native writer. No final physical-pen batch is ready yet.

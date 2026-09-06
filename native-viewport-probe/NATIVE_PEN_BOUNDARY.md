@@ -137,7 +137,7 @@ broken exclusivity, duplicate descriptors and cleanup after acquisition.
 Build with `build-pen-device-probe.ps1 -Ndk <installed NDK>`. Review the full
 updated source subset before running either AArch64 executable on the tablet.
 Run `pen-grab-core-test` as ordinary adb UID 2000: it uses only fake operations.
-The real probe needs root for the exact device node; it must never be used as
+The real probe was run as root on the exact device node; it must never be used as
 an excuse to start native writing before the coherent output/input adapter.
 
 Kernel reference: [Linux evdev grab/release implementation](https://github.com/torvalds/linux/blob/v5.4/drivers/input/evdev.c).

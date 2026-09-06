@@ -3001,6 +3001,26 @@ APK was removed, orientation restored and fixture PDF/mark hashes unchanged.
 Full source-only r4 confirmation review was clean. See
 [exact evidence and remaining gates](native-viewport-probe/DISPLAY_HARDWARE.md).
 
+### Native pen boundary diagnostics — 2026-09-06/07
+
+PASS for read-only buffer observation and instantaneous Wacom exclusivity/release
+on Nomad SN078C10015092, Android 11 build 20260616, Document 1.02.446. These are
+standalone diagnostics, NOT a native viewport/tool/annotation hardware pass.
+The production module and plug-in remain unchanged; the module remains disabled.
+
+The exact reviewed observer confirmed DrawPath's three cached output planes
+reference the physical `/dev/ebc` mapping. The reviewed standalone C helper then
+passed 18 fake-operation failure/cleanup cases as ordinary adb UID 2000, followed
+by root-only exact-device idle/exclusive-grab/release/post-idle checks with File
+Manager foreground. No input was generated and Document was not opened.
+Document/DrawPath processes and stock PDF/mark hashes remained unchanged.
+Both temporary device helpers and their empty directory were removed.
+
+Independent source-only r1/r2 reviews were clean. The observer's 34 executable
+mock cases and existing full check matrix passed. A held handwriting interlock,
+native output redirection and genuine native page/tool viewport gate remain
+unproved. See [exact hashes and limitations](native-viewport-probe/NATIVE_PEN_BOUNDARY.md).
+
 Before reproducing a failure:
 
 ```powershell

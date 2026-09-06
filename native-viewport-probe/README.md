@@ -208,3 +208,12 @@ Duplicate launches are rejected by a single calibration claim; only the admitted
 calibration may signal termination. That signal clears attachment status and
 stops the display. Full/left/right presentation, rotation and cleanup passed.
 No native Document page or handwriting was tested. The temporary APK is removed.
+
+The next lower-level investigation is now checkpointed in
+[NATIVE_PEN_BOUNDARY.md](NATIVE_PEN_BOUNDARY.md). Read-only live metadata confirmed
+that DrawPath's pen planes bypass the Android surface. A separately reviewed,
+short-lived input-device helper proved exclusive acquisition and release with
+the reader closed, without generating input or changing annotations. The helper
+was removed. This is not a held pen barrier or permission to write on the
+display-only host. See [overnight continuation](OVERNIGHT_CHECKPOINT.md) for the
+exact remaining work and preserved evidence.

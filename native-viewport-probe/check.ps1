@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory=$true)][string]$Jdk,
     [Parameter(Mandatory=$true)][string]$AndroidJar,
-    [Parameter(Mandatory=$true)][string]$Python
+    [Parameter(Mandatory=$true)][string]$Python,
+    [string]$Node='node'
 )
 $ErrorActionPreference='Stop'
 $probeRoot=$PSScriptRoot
@@ -30,4 +31,6 @@ $hostSources=@(Get-ChildItem -LiteralPath (Join-Path $probeRoot 'display-host/sr
 if ($LASTEXITCODE -ne 0) {throw 'Display-only Android host compilation failed'}
 & $Python -m unittest discover -s $probeRoot -p 'test_*.py' -v
 if ($LASTEXITCODE -ne 0) {throw 'Evidence validation tests failed'}
+& $Node (Join-Path $probeRoot 'test_pen_boundary_snapshot.js')
+if ($LASTEXITCODE -ne 0) {throw 'Pen-boundary observation tests failed'}
 Write-Output 'HOST CHECKS PASS. Not a hardware/collector/viewport readiness claim.'

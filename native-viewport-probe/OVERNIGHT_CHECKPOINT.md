@@ -2,6 +2,23 @@
 
 ## Continued host preparation — 2026-09-07 morning
 
+### Review approval boundary
+
+Tested source is committed locally as
+`84800544e711e9a5a7973f5dc5db00453da67986`. A complete 52-file source-only snapshot
+was prepared at `../../reviews/native-viewport-loader-8480054-r1`, with a hash
+manifest and without firmware, raw maps/pointers, PDFs, ink data or credentials.
+The OpenAI Codex CLI review command was rejected BEFORE execution: the approval
+system requires explicit disclosure approval for this new snapshot/destination.
+No reviewer is running and no clean-review claim applies to this new subset.
+Do not retry or route the same payload through another tool/agent without that
+approval. Prior approval/reviews remain historical; they do not clear this new
+blocking decision. Ask for the 52-file authored source/design-note upload only.
+Local checks/builds are complete; no device command, transfer or helper remains.
+The existing overnight automation stays PAUSED. After approval, refresh the
+source-only snapshot to include this documentation update and perform the full
+integrated subset review; do not repeat completed device captures or stock tests.
+
 - Read-only library/relocation capture completed. Exact process/mapping checks
   passed; 202 candidate ELFs remain local-only in `../../loader-inventory-20260907c`.
   System Binder, runtime linker alias and app-process interposition findings are

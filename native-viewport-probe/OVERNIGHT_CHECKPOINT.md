@@ -1,5 +1,31 @@
 # Overnight checkpoint — 2026-09-06/07
 
+## Continued host preparation — 2026-09-07 morning
+
+- Read-only library/relocation capture completed. Exact process/mapping checks
+  passed; 202 candidate ELFs remain local-only in `../../loader-inventory-20260907c`.
+  System Binder, runtime linker alias and app-process interposition findings are
+  recorded in `LOADER_ADMISSION.md`. No native methods were invoked.
+- 15 dedicated inventory tests and 17 binding/parser tests PASS. LLVM independently
+  matches 48,764 relocation records from the five captured core libraries.
+- New constructor-policy candidate: 169,654 interpreter vectors / 124 decision
+  mutations PASS; 51 unprivileged Linux kernel/own-constructor cases PASS.
+  Android interpreter build/static analysis PASS, binary SHA-256
+  `f38819c83a338311cec1beccadc8d93318509562681470fbabd56ac659f9958f`.
+  This is a data interpreter, not an installed policy or native loader.
+- Generic Python discovery: 47 tests, 3 explicitly skipped optional parser cases;
+  those same three passed in the separate parser-enabled 15-case run above.
+- Native firmware loading, immutable library-root publication, Android SIGSYS
+  reporting and the real offscreen adapter remain UNIMPLEMENTED / NOT admitted.
+  Full/left/right genuine pen gates remain pending; do not repeat prior stock
+  or display-only hardware tests to claim progress on that missing boundary.
+- User asked whether the Nomad is needed and was told it can safely disconnect:
+  all device reads finished, no device helper or transfer is running. Do not
+  reconnect/use it implicitly during host work; revalidate before the next gate.
+- Next: independent review of the complete updated source subset, then a bounded
+  immutable-root/constructor-loader implementation with own-fixture adversarial
+  evidence before any new device executable. No PR, push, install or merge here.
+
 User authorized autonomous testing/fixes while sleeping, approximately through
 2026-09-07 05:30 Asia/Jerusalem. No physical-action requests or audible pings.
 The overnight heartbeat was paused at approximately 05:25 local while closing

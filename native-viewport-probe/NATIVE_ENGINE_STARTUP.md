@@ -211,3 +211,12 @@ engine. First review the bounded isolation alternatives and prove the selected
 one independently of Document and user annotations. The full-screen stock
 reader remains unchanged. No Gate B claim, new APK or enabled writer follows
 from these static findings.
+
+### Subsequent read-only runtime evidence
+
+The resumed 2026-09-07 capture in [LOADER_ADMISSION.md](LOADER_ADMISSION.md)
+confirms system Binder rather than the bundled copy, and records actual core
+relocation targets, app-process interposition and the linker alias. Candidate
+closure is not exact constructor admission. That note also records the separate
+host-only constructor-policy tests; no firmware was loaded on either host or
+Nomad and no native page/tool gate is implied.

@@ -128,7 +128,7 @@ def relocation_sections(elf):
     dynamics=[s for s in elf.iter_segments() if s["p_type"]=="PT_DYNAMIC"]
     if len(dynamics)!=1: raise dep.InventoryError("ambiguous dynamic relocation authority")
     fields={"DT_RELA","DT_RELASZ","DT_RELAENT","DT_JMPREL","DT_PLTRELSZ","DT_PLTREL",
-            "DT_ANDROID_RELA","DT_ANDROID_RELASZ","DT_SYMTAB","DT_SYMENT",
+            "DT_ANDROID_RELA","DT_ANDROID_RELASZ","DT_SYMTAB","DT_SYMENT","DT_STRTAB","DT_STRSZ",
             "DT_REL","DT_RELSZ","DT_RELENT","DT_ANDROID_REL","DT_ANDROID_RELSZ",
             "DT_RELR","DT_RELRSZ","DT_RELRENT","DT_ANDROID_RELR","DT_ANDROID_RELRSZ","DT_ANDROID_RELRENT"}
     values={}
@@ -155,7 +155,7 @@ def relocation_sections(elf):
         if kind in ("SHT_RELR",0x6fffff00) and (values[size]%8 or values.get(address.replace("RELR","RELRENT"))!=8):
             raise dep.InventoryError("invalid RELR entry metadata")
         specs.append((values[address],values[size],kind))
-    if not specs or values.get("DT_SYMENT")!=24 or "DT_SYMTAB" not in values:
+    if not specs or values.get("DT_SYMENT")!=24 or "DT_SYMTAB" not in values or values.get("DT_STRTAB",0)<=0 or values.get("DT_STRSZ",0)<=0:
         raise dep.InventoryError("missing relocation/symbol authority")
     sections=list(elf.iter_sections())
     tables=[]
@@ -175,6 +175,13 @@ def relocation_sections(elf):
             symbols=elf.get_section(s["sh_link"])
             if symbols["sh_type"]!="SHT_DYNSYM" or symbols["sh_addr"]!=values["DT_SYMTAB"] or symbols["sh_entsize"]!=24:
                 raise dep.InventoryError("dynamic relocation symbol table mismatch")
+            if symbols["sh_size"]<=0 or symbols["sh_size"]%24 or not symbols["sh_flags"]&2:
+                raise dep.InventoryError("invalid dynamic symbol extent")
+            validate_section_storage(symbols,loads)
+            strings=elf.get_section(symbols["sh_link"])
+            if strings["sh_type"]!="SHT_STRTAB" or not strings["sh_flags"]&2 or strings["sh_addr"]!=values["DT_STRTAB"] or strings["sh_size"]!=values["DT_STRSZ"]:
+                raise dep.InventoryError("dynamic symbol string authority mismatch")
+            validate_section_storage(strings,loads)
         tables.append((i,s))
     indices={i for i,_ in tables}
     allocated={i for i,s in enumerate(sections) if s["sh_flags"]&2 and
@@ -185,6 +192,15 @@ def relocation_sections(elf):
     if any(end>next_start for (_,end),(next_start,_) in zip(ranges,ranges[1:])):
         raise dep.InventoryError("overlapping dynamic relocation tables")
     return tables
+
+
+def validate_section_storage(section,loads):
+    address,size=section["sh_addr"],section["sh_size"]
+    if not 0<size<=dep.MAX_FILE_BYTES or address<0 or address+size>=(1<<64):
+        raise dep.InventoryError("invalid dynamic section byte extent")
+    owners=[p for p in loads if p["p_vaddr"]<=address and address+size<=p["p_vaddr"]+p["p_filesz"] and
+            section["sh_offset"]==p["p_offset"]+address-p["p_vaddr"]]
+    if len(owners)!=1: raise dep.InventoryError("dynamic section file correspondence mismatch")
 
 
 def slot_file_correspondence(offset,base,loads,mappings):
@@ -237,6 +253,7 @@ def import_slots(data, mappings):
     slots = []
     for _,section in relocation_sections(elf):
         symbols = elf.get_section(section["sh_link"])
+        strings=elf.get_section(symbols["sh_link"]).data() if section["sh_type"] not in ("SHT_RELR",0x6fffff00) else None
         for offset, info, _ in relocation_rows(section):
             # AArch64 GLOB_DAT / JUMP_SLOT. Never read RELATIVE data/ink planes.
             if info & 0xffffffff not in (1025, 1026):
@@ -244,8 +261,14 @@ def import_slots(data, mappings):
             if info >> 32 >= symbols.num_symbols():
                 raise dep.InventoryError("relocation symbol index out of range")
             symbol = symbols.get_symbol(info >> 32)
+            name_offset=int(symbol["st_name"])
+            if strings is None or not 0<=name_offset<len(strings):
+                raise dep.InventoryError("symbol name outside dynamic string table")
+            name_end=strings.find(b"\0",name_offset)
+            if name_end<0: raise dep.InventoryError("unterminated dynamic symbol name")
+            name=strings[name_offset:name_end].decode("utf-8",errors="strict")
             slot_file_correspondence(offset,base,loads,mappings)
-            slots.append({"symbol": symbol.name, "symbolType": symbol["st_info"]["type"],
+            slots.append({"symbol": name, "symbolType": symbol["st_info"]["type"],
                           "binding": symbol["st_info"]["bind"],
                           "undefined": symbol["st_shndx"] == "SHN_UNDEF",
                           "rva": offset, "address": base+offset})

@@ -195,3 +195,14 @@ embedded authored DSO SHA-256
 All 54 Python cases pass with the ELF parser enabled (zero skips), alongside
 280 viewport, 45,459 display assertions and 34 closed observer cases. The generic
 check script's five optional-parser skips are covered by that explicit run.
+
+The integrated Ultra r2 review of `56de162` reviewed all 56 files and found one
+additional P2: section-selected symbol/string bytes were not tied completely
+to DT_SYMTAB/DT_STRTAB. This is fixed by checking their PT_LOAD file offsets,
+dynamic string address/size, symbol extents and each name's in-table terminator.
+Tests displace both `.dynsym` and `.dynstr`, change string geometry, exceed the
+name offset and remove the terminator. All 56 parser-enabled Python tests pass;
+all 49,594 offline LLVM records still agree (`llvm-comparison-v3.json`). The C
+loader, binary hash and previously run kernel/policy tests are unchanged. The
+review established no further loader/cleanup/geometry finding, but the combined
+subset still requires the final updated-head confirmation before a device run.

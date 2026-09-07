@@ -84,6 +84,26 @@ class BindingTests(unittest.TestCase):
         for data in (synthetic_import_elf(omit_packed_tags=True),synthetic_import_elf(wrong_section_offset=True)):
             with self.assertRaises(d.InventoryError): b.relocation_sections(ELFFile(io.BytesIO(data)))
 
+    @unittest.skipUnless(ELFFile,"required explicit ELF parser gate")
+    def test_dynamic_symbols_and_strings_cannot_use_displaced_storage(self):
+        for section in (1,2):
+            data=bytearray(synthetic_import_elf())
+            data[0x680:0x685]=b"\0bar\0"
+            struct.pack_into("<Q",data,0x800+64*section+24,0x680)
+            with self.assertRaises(d.InventoryError):
+                b.import_slots(bytes(data),[{**region(0x10000,0x11000),"offset":0}])
+
+    @unittest.skipUnless(ELFFile,"required explicit ELF parser gate")
+    def test_dynamic_string_bounds_and_termination(self):
+        for kind in ("address","size","name_offset","terminator"):
+            data=bytearray(synthetic_import_elf())
+            if kind=="address": struct.pack_into("<Q",data,0x800+128+16,0x680)
+            elif kind=="size": struct.pack_into("<Q",data,0x800+128+32,10)
+            elif kind=="name_offset": struct.pack_into("<I",data,0x418,5)
+            else: data[0x304]=ord("x")
+            with self.subTest(kind=kind),self.assertRaises(d.InventoryError):
+                b.import_slots(bytes(data),[{**region(0x10000,0x11000),"offset":0}])
+
     def test_packed_grouped_offset_and_info(self):
         self.assertEqual(list(b.packed_rela(packed(2,4096,2,3,8,1026))),
                          [(4104,1026,0),(4112,1026,0)])

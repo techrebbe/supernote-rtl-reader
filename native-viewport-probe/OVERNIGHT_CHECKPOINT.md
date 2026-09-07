@@ -2,6 +2,16 @@
 
 ## Latest continuation: approval received, review fixes implemented
 
+Update after integrated Ultra r2: `56de162` passed the full source review except
+one dynamic symbol/string-table correspondence finding. The fix and targeted
+rejections now pass 56 Python cases with zero skips, and LLVM still matches
+49,594 records. C loader/build source is unchanged from that reviewed head.
+All five repository baseline gates passed, including 85,407 core assertions,
+271 mutations and fail-closed packaging. Shared isolation tests passed again:
+16 core cases, 56,376/50 filter vectors/mutations and 102 Linux kernel runs with
+1,428 checks, zero descriptor leaks and bounded watchdog/reaper recovery.
+The final exact-head confirmation is next; no device work or firmware loading.
+
 The user explicitly approved project-related work after the source-disclosure
 question. The source/notes-only review now ran; do not treat the historical
 rejection below as an active blocker. `native-viewport-loader-9e2441f-approved-r1`

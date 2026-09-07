@@ -206,3 +206,15 @@ all 49,594 offline LLVM records still agree (`llvm-comparison-v3.json`). The C
 loader, binary hash and previously run kernel/policy tests are unchanged. The
 review established no further loader/cleanup/geometry finding, but the combined
 subset still requires the final updated-head confirmation before a device run.
+
+The retained-context r3 review then identified the upstream PT_DYNAMIC offset
+gap. Both tools now share a bounded raw dynamic-entry reader: validate program
+segment extents/alignment, require exactly one readable PT_LOAD backing and exact
+PT_DYNAMIC file-offset correspondence, and require DT_NULL inside its declared
+extent. Dependency names use DT_STRTAB/DT_STRSZ directly, never a section-link
+fallback. Symbol records are parsed without automatic string resolution; mapped
+tables cannot use compressed-section reinterpretation. Added displaced-dynamic,
+missing-terminator, partial/truncated/unreadable/overlapping-segment, alignment
+and compressed-table regressions. All 59 parser-enabled Python tests pass. The
+firmware fixture, C wrapper, policy and device state remain unchanged; another
+confirmation is required for this updated host-evidence reader.

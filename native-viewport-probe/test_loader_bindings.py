@@ -104,6 +104,38 @@ class BindingTests(unittest.TestCase):
             with self.subTest(kind=kind),self.assertRaises(d.InventoryError):
                 b.import_slots(bytes(data),[{**region(0x10000,0x11000),"offset":0}])
 
+    @unittest.skipUnless(ELFFile,"required explicit ELF parser gate")
+    def test_displaced_dynamic_segment_rejected_by_inventory_and_binding(self):
+        data=bytearray(synthetic_import_elf())
+        data[0xa00:0xab0]=data[0x100:0x1b0]
+        struct.pack_into("<Q",data,128,0xa00)
+        data[0x680:0x685]=b"\0bar\0"
+        struct.pack_into("<Q",data,0x108,0x680)
+        for inspect in (d.elf_metadata,lambda raw:b.import_slots(raw,[{**region(0x10000,0x11000),"offset":0}])):
+            with self.assertRaises(d.InventoryError): inspect(bytes(data))
+
+    @unittest.skipUnless(ELFFile,"required explicit ELF parser gate")
+    def test_dynamic_extent_and_loader_backing_fail_closed(self):
+        for kind in ("no_terminator","partial_record","truncated_segment","overlapping_load","unreadable_load","bad_load_alignment"):
+            data=bytearray(synthetic_import_elf())
+            if kind=="no_terminator": struct.pack_into("<qQ",data,0x1a0,1,1)
+            elif kind=="partial_record": struct.pack_into("<Q",data,120+32,175)
+            elif kind=="truncated_segment": struct.pack_into("<Q",data,64+32,100)
+            elif kind=="overlapping_load":
+                struct.pack_into("<H",data,56,3)
+                data[176:232]=data[64:120]
+            elif kind=="unreadable_load": struct.pack_into("<I",data,68,2)
+            else: struct.pack_into("<Q",data,64+48,3)
+            with self.subTest(kind=kind),self.assertRaises(d.InventoryError): d.elf_metadata(bytes(data))
+
+    @unittest.skipUnless(ELFFile,"required explicit ELF parser gate")
+    def test_allocated_compression_is_not_runtime_table_storage(self):
+        for section in (1,2,3,4):
+            data=bytearray(synthetic_import_elf())
+            struct.pack_into("<Q",data,0x800+section*64+8,0x802)
+            with self.subTest(section=section),self.assertRaises((d.InventoryError,ValueError)):
+                b.import_slots(bytes(data),[{**region(0x10000,0x11000),"offset":0}])
+
     def test_packed_grouped_offset_and_info(self):
         self.assertEqual(list(b.packed_rela(packed(2,4096,2,3,8,1026))),
                          [(4104,1026,0),(4112,1026,0)])

@@ -2,6 +2,14 @@
 
 ## Latest continuation: approval received, review fixes implemented
 
+Latest after r3: one upstream PT_DYNAMIC-to-PT_LOAD correspondence gap was
+accepted and fixed as a shared bounded raw tag/string reader in both tools.
+This removes section-string fallback and unbounded terminator scanning as well.
+Program extents/alignment and dynamic offset/termination, symbol/string bounds
+and compressed-table rejection are covered by 59 passing Python cases. The C
+fixture loader remains byte-for-byte unchanged; no new device commands. Final
+retained-context confirmation must complete before the next device experiment.
+
 Update after integrated Ultra r2: `56de162` passed the full source review except
 one dynamic symbol/string-table correspondence finding. The fix and targeted
 rejections now pass 56 Python cases with zero skips, and LLVM still matches

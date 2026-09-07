@@ -107,6 +107,10 @@ def relr_rows(data):
 
 
 def relocation_rows(section):
+    if section["sh_type"] not in ("SHT_RELA",0x60000002,"SHT_RELR",0x6fffff00):
+        raise dep.InventoryError("unsupported import relocation format")
+    if section["sh_flags"]&0x800:
+        raise dep.InventoryError("compressed relocation section is not runtime loader storage")
     if section["sh_type"] == "SHT_RELA":
         if section.num_relocations() > MAX_RELOCATIONS:
             raise dep.InventoryError("relocation count budget exceeded")
@@ -125,18 +129,17 @@ def relocation_sections(elf):
     This bounded prototype explicitly rejects sectionless and REL layouts rather
     than reporting a partial import plan. RELR is covered but has no symbols.
     """
-    dynamics=[s for s in elf.iter_segments() if s["p_type"]=="PT_DYNAMIC"]
-    if len(dynamics)!=1: raise dep.InventoryError("ambiguous dynamic relocation authority")
+    entries,loads=dep.dynamic_entries(elf)
     fields={"DT_RELA","DT_RELASZ","DT_RELAENT","DT_JMPREL","DT_PLTRELSZ","DT_PLTREL",
             "DT_ANDROID_RELA","DT_ANDROID_RELASZ","DT_SYMTAB","DT_SYMENT","DT_STRTAB","DT_STRSZ",
             "DT_REL","DT_RELSZ","DT_RELENT","DT_ANDROID_REL","DT_ANDROID_RELSZ",
             "DT_RELR","DT_RELRSZ","DT_RELRENT","DT_ANDROID_RELR","DT_ANDROID_RELRSZ","DT_ANDROID_RELRENT"}
     values={}
-    for tag in dynamics[0].iter_tags():
-        key=tag.entry.d_tag
+    for tag in entries:
+        key=tag.d_tag
         if key in fields:
             if key in values: raise dep.InventoryError("duplicate dynamic relocation metadata")
-            values[key]=int(tag.entry.d_val)
+            values[key]=int(tag.d_val)
     if any(values.get(k,0) for k in ("DT_REL","DT_RELSZ","DT_RELENT","DT_ANDROID_REL","DT_ANDROID_RELSZ")):
         raise dep.InventoryError("REL import layouts are not supported by this bounded probe")
     specs=[]
@@ -159,7 +162,6 @@ def relocation_sections(elf):
         raise dep.InventoryError("missing relocation/symbol authority")
     sections=list(elf.iter_sections())
     tables=[]
-    loads=[p for p in elf.iter_segments() if p["p_type"]=="PT_LOAD"]
     for address,size,kind in specs:
         found=[(i,s) for i,s in enumerate(sections) if s["sh_type"]==kind and
                s["sh_addr"]==address and s["sh_size"]==size and s["sh_flags"]&2]
@@ -196,7 +198,7 @@ def relocation_sections(elf):
 
 def validate_section_storage(section,loads):
     address,size=section["sh_addr"],section["sh_size"]
-    if not 0<size<=dep.MAX_FILE_BYTES or address<0 or address+size>=(1<<64):
+    if section["sh_flags"]&0x800 or not 0<size<=dep.MAX_FILE_BYTES or address<0 or address+size>=(1<<64):
         raise dep.InventoryError("invalid dynamic section byte extent")
     owners=[p for p in loads if p["p_vaddr"]<=address and address+size<=p["p_vaddr"]+p["p_filesz"] and
             section["sh_offset"]==p["p_offset"]+address-p["p_vaddr"]]
@@ -254,13 +256,17 @@ def import_slots(data, mappings):
     for _,section in relocation_sections(elf):
         symbols = elf.get_section(section["sh_link"])
         strings=elf.get_section(symbols["sh_link"]).data() if section["sh_type"] not in ("SHT_RELR",0x6fffff00) else None
+        symbol_data=symbols.data() if strings is not None else None
         for offset, info, _ in relocation_rows(section):
             # AArch64 GLOB_DAT / JUMP_SLOT. Never read RELATIVE data/ink planes.
             if info & 0xffffffff not in (1025, 1026):
                 continue
             if info >> 32 >= symbols.num_symbols():
                 raise dep.InventoryError("relocation symbol index out of range")
-            symbol = symbols.get_symbol(info >> 32)
+            # Parse only the validated record, without get_symbol() resolving a
+            # string through its own fallback before our bound check.
+            start=(info>>32)*24
+            symbol=elf.structs.Elf_Sym.parse(symbol_data[start:start+24])
             name_offset=int(symbol["st_name"])
             if strings is None or not 0<=name_offset<len(strings):
                 raise dep.InventoryError("symbol name outside dynamic string table")

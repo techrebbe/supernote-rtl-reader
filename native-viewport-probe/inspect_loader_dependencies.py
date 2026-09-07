@@ -158,6 +158,72 @@ def mapped_libraries(text: str) -> dict[str, list[dict]]:
     return result
 
 
+def dynamic_entries(elf):
+    """Validate the runtime-address authority before parsing any dynamic tag.
+
+    Do not use DynamicSegment.iter_tags: that resolves strings through optional
+    section links and can scan past PT_DYNAMIC searching for a terminator.
+    """
+    stream=elf.stream
+    saved=stream.tell()
+    length=stream.seek(0,2)
+    stream.seek(saved)
+    if not 0<length<=MAX_FILE_BYTES or elf.elfclass!=64 or not elf.little_endian or elf["e_machine"]!="EM_AARCH64":
+        raise InventoryError("unsupported dynamic image")
+    segments=list(elf.iter_segments())
+    if not 0<len(segments)<=1024: raise InventoryError("program segment budget exceeded")
+    loads=[s for s in segments if s["p_type"]=="PT_LOAD"]
+    for load in loads:
+        offset,address,size,memory,align=(load[k] for k in ("p_offset","p_vaddr","p_filesz","p_memsz","p_align"))
+        if min(offset,address,size,memory,align)<0 or size>memory or offset+size>length or address+memory>=(1<<64) or (
+                align>1 and (align&(align-1) or address%align!=offset%align)):
+            raise InventoryError("invalid file-backed program segment")
+    dynamics=[s for s in segments if s["p_type"]=="PT_DYNAMIC"]
+    if len(dynamics)!=1: raise InventoryError("expected one dynamic segment")
+    dynamic=dynamics[0]
+    address,offset,size=dynamic["p_vaddr"],dynamic["p_offset"],dynamic["p_filesz"]
+    if size<=0 or size>1024*1024 or size%16 or offset%8 or address%8 or dynamic["p_memsz"]!=size:
+        raise InventoryError("invalid dynamic extent")
+    if runtime_file_offset(address,size,loads)!=offset:
+        raise InventoryError("dynamic segment file correspondence mismatch")
+    stream.seek(offset)
+    data=stream.read(size)
+    if len(data)!=size: raise InventoryError("truncated dynamic segment")
+    entries=[]
+    for i in range(0,size,16):
+        entry=elf.structs.Elf_Dyn.parse(data[i:i+16])
+        entries.append(entry)
+        if entry.d_tag=="DT_NULL": return entries,loads
+    raise InventoryError("dynamic terminator outside declared extent")
+
+
+def runtime_file_offset(address,size,loads):
+    if min(address,size)<0 or size==0 or address+size>=(1<<64):
+        raise InventoryError("invalid runtime table extent")
+    owners=[p for p in loads if p["p_vaddr"]<=address and address+size<=p["p_vaddr"]+p["p_filesz"] and p["p_flags"]&4]
+    if len(owners)!=1: raise InventoryError("runtime table lacks unique readable file backing")
+    return owners[0]["p_offset"]+address-owners[0]["p_vaddr"]
+
+
+def dynamic_strings(elf,entries,loads):
+    tables=[int(e.d_val) for e in entries if e.d_tag=="DT_STRTAB"]
+    sizes=[int(e.d_val) for e in entries if e.d_tag=="DT_STRSZ"]
+    if len(tables)!=1 or len(sizes)!=1 or not 0<sizes[0]<=MAX_FILE_BYTES:
+        raise InventoryError("ambiguous dynamic string table")
+    offset=runtime_file_offset(tables[0],sizes[0],loads)
+    elf.stream.seek(offset)
+    data=elf.stream.read(sizes[0])
+    if len(data)!=sizes[0]: raise InventoryError("truncated dynamic strings")
+    return data
+
+
+def bounded_string(data,offset):
+    if not 0<=offset<len(data): raise InventoryError("dynamic name offset outside string table")
+    end=data.find(b"\0",offset)
+    if end<0: raise InventoryError("unterminated dynamic name")
+    return data[offset:end].decode("utf-8",errors="strict")
+
+
 def elf_metadata(data: bytes) -> dict:
     from elftools.elf.elffile import ELFFile
     if not data or len(data) > MAX_FILE_BYTES:
@@ -165,22 +231,22 @@ def elf_metadata(data: bytes) -> dict:
     elf = ELFFile(io.BytesIO(data))
     if elf.elfclass != 64 or not elf.little_endian or elf["e_machine"] != "EM_AARCH64" or elf["e_type"] != "ET_DYN":
         raise InventoryError("expected AArch64 little-endian shared library")
-    dynamics = [s for s in elf.iter_segments() if s["p_type"] == "PT_DYNAMIC"]
-    if len(dynamics) != 1:
-        raise InventoryError("expected one dynamic segment")
+    entries,loads=dynamic_entries(elf)
+    strings=dynamic_strings(elf,entries,loads)
     needed, sonames, sizes, init_functions = [], [], [], []
-    for tag in dynamics[0].iter_tags():
-        kind = tag.entry.d_tag
+    for tag in entries:
+        kind = tag.d_tag
         if kind == "DT_NEEDED":
-            if not NAME.fullmatch(tag.needed):
+            name=bounded_string(strings,int(tag.d_val))
+            if not NAME.fullmatch(name):
                 raise InventoryError("unsupported dependency name")
-            needed.append(tag.needed)
+            needed.append(name)
         elif kind == "DT_SONAME":
-            sonames.append(tag.soname)
+            sonames.append(bounded_string(strings,int(tag.d_val)))
         elif kind == "DT_INIT_ARRAYSZ":
-            sizes.append(int(tag.entry.d_val))
+            sizes.append(int(tag.d_val))
         elif kind == "DT_INIT":
-            init_functions.append(int(tag.entry.d_ptr))
+            init_functions.append(int(tag.d_ptr))
     if len(sonames) > 1 or any(not NAME.fullmatch(x) for x in sonames):
         raise InventoryError("invalid SONAME")
     if len(sizes) > 1 or (sizes and (sizes[0] % 8 or sizes[0] > len(data))):

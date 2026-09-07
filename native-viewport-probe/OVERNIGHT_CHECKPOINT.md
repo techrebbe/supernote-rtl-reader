@@ -1,5 +1,33 @@
 # Overnight checkpoint — 2026-09-06/07
 
+## Current handoff: final source-review disclosure blocked before execution
+
+Current tested code head: `005845c2d4243cbd5ebce11108f2079bc08b41e9`.
+All accepted r1/r2/r3 findings are implemented; 59 parser-enabled Python cases
+pass with zero skips and 49,594 LLVM records match (`llvm-comparison-v5.json`).
+The Android authored-fixture diagnostic remains build-only, unchanged SHA-256
+`5c0059935ea71788e9f8a740b03918df8b1e4fb81de994a3841e7afcc2b6e889`.
+
+The prepared r4 snapshot `../../reviews/native-viewport-loader-005845c-confirmation-r4`
+contains exactly the same 56 paths as r3. Only three Python files and two notes
+changed. Its manifest SHA-256 is
+`8cb50aac403ca51b45ebee04326e3b85e87586aa7f5208f7ca47ed8999522c3a`.
+The OpenAI review invocation was REJECTED BEFORE EXECUTION: the approval system
+requires explicit authorization for exporting this source to that destination,
+despite earlier reviews being allowed and the user's broad project approval.
+No r4 reviewer is running; r3 ended NOT CLEAN before this last fix. Do not claim
+a clean integrated head, bypass the rejection, or execute the new Android probe.
+
+Ask for explicit approval to send the 56 authored source/design-note files to
+OpenAI's Codex review service, excluding PDFs, ink, firmware binaries, raw
+captures and credentials. After approval, refresh the same source-only snapshot
+for the latest documentation head and resume reviewer session
+`01a07b19-1e04-7ad3-9d43-54e8161991b6` with its retained analysis. The exact public
+pyelftools directory is `../../tools/_vendor`; no private evidence reads are
+needed for its synthetic tests. Do not redo completed hardware work. Device is
+still released and untouched; no background device operation or automation is
+running. No GitHub push, PR, installation or merge occurred in this continuation.
+
 ## Latest continuation: approval received, review fixes implemented
 
 Latest after r3: one upstream PT_DYNAMIC-to-PT_LOAD correspondence gap was

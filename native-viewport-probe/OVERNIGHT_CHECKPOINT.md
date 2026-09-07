@@ -1,8 +1,38 @@
 # Overnight checkpoint — 2026-09-06/07
 
+## Latest continuation: approval received, review fixes implemented
+
+The user explicitly approved project-related work after the source-disclosure
+question. The source/notes-only review now ran; do not treat the historical
+rejection below as an active blocker. `native-viewport-loader-9e2441f-approved-r1`
+reviewed all 52 exact files and returned four P2 evidence-tool findings. This
+batch addresses descriptor/mapping identity, mapped file offsets, dynamic-table
+coverage and bounded reads; see `LOADER_ADMISSION.md`. Raw ELFs/maps/pointers,
+PDFs, ink data and credentials were NOT included in the uploaded snapshot.
+
+Also prepared a fixture-only Android loader with an embedded authored DSO and
+private read-only child root. No Supernote firmware load or device execution.
+The initial Android compile caught incorrect cross-architecture open flags;
+target compiler assertions and semantic host translation now cover this.
+Constructor-phase markers prevent an early loader trap/stall from passing a
+constructor test. Host policy/report and Linux kernel fixture tests pass; the
+Android build/Clang analysis pass. Full integrated confirmation review is NEXT,
+including the new wrapper and the complete shared isolation/supervisor code.
+
+Offline LLVM now agrees on all 49,594 RELA/APS2/RELR records across the five
+preserved libraries. Inventory v1 is historical only; future live slot reads
+require descriptor-bound inventory v2 and current process/mapping evidence.
+Do not redo the completed stock/display/isolation gates to manufacture progress.
+
+The device remains released, untouched by this continuation. No package,
+annotation, production setting, GitHub branch/PR or merge changed. The overnight
+heartbeat is PAUSED; no new overnight duration was inferred. Preserve every
+prior branch/evidence artifact. Gate B real native page viewport is NOT READY;
+full/left/right genuine pen tests remain after the missing engine boundary.
+
 ## Continued host preparation — 2026-09-07 morning
 
-### Review approval boundary
+### Historical review approval boundary (superseded above)
 
 Tested source is committed locally as
 `84800544e711e9a5a7973f5dc5db00453da67986`. A complete 52-file source-only snapshot

@@ -1,4 +1,4 @@
-/* Authored Linux host constructor fixture only; not firmware or an Android app. */
+/* Authored Linux/Android constructor fixture only; never Supernote firmware. */
 #define _GNU_SOURCE
 #include <fcntl.h>
 #include <sched.h>
@@ -7,11 +7,18 @@
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+#include "loader_report.h"
+
+static void marker(int tag,int which) {
+    struct loader_result r={LOADER_RESULT_MAGIC,tag,0,which,{0}};
+    if(syscall(__NR_write,3,&r,sizeof(r))!=(long)sizeof(r)) _exit(78);
+}
 
 int loader_fixture_value;
 __attribute__((constructor)) static void fixture(void) {
     const char *mode=getenv("VIEWPORT_LOADER_FIXTURE_CASE");
     int which=mode ? atoi(mode):-1;
+    marker(20,which);
     if(which==0) loader_fixture_value=42;
     else if(which==1) {
         void *p=mmap(NULL,4096,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
@@ -38,6 +45,7 @@ __attribute__((constructor)) static void fixture(void) {
     else if(which==15) (void)syscall(__NR_futex,NULL,0,0,0,0,0);
     else if(which==16) (void)syscall(__NR_mremap,NULL,0,0,0,0);
     else _exit(83);
+    marker(21,which);
     /* Forbidden operations returning (even errno) instead of trapping cannot
      * accidentally count as a positive fixture. */
 }

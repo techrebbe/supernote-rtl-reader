@@ -108,7 +108,8 @@ tool-specific remapping, annotation conversion or production release is added.
 ## Constructor-policy preparation (host only)
 
 `native/loader_filter.h` is a NEW policy candidate, separate from the previously
-hardware-tested isolation filter. No Android wrapper installs it. Its host
+hardware-tested isolation filter. The new Android wrapper is fixture-only and
+has not run on the Nomad. Its host
 interpreter tests argument/architecture/unknown-syscall behavior and decision
 mutations. It admits read-only opens, private non-W+X mapping requests, exact
 report-FD writes and a minimal runtime-query set; disallowed requests TRAP.
@@ -130,7 +131,67 @@ root/FD/credential/namespace requirements, plus runtime mapping and personality
 preconditions (no inherited external shared writable mapping or implicit-exec
 personality). A filter checks syscall requests; it cannot establish filesystem
 authority, arbitrary code integrity, actual effective W^X by itself, constructor
-semantics, or faithful app-runtime behavior. The standalone Android worker,
-library-publication manifest, SIGSYS report handler and immutable loader root
-are still unimplemented. Do not combine this policy and firmware on the Nomad
-without that implementation, adversarial evidence and exact-source review.
+semantics, or faithful app-runtime behavior. Firmware library publication and
+the real engine worker are still unimplemented. Do not combine this policy and
+firmware on the Nomad without that implementation, evidence and exact review.
+
+## Review-fix batch and authored Android loader — 2026-09-07
+
+The approved 52-file review of `9e2441f`/code `8480054` returned NOT CLEAN with
+four actionable host-evidence findings. All were accepted in this batch:
+
+- Inventory v2 opens `/proc/<pid>/map_files/<range>` and compares the **open
+  descriptor's** device/inode with the process mappings. Both bounded captures
+  and before/after descriptor stat records must match. No pathname in adb's
+  different mount namespace is treated as equivalent. Lack of map_files access
+  fails explicitly. The existing inventory-v1 evidence remains preserved, not
+  retroactively upgraded; the live binding collector now rejects it.
+- Import slots must agree with both PT_LOAD file offsets and the readable
+  process mapping's file offsets. BSS-only/ambiguous storage is rejected.
+- Dynamic-table addresses/sizes, allocated section coverage and symbol-table
+  identity replace name-based `.rela.*` selection. A renamed packed-table
+  synthetic ELF proves imports cannot silently disappear. RELR relative entries
+  are covered separately and never read as symbolic import pointers.
+- Local reads validate the opened descriptor and read at most its prechecked
+  size plus one. Remote stdout is capped while reading; the mapped transfer has
+  an explicit dd block count. LLVM consumes an exclusive bounded-byte copy,
+  not a potentially replaced source pathname.
+
+The revised independent LLVM comparison matches **49,594** records: the earlier
+48,764 RELA/APS2 records plus 830 RELR entries. This does not change the earlier
+observed pointer values or grant new live-memory authority. Local evidence:
+`../../loader-inventory-20260907c/llvm-comparison-v2.json` (no ADB run).
+
+The first Android compilation caught an architecture-specific open-flag error:
+the AArch64 allowed mask is `0xac800`, not x86-64's `0xb8800`. The target ABI is
+now compiler-asserted; host tests translate those flag semantics explicitly.
+174,795 policy vectors / 124 decision mutations pass. New constructor markers
+distinguish loader-ready, constructor-entered, operation-returned and completed
+dlclose. 5,704 report checks reject missing/reordered/wrong/truncated evidence;
+the 51 Linux kernel/own-constructor cases pass again with these markers.
+
+`build-loader-probe.ps1` builds `loader_android_probe.c` with the compiled bytes
+of our own small `loader_fixture.c` embedded. There is no arbitrary DSO argument
+or firmware payload. It reuses the tested isolation sequence/supervisor, creates
+a child-only private tmpfs, seeds only that fixture and makes the root read-only,
+rejects inherited shared/W+X mappings and implicit-exec personality, closes all
+outside descriptors, chroots, drops credentials/capabilities and installs the
+constructor filter before dlopen. SIGSYS reports use the exact report pipe.
+Seventeen constructor cases plus five isolated crash boundaries are prepared.
+The parent checks bounded exact-child cleanup and unchanged namespace/root/device
+node identity; it never opens pen/EBC nodes. Unknown cleanup preserves evidence.
+
+The Android build and Clang analysis pass. This is **BUILD ONLY**, not 22 device
+passes. No new helper was staged, installed or executed; the companion remains
+disabled. Exact integrated source review and owned-device preflight are required
+before this test. A fixture pass would still not authorize JNI_OnLoad/startDraw,
+Binder service creation, engine threads, Document admission or real pen input.
+
+Prepared artifact: `build/loader-probe-8e207c0811ac402fb154a0bd281ef8ca/`
+`loader-android-probe` SHA-256
+`5c0059935ea71788e9f8a740b03918df8b1e4fb81de994a3841e7afcc2b6e889`;
+embedded authored DSO SHA-256
+`6a1418ef3517ca03124e5082c8c274603b39b4464a063962cd615b80c5703663`.
+All 54 Python cases pass with the ELF parser enabled (zero skips), alongside
+280 viewport, 45,459 display assertions and 34 closed observer cases. The generic
+check script's five optional-parser skips are covered by that explicit run.

@@ -28,7 +28,7 @@ static uint32_t interpret(const struct loader_program *p,uint32_t arch,uint32_t 
 static uint32_t expected(uint32_t arch,uint32_t nr,const uint64_t a[6]) {
     if(arch!=LOAD_ARCH) return LOAD_KILL;
     switch(nr) {
-        case 56: return (a[2]&~UINT64_C(0xb8800))==0 ? LOAD_ALLOW:LOAD_TRAP;
+        case 56: return (a[2]&~UINT64_C(0xac800))==0 ? LOAD_ALLOW:LOAD_TRAP;
         case 64: return a[0]==3 ? LOAD_ALLOW:LOAD_TRAP;
         case 222:
             return a[2]<=7 && (a[2]&6)!=6 && (a[3]&~UINT64_C(0x104832))==0 &&
@@ -50,7 +50,7 @@ static uint32_t expected(uint32_t arch,uint32_t nr,const uint64_t a[6]) {
 
 static unsigned verify(const struct loader_program *p,int assert_all) {
     const uint64_t values[]={0,1,2,3,4,5,6,7,8,16,21,32,34,39,64,128,129,256,512,
-        1024,2048,2050,16384,32768,65536,131072,524288,1048576,0xb8800,0x104832,
+        1024,2048,2050,16384,32768,65536,131072,524288,1048576,0xac800,0xb8800,0x104832,
         UINT64_C(0x100000000),UINT64_C(0x100000003),UINT64_MAX};
     const uint32_t arches[]={LOAD_ARCH,0xc000003e,0x40000028,0,UINT32_MAX};
     unsigned checks=0;

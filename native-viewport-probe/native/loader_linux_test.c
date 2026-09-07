@@ -19,14 +19,14 @@
 #include <ucontext.h>
 #include <unistd.h>
 #include "loader_filter.h"
+#include "loader_report.h"
 #include "isolation_supervisor.h"
 #if !defined(__linux__) || !defined(__x86_64__)
 #error Host test only. Do not build or run on the Nomad.
 #endif
 
-struct result { int tag,nr; unsigned long long args[6]; };
 static void send_result(int tag,int nr,const unsigned long long *args) {
-    struct result r={tag,nr,{0}};
+    struct loader_result r={LOADER_RESULT_MAGIC,tag,nr,-1,{0}};
     if(args) for(unsigned i=0;i<6;++i) r.args[i]=args[i];
     if(syscall(__NR_write,3,&r,sizeof(r))!=(long)sizeof(r)) _exit(78);
 }
@@ -63,11 +63,18 @@ static int host_program(struct loader_program *p) {
     if(p->error || p->code[0].code!=0x20 || p->code[0].k!=4 ||
        p->code[1].k!=LOAD_ARCH || p->code[3].code!=0x20 || p->code[3].k!=0) return -1;
     p->code[1].k=AUDIT_ARCH_X86_64;
-    /* Each case head is reached via the previous head's false jump. Only
-     * these are syscall numbers; argument values and masks remain unchanged. */
+    /* Case heads contain syscall numbers. The openat flags additionally need
+     * semantic translation: unlike mmap/prctl, they differ on x86-64. */
+    _Static_assert((O_CLOEXEC|O_DIRECTORY|O_NOFOLLOW|O_NONBLOCK)==0xb0800,"host open flags");
     size_t at=4;
     while(at<p->count && p->code[at].code==0x15) {
         if(p->code[at].jt!=0 || !p->code[at].jf) return -1;
+        if(p->code[at].k==56) {
+            size_t mask=at+5;
+            if(mask>=p->count || p->code[mask].code!=0x45 || p->code[mask].k!=~0xac800u) return -1;
+            /* Kernel x86 O_LARGEFILE=0x8000; glibc defines its macro as zero. */
+            p->code[mask].k=~0xb8800u;
+        }
         int nr=translate(p->code[at].k); if(nr<0) return -1;
         p->code[at].k=(unsigned)nr; at+=1+p->code[at].jf;
     }
@@ -130,19 +137,18 @@ static int run_case(int which,const char *library) {
         if(stopped.reaped!=1) _exit(74);
         terminated=stopped.signal_sent;
     }
-    struct result messages[3]; ssize_t bytes=read(pipe_fds[0],messages,sizeof(messages));
+    struct loader_result messages[5]; ssize_t bytes=read(pipe_fds[0],messages,sizeof(messages));
     close(pipe_fds[0]);
-    int ready=bytes>=(long)sizeof(messages[0]) && messages[0].tag==10;
-    int loaded=which==0 || which==1 || which==12;
-    int ok=ready && (which==11 ? terminated && WIFSIGNALED(status) && WTERMSIG(status)==SIGKILL :
-        bytes==(long)(2*sizeof(messages[0])) && WIFEXITED(status) &&
-        (loaded ? WEXITSTATUS(status)==0 && messages[1].tag==42 :
-         WEXITSTATUS(status)==77 && messages[1].tag==77 && messages[1].nr==expected_syscall(which)));
+    int ready=bytes>=(long)sizeof(messages[0]) && loader_marker(&messages[0],10,-1);
+    int ok=bytes>=0 && loader_sequence(messages,(size_t)bytes,which,expected_syscall(which),
+        WIFEXITED(status) ? WEXITSTATUS(status):-1,
+        terminated && WIFSIGNALED(status) && WTERMSIG(status)==SIGKILL);
     if(!ok) {
         fprintf(stderr,"LOADER_CASE_FAIL case=%d status=%d bytes=%ld ready=%d",which,status,(long)bytes,ready);
-        if(bytes>=(long)(2*sizeof(messages[0]))) fprintf(stderr," tag=%d syscall=%d args=%llx,%llx,%llx,%llx,%llx,%llx",
-            messages[1].tag,messages[1].nr,messages[1].args[0],messages[1].args[1],messages[1].args[2],
-            messages[1].args[3],messages[1].args[4],messages[1].args[5]);
+        if(bytes>=(long)sizeof(messages[0])) {
+            const struct loader_result *last=&messages[(size_t)bytes/sizeof(messages[0])-1];
+            fprintf(stderr," tag=%d syscall=%d step=%d",last->tag,last->nr,last->step);
+        }
         fputc('\n',stderr);
     }
     return ok ? 0:-1;

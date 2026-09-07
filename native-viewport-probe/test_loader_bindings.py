@@ -1,7 +1,14 @@
 """Memory read-plan and classification tests; no ADB or live memory access."""
 import unittest
+import io
+import struct
 import inspect_loader_bindings as b
 import inspect_loader_dependencies as d
+
+try:
+    from elftools.elf.elffile import ELFFile
+except ImportError:
+    ELFFile=None
 
 
 def region(start=4096, end=8192, permissions="r--p"):
@@ -25,7 +32,58 @@ def packed(*values):
     return b"APS2" + b"".join(sleb(v) for v in values)
 
 
+def synthetic_import_elf(omit_packed_tags=False, wrong_section_offset=False):
+    """Independent tiny binary with a renamed packed table AND ordinary PLT."""
+    data=bytearray(4096)
+    packed_bytes=packed(1,0x600,1,3,8,(1<<32)|1025)
+    names=b"\0.dynsym\0.dynstr\0.rela.plt\0.renamed-packed-imports\0.shstrtab\0"
+    tags=[(5,0x300),(10,5),(6,0x400),(11,24),(23,0x500),(2,24),(20,7),(9,24)]
+    if not omit_packed_tags: tags.extend(((0x60000011,0x520),(0x60000012,len(packed_bytes))))
+    tags.append((0,0))
+    struct.pack_into("<16sHHIQQQIHHHHHH",data,0,b"\x7fELF\x02\x01\x01"+bytes(9),3,183,1,0,64,0x800,0,64,56,2,64,6,5)
+    struct.pack_into("<IIQQQQQQ",data,64,1,6,0,0,0,4096,4096,4096)
+    struct.pack_into("<IIQQQQQQ",data,120,2,6,0x100,0x100,0,len(tags)*16,len(tags)*16,8)
+    for i,tag in enumerate(tags): struct.pack_into("<qQ",data,0x100+i*16,*tag)
+    data[0x300:0x305]=b"\0foo\0"
+    struct.pack_into("<IBBHQQ",data,0x418,1,0x12,0,0,0,0)
+    struct.pack_into("<QQq",data,0x500,0x600,(1<<32)|1026,0)
+    data[0x520:0x520+len(packed_bytes)]=packed_bytes
+    data[0x700:0x700+len(names)]=names
+    entries=[(names.index(b".dynsym"),11,2,0x400,0x400,48,2,1,8,24),
+             (names.index(b".dynstr"),3,2,0x300,0x300,5,0,0,1,0),
+             (names.index(b".rela.plt"),4,2,0x500,0x500,24,1,0,8,24),
+             (names.index(b".renamed"),0x60000002,2,0x520,0x528 if wrong_section_offset else 0x520,len(packed_bytes),1,0,8,1),
+             (names.index(b".shstrtab"),3,0,0,0x700,len(names),0,0,1,0)]
+    for i,entry in enumerate(entries,1): struct.pack_into("<IIQQQQIIQQ",data,0x800+64*i,*entry)
+    return bytes(data)
+
+
 class BindingTests(unittest.TestCase):
+    def test_relr_includes_bitmap_and_has_no_import_symbol_or_addend(self):
+        data=struct.pack("<QQQ",0x1000,1|(1<<1)|(1<<3),0x2000)
+        self.assertEqual(list(b.relr_rows(data)),[(0x1000,1027,None),(0x1008,1027,None),(0x1018,1027,None),(0x2000,1027,None)])
+        for value in (b"",b"a",struct.pack("<Q",3),struct.pack("<Q",0x1002),
+                      struct.pack("<QQ",0x1000,0x1000),struct.pack("<Q",0xfffffffffffffff8)):
+            with self.assertRaises(d.InventoryError): list(b.relr_rows(value))
+
+    def test_slot_file_offset_correspondence(self):
+        loads=[{"p_vaddr":0x4000,"p_offset":0x1000,"p_filesz":4096}]
+        maps=[{**region(0x14000,0x15000),"offset":0x1000}]
+        b.slot_file_correspondence(0x4000,0x10000,loads,maps)
+        maps[0]["offset"]=0x8000
+        with self.assertRaises(d.InventoryError): b.slot_file_correspondence(0x4000,0x10000,loads,maps)
+
+    @unittest.skipUnless(ELFFile,"required explicit ELF parser gate")
+    def test_renamed_packed_import_table_is_not_omitted(self):
+        slots,_=b.import_slots(synthetic_import_elf(),[{**region(0x10000,0x11000),"offset":0}])
+        self.assertEqual({s["rva"] for s in slots},{0x600,0x608})
+        self.assertEqual({s["symbol"] for s in slots},{"foo"})
+
+    @unittest.skipUnless(ELFFile,"required explicit ELF parser gate")
+    def test_unaccounted_allocated_imports_and_wrong_storage_fail(self):
+        for data in (synthetic_import_elf(omit_packed_tags=True),synthetic_import_elf(wrong_section_offset=True)):
+            with self.assertRaises(d.InventoryError): b.relocation_sections(ELFFile(io.BytesIO(data)))
+
     def test_packed_grouped_offset_and_info(self):
         self.assertEqual(list(b.packed_rela(packed(2,4096,2,3,8,1026))),
                          [(4104,1026,0),(4112,1026,0)])

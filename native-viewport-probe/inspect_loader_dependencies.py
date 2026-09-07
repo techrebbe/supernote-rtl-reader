@@ -10,9 +10,12 @@ import argparse
 import hashlib
 import io
 import json
+import os
 import re
+import stat
 import subprocess
 import sys
+import threading
 from pathlib import Path, PurePosixPath
 
 SERIAL = "SN078C10015092"
@@ -29,6 +32,95 @@ MAP = re.compile(r"([0-9a-f]+)-([0-9a-f]+) ([r-][w-][x-][ps]) ([0-9a-f]+) ([0-9a
 
 class InventoryError(ValueError):
     pass
+
+
+def read_bounded(path: Path, limit=MAX_FILE_BYTES, expected_size=None) -> bytes:
+    """Check the opened descriptor, and cap the read even if the file grows."""
+    if type(limit) is not int or limit<=0:
+        raise InventoryError("invalid read budget")
+    before=path.lstat()
+    if not stat.S_ISREG(before.st_mode) or getattr(before,"st_file_attributes",0)&0x400:
+        raise InventoryError("nonregular or reparse evidence file")
+    with path.open("rb") as stream:
+        opened=os.fstat(stream.fileno())
+        if (opened.st_dev,opened.st_ino)!=(before.st_dev,before.st_ino):
+            raise InventoryError("evidence replaced during open")
+        if not 0<opened.st_size<=limit or (expected_size is not None and
+                (type(expected_size) is not int or opened.st_size!=expected_size)):
+            raise InventoryError("evidence size budget/mismatch")
+        data=stream.read(opened.st_size+1)
+        after=os.fstat(stream.fileno())
+        fields=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+        if len(data)!=opened.st_size or fields(opened)!=fields(after):
+            raise InventoryError("evidence changed during bounded read")
+        return data
+
+
+def bounded_command(command, limit, timeout=30):
+    """Cap stdout in memory while reading, not after subprocess.run allocates it."""
+    if type(limit) is not int or limit<=0 or not 0<timeout<=60:
+        raise InventoryError("invalid command budget")
+    with subprocess.Popen(command,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL) as process:
+        expired=threading.Event()
+        def stop():
+            expired.set()
+            try: process.kill()
+            except ProcessLookupError: pass
+        timer=threading.Timer(timeout,stop)
+        timer.start()
+        try:
+            data=process.stdout.read(limit+1)
+            if len(data)>limit:
+                process.kill()
+                raise InventoryError("command output budget exceeded")
+            code=process.wait(timeout=2)
+            if expired.is_set() or code:
+                raise InventoryError("bounded command timed out or failed")
+            return data
+        finally:
+            timer.cancel()
+            if process.poll() is None: process.kill()
+            process.wait(timeout=2)
+
+
+def mapped_file_identity(header, mappings):
+    """stat decimal Linux dev_t must match maps' hexadecimal major:minor."""
+    if not re.fullmatch(rb"[0-9]+:[0-9]+:[0-9]+:[0-9a-fA-F]+:[0-9]+:[0-9]+",header):
+        raise InventoryError("invalid mapped descriptor stat")
+    dev,inode,size,mode,mtime,ctime=header.decode().split(":")
+    dev,inode,size=int(dev),int(inode),int(size)
+    major=((dev>>8)&0xfff)|((dev>>32)&~0xfff)
+    minor=(dev&0xff)|((dev>>12)&~0xff)
+    identities={(tuple(int(x,16) for x in m["device"].split(":")),m["inode"]) for m in mappings}
+    if identities!={((major,minor),inode)} or inode<=0 or not stat.S_ISREG(int(mode,16)) or not 0<size<=MAX_FILE_BYTES:
+        raise InventoryError("descriptor differs from mapped file identity/size")
+    return {"device":f"{major:x}:{minor:x}","inode":inode,"bytes":size,
+            "mtime":int(mtime),"ctime":int(ctime),"authority":"proc-map-files-open-descriptor-v1"}
+
+
+def mapped_capture_command(pid, mappings):
+    if type(pid) is not int or not 1<pid<4194304 or not mappings:
+        raise InventoryError("invalid mapped capture process")
+    mapping=mappings[0]
+    start,end=mapping["start"],mapping["end"]
+    if type(start) is not int or type(end) is not int or not 0<start<end<(1<<56):
+        raise InventoryError("invalid mapped capture range")
+    # Open the exact mapped inode through the process, not an adb namespace
+    # pathname. Keep that descriptor across both stat records and the data read.
+    return (f"su -c 'exec 9</proc/{pid}/map_files/{start:x}-{end:x} || exit 61; "
+            "stat -L -c %d:%i:%s:%f:%Y:%Z /proc/self/fd/9 || exit 62; "
+            f"dd if=/proc/self/fd/9 bs=65536 count={MAX_FILE_BYTES//65536+1} 2>/dev/null || exit 63; "
+            "stat -L -c %d:%i:%s:%f:%Y:%Z /proc/self/fd/9 || exit 64'")
+
+
+def parse_mapped_capture(payload, mappings):
+    header,separator,rest=payload.partition(b"\n")
+    if not separator or len(header)>256: raise InventoryError("missing descriptor header")
+    identity=mapped_file_identity(header,mappings)
+    size=identity["bytes"]
+    if len(rest)!=size+len(header)+1 or rest[size:]!=header+b"\n":
+        raise InventoryError("mapped descriptor changed or transfer size mismatch")
+    return rest[:size],identity
 
 
 def process_identity(stat: str, expected_pid: int) -> tuple[int, int]:
@@ -146,10 +238,7 @@ def main() -> int:
     adb = str(args.adb.resolve(strict=True))
 
     def run(*command: str, timeout=30) -> bytes:
-        p = subprocess.run([adb, "-s", SERIAL, *command], capture_output=True, timeout=timeout)
-        if p.returncode:
-            raise InventoryError("ADB read failed: " + p.stderr.decode("utf-8", "replace")[:300])
-        return p.stdout
+        return bounded_command([adb,"-s",SERIAL,*command],4*1024*1024,timeout)
 
     fingerprint = run("shell", "getprop", "ro.build.fingerprint").decode().strip()
     if fingerprint != FINGERPRINT:
@@ -185,26 +274,22 @@ def main() -> int:
         local = args.output / filename
         if local.exists():
             raise InventoryError("local evidence filename collision")
-        size_text = run("shell", "stat", "-L", "-c", "%s", path).decode().strip()
-        if not size_text.isdecimal() or not 0 < int(size_text) <= MAX_FILE_BYTES:
-            raise InventoryError("unsupported remote library size")
-        run("pull", path, str(local), timeout=60)
-        data = local.read_bytes()
-        if len(data) != int(size_text):
-            raise InventoryError("library changed during pull")
+        command=[adb,"-s",SERIAL,"exec-out",mapped_capture_command(pid,maps[path])]
+        data,identity=parse_mapped_capture(bounded_command(command,MAX_FILE_BYTES+512,60),maps[path])
+        again,identity_again=parse_mapped_capture(bounded_command(command,MAX_FILE_BYTES+512,60),maps[path])
+        if data!=again or identity!=identity_again:
+            raise InventoryError("mapped library changed across bounded captures")
         metadata = elf_metadata(data)
-        remote_digest = run("shell", "sha256sum", path).decode().split()[0]
-        if remote_digest != metadata["sha256"]:
-            raise InventoryError("remote/local library digest mismatch")
+        with local.open("xb") as out: out.write(data)
         print("READ", basename, metadata["bytes"], flush=True)
-        return {**metadata, "localFile": filename}
+        return {**metadata, "localFile": filename,"mappedFileIdentity":identity}
 
     libraries, edges = collect_graph(maps, read_library)
     after, after_maps, after_raw = snapshot()
     if after != before or any(after_maps.get(p) != maps[p] for p in libraries):
         raise InventoryError("process or selected library mapping changed")
     (args.output / "maps-after.txt").write_text(after_raw, encoding="utf-8")
-    report = {"schema": "native-loader-inventory-v1", "firmware": fingerprint,
+    report = {"schema": "native-loader-inventory-v2", "firmware": fingerprint,
               "serial": SERIAL, "process": {"pid": pid, "startTime": before[1]},
               "nativeStartAllowed": False, "bindingAuthority": False,
               "libraries": libraries, "edges": edges,

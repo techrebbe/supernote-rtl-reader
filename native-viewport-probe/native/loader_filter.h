@@ -4,7 +4,8 @@
 #include <stddef.h>
 
 /* Separate constructor-only policy candidate, NOT the tested isolation policy.
- * No Android caller installs this yet. A syscall filter is not a filesystem
+ * The Android caller is an authored-fixture diagnostic, not a firmware loader.
+ * A syscall filter is not a filesystem
  * sandbox: the future child must first have a private, read-only library root,
  * no outside descriptors, no real devices/Binder/procfs and no capabilities.
  * Unknown calls TRAP: a constructor's unsupported action is a failed probe.
@@ -57,9 +58,10 @@ static inline struct loader_program loader_filter_make(void) {
 
     at=load_case(&p,56); /* openat: read-only flags only, within an isolated root */
     load_arg32(&p,2);
-    /* CLOEXEC, NONBLOCK and the architecture union of DIRECTORY/NOFOLLOW/
-     * LARGEFILE. ACCESSMODE, CREATE, TRUNCATE, APPEND and TMPFILE are excluded. */
-    load_forbid_bits(&p,~0x000b8800u); load_finish_case(&p,at);
+    /* AArch64 CLOEXEC/NONBLOCK/DIRECTORY/NOFOLLOW/LARGEFILE. Not an architecture
+     * union: x86-64 assigns different meanings to 0x4000/0x10000/0x20000.
+     * ACCESSMODE, CREATE, TRUNCATE, APPEND, DIRECT and TMPFILE are excluded. */
+    load_forbid_bits(&p,~0x000ac800u); load_finish_case(&p,at);
 
     at=load_case(&p,64); /* write: exact owned report channel, no other output */
     load_arg32(&p,0); load_emit(&p,0x15,1,0,3); load_return(&p,LOAD_TRAP); load_finish_case(&p,at);

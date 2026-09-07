@@ -1,8 +1,12 @@
 """Host-only tests. No ADB, firmware execution or real ELF fixture required."""
 import argparse
+import io
+from pathlib import Path
 import struct
 import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 
 import inspect_loader_dependencies as inv
 
@@ -42,6 +46,45 @@ def meta(needed=(), digest="f"*64, size=10):
 
 
 class InventoryTests(unittest.TestCase):
+    def test_mapped_descriptor_identity_and_capture(self):
+        maps=inv.mapped_libraries(record(inv.ROOT_LIBRARY))[inv.ROOT_LIBRARY]
+        header=b"64772:123:4:81a4:1:1"
+        data,identity=inv.parse_mapped_capture(header+b"\nELFx"+header+b"\n",maps)
+        self.assertEqual(data,b"ELFx")
+        self.assertEqual(identity["authority"],"proc-map-files-open-descriptor-v1")
+        for wrong in (b"64773:123:4:81a4:1:1",b"64772:124:4:81a4:1:1",
+                      b"64772:123:4:21b6:1:1",b"64772:123:67108865:81a4:1:1"):
+            with self.assertRaises(inv.InventoryError): inv.mapped_file_identity(wrong,maps)
+        for body in (header+b"\nELF"+header+b"\n",header+b"\nELFx"+header[:-1]+b"2\n",
+                     header+b"\nELFxx"+header+b"\n"):
+            with self.assertRaises(inv.InventoryError): inv.parse_mapped_capture(body,maps)
+        command=inv.mapped_capture_command(1425,maps)
+        self.assertIn("/proc/1425/map_files/1000-2000",command)
+        self.assertNotIn(inv.ROOT_LIBRARY,command)
+        self.assertIn("count=1025",command)
+
+    def test_bounded_local_reads_reject_size_and_type(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/"data"
+            path.write_bytes(b"abcd")
+            self.assertEqual(inv.read_bounded(path,4,4),b"abcd")
+            for limit,size in ((3,None),(4,3),(4,True)):
+                with self.assertRaises(inv.InventoryError): inv.read_bounded(path,limit,size)
+            with self.assertRaises(inv.InventoryError): inv.read_bounded(Path(temp))
+            # Simulate growth after descriptor-size check: actual read remains
+            # explicitly limited to old size+1 and rejects the extra byte.
+            class Growing(io.BytesIO):
+                def fileno(self): return 7
+            old=path.stat()
+            with patch.object(Path,"open",return_value=Growing(b"abcde")),patch.object(inv.os,"fstat",return_value=old):
+                with self.assertRaises(inv.InventoryError): inv.read_bounded(path,4)
+
+    def test_bounded_command_overflow_failure_and_timeout(self):
+        self.assertEqual(inv.bounded_command([sys.executable,"-c","print('ok')"],10).strip(),b"ok")
+        for code,limit,timeout in (("print('x'*10000)",10,3),("raise SystemExit(3)",10,3),
+                                    ("import time;time.sleep(3)",10,0.1)):
+            with self.assertRaises(inv.InventoryError): inv.bounded_command([sys.executable,"-c",code],limit,timeout)
+
     def test_stat_comm_spaces_and_parentheses(self):
         tail = ["S"] + ["0"]*18 + ["2642"]
         self.assertEqual(inv.process_identity("1425 (odd (name)) " + " ".join(tail), 1425), (1425, 2642))

@@ -81,6 +81,31 @@ def packed_rela(data):
         raise dep.InventoryError("trailing packed relocation data")
 
 
+def relr_rows(data):
+    """RELR has only relative relocations, never symbolic import pointers."""
+    if not data or len(data)%8 or len(data)//8>MAX_RELOCATIONS:
+        raise dep.InventoryError("invalid RELR byte count")
+    base=None
+    previous=-1
+    count=0
+    for (word,) in struct.iter_unpack("<Q",data):
+        if word&1:
+            if base is None: raise dep.InventoryError("RELR bitmap without base")
+            offsets=[base+8*(bit-1) for bit in range(1,64) if word&(1<<bit)]
+            base+=63*8
+        else:
+            offsets=[word]
+            base=word+8
+        if base>=(1<<64): raise dep.InventoryError("RELR address overflow")
+        for offset in offsets:
+            if offset%8 or offset<=previous or offset>=(1<<64)-7:
+                raise dep.InventoryError("invalid/repeated RELR offset")
+            previous=offset
+            count+=1
+            if count>MAX_RELOCATIONS: raise dep.InventoryError("RELR expansion budget exceeded")
+            yield offset,1027,None  # No serialized addend; do not fabricate one.
+
+
 def relocation_rows(section):
     if section["sh_type"] == "SHT_RELA":
         if section.num_relocations() > MAX_RELOCATIONS:
@@ -89,7 +114,88 @@ def relocation_rows(section):
                 for r in section.iter_relocations())
     if section["sh_type"] == 0x60000002:  # SHT_ANDROID_RELA (APS2)
         return packed_rela(section.data())
+    if section["sh_type"] in ("SHT_RELR",0x6fffff00):
+        return relr_rows(section.data())
     raise dep.InventoryError("unsupported import relocation format")
+
+
+def relocation_sections(elf):
+    """Dynamic addresses/sizes are authoritative, not conventional section names.
+
+    This bounded prototype explicitly rejects sectionless and REL layouts rather
+    than reporting a partial import plan. RELR is covered but has no symbols.
+    """
+    dynamics=[s for s in elf.iter_segments() if s["p_type"]=="PT_DYNAMIC"]
+    if len(dynamics)!=1: raise dep.InventoryError("ambiguous dynamic relocation authority")
+    fields={"DT_RELA","DT_RELASZ","DT_RELAENT","DT_JMPREL","DT_PLTRELSZ","DT_PLTREL",
+            "DT_ANDROID_RELA","DT_ANDROID_RELASZ","DT_SYMTAB","DT_SYMENT",
+            "DT_REL","DT_RELSZ","DT_RELENT","DT_ANDROID_REL","DT_ANDROID_RELSZ",
+            "DT_RELR","DT_RELRSZ","DT_RELRENT","DT_ANDROID_RELR","DT_ANDROID_RELRSZ","DT_ANDROID_RELRENT"}
+    values={}
+    for tag in dynamics[0].iter_tags():
+        key=tag.entry.d_tag
+        if key in fields:
+            if key in values: raise dep.InventoryError("duplicate dynamic relocation metadata")
+            values[key]=int(tag.entry.d_val)
+    if any(values.get(k,0) for k in ("DT_REL","DT_RELSZ","DT_RELENT","DT_ANDROID_REL","DT_ANDROID_RELSZ")):
+        raise dep.InventoryError("REL import layouts are not supported by this bounded probe")
+    specs=[]
+    for address,size,kind in (("DT_RELA","DT_RELASZ","SHT_RELA"),
+                              ("DT_JMPREL","DT_PLTRELSZ","SHT_RELA"),
+                              ("DT_ANDROID_RELA","DT_ANDROID_RELASZ",0x60000002),
+                              ("DT_RELR","DT_RELRSZ","SHT_RELR"),
+                              ("DT_ANDROID_RELR","DT_ANDROID_RELRSZ",0x6fffff00)):
+        if address not in values and size not in values: continue
+        if address not in values or size not in values or values[address]<=0 or values[size]<=0:
+            raise dep.InventoryError("incomplete/empty dynamic relocation table")
+        if kind=="SHT_RELA" and (values[size]%24 or values.get("DT_RELAENT")!=24):
+            raise dep.InventoryError("invalid RELA entry metadata")
+        if address=="DT_JMPREL" and values.get("DT_PLTREL")!=7:
+            raise dep.InventoryError("non-RELA PLT relocation table")
+        if kind in ("SHT_RELR",0x6fffff00) and (values[size]%8 or values.get(address.replace("RELR","RELRENT"))!=8):
+            raise dep.InventoryError("invalid RELR entry metadata")
+        specs.append((values[address],values[size],kind))
+    if not specs or values.get("DT_SYMENT")!=24 or "DT_SYMTAB" not in values:
+        raise dep.InventoryError("missing relocation/symbol authority")
+    sections=list(elf.iter_sections())
+    tables=[]
+    loads=[p for p in elf.iter_segments() if p["p_type"]=="PT_LOAD"]
+    for address,size,kind in specs:
+        found=[(i,s) for i,s in enumerate(sections) if s["sh_type"]==kind and
+               s["sh_addr"]==address and s["sh_size"]==size and s["sh_flags"]&2]
+        if len(found)!=1: raise dep.InventoryError("dynamic relocation table missing/ambiguous in sections")
+        i,s=found[0]
+        backed=[p for p in loads if p["p_vaddr"]<=address and address+size<=p["p_vaddr"]+p["p_filesz"] and
+                s["sh_offset"]==p["p_offset"]+address-p["p_vaddr"]]
+        if len(backed)!=1: raise dep.InventoryError("relocation table file correspondence mismatch")
+        if kind in ("SHT_RELR",0x6fffff00):
+            if s["sh_link"]!=0 or s["sh_entsize"]!=8:
+                raise dep.InventoryError("RELR table must not name symbols")
+        else:
+            symbols=elf.get_section(s["sh_link"])
+            if symbols["sh_type"]!="SHT_DYNSYM" or symbols["sh_addr"]!=values["DT_SYMTAB"] or symbols["sh_entsize"]!=24:
+                raise dep.InventoryError("dynamic relocation symbol table mismatch")
+        tables.append((i,s))
+    indices={i for i,_ in tables}
+    allocated={i for i,s in enumerate(sections) if s["sh_flags"]&2 and
+               s["sh_type"] in ("SHT_RELA","SHT_REL",0x60000001,0x60000002,"SHT_RELR",0x6fffff00)}
+    if len(indices)!=len(specs) or indices!=allocated:
+        raise dep.InventoryError("unaccounted allocated relocation table")
+    ranges=sorted((a,a+s) for a,s,_ in specs)
+    if any(end>next_start for (_,end),(next_start,_) in zip(ranges,ranges[1:])):
+        raise dep.InventoryError("overlapping dynamic relocation tables")
+    return tables
+
+
+def slot_file_correspondence(offset,base,loads,mappings):
+    segments=[p for p in loads if p["p_vaddr"]<=offset and offset+8<=p["p_vaddr"]+p["p_filesz"]]
+    owners=[m for m in mappings if m["start"]<=base+offset and base+offset+8<=m["end"] and
+            m["permissions"].startswith("r")]
+    if len(segments)!=1 or len(owners)!=1:
+        raise dep.InventoryError("slot not in one readable file-backed segment/mapping")
+    p,m=segments[0],owners[0]
+    if p["p_offset"]+offset-p["p_vaddr"]!=m["offset"]+base+offset-m["start"]:
+        raise dep.InventoryError("slot mapped file offset differs from ELF segment")
 
 
 def checked_runs(slots, mappings):
@@ -129,10 +235,7 @@ def import_slots(data, mappings):
         raise dep.InventoryError("unsupported or ambiguous load bias")
     base = zeros[0]["start"]
     slots = []
-    for name in (".rela.plt", ".rela.dyn"):
-        section = elf.get_section_by_name(name)
-        if section is None:
-            continue
+    for _,section in relocation_sections(elf):
         symbols = elf.get_section(section["sh_link"])
         for offset, info, _ in relocation_rows(section):
             # AArch64 GLOB_DAT / JUMP_SLOT. Never read RELATIVE data/ink planes.
@@ -141,8 +244,7 @@ def import_slots(data, mappings):
             if info >> 32 >= symbols.num_symbols():
                 raise dep.InventoryError("relocation symbol index out of range")
             symbol = symbols.get_symbol(info >> 32)
-            if not any(p["p_vaddr"] <= offset and offset+8 <= p["p_vaddr"]+p["p_memsz"] for p in loads):
-                raise dep.InventoryError("relocation outside ELF image")
+            slot_file_correspondence(offset,base,loads,mappings)
             slots.append({"symbol": symbol.name, "symbolType": symbol["st_info"]["type"],
                           "binding": symbol["st_info"]["bind"],
                           "undefined": symbol["st_shndx"] == "SHN_UNDEF",
@@ -171,9 +273,9 @@ def main():
     sys.path.insert(0, str(args.python_path.resolve(strict=True)))
     __import__("elftools.elf.elffile")
     source = args.inventory.resolve(strict=True)
-    inventory_bytes = source.read_bytes()
+    inventory_bytes = dep.read_bounded(source,4*1024*1024)
     inv = json.loads(inventory_bytes)
-    if inv["schema"] != "native-loader-inventory-v1" or inv["serial"] != dep.SERIAL or inv["firmware"] != dep.FINGERPRINT:
+    if inv["schema"] != "native-loader-inventory-v2" or inv["serial"] != dep.SERIAL or inv["firmware"] != dep.FINGERPRINT:
         raise dep.InventoryError("wrong inventory identity")
     pid, start = inv["process"]["pid"], inv["process"]["startTime"]
     if type(pid) is not int or not 1 < pid < 4194304 or type(start) is not int or start <= 0:
@@ -181,13 +283,18 @@ def main():
     plans = {}
     for path in MODULES:
         meta = inv["libraries"][path]
+        identity=meta["mappedFileIdentity"]
+        if identity.get("authority")!="proc-map-files-open-descriptor-v1" or identity["bytes"]!=meta["bytes"] or any(
+                (int(m["device"].split(":")[0],16),int(m["device"].split(":")[1],16),m["inode"])!=
+                (*[int(x,16) for x in identity["device"].split(":")],identity["inode"]) for m in meta["mappings"]):
+            raise dep.InventoryError("inventory lacks exact mapped descriptor authority")
         filename = meta["localFile"]
         if not dep.re.fullmatch(r"[0-9a-f]{16}\.so", filename):
             raise dep.InventoryError("unsupported local evidence filename")
         local = source.parent / filename
         if local.is_symlink():
             raise dep.InventoryError("symlink evidence library")
-        data = local.read_bytes()
+        data = dep.read_bounded(local,expected_size=meta["bytes"])
         if hashlib.sha256(data).hexdigest() != meta["sha256"]:
             raise dep.InventoryError("local library digest changed")
         if path == dep.ROOT_LIBRARY and meta["sha256"] != dep.ROOT_SHA256:
@@ -197,8 +304,7 @@ def main():
 
     adb = str(args.adb.resolve(strict=True))
     def run(*command):
-        result = subprocess.run([adb, "-s", dep.SERIAL, *command], capture_output=True, timeout=30, check=True)
-        return result.stdout
+        return dep.bounded_command([adb,"-s",dep.SERIAL,*command],4*1024*1024)
 
     def verify_identity():
         if run("shell", "getprop", "ro.build.fingerprint").decode().strip() != dep.FINGERPRINT:

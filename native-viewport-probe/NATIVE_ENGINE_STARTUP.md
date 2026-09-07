@@ -121,6 +121,76 @@ The constructor starts an update worker itself (0xab188); blocking only the
 six top-level `startDraw` thread starts would miss this nested startup path.
 No constructor, setter or worker has been called during this inspection.
 
+## Transaction dispatch, not the named service stubs
+
+Further local static inspection at approximately 05:20 on 2026-09-07 confirmed
+that seven BnMyService methods at 0x6cc18..0x6cc30 are literal four-byte RETs:
+askTrailData, askDeletedlData, clearScreen, setWritableAndNonWritableArea,
+setPenInfo, setWalcomEmrInfo and setDebugMode. Calling these typed methods is
+NOT a private equivalent of the stock client's Binder operations. Their Bp
+counterparts contain substantial Parcel code.
+
+The real BnMyService::onTransact is 0x6cc40, size 31652. Its inspected direct
+calls include interface validation, String16/application identity and numeric
+Parcel fields, tool configuration, trail queues, recognition and output work:
+
+- 0x6e394: ThreadDrawPath::setPen; 0x6e4c4: setShiftValue.
+- 0x6dbbc: TrailContainer queue push; 0x6e5a0: wait_and_pop.
+- 0x6de54: SFCommunicate::sync_pw_buffer; 0x6df18: enableOverlay.
+- 0x6d164: recognition trigger configuration; 0x6ce70: debug-image saving.
+
+These are call sites, not a complete transaction-code/field schema or proof
+that each branch is valid offscreen. Some requests block or touch output and
+logging. A future private endpoint must preserve the actual dispatch/Parcel
+semantics, bound blocking behavior and explicitly classify each side effect.
+Do not replace unknown operations with success or synthesize tool results.
+
+BnMyService construction at 0x801dc (size 688) has direct calls to RefBase,
+IMyService, BBinder and String16 construction. initBinderServer at 0x7ffc4
+also obtains the default global service manager. Neither was executed. A
+local dispatcher without global registration remains a candidate, not a
+tested loader or a safe substitute for the worker startup sequence.
+
+## Refresh-channel distinction on this firmware
+
+The Java HandWriteClient also contains a cached SurfaceFlinger Binder and
+transaction 1102 with the android.ui.ISurfaceComposer interface. However its
+Communicate and setFullAuto paths first check system type. DocumentConstants
+returns 11 for the Nomad; that path invokes the e-ink manager's enableFullUiAuto
+instead. The older SurfaceFlinger branch must NOT be recorded as an observed
+Nomad transaction merely because it exists in the decompiled class. Actual
+refresh ownership still needs to be coordinated with the canonical presenter.
+
+In pinned DrawPath, SFCommunicate::Init, Communicate, set_pw_rect, exit_pw,
+start_writing, stop_writing and set_pw_xrect at 0xcabc4..0xcabf4 each return
+zero immediately. In contrast sync_pw_buffer at 0xcabfc (size 1552) obtains and
+retains a draw-buffer Mat, and calls Mat::setTo at 0xcb008. Lazy initialization
+can construct ThreadUpdateEpdc at 0xcb0c4/0xcb110. Its examined direct calls
+do not make it an offscreen-frame export API. The misleadingly broad method
+name is not evidence of a safe canonical background-input endpoint.
+
+## Packaged dependency inventory (not the loaded dependency closure)
+
+Read-only ELF inspection inside the pinned DrawPath APK found the following
+arm64 libraries. The recognition entry matches the separately inspected ELF.
+No archive member was extracted or loaded by this inventory.
+
+| Library | SHA-256 | init_array entries |
+| --- | --- | ---: |
+| librecgnition.so | 3ce8bcf151e92899cb06c64e529723c560718aea36f070761c4ee9fe99bd57e2 | 28 |
+| libbinder.so | 92255144e68336f94a134f6b77526be18ffa7b66ea12b8f650d7a166dbf99c57 | 22 |
+| libc++_shared.so | ef50b47c713cf7778c42efd33fde62663f1a80a9764c803541b90e1bc8068949 | 1 |
+| libomp.so | 10f837c340d07023b6b1830e0ca8770e4ca3a49da2fb2e1d51b6125b1416d2ae | 1 |
+| libopencv_java4.so | 0107988932251f9a5c2107f3d1f88789340ca63934dba3e9e7b3ca32f8d3b57b | 61 |
+| libutils.so | 1fffdb43d209477b3934ecafc1828d9051495d2b08df224adedb043cace0e0a1 | 2 |
+
+OpenCV introduces libjnigraphics, libz and libmediandk. The bundled Binder/utils
+introduce libcutils, platform libc++, libprocessgroup and libvndksupport, in
+addition to libc/libm/libdl/liblog. The APK thus contains 87 initializer entries
+outside the main recognition library alone. This count does NOT imply 87 unsafe
+initializers, or describe which libraries the running linker actually selected.
+That loaded closure and its initializer/transitive behavior are still unproved.
+
 ## Current decision
 
 Additional read-only ELF work recovered exact unwind-FDE bounds for all 28

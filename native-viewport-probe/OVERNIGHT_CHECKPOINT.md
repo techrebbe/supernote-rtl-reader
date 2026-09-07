@@ -2,12 +2,52 @@
 
 User authorized autonomous testing/fixes while sleeping, approximately through
 2026-09-07 05:30 Asia/Jerusalem. No physical-action requests or audible pings.
-The existing heartbeat has been resumed, every 30 minutes through the original
-02:30 UTC deadline, using the product's scheduled-task update mechanism.
+The overnight heartbeat was paused at approximately 05:25 local while closing
+the final segment, within the original 02:30 UTC deadline. The product update
+confirmed PAUSED. It will not continue unattended beyond this window.
 The user has explicitly approved the source/notes-only OpenAI review; this
 continuation resumed directly. Do not send PDFs, annotations, firmware binaries
 or credentials. Temporary device helpers from the prior segment are gone.
 Do not merge or claim physical-pen validation.
+
+## Final local-only segment — approximately 05:15 through 05:25 local
+
+- Started from clean `104f2515c806564057701d2d4a4ea90e70e49824`.
+  No completed hardware gate was repeated and no device operation was made.
+- Pinned disassembly proves seven named BnMyService tool methods are RET stubs;
+  actual Parcel/onTransact dispatch contains the native tool/queue/output work.
+  A future private adapter cannot call those stubs and claim native behavior.
+- Distinguished the Nomad e-ink-manager refresh path from the older Java
+  SurfaceFlinger transaction branch. Native SFCommunicate control methods are
+  no-ops, but sync_pw_buffer retains/fills a draw-buffer Mat and can lazily
+  construct the physical output owner. It is not a proved offscreen output API.
+- Inventoried six packaged arm64 libraries without extracting/loading them:
+  hashes, dependencies and 87 initializer entries outside librecgnition itself.
+  Packaged contents are NOT proof of the running linker's dependency selection.
+- Authored findings and the next bounded initializer-only/private-dispatch
+  proof are in `NATIVE_ENGINE_STARTUP.md` / `OFFSCREEN_ENGINE_EXPERIMENT.md`.
+  This is documentation-only static evidence. It adds no runtime code and does
+  not extend the exact-source clean review of the earlier isolation executable.
+- Minimum validation: inspected the complete documentation diff and ran
+  `git diff --check`. Existing executable sources/tests/builds are unchanged;
+  no reason to rerun stock hardware or claim new behavioral coverage.
+- No push, PR advancement, merge, package installation, module enablement,
+  live mapping change, firmware startup or annotation mutation. The latest
+  actual device ownership/hash/cleanup evidence remains the 04:38 mechanism run.
+- Automation `prepare-next-native-viewport-tests` is PAUSED. No background
+  command/reviewer/test was started during this final segment.
+
+### Resume point, not a request for more pen actions yet
+
+The isolated native loader/IPC/background-output adapter is still unimplemented.
+Continue the bounded dependency/initializer admission proof described in the
+experiment, with deterministic tests and independent exact-source review before
+any new executable runs on the Nomad. Revalidate exclusive Nomad ownership,
+process/firmware identity and 0700 staging before a future device operation.
+Do not launch Document in a half viewport based on the isolation mechanism
+pass. Genuine native write/erase/history/lasso/text-selection and canonical
+saved-geometry checks in full/left/right frames remain pending. No second live
+page can be admitted until that first genuine native viewport gate passes.
 
 ## Resumed after explicit review approval — approximately 04:30 local
 

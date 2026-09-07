@@ -42,7 +42,8 @@ Possible mechanism: a child-only private mount namespace with no physical `/dev`
 or global Binder/property sockets, followed by capability/UID restrictions;
 explicit native I/O adapters for the owned endpoints. Namespace operations must
 be proved not to propagate to the parent. A Java hook alone is NOT the isolation
-boundary. No mount, worker or library startup has been attempted yet.
+boundary. The generic child-only mount/filter mechanism has since passed as
+described below; no firmware worker or library startup has been attempted.
 
 The isolated-process substrate is described in `ISOLATION_PROBE.md`. The user
 approved source-only review; two supervisor findings were fixed and the full
@@ -79,6 +80,38 @@ not an established offscreen engine. Do not treat an evocative symbol name as a
 supported mode or substitute a bitmap renderer for genuine native tool behavior.
 
 ## Stop criteria and release boundaries
+
+### Next bounded proof, before a page/tool test
+
+The 05:20 local static findings in `NATIVE_ENGINE_STARTUP.md` narrow the next
+step; they do not approve starting the stock service:
+
+1. Establish the exact loaded dependency closure from pinned local evidence
+   (or a separately owned read-only device observation), not APK filenames
+   alone. Record library hashes, needed libraries and constructor boundaries.
+2. Specify an initializer-only loading experiment in the disposable child.
+   It must have no Document, global Binder, property sockets, physical devices,
+   personal paths or annotation access. The current mechanism filter cannot
+   load libraries or create threads; any expanded policy must be separately
+   implemented, adversarially tested and reviewed before device execution.
+   Unknown dependencies or initialization side effects must fail explicitly.
+3. After that gate, evaluate private Parcel/onTransact dispatch without
+   initBinderServer/global registration. Named BnMyService tool methods are
+   RET stubs and cannot serve as the adapter. Preserve protocol semantics,
+   application identity, queue deadlines and native replies; do not fake success.
+4. Admit painter/worker initialization only with all retained output aliases
+   bound to owned planes from construction, plus a verified canonical page
+   background input. SFCommunicate::sync_pw_buffer is not an established frame
+   export endpoint. The Nomad's Java e-ink-manager refresh route must also be
+   accounted for; the old SurfaceFlinger Java branch is not active on this model.
+5. Prove deterministic synthetic input/output and teardown before exposing
+   Document to one canonical page in full, left and right rectangles. This
+   still cannot replace the later real-pen, saved-geometry and untouched-native
+   reopen gate. Only a passed single-page gate admits second-viewport work.
+
+This sequence retains the stock evidence, display geometry, observer and
+isolation supervisor. It adds no competing page/save owner and does not grant
+permission to mutate the existing service's mappings while a loader is missing.
 
 This is a single native engine/viewport investigation, not two independently
 writing readers. Keep original PDF and `.mark` authoritative; no conversion,

@@ -3037,7 +3037,34 @@ was rejected before execution for lack of specific external-disclosure approval.
 No new diagnostic has been staged or run on the Nomad. The full original PDF/
 mark hashes were rechecked unchanged with File Manager foreground; Document
 PID 2027 remains alive. No package, module or firmware changed. See
-[prepared source, exact scope and review blocker](native-viewport-probe/ISOLATION_PROBE.md).
+[prepared source and review history](native-viewport-probe/ISOLATION_PROBE.md).
+
+### Child-isolation mechanism — 2026-09-07 approximately 04:38 local
+
+The user resolved the source-disclosure approval gate. Full independent review
+of `25aa958` found two supervisor defects: unbounded reaping after denied kill
+and stale-PID signaling after lost child ownership. Both were fixed with a
+shared bounded supervisor, SIGCHLD normalization, effective CAP_KILL preflight
+and an independent child watchdog. The Linux host kernel suite now passes 102
+filter runs / 1,428 checks plus reaper-ownership tests, with no descriptor leaks.
+The updated full 39-file source review at
+`e2a27320e6a5d56c60798663cc1ec0973b822bf3` completed CLEAN.
+
+Exact AArch64 diagnostic hash
+`4775fe42b615970ece06ef49131d440a7fefc0043e432ef9411473438f67099c`
+passed five bounded cases on Nomad SN078C10015092: normal isolated completion,
+injected exit after mount/chroot/filter, and supervised timeout. Ordinary adb
+also ran the portable core and filter checks successfully. All cases retain
+`native_start_allowed=false`; no firmware loader, native pen operation, reader
+launch or package change occurred. Parent namespace/device-node identities,
+Document/DrawPath PID/starttime and stock PDF/mark hashes remained unchanged.
+All three device helpers and their empty staging directory were removed.
+
+This validates a cooperative isolated-process mechanism, NOT a genuine native
+page viewport or pen/tool/save behavior. Android parent-death delivery and
+denied-signal fallback are not device-tested. Future executable staging must
+explicitly use 0700 rather than Android's inherited umask. See
+[complete scope, hashes, host/device distinction and cleanup evidence](native-viewport-probe/ISOLATION_PROBE.md).
 
 Before reproducing a failure:
 

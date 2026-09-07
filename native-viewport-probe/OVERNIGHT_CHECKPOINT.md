@@ -2,13 +2,42 @@
 
 User authorized autonomous testing/fixes while sleeping, approximately through
 2026-09-07 05:30 Asia/Jerusalem. No physical-action requests or audible pings.
-The original heartbeat was every 30 minutes until 02:30 UTC and remains paused.
+The existing heartbeat has been resumed, every 30 minutes through the original
+02:30 UTC deadline, using the product's scheduled-task update mechanism.
 The user has explicitly approved the source/notes-only OpenAI review; this
 continuation resumed directly. Do not send PDFs, annotations, firmware binaries
 or credentials. Temporary device helpers from the prior segment are gone.
 Do not merge or claim physical-pen validation.
 
 ## Resumed after explicit review approval — approximately 04:30 local
+
+### Latest completed boundary — approximately 04:40 local
+
+- Code commit `e2a27320e6a5d56c60798663cc1ec0973b822bf3`; full updated
+  39-file source review CLEAN. Both earlier supervisor findings closed.
+- Exact binary `4775fe42b615970ece06ef49131d440a7fefc0043e432ef9411473438f67099c`
+  ran on the verified Nomad: all five isolation cases PASS; core/filter tests
+  also PASS as ordinary adb UID 2000. No firmware loaded or writer admitted.
+- Parent namespace/node identities, Document/DrawPath PID/starttime, foreground
+  File Manager and both stock hashes unchanged. All three staged tools, their
+  directory and all child roots removed. No helper/reviewer/test remains running.
+- Evidence: `build/isolation-hardware-20260907/`; scope and limitations in
+  `ISOLATION_PROBE.md`. Do not repeat completed gates for duplicate evidence.
+- The existing overnight heartbeat is ACTIVE again through 02:30 UTC, with the
+  resolved review approval, completed mechanism gate and remaining boundaries
+  in its updated prompt. No new or standalone task was created.
+- Future executable staging: explicitly CREATE 0700 and verify before copying;
+  Android shell mkdir inherited 0777 in this cooperative run. All executable
+  hashes were rechecked unchanged and the directory restricted then removed.
+- Actual Android parent-death delivery is NOT tested; denied-kill watchdog is
+  Linux-host-tested only. No genuine native pen viewport is ready.
+- New static-only finding: unwind FDEs bound all 28 top-level native initializers;
+  direct dependency list and caveats recorded in `NATIVE_ENGINE_STARTUP.md`.
+- Next bounded work is native startup/private IPC/background/output feasibility,
+  plus parent-death recovery proof if extending the worker. Do not start firmware
+  or touch the live DrawPath mapping under this mechanism's authority.
+
+### Earlier in this resumed turn
 
 - Exact 35-file review of `25aa958` completed NOT CLEAN with two supervisor
   findings (unbounded reap after failed kill; stale PID signaling after ECHILD).

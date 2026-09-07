@@ -123,6 +123,19 @@ No constructor, setter or worker has been called during this inspection.
 
 ## Current decision
 
+Additional read-only ELF work recovered exact unwind-FDE bounds for all 28
+`.init_array` targets. This avoids the earlier first-RET/tail-call overrun.
+In particular 0xc0998 has FDE size 240 bytes and ends at 0xc0a88, before the
+separate hardware-opening constructor. Enumerating direct BL/tail-B targets
+within these bounds found ordinary static initialization, Android String16,
+and embedded logging/flag registration; unresolved/transitive callees remain.
+This is NOT a complete side-effect proof.
+
+The ELF's declared direct dependencies are liblog, libopencv_java4, libbinder,
+libomp, libm, libc++_shared, libdl and libc. Their transitive dependencies and
+initializers must also be included in any future pre-start loader boundary.
+No library was loaded to obtain these findings.
+
 Do not mutate the live DrawPath mapping or start another unmodified native
 engine. First review the bounded isolation alternatives and prove the selected
 one independently of Document and user annotations. The full-screen stock

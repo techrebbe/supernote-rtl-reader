@@ -44,11 +44,12 @@ explicit native I/O adapters for the owned endpoints. Namespace operations must
 be proved not to propagate to the parent. A Java hook alone is NOT the isolation
 boundary. No mount, worker or library startup has been attempted yet.
 
-The prepared isolation substrate is described in `ISOLATION_PROBE.md`. It is
-host-tested only, has no firmware loader, and does not admit native startup.
-The user has approved source-only review. Its first review found two supervisor
-cleanup defects; fixes pass host tests and await confirmation review. No device
-execution or native startup is admitted yet.
+The isolated-process substrate is described in `ISOLATION_PROBE.md`. The user
+approved source-only review; two supervisor findings were fixed and the full
+confirmation review was clean. The exact diagnostic then passed its five
+bounded Nomad cases and was removed. It has no firmware loader and does NOT
+admit native startup. Parent-death delivery and hostile deployment remain
+separate from the completed cooperative mechanism test.
 
 Concerns: native dependencies/SELinux, startup global-service assumptions,
 initializers, Java callback delivery, native Binder caches, added IPC latency.

@@ -1,6 +1,7 @@
 # Single native-page viewport experiment
 
-Status: saved-ink diagnostic and isolated Android display-substrate validated;
+Status: saved-ink diagnostic, isolated Android display substrate and bounded
+child-isolation mechanism validated;
 **no native viewport adapter installed or proven**.
 Branch `agent/native-single-viewport-probe` starts at recorded merged main
 `69e2aa273b9d1943f19afaeac6a1e324abbf9481`. The earlier post-merge working patch
@@ -59,6 +60,12 @@ on the left and(1562,336 2/3) on the right. These arithmetic vectors do not
 establish the still-unproven native pen-service mapping.
 
 ## Next gates, in order
+
+The 2026-09-07 [isolation mechanism gate](ISOLATION_PROBE.md) passed after
+source review and two cleanup fixes. It is only the substrate for investigating
+a private pen engine. Startup dependencies, private IPC, canonical background/
+output coupling and held physical-input ownership remain unproved; do not open
+Document in the display host or repeat the completed stock suite yet.
 
 1. DONE for the saved calibration checkpoints below: review/build the isolated collector, then validate it on disposable copies
    of existing saved baseline checkpoints without asking for another stroke.

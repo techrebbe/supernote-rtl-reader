@@ -2,11 +2,29 @@
 
 User authorized autonomous testing/fixes while sleeping, approximately through
 2026-09-07 05:30 Asia/Jerusalem. No physical-action requests or audible pings.
-The original heartbeat was every 30 minutes until 02:30 UTC. Current continuation
-has reached an explicit review-disclosure approval gate and is being paused;
-do not retry the rejected review uploads or admit new device code. All local
-checks completed and temporary device helpers from the prior segment are gone.
+The original heartbeat was every 30 minutes until 02:30 UTC and remains paused.
+The user has explicitly approved the source/notes-only OpenAI review; this
+continuation resumed directly. Do not send PDFs, annotations, firmware binaries
+or credentials. Temporary device helpers from the prior segment are gone.
 Do not merge or claim physical-pen validation.
+
+## Resumed after explicit review approval — approximately 04:30 local
+
+- Exact 35-file review of `25aa958` completed NOT CLEAN with two supervisor
+  findings (unbounded reap after failed kill; stale PID signaling after ECHILD).
+- Both fixed in the shared `isolation_supervisor.h`: SIGCHLD normalization,
+  waitable-child authority, CAP_KILL preflight, bounded reaping, independent
+  five-second child watchdog, uncertain-cleanup failure with exact-path preservation.
+- Android build and portable cases pass. Linux: 102 filter runs / 1,428 checks,
+  denied-kill watchdog and inherited-SIGCHLD/reaped-PID regressions PASS.
+- New build `build/isolation-1b9348304e074db298129cb2807e8185/`, diagnostic hash
+  `4775fe42b615970ece06ef49131d440a7fefc0043e432ef9411473438f67099c`.
+- Full updated confirmation review is next; no new diagnostic is staged/run.
+- Nomad exact USB serial verified. File Manager foreground, asleep, powered,
+  battery 100%, Document/DrawPath still 2027/1425, both stock hashes unchanged.
+- Existing full viewport/baseline tests reran PASS. A trailing escalated Git
+  diff invocation failed due its execution context; standalone local Git
+  status/diff-check and packaging test rerun clean.
 
 ## Latest continuation — approximately 01:25 local
 
@@ -32,7 +50,7 @@ Do not merge or claim physical-pen validation.
   Document PID 2027, both stock fixture hashes below unchanged. No new device
   modifications, native hooks, input generation, package changes or pen activity.
 
-### Explicit blocker; do not route around it
+### Earlier explicit blocker (now resolved by the user's approval above)
 
 The external Codex review request for five architecture/evidence notes was
 rejected before execution. The provider was then verified as OpenAI from local

@@ -13,7 +13,9 @@ a disposable child. The parent never changes its mounts or credentials.
 
 The child must perform these steps in order; any failure terminates it:
 
-1. Verify the parent and fresh directory, then arm parent-death SIGKILL.
+1. Require supervisor CAP_KILL and normalize its SIGCHLD disposition before
+   forking. Verify the parent and fresh directory, then arm parent-death SIGKILL
+   and an independent five-second child watchdog before privileged setup.
 2. Unshare the mount namespace and prove its identity differs from the parent.
 3. Make the child's mount tree recursively private BEFORE mounting anything.
 4. Mount a one-megabyte private tmpfs, verify its identity, and create ordinary
@@ -29,6 +31,11 @@ The child must perform these steps in order; any failure terminates it:
 
 The parent supervises timeouts, reaps its exact child, compares its original
 namespace/device/directory metadata, and removes only that exact empty directory.
+Every reap is bounded and checks waitable-child ownership before signaling.
+If cleanup cannot be proved, the supervisor exits unsuccessfully and preserves
+the exact directory for inspection; it never continues or signals a stale PID.
+The child's independent SIGALRM deadline survives credential changes and cannot
+be canceled by the installed filter. It is separate from parent-death SIGKILL.
 No real input or EBC node is opened. Cases include normal completion, deliberate
 child exit after mount/chroot/filter, and timeout after a positively reported
 filter admission. Child namespace destruction removes private mounts. If the
@@ -51,29 +58,53 @@ NDK 27.0.12077973 for AArch64/API30 compilation. On 2026-09-07:
 - The Android wrapper compile-time checks ABI offsets, syscall numbers and
   filter encoding against installed Linux/Android headers. Compilation with
   warnings as errors and Clang static analysis both pass.
-- Existing unprivileged WSL Linux/x86-64 host: **101 kernel-filter runs / 1,414
+- Existing unprivileged WSL Linux/x86-64 host: **102 kernel-filter runs / 1,428
   checks PASS, no descriptor leaks**, including an intentionally stalled child
   after a complete report. The parent retains a bounded exit deadline; reporting
-  success cannot leave it waiting indefinitely. This translates only architecture/syscall
+  success cannot leave it waiting indefinitely. The shared supervisor also passes
+  an injected kill-EPERM case (child watchdog actually terminates it), inherited
+  SIGCHLD-ignore normalization, and a reaped-child no-signal regression.
+  This translates only architecture/syscall
   numbers in the same BPF program; no root, namespace/mount test, firmware,
   networking or tablet operation. Positive I/O uses `/dev/null` and owned pipes.
   It is specifically NOT a Nomad seccomp or namespace hardware pass.
 
 Latest Android diagnostic build:
-`build/isolation-15a4b0ff6c874a8c8d9c99b945f699f5/isolation_probe`
-SHA-256 `01aa3493218f3ab8be23e1d5c7c923b64b59635b46b5ddaf23845f649031a28a`.
+`build/isolation-1b9348304e074db298129cb2807e8185/isolation_probe`
+SHA-256 `4775fe42b615970ece06ef49131d440a7fefc0043e432ef9411473438f67099c`.
 It has not been transferred to or run on the Nomad.
 
-## Review blocker / safe next action
+## Review history / safe next action
 
-The independent Codex CLI review attempt for the architecture notes was rejected
+The user explicitly approved sending the diagnostic sources and authored notes
+to OpenAI's Codex review service, excluding PDFs, annotation data, firmware
+binaries and credentials. This supersedes the disclosure blocker described below.
+The fresh 35-file exact-source review of head `25aa958` completed NOT CLEAN:
+failed child termination could lead to an unbounded wait, and inherited SIGCHLD
+auto-reaping could leave stale numeric-PID signal authority.
+
+Both findings are addressed by `isolation_supervisor.h`, shared with the Linux
+kernel test. Android now requires CAP_KILL, normalizes SIGCHLD, arms a child
+watchdog, uses bounded reaping and stops without signaling on ECHILD. Updated
+tests and the Android build pass. A full updated source confirmation review
+is required before staging or executing the diagnostic.
+
+The review also keeps these limits explicit: this cooperative diagnostic assumes
+trusted staging ancestors (verify on-device); the host test does not reproduce
+Android UID/SELinux transitions or parent-death delivery; a private engine still
+needs pre-initializer isolation, private IPC and canonical background/output
+coupling. No hardware or native-start claim follows from the source review.
+
+### Earlier rejected attempts (preserved history, not an active blocker)
+
+The earlier independent Codex CLI review attempt for the architecture notes was rejected
 before execution because sending those notes to an external review service needs
 more specific user approval. The CLI provider was subsequently verified as OpenAI
 from the existing configuration/review log. A smaller fresh review containing
 ONLY seven generic authored diagnostic source/build files, excluding all internal
 architecture notes, was also rejected before execution for lack of specific
 payload-disclosure approval. Neither review ran. Do NOT retry or route around
-these rejections; request explicit approval when the user returns.
+these rejections without explicit approval. That approval has now been received.
 
 The unreviewed local snapshots are
 `inspection/native-reader/reviews/native-viewport-engine-boundary-20260907-r3`

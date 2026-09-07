@@ -30,6 +30,7 @@
 #include <unistd.h>
 #include "isolation_core.h"
 #include "isolation_filter.h"
+#include "isolation_supervisor.h"
 
 #if !defined(__aarch64__)
 #error This Linux implementation is pinned to Android AArch64; use the pure core test on hosts.
@@ -114,6 +115,13 @@ static int empty_capabilities(void) {
         caps[1].effective || caps[1].permitted || caps[1].inheritable ? -1 : 0;
 }
 
+static int parent_can_signal(void) {
+    struct __user_cap_header_struct header = {_LINUX_CAPABILITY_VERSION_3, 0};
+    struct __user_cap_data_struct caps[2] = {{0}};
+    return syscall(__NR_capget, &header, caps) == 0 &&
+        (caps[CAP_KILL / 32].effective & (1u << (CAP_KILL % 32))) ? 1 : 0;
+}
+
 /* Only enough syscalls for this diagnostic. NOT a native worker allowlist.
  * No socket, binder ioctl, mount, namespace entry, device creation, process/thread
  * creation, exec, ptrace, file-handle opens, process_vm, kill, or seccomp updates. */
@@ -193,7 +201,7 @@ static int perform(void *opaque, enum isolation_step step) {
                 lstat(ctx->root, &info) == 0 && same_node(&info, &ctx->original_root) ? 0 : -1;
             break;
         case ISO_PARENT_LIFELINE:
-            if (prctl(PR_SET_PDEATHSIG, SIGKILL) != 0) break;
+            if (isolation_arm_watchdog(5) || prctl(PR_SET_PDEATHSIG, SIGKILL) != 0) break;
             result = getppid() == ctx->parent ? 0 : -1;
             break;
         case ISO_PRIVATE_NAMESPACE:
@@ -271,15 +279,26 @@ static int perform(void *opaque, enum isolation_step step) {
 }
 
 static int64_t now_ms(void) {
-    struct timespec value;
-    if (clock_gettime(CLOCK_MONOTONIC, &value)) return -1;
-    return (int64_t)value.tv_sec * 1000 + value.tv_nsec / 1000000;
+    return isolation_clock_ms();
+}
+
+static void stop_owned_child(pid_t child, int *status, int *killed, const char *root) {
+    struct isolation_reap_result stopped = isolation_stop_child(child, status, 6000, kill);
+    if (stopped.signal_sent) *killed = 1;
+    if (stopped.reaped == 1) return;
+    /* Do not proceed to more cases or delete a directory while ownership is
+     * uncertain. Parent exit triggers PDEATHSIG; the child's own timer remains
+     * armed. Preserve only this fresh path for later inspection. */
+    fprintf(stderr, "ISOLATION_CLEANUP_UNCERTAIN signal_errno=%d wait_errno=%d preserve=%s\n",
+        stopped.signal_error, stopped.wait_error, root);
+    fflush(stderr);
+    _exit(74);
 }
 
 static int run_case(int crash, int timeout) {
     char root[] = TMP_PREFIX "XXXXXX";
     struct stat before_ebc, before_pen, before_ns, root_info, after;
-    if (geteuid() != 0 || lstat("/dev/ebc", &before_ebc) ||
+    if (geteuid() != 0 || !parent_can_signal() || lstat("/dev/ebc", &before_ebc) ||
         lstat("/dev/input/event7", &before_pen) || !S_ISCHR(before_ebc.st_mode) ||
         !S_ISCHR(before_pen.st_mode) || stat("/proc/self/ns/mnt", &before_ns)) return -1;
     if (!mkdtemp(root)) return -1;
@@ -318,10 +337,7 @@ static int run_case(int crash, int timeout) {
 reap:
     if (!waited) {
         /* Covers parent-side failure without leaving a root child behind. */
-        if (!killed) (void)kill(child, SIGKILL);
-        pid_t ended;
-        do { ended = waitpid(child, &status, 0); } while (ended < 0 && errno == EINTR);
-        if (ended != child) goto done;
+        stop_owned_child(child, &status, &killed, root);
     }
     child = -1;
     if (used < sizeof(report)) {
@@ -346,8 +362,8 @@ reap:
         crash, timeout, result ? "FAIL" : "PASS");
 done:
     if (child > 0) {
-        (void)kill(child, SIGKILL);
-        while (waitpid(child, NULL, 0) < 0 && errno == EINTR) {}
+        int cleanup_status = 0, cleanup_killed = 0;
+        stop_owned_child(child, &cleanup_status, &cleanup_killed, root);
     }
     if (pipe_fds[0] >= 0) close(pipe_fds[0]);
     if (pipe_fds[1] >= 0) close(pipe_fds[1]);
@@ -361,6 +377,7 @@ int main(int argc, char **argv) {
         fputs("Use --prove-isolation after exact-source review. No firmware startup.\n", stderr);
         return 2;
     }
+    if (isolation_prepare_parent()) return 2;
     if (run_case(-1, -1) || run_case(ISO_PRIVATE_ROOT, -1) ||
         run_case(ISO_CHROOT_AND_CWD, -1) || run_case(ISO_SYSCALL_FILTER, -1) ||
         run_case(-1, ISO_SYSCALL_FILTER)) return 1;

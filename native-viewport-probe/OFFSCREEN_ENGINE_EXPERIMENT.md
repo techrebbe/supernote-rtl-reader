@@ -46,7 +46,9 @@ boundary. No mount, worker or library startup has been attempted yet.
 
 The prepared isolation substrate is described in `ISOLATION_PROBE.md`. It is
 host-tested only, has no firmware loader, and does not admit native startup.
-Its source-only review is also awaiting explicit disclosure approval.
+The user has approved source-only review. Its first review found two supervisor
+cleanup defects; fixes pass host tests and await confirmation review. No device
+execution or native startup is admitted yet.
 
 Concerns: native dependencies/SELinux, startup global-service assumptions,
 initializers, Java callback delivery, native Binder caches, added IPC latency.

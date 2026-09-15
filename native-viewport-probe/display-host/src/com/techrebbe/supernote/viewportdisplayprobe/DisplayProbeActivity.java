@@ -139,18 +139,20 @@ public final class DisplayProbeActivity extends Activity implements SurfaceHolde
         super.onConfigurationChanged(configuration);
         // Only the physical presentation changes. Do not resize the native
         // display, re-open its activity, or synthesize a native rotation.
+        lifecycle.onConfigurationChanged();
         root.post(this::layoutSurface);
     }
 
     @Override public void surfaceCreated(SurfaceHolder holder) { /* wait for fixed-size confirmation */ }
 
     @Override public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-        if (closing || failure != null || display != null || !lifecycle.canCreate()) return;
+        if (closing || failure != null || display != null) return;
         if (width != DisplayProbeLayout.BUFFER_WIDTH || height != DisplayProbeLayout.BUFFER_HEIGHT
                 || !holder.getSurface().isValid()) {
             log("WAIT_SURFACE", "size=" + width + "x" + height);
             return;
         }
+        if (!lifecycle.onSurfaceReady()) return;
         try {
             DisplayMetrics metrics = new DisplayMetrics();
             getWindowManager().getDefaultDisplay().getRealMetrics(metrics);
@@ -174,7 +176,7 @@ public final class DisplayProbeActivity extends Activity implements SurfaceHolde
                 throw new IllegalStateException("non-default display allocation failed");
             }
             int id = display.getDisplay().getDisplayId();
-            lifecycle.activate();
+            lifecycle.onDisplayCreated();
             log("CREATED", "display=" + id + " buffer=" + width + "x" + height
                     + " density=" + metrics.densityDpi + " generation=" + captured);
             // Nomad rejects an ordinary app launch on this untrusted display.
@@ -184,18 +186,20 @@ public final class DisplayProbeActivity extends Activity implements SurfaceHolde
             log("WAIT_ROOT_CALIBRATION", "display=" + id + " generation=" + captured);
             showStatus();
         } catch (RuntimeException exception) {
+            lifecycle.onDisplayCreateFailed();
             releaseDisplay();
             fail(exception.getClass().getSimpleName() + ": " + exception.getMessage());
         }
     }
 
     @Override public void surfaceDestroyed(SurfaceHolder holder) {
+        lifecycle.onSurfaceDestroyed();
         releaseDisplay();
         if (!closing) fail("surface lost; restart display-only probe explicitly");
     }
 
     private void releaseDisplay() {
-        if (lifecycle != null) lifecycle.stop();
+        if (lifecycle != null) lifecycle.onDisplayReleased();
         generation++;
         VirtualDisplay old = display;
         display = null;
@@ -217,7 +221,7 @@ public final class DisplayProbeActivity extends Activity implements SurfaceHolde
     static boolean calibrationAttached(String instance, int id) {
         if (!ownsDisplay(instance, id)) return false;
         DisplayProbeActivity activity = owner.get();
-        if (activity == null || !activity.lifecycle.claimCalibration()) return false;
+        if (activity == null || !activity.lifecycle.onCalibrationAttached()) return false;
         activity.calibrationLaunched = true;
         activity.log("CALIBRATION_ATTACHED", "display=" + id + " pen-ready=false");
         activity.showStatus();
@@ -228,13 +232,14 @@ public final class DisplayProbeActivity extends Activity implements SurfaceHolde
         if (!ownsDisplay(instance, id)) return;
         DisplayProbeActivity activity = owner.get();
         if (activity == null) return;
+        activity.lifecycle.onCalibrationEnded();
         activity.releaseDisplay();
         activity.fail("calibration ended; close and reopen probe to restart");
     }
 
     private void fail(String reason) {
         failure = reason;
-        if (lifecycle != null) lifecycle.stop();
+        if (lifecycle != null) lifecycle.onFailure();
         if (controls != null) controls.setVisibility(View.VISIBLE);
         log("UNAVAILABLE", reason);
         showStatus();
@@ -255,12 +260,14 @@ public final class DisplayProbeActivity extends Activity implements SurfaceHolde
 
     @Override protected void onDestroy() {
         closing = true;
+        if (lifecycle != null) lifecycle.onActivityDestroyed();
         releaseDisplay();
         super.onDestroy();
     }
 
     @Override protected void onSaveInstanceState(Bundle state) {
         super.onSaveInstanceState(state);
+        lifecycle.onStateSaved();
         state.putBoolean("displayProbeExisted", true);
         // Never persist authority to create a replacement display automatically.
     }

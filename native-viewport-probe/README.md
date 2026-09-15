@@ -9,6 +9,26 @@ and complete stock hardware evidence remain untouched in the sibling
 `supernote-rtl-reader-pr22-upload` worktree. The installed companion remains
 disabled for the stock baseline. No production package includes these files.
 
+The corrected no-bootstrap SavedInk collector passed its bounded hardware gate
+on 2026-09-11. It ran twice as ordinary ADB-shell UID/GID 2000 against the same
+protected disposable `.mark` input and produced byte-identical authenticated
+frames. The oracle found two unchanged native records and no added, removed or
+changed record. The live PDF/mark, disposable source, protected input, firmware
+hashes and Document process identity remained unchanged, and no helper process
+remained. The deployable 37,578-byte JAR has SHA-256
+`fe0d42d26a8f2a21ee0a14cb88f0f57bee8cd98d5e3abfeaf8e75da4391e09b2`;
+its DEX contains no call-site or method-handle bootstrap section. This validates
+only the independent saved-ink reader boundary; it does not prove or install the
+one-page native viewport or pen engine. Three independent current-state reviews
+returned CLEAN; the bounded one-page viewport experiment is the next gate.
+The bounded machine-readable checkpoint is
+[HARDWARE_SAVED_INK_GATE_20260911.json](HARDWARE_SAVED_INK_GATE_20260911.json);
+raw annotation frames and native stderr remain local-only evidence.
+After independent review completed, this gate's exact uploaded collector, four
+remote capture files, protected input and now-empty protected directory were
+removed and individually verified absent. Historical compatibility/r3 files
+were not touched.
+
 ## Implemented preparation
 
 - `ViewportFrame`: one immutable native-page-canvas to window transform and a
@@ -26,6 +46,11 @@ disabled for the stock baseline. No production package includes these files.
   `app_process` and a disposable `.mark` COPY only. It uses the pinned native
   `getFilePageTrails` read interface, never live `getTrailContainer`. It does not
   attach to Document/DrawPath, install hooks, connect Binder, or write a mark.
+  This collector must run as the ordinary ADB shell process with exact UID 2000
+  and GID 2000; it deliberately refuses `su`, root, app, or mixed identities
+  before parsing arguments, opening files, authenticating firmware, or loading
+  native code. This restriction is SavedInk-specific: the separate read-only
+  loader inventory tools still require `su` for protected `/proc` evidence.
   Native initialization/cleanup is private to its process. Firmware/copy hashes
   are checked before and after. Its disposable-copy gate is recorded below.
   Read-only `fetchPagesOfMark` must admit the requested page first. A page with
@@ -225,12 +250,95 @@ was removed. This is not a held pen barrier or permission to write on the
 display-only host. See [overnight continuation](OVERNIGHT_CHECKPOINT.md) for the
 exact remaining work and preserved evidence.
 
-The next host-only preparation records the actual service startup, separate
-Binder caches, painter-held EBC aliases and canonical-background dependency in
-[NATIVE_ENGINE_STARTUP.md](NATIVE_ENGINE_STARTUP.md). A disposable-process
-[isolation diagnostic](ISOLATION_PROBE.md) compiles for Android and passes its
-portable and unprivileged Linux host checks. It has NOT run on the Nomad and
-contains no firmware loader. Independent review of the new source/notes is
-blocked pending explicit external-review disclosure approval. Existing r2
-review does not cover these new files; do not use the host results as permission
-to start a native writer. No final physical-pen batch is ready yet.
+## Pre-hardware repair record — superseded by the hardware checkpoint above
+
+The later host-only preparation records actual service startup, separate Binder
+caches, painter-held EBC aliases and canonical-background dependency in
+[NATIVE_ENGINE_STARTUP.md](NATIVE_ENGINE_STARTUP.md). The disposable-process
+[isolation diagnostic](ISOLATION_PROBE.md) subsequently passed its bounded Nomad
+mechanism gate with only an authored fixture; it did not load firmware. The
+separate loader-admission candidate passed its then-current host matrices and
+focused reviews as recorded below. None of those results was permission to start
+a native writer or physical-pen batch.
+
+That pre-hardware 2026-09-11 repair candidate passed the complete Windows and WSL
+matrices. Windows ran 234 authenticated tests: the 222-test core plus the
+12-test generated-device-artifact lane, with 20 expected platform-only skips.
+WSL ran the 222-test core with 9 expected skips. The Linux native harness also
+passed 6,439 report checks, 57 loader cases and 102 filter runs / 1,428 checks.
+The authorities at that checkpoint were launcher-gate SHA-256
+`8f961715c251e4a80207dc656ecac3ca0a9dd890de10d459236390eed66e133c`
+and authenticated fifteen-file Python-source SHA-256
+`c6bfd63eccfbb716e8fad91346cd7bbf69198c82855d2cc5418071fc0840e9cb`.
+`loader_resource.h` is now part of the explicit native source inventory: the
+child closes inherited descriptors before applying the exact 256 MiB address-
+space and 32-descriptor limits, and only then reaches `dlopen`.
+
+The Java/Python SavedInk golden is 2,532 payload bytes with SHA-256
+`20a179534dfce744b9be97e8e40c1ab07ef19e1c1ddb618ed38f58002e648158`
+and a 2,562-byte outer frame. It now exercises the exact firmware record types,
+including nested `PointF`, `JniFlagRect` and `JniRecognData` fields rather than
+an encoder-derived approximation. On POSIX, report publication remains
+descriptor-authorized and mutation-detecting under a trusted host account; it
+does not claim sealing against a malicious same-UID actor. Exact status,
+limitations and review evidence are recorded in
+[LOADER_ADMISSION.md](LOADER_ADMISSION.md).
+
+The Windows-configured artifact lane built two clean copies of the deployable
+schema-v2 SavedInk reader, proves byte-for-byte reproducibility, verifies the
+actual JAR, DEX and provenance, and then runs all 12 artifact mutation tests.
+The then-canonical JAR was 37,810 bytes with SHA-256
+`9204fb1a8e2230527af4bad314e6f52c430c6e94f28020a1251ffc26ef6767c9`;
+its 31,340-byte `classes.dex` has SHA-256
+`d49bda671c7a16350d35b26a5f0883b4058d938cbc463e0e5f3aee04c6976df9`;
+and its embedded authority has SHA-256
+`4230ab7067aaa7fe8658c176fb0db65cfac6f9f7760efcf7348b8e75a7e2e296`.
+The collector wire is `native-viewport-ink-evidence-v2`; a DEX carrying the
+stale `native-viewport-ink-evidence-v1` wire is explicitly rejected.
+
+Two P1 integration findings discovered after the earlier slice reviews are now
+repaired. Terminal report publication treats the successful no-replace
+link/rename as the logical commit and explicitly tracks private,
+outcome-unknown, published and collision states. Published or uncertain output
+is preserved, while collision, relocation and post-commit uncertainty are
+reported as nonretryable exit 2 rather than inviting a second authority. The
+gate-provenance repair binds a reused gate's complete executable namespace to
+the exact captured and pinned gate bytes, retains the accepted object identities
+and revalidates them on later calls. Its regressions reject callable preloads,
+ordinary-loader relabeling, self-consistent custom fake loader/finder graphs and
+post-first-use replacement.
+
+This admission assumes the production launchers' fresh `-I -S -E -s` process,
+exact captured/pinned sources, a trusted unmodified CPython runtime and
+quiescent canonical builtins, standard-library identities and import state.
+Tests reject inert matching-path aliases, fake or relabeled loader graphs,
+helper and authority replacement, ABC virtual-subclass tricks, hostile
+container equality and callback-bearing source/root paths. It does not claim to
+survive arbitrary code that already poisoned or concurrently mutates the same
+interpreter, builtins, standard library, `sys.modules` or `sys.meta_path`, nor a
+hostile CPython executable. The final sequential matrices passed for this
+repair: Windows ran 234/234 core-plus-artifact tests with 20 expected skips,
+WSL ran 222/222 core tests with 9 expected skips, and the Linux harness passed
+6,439 report checks, 57 loader cases and 102 filter runs / 1,428 checks. The
+focused launcher, terminal-publication, artifact and exact-source reviews are
+**CLEAN**, but they do not clear the overall candidate: one combined current-
+head review remains required.
+
+The production display-package inspector and verifier now enter through
+`invoke-authenticated-production.ps1`; arbitrary real SavedInk before/after
+captures enter through `run-ink-oracle.ps1`. The oracle requires exactly one
+complete input mode: either the compatible raw before/after path pair or the
+explicit `--framed-before`/`--framed-after` pair. It never autodetects or mixes
+raw and framed inputs. Each shell entry point starts only fresh
+`python -I -S -E -s -c` bootstrap text, authenticates the retained exact
+launcher snapshot, and captures every transitive local source before import.
+Exact one-record status framing, independently preserved stdout/stderr, exact
+0/1/2/126 exits, source/path revalidation, descriptor cleanup and nonretryable
+post-publication uncertainty are covered by the authenticated host matrices.
+
+The SavedInk collector hardware gate now passes as recorded at the top of this
+file and in [LOADER_ADMISSION.md](LOADER_ADMISSION.md). This remains collector
+evidence, not arbitrary-viewport or native-writer readiness. Three independent
+current-state read-only reviews returned CLEAN; the bounded one-page viewport
+experiment is now the next gate. No package installation, module enable, push,
+PR advance or merge occurred during the collector gate.

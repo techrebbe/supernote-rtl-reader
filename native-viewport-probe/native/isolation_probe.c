@@ -316,41 +316,59 @@ static int run_case(int crash, int timeout) {
     close(pipe_fds[1]); pipe_fds[1] = -1;
     struct report report = {0};
     size_t used = 0;
-    int status = 0, killed = 0, waited = 0;
+    int status = 0, killed = 0;
+    int wait_outcome = ISO_WAIT_SUPERVISOR_ERROR;
     int64_t start = now_ms();
     if (start < 0) goto reap;
+    int64_t deadline = start + (timeout >= 0 ? 2500 : 10000);
     for (;;) {
+        int64_t before = now_ms();
+        if (before < start) { wait_outcome = ISO_WAIT_SUPERVISOR_ERROR; break; }
+        if (before >= deadline) {
+            wait_outcome = ISO_WAIT_ELAPSED_TIMEOUT;
+            if (kill(child, SIGKILL) == 0) killed = 1;
+            break;
+        }
         ssize_t count = read(pipe_fds[0], (char *)&report + used, sizeof(report) - used);
         if (count > 0) used += (size_t)count;
         else if (count < 0 && errno != EAGAIN && errno != EINTR) break;
         pid_t ended = waitpid(child, &status, WNOHANG);
-        if (ended == child) { waited = 1; break; }
-        if (ended < 0 && errno != EINTR) break;
+        if (ended < 0 && errno != EINTR) { wait_outcome = ISO_WAIT_SUPERVISOR_ERROR; break; }
         int64_t clock = now_ms();
-        if (clock < 0 || clock - start > (timeout >= 0 ? 2500 : 10000)) {
+        if (clock < before) { wait_outcome = ISO_WAIT_SUPERVISOR_ERROR; break; }
+        if (ended == child) {
+            wait_outcome = clock < deadline ? ISO_WAIT_TIMELY_EXIT : ISO_WAIT_LATE_EXIT;
+            break;
+        }
+        if (clock >= deadline) {
+            wait_outcome = ISO_WAIT_ELAPSED_TIMEOUT;
             if (kill(child, SIGKILL) == 0) killed = 1;
             break;
         }
         struct pollfd pfd = {pipe_fds[0], POLLIN, 0};
-        (void)poll(&pfd, 1, 10);
+        int remaining = (int)(deadline - clock);
+        int polled = poll(&pfd, 1, remaining < 10 ? remaining : 10);
+        if (polled < 0 && errno != EINTR) { wait_outcome = ISO_WAIT_SUPERVISOR_ERROR; break; }
     }
 reap:
-    if (!waited) {
+    if (wait_outcome == ISO_WAIT_ELAPSED_TIMEOUT || wait_outcome == ISO_WAIT_SUPERVISOR_ERROR) {
         /* Covers parent-side failure without leaving a root child behind. */
         stop_owned_child(child, &status, &killed, root);
     }
     child = -1;
-    if (used < sizeof(report)) {
-        ssize_t count = read(pipe_fds[0], (char *)&report + used, sizeof(report) - used);
-        if (count > 0) used += (size_t)count;
-    }
-    if (crash >= 0) result = WIFEXITED(status) && WEXITSTATUS(status) == 71 ? 0 : -1;
-    else if (timeout >= 0) result = killed && WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL &&
-        used == sizeof(report) && report.magic == REPORT_MAGIC && report.completed == timeout + 1 &&
+    size_t expected_wire = crash >= 0 ? 0u : sizeof(report);
+    int wire_ok = isolation_read_exact_eof(
+        pipe_fds[0], &report, expected_wire, used) == 0;
+    if (crash >= 0) result = wait_outcome == ISO_WAIT_TIMELY_EXIT &&
+        wire_ok && WIFEXITED(status) && WEXITSTATUS(status) == 71 ? 0 : -1;
+    else if (timeout >= 0) result = wait_outcome == ISO_WAIT_ELAPSED_TIMEOUT && killed &&
+        WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL &&
+        wire_ok && report.magic == REPORT_MAGIC && report.completed == timeout + 1 &&
         report.failed == -1 && report.error == 0 && report.pass == 0 ? 0 : -1;
-    else result = WIFEXITED(status) && WEXITSTATUS(status) == 0 && used == sizeof(report) &&
+    else result = wait_outcome == ISO_WAIT_TIMELY_EXIT && WIFEXITED(status) &&
+        WEXITSTATUS(status) == 0 && wire_ok &&
         report.magic == REPORT_MAGIC && report.completed == ISO_COUNT && report.failed == -1 && report.pass == 1 ? 0 : -1;
-    if (result && used == sizeof(report) && report.magic == REPORT_MAGIC)
+    if (result && wire_ok && expected_wire == sizeof(report) && report.magic == REPORT_MAGIC)
         fprintf(stderr, "ISOLATION_REJECTED step=%d completed=%d errno=%d\n", report.failed, report.completed, report.error);
     /* Verify the parent still sees its ORIGINAL namespace, root, and hardware
      * identities. No real device node has ever been opened by this executable. */

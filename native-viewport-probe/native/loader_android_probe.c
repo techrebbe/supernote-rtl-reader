@@ -36,6 +36,7 @@
 #include "isolation_supervisor.h"
 #include "loader_filter.h"
 #include "loader_report.h"
+#include "loader_resource.h"
 #include "loader_fixture_blob.h" /* Generated from our fixture by the build. */
 #if !defined(__aarch64__)
 #error Android AArch64 diagnostic only.
@@ -46,7 +47,7 @@ struct context {
     pid_t parent;
     const char *root;
     struct stat namespace_before,outer_before;
-    int crash_after,root_readonly,mappings_verified;
+    int crash_after,root_readonly,mappings_verified,resource_limits_verified;
 };
 
 static int same_node(const struct stat *a,const struct stat *b) {
@@ -95,6 +96,21 @@ static int close_others(void) {
     }
     if(closedir(d)) failed=1;
     return failed ? -1:0;
+}
+static int descriptor_count(void) {
+    DIR *directory=opendir("/proc/self/fd");
+    if(!directory) return -1;
+    int count=0;
+    for(;;) {
+        errno=0; struct dirent *entry=readdir(directory);
+        if(!entry) { if(errno) count=-1; break; }
+        char *end=NULL; (void)strtol(entry->d_name,&end,10);
+        if(end!=entry->d_name && *end=='\0') ++count;
+    }
+    return closedir(directory) || count<0 ? -1:count;
+}
+static int same_limit(const struct rlimit *a,const struct rlimit *b) {
+    return a->rlim_cur==b->rlim_cur && a->rlim_max==b->rlim_max;
 }
 static int outside_absent(void) {
     const char *paths[]={"/dev","/proc","/sys","/system","/system_ext","/apex","/data","/storage"};
@@ -199,7 +215,13 @@ static int perform(void *opaque,enum isolation_step step) {
         case ISO_CLOSE_INHERITED_FDS:
             if(private_mappings_only()) break;
             ctx->mappings_verified=1;
-            result=close_others(); break;
+            /* A dense inherited table can occupy every descriptor below the
+             * cap. Walk and close it while the inherited ceiling still permits
+             * opening /proc/self/fd, then install both hard caps. */
+            if(close_others() || getppid()!=ctx->parent ||
+                loader_apply_resource_limits() || loader_resource_limits_exact()) break;
+            ctx->resource_limits_verified=1;
+            result=0; break;
         case ISO_CHROOT_AND_CWD:
             if(chroot(".") || chdir("/")) break;
             result=outside_absent(); break;
@@ -221,7 +243,8 @@ static int perform(void *opaque,enum isolation_step step) {
                 ge==FIXTURE_UID && gs==FIXTURE_UID && getgroups(0,NULL)==0 && capabilities(0)==0 &&
                 getppid()==ctx->parent && prctl(PR_GET_PDEATHSIG,&death)==0 && death==SIGKILL &&
                 prctl(PR_GET_NO_NEW_PRIVS,0,0,0,0)==1 && prctl(PR_GET_SECCOMP,0,0,0,0)==SECCOMP_MODE_FILTER &&
-                ctx->root_readonly && ctx->mappings_verified && outside_absent()==0 ? 0:-1;
+                ctx->root_readonly && ctx->mappings_verified && ctx->resource_limits_verified &&
+                outside_absent()==0 ? 0:-1;
             break;
         }
         case ISO_OWNED_IO_ONLY: {
@@ -249,16 +272,19 @@ static int expected_syscall(int which) {
 }
 static int run_case(int which,int crash_after) {
     struct stat ns,ebc,pen,outer,after;
+    struct rlimit parent_as_before,parent_as_after,parent_nofile_before,parent_nofile_after;
+    int descriptors_before=descriptor_count();
     if(geteuid()!=0 || capabilities(1) || stat("/proc/self/ns/mnt",&ns) ||
         lstat("/dev/ebc",&ebc) || lstat("/dev/input/event7",&pen) ||
-        !S_ISCHR(ebc.st_mode) || !S_ISCHR(pen.st_mode)) return -1;
+        !S_ISCHR(ebc.st_mode) || !S_ISCHR(pen.st_mode) || descriptors_before<0 ||
+        getrlimit(RLIMIT_AS,&parent_as_before) || getrlimit(RLIMIT_NOFILE,&parent_nofile_before)) return -1;
     char root[]="/data/local/tmp/native-viewport-loader-XXXXXX";
     if(!mkdtemp(root)) return -1;
     int result=-1,channel[2]={-1,-1}; pid_t child=-1;
     char mode[16]; snprintf(mode,sizeof(mode),"%d",which);
     if(setenv("VIEWPORT_LOADER_FIXTURE_CASE",mode,1) || lstat(root,&outer) || outer.st_uid!=0 ||
         !S_ISDIR(outer.st_mode) || (outer.st_mode&0777)!=0700 || pipe2(channel,O_CLOEXEC|O_NONBLOCK)) goto done;
-    struct context ctx={getpid(),root,ns,outer,crash_after,0,0};
+    struct context ctx={getpid(),root,ns,outer,crash_after,0,0,0};
     child=fork();
     if(child==0) {
         if(channel[1]!=3 && dup2(channel[1],3)!=3) _exit(70);
@@ -269,30 +295,39 @@ static int run_case(int which,int crash_after) {
     }
     if(child<0) goto done;
     close(channel[1]); channel[1]=-1;
-    int status=0,terminated=0;
+    int status=0;
     int waited=isolation_wait_exit(child,&status,which==11 ? 2000:7000);
-    if(waited!=1) {
-        struct isolation_reap_result stopped=isolation_stop_child(child,&status,6000,kill);
-        if(stopped.reaped!=1) {
+    struct isolation_reap_result stopped={ISO_WAIT_TIMELY_EXIT,0,0,0};
+    if(waited==ISO_WAIT_ELAPSED_TIMEOUT || waited==ISO_WAIT_SUPERVISOR_ERROR) {
+        stopped=isolation_stop_child(child,&status,6000,kill);
+        if(stopped.reaped!=ISO_WAIT_TIMELY_EXIT) {
             fprintf(stderr,"LOADER_CLEANUP_UNCERTAIN preserve=%s signal_errno=%d wait_errno=%d\n",root,stopped.signal_error,stopped.wait_error);
             _exit(74);
         }
-        terminated=stopped.signal_sent;
     }
+    int forced_timeout=isolation_confirmed_forced_timeout(waited,stopped,status);
+    int provenance_ok=crash_after>=0 ? waited==ISO_WAIT_TIMELY_EXIT :
+        which==11 ? forced_timeout : waited==ISO_WAIT_TIMELY_EXIT;
     child=-1;
-    struct loader_result messages[5]; ssize_t bytes=read(channel[0],messages,sizeof(messages));
-    if(crash_after>=0) result=bytes==0 && WIFEXITED(status) && WEXITSTATUS(status)==75 ? 0:-1;
-    else result=bytes>=0 && loader_sequence(messages,(size_t)bytes,which,expected_syscall(which),
+    struct loader_result messages[5];
+    size_t expected_bytes=loader_expected_report_bytes(which,crash_after);
+    int wire_ok=expected_bytes<=sizeof(messages) &&
+        isolation_read_exact_eof(channel[0],messages,expected_bytes,0)==0;
+    if(crash_after>=0) result=provenance_ok && wire_ok && WIFEXITED(status) && WEXITSTATUS(status)==75 ? 0:-1;
+    else result=provenance_ok && wire_ok && loader_sequence(messages,expected_bytes,which,expected_syscall(which),
         WIFEXITED(status) ? WEXITSTATUS(status):-1,
-        terminated && WIFSIGNALED(status) && WTERMSIG(status)==SIGKILL) ? 0:-1;
+        forced_timeout) ? 0:-1;
     if(result) {
-        fprintf(stderr,"LOADER_FAIL case=%d crash=%d status=%d bytes=%ld",which,crash_after,status,(long)bytes);
-        if(bytes>=(long)sizeof(messages[0])) fprintf(stderr," first_tag=%d step=%d nr=%d",messages[0].tag,messages[0].step,messages[0].nr);
-        if(bytes>=(long)(2*sizeof(messages[0]))) fprintf(stderr," second_tag=%d step=%d nr=%d",messages[1].tag,messages[1].step,messages[1].nr);
+        fprintf(stderr,"LOADER_FAIL case=%d crash=%d status=%d expected_bytes=%lu wire_ok=%d",
+            which,crash_after,status,(unsigned long)expected_bytes,wire_ok);
+        if(wire_ok && expected_bytes>=sizeof(messages[0])) fprintf(stderr," first_tag=%d step=%d nr=%d",messages[0].tag,messages[0].step,messages[0].nr);
+        if(wire_ok && expected_bytes>=2*sizeof(messages[0])) fprintf(stderr," second_tag=%d step=%d nr=%d",messages[1].tag,messages[1].step,messages[1].nr);
         fputc('\n',stderr);
     }
     if(stat("/proc/self/ns/mnt",&after) || !same_node(&ns,&after) || lstat(root,&after) || !same_node(&outer,&after) ||
-        lstat("/dev/ebc",&after) || !same_node(&ebc,&after) || lstat("/dev/input/event7",&after) || !same_node(&pen,&after)) result=-1;
+        lstat("/dev/ebc",&after) || !same_node(&ebc,&after) || lstat("/dev/input/event7",&after) || !same_node(&pen,&after) ||
+        getrlimit(RLIMIT_AS,&parent_as_after) || getrlimit(RLIMIT_NOFILE,&parent_nofile_after) ||
+        !same_limit(&parent_as_before,&parent_as_after) || !same_limit(&parent_nofile_before,&parent_nofile_after)) result=-1;
 done:
     if(child>0) { /* No path currently reaches here with an unreaped child. */
         int status=0;
@@ -301,14 +336,15 @@ done:
     if(channel[0]>=0) close(channel[0]);
     if(channel[1]>=0) close(channel[1]);
     if(rmdir(root)) { fprintf(stderr,"LOADER_PRESERVE %s\n",root); result=-1; }
+    if(descriptor_count()!=descriptors_before) result=-1;
     printf("LOADER_CASE case=%d crash=%d result=%s embedded_fixture_only=true firmware_loaded=false\n",which,crash_after,result ? "FAIL":"PASS");
     return result;
 }
 int main(int argc,char **argv) {
     if(argc!=2 || strcmp(argv[1],"--prove-fixture-loader") || isolation_prepare_parent()) return 2;
-    for(int which=0;which<=16;++which) if(run_case(which,-1)) return 1;
+    for(int which=0;which<=18;++which) if(run_case(which,-1)) return 1;
     const int crashes[]={ISO_PRIVATE_ROOT,ISO_SEED_FIXTURES,ISO_CHROOT_AND_CWD,ISO_DROP_PRIVILEGES,ISO_SYSCALL_FILTER};
     for(unsigned i=0;i<sizeof(crashes)/sizeof(crashes[0]);++i) if(run_case(0,crashes[i])) return 1;
-    puts("LOADER_FIXTURE_MECHANISM PASS cases=22 firmware_loaded=false native_start_allowed=false");
+    puts("LOADER_FIXTURE_MECHANISM PASS cases=24 resource_caps=PASS firmware_loaded=false native_start_allowed=false");
     return 0;
 }

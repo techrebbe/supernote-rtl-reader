@@ -17,6 +17,12 @@ public final class DisplayProbeLayout {
         this.effectivePlacement = placement;
     }
 
+    public boolean exactlyMatches(int measuredLeft, int measuredTop,
+            int measuredWidth, int measuredHeight) {
+        return left == measuredLeft && top == measuredTop
+                && width == measuredWidth && height == measuredHeight;
+    }
+
     public static DisplayProbeLayout fit(int hostWidth, int hostHeight, Placement requested) {
         if (hostWidth < 4 || hostHeight < 4 || hostWidth > 8192 || hostHeight > 8192
                 || requested == null) throw new IllegalArgumentException("invalid host geometry");

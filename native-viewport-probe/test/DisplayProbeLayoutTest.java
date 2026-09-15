@@ -33,24 +33,62 @@ public final class DisplayProbeLayoutTest {
         }
         require(DisplayProbeLayout.BUFFER_WIDTH == 1404 && DisplayProbeLayout.BUFFER_HEIGHT == 1872);
         DisplayProbeLifecycle cold = new DisplayProbeLifecycle(false);
-        require(cold.canCreate() && !cold.isActive());
-        require(!cold.claimCalibration());
-        cold.activate();
-        require(!cold.canCreate() && cold.isActive());
-        require(cold.claimCalibration());
-        require(!cold.claimCalibration());
-        cold.stop();
-        require(!cold.canCreate() && !cold.isActive());
-        require(!cold.claimCalibration());
-        cold.stop();
-        require(!cold.canCreate());
-        for (DisplayProbeLifecycle stopped : new DisplayProbeLifecycle[]{cold, new DisplayProbeLifecycle(true)}) {
-            require(!stopped.canCreate() && !stopped.isActive());
-            require(!stopped.claimCalibration());
-            try { stopped.activate(); throw new AssertionError("restored/stopped host restarted"); }
-            catch (IllegalStateException expected) { checks++; }
+        require(cold.canCreate() && !cold.isCreating() && !cold.isActive());
+        require(!cold.onCalibrationAttached());
+        require(cold.onSurfaceReady());
+        require(!cold.canCreate() && cold.isCreating() && !cold.isActive());
+        require(!cold.onSurfaceReady()); // duplicate surface callback cannot double-create
+        require(!cold.onCalibrationAttached());
+        cold.onConfigurationChanged();
+        cold.onStateSaved();
+        require(cold.isCreating());
+        cold.onDisplayCreated();
+        require(!cold.canCreate() && !cold.isCreating() && cold.isActive());
+        require(cold.onCalibrationAttached());
+        require(!cold.onCalibrationAttached());
+        cold.onConfigurationChanged();
+        cold.onStateSaved();
+        require(cold.isActive());
+        cold.onSurfaceDestroyed();
+        require(!cold.canCreate() && !cold.isCreating() && !cold.isActive());
+        require(!cold.onSurfaceReady() && !cold.onCalibrationAttached());
+        try { cold.onDisplayCreated(); throw new AssertionError("stopped host completed creation"); }
+        catch (IllegalStateException expected) { checks++; }
+
+        DisplayProbeLifecycle restored = new DisplayProbeLifecycle(true);
+        require(!restored.canCreate() && !restored.isCreating() && !restored.isActive());
+        require(!restored.onSurfaceReady() && !restored.onCalibrationAttached());
+
+        DisplayProbeLifecycle createFailure = new DisplayProbeLifecycle(false);
+        require(createFailure.onSurfaceReady());
+        createFailure.onDisplayCreateFailed();
+        require(!createFailure.canCreate() && !createFailure.isCreating() && !createFailure.isActive());
+
+        // Every production terminal callback is sticky from both creating and
+        // active states, while presentation callbacks above preserve authority.
+        for (int terminal = 0; terminal < 6; terminal++) {
+            DisplayProbeLifecycle lifecycle = new DisplayProbeLifecycle(false);
+            require(lifecycle.onSurfaceReady());
+            if ((terminal & 1) != 0) lifecycle.onDisplayCreated();
+            switch (terminal) {
+                case 0: lifecycle.onSurfaceDestroyed(); break;
+                case 1: lifecycle.onDisplayReleased(); break;
+                case 2: lifecycle.onCalibrationEnded(); break;
+                case 3: lifecycle.onFailure(); break;
+                case 4: lifecycle.onActivityDestroyed(); break;
+                default: lifecycle.onDisplayCreateFailed(); break;
+            }
+            require(!lifecycle.canCreate() && !lifecycle.isCreating() && !lifecycle.isActive());
+            lifecycle.onConfigurationChanged();
+            lifecycle.onStateSaved();
+            require(!lifecycle.onSurfaceReady() && !lifecycle.onCalibrationAttached());
         }
+        try {
+            new DisplayProbeLifecycle(false).onDisplayCreated();
+            throw new AssertionError("unadmitted display creation completed");
+        } catch (IllegalStateException expected) { checks++; }
         require(new DisplayProbeLifecycle(false).canCreate());
-        System.out.println("Display surface layout: " + checks + " assertions PASS (not native pen geometry)");
+        System.out.println("Display surface/lifecycle seam: " + checks
+                + " assertions PASS (Android callback delivery and native pen geometry remain hardware-only)");
     }
 }

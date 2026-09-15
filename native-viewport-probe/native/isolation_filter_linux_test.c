@@ -16,6 +16,7 @@
 #include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/time.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -124,11 +125,27 @@ static int deny_signal(pid_t child, int signal) {
     return -1;
 }
 
+static int poll_readable_until(int fd, unsigned timeout_ms) {
+    int64_t start = isolation_clock_ms();
+    if (start < 0) return -1;
+    for (;;) {
+        int64_t now = isolation_clock_ms();
+        if (now < start) return -1;
+        uint64_t elapsed = (uint64_t)(now - start);
+        if (elapsed >= timeout_ms) return 0;
+        int remaining = (int)(timeout_ms - elapsed);
+        struct pollfd ready = {fd, POLLIN, 0};
+        int result = poll(&ready, 1, remaining);
+        if (result >= 0) return result;
+        if (errno != EINTR) return -1;
+    }
+}
+
 static int run_kernel_case(int hang_after_report, int deny_kill) {
     struct sock_filter code[ISOLATION_FILTER_COUNT];
     if (make_host_program(code)) return 2;
     int channel[2];
-    if (pipe2(channel, O_CLOEXEC)) return 2;
+    if (pipe2(channel, O_CLOEXEC | O_NONBLOCK)) return 2;
     pid_t parent = getpid(), child = fork();
     if (child == 0) {
         close(channel[0]);
@@ -137,22 +154,15 @@ static int run_kernel_case(int hang_after_report, int deny_kill) {
     close(channel[1]);
     if (child < 0) { close(channel[0]); return 2; }
     int report[3] = {0}, status = 0;
-    struct pollfd ready = {channel[0], POLLIN, 0};
-    int readable;
-    do { readable = poll(&ready, 1, 3000); } while (readable < 0 && errno == EINTR);
+    int readable = poll_readable_until(channel[0], 3000);
     ssize_t count = readable > 0 ? read(channel[0], report, sizeof(report)) : -1;
-    close(channel[0]);
     int killed = 0, signal_error = 0;
-    pid_t ended = 0;
+    int wait_outcome = ISO_WAIT_SUPERVISOR_ERROR;
     /* Receiving a complete report must NOT remove the child-exit deadline. */
-    unsigned attempts = hang_after_report ? 20 : 300;
-    while (count == sizeof(report) && attempts--) {
-        ended = waitpid(child, &status, WNOHANG);
-        if (ended == child || (ended < 0 && errno != EINTR)) break;
-        const struct timespec pause = {0, 10000000};
-        (void)nanosleep(&pause, NULL);
-    }
-    if (ended != child) {
+    if (count == sizeof(report))
+        wait_outcome = isolation_wait_exit(child, &status, hang_after_report ? 200 : 3000);
+    int reaped = wait_outcome == ISO_WAIT_TIMELY_EXIT || wait_outcome == ISO_WAIT_LATE_EXIT;
+    if (!reaped) {
         struct isolation_reap_result stopped = isolation_stop_child(child, &status, 2000,
             deny_kill ? deny_signal : kill);
         killed = stopped.signal_sent;
@@ -162,13 +172,19 @@ static int run_kernel_case(int hang_after_report, int deny_kill) {
             (void)isolation_stop_child(child, &status, 1000, kill);
             _exit(73);
         }
-        ended = child;
+        reaped = 1;
     }
-    int exit_ok = deny_kill ? !killed && signal_error == EPERM &&
+    size_t used = count > 0 ? (size_t)count : 0u;
+    int wire_ok = readable > 0 && count >= 0 &&
+        isolation_read_exact_eof(channel[0], report, sizeof(report), used) == 0;
+    close(channel[0]);
+    int exit_ok = deny_kill ? wait_outcome == ISO_WAIT_ELAPSED_TIMEOUT &&
+        !killed && signal_error == EPERM &&
         WIFSIGNALED(status) && WTERMSIG(status) == SIGALRM :
-        hang_after_report ? killed && WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL :
-        WIFEXITED(status) && WEXITSTATUS(status) == 0;
-    if (ended != child || count != sizeof(report) || !exit_ok ||
+        hang_after_report ? wait_outcome == ISO_WAIT_ELAPSED_TIMEOUT && killed &&
+            WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL :
+        wait_outcome == ISO_WAIT_TIMELY_EXIT && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    if (!reaped || !wire_ok || !exit_ok ||
         report[0] != 1 || report[1] != 14 || report[2] != 1) {
         fprintf(stderr, "LINUX_FILTER FAIL installed=%d checks=%d completed=%d\n", report[0], report[1], report[2]);
         return 1;
@@ -201,6 +217,30 @@ static int count_unexpected_signal(pid_t child, int signal) {
     return -1;
 }
 
+struct scripted_wait {
+    int64_t clocks[4];
+    unsigned clock_at;
+    pid_t wait_result;
+    int wait_errno;
+};
+
+static int64_t scripted_clock(void *opaque) {
+    struct scripted_wait *script = opaque;
+    return script->clocks[script->clock_at++];
+}
+
+static pid_t scripted_wait_nohang(pid_t child, int *status, void *opaque) {
+    struct scripted_wait *script = opaque;
+    if (script->wait_result == child) *status = 0;
+    errno = script->wait_errno;
+    return script->wait_result;
+}
+
+static int scripted_pause(uint64_t milliseconds, void *opaque) {
+    (void)milliseconds; (void)opaque;
+    return 0;
+}
+
 static int test_reaper_ownership(void) {
     /* Model launch from a shell which ignored SIGCHLD / enabled auto-reaping. */
     struct sigaction inherited;
@@ -221,8 +261,110 @@ static int test_reaper_ownership(void) {
         !lost.signal_sent && unexpected_signal_calls == 0 ? 0 : 1;
 }
 
+static int test_timeout_provenance(void) {
+    struct isolation_reap_result forced = {ISO_WAIT_TIMELY_EXIT, 1, 0, 0};
+    struct isolation_reap_result late_exit = {ISO_WAIT_TIMELY_EXIT, 0, 0, 0};
+    int killed_status = SIGKILL;
+    int exited_status = 0;
+    struct scripted_wait late = {{100, 109, 110, 110}, 0, 77, 0};
+    struct scripted_wait error = {{100, 101, 101, 101}, 0, -1, EIO};
+    struct isolation_wait_ops late_ops = {
+        scripted_clock, scripted_wait_nohang, scripted_pause, &late};
+    struct isolation_wait_ops error_ops = {
+        scripted_clock, scripted_wait_nohang, scripted_pause, &error};
+    int late_status = 0, error_status = 0;
+    int late_result = isolation_wait_exit_with_ops(77, &late_status, 10, &late_ops);
+    int error_result = isolation_wait_exit_with_ops(77, &error_status, 10, &error_ops);
+    return isolation_confirmed_forced_timeout(ISO_WAIT_ELAPSED_TIMEOUT, forced, killed_status) &&
+        !isolation_confirmed_forced_timeout(ISO_WAIT_SUPERVISOR_ERROR, forced, killed_status) &&
+        !isolation_confirmed_forced_timeout(ISO_WAIT_TIMELY_EXIT, forced, killed_status) &&
+        !isolation_confirmed_forced_timeout(ISO_WAIT_ELAPSED_TIMEOUT, late_exit, exited_status) &&
+        isolation_observed_exit_outcome(100, 109, 10) == ISO_WAIT_TIMELY_EXIT &&
+        isolation_observed_exit_outcome(100, 110, 10) == ISO_WAIT_LATE_EXIT &&
+        isolation_observed_exit_outcome(100, 99, 10) == ISO_WAIT_SUPERVISOR_ERROR &&
+        late_result == ISO_WAIT_LATE_EXIT && error_result == ISO_WAIT_SUPERVISOR_ERROR &&
+        !isolation_confirmed_forced_timeout(late_result, forced, killed_status) &&
+        !isolation_confirmed_forced_timeout(error_result, forced, killed_status) ? 0 : 1;
+}
+
+static int exact_wire_case(size_t payload_size, size_t expected_size, size_t pre_read) {
+    unsigned char payload[32], received[16] = {0};
+    if (payload_size > sizeof(payload) || expected_size > sizeof(received) ||
+        pre_read > expected_size || pre_read > payload_size) return 1;
+    for (size_t i = 0; i < sizeof(payload); ++i) payload[i] = (unsigned char)(i + 1u);
+    int channel[2];
+    if (pipe2(channel, O_CLOEXEC | O_NONBLOCK)) return 1;
+    size_t written = 0;
+    while (written < payload_size) {
+        ssize_t count = write(channel[1], payload + written, payload_size - written);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) { close(channel[0]); close(channel[1]); return 1; }
+        written += (size_t)count;
+    }
+    close(channel[1]);
+    size_t used = 0;
+    while (used < pre_read) {
+        ssize_t count = read(channel[0], received + used, pre_read - used);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) { close(channel[0]); return 1; }
+        used += (size_t)count;
+    }
+    int accepted = isolation_read_exact_eof(
+        channel[0], received, expected_size, used) == 0;
+    close(channel[0]);
+    int should_accept = payload_size == expected_size;
+    return accepted == should_accept &&
+        (!accepted || memcmp(payload, received, expected_size) == 0) ? 0 : 1;
+}
+
+static int test_exact_wire_framing(void) {
+    int retained[2];
+    if (pipe2(retained, O_CLOEXEC | O_NONBLOCK)) return 1;
+    const unsigned char complete[4] = {1, 2, 3, 4};
+    if (write(retained[1], complete, sizeof(complete)) != (ssize_t)sizeof(complete)) {
+        close(retained[0]); close(retained[1]); return 1;
+    }
+    unsigned char received[4] = {0};
+    int framed = isolation_read_exact_eof(retained[0], received, sizeof(received), 0);
+    int retained_rejected = framed != 0;
+    close(retained[0]); close(retained[1]);
+    return !retained_rejected || exact_wire_case(12, 12, 0) || exact_wire_case(12, 12, 5) ||
+        exact_wire_case(11, 12, 0) || exact_wire_case(13, 12, 0) ||
+        exact_wire_case(24, 12, 12) || exact_wire_case(1, 0, 0);
+}
+
+static void interrupt_wait(int signal) { (void)signal; }
+
+static int test_interrupted_wait_uses_actual_deadline(void) {
+    pid_t child = fork();
+    if (child == 0) for (;;) pause();
+    if (child < 0) return 1;
+    struct sigaction action, old;
+    struct itimerval timer = {{0, 1000}, {0, 1000}}, stopped_timer = {{0, 0}, {0, 0}};
+    int old_valid = 0, timer_started = 0, status = 0, outcome = ISO_WAIT_SUPERVISOR_ERROR;
+    int64_t start = -1, elapsed = -1;
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = interrupt_wait;
+    if (!sigemptyset(&action.sa_mask) && !sigaction(SIGALRM, &action, &old)) {
+        old_valid = 1;
+        start = isolation_clock_ms();
+        if (start >= 0 && !setitimer(ITIMER_REAL, &timer, NULL)) {
+            timer_started = 1;
+            outcome = isolation_wait_exit(child, &status, 50);
+            elapsed = isolation_clock_ms() - start;
+        }
+    }
+    if (timer_started) (void)setitimer(ITIMER_REAL, &stopped_timer, NULL);
+    if (old_valid) (void)sigaction(SIGALRM, &old, NULL);
+    struct isolation_reap_result cleanup = isolation_stop_child(child, &status, 1000, kill);
+    return outcome == ISO_WAIT_ELAPSED_TIMEOUT && elapsed >= 50 && elapsed < 500 &&
+        cleanup.reaped == ISO_WAIT_TIMELY_EXIT ? 0 : 1;
+}
+
 int main(void) {
-    if (test_reaper_ownership() || isolation_prepare_parent()) return 2;
+    if (test_timeout_provenance() || test_exact_wire_framing() ||
+        test_reaper_ownership() || isolation_prepare_parent() ||
+        test_interrupted_wait_uses_actual_deadline()) return 2;
     int before = descriptor_count();
     if (before < 0) return 2;
     for (unsigned run = 0; run < 100; ++run) {
@@ -230,6 +372,6 @@ int main(void) {
     }
     if (run_kernel_case(1, 0) || descriptor_count() != before) return 1;
     if (run_kernel_case(1, 1) || descriptor_count() != before) return 1;
-    puts("LINUX_FILTER PASS runs=102 checks=1428 descriptor_leaks=0 exit_deadline=PASS denied_kill_watchdog=PASS reaper_ownership=PASS profile=x86_64-host-translation nomad_tested=false");
+    puts("LINUX_FILTER PASS runs=102 checks=1428 descriptor_leaks=0 exact_wire=PASS exit_deadline=PASS denied_kill_watchdog=PASS reaper_ownership=PASS profile=x86_64-host-translation nomad_tested=false");
     return 0;
 }

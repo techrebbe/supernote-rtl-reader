@@ -1,6 +1,351 @@
 # Overnight checkpoint — 2026-09-06/07
 
-## Current handoff: final source-review disclosure blocked before execution
+## Current status — no-bootstrap SavedInk collector hardware gate PASS; reviews CLEAN
+
+On 2026-09-11 the corrected collector passed its bounded Nomad gate on
+`SN078C10015092`. The generated DEX no longer contains invoke-custom or method-
+handle bootstrap sections (`0x0007`/`0x0008`); the only dynamic JVM bootstrap in
+the prior build came from `Comparator.comparing(Field::getName)` and was replaced
+with a bounded manual field sort. The deployable JAR is 37,578 bytes with
+SHA-256
+`fe0d42d26a8f2a21ee0a14cb88f0f57bee8cd98d5e3abfeaf8e75da4391e09b2`;
+its embedded 31,108-byte DEX has SHA-256
+`ede82ef546ac99cc0a4489fb1b78909ecd3f5d440ff34322cb0cf5677034c097`,
+and its embedded artifact authority has SHA-256
+`c6d449a492d8b4f99c79608a80be01d3de14ec6f98ad1ca39a3c0b8e9381586c`.
+Two clean builds were byte-identical and all 12 artifact mutation tests passed,
+including count-stable DEX map mutations to both forbidden bootstrap types.
+
+The helper ran through ordinary ADB-shell `app_process` as exact UID/GID 2000,
+never as root. Root was limited to preparing and rechecking the protected,
+read-only disposable input file. Two independent frames were byte-identical:
+15,866 bytes each, SHA-256
+`19ad6004ada5e8a92b994f0b9f3b5fbd78ccc4aa18b06907d29321820464892a`,
+with exactly one `NATIVE_VIEWPORT_INK_EVIDENCE` record and no failure record.
+The authenticated oracle returned PASS with two unchanged native records and no
+added, removed or changed record. The live PDF and `.mark`, disposable source,
+protected input, firmware libraries, Document PID/starttime and collector bytes
+all remained unchanged, and no `SavedInkReader` process remained.
+
+The complete host matrices also pass on these exact sources: Windows ran 234
+tests with 20 expected skips; WSL ran 222 tests with 9 expected skips. Current
+fifteen-source authority is
+`07e205bc314fc1cdbbc23fa58391b2f5450cdda791d83c08e32651a74f8e300b`
+and launcher-gate authority is
+`ff7021874c16321f71b4309e131d78061d0d71c4cd6d14743574fc4eb229cd2f`.
+This proves only the independent saved-ink collector boundary. It does not yet
+prove an arbitrary native viewport, a pen engine, annotation mutation or two
+simultaneous page contexts. Three independent current-state read-only reviews
+returned CLEAN, so the bounded one-page viewport experiment is the next gate.
+Nothing was installed, enabled, pushed or merged during the collector gate.
+The bounded machine-readable checkpoint is
+[HARDWARE_SAVED_INK_GATE_20260911.json](HARDWARE_SAVED_INK_GATE_20260911.json);
+raw frames and native stderr remain local evidence and are intentionally not
+committed as source or annotation fixtures.
+
+## Pre-hardware host checkpoint — superseded by the hardware result above
+
+At this pre-hardware checkpoint, the repair candidate passed the complete Windows and WSL
+matrices. Windows ran 234 authenticated tests: the 222-test core plus the
+12-test generated-device-artifact lane, with 20 expected platform-only skips.
+WSL ran the 222-test core with 9 expected skips. The Linux native harness passed
+6,439 report checks, 57 loader cases and 102 filter runs / 1,428 checks. Earlier
+focused reviews remain **CLEAN** for the unchanged native-containment and
+complete SavedInk-wire slices. Focused exact-source reviews of the repaired
+publication-state, gate-provenance, production-launch and artifact slices also
+returned **CLEAN**. One combined exact-head review remains pending.
+
+The terminal-publication P1 is repaired: the successful no-replace link/rename
+is the logical commit; private, outcome-unknown, published and collision states
+are explicit; published or uncertain output is preserved; and collision,
+relocation and post-commit uncertainty are nonretryable exit 2. A follow-on
+gate-provenance P1 is also repaired. A reused gate's complete executable
+namespace must match the exact captured and pinned gate bytes, and the accepted
+authority/method/source/loader/finder identities are retained and revalidated.
+The current authorities are gate SHA-256
+`8f961715c251e4a80207dc656ecac3ca0a9dd890de10d459236390eed66e133c`
+and fifteen-source SHA-256
+`c6bfd63eccfbb716e8fad91346cd7bbf69198c82855d2cc5418071fc0840e9cb`.
+The trust boundary is a fresh launcher process using `-I -S -E -s`, exact
+captured and pinned gate/probe bytes, and a trusted unmodified CPython runtime
+whose canonical builtins, standard-library module identities, `sys.modules` and
+`sys.meta_path` remain quiescent through validation and invocation. Regressions
+reject inert matching-path aliases, ordinary/custom loader substitution,
+altered helpers, post-first-use replacement, ABC virtual-subclass tricks,
+hostile container equality and callback-bearing source/root path objects. This
+does not defend a process whose interpreter, builtins, standard library or
+import state was already poisoned or is concurrently mutated by arbitrary
+same-process code, nor a hostile CPython executable. The existing launcher-
+isolation tests retain that explicit boundary. The passing focused reviews do
+not replace the pending combined current-head review.
+
+Authorities at that checkpoint:
+
+- probe-source SHA-256:
+  `c6bfd63eccfbb716e8fad91346cd7bbf69198c82855d2cc5418071fc0840e9cb`;
+- gate SHA-256:
+  `8f961715c251e4a80207dc656ecac3ca0a9dd890de10d459236390eed66e133c`;
+- runner SHA-256:
+  `b5b643c035114b503952ccf45363d07dbcc3c6f31b119ae3c9c95f719a61d288`;
+- pinned parser-tree SHA-256:
+  `09679ad9ea7781df8fe3ef1d39b2189261f57967e06c549ce2891b977018382a`;
+- SavedInk payload: 2,532 bytes with SHA-256
+  `20a179534dfce744b9be97e8e40c1ab07ef19e1c1ddb618ed38f58002e648158`,
+  inside a 2,562-byte exact frame.
+- deployable SavedInk reader JAR: 37,810 bytes with SHA-256
+  `9204fb1a8e2230527af4bad314e6f52c430c6e94f28020a1251ffc26ef6767c9`;
+- embedded `classes.dex`: 31,340 bytes with SHA-256
+  `d49bda671c7a16350d35b26a5f0883b4058d938cbc463e0e5f3aee04c6976df9`;
+- embedded artifact-authority SHA-256:
+  `4230ab7067aaa7fe8658c176fb0db65cfac6f9f7760efcf7348b8e75a7e2e296`.
+
+The final repair batch includes descriptor-authenticated launchers and captured
+child source; exact EOF/framing; inventory-v4 raw-map authority and terminal
+publication; immutable package evidence; the exact 62-field firmware annotation
+grammar; and resource-bounded native loading. `loader_resource.h` is now in the
+explicit native source inventory. The loader child closes inherited descriptors
+before applying exact 256 MiB address-space and 32-descriptor caps, preventing a
+dense inherited descriptor table from defeating its own setup.
+
+The SavedInk oracle accepts exactly one complete raw before/after path pair or
+one explicit framed pair, never a mixed or autodetected mode. Its production
+wrappers preserve stdout and stderr independently and retain exact 0/1/2/126
+exits. The Windows-configured artifact lane performs two clean builds, verifies
+their actual JAR, DEX and provenance, and runs all 12 artifact mutation tests.
+The collector uses `native-viewport-ink-evidence-v2`; the stale
+`native-viewport-ink-evidence-v1` DEX is rejected. The WSL gate covers the
+222-test core and does not claim an Android artifact build without the configured
+Android build inputs.
+
+This checkpoint does not certify a hardware collector, native viewport or pen
+engine. The next gate is one fresh ordinary-ADB-shell capture as exact UID/GID
+2000 from a disposable copy of a saved Nomad `.mark`, followed by an exact
+repeat capture, unchanged copy/live-reader fingerprints and proof that no helper
+remains. No firmware was loaded, native engine started, device mutated, package
+installed, or code pushed/merged during the host validation.
+
+## Prior checkpoint — r11 historical record; repair/pass claims withdrawn
+
+All dated sections below this point are contemporaneous historical records.
+Words such as "current", schema-v2/v3 requirements, old counts, and old pass
+claims describe only their recorded snapshot; they do not override the current
+repaired status, inventory-v4 contract, or pending Nomad gate above.
+
+Ultra r11 returned **NOT CLEAN** on the immutable 56-file snapshot with
+manifest
+`6816acb7724e7f9a8450e44e2b49adf58e10e56248f1d94818c25c4889873d06`.
+The exact seal passed before and after review, with no missing, extra, reparse,
+alternate-stream or modified file.
+
+The contemporaneous checkpoint then described the r11 findings as repaired and
+recorded a 103-case Python run plus broader host/repository passes. **Those
+mechanism and pass claims are withdrawn:** immutable r12 review subsequently
+identified still-live defects in process cleanup/supervision, evidence and path
+authority, exact raw wires, report publication, SavedInk bounds, APK snapshot
+immutability, serialized sizing, and the claimed production test coverage. In
+particular, the former claims about exact POSIX signal/subreaper restoration,
+owned-descendant reaping, durable publication, and one pinned immutable APK
+snapshot are not current implementation evidence. The r11 seal and verdict are
+retained as history; its old counts, hashes, and pass output do not attest the
+current tree.
+
+Only the repaired status above is current. The r12 verdict and r11 claims below
+remain historical evidence superseded by the current host matrix and focused
+confirmation reviews. A fresh disposable-copy Nomad collector gate is still
+required. No device operation, firmware load, native start, installation, push,
+PR, merge, or readiness claim is authorized by the historical records.
+
+## 2026-09-09: GPT-5.6 Sol Ultra r10 findings repaired; confirmation pending
+
+Ultra r10 (`01a084c5-703e-7a61-9411-4e150cfce4e0`) returned **NOT CLEAN** on
+the immutable 56-file snapshot with manifest
+`f27db9368f401b54e774a0662818fcd647e8c35bfe20d2c8e13d051d4fbb707f`.
+The snapshot passed the exact seal before and after review and was untouched.
+All eight P2 boundary groups and three P3 proof/documentation gaps are accepted
+and repaired locally: one-deadline process-tree ownership, descriptor-first
+local evidence, effective `PT_LOAD` anchor identity, precharged aggregate work
+and atomic capped publication, final-map recapture bracketing, bounded streaming
+saved-ink JSON, final named-source revalidation, exact bounded packaged-manifest
+inspection, and the requested behavioral regressions.
+
+The complete local matrix passes. The parser-enabled Python run has 95 cases:
+91 applicable Windows cases pass and the four Linux-only cases pass under WSL.
+The Linux harness passes 5,704 report checks, 51 loader cases, 102 filter runs /
+1,428 checks, and all four process/seal boundary tests. The real Android/Java
+host gate passes 280 viewport assertions, 45,459 display assertions, executable
+saved-ink budget and Java-to-Python envelope parity, and 34 Node cases. The
+unsigned display-only APK builds and its actual permission/XML inspection passes
+the exact bounded verifier. Integrated repository gates pass 85,407 v2 core
+assertions, all 271 mutations, all Native Reader/renderer/Native Spread
+invariants, deterministic provenance, fail-closed packaging and trace-helper
+tests. `git diff --check` passes.
+
+A fresh immutable Ultra confirmation remains pending. No Nomad operation,
+firmware load, native start, installation, push, PR or merge is authorized by
+this checkpoint.
+
+## 2026-09-09: GPT-5.6 Sol Ultra r9 findings repaired; confirmation pending
+
+Ultra r9 (`01a0848c-2908-7e83-87d5-a784593d495d`) returned **NOT CLEAN** on
+the immutable 56-file snapshot with manifest
+`5c4c795037c7f8a613987a24b3f66e797cfdab0602e7a43f1e2f9adee8ea0b08`.
+The snapshot passed the full manifest check before and after review and was not
+modified. All findings are accepted in the current local batch: waitable POSIX
+process-group ownership; suspended pre-Job Windows startup; effective-load-bias
+authority; genuinely aggregate binding budgets; exact Java/Python structural
+and UTF-8 admission; sealed immutable `.mark` snapshots; authenticated bounded
+permission-tool evidence; exact JSON types; and independent boundary tests.
+
+Focused Windows/parser/APK and WSL suites pass. The full integrated repository
+matrix passes 85,407 v2 core assertions, all 271 mutations, all three invariant
+suites, deterministic build provenance, fail-closed packaging, and the
+trace-helper adversarial suite. The host gate passes 280 viewport assertions,
+45,459 display assertions, the real Java encoder/budget executable, 88 Python
+cases, and 34 Node cases. A clean immutable Ultra confirmation remains pending.
+No Nomad operation, firmware load, native start, installation, push, PR, or
+merge is authorized by this checkpoint.
+
+## 2026-09-09: GPT-5.6 Sol Ultra r8 findings fixed; confirmation pending
+
+The independent Ultra r8 review (`01a082b9-0d3d-7ca2-a75c-e3e544fa8b18`)
+completed **NOT CLEAN** against an immutable 56-file snapshot whose manifest
+remained exactly
+`b908071c8441ceacaad576e91f67f549e9b2aae60f89af532acbd718842caea5`.
+It found seven P2 groups and four P3 proof gaps. All are accepted and repaired
+locally: bounded POSIX pipe/process-group cleanup; reparsed and live-recaptured
+binding-owner closure; indexed aggregate-bounded binding planning; absolute
+native wait deadlines with late-exit provenance; exact Java/Python saved-ink
+wire admission; descriptor-backed bounded `.mark` authority; complete packaged
+permission-element inspection; and the requested independent edge fixtures.
+
+The repair matrix is clean. Windows parser-enabled runs cover 68 cases (66 pass
+and two POSIX-only cases skip); those two cases pass under WSL. The host gate
+passes 280 viewport assertions, 45,459 display assertions, the executable Java
+budget test, 88 Python cases (the optional parser/POSIX skips are covered by the
+explicit runs), and 34 Node cases. The Linux harness passes 5,704 report checks,
+51 loader cases, and 102 filter runs / 1,428 checks. Integrated repository gates
+pass 85,407 v2 assertions, 271 mutations, all three invariant suites, build
+provenance, fail-closed packaging, and trace-helper tests. The unsigned APK has
+no permission element in either packaged inspection surface.
+
+The descriptor-backed saved-ink reader still needs a fresh disposable-copy
+Nomad hardware revalidation before it becomes collector evidence. No ADB,
+firmware load, native start, device mutation, installation, push, PR, or merge
+occurred in this repair. The next action is one clean exact-source Ultra
+confirmation review of the same approved 56-file boundary.
+
+## 2026-09-08: Daybreak r7 findings fixed locally; Ultra confirmation pending
+
+The previously interrupted 56-file source-only review was resumed in its exact
+session using the user's newly approved Daybreak Blue access. The original r4
+manifest still matched before and after review. Daybreak completed normally and
+returned **NOT CLEAN** with three P2 host-evidence findings; it did not find a
+new Android fixture, cleanup, filter, geometry or isolation defect.
+
+The first three findings were fixed in r5. Its exact confirmation review
+(`01a08231-0430-7610-b6a0-508010f0f36a`, manifest
+`8fe68f4b379a7a8d785bfff7409a21f6eb85a4136397cc6b29148dd7c55d8c3e`)
+completed **NOT CLEAN** with six further P2 evidence-tool findings. It found no
+additional geometry, display, isolation, supervisor, pen or fixture-loader
+defect. All six are accepted and fixed together in the current worktree:
+
+- Ordered `PT_LOAD` authority now distinguishes file mapping, complete final-file-
+  page zero fill, and anonymous mapping. Disjoint same-page replacement, short
+  BSS, and unaligned zero-file loads have independent regressions.
+- One exact inventory-v3 validator is shared by both consumers. Each library's
+  mapping copy must equal the authenticated complete map set; pointer planning
+  and target classification consume only that same stable authority.
+- Raw ELF preflight rejects malformed RELA entry sizes before pyelftools can
+  construct a section. Dynamic authority and the matched runtime section must
+  both specify 24-byte RELA records.
+- The remaining aggregate byte allowance reaches the device capture. The opened
+  remote descriptor's size is rejected before `dd`, and library bytes are not
+  published until their metadata and aggregate allowance are admitted.
+- The LLVM oracle preflights the ELF, examines only dynamically authenticated
+  runtime tables, and bounds aggregate observed/reference records. It consumes
+  the same exact inventory-v3 validator as the binding collector.
+- Strict inventory JSON rejects every floating token, including finite decimal
+  syntax and overflowing exponents, as well as duplicate/non-finite constants.
+- Daybreak r6 then found four remaining admission gaps: exact device spelling,
+  the file-backed prefix of unaligned zero-file loads, pre-parser section-name
+  bounds, and root-reachable candidate closure. All four now fail closed with
+  independent regressions. Its exact session was
+  `01a08250-77a3-7e51-9a26-b3d261e49031`; its immutable manifest remained
+  `3fddb24637566e5918301fbac0cd1de9241e96a6530f821af88f61edce5105d8`
+  before and after review. r6 itself remains **NOT CLEAN** pending confirmation.
+
+Daybreak r7 reviewed the resulting immutable 56-file snapshot (manifest
+`5aa7e692f0005339480045b2c9e3f47f9736dac84477f1baba7788a07e71119a`)
+and found six P2 plus two P3 issues. All are fixed together in the current
+worktree: Bionic writable-page zeroing, root-closure-only pointer ownership,
+bounded descendant-pipe lifetime, exact supervisor timeout/error provenance,
+one producer/oracle saved-ink budget, permission-tag and final-APK inspection,
+pre-parser section-name proof/direct inventory-v3 edge tests, and the stale
+README paragraph. The Windows timeout path assigns a bootstrap process to a
+kill-on-close Job Object before it may launch the target, eliminating the child-
+assignment race; POSIX uses a private session/process group.
+
+The explicit parser-enabled suites now pass 78 tests with zero skips. The full
+host gate passes 280 viewport assertions, 45,459 display assertions and 34 Node
+cases. All five repository baselines pass, including 85,407 v2 assertions, 271
+mutations, both invariant suites and fail-closed packaging. The Linux harness
+passes 51 loader cases and 102 filter runs / 1,428 checks. The unsigned Android
+display-host package builds and its final permission dump is empty. `git diff
+--check` passes. Historical inventory-v1 evidence remains rejected by current
+v3 consumers. No firmware, device, package install, push, PR or merge occurred.
+A fresh exact-current-source GPT-5.6 Sol Ultra confirmation is required before
+device execution.
+
+## 2026-09-08: independent offline validation preparation
+
+Added the separate `offline-validation/` folder without changing the existing
+oracle, collector, loader, display host, reader, or immutable r4 review snapshot.
+It batches pinned archived saved-ink captures across declared pages, rejects
+missing/invalid evidence, reports protected-page changes, and compares Undo/Redo
+results to explicit saved references. It does not operate ADB or load native
+code. Eraser/lasso changes remain observations requiring interpretation, not
+automatic successes; absent saved records are never fabricated as empty ink.
+
+Validation: 26 new host tests plus 13 existing ink-oracle tests pass, including
+omission mutations of all 62 native fields. The pinned archived r3 three-capture
+example matches both declared comparisons. Report is in the ignored local
+`build/offline-validation-20260908/archived-r3.report.json`; its hardware gate is
+explicitly NOT_EVALUATED. No new physical test was performed. Usage and the
+short-batch protocol are in `offline-validation/README.md`.
+
+This local-only preparation is not part of the pending independent source
+review and has not received one. The service restriction and next-device gate
+below remain unresolved. No review retry, upload, device action, package build,
+push, PR or merge occurred. No background task was started.
+
+## Current handoff: approved r4 review interrupted by service restriction
+
+The user explicitly approved sending the 56 authored source/design-note files
+to OpenAI's Codex review service, excluding PDFs, annotations, firmware binaries,
+raw captures and credentials. That disclosure approval was accepted. Do not ask
+for the same upload approval again; the earlier disclosure blocker below is
+historical, not the current blocker.
+
+The resumed independent Ultra review of source head
+`dbe3e782ecb00b5f78a2acd7f59afb30e525589e` ran against the exact source-only snapshot
+`../../reviews/native-viewport-loader-dbe3e78-approved-r4`. Its manifest SHA-256 is
+`def20df7f989cce35d9e7ff5befcf2281731d0c578c23d8e50256b783af3e5ef`.
+All 56 hashes still match after execution. The reviewer reported 56 selected
+Python tests passing with zero skips and 34/34 Node tests passing. Three Python
+tests needing temporary files were excluded from that read-only run; the full
+59-case host result below remains separate evidence.
+
+At 2026-09-07 17:18 local time, the review log ended with a service-side
+"flagged for possible cybersecurity risk" error. No final result file exists;
+the execution session is no longer available. This is an interrupted review,
+NOT a clean verdict or a new code finding. Do not bypass the restriction through
+rephrasing, a different agent, or another submission route. Any service access
+resolution must use its supported authorization/support process. Preserve the
+snapshot, review log and previous findings. No new Android probe, firmware load,
+device action, GitHub push, PR or merge occurred. The Nomad remains released.
+No reviewer or background device operation is running at this checkpoint.
+
+## Historical handoff: source-review disclosure blocked before execution
 
 Current tested code head: `005845c2d4243cbd5ebce11108f2079bc08b41e9`.
 All accepted r1/r2/r3 findings are implemented; 59 parser-enabled Python cases

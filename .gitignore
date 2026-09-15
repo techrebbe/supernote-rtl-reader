@@ -8,6 +8,7 @@ artifacts/
 deliverables/
 out/
 test-builds/
+native-viewport-probe/offline-validation/
 .npm-cache-provenance/
 .provenance-temp/
 .provenance-materialized/

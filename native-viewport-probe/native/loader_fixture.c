@@ -1,5 +1,6 @@
 /* Authored Linux/Android constructor fixture only; never Supernote firmware. */
 #define _GNU_SOURCE
+#include <errno.h>
 #include <fcntl.h>
 #include <sched.h>
 #include <signal.h>
@@ -8,6 +9,7 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 #include "loader_report.h"
+#include "loader_resource.h"
 
 static void marker(int tag,int which) {
     struct loader_result r={LOADER_RESULT_MAGIC,tag,0,which,{0}};
@@ -44,6 +46,29 @@ __attribute__((constructor)) static void fixture(void) {
     else if(which==14) (void)syscall(__NR_mprotect,NULL,0,PROT_WRITE|PROT_EXEC);
     else if(which==15) (void)syscall(__NR_futex,NULL,0,0,0,0,0);
     else if(which==16) (void)syscall(__NR_mremap,NULL,0,0,0,0);
+    else if(which==17) {
+        int descriptors[LOADER_NOFILE_LIMIT + 8u];
+        unsigned opened=0;
+        int terminal_errno=0, invalid=0;
+        for(;opened<sizeof(descriptors)/sizeof(descriptors[0]);++opened) {
+            int fd=openat(AT_FDCWD,".",O_RDONLY|O_CLOEXEC|O_DIRECTORY|O_NOFOLLOW);
+            if(fd<0) { terminal_errno=errno; break; }
+            descriptors[opened]=fd;
+        }
+        if(opened==0 || opened==sizeof(descriptors)/sizeof(descriptors[0]) ||
+            terminal_errno!=EMFILE) invalid=1;
+        while(opened) if(close(descriptors[--opened])) invalid=1;
+        if(invalid) _exit(84);
+        loader_fixture_value=42;
+    } else if(which==18) {
+        errno=0;
+        void *p=mmap(NULL,(size_t)LOADER_AS_LIMIT_BYTES,PROT_NONE,
+            MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE,-1,0);
+        int terminal_errno=errno;
+        if(p!=MAP_FAILED) { (void)munmap(p,(size_t)LOADER_AS_LIMIT_BYTES); _exit(85); }
+        if(terminal_errno!=ENOMEM) _exit(86);
+        loader_fixture_value=42;
+    }
     else _exit(83);
     marker(21,which);
     /* Forbidden operations returning (even errno) instead of trapping cannot

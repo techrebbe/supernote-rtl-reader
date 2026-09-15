@@ -8,18 +8,21 @@ static struct loader_result marker(int tag,int step) {
 }
 int main(void) {
     unsigned checks=0;
-    for(int which=0;which<=16;++which) {
-        int positive=which==0 || which==1 || which==12;
-        size_t count=which==11 ? 2u:positive ? 4u:3u;
+    for(int which=0;which<=18;++which) {
+        int positive=loader_positive_fixture_case(which);
+        size_t count=loader_expected_report_bytes(which,-1)/sizeof(struct loader_result);
         int exit_code=which==11 ? -1:positive ? 0:77;
         struct loader_result r[5]={marker(10,-1),marker(20,which),marker(21,which),marker(42,-1),marker(99,-1)};
         if(!positive && which!=11) { r[2]=marker(77,-1); r[2].nr=56; }
         size_t bytes=count*sizeof(r[0]);
+        assert(loader_expected_report_bytes(which,-1)==bytes); ++checks;
+        assert(loader_expected_report_bytes(which,0)==0); ++checks;
         assert(loader_sequence(r,bytes,which,56,exit_code,which==11)); ++checks;
         /* Every byte-count truncation and extra record must fail. */
         for(size_t n=0;n<sizeof(r);++n) if(n!=bytes) {
             assert(!loader_sequence(r,n,which,56,exit_code,which==11)); ++checks;
         }
+        assert(!loader_sequence(r,sizeof(r),which,56,exit_code,which==11)); ++checks;
         for(size_t i=0;i<count;++i) {
             struct loader_result bad[5];
             memcpy(bad,r,sizeof(r)); bad[i].magic^=1;

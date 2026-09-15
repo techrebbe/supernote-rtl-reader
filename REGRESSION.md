@@ -2986,6 +2986,49 @@ silently dropped from the derived PDF. The complete 173-test generator suite
 and both repository invariant suites pass. These generator-only corrections do
 not change the hardware-tested companion APK or runtime path.
 
+## Single native-page viewport SavedInk collector — HARDWARE PASS
+
+- [x] The final no-bootstrap collector source is 48,933 bytes with SHA-256
+  `67b4991fdeb6ed385665487af02add44e15be54c7f54b441d5a797d38f9ee148`.
+  The 37,578-byte deployable JAR has SHA-256
+  `fe0d42d26a8f2a21ee0a14cb88f0f57bee8cd98d5e3abfeaf8e75da4391e09b2`;
+  its 31,108-byte DEX has SHA-256
+  `ede82ef546ac99cc0a4489fb1b78909ecd3f5d440ff34322cb0cf5677034c097`.
+  The DEX contains neither method-handle (`0x0008`) nor call-site (`0x0007`)
+  map sections. Count-stable mutations to both forbidden types are rejected.
+- [x] Two clean artifact builds were byte-identical and all 12 generated-
+  artifact mutation tests passed. The complete Windows matrix ran 234 tests
+  with 20 expected skips; WSL ran 222 tests with 9 expected skips. The current
+  fifteen-source SHA-256 is
+  `07e205bc314fc1cdbbc23fa58391b2f5450cdda791d83c08e32651a74f8e300b`
+  and launcher-gate SHA-256 is
+  `ff7021874c16321f71b4309e131d78061d0d71c4cd6d14743574fc4eb229cd2f`.
+- [x] On 2026-09-11, authorized Nomad `SN078C10015092` ran two independent
+  collector processes through ordinary ADB-shell `app_process` as exact UID/GID
+  2000. Root was confined to preparing and rechecking the protected read-only
+  disposable input; the collector itself never ran elevated.
+- [x] Both exact output frames are 15,866 bytes with SHA-256
+  `19ad6004ada5e8a92b994f0b9f3b5fbd78ccc4aa18b06907d29321820464892a`.
+  Each contains exactly one `NATIVE_VIEWPORT_INK_EVIDENCE` record, no failure
+  record and one terminal LF. The authenticated oracle returned PASS with two
+  unchanged records and empty added, removed and changed sets.
+- [x] The PDF SHA-256 remained
+  `e470c33c6525e02acf88e51352d73b7ed8b6c1591be8d40629a42c708484e720`;
+  the live mark, disposable source and protected input all remained
+  `b95c02b05abd9a4f5a3106ffbe442f1f893256a66f8cac3628f04d300992ffd6`.
+  Firmware library hashes, Document PID/starttime (`10104` / `6336417`) and
+  uploaded collector hash also remained exact, and no helper process remained.
+- [x] This gate validates only the independent saved-ink collector. It does not
+  prove an arbitrary native viewport, pen engine, annotation mutation or two
+  simultaneous live page contexts. Combined exact-head read-only review was
+  required before the bounded one-page viewport experiment and completed CLEAN.
+  Nothing was installed, enabled, pushed or merged for this gate.
+- [x] Three independent read-only current-state reviews returned CLEAN. After
+  review, this gate's exact uploaded collector, four remote capture files,
+  protected input and empty protected directory were removed and each exact path
+  was verified absent. Historical compatibility/r3 files and local raw evidence
+  were preserved.
+
 ## Failure capture
 
 ### Isolated Android viewport substrate — 2026-09-06

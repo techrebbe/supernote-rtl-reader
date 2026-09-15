@@ -1,20 +1,33 @@
 param(
     [Parameter(Mandatory=$true)][string]$Jdk,
     [Parameter(Mandatory=$true)][string]$AndroidSdk,
-    [Parameter(Mandatory=$true)][string]$Python
+    [Parameter(Mandatory=$true)][string]$JsonJar,
+    [Parameter(Mandatory=$true)][string]$Python,
+    [Parameter(Mandatory=$true)][string]$PythonPath
 )
 $ErrorActionPreference='Stop'
 $probeRoot=$PSScriptRoot
 $androidJar=Join-Path $AndroidSdk 'platforms/android-35/android.jar'
 $buildTools=Join-Path $AndroidSdk 'build-tools/35.0.0'
-& (Join-Path $probeRoot 'check.ps1') -Jdk $Jdk -AndroidJar $androidJar -Python $Python
+& (Join-Path $probeRoot 'check.ps1') -Jdk $Jdk -AndroidJar $androidJar -JsonJar $JsonJar `
+    -Python $Python -PythonPath $PythonPath
 if ($LASTEXITCODE -ne 0) {throw 'Probe checks failed'}
 # A fresh generation for every build; never delete previous results/evidence.
 $out=Join-Path $probeRoot ('build/d-' + [guid]::NewGuid().ToString('N'))
 $classes=Join-Path $out 'classes'
 $dex=Join-Path $out 'dex'
 New-Item -ItemType Directory -Path $classes,$dex | Out-Null
-$sources=@(Get-ChildItem -LiteralPath (Join-Path $probeRoot 'display-host/src') -Recurse -Filter '*.java' | ForEach-Object FullName)
+$hostSourceRoot=Join-Path $probeRoot 'display-host/src'
+$sources=@(
+    (Join-Path $hostSourceRoot 'com/techrebbe/supernote/viewportdisplayprobe/CalibrationActivity.java'),
+    (Join-Path $hostSourceRoot 'com/techrebbe/supernote/viewportdisplayprobe/DisplayProbeActivity.java')
+)
+$discoveredSources=@(Get-ChildItem -LiteralPath $hostSourceRoot -Recurse -File -Filter '*.java' |
+    ForEach-Object FullName)
+$sourceDifference=@(Compare-Object ($sources | Sort-Object) ($discoveredSources | Sort-Object))
+if ($sourceDifference.Count -ne 0) {
+    throw 'Display-host Java source inventory differs from the exact two-file allowlist'
+}
 $sources+=Join-Path $probeRoot 'java/com/techrebbe/supernote/viewportprobe/DisplayProbeLayout.java'
 $sources+=Join-Path $probeRoot 'java/com/techrebbe/supernote/viewportprobe/DisplayProbeLifecycle.java'
 & (Join-Path $Jdk 'bin/javac.exe') -encoding UTF-8 --release 8 -classpath $androidJar -d $classes @sources
@@ -39,8 +52,34 @@ $aligned=Join-Path $out 'viewport-unsigned.apk'
 if ($LASTEXITCODE -ne 0) {throw 'Display host alignment failed'}
 & (Join-Path $buildTools 'zipalign.exe') -c 4 $aligned
 if ($LASTEXITCODE -ne 0) {throw 'Display host alignment verification failed'}
-& (Join-Path $buildTools 'aapt.exe') dump badging $aligned
-if ($LASTEXITCODE -ne 0) {throw 'Display host package inspection failed'}
-Get-FileHash -LiteralPath $aligned -Algorithm SHA256
+$permissionPath=Join-Path $out 'permissions.txt'
+$xmltreePath=Join-Path $out 'manifest-xmltree.txt'
+$authorityPath=Join-Path $out 'packaged-scope-authority.json'
+$authenticatedLauncher=Join-Path $probeRoot 'invoke-authenticated-production.ps1'
+$inspectArguments=@(
+    '--aapt', (Join-Path $buildTools 'aapt.exe'),
+    '--apk', $aligned,
+    '--permissions-out', $permissionPath,
+    '--xmltree-out', $xmltreePath,
+    '--authority-out', $authorityPath
+)
+& $authenticatedLauncher -Python $Python `
+    -Mode display-inspect -CommandArguments $inspectArguments
+$inspectExit=$LASTEXITCODE
+if ($inspectExit -eq 2) {exit 2}
+if ($inspectExit -eq 126) {exit $inspectExit}
+if ($inspectExit -ne 0) {exit 126}
+$verifyArguments=@(
+    '--apk', $aligned,
+    '--permissions-out', $permissionPath,
+    '--xmltree-out', $xmltreePath,
+    '--authority-out', $authorityPath
+)
+& $authenticatedLauncher -Python $Python `
+    -Mode display-verify -CommandArguments $verifyArguments
+$verifyExit=$LASTEXITCODE
+if ($verifyExit -eq 2) {exit 2}
+if ($verifyExit -eq 126) {exit $verifyExit}
+if ($verifyExit -ne 0) {exit 126}
 Write-Output 'UNSIGNED DISPLAY-ONLY APK. Not installable, not a reader/pen gate. Independent review required.'
 Write-Output $aligned

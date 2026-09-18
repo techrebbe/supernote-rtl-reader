@@ -127,17 +127,53 @@ def _bounded_int(value: str, label: str, minimum: int, maximum: int) -> int:
     return number
 
 
-def _reject_malformed_structural_headers(text: str) -> None:
-    """Prevent a malformed boundary line from inheriting its predecessor's scope."""
-    lines = text.split("\n")
+def _reject_malformed_structural_headers(text: str) -> str:
+    """Return only the canonical display list after validating any supervisor suffix.
+
+    The pinned firmware appends an ``ActivityStackSupervisor state:`` section
+    which repeats task-looking records at a different indentation.  That suffix
+    is useful corroboration, but it is never task-selection authority.  Split it
+    at one exact boundary, fail closed on structural dialect confusion, and
+    return only the top ``Display #...`` region to the semantic parser.
+    """
+    all_lines = text.split("\n")
+    lines = all_lines[:-1]  # _wire() already requires one terminating newline.
+    supervisor_boundary = "ActivityStackSupervisor state:"
+    supervisor_boundary_like = re.compile(
+        r"^\s*ActivityStackSupervisor\b", re.IGNORECASE)
+    boundary_indexes = [
+        index for index, line in enumerate(lines)
+        if line == supervisor_boundary]
+    if len(boundary_indexes) > 1:
+        raise AndroidAuthorityError(
+            "ActivityManager supervisor boundary is ambiguous")
+    for line in lines:
+        if (supervisor_boundary_like.match(line) is not None and
+                line != supervisor_boundary):
+            raise AndroidAuthorityError(
+                "ActivityManager supervisor boundary is malformed")
+
+    if boundary_indexes:
+        boundary_index = boundary_indexes[0]
+        authority_lines = lines[:boundary_index]
+        supervisor_lines = lines[boundary_index + 1:]
+    else:
+        boundary_index = None
+        authority_lines = lines
+        supervisor_lines = []
+
     display_header = re.compile(
-        r"^Display #[0-9]+ \(activities from top to bottom\):$")
+        r"^Display #([0-9]+) \(activities from top to bottom\):$")
+    display_summary = re.compile(
+        r"^  Display: mDisplayId=(0|[1-9][0-9]{0,9}) "
+        r"stacks=(0|[1-9][0-9]{0,9})$")
     display_preamble = "Display areas in focus order:"
     display_headers = [
-        index for index, line in enumerate(lines)
+        index for index, line in enumerate(authority_lines)
         if display_header.fullmatch(line) is not None]
     display_preambles = [
-        index for index, line in enumerate(lines) if line == display_preamble]
+        index for index, line in enumerate(authority_lines)
+        if line == display_preamble]
     if display_preambles:
         placement_is_canonical = (
             display_preambles == [1] and bool(display_headers) and
@@ -147,13 +183,398 @@ def _reject_malformed_structural_headers(text: str) -> None:
     if not placement_is_canonical:
         raise AndroidAuthorityError(
             "ActivityManager display list is not header-anchored")
-    for index, line in enumerate(lines):
+    supervisor_prefixes = (
+        "  topDisplayFocusedStack=",
+        "  mLastOrientationSource=",
+        "  deepestLastOrientationSource=",
+        "  Task display areas in top down Z order:",
+    )
+    for index, line in enumerate(authority_lines):
+        if (display_summary.fullmatch(line) is not None or
+                line.startswith(supervisor_prefixes)):
+            raise AndroidAuthorityError(
+                "ActivityManager supervisor content precedes its boundary")
         if re.match(r"^\s*Display\b", line, re.IGNORECASE):
             canonical_header = display_header.fullmatch(line) is not None
             canonical_preamble = display_preambles == [index]
             if not canonical_header and not canonical_preamble:
                 raise AndroidAuthorityError(
                     "ActivityManager structural header is malformed")
+
+    first_display_line = 2 if display_preambles else 1
+    display_region_end = len(authority_lines)
+    for index in range(first_display_line + 1, len(authority_lines)):
+        line = authority_lines[index]
+        if (line == "" or line.startswith((" ", "\t")) or
+                display_header.fullmatch(line) is not None):
+            continue
+        display_region_end = index
+        break
+    if boundary_index is not None and display_region_end != len(authority_lines):
+        raise AndroidAuthorityError(
+            "ActivityManager supervisor boundary does not follow display list")
+
+    # Index canonical pre-boundary Hist identities by the display which owns
+    # them.  Some pinned-firmware multi-display dumps repeat an ActivityRecord
+    # orientation-source pair immediately before that display's redundant
+    # summary.  Those repeats are corroborating metadata only; they may be
+    # admitted only when the complete identity names exactly one canonical
+    # Hist record in the corresponding display section.
+    activity_identity = (
+        r"ActivityRecord\{[0-9a-f]+ u0 [^\s{}]+ "
+        r"t[1-9][0-9]{0,9}\}")
+    canonical_activity_displays: dict[str, list[int]] = {}
+    all_activity_displays: dict[str, list[int]] = {}
+    activity_token_occurrences: dict[str, list[tuple[str, int]]] = {}
+    for record_index, header_index in enumerate(display_headers):
+        header_match = display_header.fullmatch(authority_lines[header_index])
+        if header_match is None:  # Defensive: indexes came from this regex.
+            raise AndroidAuthorityError(
+                "ActivityManager display authority is inconsistent")
+        canonical_display_id = _bounded_int(
+            header_match.group(1), "display ID", 0, 1024)
+        record_end = (display_headers[record_index + 1]
+                      if record_index + 1 < len(display_headers)
+                      else len(authority_lines))
+        display_lines = authority_lines[header_index + 1:record_end]
+        for line in display_lines:
+            history_match = re.fullmatch(
+                r"^      \* Hist #[0-9]+: (" + activity_identity + r")$",
+                line)
+            if history_match is not None:
+                identity = history_match.group(1)
+                identity_fields = re.fullmatch(
+                    r"ActivityRecord\{([0-9a-f]+) u0 [^\s{}]+ "
+                    r"t([1-9][0-9]{0,9})\}", identity)
+                if identity_fields is None:  # Defensive: same strict grammar.
+                    raise AndroidAuthorityError(
+                        "ActivityManager canonical activity identity differs")
+                _bounded_int(
+                    identity_fields.group(2), "activity task ID", 0,
+                    10_000_000)
+                all_activity_displays.setdefault(identity, []).append(
+                    canonical_display_id)
+                activity_token_occurrences.setdefault(
+                    identity_fields.group(1), []).append(
+                        (identity, canonical_display_id))
+
+        # A matching-looking Hist line is canonical binding evidence only when
+        # it is nested inside one exact Stack/Task block and all four task
+        # identities agree: Stack #N, Task #N, taskId/stackId=N, and the
+        # ActivityRecord's tN.  Merely sharing display indentation is not
+        # enough, because malformed or displaced Hist records must not become
+        # orientation authority.
+        stack_headers = [
+            (index, match) for index, line in enumerate(display_lines)
+            if (match := re.fullmatch(
+                r"^  Stack #([1-9][0-9]{0,9}):[^\n]*$", line)) is not None
+        ]
+        for stack_index, (stack_start, stack_match) in enumerate(stack_headers):
+            stack_id = _bounded_int(
+                stack_match.group(1), "orientation stack ID", 1, 10_000_000)
+            stack_end = (stack_headers[stack_index + 1][0]
+                         if stack_index + 1 < len(stack_headers)
+                         else len(display_lines))
+            stack_lines = display_lines[stack_start + 1:stack_end]
+            task_headers = [
+                (index, match) for index, line in enumerate(stack_lines)
+                if (match := re.fullmatch(
+                    r"^    \* Task\{[0-9a-f]+ "
+                    r"#([1-9][0-9]{0,9}) [^\n]*\}$", line)) is not None
+            ]
+            for task_index, (task_start, task_match) in enumerate(task_headers):
+                task_id = _bounded_int(
+                    task_match.group(1), "orientation task ID", 1,
+                    10_000_000)
+                task_end = (task_headers[task_index + 1][0]
+                            if task_index + 1 < len(task_headers)
+                            else len(stack_lines))
+                task_lines = stack_lines[task_start:task_end]
+                stack_id_tokens = re.findall(
+                    r"(?<!\S)StackId=([1-9][0-9]{0,9})(?=\s|\})",
+                    task_lines[0])
+                details = [
+                    (index, match) for index, line in enumerate(task_lines)
+                    if (match := re.fullmatch(
+                        r"^      taskId=([1-9][0-9]{0,9}) "
+                        r"stackId=([1-9][0-9]{0,9})$", line)) is not None
+                ]
+                context_is_canonical = (
+                    task_id == stack_id and len(stack_id_tokens) == 1 and
+                    _bounded_int(
+                        stack_id_tokens[0], "orientation Task StackId", 1,
+                        10_000_000) == stack_id and len(details) == 1 and
+                    _bounded_int(
+                        details[0][1].group(1), "orientation detail task ID",
+                        1, 10_000_000) == task_id and
+                    _bounded_int(
+                        details[0][1].group(2), "orientation detail stack ID",
+                        1, 10_000_000) == stack_id)
+                for line_index, line in enumerate(task_lines):
+                    history_match = re.fullmatch(
+                        r"^      \* Hist #[0-9]+: (" + activity_identity +
+                        r")$", line)
+                    if history_match is None:
+                        continue
+                    identity = history_match.group(1)
+                    identity_fields = re.fullmatch(
+                        r"ActivityRecord\{[0-9a-f]+ u0 [^\s{}]+ "
+                        r"t([1-9][0-9]{0,9})\}", identity)
+                    if identity_fields is None:  # Defensive: same grammar.
+                        continue
+                    activity_task_id = _bounded_int(
+                        identity_fields.group(1), "orientation activity task ID",
+                        1, 10_000_000)
+                    if (context_is_canonical and
+                            details[0][0] < line_index and
+                            activity_task_id == task_id):
+                        canonical_activity_displays.setdefault(
+                            identity, []).append(canonical_display_id)
+
+    # The exact pinned-firmware supervisor prologue proves that the boundary
+    # was not injected into an arbitrary blank line inside the canonical list.
+    # While an Activity owns orientation, both orientation-source fields are
+    # ActivityRecord/null values.  When the pinned firmware is idle, both name
+    # the same DefaultTaskDisplayArea instance instead.  The latter is one
+    # coherent supervisor state, not two independently borrowable values.
+    if supervisor_lines:
+        labels = (
+            "topDisplayFocusedStack",
+            "mLastOrientationSource",
+            "deepestLastOrientationSource",
+        )
+        if len(supervisor_lines) < len(labels):
+            raise AndroidAuthorityError(
+                "ActivityManager supervisor prologue differs")
+
+        label_indexes: dict[str, list[int]] = {}
+        for label in labels:
+            label_like = re.compile(
+                r"^\s*" + re.escape(label), re.IGNORECASE)
+            label_indexes[label] = [
+                index for index, line in enumerate(supervisor_lines)
+                if label_like.match(line) is not None
+            ]
+        if label_indexes["topDisplayFocusedStack"] != [0]:
+            raise AndroidAuthorityError(
+                "ActivityManager supervisor prologue is ambiguous")
+        last_indexes = label_indexes["mLastOrientationSource"]
+        deepest_indexes = label_indexes["deepestLastOrientationSource"]
+        if (not last_indexes or not deepest_indexes or
+                last_indexes[0] != 1 or deepest_indexes[0] != 2 or
+                len(last_indexes) != len(deepest_indexes)):
+            raise AndroidAuthorityError(
+                "ActivityManager supervisor prologue is ambiguous")
+
+        if re.fullmatch(
+                r"^  topDisplayFocusedStack=(?:Task\{[^\n]*\}|null)$",
+                supervisor_lines[0]) is None:
+            raise AndroidAuthorityError(
+                "ActivityManager supervisor prologue differs")
+
+        activity_or_null = r"(?:ActivityRecord\{[^\n]*\}|null)"
+        last_active = re.fullmatch(
+            r"^  mLastOrientationSource=" + activity_or_null + r"$",
+            supervisor_lines[1])
+        deepest_active = re.fullmatch(
+            r"^  deepestLastOrientationSource=" + activity_or_null + r"$",
+            supervisor_lines[2])
+        last_display_area = re.fullmatch(
+            r"^  mLastOrientationSource=DefaultTaskDisplayArea@"
+            r"(0|[1-9][0-9]{0,9})$",
+            supervisor_lines[1])
+        deepest_display_area = re.fullmatch(
+            r"^  deepestLastOrientationSource=DefaultTaskDisplayArea@"
+            r"(0|[1-9][0-9]{0,9})$",
+            supervisor_lines[2])
+        if last_active is not None and deepest_active is not None:
+            pass
+        elif (last_display_area is not None and
+              deepest_display_area is not None):
+            last_identity = _bounded_int(
+                last_display_area.group(1),
+                "last orientation display-area identity", 0, 2_147_483_647)
+            deepest_identity = _bounded_int(
+                deepest_display_area.group(1),
+                "deepest orientation display-area identity", 0,
+                2_147_483_647)
+            if last_identity != deepest_identity:
+                raise AndroidAuthorityError(
+                    "ActivityManager orientation display-area identities disagree")
+        else:
+            raise AndroidAuthorityError(
+                "ActivityManager supervisor orientation sources differ")
+
+        # A pinned multi-display firmware dialect repeats one display-area
+        # orientation pair immediately before the redundant summary for a
+        # non-primary display.  It is display metadata only: admitting the pair
+        # must never make either line task/activity-selection authority.  Bind
+        # every optional repeat to one unique summary.  Anything target-bearing,
+        # partial, misplaced, duplicated, mixed, or numerically noncanonical
+        # fails closed.
+        orientation_pair_displays: set[int] = set()
+        orientation_pair_identities: set[int] = set()
+        orientation_pair_activities: set[str] = set()
+        display_area_pattern = (
+            r"^  {label}=DefaultTaskDisplayArea@"
+            r"(0|[1-9][0-9]{{0,9}})$")
+        for last_index, deepest_index in zip(
+                last_indexes[1:], deepest_indexes[1:]):
+            if (deepest_index != last_index + 1 or
+                    deepest_index + 1 >= len(supervisor_lines)):
+                raise AndroidAuthorityError(
+                    "ActivityManager per-display orientation pair is misplaced")
+            summary_match = display_summary.fullmatch(
+                supervisor_lines[deepest_index + 1])
+            if summary_match is None:
+                raise AndroidAuthorityError(
+                    "ActivityManager per-display orientation pair is misplaced")
+            display_id = _bounded_int(
+                summary_match.group(1), "orientation-pair display ID", 0, 1024)
+            if display_id == 0 or display_id in orientation_pair_displays:
+                raise AndroidAuthorityError(
+                    "ActivityManager per-display orientation pair is ambiguous")
+
+            last_match = re.fullmatch(
+                display_area_pattern.format(
+                    label="mLastOrientationSource"),
+                supervisor_lines[last_index])
+            deepest_match = re.fullmatch(
+                display_area_pattern.format(
+                    label="deepestLastOrientationSource"),
+                supervisor_lines[deepest_index])
+            last_activity = re.fullmatch(
+                r"^  mLastOrientationSource=(" + activity_identity + r")$",
+                supervisor_lines[last_index])
+            deepest_activity = re.fullmatch(
+                r"^  deepestLastOrientationSource=(" + activity_identity +
+                r")$", supervisor_lines[deepest_index])
+            if last_match is not None and deepest_match is not None:
+                last_identity = _bounded_int(
+                    last_match.group(1),
+                    "per-display last orientation display-area identity",
+                    0, 2_147_483_647)
+                deepest_identity = _bounded_int(
+                    deepest_match.group(1),
+                    "per-display deepest orientation display-area identity",
+                    0, 2_147_483_647)
+                if last_identity != deepest_identity:
+                    raise AndroidAuthorityError(
+                        "ActivityManager per-display orientation identities disagree")
+                if last_identity in orientation_pair_identities:
+                    raise AndroidAuthorityError(
+                        "ActivityManager per-display orientation identity is reused")
+                orientation_pair_identities.add(last_identity)
+            elif last_activity is not None and deepest_activity is not None:
+                last_identity_text = last_activity.group(1)
+                deepest_identity_text = deepest_activity.group(1)
+                if last_identity_text != deepest_identity_text:
+                    raise AndroidAuthorityError(
+                        "ActivityManager per-display orientation activities disagree")
+                locations = canonical_activity_displays.get(
+                    last_identity_text, [])
+                all_locations = all_activity_displays.get(
+                    last_identity_text, [])
+                activity_fields = re.fullmatch(
+                    r"ActivityRecord\{([0-9a-f]+) u0 [^\s{}]+ "
+                    r"t[1-9][0-9]{0,9}\}", last_identity_text)
+                if activity_fields is None:  # Defensive: same strict grammar.
+                    raise AndroidAuthorityError(
+                        "ActivityManager per-display orientation activity differs")
+                token_occurrences = activity_token_occurrences.get(
+                    activity_fields.group(1), [])
+                if (locations != [display_id] or
+                        all_locations != [display_id] or
+                        token_occurrences != [(last_identity_text, display_id)]):
+                    raise AndroidAuthorityError(
+                        "ActivityManager per-display orientation activity is unbound")
+                if last_identity_text in orientation_pair_activities:
+                    raise AndroidAuthorityError(
+                        "ActivityManager per-display orientation activity is reused")
+                orientation_pair_activities.add(last_identity_text)
+            else:
+                raise AndroidAuthorityError(
+                    "ActivityManager per-display orientation sources differ")
+            orientation_pair_displays.add(display_id)
+    elif boundary_index is not None:
+        raise AndroidAuthorityError("ActivityManager supervisor section is empty")
+    else:
+        orientation_pair_displays = set()
+
+    supervisor_task = re.compile(r"^ {6}(?: {2})*\* Task\{[^\n]*\}$")
+    supervisor_activity = re.compile(
+        r"^ {8}(?: {2})*\* ActivityRecord\{[^\n]*\}$")
+    for line in supervisor_lines:
+        if re.match(r"^\s*Display\b", line, re.IGNORECASE):
+            if display_summary.fullmatch(line) is None:
+                raise AndroidAuthorityError(
+                    "ActivityManager supervisor display record is malformed")
+        if re.match(r"^\s*Stack\b", line, re.IGNORECASE):
+            raise AndroidAuthorityError(
+                "ActivityManager canonical stack follows supervisor boundary")
+        if re.match(r"^\s*\*+\s*Task\b", line, re.IGNORECASE):
+            if supervisor_task.fullmatch(line) is None:
+                raise AndroidAuthorityError(
+                    "ActivityManager supervisor task indentation is malformed")
+        if re.match(r"^\s*\*+\s*ActivityRecord\b", line, re.IGNORECASE):
+            if supervisor_activity.fullmatch(line) is None:
+                raise AndroidAuthorityError(
+                    "ActivityManager supervisor activity indentation is malformed")
+        if (re.match(r"^\s*\*+\s*Hist\b", line, re.IGNORECASE) or
+                re.match(r"^\s*mResumedActivity\b", line, re.IGNORECASE)):
+            raise AndroidAuthorityError(
+                "ActivityManager canonical record follows supervisor boundary")
+
+    # Cross-check the redundant display summaries without permitting them to
+    # contribute any task, activity, or target-component authority.
+    summaries: list[tuple[int, int, int]] = []
+    for index, line in enumerate(supervisor_lines):
+        match = display_summary.fullmatch(line)
+        if match is not None:
+            summaries.append((
+                index,
+                _bounded_int(match.group(1), "display summary ID", 0, 1024),
+                _bounded_int(
+                    match.group(2), "display summary stack count", 0, 10_000_000),
+            ))
+    if boundary_index is not None:
+        if not summaries:
+            raise AndroidAuthorityError(
+                "ActivityManager supervisor display summaries are absent")
+        header_records: list[tuple[int, int]] = []
+        for index in display_headers:
+            match = display_header.fullmatch(authority_lines[index])
+            if match is None:  # Defensive: display_headers came from this regex.
+                raise AndroidAuthorityError(
+                    "ActivityManager display authority is inconsistent")
+            header_records.append((
+                index,
+                _bounded_int(match.group(1), "display ID", 0, 1024),
+            ))
+        header_ids = [display_id for _, display_id in header_records]
+        summary_ids = [display_id for _, display_id, _ in summaries]
+        if (len(set(header_ids)) != len(header_ids) or
+                len(set(summary_ids)) != len(summary_ids) or
+                summary_ids != header_ids):
+            raise AndroidAuthorityError(
+                "ActivityManager display summaries disagree with display sections")
+        if not orientation_pair_displays.issubset(set(header_ids)):
+            raise AndroidAuthorityError(
+                "ActivityManager per-display orientation authority is unbound")
+
+        expected_counts: dict[int, int] = {}
+        for record_index, (start, display_id) in enumerate(header_records):
+            end = (header_records[record_index + 1][0]
+                   if record_index + 1 < len(header_records)
+                   else len(authority_lines))
+            expected_counts[display_id] = sum(
+                re.fullmatch(r"^  Stack #[0-9]+:[^\n]*$", line) is not None
+                for line in authority_lines[start + 1:end]
+            )
+        if any(expected_counts[display_id] != stack_count
+               for _, display_id, stack_count in summaries):
+            raise AndroidAuthorityError(
+                "ActivityManager display summary stack count disagrees")
 
     structural = (
         (r"^\s*Stack\b", r"^  Stack #[0-9]+:[^\n]*$"),
@@ -163,11 +584,13 @@ def _reject_malformed_structural_headers(text: str) -> None:
         (r"^\s*mResumedActivity\b",
          r"^    mResumedActivity: (?:ActivityRecord\{[^\n]*\}|null)$"),
     )
-    for line in lines:
+    for line in authority_lines:
         for header_like, admitted in structural:
             if (re.match(header_like, line, re.IGNORECASE) and
                     re.fullmatch(admitted, line) is None):
                 raise AndroidAuthorityError("ActivityManager structural header is malformed")
+
+    return "\n".join(authority_lines) + "\n"
 
 
 def _display_stack_blocks(text: str) -> list[tuple[int, int, str]]:
@@ -256,7 +679,7 @@ def parse_document_task_authority(raw: bytes, *, expected_pid: int,
     if type(require_live) is not bool:
         raise AndroidAuthorityError("require_live is not boolean")
     text, digest = _wire(raw)
-    _reject_malformed_structural_headers(text)
+    text = _reject_malformed_structural_headers(text)
     display_stack_blocks = _display_stack_blocks(text)
     target_history_pattern = (
         rf"^      \* Hist #[0-9]+: ActivityRecord\{{[0-9a-f]+ u0 "

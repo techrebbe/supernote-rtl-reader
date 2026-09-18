@@ -467,7 +467,7 @@ def _derive_host(prefix: bytes, process: host.ProcessIdentity,
 
 
 def _fd_targets(links: str) -> frozenset[str]:
-    return prior._validated_document_fd_targets(links)  # type: ignore[attr-defined]
+    return prior._validated_fd_targets(links)  # type: ignore[attr-defined]
 
 
 @dataclass(frozen=True)

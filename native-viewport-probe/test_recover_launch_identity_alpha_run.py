@@ -1,13 +1,100 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import asdict
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 import native_page_alpha_runner as alpha
+import native_page_host_authority as host
 import recover_launch_identity_alpha_run as recovery
 import test_native_page_android_authority as android_test
+
+
+class FakeExecutionDevice:
+    def __init__(self) -> None:
+        self.history: list[dict[str, object]] = []
+        self.document_task_live = True
+        self.host_task_live = True
+        self.document_process_live = True
+        self.files = {
+            **recovery.ORIGINALS,
+            recovery.PARKING_PDF: recovery.PARKING,
+            **recovery.TARGETS,
+        }
+
+    def pidof(self, package: str) -> tuple[int, ...]:
+        if package == alpha.DOCUMENT_PACKAGE:
+            return ((recovery.DOCUMENT_PID,)
+                    if self.document_process_live else ())
+        return ()
+
+    def process_identity(self, pid: int, package: str) -> host.ProcessIdentity:
+        if (pid != recovery.DOCUMENT_PID or
+                package != alpha.DOCUMENT_PACKAGE or
+                not self.document_process_live):
+            raise AssertionError("unexpected process identity request")
+        return host.ProcessIdentity(
+            recovery.DOCUMENT_PID, 44_444, recovery.DOCUMENT_UID,
+            alpha.DOCUMENT_PACKAGE)
+
+    def process_fd_links(self, pid: int) -> str:
+        if pid != recovery.DOCUMENT_PID:
+            raise AssertionError("unexpected descriptor request")
+        return (
+            "lr-x------ 1 root root 64 2026-09-17 01:40 40 -> " +
+            recovery.TARGET_PDF + "\n")
+
+    def stat_file(self, path: str, *, absent_ok: bool = False):
+        value = self.files.get(path)
+        if value is None and not absent_ok:
+            raise AssertionError("required fake file is absent: " + path)
+        return value
+
+    def rotation_settings(self) -> tuple[str, str]:
+        return ("1", "2")
+
+    def remove_task(self, task_id: int) -> alpha.CommandResult:
+        if task_id == 4_634 and self.document_task_live:
+            self.document_task_live = False
+        elif task_id == 4_633 and self.host_task_live:
+            self.host_task_live = False
+        else:
+            raise AssertionError("unexpected task removal")
+        self.history.append({"operation": "remove_exact_task", "taskId": task_id})
+        return alpha.CommandResult("remove_exact_task", (), 0, b"", b"")
+
+    def force_stop_document(self) -> alpha.CommandResult:
+        self.document_process_live = False
+        self.history.append({"operation": "force_stop_document"})
+        return alpha.CommandResult("force_stop_document", (), 0, b"", b"")
+
+    def move_if_exact(self, source: str, quarantine: str) -> alpha.CommandResult:
+        expected = self.files.pop(source)
+        self.files[quarantine] = alpha.DeviceFile(
+            quarantine, expected.kind, expected.size, expected.uid,
+            expected.gid, expected.inode, expected.device, expected.sha256)
+        operation = "recovery_quarantine_" + Path(source).name
+        self.history.append({"operation": operation})
+        return alpha.CommandResult(operation, (), 0, b"", b"")
+
+    def delete_if_exact(self, source: str, quarantine: str) -> alpha.CommandResult:
+        self.files.pop(quarantine)
+        operation = "recovery_remove_" + Path(quarantine).name
+        self.history.append({"operation": operation})
+        return alpha.CommandResult(operation, (), 0, b"", b"")
+
+    def activities(self) -> bytes:
+        return b"ACTIVITY MANAGER ACTIVITIES clean\n"
+
+    def windows(self) -> bytes:
+        return b"WINDOW MANAGER WINDOWS clean\n"
+
+    def displays(self) -> bytes:
+        return b"DISPLAY MANAGER clean\n"
 
 
 class LaunchIdentityRecoveryTests(unittest.TestCase):
@@ -123,6 +210,141 @@ class LaunchIdentityRecoveryTests(unittest.TestCase):
                 self.assertEqual(
                     ["header", "remove-document-task-intent"],
                     [record["kind"] for record in journal.records])
+            finally:
+                journal.close()
+
+    def _execution_authority(self, directory: Path) -> recovery.Authority:
+        retained = recovery.load_authority(self.root)
+        report_path = directory / "report.json"
+        active_path = directory / "active.jsonl"
+        shutil.copyfile(retained.report_path, report_path)
+        shutil.copyfile(retained.active_path, active_path)
+        _, report_identity = recovery._read_regular(
+            report_path, 128 * 1024, "test report")
+        _, active_identity = recovery._read_regular(
+            active_path, 256 * 1024, "test active journal")
+        return recovery.Authority(
+            self.root, report_path, active_path,
+            directory / "retired.jsonl", directory / "recovery.jsonl",
+            directory / "evidence.json", report_identity,
+            {**active_identity, "path": str(active_path)},
+            retained.dependency_identities)
+
+    @staticmethod
+    def _plan(stable: str = "fixed") -> dict[str, object]:
+        observation = {
+            "activitySha256": "1" * 64,
+            "windowSha256": "2" * 64,
+            "displaySha256": "3" * 64,
+            "stable": stable,
+        }
+        return {
+            "authority": recovery.PLAN_AUTHORITY,
+            "bindingSha256": "a" * 64,
+            "first": copy.deepcopy(observation),
+            "second": copy.deepcopy(observation),
+        }
+
+    @staticmethod
+    def _observation() -> recovery.Observation:
+        process = host.ProcessIdentity(
+            recovery.DOCUMENT_PID, 44_444, recovery.DOCUMENT_UID,
+            alpha.DOCUMENT_PACKAGE)
+        document = {
+            "taskId": 4_634, "activityToken": "doc-token",
+            "component": alpha.DOCUMENT_COMPONENT,
+            "process": asdict(process),
+        }
+        visual_host = {
+            "taskId": 4_633, "activityToken": "host-token",
+            "component": alpha.HOST_COMPONENT,
+        }
+        return recovery.Observation(
+            {}, visual_host, document, (), "1" * 64, "2" * 64,
+            "3" * 64, {}, ("1", "2"))
+
+    def test_execute_uses_exact_order_and_publishes_archive_and_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            authority = self._execution_authority(directory)
+            device = FakeExecutionDevice()
+            plan = self._plan()
+            observation = self._observation()
+            with (mock.patch.object(
+                        recovery, "build_plan",
+                        return_value=copy.deepcopy(plan)),
+                  mock.patch.object(
+                        recovery, "observe", return_value=observation),
+                  mock.patch.object(
+                        recovery, "_document_task_absent",
+                        side_effect=lambda target, pinned:
+                        not target.document_task_live),
+                  mock.patch.object(
+                        recovery, "_host_task_absent_and_display_gone",
+                        side_effect=lambda target, pinned:
+                        not target.host_task_live)):
+                result = recovery.execute(
+                    authority, device, copy.deepcopy(plan),
+                    {"path": "test-plan", "sha256": "b" * 64})
+
+            self.assertEqual("LAUNCH_IDENTITY_RECOVERED_CLEANLY",
+                             result["result"])
+            self.assertEqual(
+                ["remove_exact_task", "remove_exact_task",
+                 "force_stop_document",
+                 "recovery_quarantine_" + Path(recovery.TARGET_MARK).name,
+                 "recovery_remove_" +
+                 Path(recovery.QUARANTINE_MARK).name,
+                 "recovery_quarantine_" + Path(recovery.TARGET_PDF).name,
+                 "recovery_remove_" +
+                 Path(recovery.QUARANTINE_PDF).name],
+                [item["operation"] for item in device.history])
+            self.assertFalse(authority.active_path.exists())
+            self.assertTrue(authority.retired_path.exists())
+            self.assertTrue(authority.ledger_path.exists())
+            self.assertTrue(authority.evidence_path.exists())
+            self.assertNotIn(recovery.TARGET_MARK, device.files)
+            self.assertNotIn(recovery.TARGET_PDF, device.files)
+            self.assertEqual(recovery.ORIGINALS[recovery.ORIGINAL_PDF],
+                             device.files[recovery.ORIGINAL_PDF])
+            self.assertEqual(recovery.PARKING,
+                             device.files[recovery.PARKING_PDF])
+
+    def test_stable_plan_drift_fails_before_ledger_or_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            authority = self._execution_authority(Path(directory_name))
+            device = FakeExecutionDevice()
+            with mock.patch.object(
+                    recovery, "build_plan", return_value=self._plan("drift")):
+                with self.assertRaisesRegex(
+                        recovery.RecoveryError,
+                        "live authority no longer matches"):
+                    recovery.execute(
+                        authority, device, self._plan(),
+                        {"path": "test-plan", "sha256": "b" * 64})
+            self.assertEqual([], device.history)
+            self.assertFalse(authority.ledger_path.exists())
+            self.assertTrue(authority.active_path.exists())
+            self.assertFalse(authority.retired_path.exists())
+
+    def test_lost_reply_may_settle_once_by_exact_postcondition(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            journal = recovery.Journal(
+                Path(directory) / "recovery.jsonl", {"test": True})
+            try:
+                def uncertain():
+                    raise recovery.MutationTransportUncertain("lost reply")
+
+                recovery._dispatch_one(
+                    journal, "remove-document-task", "remove_exact_task",
+                    {"taskId": 1}, uncertain, lambda: True)
+                self.assertEqual(
+                    ["header", "remove-document-task-intent",
+                     "remove-document-task-settled"],
+                    [record["kind"] for record in journal.records])
+                self.assertEqual(
+                    "lost reply",
+                    journal.records[-1]["payload"]["transportError"])
             finally:
                 journal.close()
 

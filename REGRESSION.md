@@ -3031,6 +3031,28 @@ not change the hardware-tested companion APK or runtime path.
 
 ## Failure capture
 
+### Native Page post-restart orphan plan — 2026-09-22, read-only rejection
+
+On Nomad `SN078C10015092` (firmware
+`Chauvet.E103.2606161001.2393_release`), the read-only plan for retained run
+`alpha-20260917-020337Z-f27af080` was attempted from helper commit
+`d82a3fa790217a412b2f088e75d4468052330595`. It rejected during the
+first scope observation with `physical display-0 override identity differs`.
+The live display-0 override reported display ID 0, internal type, 1404 x 1872,
+rotation 0, and `state OFF`; admission requires the physical display to be ON.
+The host package had no process, while stock Document reported PID 2055.
+The first semantic observation did not complete, so no second observation or
+plan identity exists. No file or FD authority was admitted by this attempt.
+
+The run directory still contained only its 105,421-byte `report.json` (SHA-256
+`bd0ed2936693c58b2027f8c729f4ee16b127c82c95b2d304280e383b8042179c`).
+The 82,094-byte active journal remained SHA-256
+`3d5bf708704093f0eac01f0beb91e1ad9588474ed03dde1e64cabe17d47a9e5b`.
+No recovery plan, ledger, or evidence was published, and no device mutation was
+run. This is a fail-closed hardware observation, not a recovery or release pass.
+See [PM bridge #23](https://github.com/techrebbe/supernote-rtl-reader/issues/23)
+for the authorization and next decision.
+
 ### Isolated Android viewport substrate — 2026-09-06
 
 PASS for the separate `0.0.2-display-only` probe on Nomad SN078C10015092,

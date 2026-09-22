@@ -97,6 +97,14 @@ class FakeExecutionDevice:
         return b"DISPLAY MANAGER clean\n"
 
 
+class PackagePathNomad(recovery.Nomad):
+    def __init__(self, output: bytes) -> None:
+        self.output = output
+
+    def _invoke(self, operation, tail, **kwargs):
+        return alpha.CommandResult(operation, tuple(tail), 0, self.output, b"")
+
+
 class LaunchIdentityRecoveryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.root = Path(__file__).parent.resolve()
@@ -115,6 +123,30 @@ class LaunchIdentityRecoveryTests(unittest.TestCase):
         self.assertFalse(authority.evidence_path.exists())
         self.assertTrue(authority.active_path.exists())
         self.assertFalse(authority.retired_path.exists())
+
+    def test_package_path_admits_exact_host_and_stock_document_locations(self) -> None:
+        host_path = "/data/app/~~token/com.techrebbe.supernote.nativepagehost/base.apk"
+        self.assertEqual(
+            host_path,
+            PackagePathNomad(("package:" + host_path + "\n").encode("ascii"))
+            .package_path(alpha.HOST_PACKAGE))
+        self.assertEqual(
+            alpha.DOCUMENT_APK,
+            PackagePathNomad(
+                ("package:" + alpha.DOCUMENT_APK + "\n").encode("ascii"))
+            .package_path(alpha.DOCUMENT_PACKAGE))
+
+        rejected = (
+            (alpha.DOCUMENT_PACKAGE,
+             b"package:/data/app/com.supernote.document/base.apk\n"),
+            (alpha.HOST_PACKAGE,
+             ("package:" + alpha.DOCUMENT_APK + "\n").encode("ascii")),
+            ("com.example.other", b"package:/data/app/other/base.apk\n"),
+        )
+        for package, output in rejected:
+            with self.subTest(package=package, output=output), self.assertRaises(
+                    recovery.RecoveryError):
+                PackagePathNomad(output).package_path(package)
 
     def test_runner_dependency_pin_rejects_any_byte_or_size_mismatch(self) -> None:
         original_size = recovery.RUNNER_BYTES

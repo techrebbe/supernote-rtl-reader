@@ -544,8 +544,15 @@ class Nomad(prior.RecoveryNomad):
             "displays", ("shell", "dumpsys", "display")))
 
     def package_path(self, package: str) -> str:
+        if package not in {alpha.HOST_PACKAGE, alpha.DOCUMENT_PACKAGE}:
+            _fail("package path escaped the fixed recovery package set")
         result = self._invoke("package_path", ("shell", "pm", "path", package))
         text = self._require_zero(result).decode("ascii").strip()
+        if package == alpha.DOCUMENT_PACKAGE:
+            expected = "package:" + alpha.DOCUMENT_APK
+            if text != expected:
+                _fail("stock Document package path is malformed")
+            return alpha.DOCUMENT_APK
         match = re.fullmatch(r"package:(/data/app/[^\s]+/base\.apk)", text)
         if match is None:
             _fail("host package path is malformed")

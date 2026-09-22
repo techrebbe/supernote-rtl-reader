@@ -3050,6 +3050,14 @@ The 82,094-byte active journal remained SHA-256
 `3d5bf708704093f0eac01f0beb91e1ad9588474ed03dde1e64cabe17d47a9e5b`.
 No recovery plan, ledger, or evidence was published, and no device mutation was
 run. This is a fail-closed hardware observation, not a recovery or release pass.
+The one PM-authorized retry after the user confirmed the screen was awake also
+rejected at the same first-observation check. Display Manager still reported
+physical display 0 as `state OFF`, while Power Manager reported
+`mWakefulness=Awake`, `mDisplayReady=true`, and
+`mHoldingDisplaySuspendBlocker=true`. Thus `state OFF` cannot by itself be
+treated as proof that the user left the device asleep. The retained local
+report/journal hashes above remained unchanged, and no plan or recovery
+artifact was created. Further authority interpretation awaits PM direction.
 See [PM bridge #23](https://github.com/techrebbe/supernote-rtl-reader/issues/23)
 for the authorization and next decision.
 

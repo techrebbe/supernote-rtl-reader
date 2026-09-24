@@ -3061,6 +3061,33 @@ artifact was created. Further authority interpretation awaits PM direction.
 See [PM bridge #23](https://github.com/techrebbe/supernote-rtl-reader/issues/23)
 for the authorization and next decision.
 
+### Native Page post-restart display authority v2 — 2026-09-24
+
+The post-restart orphan helper now separates the built-in display's physical
+awake authority from its logical presentation override. Admission requires
+exactly one physical device and exactly one logical display (display 0), with
+the device and base record fixed to Built-in Screen, local:0, internal
+1404 x 1872, rotation 0 and state ON. Power Manager must independently report
+Awake, display-ready true, the display suspend blocker held, user-activity
+summary 0x1, and wake-lock summary 0x0.
+
+The logical override remains authoritative for active geometry and rotation,
+with exact internal/local:0 identity and a rotation-consistent Nomad frame.
+Its firmware-reported state must be exactly ON or OFF, is preserved as
+evidence, and is treated as advisory during stability comparison. Missing,
+duplicated, malformed, truncated, secondary-display, identity-borrowing,
+geometry-drift, power-drift, or rebound-plan evidence fails closed. The plan,
+ledger, and evidence authority moved to schema/authority v2 so no v1 plan can
+be consumed under the new split.
+
+The focused post-restart suite passes 29 tests, and the existing strict
+ActivityManager task/launch parser gate passes 39 tests (68 total).
+py_compile and git diff --check pass. A fresh read-only Nomad wire was accepted
+with physical device/base ON, override 1872 x 1404 rotation 3 state OFF, and
+the complete positive five-field Power Manager tuple. This validates only the
+parser/authority boundary. No recovery plan, cleanup execution, task or process
+mutation, file quarantine/delete, or journal retirement was run.
+
 ### Isolated Android viewport substrate — 2026-09-06
 
 PASS for the separate `0.0.2-display-only` probe on Nomad SN078C10015092,

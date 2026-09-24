@@ -31,8 +31,8 @@ import native_page_host_authority as host
 import recover_launch_identity_alpha_run as launch
 
 
-AUTHORITY = "native-page-alpha-post-restart-orphan-recovery-v1"
-PLAN_AUTHORITY = "native-page-alpha-post-restart-orphan-recovery-plan-v1"
+AUTHORITY = "native-page-alpha-post-restart-orphan-recovery-v2"
+PLAN_AUTHORITY = "native-page-alpha-post-restart-orphan-recovery-plan-v2"
 PLAN_BASENAME = "post-restart-orphan-recovery-plan.json"
 LEDGER_BASENAME = "post-restart-orphan-recovery.jsonl"
 EVIDENCE_BASENAME = "post-restart-orphan-recovery-evidence.json"
@@ -243,6 +243,171 @@ def _document_task_block(prefix: bytes,
     return candidates[0]
 
 
+def _one_record_field(record: str, pattern: str, label: str) -> str:
+    values = re.findall(pattern, record)
+    if len(values) != 1:
+        _fail(label + " is absent or ambiguous")
+    return values[0]
+
+
+def _display_info_authority(record: str, label: str) -> dict[str, Any]:
+    prefix = 'DisplayInfo{"Built-in Screen",'
+    if not record.startswith(prefix):
+        _fail(label + " name differs")
+    display_id = _one_record_field(
+        record, r"(?<![A-Za-z0-9_])displayId (0|[1-9][0-9]*)",
+        label + " display ID")
+    dimensions = re.findall(
+        r"(?<![A-Za-z0-9_])real ([0-9]{1,5}) x ([0-9]{1,5})",
+        record)
+    if len(dimensions) != 1:
+        _fail(label + " geometry is absent or ambiguous")
+    rotation = _one_record_field(
+        record, r"(?<![A-Za-z0-9_])rotation ([0-3])",
+        label + " rotation")
+    state = _one_record_field(
+        record, r"(?<![A-Za-z0-9_])state ([A-Z]+)",
+        label + " state")
+    display_type = _one_record_field(
+        record, r"(?<![A-Za-z0-9_])type ([A-Z]+)",
+        label + " type")
+    unique_id = _one_record_field(
+        record, r'(?<![A-Za-z0-9_])uniqueId "([^"\r\n]+)"',
+        label + " unique ID")
+    return {
+        "displayId": int(display_id),
+        "width": int(dimensions[0][0]),
+        "height": int(dimensions[0][1]),
+        "rotation": int(rotation),
+        "state": state,
+        "type": display_type,
+        "uniqueId": unique_id,
+    }
+
+
+def _physical_display0_authority(displays: bytes) -> dict[str, Any]:
+    """Authenticate physical power separately from logical presentation.
+
+    On the pinned Nomad firmware the logical override's state token can flicker
+    between ON and OFF while the built-in display, logical base display, and
+    PowerManager remain positively awake.  The physical device and base record
+    therefore own physical display state.  The override remains authoritative
+    only for the active frame and rotation; its state is retained as advisory
+    evidence and accepts only the two known tokens.
+    """
+    text = _decode_envelope(
+        displays, "display inventory", "DISPLAY MANAGER (dumpsys display)")
+    device_sizes = re.findall(
+        r"(?m)^Display Devices: size=(0|[1-9][0-9]*)\r?$", text)
+    device_lines = [line.strip() for line in text.splitlines()
+                    if "DisplayDeviceInfo{" in line]
+    if device_sizes != ["1"] or len(device_lines) != 1:
+        _fail("physical display inventory is incomplete or ambiguous")
+    device = device_lines[0]
+    if device.count('DisplayDeviceInfo{"Built-in Screen":') != 1:
+        _fail("physical display-0 device name differs")
+    unique_id = _one_record_field(
+        device, r'uniqueId="([^"\r\n]+)"',
+        "physical display-0 device unique ID")
+    dimensions = re.findall(
+        r'uniqueId="local:0", ([0-9]{1,5}) x ([0-9]{1,5}),', device)
+    rotation = _one_record_field(
+        device, r"(?<![A-Za-z0-9_])rotation ([0-3])",
+        "physical display-0 device rotation")
+    state = _one_record_field(
+        device, r"(?<![A-Za-z0-9_])state ([A-Z]+)",
+        "physical display-0 device state")
+    display_type = _one_record_field(
+        device, r"(?<![A-Za-z0-9_])type ([A-Z]+)",
+        "physical display-0 device type")
+    if (unique_id != "local:0" or dimensions != [("1404", "1872")] or
+            rotation != "0" or state != "ON" or
+            display_type != "INTERNAL"):
+        _fail("physical display-0 device identity differs")
+
+    logical_pattern = re.compile(
+        r"(?ms)^  Display (0|[1-9][0-9]*):\s*\n"
+        r"(.*?)(?=^  Display (?:0|[1-9][0-9]*):|\Z)")
+    blocks = list(logical_pattern.finditer(text))
+    inventory_sizes = re.findall(
+        r"(?m)^Logical Displays: size=(0|[1-9][0-9]*)\r?$", text)
+    if inventory_sizes != ["1"] or len(blocks) != 1:
+        _fail("logical display inventory is truncated or ambiguous")
+    display_ids = [int(item.group(1)) for item in blocks]
+    if display_ids != [0]:
+        _fail("physical display-0 logical record is absent or ambiguous")
+    block_ids = [line.strip() for line in blocks[0].group(2).splitlines()
+                 if line.lstrip().startswith("mDisplayId=")]
+    if block_ids != ["mDisplayId=0"]:
+        _fail("physical display-0 logical ID differs")
+    block = blocks[0].group(2)
+
+    def one_info(key: str, label: str) -> dict[str, Any]:
+        lines = [line.strip() for line in block.splitlines()
+                 if line.lstrip().startswith(key + "=")]
+        if len(lines) != 1:
+            _fail(label + " is absent or ambiguous")
+        prefix = key + "="
+        return _display_info_authority(lines[0][len(prefix):], label)
+
+    base = one_info("mBaseDisplayInfo", "physical display-0 base")
+    if base != {
+            "displayId": 0, "width": 1404, "height": 1872,
+            "rotation": 0, "state": "ON", "type": "INTERNAL",
+            "uniqueId": "local:0"}:
+        _fail("physical display-0 base identity differs")
+
+    override = one_info(
+        "mOverrideDisplayInfo", "physical display-0 override")
+    if (override["displayId"] != 0 or override["type"] != "INTERNAL" or
+            override["uniqueId"] != "local:0" or
+            override["state"] not in {"ON", "OFF"}):
+        _fail("physical display-0 override identity differs")
+    expected = ((1404, 1872) if override["rotation"] in (0, 2)
+                else (1872, 1404))
+    if (override["width"], override["height"]) != expected:
+        _fail("physical display-0 override geometry/rotation differs")
+    return {
+        "device": {
+            "name": "Built-in Screen", "uniqueId": "local:0",
+            "width": 1404, "height": 1872, "rotation": 0,
+            "state": "ON", "type": "INTERNAL"},
+        "base": base,
+        "override": override,
+    }
+
+
+def _power_authority(power: bytes) -> dict[str, Any]:
+    text = _decode_envelope(
+        power, "power inventory", "POWER MANAGER (dumpsys power)")
+    expected = {
+        "mWakefulness": "Awake",
+        "mDisplayReady": "true",
+        "mHoldingDisplaySuspendBlocker": "true",
+        "mUserActivitySummary": "0x1",
+        "mWakeLockSummary": "0x0",
+    }
+    observed: dict[str, str] = {}
+    for field, value in expected.items():
+        matches = re.findall(
+            r"(?m)^([ \t]*)" + re.escape(field) +
+            r"=([^\r\n]+)\r?$", text)
+        if len(matches) != 1:
+            _fail("PowerManager " + field + " is absent or ambiguous")
+        indentation, observed[field] = matches[0]
+        if indentation != "  ":
+            _fail("PowerManager " + field + " has malformed indentation")
+        if observed[field] != value:
+            _fail("PowerManager " + field + " differs")
+    return {
+        "wakefulness": observed["mWakefulness"],
+        "displayReady": True,
+        "holdingDisplaySuspendBlocker": True,
+        "userActivitySummary": observed["mUserActivitySummary"],
+        "wakeLockSummary": observed["mWakeLockSummary"],
+    }
+
+
 def _capture_scope(device: "Device") -> dict[str, Any]:
     environment = device.environment()
     host_before = device.pidof(alpha.HOST_PACKAGE)
@@ -267,8 +432,10 @@ def _capture_scope(device: "Device") -> dict[str, Any]:
     displays = device.displays()
     display_text = _decode_envelope(
         displays, "display inventory", "DISPLAY MANAGER (dumpsys display)")
+    power = device.power()
     try:
-        physical = launch.prior._physical_display0_override(displays)  # type: ignore[attr-defined]
+        physical = _physical_display0_authority(displays)
+        power_authority = _power_authority(power)
         launch.prior._assert_no_virtual_display(displays)  # type: ignore[attr-defined]
     except (launch.prior.RecoveryError, alpha.AlphaError) as error:
         raise RecoveryError(str(error)) from error
@@ -348,12 +515,14 @@ def _capture_scope(device: "Device") -> dict[str, Any]:
             "processes": [], "taskWindowDisplayAbsent": True,
             "physicalDisplay": physical,
         },
+        "power": power_authority,
         "document": document,
         "displaySummaries": [list(item) for item in summaries],
         "rotation": list(rotation),
         "activitySha256": activity_digest,
         "windowSha256": _sha(windows),
         "displaySha256": _sha(displays),
+        "powerSha256": _sha(power),
     }
 
 
@@ -375,8 +544,23 @@ def observe(device: "Device") -> Observation:
 
 def _stable_scope(scope: dict[str, Any]) -> dict[str, Any]:
     stable = copy.deepcopy(scope)
-    for key in ("activitySha256", "windowSha256", "displaySha256"):
+    for key in ("activitySha256", "windowSha256", "displaySha256",
+                "powerSha256"):
         stable.pop(key, None)
+    host_scope = stable.get("host")
+    if type(host_scope) is not dict:
+        _fail("host scope is malformed")
+    physical = host_scope.get("physicalDisplay")
+    if type(physical) is not dict:
+        _fail("physical display scope is malformed")
+    override = physical.get("override")
+    if type(override) is not dict:
+        _fail("physical display override is malformed")
+    override_state = override.get("state")
+    if (type(override_state) is not str or
+            override_state not in {"ON", "OFF"}):
+        _fail("physical display override state is malformed")
+    del override["state"]
     document = stable.get("document")
     if type(document) is not dict:
         _fail("Document scope is malformed")
@@ -402,6 +586,7 @@ class Device(Protocol):
     def activities(self) -> bytes: ...
     def windows(self) -> bytes: ...
     def displays(self) -> bytes: ...
+    def power(self) -> bytes: ...
     def pidof(self, package: str) -> tuple[int, ...]: ...
     def process_identity(self, pid: int, package: str) -> host.ProcessIdentity: ...
     def process_fd_links(self, pid: int) -> str: ...
@@ -420,6 +605,10 @@ class Nomad(launch.Nomad):
     def force_stop_document(self) -> alpha.CommandResult:
         _fail("post-restart recovery has no package-force-stop capability")
 
+    def power(self) -> bytes:
+        return self._require_zero(self._invoke(
+            "power", ("shell", "dumpsys", "power")))
+
 
 def build_plan(authority: Authority, device: Device) -> dict[str, Any]:
     _authority_guard(authority)
@@ -430,7 +619,7 @@ def build_plan(authority: Authority, device: Device) -> dict[str, Any]:
     _authority_guard(authority)
     body = {
         "authority": PLAN_AUTHORITY,
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "report": authority.report_identity,
         "activeJournal": authority.active_identity,
         "dependencies": authority.dependency_identities,
@@ -480,7 +669,7 @@ def load_plan(path: Path, authority: Authority) -> tuple[dict[str, Any], dict[st
     unsigned.pop("bindingSha256", None)
     if (type(binding) is not str or binding != _canonical_sha(unsigned) or
             plan.get("authority") != PLAN_AUTHORITY or
-            plan.get("schemaVersion") != 1 or
+            plan.get("schemaVersion") != 2 or
             plan.get("report") != authority.report_identity or
             plan.get("activeJournal") != authority.active_identity or
             plan.get("dependencies") != authority.dependency_identities):
@@ -631,7 +820,7 @@ def execute(authority: Authority, device: Device, plan: dict[str, Any],
     })
     evidence: dict[str, Any] = {
         "authority": AUTHORITY,
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "plan": plan_identity,
         "mutations": [],
         "result": "RECOVERY_PENDING",

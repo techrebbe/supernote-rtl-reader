@@ -1072,6 +1072,192 @@ Logical Displays: size=1
             self.assertTrue(authority.active_path.exists())
             self.assertFalse(authority.retired_path.exists())
 
+    def test_execute_retries_transient_wake_lock_in_complete_preflight(
+            self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            authority = self._execution_authority(Path(directory_name))
+            device = FakeDevice()
+            plan = recovery.build_plan(authority, device)
+            device.power_reads = 0
+            device.power_wake_lock = ("0x0", "0x23", "0x0", "0x0")
+            with mock.patch.object(recovery.time, "sleep") as pause:
+                result = recovery.execute(
+                    authority, device, plan,
+                    {"path": "test-plan", "sha256": "e" * 64})
+            pause.assert_called_once_with(3.0)
+            self.assertEqual(
+                "POST_RESTART_ORPHAN_RECOVERED_CLEANLY", result["result"])
+            self.assertEqual(4, len(self._operation_names(device)))
+            self.assertEqual(1, sum(
+                "recovery_quarantine_" + Path(recovery.TARGET_MARK).name == item
+                for item in self._operation_names(device)))
+            self.assertEqual(1, sum(
+                "recovery_quarantine_" + Path(recovery.TARGET_PDF).name == item
+                for item in self._operation_names(device)))
+
+    def test_execute_exhausts_busy_preflight_without_publication_or_mutation(
+            self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            authority = self._execution_authority(Path(directory_name))
+            device = FakeDevice()
+            plan = recovery.build_plan(authority, device)
+            device.power_reads = 0
+            device.power_wake_lock = ("0x23",)
+            with mock.patch.object(recovery.time, "sleep") as pause:
+                with self.assertRaises(recovery.WakeLockBusy):
+                    recovery.execute(
+                        authority, device, plan,
+                        {"path": "test-plan", "sha256": "f" * 64})
+            self.assertEqual(2, pause.call_count)
+            self.assertEqual(3, device.power_reads)
+            self.assertEqual([], device.history)
+            self.assertFalse(authority.ledger_path.exists())
+            self.assertFalse(authority.evidence_path.exists())
+            self.assertTrue(authority.active_path.exists())
+            self.assertEqual(recovery.TARGETS[recovery.TARGET_MARK],
+                             device.files[recovery.TARGET_MARK])
+            self.assertEqual(recovery.TARGETS[recovery.TARGET_PDF],
+                             device.files[recovery.TARGET_PDF])
+
+    def test_execute_retries_transient_final_scope_before_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            authority = self._execution_authority(Path(directory_name))
+            device = FakeDevice()
+            plan = recovery.build_plan(authority, device)
+            device.power_reads = 0
+            device.power_wake_lock = ("0x0", "0x0", "0x23", "0x0")
+            with mock.patch.object(recovery.time, "sleep") as pause:
+                result = recovery.execute(
+                    authority, device, plan,
+                    {"path": "test-plan", "sha256": "4" * 64})
+            pause.assert_called_once_with(3.0)
+            self.assertEqual(
+                "POST_RESTART_ORPHAN_RECOVERED_CLEANLY", result["result"])
+            self.assertEqual(4, len(self._operation_names(device)))
+
+    def test_execute_exhausts_final_scope_before_ledger_without_mutation(
+            self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            authority = self._execution_authority(Path(directory_name))
+            device = FakeDevice()
+            plan = recovery.build_plan(authority, device)
+            device.power_reads = 0
+            device.power_wake_lock = ("0x0", "0x0", "0x23", "0x23", "0x23")
+            with mock.patch.object(recovery.time, "sleep") as pause:
+                with self.assertRaises(recovery.WakeLockBusy):
+                    recovery.execute(
+                        authority, device, plan,
+                        {"path": "test-plan", "sha256": "5" * 64})
+            self.assertEqual(2, pause.call_count)
+            self.assertEqual(5, device.power_reads)
+            self.assertEqual([], device.history)
+            self.assertFalse(authority.ledger_path.exists())
+            self.assertFalse(authority.evidence_path.exists())
+            self.assertTrue(authority.active_path.exists())
+            self.assertEqual(recovery.TARGETS[recovery.TARGET_MARK],
+                             device.files[recovery.TARGET_MARK])
+            self.assertEqual(recovery.TARGETS[recovery.TARGET_PDF],
+                             device.files[recovery.TARGET_PDF])
+
+    def test_execute_retries_transient_busy_scope_without_replaying_mutations(
+            self) -> None:
+        # Capture indices 3/4/5 are respectively after ledger creation,
+        # after MARK deletion, and after PDF deletion.
+        for busy_at in (3, 4, 5):
+            with self.subTest(busy_at=busy_at):
+                with tempfile.TemporaryDirectory() as directory_name:
+                    authority = self._execution_authority(Path(directory_name))
+                    device = FakeDevice()
+                    plan = recovery.build_plan(authority, device)
+                    device.power_reads = 0
+                    device.power_wake_lock = (("0x0",) * busy_at +
+                                              ("0x23", "0x0"))
+                    with mock.patch.object(recovery.time, "sleep") as pause:
+                        result = recovery.execute(
+                            authority, device, plan,
+                            {"path": "test-plan", "sha256": "1" * 64})
+                    pause.assert_called_once_with(3.0)
+                    self.assertEqual(
+                        "POST_RESTART_ORPHAN_RECOVERED_CLEANLY",
+                        result["result"])
+                    self.assertEqual(
+                        [
+                            "recovery_quarantine_" +
+                            Path(recovery.TARGET_MARK).name,
+                            "recovery_remove_" +
+                            Path(recovery.QUARANTINES[
+                                recovery.TARGET_MARK]).name,
+                            "recovery_quarantine_" +
+                            Path(recovery.TARGET_PDF).name,
+                            "recovery_remove_" +
+                            Path(recovery.QUARANTINES[
+                                recovery.TARGET_PDF]).name,
+                        ], self._operation_names(device))
+
+    def test_execute_busy_after_mark_exhausts_with_ledger_and_pdf_intact(
+            self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            authority = self._execution_authority(Path(directory_name))
+            device = FakeDevice()
+            plan = recovery.build_plan(authority, device)
+            device.power_reads = 0
+            device.power_wake_lock = (("0x0",) * 4 + ("0x23",) * 3)
+            with mock.patch.object(recovery.time, "sleep") as pause:
+                with self.assertRaises(recovery.WakeLockBusy):
+                    recovery.execute(
+                        authority, device, plan,
+                        {"path": "test-plan", "sha256": "2" * 64})
+            self.assertEqual(2, pause.call_count)
+            self.assertEqual(7, device.power_reads)
+            self.assertEqual(
+                ["recovery_quarantine_" + Path(recovery.TARGET_MARK).name,
+                 "recovery_remove_" +
+                 Path(recovery.QUARANTINES[recovery.TARGET_MARK]).name],
+                self._operation_names(device))
+            self.assertNotIn(recovery.TARGET_MARK, device.files)
+            self.assertEqual(recovery.TARGETS[recovery.TARGET_PDF],
+                             device.files[recovery.TARGET_PDF])
+            self.assertTrue(authority.ledger_path.exists())
+            self.assertFalse(authority.evidence_path.exists())
+            self.assertTrue(authority.active_path.exists())
+            with self.assertRaisesRegex(
+                    recovery.RecoveryError, "one-shot recovery ledger/evidence"):
+                recovery.execute(
+                    authority, device, plan,
+                    {"path": "test-plan", "sha256": "2" * 64})
+
+    def test_execute_unrelated_scope_drift_after_busy_does_not_retry(
+            self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            authority = self._execution_authority(Path(directory_name))
+            device = FakeDevice()
+            plan = recovery.build_plan(authority, device)
+            device.power_reads = 0
+            device.power_wake_lock = (("0x0",) * 4 + ("0x23", "0x0"))
+
+            def change_rotation_after_busy(raw: bytes, index: int) -> bytes:
+                if index == 4:
+                    device.rotation = ("0", "0")
+                return raw
+
+            device.power_mutator = change_rotation_after_busy
+            with mock.patch.object(recovery.time, "sleep") as pause:
+                with self.assertRaisesRegex(
+                        recovery.RecoveryError,
+                        "persisted rotation settings differ"):
+                    recovery.execute(
+                        authority, device, plan,
+                        {"path": "test-plan", "sha256": "3" * 64})
+            pause.assert_called_once_with(3.0)
+            self.assertEqual(6, device.power_reads)
+            self.assertEqual(
+                ["recovery_quarantine_" + Path(recovery.TARGET_MARK).name,
+                 "recovery_remove_" +
+                 Path(recovery.QUARANTINES[recovery.TARGET_MARK]).name],
+                self._operation_names(device))
+            self.assertTrue(authority.ledger_path.exists())
+            self.assertFalse(authority.evidence_path.exists())
+
     def test_nomad_power_transport_is_bounded_to_dumpsys_power(self) -> None:
         device = object.__new__(recovery.Nomad)
         token = object()

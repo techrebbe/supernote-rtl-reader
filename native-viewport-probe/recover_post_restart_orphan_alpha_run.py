@@ -791,6 +791,24 @@ def build_read_only_plan_with_wake_lock_retries(
     raise AssertionError("unreachable read-only plan retry state")
 
 
+def require_planned_scope_with_wake_lock_retries(
+        plan: dict[str, Any], device: Device, *,
+        pause: Callable[[float], None] | None = None) -> dict[str, Any]:
+    """Recheck scope without replaying a mutation after a transient wake lock."""
+    if pause is None:
+        pause = time.sleep
+    for attempt in range(3):
+        try:
+            scope = _capture_scope(device)
+            _require_planned_scope(plan, scope)
+            return scope
+        except WakeLockBusy:
+            if attempt == 2:
+                raise
+            pause(3.0)
+    raise AssertionError("unreachable planned-scope retry state")
+
+
 def _strict_json(raw: bytes, label: str) -> dict[str, Any]:
     try:
         value = json.loads(raw.decode("ascii"),
@@ -958,14 +976,15 @@ def execute(authority: Authority, device: Device, plan: dict[str, Any],
             plan_identity: dict[str, Any]) -> dict[str, Any]:
     if os.path.lexists(authority.ledger_path) or os.path.lexists(authority.evidence_path):
         _fail("one-shot recovery ledger/evidence is already occupied")
-    current_plan = build_plan(authority, device)
+    current_plan = build_read_only_plan_with_wake_lock_retries(
+        authority, device)
     if _stable_plan_projection(current_plan) != _stable_plan_projection(plan):
         _fail("live authority no longer matches the exact plan")
 
-    # One final scope observation is made before the O_EXCL ledger and first
-    # mutation.  Any drift here still leaves the retained run untouched.
-    preledger_scope = _capture_scope(device)
-    _require_planned_scope(plan, preledger_scope)
+    # A final scope observation is made before the O_EXCL ledger and first
+    # mutation. Only a transient wake lock may retry; any other drift still
+    # leaves the retained run untouched.
+    require_planned_scope_with_wake_lock_retries(plan, device)
     journal = Journal(authority.ledger_path, {
         "plan": plan_identity,
         "planBindingSha256": plan["bindingSha256"],
@@ -980,13 +999,13 @@ def execute(authority: Authority, device: Device, plan: dict[str, Any],
         "result": "RECOVERY_PENDING",
     }
     try:
-        _require_planned_scope(plan, _capture_scope(device))
+        require_planned_scope_with_wake_lock_retries(plan, device)
         _dispatch_disposable(
             journal, device, TARGET_MARK, frozenset((TARGET_PDF,)))
-        _require_planned_scope(plan, _capture_scope(device))
+        require_planned_scope_with_wake_lock_retries(plan, device)
         _dispatch_disposable(journal, device, TARGET_PDF, frozenset())
-        final_scope = _capture_scope(device)
-        _require_planned_scope(plan, final_scope)
+        final_scope = require_planned_scope_with_wake_lock_retries(
+            plan, device)
         final_files = _assert_file_set(
             device, "final closure", frozenset())
         _archive_active(authority, journal)

@@ -23,7 +23,8 @@ from pathlib import Path
 import re
 import stat
 import sys
-from typing import Any, NoReturn, Protocol, Sequence
+import time
+from typing import Any, Callable, NoReturn, Protocol, Sequence
 
 import native_page_alpha_runner as alpha
 import native_page_android_authority as android
@@ -65,6 +66,10 @@ CURRENT_CONFIGURATION_ROTATIONS = {
 
 class RecoveryError(RuntimeError):
     """The fixed post-restart orphan authority is absent or changed."""
+
+
+class WakeLockBusy(RecoveryError):
+    """A bounded read-only observation saw a valid active wake-lock mask."""
 
 
 MutationTransportUncertain = launch.MutationTransportUncertain
@@ -513,7 +518,14 @@ def _power_authority(power: bytes) -> dict[str, Any]:
         if indentation != "  ":
             _fail("PowerManager " + field + " has malformed indentation")
         if observed[field] != value:
-            _fail("PowerManager " + field + " differs")
+            actual = observed[field]
+            message = ("PowerManager " + field + " differs "
+                       f"(observed={ascii(actual[:32])}, length={len(actual)})")
+            if (field == "mWakeLockSummary" and len(actual) <= 18 and
+                    re.fullmatch(r"0x[0-9a-fA-F]+", actual) and
+                    int(actual, 16) != 0):
+                raise WakeLockBusy(message)
+            _fail(message)
     return {
         "wakefulness": observed["mWakefulness"],
         "displayReady": True,
@@ -763,6 +775,22 @@ def build_plan(authority: Authority, device: Device) -> dict[str, Any]:
     return {**body, "bindingSha256": _canonical_sha(body)}
 
 
+def build_read_only_plan_with_wake_lock_retries(
+        authority: Authority, device: Device, *,
+        pause: Callable[[float], None] | None = None) -> dict[str, Any]:
+    """Retry complete read-only plans only for a valid transient wake lock."""
+    if pause is None:
+        pause = time.sleep
+    for attempt in range(3):
+        try:
+            return build_plan(authority, device)
+        except WakeLockBusy:
+            if attempt == 2:
+                raise
+            pause(3.0)
+    raise AssertionError("unreachable read-only plan retry state")
+
+
 def _strict_json(raw: bytes, label: str) -> dict[str, Any]:
     try:
         value = json.loads(raw.decode("ascii"),
@@ -1004,7 +1032,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _fail("read-only plan mode requires --output and forbids --plan")
     if args.output.resolve() != authority.plan_path.resolve():
         _fail("--output differs from the fixed post-restart plan path")
-    plan = build_plan(authority, device)
+    plan = build_read_only_plan_with_wake_lock_retries(authority, device)
     identity = _write_exclusive(args.output, plan)
     print(json.dumps({"result": "PLAN_READY", "plan": str(args.output),
                       "sha256": identity["sha256"]}, sort_keys=True))

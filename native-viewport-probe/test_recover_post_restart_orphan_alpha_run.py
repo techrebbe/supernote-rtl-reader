@@ -605,6 +605,97 @@ class PostRestartOrphanRecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(recovery.RecoveryError, "PowerManager"):
             recovery.build_plan(authority, device)
 
+    def test_wake_lock_drift_reports_bounded_token_and_fails_closed(
+            self) -> None:
+        authority = recovery.load_authority(self.root)
+        device = FakeDevice()
+        device.power_wake_lock = ("0x0", "0x1")
+        with self.assertRaisesRegex(
+                recovery.RecoveryError,
+                "PowerManager mWakeLockSummary differs "
+                r"\(observed='0x1', length=3\)"):
+            recovery.build_plan(authority, device)
+
+    def test_read_only_plan_retries_complete_observations_for_busy_wake_lock(
+            self) -> None:
+        authority = recovery.load_authority(self.root)
+        device = FakeDevice()
+        device.power_wake_lock = ("0x0", "0x23", "0x0", "0x0")
+        pauses: list[float] = []
+        plan = recovery.build_read_only_plan_with_wake_lock_retries(
+            authority, device, pause=pauses.append)
+        self.assertEqual([3.0], pauses)
+        self.assertEqual(4, device.power_reads)
+        self.assertEqual("0x0", plan["first"]["power"]["wakeLockSummary"])
+        self.assertEqual("0x0", plan["second"]["power"]["wakeLockSummary"])
+
+    def test_read_only_plan_retries_busy_first_observation(self) -> None:
+        authority = recovery.load_authority(self.root)
+        device = FakeDevice()
+        device.power_wake_lock = ("0x23", "0x0", "0x0")
+        pauses: list[float] = []
+        plan = recovery.build_read_only_plan_with_wake_lock_retries(
+            authority, device, pause=pauses.append)
+        self.assertEqual([3.0], pauses)
+        self.assertEqual(3, device.power_reads)
+        self.assertEqual("0x0", plan["first"]["power"]["wakeLockSummary"])
+        self.assertEqual("0x0", plan["second"]["power"]["wakeLockSummary"])
+
+    def test_read_only_plan_stops_after_three_busy_wake_locks(self) -> None:
+        authority = recovery.load_authority(self.root)
+        device = FakeDevice()
+        device.power_wake_lock = ("0x23",)
+        pauses: list[float] = []
+        with self.assertRaisesRegex(recovery.WakeLockBusy, "observed='0x23'"):
+            recovery.build_read_only_plan_with_wake_lock_retries(
+                authority, device, pause=pauses.append)
+        self.assertEqual([3.0, 3.0], pauses)
+        self.assertEqual(3, device.power_reads)
+
+    def test_read_only_plan_never_retries_malformed_or_other_power_state(
+            self) -> None:
+        authority = recovery.load_authority(self.root)
+        for field, value in (("power_wake_lock", "0x0 "),
+                             ("power_wakefulness", "Dreaming")):
+            with self.subTest(field=field):
+                device = FakeDevice()
+                setattr(device, field, (value,))
+                pauses: list[float] = []
+                with self.assertRaises(recovery.RecoveryError):
+                    recovery.build_read_only_plan_with_wake_lock_retries(
+                        authority, device, pause=pauses.append)
+                self.assertEqual([], pauses)
+                self.assertEqual(1, device.power_reads)
+
+    def test_read_only_plan_stops_on_unrelated_error_after_busy_retry(
+            self) -> None:
+        authority = recovery.load_authority(self.root)
+        device = FakeDevice()
+        device.power_wake_lock = ("0x23", "0x0")
+        device.power_wakefulness = ("Awake", "Dreaming")
+        pauses: list[float] = []
+        with self.assertRaisesRegex(recovery.RecoveryError, "mWakefulness"):
+            recovery.build_read_only_plan_with_wake_lock_retries(
+                authority, device, pause=pauses.append)
+        self.assertEqual([3.0], pauses)
+        self.assertEqual(2, device.power_reads)
+
+    def test_read_only_plan_main_never_publishes_after_retry_exhaustion(
+            self) -> None:
+        authority = recovery.load_authority(self.root)
+        device = FakeDevice()
+        device.power_wake_lock = ("0x23",)
+        with (mock.patch.object(recovery, "load_authority", return_value=authority),
+              mock.patch.object(recovery, "Nomad", return_value=device),
+              mock.patch.object(recovery, "_write_exclusive") as publish,
+              mock.patch.object(recovery.time, "sleep") as pause):
+            with self.assertRaises(recovery.WakeLockBusy):
+                recovery.main(("--adb", str(self.root / "adb"),
+                               "--output", str(authority.plan_path)))
+        self.assertEqual(3, device.power_reads)
+        self.assertEqual(2, pause.call_count)
+        publish.assert_not_called()
+
     def test_display_authority_rejects_identity_and_geometry_mismatches(
             self) -> None:
         cases = (

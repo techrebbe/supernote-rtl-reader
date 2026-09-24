@@ -42,6 +42,12 @@ class FakeDevice:
         self.extra_document_task = False
         self.extra_document_window = False
         self.malformed_activities = False
+        self.activity_rotation_literals = ("0",)
+        self.activity_size = (1404, 1872)
+        self.activity_app_size = (1404, 1872)
+        self.activity_qualifiers = "1.0 en_US 300dpi port"
+        self.activity_reads = 0
+        self.activity_mutator = None
         self.rotation = ("1", "2")
         self.lose_after: set[str] = set()
         self.physical_name = "Built-in Screen"
@@ -141,7 +147,11 @@ Display #0 (activities from top to bottom):
 """
         stale = ("  stale=" + alpha.HOST_PACKAGE + "\n"
                  if self.stale_host_task else "")
-        return f"""ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
+        index = self.activity_reads
+        self.activity_reads += 1
+        rotation_literal = self.activity_rotation_literals[
+            min(index, len(self.activity_rotation_literals) - 1)]
+        wire = f"""ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
 Display #0 (activities from top to bottom):
   Stack #{task}: type=standard mode=fullscreen
     mResumedActivity: ActivityRecord{{{self.ACTIVITY_TOKEN} u0 {component} t{task}}}
@@ -155,7 +165,7 @@ Display #0 (activities from top to bottom):
           app=ProcessRecord{{{self.PROCESS_TOKEN} {self.DOCUMENT_PID}:{package}/1000}}
           mActivityComponent={component}
           baseDir={alpha.DOCUMENT_APK}
-          CurrentConfiguration={{1.0 en_US 300dpi port winConfig={{ mBounds=Rect(0, 0 - 1404, 1872) mAppBounds=Rect(0, 0 - 1404, 1872) mRotation=ROTATION_0}} s.186}}
+          CurrentConfiguration={{{self.activity_qualifiers} winConfig={{ mBounds=Rect(0, 0 - {self.activity_size[0]}, {self.activity_size[1]}) mAppBounds=Rect(0, 0 - {self.activity_app_size[0]}, {self.activity_app_size[1]}) mRotation=ROTATION_{rotation_literal}}} s.186}}
           state=RESUMED stopped=false delayedResume=false finishing=false
           mVisibleRequested=true mVisible=true mClientVisible=true reportedDrawn=true reportedVisible=true
           nowVisible=true lastVisibleTime=-1s
@@ -165,6 +175,9 @@ Display #0 (activities from top to bottom):
   deepestLastOrientationSource=ActivityRecord{{{self.ACTIVITY_TOKEN} u0 {component} t{task}}}
   Display: mDisplayId=0 stacks={2 if self.extra_document_task else 1}
 """.encode("utf-8")
+        if self.activity_mutator is not None:
+            wire = self.activity_mutator(wire, index)
+        return wire
 
     def windows(self) -> bytes:
         if not self.document_pids:
@@ -327,6 +340,159 @@ class PostRestartOrphanRecoveryTests(unittest.TestCase):
             [FakeDevice.OTHER_PDF],
             plan["first"]["document"]["stable"]["fdTargets"])
         self.assertEqual([], device.history)
+
+    def test_closed_activity_rotation_degrees_are_admitted_and_retained(
+            self) -> None:
+        cases = (
+            ("0", 1404, 1872, 0),
+            ("90", 1872, 1404, 1),
+            ("180", 1404, 1872, 2),
+            ("270", 1872, 1404, 3),
+        )
+        for literal, width, height, expected in cases:
+            with self.subTest(literal=literal):
+                device = FakeDevice()
+                device.activity_rotation_literals = (literal,)
+                device.activity_size = (width, height)
+                device.activity_app_size = (width, height)
+                device.override_frames = ((width, height, expected),)
+                observation = recovery.observe(device).wire()
+                configuration = observation["document"]["stable"][
+                    "configuration"]
+                self.assertEqual({
+                    "rotationLiteral": "ROTATION_" + literal,
+                    "rotationDialect": "android-degrees",
+                    "rotation": expected,
+                    "width": width,
+                    "height": height,
+                }, configuration)
+                evidence = observation["document"]["evidence"]
+                self.assertRegex(evidence["configurationSha256"],
+                                 r"^[0-9a-f]{64}$")
+                self.assertRegex(evidence["authorityRawSha256"],
+                                 r"^[0-9a-f]{64}$")
+
+    def test_literal_live_nomad_rotation_270_wire_builds_stable_plan(self) -> None:
+        authority = recovery.load_authority(self.root)
+        device = FakeDevice()
+        device.activity_rotation_literals = ("270",)
+        device.activity_size = (1872, 1404)
+        device.activity_app_size = (1872, 1404)
+        device.activity_qualifiers = (
+            "1.0 [en_US,iw_IL] ldltr sw1198dp w1596dp h1147dp "
+            "300dpi xlrg land finger -keyb/v/h -nav/h")
+        device.override_frames = ((1872, 1404, 3),)
+        device.override_states = ("OFF",)
+        plan = recovery.build_plan(authority, device)
+        self.assertEqual(
+            {"rotationLiteral": "ROTATION_270",
+             "rotationDialect": "android-degrees", "rotation": 3,
+             "width": 1872, "height": 1404},
+            plan["first"]["document"]["stable"]["configuration"])
+        self.assertEqual(
+            recovery._stable_observation(plan["first"]),
+            recovery._stable_observation(plan["second"]))
+        self.assertEqual([], device.history)
+
+    def test_activity_rotation_aliases_and_malformed_values_fail_closed(
+            self) -> None:
+        for literal in ("1", "2", "3", "45", "360", "-90", "03",
+                        "undefined", "rotation_270"):
+            with self.subTest(literal=literal):
+                device = FakeDevice()
+                device.activity_rotation_literals = (literal,)
+                with self.assertRaises(recovery.RecoveryError):
+                    recovery.observe(device)
+
+    def test_activity_configuration_duplicate_and_mixed_tokens_fail_closed(
+            self) -> None:
+        def duplicate(raw: bytes, _index: int) -> bytes:
+            return self._replace_wire_line(
+                raw, b"          CurrentConfiguration=",
+                lambda line: line + line)
+
+        def mixed(raw: bytes, _index: int) -> bytes:
+            return raw.replace(
+                b"mRotation=ROTATION_0}",
+                b"mRotation=ROTATION_0 mRotation=ROTATION_270}", 1)
+
+        for label, mutate in (("duplicate", duplicate), ("mixed", mixed)):
+            with self.subTest(label=label):
+                device = FakeDevice()
+                device.activity_mutator = mutate
+                with self.assertRaises(recovery.RecoveryError):
+                    recovery.observe(device)
+
+    def test_neighbor_configuration_records_are_not_rotation_authority(
+            self) -> None:
+        sibling = (
+            b"            mGlobalConfig={1.0 300dpi winConfig={ "
+            b"mBounds=Rect(0, 0 - 1872, 1404) "
+            b"mAppBounds=Rect(0, 0 - 1872, 1404) "
+            b"mRotation=ROTATION_270}}\n"
+            b"            mOverrideConfig={1.0 300dpi winConfig={ "
+            b"mBounds=Rect(0, 0 - 1872, 1404) "
+            b"mAppBounds=Rect(0, 0 - 1872, 1404) "
+            b"mRotation=ROTATION_270}}\n"
+            b"          RequestedOverrideConfiguration={0.0 ?density "
+            b"winConfig={ mBounds=Rect(0, 0 - 0, 0) "
+            b"mAppBounds=null mRotation=undefined}}\n")
+        device = FakeDevice()
+        device.activity_rotation_literals = ("270",)
+        device.activity_size = (1872, 1404)
+        device.activity_app_size = (1872, 1404)
+        device.override_frames = ((1872, 1404, 3),)
+        device.activity_mutator = (
+            lambda raw, _index: raw.replace(
+                b"          CurrentConfiguration=", sibling +
+                b"          CurrentConfiguration=", 1))
+        observation = recovery.observe(device).wire()
+        self.assertEqual(
+            "ROTATION_270",
+            observation["document"]["stable"]["configuration"][
+                "rotationLiteral"])
+
+    def test_activity_configuration_geometry_and_display_mismatch_fail_closed(
+            self) -> None:
+        app_bounds = FakeDevice()
+        app_bounds.activity_app_size = (1400, 1872)
+        with self.assertRaises(recovery.RecoveryError):
+            recovery.observe(app_bounds)
+
+        rotation_geometry = FakeDevice()
+        rotation_geometry.activity_rotation_literals = ("270",)
+        with self.assertRaises(recovery.RecoveryError):
+            recovery.observe(rotation_geometry)
+
+        display = FakeDevice()
+        display.activity_rotation_literals = ("270",)
+        display.activity_size = (1872, 1404)
+        display.activity_app_size = (1872, 1404)
+        with self.assertRaisesRegex(
+                recovery.RecoveryError, "geometry differs"):
+            recovery.observe(display)
+
+    def test_activity_rotation_drift_between_observations_fails_closed(
+            self) -> None:
+        authority = recovery.load_authority(self.root)
+        device = FakeDevice()
+        device.activity_rotation_literals = ("90", "270")
+        device.activity_size = (1872, 1404)
+        device.activity_app_size = (1872, 1404)
+        device.override_frames = ((1872, 1404, 1), (1872, 1404, 3))
+        with self.assertRaisesRegex(
+                recovery.RecoveryError, "authority drifted"):
+            recovery.build_plan(authority, device)
+
+    def test_shared_v2_parser_remains_closed_to_degree_literals(self) -> None:
+        device = FakeDevice()
+        device.activity_rotation_literals = ("270",)
+        device.activity_size = (1872, 1404)
+        device.activity_app_size = (1872, 1404)
+        with self.assertRaises(android.AndroidAuthorityError):
+            android.parse_document_task_authority(
+                device.activities(), expected_pid=FakeDevice.DOCUMENT_PID,
+                require_live=True)
 
     def test_override_off_is_admitted_only_under_positive_authority(self) -> None:
         device = FakeDevice()
@@ -567,7 +733,7 @@ Logical Displays: size=1
         geometry.override_frames = (
             (1404, 1872, 0), (1872, 1404, 3))
         with self.assertRaisesRegex(
-                recovery.RecoveryError, "authority drifted"):
+                recovery.RecoveryError, "geometry differs"):
             recovery.build_plan(authority, geometry)
 
         raw_only = FakeDevice()

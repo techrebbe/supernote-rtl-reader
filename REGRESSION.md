@@ -3088,6 +3088,35 @@ the complete positive five-field Power Manager tuple. This validates only the
 parser/authority boundary. No recovery plan, cleanup execution, task or process
 mutation, file quarantine/delete, or journal retirement was run.
 
+### Native Page post-restart ActivityManager rotation dialect — 2026-09-24
+
+The first read-only v2 plan attempt rejected during its first observation and
+published no plan, ledger or evidence. The exact live stock Document
+`CurrentConfiguration` used the pinned firmware's degree-name dialect,
+`mRotation=ROTATION_270`, with 1872 x 1404 bounds. The retained shared v2
+ActivityManager parser accepts only its internal surface-index dialect and
+therefore rejected the otherwise corroborated live record. In the same bounded
+read-only snapshot, DisplayManager and WindowManager both independently
+reported rotation 3 at 1872 x 1404. The retained 105,421-byte report stayed at
+SHA-256 `bd0ed2936693c58b2027f8c729f4ee16b127c82c95b2d304280e383b8042179c`;
+the 82,094-byte active journal stayed at SHA-256
+`3d5bf708704093f0eac01f0beb91e1ad9588474ed03dde1e64cabe17d47a9e5b`.
+No device, task, process, file, setting or retained-run state was mutated.
+
+The bounded fix leaves the hash-pinned shared parser unchanged. The separate
+post-restart helper now selects exactly one current stock Document
+ActivityRecord owned by the expected process, admits only Android's closed
+`ROTATION_0/90/180/270` degree literals, verifies its bounds and app bounds,
+normalizes only that owned line on an in-memory copy, and then delegates to the
+strict shared parser. The original literal, dialect, configuration-line hash
+and raw ActivityManager hash remain evidence. Sibling global/override records,
+numeric aliases, malformed or duplicate fields, unsupported literals,
+geometry mismatches, display-authority mismatches and observation drift fail
+closed. The focused suite passes 37 tests and the existing strict task/launch
+gate passes 39 tests (76 total); py_compile and git diff --check pass. No new
+hardware plan attempt or recovery execution is part of this code-validation
+gate.
+
 ### Isolated Android viewport substrate — 2026-09-06
 
 PASS for the separate `0.0.2-display-only` probe on Nomad SN078C10015092,

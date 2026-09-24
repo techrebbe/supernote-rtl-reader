@@ -14,7 +14,7 @@ evidence.  It has no task-removal or package-force-stop operation.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import argparse
 import copy
 import json
@@ -54,6 +54,13 @@ PARKING_PDF = launch.PARKING_PDF
 PARKING_MARK = launch.PARKING_MARK
 PROTECTED_PATHS = launch.PROTECTED_PATHS
 DISPLAY_NAME = launch.DISPLAY_NAME
+
+CURRENT_CONFIGURATION_ROTATIONS = {
+    "0": 0,
+    "90": 1,
+    "180": 2,
+    "270": 3,
+}
 
 
 class RecoveryError(RuntimeError):
@@ -241,6 +248,114 @@ def _document_task_block(prefix: bytes,
     if len(candidates) != 1:
         _fail("current Document root task is absent or ambiguous")
     return candidates[0]
+
+
+def _closed_document_authority(
+        raw: bytes, expected_pid: int,
+        ) -> tuple[android.DocumentTaskAuthority, dict[str, Any]]:
+    """Adapt one owned degree-literal CurrentConfiguration to parser v2.
+
+    The retained shared parser is intentionally unchanged and hash-pinned by
+    older recovery evidence.  Current Nomad firmware emits Android's degree
+    names in ActivityManager (ROTATION_0/90/180/270), while that parser accepts
+    surface indices (ROTATION_0/1/2/3).  Select and normalize only the exact
+    current Document ActivityRecord on a copy, then retain the original wire
+    identity and literal as evidence.
+    """
+    try:
+        text, raw_sha256 = android._wire(raw)  # type: ignore[attr-defined]
+    except android.AndroidAuthorityError as error:
+        raise RecoveryError("current Document activity wire is malformed") from error
+    if type(expected_pid) is not int or not 1 <= expected_pid <= android.MAX_PID:
+        _fail("current Document PID is invalid")
+
+    component = (
+        rf"(?:{re.escape(android.SHORT_COMPONENT)}|"
+        rf"{re.escape(android.FULL_COMPONENT)})")
+    history_pattern = re.compile(
+        rf"^      \* Hist #[0-9]+: ActivityRecord\{{([0-9a-f]+) u0 "
+        rf"{component} t([0-9]+)\}}$")
+    lines = text.split("\n")
+    histories = [(index, history_pattern.fullmatch(line))
+                 for index, line in enumerate(lines)]
+    histories = [(index, match) for index, match in histories
+                 if match is not None]
+    if len(histories) != 1:
+        _fail("current Document activity block is absent or ambiguous")
+    start, history = histories[0]
+    assert history is not None
+    end = next((index for index in range(start + 1, len(lines))
+                if lines[index].startswith(("      * Hist #", "    * Task{",
+                                             "  Stack #", "Display #"))),
+               len(lines))
+    block = lines[start:end]
+    block_text = "\n".join(block)
+    process_pattern = re.compile(
+        rf"^          app=ProcessRecord\{{[0-9a-f]+ {expected_pid}:"
+        rf"{re.escape(android.PROCESS)}/{android.SYSTEM_UID}\}}$")
+    if len([line for line in block if process_pattern.fullmatch(line)]) != 1:
+        _fail("current Document activity process ownership differs")
+    if block_text.count("CurrentConfiguration=") != 1:
+        _fail("current Document configuration envelope is ambiguous")
+    configuration_indexes = [
+        index for index in range(start, end)
+        if lines[index].startswith("          CurrentConfiguration=")]
+    if len(configuration_indexes) != 1:
+        _fail("current Document configuration is absent or ambiguous")
+    configuration_index = configuration_indexes[0]
+    configuration = lines[configuration_index]
+    if (configuration.count("mBounds=") != 1 or
+            configuration.count("mAppBounds=") != 1 or
+            configuration.count("mRotation=") != 1 or
+            len(re.findall(
+                r"(?<!\S)[0-9]+dpi(?=\s|$)", configuration)) != 1):
+        _fail("current Document configuration fields are ambiguous")
+    bounds = re.search(
+        r"(?<!\S)mBounds=Rect\(0, 0 - ([1-9][0-9]*), ([1-9][0-9]*)\)"
+        r"(?=\s|$)", configuration)
+    app_bounds = re.search(
+        r"(?<!\S)mAppBounds=Rect\(0, 0 - ([1-9][0-9]*), ([1-9][0-9]*)\)"
+        r"(?=\s|$)", configuration)
+    rotation = re.search(
+        r"(?<!\S)mRotation=ROTATION_(0|90|180|270)(?=\}|\s|$)",
+        configuration)
+    if bounds is None or app_bounds is None or rotation is None:
+        _fail("current Document configuration value is invalid")
+    width, height = map(int, bounds.groups())
+    if tuple(map(int, app_bounds.groups())) != (width, height):
+        _fail("current Document app bounds differ from display bounds")
+    literal = rotation.group(1)
+    surface_rotation = CURRENT_CONFIGURATION_ROTATIONS[literal]
+    expected_geometry = (
+        (1404, 1872) if surface_rotation in (0, 2) else (1872, 1404))
+    if (width, height) != expected_geometry:
+        _fail("current Document bounds disagree with closed rotation")
+
+    normalized_lines = list(lines)
+    normalized_lines[configuration_index] = (
+        configuration[:rotation.start(1)] + str(surface_rotation) +
+        configuration[rotation.end(1):])
+    normalized = "\n".join(normalized_lines).encode("utf-8", "strict")
+    try:
+        authority = android.parse_document_task_authority(
+            normalized, expected_pid=expected_pid, require_live=True)
+    except android.AndroidAuthorityError as error:
+        raise RecoveryError(
+            "current Document normalized authority is malformed") from error
+    if (authority.activity_token != history.group(1) or
+            authority.task_id != int(history.group(2)) or
+            authority.width != width or authority.height != height or
+            authority.rotation != surface_rotation):
+        _fail("current Document normalized authority differs")
+    authority = replace(authority, raw_sha256=raw_sha256)
+    return authority, {
+        "rotationLiteral": "ROTATION_" + literal,
+        "rotationDialect": "android-degrees",
+        "rotation": surface_rotation,
+        "width": width,
+        "height": height,
+        "configurationSha256": _sha(configuration.encode("utf-8")),
+    }
 
 
 def _one_record_field(record: str, pattern: str, label: str) -> str:
@@ -463,8 +578,14 @@ def _capture_scope(device: "Device") -> dict[str, Any]:
         if process != expected:
             _fail("current stock Document process identity differs")
         try:
-            task_authority = android.parse_document_task_authority(
-                prefix, expected_pid=pid, require_live=True)
+            task_authority, configuration = _closed_document_authority(
+                prefix, expected_pid=pid)
+            override = physical["override"]
+            if (task_authority.display_id != override["displayId"] or
+                    task_authority.width != override["width"] or
+                    task_authority.height != override["height"] or
+                    task_authority.rotation != override["rotation"]):
+                _fail("current Document geometry differs from display authority")
             scope = launch.prior._assert_sole_document_scope(  # type: ignore[attr-defined]
                 activities, windows, task_authority, process)
             fd_targets = launch._fd_targets(device.process_fd_links(pid))
@@ -486,12 +607,17 @@ def _capture_scope(device: "Device") -> dict[str, Any]:
             "stable": {
                 "process": asdict(process),
                 "taskAuthority": authority_wire,
+                "configuration": {
+                    key: value for key, value in configuration.items()
+                    if key != "configurationSha256"
+                },
                 "documentScope": scope["stable"],
                 "fdTargets": sorted(fd_targets),
             },
             "evidence": {
                 "taskSha256": _sha(task.encode("utf-8")),
                 "authorityRawSha256": task_authority.raw_sha256,
+                "configurationSha256": configuration["configurationSha256"],
                 **scope["evidence"],
             },
         }

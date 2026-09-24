@@ -293,6 +293,17 @@ class DriftingFileDevice(FakeDevice):
 class PostRestartOrphanRecoveryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.root = Path(__file__).parent.resolve()
+        pause_patch = mock.patch.object(recovery.time, "sleep", return_value=None)
+        pause_patch.start()
+        self.addCleanup(pause_patch.stop)
+        # Keep the older retry/mutation tests focused on their own single
+        # observation semantics. The quiet dwell has dedicated live-path tests
+        # below, so its extra samples do not invalidate their capture indices.
+        self.actual_quiet_gate = recovery._await_quiet_power
+        quiet_patch = mock.patch.object(
+            recovery, "_await_quiet_power", return_value=None)
+        quiet_patch.start()
+        self.addCleanup(quiet_patch.stop)
 
     @staticmethod
     def _replace_wire_line(
@@ -615,6 +626,135 @@ class PostRestartOrphanRecoveryTests(unittest.TestCase):
                 "PowerManager mWakeLockSummary differs "
                 r"\(observed='0x1', length=3\)"):
             recovery.build_plan(authority, device)
+
+    def test_quiet_gate_waits_five_samples_even_when_power_is_clear(
+            self) -> None:
+        device = FakeDevice()
+        pauses: list[float] = []
+        self.actual_quiet_gate(device, pause=pauses.append)
+        self.assertEqual(5, device.power_reads)
+        self.assertEqual([1.0] * 4, pauses)
+        self.assertEqual([], device.history)
+
+    def test_quiet_gate_resets_streak_for_delayed_magisk_toast(
+            self) -> None:
+        device = FakeDevice()
+        device.power_wake_lock = (
+            "0x0", "0x0", "0x23", "0x23", "0x0", "0x0", "0x0", "0x0")
+        pauses: list[float] = []
+        self.actual_quiet_gate(device, pause=pauses.append)
+        self.assertEqual(8, device.power_reads)
+        self.assertEqual([1.0] * 7, pauses)
+        self.assertEqual([], device.history)
+
+    def test_quiet_gate_rejects_malformed_power_without_retry(
+            self) -> None:
+        for field, value in (("power_wake_lock", "0x0 "),
+                             ("power_wakefulness", "Dreaming")):
+            with self.subTest(field=field):
+                device = FakeDevice()
+                setattr(device, field, (value,))
+                pauses: list[float] = []
+                with self.assertRaises(recovery.RecoveryError):
+                    self.actual_quiet_gate(device, pause=pauses.append)
+                self.assertEqual(1, device.power_reads)
+                self.assertEqual([], pauses)
+
+    def test_quiet_gate_exhausts_at_thirty_samples_without_mutation(
+            self) -> None:
+        device = FakeDevice()
+        original_files = copy.deepcopy(device.files)
+        device.power_wake_lock = ("0x23",)
+        pauses: list[float] = []
+        with self.assertRaises(recovery.RecoveryError):
+            self.actual_quiet_gate(device, pause=pauses.append)
+        self.assertEqual(30, device.power_reads)
+        self.assertEqual([1.0] * 29, pauses)
+        self.assertEqual(original_files, device.files)
+        self.assertEqual([], device.history)
+
+    def test_full_plan_runs_real_quiet_gate_before_each_observation(
+            self) -> None:
+        authority = recovery.load_authority(self.root)
+        device = FakeDevice()
+        with mock.patch.object(recovery, "_await_quiet_power",
+                               self.actual_quiet_gate):
+            plan = recovery.build_plan(authority, device)
+        self.assertEqual(12, device.power_reads)
+        self.assertEqual("0x0", plan["first"]["power"]["wakeLockSummary"])
+        self.assertEqual("0x0", plan["second"]["power"]["wakeLockSummary"])
+
+    def test_power_becoming_busy_after_quiet_gate_still_fails_closed(
+            self) -> None:
+        authority = recovery.load_authority(self.root)
+        device = FakeDevice()
+        device.power_wake_lock = ("0x0",) * 5 + ("0x23",)
+        with mock.patch.object(recovery, "_await_quiet_power",
+                               self.actual_quiet_gate):
+            with self.assertRaisesRegex(recovery.WakeLockBusy,
+                                        "observed='0x23'"):
+                recovery.build_plan(authority, device)
+        self.assertEqual(6, device.power_reads)
+        self.assertEqual([], device.history)
+
+    def test_host_process_appearing_during_quiet_gate_fails_closed(
+            self) -> None:
+        authority = recovery.load_authority(self.root)
+        device = FakeDevice()
+
+        def start_host_on_last_quiet_sample(raw: bytes, index: int) -> bytes:
+            if index == 4:
+                device.host_pids = (999,)
+            return raw
+
+        device.power_mutator = start_host_on_last_quiet_sample
+        with mock.patch.object(recovery, "_await_quiet_power",
+                               self.actual_quiet_gate):
+            with self.assertRaisesRegex(
+                    recovery.RecoveryError,
+                    "retained visual-host process authority"):
+                recovery.build_plan(authority, device)
+        self.assertEqual(5, device.power_reads)
+        self.assertEqual([], device.history)
+
+    def test_plan_quiet_gate_precedes_each_full_observation(self) -> None:
+        authority = recovery.load_authority(self.root)
+        device = FakeDevice()
+        order: list[str] = []
+        observe = recovery.observe
+
+        def record_observation(current: FakeDevice):
+            order.append("observe")
+            return observe(current)
+
+        with (mock.patch.object(
+                recovery, "_await_quiet_power",
+                side_effect=lambda *args, **kwargs: order.append("quiet")),
+              mock.patch.object(recovery, "observe",
+                                side_effect=record_observation)):
+            recovery.build_plan(authority, device)
+        self.assertEqual(["quiet", "observe", "quiet", "observe"], order)
+
+    def test_planned_scope_quiet_gate_precedes_capture(self) -> None:
+        authority = recovery.load_authority(self.root)
+        device = FakeDevice()
+        with mock.patch.object(recovery, "_await_quiet_power"):
+            plan = recovery.build_plan(authority, device)
+        order: list[str] = []
+        capture = recovery._capture_scope
+
+        def record_capture(current: FakeDevice):
+            order.append("scope")
+            return capture(current)
+
+        with (mock.patch.object(
+                recovery, "_await_quiet_power",
+                side_effect=lambda *args, **kwargs: order.append("quiet")),
+              mock.patch.object(recovery, "_capture_scope",
+                                side_effect=record_capture)):
+            recovery.require_planned_scope_with_wake_lock_retries(
+                plan, device, pause=lambda seconds: None)
+        self.assertEqual(["quiet", "scope"], order)
 
     def test_read_only_plan_retries_complete_observations_for_busy_wake_lock(
             self) -> None:
@@ -1033,6 +1173,56 @@ Logical Displays: size=1
             self.assertTrue(authority.evidence_path.exists())
             self.assertNotIn(recovery.TARGET_MARK, device.files)
             self.assertNotIn(recovery.TARGET_PDF, device.files)
+
+    def test_execute_with_real_quiet_gates_reaches_verified_closure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            authority = self._execution_authority(Path(directory_name))
+            device = FakeDevice()
+            with mock.patch.object(recovery, "_await_quiet_power",
+                                   self.actual_quiet_gate):
+                plan = recovery.build_plan(authority, device)
+                device.power_reads = 0
+                result = recovery.execute(
+                    authority, device, plan,
+                    {"path": "test-plan", "sha256": "a" * 64})
+            self.assertEqual(36, device.power_reads)
+            self.assertEqual(
+                "POST_RESTART_ORPHAN_RECOVERED_CLEANLY", result["result"])
+            self.assertEqual(4, len(self._operation_names(device)))
+            self.assertTrue(authority.evidence_path.exists())
+            self.assertFalse(authority.active_path.exists())
+
+    def test_execute_real_quiet_gate_busy_after_mark_preserves_pdf(
+            self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            authority = self._execution_authority(Path(directory_name))
+            device = FakeDevice()
+            with mock.patch.object(recovery, "_await_quiet_power",
+                                   self.actual_quiet_gate):
+                plan = recovery.build_plan(authority, device)
+                device.power_reads = 0
+                # The first 24 reads finish the complete preflight and the
+                # scope before MARK deletion. The next quiet gate must not
+                # proceed to PDF deletion while a wake lock remains active.
+                device.power_wake_lock = ("0x0",) * 24 + ("0x23",)
+                with self.assertRaisesRegex(
+                        recovery.RecoveryError,
+                        "PowerManager did not stay quiet"):
+                    recovery.execute(
+                        authority, device, plan,
+                        {"path": "test-plan", "sha256": "b" * 64})
+            self.assertEqual(54, device.power_reads)
+            self.assertEqual(
+                ["recovery_quarantine_" + Path(recovery.TARGET_MARK).name,
+                 "recovery_remove_" + Path(
+                     recovery.QUARANTINES[recovery.TARGET_MARK]).name],
+                self._operation_names(device))
+            self.assertNotIn(recovery.TARGET_MARK, device.files)
+            self.assertEqual(recovery.TARGETS[recovery.TARGET_PDF],
+                             device.files[recovery.TARGET_PDF])
+            self.assertTrue(authority.ledger_path.exists())
+            self.assertTrue(authority.active_path.exists())
+            self.assertFalse(authority.evidence_path.exists())
 
     def test_lost_mutation_reply_settles_only_from_exact_postcondition(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:

@@ -748,10 +748,37 @@ class Nomad(launch.Nomad):
             "power", ("shell", "dumpsys", "power")))
 
 
+def _await_quiet_power(device: Device, *,
+                       pause: Callable[[float], None] | None = None) -> None:
+    """Require a bounded quiet dwell after root checks may queue Magisk Toasts.
+
+    The Toast can appear after an immediately clear PowerManager snapshot. Five
+    spaced samples provide a minimum dwell; four consecutive fully valid quiet
+    samples are required. The full observation still validates power again.
+    """
+    if pause is None:
+        pause = time.sleep
+    clear_samples = 0
+    for sample in range(30):
+        try:
+            _power_authority(device.power())
+        except WakeLockBusy:
+            clear_samples = 0
+        else:
+            clear_samples += 1
+        if sample >= 4 and clear_samples >= 4:
+            return
+        if sample < 29:
+            pause(1.0)
+    _fail("PowerManager did not stay quiet during bounded observation")
+
+
 def build_plan(authority: Authority, device: Device) -> dict[str, Any]:
     _authority_guard(authority)
+    _await_quiet_power(device)
     first = observe(device)
     _authority_guard(authority)
+    _await_quiet_power(device)
     second = observe(device)
     _assert_stable(first, second)
     _authority_guard(authority)
@@ -799,6 +826,7 @@ def require_planned_scope_with_wake_lock_retries(
         pause = time.sleep
     for attempt in range(3):
         try:
+            _await_quiet_power(device, pause=pause)
             scope = _capture_scope(device)
             _require_planned_scope(plan, scope)
             return scope

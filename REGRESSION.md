@@ -3117,6 +3117,40 @@ gate passes 39 tests (76 total); py_compile and git diff --check pass. No new
 hardware plan attempt or recovery execution is part of this code-validation
 gate.
 
+### Native Page post-restart orphan recovery v3 — 2026-09-24
+
+RECOVERY PASS ONLY for retained visual-alpha run
+`alpha-20260917-020337Z-f27af080` on Nomad `SN078C10015092`, Android 11,
+the pinned 20260616 firmware. This is not a native-page visual, pen, tool, or
+annotation pass. The earlier v2 attempt stopped after publishing a MARK
+quarantine intent because its ADB wrapper returned an invalid command reply;
+it did not move either disposable file. Its plan and ledger remain preserved.
+
+The separate, one-shot v3 path first authenticated a no-op adjudication of
+that v2 intent, then retained a new read-only plan with SHA-256
+`41d588f572b81cbaa2a1919a08dd16c8c30ac9c3683d456a2d4947c8a78d7030`.
+The resulting evidence reports
+`DISPOSABLES_QUARANTINED_RETAINED_V3`: only the exact disposable alpha PDF
+and `.mark` were moved to two hidden quarantine paths and retained, not
+deleted. The fixed active journal was retired to a retained 82,094-byte copy
+with SHA-256 `3d5bf708704093f0eac01f0beb91e1ad9588474ed03dde1e64cabe17d47a9e5b`.
+The recorded final scope has no visual host task/window/display, while the
+live stock Document is unrelated to the disposable target. Protected original
+PDF/mark and parking-file identities remained intact in the recorded checks.
+The local v3 evidence file has SHA-256
+`3a92fdd4181e160c63583448d5d3df215f963795b00bb6f93d51e760e13baa9b`.
+It and the old v2 artifacts are retained under the ignored
+`native-viewport-probe/build/native-page-alpha-runs/alpha-20260917-020337Z-f27af080/`
+directory; they are not GitHub artifacts. Do not repeat v3 `--execute` or
+remove the quarantine leaves.
+
+The new v3 recovery and no-op-adjudication host tests pass 53/53 at local
+head `ba056c9`; alpha-runner tests pass 193/193. The older v2 suite is not a
+current passing gate: 38 of its 62 cases error because its fixture requires
+the fixed active journal that v3 legitimately retired. A clean visual-only
+alpha run and subsequent pen-engine feasibility remain separate hardware
+gates.
+
 ### Isolated Android viewport substrate — 2026-09-06
 
 PASS for the separate `0.0.2-display-only` probe on Nomad SN078C10015092,

@@ -405,9 +405,23 @@ def _quarantine_one(journal: Journal, device: v2.Device,
     })
 
 
+MOVEFILE_WRITE_THROUGH = 0x00000008
+
+
+def _move_file_ex(source: Path, target: Path, flags: int) -> bool:
+    """Invoke the Windows wide-character move without adding replace flags."""
+    import ctypes
+    from ctypes import wintypes
+
+    move = ctypes.WinDLL("kernel32", use_last_error=True).MoveFileExW
+    move.argtypes = (wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD)
+    move.restype = wintypes.BOOL
+    return bool(move(str(source), str(target), flags))
+
+
 def _retire_active_no_clobber(session: Session, journal: Journal) -> dict[str, Any]:
     if os.name != "nt":
-        _fail("v3 active-journal retirement requires Windows no-clobber rename")
+        _fail("v3 active-journal retirement requires Windows no-clobber move")
     _guard_local(session)
     authority = session.context.authority
     if os.path.lexists(authority.retired_path):
@@ -423,10 +437,14 @@ def _retire_active_no_clobber(session: Session, journal: Journal) -> dict[str, A
         "identity": current,
         "noClobber": True,
     })
-    # Python's os.rename never replaces an existing destination on Windows.
-    # A raced replacement of the source would remain recoverable in the
-    # retired leaf and fail the exact postcheck; it is never deleted here.
-    os.rename(authority.active_path, authority.retired_path)
+    # MOVEFILE_WRITE_THROUGH is the sole flag: do not opt into
+    # MOVEFILE_REPLACE_EXISTING. A raced source replacement remains
+    # recoverable in the retired leaf and fails the exact postcheck.
+    if not _move_file_ex(authority.active_path, authority.retired_path,
+                         MOVEFILE_WRITE_THROUGH):
+        import ctypes
+        _fail("active-journal retirement failed with Windows error " +
+              str(ctypes.get_last_error()))
     v2.launch.prior._fsync_directory(authority.active_path.parent)
     retired_raw, retired = v2._read_regular(
         authority.retired_path, 256 * 1024, "retired active journal")

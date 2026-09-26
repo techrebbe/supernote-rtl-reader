@@ -369,10 +369,16 @@ class VersionedContinuationTests(unittest.TestCase):
         content = self._active_fixture()
         journal = v3.Journal(self.run_dir / "retire-ledger.jsonl", {})
         try:
-            with mock.patch.object(v3, "_guard_local"):
+            with (mock.patch.object(v3, "_guard_local"),
+                  mock.patch.object(v3, "_move_file_ex",
+                                    wraps=v3._move_file_ex) as move):
                 retired = v3._retire_active_no_clobber(self.session, journal)
         finally:
             journal.close()
+        move.assert_called_once_with(
+            self.context.authority.active_path,
+            self.context.authority.retired_path, 0x00000008)
+        self.assertEqual(0, move.call_args.args[2] & 0x00000001)
         self.assertFalse(self.context.authority.active_path.exists())
         self.assertEqual(content,
                          self.context.authority.retired_path.read_bytes())
@@ -398,38 +404,46 @@ class VersionedContinuationTests(unittest.TestCase):
         self.assertEqual(b"not our journal\n",
                          self.context.authority.retired_path.read_bytes())
 
-    def test_destination_appearing_during_rename_cannot_be_clobbered(self) -> None:
+    def test_destination_appearing_during_move_cannot_be_clobbered(self) -> None:
         content = self._active_fixture()
         journal = v3.Journal(self.run_dir / "race-retire-ledger.jsonl", {})
-        original_rename = v3.os.rename
 
-        def race(source, destination):
+        def race(source, destination, flags):
+            self.assertEqual(0x00000008, flags)
+            self.assertEqual(0, flags & 0x00000001)
             Path(destination).write_bytes(b"raced-in destination\n")
-            return original_rename(source, destination)
+            return False
 
         try:
             with (mock.patch.object(v3, "_guard_local"),
-                  mock.patch.object(v3.os, "rename", side_effect=race)):
-                with self.assertRaises(FileExistsError):
+                  mock.patch.object(v3, "_move_file_ex", side_effect=race)):
+                with self.assertRaisesRegex(v3.RecoveryError,
+                                            "retirement failed with Windows error"):
                     v3._retire_active_no_clobber(self.session, journal)
         finally:
             journal.close()
         self.assertEqual(content, self.context.authority.active_path.read_bytes())
         self.assertEqual(b"raced-in destination\n",
                          self.context.authority.retired_path.read_bytes())
+        self.assertEqual(["header", "archive-active-intent"],
+                         [v2._strict_json(line, "record")["kind"] for line in
+                          (self.run_dir / "race-retire-ledger.jsonl").read_bytes().splitlines()])
 
     def test_source_change_during_retirement_fails_postcheck_recoverably(self) -> None:
         self._active_fixture()
         journal = v3.Journal(self.run_dir / "changed-retire-ledger.jsonl", {})
         original_rename = v3.os.rename
 
-        def race(source, destination):
+        def race(source, destination, flags):
+            self.assertEqual(0x00000008, flags)
+            self.assertEqual(0, flags & 0x00000001)
             Path(source).write_bytes(b"raced replacement\n")
-            return original_rename(source, destination)
+            original_rename(source, destination)
+            return True
 
         try:
             with (mock.patch.object(v3, "_guard_local"),
-                  mock.patch.object(v3.os, "rename", side_effect=race)):
+                  mock.patch.object(v3, "_move_file_ex", side_effect=race)):
                 with self.assertRaisesRegex(v3.RecoveryError,
                                             "did not reach exact postcondition"):
                     v3._retire_active_no_clobber(self.session, journal)

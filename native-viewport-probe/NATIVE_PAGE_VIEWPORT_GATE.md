@@ -140,6 +140,33 @@ Each transition is bound to the live random session token. A placement command
 cannot change display generation, native configuration, page, presenter, note,
 history, Binder or saved data.
 
+### Next bounded micro-experiment: one page, no pen
+
+This is a **proposed card**, not hardware admission. The transport that can
+preserve the live stock `singleTask` reader without moving, killing or reusing
+an unrelated task remains a PM architecture decision. Do not run the unchanged
+virtual-display launcher beside a live stock Document task. The successful
+display-0 raw graph observer is also not a foreign-display graph adapter.
+The existing visual alpha runner requires global stock-Document absence before
+launch and after cleanup, so its four placement calls cannot simply be reused
+around an adopted live task.
+
+| Card item | Required evidence |
+| --- | --- |
+| Hypothesis | One real native page/presenter can remain unchanged while only its outer presentation rectangle moves. |
+| Fixed starting state | Pinned Nomad firmware, same SHA-verified disposable two-page PDF, source page, landscape orientation, native task/PID/starttime, display identity, verified Phase 1 physical-pen exclusion, and no pre-existing `.mark`. |
+| Single delta | Change only the outer presentation rectangle: centered FULL, LEFT, RIGHT, then centered FULL again; keep the underlying native page/writer geometry and document state fixed at the approved transport's pinned baseline. Do not rotate or turn a page during this card. |
+| Per-step capture | Bind task/process/document and exact placement generation; collect native graph, screenshot, then native graph again, plus PDF/`.mark` state. The graph observer/adapter must be reviewed for the chosen display/task architecture before use. |
+| PASS | Both graph samples agree at every placement, and the native page/presenter/document identities agree across all four placements; only authorized outer geometry changes; corners, text and native chrome fit without crop, stretch or stale pixels; the final FULL state and stock-reader state match the initial baseline after verified cleanup. This is visual/session evidence only. |
+| Abort/UNKNOWN | Any identity or graph drift, unexpected native configuration/page/tool/save event, pen contact, malformed capture, crop/stretch, late callback, missing cleanup proof or ambiguous state. Never infer a pass from screenshots alone. |
+| Rollback | Restore the exact initial FULL rectangle or tear down only the owned isolated task, as defined by the approved transport; verify no task migration, helper/forward leak, PDF change or `.mark` creation. Do not force-stop an unrelated stock reader. If exact restoration cannot be proved, retain quarantine and controlled-reboot obligation without retry. |
+
+Only after this card passes may a separately reviewed physical-pen card test one
+stroke in one half, its immediate and saved position, page turn and reopening
+in the untouched native reader. Eraser, Undo/Redo, lasso and text selection are
+separate cards, not combined with geometry changes. A second simultaneous page
+waits until one-page writer persistence has passed.
+
 ## Read-only evidence at every placement
 
 The observer captures two matching samples of bounded scalar/object identity:

@@ -50,14 +50,37 @@ CHILD_BASE_CODES = frozenset({
     "HIERARCHY_CHILD_UNLOAD_FAILED", "HIERARCHY_CHILD_DETACH_FAILED",
     "HIERARCHY_CHILD_FAILED", "HIERARCHY_CHILD_BUNDLE_INVALID",
 })
+ATTACH_ERROR_TYPES = (
+    ("ProcessNotFoundError", "PROCESS_NOT_FOUND"),
+    ("ProcessNotRespondingError", "PROCESS_NOT_RESPONDING"),
+    ("PermissionDeniedError", "PERMISSION_DENIED"),
+    ("TimedOutError", "TIMED_OUT"),
+    ("TransportError", "TRANSPORT_ERROR"),
+    ("ServerNotRunningError", "SERVER_NOT_RUNNING"),
+    ("ProtocolError", "PROTOCOL_ERROR"),
+    ("InvalidArgumentError", "INVALID_ARGUMENT"),
+    ("InvalidOperationError", "INVALID_OPERATION"),
+    ("NotSupportedError", "NOT_SUPPORTED"),
+    ("OperationCancelledError", "OPERATION_CANCELLED"),
+)
 CHILD_CODES = CHILD_BASE_CODES | frozenset(
     "HIERARCHY_CHILD_OBSERVER_REJECTED_" + phase + "_" + reason
-    for phase, reason in ERROR_PAIRS)
+    for phase, reason in ERROR_PAIRS) | frozenset(
+    "HIERARCHY_CHILD_ATTACH_" + reason for _, reason in ATTACH_ERROR_TYPES)
 MAX_FRAME = 16_384
 
 
 class HierarchyError(RuntimeError):
     """Only path-free fixed diagnostic codes reach callers."""
+
+
+def _attach_error_code(error: BaseException, frida: Any) -> str:
+    """Classify only exact Frida 17.9.11 attach errors; never inspect their text."""
+    for class_name, reason in ATTACH_ERROR_TYPES:
+        exception_type = getattr(frida, class_name, None)
+        if type(exception_type) is type and type(error) is exception_type:
+            return "HIERARCHY_CHILD_ATTACH_" + reason
+    return "HIERARCHY_CHILD_ATTACH_FAILED"
 
 
 def _need(ok: bool, code: str = "HIERARCHY_REJECTED") -> None:
@@ -343,6 +366,8 @@ def child(pid: int, wire: bytes) -> int:
     except BaseException as error:
         if type(error) is HierarchyError and str(error) in CHILD_CODES:
             body_error = error
+        elif stage == "ATTACH":
+            body_error = HierarchyError(_attach_error_code(error, frida))
         else:
             body_error = HierarchyError(
                 "HIERARCHY_CHILD_" + stage + "_FAILED"

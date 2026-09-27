@@ -22,9 +22,16 @@
   });
   const MAX_CHILDREN = 32;
   let done = false, timer = null, state = null, phase = 'MANIFEST', reason = 'INVALID';
+  let stage = 'NONE', childIndex = -1, sampleOrdinal = 0;
   function reject() { throw 'HIERARCHY_REJECTED'; }
   function need(ok) { if (!ok) reject(); }
-  function point(p, r) { phase = p; reason = r; }
+  function point(p, r) {
+    phase = p; reason = r;
+    stage = 'NONE'; childIndex = -1; sampleOrdinal = 0;
+  }
+  // Error diagnostics carry only fixed checkpoints and bounded ordinals. They
+  // never publish a partial hierarchy, exception text, target URI, or geometry.
+  function checkpoint(name, index = -1) { stage = name; childIndex = index; }
   function object(v) { return v !== null && typeof v === 'object' && !Array.isArray(v); }
   function keys(value, names) {
     need(object(value));
@@ -186,27 +193,42 @@
     return box;
   }
   function childSnapshot(v, index, s, root) {
+    checkpoint('CHILD_CLASS', index);
     const name = ascii(v.$className, 160);
     need(object(v.$h));
+    checkpoint('CHILD_PARENT', index);
     same(s, v.getParent(), root);
+    checkpoint('CHILD_ID', index);
     const id = integer(v.getId(), -1, 2147483647);
+    checkpoint('CHILD_VISIBILITY', index);
     const visibility = integer(v.getVisibility(), 0, 8);
     need([0, 4, 8].includes(visibility));
-    return {index, id, className: name, bounds: bounds(v, visibility === 0),
-      visibility, z: f64(v.getZ()), parentIsRoot: true};
+    checkpoint('CHILD_BOUNDS', index);
+    const box = bounds(v, visibility === 0);
+    checkpoint('CHILD_Z', index);
+    const z = f64(v.getZ());
+    return {index, id, className: name, bounds: box,
+      visibility, z, parentIsRoot: true};
   }
   function sample(activity, s, previous) {
     point('HIERARCHY', 'MISMATCH');
+    sampleOrdinal = previous === null ? 1 : 2;
+    checkpoint('ACTIVITY_CLASS');
     exact(activity, CLASSES.activity);
+    checkpoint('ACTIVITY_LIFECYCLE');
     need(direct(activity, 'mResumed') === true &&
       direct(activity, 'mFinished') === false &&
       direct(activity, 'mDestroyed') === false);
+    checkpoint('VM_CLASS');
     const vm = direct(activity, 'documentViewModel');
     exact(vm, CLASSES.vm);
+    checkpoint('URI_CLASS');
     const uri = direct(vm, 'uri');
     need(object(uri) && [CLASSES.stringUri, CLASSES.hierarchicalUri].includes(uri.$className));
+    checkpoint('URI_VALUE');
     const concrete = Java.cast(uri, Java.use(uri.$className));
     need(ascii(direct(concrete, 'uriString'), 1024) === URI);
+    checkpoint('ROOT_CLASS');
     const root = direct(activity, 'mContentView');
     exact(root, CLASSES.root);
     const fields = [
@@ -216,19 +238,24 @@
     ];
     const refs = {activity, vm, uri, root}, fieldIndex = {};
     for (const [key, name, className] of fields) {
+      checkpoint('FIELD_' + key.toUpperCase());
       const view = direct(activity, name);
       exact(view, className);
       refs[key] = view;
     }
+    checkpoint('ROOT_CHILD_COUNT');
     const count = integer(root.getChildCount(), 4, MAX_CHILDREN);
+    checkpoint('DRAW_ORDER');
     const customDrawingOrder = root.isChildrenDrawingOrderEnabled();
     need(typeof customDrawingOrder === 'boolean');
     const children = [];
     for (let i = 0; i < count; i++) {
+      checkpoint('CHILD_HANDLE', i);
       const child = root.getChildAt(i);
       need(object(child) && object(child.$h));
       refs['child' + i] = child;
       children.push(childSnapshot(child, i, s, root));
+      checkpoint('CHILD_FIELD_IDENTITY', i);
       for (const [key] of fields) {
         if (s.env.isSameObject(child.$h, refs[key].$h) === true) {
           need(fieldIndex[key] === undefined);
@@ -236,17 +263,24 @@
         }
       }
     }
+    checkpoint('FIELD_ORDER');
     need(Object.keys(fieldIndex).length === 3 &&
       fieldIndex.pdf < fieldIndex.digest && fieldIndex.digest < fieldIndex.pen);
     // These are raw child indices and Z values. A custom draw order or future
     // framework behavior can invalidate any inferred effective compositing.
-    const output = {rootClass: CLASSES.root, rootId: integer(root.getId(), -1, 2147483647),
-      rootBounds: bounds(root, true), childCount: count, children,
+    checkpoint('ROOT_ID');
+    const rootId = integer(root.getId(), -1, 2147483647);
+    checkpoint('ROOT_BOUNDS');
+    const rootBounds = bounds(root, true);
+    const output = {rootClass: CLASSES.root, rootId,
+      rootBounds, childCount: count, children,
       fieldIndex, customDrawingOrder,
       effectiveCompositingAdmitted: false,
       uriMatchedExpected: true, lifecycleStable: true};
     if (previous !== null) {
+      checkpoint('SECOND_SAMPLE_REFS');
       for (const key of Object.keys(refs)) same(s, refs[key], previous.refs[key]);
+      checkpoint('SECOND_SAMPLE_VALUES');
       need(JSON.stringify(output) === JSON.stringify(previous.output));
     }
     return {refs, output};
@@ -261,7 +295,8 @@
   }
   function fail() {
     frames({event: 'native_page_hierarchy_error', schemaVersion: VERSION,
-      code: 'HIERARCHY_REJECTED', phase, reason}, false);
+      code: 'HIERARCHY_REJECTED', phase, reason, stage, childIndex,
+      sampleOrdinal}, false);
   }
   function observe(parsed) {
     if (done) return;

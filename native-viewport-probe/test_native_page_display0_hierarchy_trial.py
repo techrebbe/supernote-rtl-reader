@@ -24,6 +24,9 @@ CLASSES = [
     "android.widget.RelativeLayout",
     "android.widget.RelativeLayout",
     "android.widget.FrameLayout",
+    "android.widget.FrameLayout",
+    "android.widget.LinearLayout",
+    "android.widget.FrameLayout",
 ]
 
 
@@ -38,7 +41,8 @@ def record() -> dict:
         "rootBounds": [0, 0, 1872, 1404], "childCount": len(CLASSES),
         "children": [
             {"index": i, "id": 1000 + i, "className": name,
-             "bounds": [0, 0, 1872, 1404], "visibility": 0,
+             "bounds": [0, 0, 0, 0] if i == 7 else [0, 0, 1872, 1404],
+             "visibility": 8 if i == 7 else 0,
              "z": "0x0000000000000000", "parentIsRoot": True}
             for i, name in enumerate(CLASSES)
         ],
@@ -53,6 +57,18 @@ def frames(value: dict) -> tuple[bytes, bytes]:
             canonical.canonical_bytes(
                 {"event": "native_page_hierarchy_complete", "success": True},
                 subject.MAX_FRAME))
+
+
+def error_frames(phase: str = "HIERARCHY", reason: str = "MISMATCH",
+                 stage: str = "CHILD_PARENT", child_index: int = 8,
+                 sample: int = 1) -> tuple[bytes, bytes]:
+    return (canonical.canonical_bytes({
+        "event": "native_page_hierarchy_error", "schemaVersion": 1,
+        "code": "HIERARCHY_REJECTED", "phase": phase, "reason": reason,
+        "stage": stage, "childIndex": child_index, "sampleOrdinal": sample,
+    }, subject.MAX_FRAME), canonical.canonical_bytes(
+        {"event": "native_page_hierarchy_complete", "success": False},
+        subject.MAX_FRAME))
 
 
 def child_wire() -> bytes:
@@ -88,11 +104,11 @@ class HierarchyTrialTests(unittest.TestCase):
         for visibility in (4, 8):
             with self.subTest(visibility=visibility):
                 value = record()
-                value["children"][5]["visibility"] = visibility
-                value["children"][5]["bounds"] = [0, 0, 0, 0]
+                value["children"][8]["visibility"] = visibility
+                value["children"][8]["bounds"] = [0, 0, 0, 0]
                 self.assertEqual(subject.parse_frames(frames(value), MANIFEST_SHA),
                                  value)
-                value["children"][5]["bounds"] = [0, 0, -1, 0]
+                value["children"][8]["bounds"] = [0, 0, -1, 0]
                 with self.assertRaises(subject.HierarchyError):
                     subject.parse_frames(frames(value), MANIFEST_SHA)
 
@@ -120,17 +136,57 @@ class HierarchyTrialTests(unittest.TestCase):
                     subject.parse_frames(frames(value), MANIFEST_SHA)
 
     def test_error_record_is_not_success(self) -> None:
-        error = {"event": "native_page_hierarchy_error", "schemaVersion": 1,
-                 "code": "HIERARCHY_REJECTED", "phase": "HIERARCHY",
-                 "reason": "MISMATCH"}
-        raw = (canonical.canonical_bytes(error, subject.MAX_FRAME),
-               canonical.canonical_bytes(
-                   {"event": "native_page_hierarchy_complete", "success": False},
-                   subject.MAX_FRAME))
+        raw = error_frames()
         self.assertEqual(subject.parse_error_frames(raw),
-                         ("HIERARCHY", "MISMATCH"))
+                         ("HIERARCHY", "MISMATCH", "CHILD_PARENT", 8, 1))
+        self.assertEqual(subject._observer_error_code(
+            *subject.parse_error_frames(raw)),
+            "HIERARCHY_CHILD_OBSERVER_REJECTED_HIERARCHY_MISMATCH_S1_CHILD_PARENT_I8")
         with self.assertRaises(subject.HierarchyError):
             subject.parse_frames(raw, MANIFEST_SHA)
+
+    def test_error_frame_stage_index_and_sample_are_strict(self) -> None:
+        valid = (
+            ("HIERARCHY", "MISMATCH", "DRAW_ORDER", -1, 1),
+            ("HIERARCHY", "MISMATCH", "CHILD_BOUNDS", 31, 2),
+            ("MANIFEST", "INVALID", "NONE", -1, 0),
+            ("CLEANUP", "FAILED", "NONE", -1, 0),
+        )
+        for case in valid:
+            with self.subTest(case=case):
+                parsed = subject.parse_error_frames(error_frames(*case))
+                self.assertEqual(parsed, case)
+                self.assertIn(subject._observer_error_code(*parsed),
+                              subject.CHILD_CODES)
+        invalid = (
+            ("HIERARCHY", "MISMATCH", "UNBOUNDED", -1, 1),
+            ("HIERARCHY", "MISMATCH", "DRAW_ORDER", 0, 1),
+            ("HIERARCHY", "MISMATCH", "CHILD_PARENT", -1, 1),
+            ("HIERARCHY", "MISMATCH", "CHILD_PARENT", 32, 1),
+            ("HIERARCHY", "MISMATCH", "CHILD_PARENT", True, 1),
+            ("HIERARCHY", "MISMATCH", "DRAW_ORDER", -1, 0),
+            ("HIERARCHY", "MISMATCH", "DRAW_ORDER", -1, 3),
+            ("MANIFEST", "INVALID", "CHILD_PARENT", 8, 1),
+            ("MANIFEST", "INVALID", "NONE", 0, 0),
+        )
+        for case in invalid:
+            with self.subTest(case=case):
+                with self.assertRaises(subject.HierarchyError):
+                    subject.parse_error_frames(error_frames(*case))
+
+        first, second = error_frames()
+        altered = canonical.load_canonical(first, subject.MAX_FRAME).value
+        for mutation in (
+            lambda e: e.update(rawException="C:\\private\\secret.pdf"),
+            lambda e: e.pop("stage"),
+            lambda e: e.update(stage="C:\\private\\secret.pdf"),
+        ):
+            with self.subTest(mutation=mutation):
+                bad = copy.deepcopy(altered)
+                mutation(bad)
+                raw = canonical.canonical_bytes(bad, subject.MAX_FRAME)
+                with self.assertRaises(subject.HierarchyError):
+                    subject.parse_error_frames((raw, second))
 
     def test_exact_pinned_attach_errors_are_fixed_codes(self) -> None:
         frida = pinned_frida()
@@ -204,6 +260,37 @@ class HierarchyTrialTests(unittest.TestCase):
               patch.object(frida, "get_device_manager", return_value=manager)):
             with self.assertRaisesRegex(subject.HierarchyError,
                                         "^HIERARCHY_CHILD_DETACH_FAILED$"):
+                subject.child(1234, child_wire())
+        device.attach.assert_called_once_with(1234)
+        script.unload.assert_called_once_with()
+        session.detach.assert_called_once_with()
+
+    def test_child_propagates_only_bounded_stage_and_always_detaches(self) -> None:
+        frida = pinned_frida()
+        script = Mock()
+        callback = None
+
+        def register(_event, receiver):
+            nonlocal callback
+            callback = receiver
+
+        def emit():
+            assert callback is not None
+            for raw in error_frames():
+                callback({"type": "send", "payload": canonical.load_canonical(
+                    raw, subject.MAX_FRAME).value}, None)
+
+        script.on.side_effect = register
+        script.load.side_effect = emit
+        session = Mock()
+        session.create_script.return_value = script
+        device = Mock()
+        device.attach.return_value = session
+        manager = SimpleNamespace(add_remote_device=lambda _: device)
+        with (patch.object(subject, "load_bundle", return_value=b"unused"),
+              patch.object(frida, "get_device_manager", return_value=manager)):
+            with self.assertRaisesRegex(subject.HierarchyError,
+                "^HIERARCHY_CHILD_OBSERVER_REJECTED_HIERARCHY_MISMATCH_S1_CHILD_PARENT_I8$"):
                 subject.child(1234, child_wire())
         device.attach.assert_called_once_with(1234)
         script.unload.assert_called_once_with()

@@ -30,8 +30,8 @@ HERE = Path(__file__).resolve().parent
 SOURCE = HERE / "native_page_display0_hierarchy_observer.js"
 ENTRYPOINT = base_bundle.BUILD / "native_page_display0_hierarchy_entry.js"
 BUNDLE = base_bundle.BUILD / "native_page_display0_hierarchy_bundle.js"
-SOURCE_SHA256 = "cfbd4b185a7cc3044fcdb16a84bbe28e8bc0658f25e6c25054e82c341806ee32"
-BUNDLE_SHA256 = "402fbdbb77057e81c68f2323916fa5d99b9740b3085d49f47e3accbad6b899d3"
+SOURCE_SHA256 = "5fcb86bf16f4eed27320323778a73a4d81fc0d585582b1a160e119b18442e311"
+BUNDLE_SHA256 = "6e27273a0ac980cda082127a1e515ca94837280ad858b16350e9de7347eefd74"
 MANIFEST_AUTHORITY = "rtl-reader-display0-hierarchy-manifest-v1"
 RECORD_AUTHORITY = "rtl-reader-display0-hierarchy-observation-v1"
 ERROR_PAIRS = frozenset({
@@ -42,6 +42,16 @@ ERROR_PAIRS = frozenset({
     ("CLEANUP", "FAILED"), ("DEADLINE", "EXPIRED"),
     ("OUTPUT", "OVERSIZE"),
 })
+HIERARCHY_STAGES = frozenset({
+    "ACTIVITY_CLASS", "ACTIVITY_LIFECYCLE", "VM_CLASS", "URI_CLASS",
+    "URI_VALUE", "ROOT_CLASS", "FIELD_PDF", "FIELD_DIGEST", "FIELD_PEN",
+    "ROOT_CHILD_COUNT", "DRAW_ORDER", "CHILD_HANDLE", "CHILD_CLASS",
+    "CHILD_PARENT", "CHILD_ID", "CHILD_VISIBILITY", "CHILD_BOUNDS",
+    "CHILD_Z", "CHILD_FIELD_IDENTITY", "FIELD_ORDER", "ROOT_ID",
+    "ROOT_BOUNDS", "SECOND_SAMPLE_REFS", "SECOND_SAMPLE_VALUES",
+})
+CHILD_STAGES = frozenset(stage for stage in HIERARCHY_STAGES
+                         if stage.startswith("CHILD_"))
 CHILD_BASE_CODES = frozenset({
     "HIERARCHY_CHILD_INPUT_INVALID", "HIERARCHY_CHILD_HOST_SETUP_FAILED",
     "HIERARCHY_CHILD_CONNECT_FAILED", "HIERARCHY_CHILD_ATTACH_FAILED",
@@ -65,7 +75,11 @@ ATTACH_ERROR_TYPES = (
 )
 CHILD_CODES = CHILD_BASE_CODES | frozenset(
     "HIERARCHY_CHILD_OBSERVER_REJECTED_" + phase + "_" + reason
-    for phase, reason in ERROR_PAIRS) | frozenset(
+    for phase, reason in ERROR_PAIRS if phase != "HIERARCHY") | frozenset(
+    "HIERARCHY_CHILD_OBSERVER_REJECTED_HIERARCHY_MISMATCH_S" +
+    str(sample) + "_" + stage + ("_I" + str(index) if index >= 0 else "")
+    for sample in (1, 2) for stage in HIERARCHY_STAGES
+    for index in (range(32) if stage in CHILD_STAGES else (-1,))) | frozenset(
     "HIERARCHY_CHILD_ATTACH_" + reason for _, reason in ATTACH_ERROR_TYPES)
 MAX_FRAME = 16_384
 
@@ -260,10 +274,11 @@ def parse_frames(frames: tuple[bytes, bytes], manifest_sha: str) -> dict[str, An
     return first
 
 
-def parse_error_frames(frames: tuple[bytes, bytes]) -> tuple[str, str]:
+def parse_error_frames(frames: tuple[bytes, bytes]) -> tuple[str, str, str, int, int]:
     _need(type(frames) is tuple and len(frames) == 2)
     first, end = [_frame(raw) for raw in frames]
-    _dict(first, {"event", "schemaVersion", "code", "phase", "reason"})
+    _dict(first, {"event", "schemaVersion", "code", "phase", "reason",
+                  "stage", "childIndex", "sampleOrdinal"})
     _dict(end, {"event", "success"})
     pair = (first["phase"], first["reason"])
     _need(first["event"] == "native_page_hierarchy_error" and
@@ -271,7 +286,27 @@ def parse_error_frames(frames: tuple[bytes, bytes]) -> tuple[str, str]:
           first["code"] == "HIERARCHY_REJECTED" and
           pair in ERROR_PAIRS and
           end == {"event": "native_page_hierarchy_complete", "success": False})
-    return pair
+    index = _int(first["childIndex"], -1, 31)
+    sample = _int(first["sampleOrdinal"], 0, 2)
+    stage = first["stage"]
+    if pair[0] == "HIERARCHY":
+        _need(type(stage) is str and stage in HIERARCHY_STAGES and
+              sample in (1, 2) and
+              ((0 <= index <= 31) if stage in CHILD_STAGES else index == -1))
+    else:
+        _need(stage == "NONE" and index == -1 and sample == 0)
+    return pair[0], pair[1], stage, index, sample
+
+
+def _observer_error_code(phase: str, reason: str, stage: str,
+                         index: int, sample: int) -> str:
+    code = "HIERARCHY_CHILD_OBSERVER_REJECTED_" + phase + "_" + reason
+    if phase == "HIERARCHY":
+        code += "_S" + str(sample) + "_" + stage
+        if index >= 0:
+            code += "_I" + str(index)
+    _need(code in CHILD_CODES, "HIERARCHY_CHILD_FRAME_REJECTED")
+    return code
 
 
 class Collector:
@@ -358,11 +393,11 @@ def child(pid: int, wire: bytes) -> int:
             parse_frames(frames, _sha(wire))
         except HierarchyError as error:
             try:
-                phase, reason = parse_error_frames(frames)
+                phase, reason, stage, index, sample = parse_error_frames(frames)
             except HierarchyError:
                 raise HierarchyError("HIERARCHY_CHILD_FRAME_REJECTED") from error
-            raise HierarchyError("HIERARCHY_CHILD_OBSERVER_REJECTED_" +
-                                 phase + "_" + reason) from error
+            raise HierarchyError(_observer_error_code(
+                phase, reason, stage, index, sample)) from error
     except BaseException as error:
         if type(error) is HierarchyError and str(error) in CHILD_CODES:
             body_error = error

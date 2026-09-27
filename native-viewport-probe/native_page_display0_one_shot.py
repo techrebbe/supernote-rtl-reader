@@ -29,7 +29,7 @@ SCHEMA_VERSION = 1
 MANIFEST_AUTHORITY = "rtl-reader-display0-identity-manifest-v1"
 RECORD_AUTHORITY = "rtl-reader-display0-identity-observation-v1"
 RUNNER_AUTHORITY = "rtl-reader-display0-one-shot-host-consistency-v1"
-OBSERVER_SHA256 = "366d0ea9fd965fbb0e479e65f00498b5479a7cb5bcb4bb16c545c079ef44fcab"
+OBSERVER_SHA256 = "0b379b75e5a2cfa2148d2af13e50ce75bac1782e752724e64eb84ad8cfeb30ae"
 DISPOSABLE_URI = (
     "file:///storage/emulated/0/Document/RTL_DISPLAY0_CAPTURE_20260927.pdf"
 )
@@ -37,6 +37,21 @@ TRACE = ("attach", "load", "unload", "detach")
 MIN_DEADLINE_MS = 250
 MAX_DEADLINE_MS = 10_000
 MAX_FRAME_BYTES = 4096
+OBSERVER_FAILURE_PAIRS = frozenset({
+    ("MANIFEST", "INVALID"),
+    ("RUNTIME", "MISMATCH"),
+    ("BRIDGE", "UNAVAILABLE"),
+    ("JAVA_CHOOSE", "FAILED"),
+    ("ACTIVITY", "NONE"),
+    ("ACTIVITY", "MULTIPLE"),
+    ("ACTIVITY", "LIMIT"),
+    ("IDENTITY", "MISMATCH"),
+    ("URI", "SUBTYPE"),
+    ("URI", "WRAPPER"),
+    ("URI", "MISMATCH"),
+    ("CLEANUP", "FAILED"),
+    ("DEADLINE", "EXPIRED"),
+})
 
 
 class OneShotError(RuntimeError):
@@ -195,6 +210,27 @@ def parse_identity_frames(frames: tuple[bytes, bytes], manifest_sha256: str,
              complete["event"] == "native_page_display0_identity_complete" and
              complete["success"] is True)
     return first
+
+
+def parse_identity_error_frames(frames: tuple[bytes, bytes]) -> tuple[str, str]:
+    """Accept only a fixed, path-free observer rejection; never as authority."""
+    _require(type(frames) is tuple and len(frames) == 2)
+    try:
+        first, complete = (_frame(item) for item in frames)
+    except graph.GraphRunnerError as error:
+        raise OneShotError("stock observation rejected") from error
+    _require(type(first) is dict and set(first) == {
+        "event", "schemaVersion", "code", "phase", "reason",
+    })
+    _require(first["event"] == "native_page_display0_identity_error" and
+             type(first["schemaVersion"]) is int and first["schemaVersion"] == 1 and
+             first["code"] == "DISPLAY0_IDENTITY_REJECTED" and
+             type(first["phase"]) is str and type(first["reason"]) is str and
+             (first["phase"], first["reason"]) in OBSERVER_FAILURE_PAIRS)
+    _require(type(complete) is dict and set(complete) == {"event", "success"} and
+             complete["event"] == "native_page_display0_identity_complete" and
+             complete["success"] is False)
+    return first["phase"], first["reason"]
 
 
 def _wait(poll: Callable[[], Any], deadline_ns: int,

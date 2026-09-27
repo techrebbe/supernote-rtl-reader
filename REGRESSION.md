@@ -3247,17 +3247,72 @@ The host must compile and hash a pinned `frida-java-bridge` bundle before a
 separately deliberate repeat. This failed alpha is not a pass for the native
 page viewport, writing, or any production authority.
 
-The host-only correction now pins Frida 17.9.11, `frida-java-bridge` 7.0.13,
-the npm lock and installed bridge tree, the raw observer, and the 479,240-byte
-compiled bundle (`868b5d97e58073b382d24448e8f706aea4e3f6be36920bbdb1910d0e2cb9ee9c`).
-The revised read-only preflight passed, including bundle compilation, and an
-independent source review found no alpha-scope blocker. A fresh live attach
-has **not** yet been counted as a pass; the user must first reconfirm the
-disposable PAGE 1 remains visible because pre-attach app state does not reveal
-the exact document URI.
+The host-only correction pins Frida 17.9.11, `frida-java-bridge` 7.0.13,
+the npm lock and installed bridge tree, and the raw observer and compiled
+bundle separately. The read-only preflight passed, including bundle
+compilation, and an independent source review found no alpha-scope blocker.
+At that point, no live attach had been counted as an in-process document-
+identity pass; pre-attach app state cannot reveal the exact document URI.
 Two independent host builds from different temporary directories produced
 byte-identical pinned bundles; this is build portability evidence, not a
 device result.
+
+After the user reconfirmed PAGE 1 and granted full Nomad access, a second
+single observation was attempted with the bundled Java bridge. It also
+reported only `FRIDA_CHILD_FAILED`; the immediate post-attempt preflight
+passed with the same stock reader, PDF hash, absent `.mark`, no server, and
+no ADB forward. This failure is not an observer verdict: a host-only check
+found that Windows writes the child's fixed diagnostic with CRLF while the
+parent accepted only LF. The parent now accepts exactly LF or CRLF for its
+allowlisted, path-free failure codes; focused regression tests pass.
+
+A third bounded attach then reached the JavaScript observer and returned an
+explicit generic identity rejection, rather than a Frida setup failure. The
+immediate post-attempt preflight passed: same reader process and disposable
+PDF hash, absent `.mark`, no server and no ADB forward. No native page,
+pen, or annotation change was made. Static firmware inspection identified
+a plausible observer error: the URI fields are declared as `android.net.Uri`,
+so the Frida wrapper can hide the concrete `StringUri.uriString` field despite
+reporting the concrete runtime class. The read-only observer now casts to the
+exact checked concrete class before field access and emits only finite,
+path-free failure stages. This is a hypothesis and diagnostic improvement,
+not a hardware pass. The revised source SHA-256 is
+`cb53cd0a05d1742e9f522f37db0d6397c47d1b811439c40d2ec1fce79857db86`;
+the reproducibly compiled 480,982-byte bundle SHA-256 was
+`5678dda127830f6af2a817475de84114031d8444fc3ca341f8c66fcf4ff0a368`.
+The read-only preflight and 80 focused Python/52 Node observer cases passed.
+One bounded attach with that exact bundle returned the fixed,
+path-free `FRIDA_CHILD_OBSERVER_REJECTED_URI_WRAPPER`. The immediate post-trial
+preflight passed with the same stock reader and PDF, no `.mark`, no Frida
+server, and no ADB forward. This narrows the rejection to the URI wrapper
+stage, but does not prove whether exact subtype, concrete cast, or field access
+failed. No native viewport or ink claim follows from these attempts.
+
+Static follow-up read the Nomad's `/system/framework/framework.jar` without
+altering the device. Its 30,186,065 bytes and SHA-256
+`c3a525a7ef16363a93412182cce693f46dfa1395a570e9620da0d4e27a59631d`
+match the pinned field-map evidence. Decompilation confirms that `Uri.fromFile`
+constructs `Uri$HierarchicalUri`, which has a direct cached `uriString` field.
+The inspected DocumentActivity uses `Uri.fromFile` for this document and
+HandWritePresenter calls `toString()` while opening it. This makes a subtype
+mismatch the likely explanation for the observed URI-wrapper rejection, but
+static evidence is not a runtime witness. The revised disposable-only observer
+accepts exactly these two concrete URI types and reads their cached string
+without invoking URI methods; any absent or mismatched cache remains a reject.
+The revised source SHA-256 is
+`0b379b75e5a2cfa2148d2af13e50ce75bac1782e752724e64eb84ad8cfeb30ae`;
+its reproducibly compiled 481,758-byte bundle SHA-256 is
+`1b3cdb7407151a4727feea81cd5794a516d5a897f3c490b90f61bc06fdf18a50`.
+On Nomad `SN078C10015092` with the pinned firmware fingerprint and the
+disposable PAGE 1 PDF open, one bounded observation with this exact revision
+returned `observerMatchedUri=true`, `readerStable=true`, `pdfUnchanged=true`,
+`markAbsent=true`, `serverRemoved=true`, and `forwardRemoved=true`. The runner
+also reported `hardwareAdmission=false` and `mutationAuthorized=false` as
+designed. An independent immediate read-only preflight passed after the run,
+again confirming the unchanged stock reader/PDF, absent `.mark`, and no Frida
+server or ADB forward. This passes only the live display-0 document-identity
+alpha. It does **not** prove a movable native viewport, pen input, annotation
+geometry, writing, erasing, or production-reader safety.
 
 Before reproducing a failure:
 

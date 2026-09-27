@@ -219,6 +219,41 @@ class OneShotTests(unittest.TestCase):
         self.rejected(FakeWorker(trace=("attach", "load", "detach")))
         self.rejected(FakeWorker(trace=("attach", "load", "unload", "detach", "attach")))
 
+    def test_observer_diagnostic_frames_have_only_fixed_path_free_pairs(self):
+        complete = graph.canonical_bytes({
+            "event": "native_page_display0_identity_complete", "success": False})
+
+        def diagnostic(phase, reason, **extra):
+            return graph.canonical_bytes({
+                "event": "native_page_display0_identity_error",
+                "schemaVersion": 1, "code": "DISPLAY0_IDENTITY_REJECTED",
+                "phase": phase, "reason": reason, **extra})
+
+        for phase, reason in one.OBSERVER_FAILURE_PAIRS:
+            with self.subTest(phase=phase, reason=reason):
+                frames = (diagnostic(phase, reason), complete)
+                self.assertEqual(one.parse_identity_error_frames(frames),
+                                 (phase, reason))
+                with self.assertRaises(one.OneShotError):
+                    one.parse_identity_frames(frames, "0" * 64,
+                                              mark_required=False)
+                self.assertNotIn(PATH.encode(), frames[0])
+                self.assertNotIn(one.DISPOSABLE_URI.encode(), frames[0])
+
+        malformed = (
+            (diagnostic("URI", "UNKNOWN"), complete),
+            (diagnostic("UNKNOWN", "MISMATCH"), complete),
+            (diagnostic("URI", "MISMATCH", message=PATH), complete),
+            (diagnostic("URI", "MISMATCH"), graph.canonical_bytes({
+                "event": "native_page_display0_identity_complete", "success": True})),
+            (diagnostic("URI", "MISMATCH"), graph.canonical_bytes({
+                "event": "native_page_display0_identity_complete", "success": 0})),
+            (b'{"event":"x","event":"x"}', complete),
+        )
+        for frames in malformed:
+            with self.subTest(frames=frames), self.assertRaises(one.OneShotError):
+                one.parse_identity_error_frames(frames)
+
     def test_json_integer_cannot_impersonate_true_in_nested_frames(self):
         digest = "0" * 64
         original = graph.load_canonical(identity(digest), 4096).value

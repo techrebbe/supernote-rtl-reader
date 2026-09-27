@@ -162,9 +162,23 @@ class TrialTests(unittest.TestCase):
         with patch.object(trial.subprocess, "run", return_value=valid):
             with self.assertRaisesRegex(trial.TrialError, "^FRIDA_CHILD_ATTACH_FAILED$"):
                 trial.Backend().child(PID, b"{}", 8.0)
+        windows = subprocess.CompletedProcess([], 2, b"", b"FRIDA_CHILD_ATTACH_FAILED\r\n")
+        with patch.object(trial.subprocess, "run", return_value=windows):
+            with self.assertRaisesRegex(trial.TrialError, "^FRIDA_CHILD_ATTACH_FAILED$"):
+                trial.Backend().child(PID, b"{}", 8.0)
+        observer_code = "FRIDA_CHILD_OBSERVER_REJECTED_URI_WRAPPER"
+        self.assertIn(observer_code, trial.CHILD_FAILURE_CODES)
+        self.assertIn("FRIDA_CHILD_OBSERVER_REJECTED_URI_SUBTYPE",
+                      trial.CHILD_FAILURE_CODES)
+        observer = subprocess.CompletedProcess([], 2, b"",
+                                               observer_code.encode() + b"\r\n")
+        with patch.object(trial.subprocess, "run", return_value=observer):
+            with self.assertRaisesRegex(trial.TrialError, "^" + observer_code + "$"):
+                trial.Backend().child(PID, b"{}", 8.0)
         for stderr in (b"private /storage/emulated/0/path\n",
                        b"FRIDA_CHILD_ATTACH_FAILED\nprivate path\n",
-                       b"FRIDA_CHILD_ATTACH_FAILED", b"FRIDA_CHILD_UNKNOWN\n"):
+                       b"FRIDA_CHILD_ATTACH_FAILED", b"FRIDA_CHILD_UNKNOWN\n",
+                       b"FRIDA_CHILD_OBSERVER_REJECTED_URI_PRIVATE_PATH\n"):
             with self.subTest(stderr=stderr):
                 result = subprocess.CompletedProcess([], 2, b"", stderr)
                 with patch.object(trial.subprocess, "run", return_value=result):
@@ -200,13 +214,17 @@ class TrialTests(unittest.TestCase):
                     if stage == "LOAD":
                         raise RuntimeError("private load path")
                     if stage in {"OBSERVER", "FRAME", "UNLOAD", "DETACH",
-                                 "LATE_UNLOAD", "LATE_DETACH", "LATE_EXTRA"}:
-                        if stage == "OBSERVER":
+                                 "LATE_UNLOAD", "LATE_DETACH", "LATE_EXTRA",
+                                 "OBSERVER_UNLOAD", "OBSERVER_DETACH",
+                                 "OBSERVER_LATE_UNLOAD", "OBSERVER_LATE_DETACH",
+                                 "OBSERVER_LATE_EXTRA"}:
+                        if stage.startswith("OBSERVER"):
                             frames = (
                                 graph.canonical_bytes({
                                     "event": "native_page_display0_identity_error",
                                     "schemaVersion": 1,
-                                    "code": "DISPLAY0_IDENTITY_REJECTED"}),
+                                    "code": "DISPLAY0_IDENTITY_REJECTED",
+                                    "phase": "URI", "reason": "WRAPPER"}),
                                 graph.canonical_bytes({
                                     "event": "native_page_display0_identity_complete",
                                     "success": False}),
@@ -221,10 +239,11 @@ class TrialTests(unittest.TestCase):
 
                 def unload(self):
                     observed.append("unload")
-                    if stage == "UNLOAD":
+                    if stage in {"UNLOAD", "OBSERVER_UNLOAD"}:
                         raise RuntimeError("private unload path")
-                    if stage in {"LATE_UNLOAD", "LATE_EXTRA"}:
-                        event = ({"type": "error"} if stage == "LATE_UNLOAD" else
+                    if stage in {"LATE_UNLOAD", "LATE_EXTRA",
+                                 "OBSERVER_LATE_UNLOAD", "OBSERVER_LATE_EXTRA"}:
+                        event = ({"type": "error"} if stage.endswith("LATE_UNLOAD") else
                                  {"type": "send", "payload": {"unexpected": True}})
                         self.callback(event, None)
 
@@ -238,9 +257,9 @@ class TrialTests(unittest.TestCase):
 
                 def detach(self):
                     observed.append("detach")
-                    if stage == "DETACH":
+                    if stage in {"DETACH", "OBSERVER_DETACH"}:
                         raise RuntimeError("private detach path")
-                    if stage == "LATE_DETACH":
+                    if stage in {"LATE_DETACH", "OBSERVER_LATE_DETACH"}:
                         scripts[0].callback({"type": "error"}, None)
 
             class FakeDevice:
@@ -271,7 +290,12 @@ class TrialTests(unittest.TestCase):
             "SCRIPT": "FRIDA_CHILD_SCRIPT_FAILED",
             "LOAD": "FRIDA_CHILD_LOAD_FAILED",
             "WAIT": "FRIDA_CHILD_WAIT_TIMEOUT",
-            "OBSERVER": "FRIDA_CHILD_OBSERVER_REJECTED",
+            "OBSERVER": "FRIDA_CHILD_OBSERVER_REJECTED_URI_WRAPPER",
+            "OBSERVER_UNLOAD": "FRIDA_CHILD_UNLOAD_FAILED",
+            "OBSERVER_DETACH": "FRIDA_CHILD_DETACH_FAILED",
+            "OBSERVER_LATE_UNLOAD": "FRIDA_CHILD_FRAME_REJECTED",
+            "OBSERVER_LATE_DETACH": "FRIDA_CHILD_FRAME_REJECTED",
+            "OBSERVER_LATE_EXTRA": "FRIDA_CHILD_FRAME_REJECTED",
             "FRAME": "FRIDA_CHILD_FRAME_REJECTED",
             "UNLOAD": "FRIDA_CHILD_UNLOAD_FAILED",
             "DETACH": "FRIDA_CHILD_DETACH_FAILED",

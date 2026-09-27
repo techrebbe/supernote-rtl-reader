@@ -1,10 +1,12 @@
 # One genuine native page in an arbitrary viewport
 
 Status: visual feasibility passed on the pinned Nomad on 2026-09-14; see
-`NATIVE_PAGE_VISUAL_HARDWARE_20260914.md`. A fully retained and independently
-bound visual/session gate, plus the physical-pen, native-tool, persistence and
-graph-identity portions, remain open. This is not yet a writable native
-viewport, two-page reader, production package or release candidate.
+`NATIVE_PAGE_VISUAL_HARDWARE_20260914.md`. The separate stock display-0
+document-identity alpha passed on 2026-09-27; see `REGRESSION.md`. A fully
+retained and independently bound visual/session gate, plus the physical-pen,
+native-tool, persistence and graph-identity portions, remain open. This is not
+yet a writable native viewport, two-page reader, production package or release
+candidate.
 
 ## Question this gate answers
 

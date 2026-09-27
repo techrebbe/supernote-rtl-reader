@@ -115,6 +115,17 @@ For a concrete `android.net.Uri$StringUri`, the framework exposes direct final
 observer may invoke `Uri.toString()` or infer a path if the object is another
 subtype.
 
+The later disposable display-0 alpha found a distinct stock-reader path on
+this exact pinned framework: `Uri.fromFile(File)` returns
+`android.net.Uri$HierarchicalUri`, whose direct `private volatile String
+uriString` cache starts at `NOT_CACHED`. `HandWritePresenter.setUri()` calls
+`uri.toString()` while opening the PDF, so the cache may already contain the
+exact URI when a read-only observer attaches. This does **not** relax the
+frozen v2 observer contract above. The separate display-0 alpha may check the
+exact concrete subtype and read the cached field without invoking URI methods;
+an absent, uncached, or mismatched value must reject. Static inspection alone
+does not establish its runtime value on the Nomad.
+
 Inherited `android.app.Activity` fields include `mToken`, `mFinished`,
 `mDestroyed`, and `mResumed`. There is no direct task-ID or display-ID field on
 the pinned class. Task, display, process start time, and diagnostic session

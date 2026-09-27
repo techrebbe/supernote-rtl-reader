@@ -15,7 +15,8 @@
     activity: 'com.supernote.document.document.DocumentActivity',
     viewModel: 'com.supernote.document.document.DocumentViewModel',
     presenter: 'com.supernote.document.handwrite.HandWritePresenter',
-    uri: 'android.net.Uri$StringUri'
+    uri: 'android.net.Uri$StringUri',
+    hierarchicalUri: 'android.net.Uri$HierarchicalUri'
   });
   const MAX_MANIFEST_BYTES = 4096;
   const MAX_CANDIDATES = 64;
@@ -23,9 +24,16 @@
   let heapWalks = 0;
   let timer = null;
   let activeState = null;
+  let failurePhase = 'MANIFEST';
+  let failureReason = 'INVALID';
+  const concreteUriClasses = Object.create(null);
 
   function reject() { throw 'DISPLAY0_IDENTITY_REJECTED'; }
   function need(condition) { if (!condition) reject(); }
+  function point(phase, reason) {
+    failurePhase = phase;
+    failureReason = reason;
+  }
   function record(value) {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
   }
@@ -168,20 +176,23 @@
       state.refs.push(copy);
       return copy;
     } catch (_) {
+      let cleaned = copy === null;
       if (copy !== null && typeof copy === 'object' && typeof copy.$dispose === 'function') {
-        try { copy.$dispose(); } catch (_) { /* terminal failure below */ }
+        try { copy.$dispose(); cleaned = true; } catch (_) { /* fixed cleanup phase below */ }
       }
+      if (!cleaned) point('CLEANUP', 'FAILED');
       reject();
     }
   }
   function release(state) {
-    if (state.released) return true;
+    if (state.released) return !state.cleanupFailed;
     state.released = true;
     let clean = true;
     for (let i = state.refs.length - 1; i >= 0; i--) {
       try { state.refs[i].$dispose(); } catch (_) { clean = false; }
     }
     state.refs.length = 0;
+    state.cleanupFailed = !clean;
     return clean;
   }
   function compareRef(value, previous, className, state) {
@@ -194,11 +205,32 @@
     need(typeof value === 'boolean');
     return value;
   }
-  function uri(value) {
-    exactClass(value, CLASS.uri);
-    return string(direct(value, 'uriString'), 1024);
+  function uriSubtype(value) {
+    point('URI', 'SUBTYPE');
+    need(value !== null && typeof value === 'object');
+    const subtype = value.$className;
+    need(subtype === CLASS.uri || subtype === CLASS.hierarchicalUri);
+    exactClass(value, subtype);
+    return subtype;
+  }
+  function uri(value, subtype) {
+    point('URI', 'WRAPPER');
+    exactClass(value, subtype);
+    // Field access on a declared android.net.Uri wrapper does not expose the
+    // concrete StringUri or HierarchicalUri member. This exact-class cast
+    // performs only a JNI read-only type check; it invokes no target Java
+    // method or setter. The subtype was checked against the two-class allowlist.
+    if (concreteUriClasses[subtype] === undefined) {
+      concreteUriClasses[subtype] = Java.use(subtype);
+    }
+    const concrete = Java.cast(value, concreteUriClasses[subtype]);
+    exactClass(concrete, subtype);
+    const cached = string(direct(concrete, 'uriString'), 1024);
+    need(cached !== 'NOT CACHED');
+    return cached;
   }
   function sample(root, manifest, state, previous) {
+    point('IDENTITY', 'MISMATCH');
     exactClass(root, CLASS.activity);
     const lifecycle = [boolean(root, 'mResumed'), boolean(root, 'mFinished'),
       boolean(root, 'mDestroyed')];
@@ -215,16 +247,23 @@
     exactClass(presenter, CLASS.presenter);
     const vmUriValue = direct(vm, 'uri');
     const presenterUriValue = direct(presenter, 'uri');
-    exactClass(vmUriValue, CLASS.uri);
-    exactClass(presenterUriValue, CLASS.uri);
-    const vmUri = previous ? compareRef(vmUriValue, previous.vmUri, CLASS.uri, state) :
+    const vmUriSubtype = uriSubtype(vmUriValue);
+    const presenterUriSubtype = uriSubtype(presenterUriValue);
+    if (previous) {
+      need(vmUriSubtype === previous.vmUriSubtype &&
+        presenterUriSubtype === previous.presenterUriSubtype);
+    }
+    point('URI', 'WRAPPER');
+    const vmUri = previous ? compareRef(vmUriValue, previous.vmUri, vmUriSubtype, state) :
       keep(vmUriValue, state);
     const presenterUri = previous ? compareRef(presenterUriValue, previous.presenterUri,
-      CLASS.uri, state) : keep(presenterUriValue, state);
-    const observedVmUri = uri(vmUri);
-    const observedPresenterUri = uri(presenterUri);
+      presenterUriSubtype, state) : keep(presenterUriValue, state);
+    const observedVmUri = uri(vmUri, vmUriSubtype);
+    const observedPresenterUri = uri(presenterUri, presenterUriSubtype);
+    point('URI', 'MISMATCH');
     need(observedVmUri === observedPresenterUri &&
       observedVmUri === manifest.expected.documentUri);
+    point('IDENTITY', 'MISMATCH');
     const rawMark = direct(presenter, 'markPath');
     need(rawMark === null || typeof rawMark === 'string');
     if (rawMark !== null) need(string(rawMark, 1024) === MARK);
@@ -234,8 +273,9 @@
       markPathMatchedExpected: manifest.expected.markPath === null ? null : true};
     const result = {lifecycle: lifecycle, diagnostic: diagnostic};
     if (previous) need(JSON.stringify(result) === JSON.stringify(previous.result));
-    return {vm: vm, presenter: presenter, vmUri: vmUri,
-      presenterUri: presenterUri, privateMarkPath: rawMark, result: result};
+    return {vm: vm, presenter: presenter, vmUri: vmUri, vmUriSubtype: vmUriSubtype,
+      presenterUri: presenterUri, presenterUriSubtype: presenterUriSubtype,
+      privateMarkPath: rawMark, result: result};
   }
   function frames(payload, success) {
     if (terminal) return;
@@ -247,11 +287,12 @@
   }
   function fail() {
     frames({event: 'native_page_display0_identity_error', schemaVersion: SCHEMA,
-      code: 'DISPLAY0_IDENTITY_REJECTED'}, false);
+      code: 'DISPLAY0_IDENTITY_REJECTED', phase: failurePhase,
+      reason: failureReason}, false);
   }
   function observe(manifest, digest) {
     if (terminal) return;
-    const state = {refs: [], released: false, env: null};
+    const state = {refs: [], released: false, cleanupFailed: false, env: null};
     activeState = state;
     let root = null;
     let candidates = 0;
@@ -259,6 +300,7 @@
     let failed = false;
     let completed = false;
     let chooseReturned = false;
+    let enteredChoose = false;
     let staged = null;
     function flush() {
       if (!chooseReturned || staged === null || terminal) return;
@@ -268,25 +310,35 @@
       else frames(outcome, true);
     }
     try {
+      point('RUNTIME', 'MISMATCH');
       need(Process.arch === 'arm64' && Process.pointerSize === 8 &&
         Process.id === manifest.attachment.pid);
+      point('BRIDGE', 'UNAVAILABLE');
       state.env = Java.vm.getEnv();
       need(state.env !== null && typeof state.env.isSameObject === 'function');
+      point('JAVA_CHOOSE', 'FAILED');
       heapWalks++;
       need(heapWalks === 1);
+      enteredChoose = true;
       Java.choose(CLASS.activity, {
         onMatch: function (candidate) {
           if (terminal || completed || failed) return 'stop';
           try {
+            point('ACTIVITY', 'LIMIT');
             candidates++;
             need(candidates <= MAX_CANDIDATES);
+            point('IDENTITY', 'MISMATCH');
             exactClass(candidate, CLASS.activity);
             if (!boolean(candidate, 'mResumed') ||
                 boolean(candidate, 'mFinished') || boolean(candidate, 'mDestroyed')) {
               return undefined;
             }
             live++;
-            if (live > 1) return 'stop';
+            if (live > 1) {
+              point('ACTIVITY', 'MULTIPLE');
+              return 'stop';
+            }
+            point('BRIDGE', 'UNAVAILABLE');
             root = keep(candidate, state);
           } catch (_) { failed = true; return 'stop'; }
           return undefined;
@@ -296,12 +348,17 @@
           completed = true;
           let result = null;
           try {
+            if (!failed && live === 0) point('ACTIVITY', 'NONE');
+            if (!failed && live > 1) point('ACTIVITY', 'MULTIPLE');
             need(!failed && live === 1 && root !== null);
             const first = sample(root, manifest, state, null);
             const second = sample(root, manifest, state, first);
             result = second.result;
           } catch (_) { failed = true; }
-          if (!release(state)) failed = true;
+          if (!release(state)) {
+            point('CLEANUP', 'FAILED');
+            failed = true;
+          }
           if (failed || result === null) staged = false;
           else staged = {event: 'native_page_display0_identity', schemaVersion: SCHEMA,
             authority: RECORD_AUTHORITY, manifestSha256: digest,
@@ -321,21 +378,25 @@
       // A synchronous onComplete may have staged success just before choose
       // throws. Only a normal choose return is allowed to publish it.
       staged = null;
-      release(state);
+      if (enteredChoose && failurePhase !== 'CLEANUP') point('JAVA_CHOOSE', 'FAILED');
+      if (!release(state)) point('CLEANUP', 'FAILED');
       fail();
     }
   }
   try {
+    point('MANIFEST', 'INVALID');
     const parsed = parseManifest();
     // This JavaScript timer is advisory: a blocked Frida event loop cannot run
     // it. The host must enforce its own monotonic timeout and detach on expiry.
     timer = setTimeout(function () {
-      if (activeState !== null) release(activeState);
+      point('DEADLINE', 'EXPIRED');
+      if (activeState !== null && !release(activeState)) point('CLEANUP', 'FAILED');
       fail();
     }, parsed.value.coordinator.hardDeadlineMs);
+    point('BRIDGE', 'UNAVAILABLE');
     Java.perform(function () { observe(parsed.value, parsed.digest); });
   } catch (_) {
-    if (activeState !== null) release(activeState);
+    if (activeState !== null && !release(activeState)) point('CLEANUP', 'FAILED');
     fail();
   }
 })();

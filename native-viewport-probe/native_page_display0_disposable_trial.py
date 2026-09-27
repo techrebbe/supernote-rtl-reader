@@ -43,15 +43,18 @@ MAX_OUTPUT = 2_097_152
 PORT = "tcp:27042"
 PID_RE = re.compile(rb"[1-9][0-9]{0,6}\Z")
 STAT_RE = re.compile(rb"[0-9]+:[0-9]+:[0-9]+:[0-9]+:[0-9a-fA-F]+\Z")
+OBSERVER_REJECTION_CODES = frozenset(
+    "FRIDA_CHILD_OBSERVER_REJECTED_" + phase + "_" + reason
+    for phase, reason in one_shot.OBSERVER_FAILURE_PAIRS)
 CHILD_FAILURE_CODES = frozenset({
     "FRIDA_CHILD_INPUT_INVALID", "FRIDA_CHILD_HOST_SETUP_FAILED",
     "FRIDA_CHILD_CONNECT_FAILED", "FRIDA_CHILD_ATTACH_FAILED",
     "FRIDA_CHILD_SCRIPT_FAILED", "FRIDA_CHILD_LOAD_FAILED",
     "FRIDA_CHILD_WAIT_TIMEOUT", "FRIDA_CHILD_FRAME_REJECTED",
-    "FRIDA_CHILD_OBSERVER_REJECTED", "FRIDA_CHILD_UNLOAD_FAILED",
+    "FRIDA_CHILD_UNLOAD_FAILED",
     "FRIDA_CHILD_DETACH_FAILED", "FRIDA_CHILD_FAILED",
     "FRIDA_CHILD_BUNDLE_INVALID",
-})
+}) | OBSERVER_REJECTION_CODES
 
 
 class TrialError(RuntimeError):
@@ -132,8 +135,11 @@ class Backend:
         if result.returncode != 0:
             # Never relay arbitrary child stderr: Frida may include private
             # paths or exception details. Only our exact, fixed token travels.
-            codes = {code.encode("ascii") + b"\n": code
-                     for code in CHILD_FAILURE_CODES}
+            # Python's text stderr writes CRLF on Windows and LF elsewhere.
+            # Accept only those two complete line encodings of fixed codes.
+            codes = {code.encode("ascii") + ending: code
+                     for code in CHILD_FAILURE_CODES
+                     for ending in (b"\n", b"\r\n")}
             if result.returncode == 2 and not result.stdout and result.stderr in codes:
                 raise TrialError(codes[result.stderr])
             raise TrialError("FRIDA_CHILD_FAILED")
@@ -505,19 +511,14 @@ def _child(pid: int, manifest: bytes) -> int:
         try:
             one_shot.parse_identity_frames(frames, _sha(manifest), mark_required=False)
         except one_shot.OneShotError as error:
-            # The observer's explicit, path-free failure has a unique pair of
-            # canonical frames. Any other malformed framing stays generic.
+            # Diagnostics are only claims from the pinned observer, never a
+            # success record or permission to act. Check exact fixed values.
             try:
-                first = graph.load_canonical(frames[0], one_shot.MAX_FRAME_BYTES).value
-                second = graph.load_canonical(frames[1], one_shot.MAX_FRAME_BYTES).value
-            except BaseException:
-                first = second = None
-            if first == {"event": "native_page_display0_identity_error",
-                          "schemaVersion": 1, "code": "DISPLAY0_IDENTITY_REJECTED"} and \
-                    second == {"event": "native_page_display0_identity_complete",
-                               "success": False}:
-                raise TrialError("FRIDA_CHILD_OBSERVER_REJECTED") from error
-            raise TrialError("FRIDA_CHILD_FRAME_REJECTED") from error
+                phase, reason = one_shot.parse_identity_error_frames(frames)
+            except one_shot.OneShotError as parse_error:
+                raise TrialError("FRIDA_CHILD_FRAME_REJECTED") from parse_error
+            raise TrialError("FRIDA_CHILD_OBSERVER_REJECTED_" + phase +
+                             "_" + reason) from error
     except BaseException as error:
         if type(error) is TrialError and str(error) in CHILD_FAILURE_CODES:
             body_error = error
@@ -542,6 +543,13 @@ def _child(pid: int, manifest: bytes) -> int:
     if unload_failed:
         raise TrialError("FRIDA_CHILD_UNLOAD_FAILED")
     if body_error is not None:
+        if str(body_error) in OBSERVER_REJECTION_CODES:
+            # A post-frame callback during teardown invalidates even a
+            # diagnostic pair. Other earlier failures may have no two frames.
+            try:
+                collector.checked_frames()
+            except TrialError as error:
+                raise TrialError("FRIDA_CHILD_FRAME_REJECTED") from error
         raise body_error
     # Unload/detach can deliver a final error or extra callback after the two
     # apparent success frames. Retire first, then inspect the latched stream.

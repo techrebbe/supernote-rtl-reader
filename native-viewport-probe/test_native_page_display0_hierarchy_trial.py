@@ -17,6 +17,16 @@ import native_page_graph_v2_runner as canonical
 
 
 MANIFEST_SHA = "a" * 64
+# Pinned stock activity_document.xml SHA-256:
+# 277e0689c733be238c2b7797e8790443f0ee2d864e4b24a34d4c49571de2d397.
+# Resource IDs are from matching public.xml SHA-256:
+# aa94f3a308db4f580243daf00bde8164afd2191eb85f2a2f206f49bdf86ff80d.
+ROOT_ID = 0x7F09020F
+CHILD_IDS = [
+    0x7F090205, 0x7F090206, 0x7F090201,
+    0x7F09021A, 0x7F090231, 0x7F0904F1,
+    0x7F090225, 0x7F090725, 0x7F090200,
+]
 CLASSES = [
     "com.supernote.document.utils.view.DocumentImageView",
     "com.supernote.document.utils.view.DigestImageView",
@@ -24,8 +34,8 @@ CLASSES = [
     "android.widget.RelativeLayout",
     "android.widget.RelativeLayout",
     "android.widget.FrameLayout",
-    "android.widget.FrameLayout",
-    "android.widget.LinearLayout",
+    "android.widget.RelativeLayout",
+    "android.view.View",
     "android.widget.FrameLayout",
 ]
 
@@ -37,10 +47,10 @@ def record() -> dict:
         "observationOnly": True, "hardwareAdmission": False,
         "uiThreadSamples": True, "heapWalks": 1,
         "retainedRootSamples": 2, "hierarchyStable": True,
-        "rootClass": "android.widget.FrameLayout", "rootId": 10,
+        "rootClass": "android.widget.FrameLayout", "rootId": ROOT_ID,
         "rootBounds": [0, 0, 1872, 1404], "childCount": len(CLASSES),
         "children": [
-            {"index": i, "id": 1000 + i, "className": name,
+            {"index": i, "id": CHILD_IDS[i], "className": name,
              "bounds": [0, 0, 0, 0] if i == 7 else [0, 0, 1872, 1404],
              "visibility": 8 if i == 7 else 0,
              "z": "0x0000000000000000", "parentIsRoot": True}

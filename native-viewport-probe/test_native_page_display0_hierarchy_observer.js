@@ -19,6 +19,18 @@ const C = {
   pen: 'com.supernote.document.handwrite.HandWriteView',
   uri: 'android.net.Uri$StringUri'
 };
+// Pinned stock activity_document.xml SHA-256:
+// 277e0689c733be238c2b7797e8790443f0ee2d864e4b24a34d4c49571de2d397.
+// Resource IDs are from the matching public.xml (SHA-256:
+// aa94f3a308db4f580243daf00bde8164afd2191eb85f2a2f206f49bdf86ff80d).
+const ROOT_ID = 0x7f09020f;
+const CHILD_IDS = [0x7f090205, 0x7f090206, 0x7f090201,
+  0x7f09021a, 0x7f090231, 0x7f0904f1,
+  0x7f090225, 0x7f090725, 0x7f090200];
+const CHILD_CLASSES = [C.pdf, C.digest, C.pen,
+  'android.widget.RelativeLayout', 'android.widget.RelativeLayout',
+  'android.widget.FrameLayout', 'android.widget.RelativeLayout',
+  'android.view.View', 'android.widget.FrameLayout'];
 function canonical(v) {
   if (v === null) return 'null';
   if (typeof v === 'boolean') return v ? 'true' : 'false';
@@ -34,10 +46,10 @@ function make(className, id, fields = {}) {
   for (const [name, value] of Object.entries(fields)) result[name] = slot(value);
   return result;
 }
-function view(className, id, parent, position) {
+function view(className, id, parent, resourceId) {
   const v = make(className, id, {mLeft: 0, mTop: 0,
     mRight: 1404, mBottom: 1872});
-  v.getId = () => 1000 + position;
+  v.getId = () => resourceId;
   v.getVisibility = () => 0;
   v.getZ = () => 0;
   v.getParent = () => parent;
@@ -46,14 +58,11 @@ function view(className, id, parent, position) {
 function scene() {
   const uri = make(C.uri, 'uri', {uriString: URI});
   const model = make(C.vm, 'vm', {uri});
-  const root = view(C.root, 'root', null, 0);
+  const root = view(C.root, 'root', null, ROOT_ID);
   // Match the pinned stock document_main_layout's nine direct children,
   // including the GONE vertical_view at index 7.
-  const classes = [C.pdf, C.digest, C.pen, 'android.widget.RelativeLayout',
-    'android.widget.RelativeLayout', 'android.widget.FrameLayout',
-    'android.widget.FrameLayout', 'android.widget.LinearLayout',
-    'android.widget.FrameLayout'];
-  const children = classes.map((name, i) => view(name, 'child-' + i, root, i));
+  const children = CHILD_CLASSES.map((name, i) =>
+    view(name, 'child-' + i, root, CHILD_IDS[i]));
   children[7].getVisibility = () => 8;
   children[7].mRight = slot(0);
   children[7].mBottom = slot(0);
@@ -134,6 +143,11 @@ function positive(result) {
   assert.strictEqual(result.sent[0].event, 'native_page_hierarchy');
   assert.strictEqual(result.sent[1].success, true);
   assert.strictEqual(result.sent[0].childCount, 9);
+  assert.strictEqual(result.sent[0].rootId, ROOT_ID);
+  assert.deepStrictEqual(result.sent[0].children.map(child => child.id),
+    CHILD_IDS);
+  assert.deepStrictEqual(result.sent[0].children.map(child => child.className),
+    CHILD_CLASSES);
   assert.deepStrictEqual(result.sent[0].fieldIndex, {pdf: 0, digest: 1, pen: 2});
   assert.strictEqual(result.sent[0].effectiveCompositingAdmitted, false);
   assert.strictEqual(result.chooseCalls, 1);

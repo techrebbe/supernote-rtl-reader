@@ -3458,6 +3458,44 @@ authoritative full-page render, aligned dry/wet ink and selection presentation,
 canonical writer coordinates, navigation semantics, and a verifiable rollback;
 then run the no-pen FULL→LEFT→RIGHT→FULL card before any one-stroke save test.
 
+### Stock split/crop v2 micro-experiment — raw PASS, model supported, 2026-09-27
+
+The separately reviewed v2 observer added only direct reads of the static
+split flag and six ViewModel rectangles. Its source SHA-256 is
+`32c12990b4ef93187272d961ffb8bcfc1608e1169d2d8de11b6c1fd3fdea3e95`;
+the verified 486,414-byte bundle SHA-256 is
+`b914bd286d35ea5f90218d1211c45bdd6944d2d4a191cd498817a122625d2065`.
+The host now verifies physical display-0 landscape rotation before and after
+the attachment using the already tested strict WindowManager parser. Offline
+validation passed 97 bounded Node observer cases, 106 stock-display Python
+cases, bundle reproduction and `git diff --check`. Independent exact-diff
+review found no live-trial blocker.
+
+One bounded read-only run on the same disposable PAGE 1 PDF returned
+`graphStable=true` across two retained samples, physical quarter-turn `1`,
+`isSplit=true`, `showRect=[0,0,1404,1053]`, null scale/trimming rectangles,
+`originBitmap=1404x1872`, `displayBitmap=1872x1404`, and presenter raw
+rotation code `90`. The five sampled views were attached at
+`[0,0,1872,1404]`. Manifest digest:
+`6b32ada7ae722bcc670a5122526df76ef0d69e005b0ff4cb92f0599ad251f505`.
+The exact `showRect` binary64 values were
+`[0x0000000000000000,0x0000000000000000,0x4095f00000000000,0x4090740000000000]`.
+The code path for `isSplit && showRect != null` crops that rectangle from the
+portrait origin, then scales by `4/3`; `1404x1053` becomes the observed
+`1872x1404` display bitmap. Thus the **live split/crop branch-state model is
+supported**, rather than merely inferred from bitmap dimensions.
+
+The runner reported `readerStable=true`, `pdfUnchanged=true`,
+`markAbsent=true`, `serverRemoved=true`, `forwardRemoved=true`,
+`hardwareAdmission=false` and `mutationAuthorized=false`. An independent
+post-run preflight passed. The raw capture is a PASS; it does not bind current
+on-screen pixels to the sampled display bitmap or prove repository/presenter
+handwriting crop, wet pen, save, navigation or viewport behavior. No pen,
+page turn, SurfaceControl transaction, task action or document mutation was
+performed. This evidence closes the proposed existing-stock presentation-only
+and simple 270-degree counter-rotation path as `NO-GO`, while leaving a new
+coordinated full-page renderer/writer architecture to be designed and gated.
+
 Before reproducing a failure:
 
 ```powershell

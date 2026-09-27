@@ -9,6 +9,7 @@ from unittest.mock import patch
 import native_page_display0_disposable_trial as identity
 import native_page_display0_graph_trial as trial
 import test_native_page_display0_graph_contract as fixture
+from test_native_page_alpha_runner import window_displays_wire
 
 
 SNAPSHOT = identity.Snapshot(1234, "5678", "12345678-1234-1234-1234-123456789abc",
@@ -43,9 +44,35 @@ class FakeBackend:
 
 
 class GraphTrialTests(TestCase):
+    def test_physical_landscape_uses_unique_display_zero_authority(self):
+        class OrientationBackend:
+            def __init__(self, raw: bytes):
+                self.raw = raw
+
+            def adb(self, *args: str) -> bytes:
+                self.asserted_args = args
+                return self.raw
+
+        for quarter_turn in (1, 3):
+            backend = OrientationBackend(window_displays_wire(quarter_turn))
+            self.assertEqual(trial._landscape_orientation(backend), quarter_turn)  # type: ignore[arg-type]
+            self.assertEqual(backend.asserted_args,
+                             ("shell", "dumpsys", "window", "displays"))
+        for quarter_turn in (0, 2):
+            with self.assertRaisesRegex(trial.GraphTrialError,
+                                        "GRAPH_NOT_LANDSCAPE"):
+                trial._landscape_orientation(OrientationBackend(
+                    window_displays_wire(quarter_turn, (1404, 1872))))  # type: ignore[arg-type]
+        with self.assertRaisesRegex(trial.GraphTrialError,
+                                    "GRAPH_PHYSICAL_ORIENTATION_UNCERTAIN"):
+            trial._landscape_orientation(OrientationBackend(b"ambiguous"))  # type: ignore[arg-type]
+
     def _patches(self, stack: ExitStack, backend: FakeBackend,
                  *, after_error: bool = False):
-        stack.enter_context(patch.object(trial, "preflight", return_value=SNAPSHOT))
+        stack.enter_context(patch.object(trial, "preflight",
+                                         return_value=(SNAPSHOT, 1)))
+        stack.enter_context(patch.object(trial, "_landscape_orientation",
+                                         return_value=1))
         stack.enter_context(patch.object(trial, "_pinned_images", return_value=None))
         stack.enter_context(patch.object(identity, "_launch_server",
                                          side_effect=lambda _b: backend.calls.append(
@@ -96,9 +123,10 @@ class GraphTrialTests(TestCase):
 
             backend.child_graph = bound_child  # type: ignore[assignment]
             result = trial.run_trial(backend)  # type: ignore[arg-type]
-        self.assertEqual(result["trial"], "alpha-disposable-graph-only")
+        self.assertEqual(result["trial"], "alpha-disposable-crop-graph-only")
         self.assertIs(result["hardwareAdmission"], False)
         self.assertIs(result["mutationAuthorized"], False)
+        self.assertEqual(result["physicalRotation"], 1)
         self.assertIs(result["pdfUnchanged"], True)
         self.assertEqual(capture.call_count, 1)
         stop.assert_called_once()
@@ -123,6 +151,19 @@ class GraphTrialTests(TestCase):
         backend = FakeBackend()
         with ExitStack() as stack:
             stop, capture = self._patches(stack, backend, after_error=True)
+            with self.assertRaisesRegex(trial.GraphTrialError,
+                                        "GRAPH_POST_STATE_UNCERTAIN"):
+                trial.run_trial(backend)  # type: ignore[arg-type]
+        self.assertEqual(capture.call_count, 1)
+        stop.assert_called_once()
+        self.assertFalse(backend.forward)
+
+    def test_physical_rotation_change_rejects_after_cleanup(self):
+        backend = FakeBackend()
+        with ExitStack() as stack:
+            stop, capture = self._patches(stack, backend)
+            stack.enter_context(patch.object(trial, "_landscape_orientation",
+                                             return_value=3))
             with self.assertRaisesRegex(trial.GraphTrialError,
                                         "GRAPH_POST_STATE_UNCERTAIN"):
                 trial.run_trial(backend)  # type: ignore[arg-type]

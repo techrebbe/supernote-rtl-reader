@@ -1,4 +1,4 @@
-"""One-attempt disposable stock-reader graph calibration on the approved Nomad.
+"""One-attempt disposable stock-reader graph and crop-state observation.
 
 This never launches or moves a task and never admits pen, ink, or a viewport.
 The CLI must not be run against the device until the project coordination gate
@@ -22,6 +22,7 @@ import native_page_display0_disposable_trial as identity
 import native_page_display0_graph_bundle as bundle
 import native_page_display0_graph_contract as contract
 import native_page_graph_v2_runner as canonical
+import native_page_alpha_runner as alpha
 
 
 OBSERVER = Path(__file__).with_name("native_page_display0_graph_observer.js")
@@ -69,7 +70,7 @@ def source_and_manifest(before: identity.Snapshot) -> tuple[bytes, bytes]:
     _need(0 < len(source) <= 65_536 and _sha(source) == bundle.SOURCE_SHA256,
           "GRAPH_SOURCE_CHANGED")
     value = {
-        "schemaVersion": 1, "authority": contract.MANIFEST_AUTHORITY,
+        "schemaVersion": 2, "authority": contract.MANIFEST_AUTHORITY,
         "attachment": {
             "packageName": "com.supernote.document",
             "processName": "com.supernote.document",
@@ -267,23 +268,35 @@ def child(pid: int, manifest: bytes) -> int:
     return 0
 
 
-def preflight(backend: GraphBackend) -> identity.Snapshot:
+def _landscape_orientation(backend: GraphBackend) -> int:
+    """Bind physical display 0, not the reader's mutable configuration."""
+    try:
+        rotation = alpha._physical_orientation(
+            backend.adb("shell", "dumpsys", "window", "displays"))
+    except (alpha.AlphaError, identity.TrialError) as error:
+        raise GraphTrialError("GRAPH_PHYSICAL_ORIENTATION_UNCERTAIN") from error
+    _need(rotation in (1, 3), "GRAPH_NOT_LANDSCAPE")
+    return rotation
+
+
+def preflight(backend: GraphBackend) -> tuple[identity.Snapshot, int]:
     identity._forward_absent(backend)
     identity._server_absent(backend)
     before = identity.capture(backend)
     _pinned_images(backend)
+    rotation = _landscape_orientation(backend)
     source_and_manifest(before)
     try:
         bundle.build_verified_bundle()
     except bundle.GraphBundleError as error:
         raise GraphTrialError("GRAPH_BUNDLE_INVALID") from error
-    return before
+    return before, rotation
 
 
 def run_trial(backend: GraphBackend,
               *, announce: Callable[[str], None] = print) -> dict[str, Any]:
     """One bounded attach; a failed cleanup or changed PDF invalidates it."""
-    before = preflight(backend)
+    before, rotation = preflight(backend)
     _, manifest = source_and_manifest(before)
     server_pid: int | None = None
     server_ticks: str | None = None
@@ -335,6 +348,8 @@ def run_trial(backend: GraphBackend,
     try:
         after = identity.capture(backend)
         identity._stable(before, after)
+        _need(_landscape_orientation(backend) == rotation,
+              "GRAPH_PHYSICAL_ORIENTATION_CHANGED")
         _pinned_images(backend)
     except BaseException:
         post_error = True
@@ -353,11 +368,12 @@ def run_trial(backend: GraphBackend,
                                              mark_required=False)
     except contract.GraphContractError as error:
         raise GraphTrialError("GRAPH_OBSERVER_REJECTED") from error
-    return {"trial": "alpha-disposable-graph-only",
+    return {"trial": "alpha-disposable-crop-graph-only",
             "record": record, "readerStable": True, "pdfUnchanged": True,
             "markAbsent": True, "serverRemoved": True, "forwardRemoved": True,
-            "hardwareAdmission": False, "mutationAuthorized": False,
-            "bundleSha256": bundle.BUNDLE_SHA256}
+             "hardwareAdmission": False, "mutationAuthorized": False,
+             "physicalRotation": rotation,
+             "bundleSha256": bundle.BUNDLE_SHA256}
 
 
 def main(argv: list[str] | None = None) -> int:

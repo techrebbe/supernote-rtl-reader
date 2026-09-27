@@ -176,6 +176,38 @@ See the bounded read-only audit in `REGRESSION.md`. No viewport placement or
 future experiment only after a new, independently reviewed renderer/writer
 boundary is specified with an exact rollback.
 
+### Current micro-experiment: observe stock split/crop, no pen
+
+The PM-approved next step is one bounded, read-only observation of the same
+disposable PAGE 1 in the existing stock display-0 reader. It makes **no
+viewport placement**. The observer must use direct fields only and compare
+two samples from the same retained Activity/ViewModel/PageInfo/Presenter
+graph. It must not call a target getter that saves, reloads or changes trails
+merely to collect a value. The host retains the fixed serial, firmware/image
+hashes, exact PDF/task/process identity, and before/after absent-`.mark` and
+helper-cleanup checks from the already validated stock graph trial.
+
+| Card item | Required evidence and interpretation |
+| --- | --- |
+| Fixed state | Same SHA-verified disposable PAGE 1 PDF, stock DocumentActivity on display 0, physical landscape, no unsaved pen stroke or `.mark`; capture reader/PDF/task/PID/start-time before attach. |
+| One delta | One short-lived read-only Frida attach; sample `BaseApplication.isSplit`, ViewModel `showRect` and scale/trimming rectangles, origin/display/digest bitmap dimensions, page CTM/inverse/offsets, presenter rotation and native view bounds twice. Do not alter any field. |
+| Expected if the static crop model is active | `isSplit=true`, a nonnull in-bounds `showRect` strictly smaller than the 1404×1872 origin, and a 1872×1404 display bitmap consistent with cropping then uniformly scaling that rectangle. The expected portrait case is approximately `showRect=[0,0,1404,1053]`. These are *hypotheses*, not previously measured live values. |
+| Observation PASS | Both retained samples agree; strict record, physical-landscape equality, and host before/after integrity checks pass. This is a raw-capture PASS only. Separately adjudicate the rectangle against origin bounds and display dimensions; if it fits the expected crop model, record `split/crop model supported`, not `pixel/writer mapping proven`. |
+| Observation CONTRADICTED | A complete, stable record materially conflicts with the expected branch or geometry; reassess the actual native path before any mutation. |
+| UNKNOWN/abort | Missing/malformed/nonfinite field, identity or physical-rotation drift, uncertain helper cleanup, PDF/`.mark` change, or ambiguous asynchronous page state rejects the raw capture. A finite but inverted/out-of-bounds rectangle may be retained as raw evidence, but its *crop interpretation* is UNKNOWN and no downstream experiment is admitted. Do not reinterpret incomplete evidence as PASS. |
+| Rollback | Unload/detach exact Frida session; remove only its owned forward/server; independently recapture the same task/PID/PDF and absent `.mark`. If any cleanup or state check fails, quarantine rather than retry. |
+
+Even a matching observation does not prove the display bitmap is currently
+painted on screen or that repository/presenter handwriting crop agrees with
+the ViewModel crop. Those are separate authorities. It only closes the
+remaining factual gap about the live stock split branch. After this card,
+request a newly reviewed coordinated renderer/writer boundary rather than
+running the FULL→LEFT→RIGHT→FULL placement card below automatically.
+
+This card has now completed with raw observation **PASS** and split/crop model
+**supported** on the disposable PAGE 1 (details in `REGRESSION.md`). The
+presentation-only placement card below is still blocked, not newly admitted.
+
 | Card item | Required evidence |
 | --- | --- |
 | Hypothesis | One real native page/presenter can remain unchanged while only its outer presentation rectangle moves. |

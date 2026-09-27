@@ -14,9 +14,9 @@ from typing import Any
 import native_page_graph_v2_runner as canonical
 
 
-SCHEMA_VERSION = 1
-MANIFEST_AUTHORITY = "rtl-reader-display0-graph-manifest-v1"
-RECORD_AUTHORITY = "rtl-reader-display0-graph-observation-v1"
+SCHEMA_VERSION = 2
+MANIFEST_AUTHORITY = "rtl-reader-display0-graph-manifest-v2"
+RECORD_AUTHORITY = "rtl-reader-display0-graph-observation-v2"
 MAX_FRAME_BYTES = 8192
 OBSERVER_FAILURE_PAIRS = frozenset({
     ("MANIFEST", "INVALID"), ("RUNTIME", "MISMATCH"),
@@ -30,6 +30,10 @@ OBSERVER_FAILURE_PAIRS = frozenset({
 VIEW_NAMES = frozenset({
     "handWriteView", "documentImage", "digestImage", "contentView",
     "documentLayout",
+})
+PRESENTATION_RECTS = frozenset({
+    "showRect", "scaleRect", "trimmingRect", "landscapeTrimmingRect",
+    "portraitScaleRect", "landscapeScaleRect",
 })
 MAX_DIMENSION = 32768
 MAX_FLOAT_ABS = 1_000_000_000
@@ -87,6 +91,13 @@ def _bitmap(value: Any) -> None:
         _int(dimension, 1, MAX_DIMENSION)
 
 
+def _presentation(value: Any) -> None:
+    item = _keys(value, PRESENTATION_RECTS | {"isSplit"})
+    _bool(item["isSplit"])
+    for name in PRESENTATION_RECTS:
+        _floats(item[name], 4, nullable=True)
+
+
 def _view(value: Any) -> None:
     item = _keys(value, {"present", "bounds", "windowAttachCount", "attached"})
     present = _bool(item["present"])
@@ -128,11 +139,11 @@ def parse_graph_frames(frames: tuple[bytes, bytes], manifest_sha256: str,
         "retainedRootSamples", "graphStable", "lifecycle",
         "uriAgreementAndExpectedMatch", "markPathPresent",
         "markPathMatchedExpected", "rawPageTuple", "pageInfo", "presenter",
-        "views",
+        "views", "presentation",
     }
     _keys(first, expected)
     _need(first["event"] == "native_page_display0_graph" and
-          _int(first["schemaVersion"], 1, 1) == SCHEMA_VERSION and
+          _int(first["schemaVersion"], 2, 2) == SCHEMA_VERSION and
           first["authority"] == RECORD_AUTHORITY and
           first["manifestSha256"] == manifest_sha256 and
           first["observationOnly"] is True and
@@ -183,6 +194,7 @@ def parse_graph_frames(frames: tuple[bytes, bytes], manifest_sha256: str,
     views = _keys(first["views"], VIEW_NAMES)
     for view in views.values():
         _view(view)
+    _presentation(first["presentation"])
 
     _keys(complete, {"event", "success"})
     _need(complete == {"event": "native_page_display0_graph_complete",
@@ -196,7 +208,7 @@ def parse_graph_error_frames(frames: tuple[bytes, bytes]) -> tuple[str, str]:
     first, complete = (_frame(raw) for raw in frames)
     _keys(first, {"event", "schemaVersion", "code", "phase", "reason"})
     _need(first["event"] == "native_page_display0_graph_error" and
-          _int(first["schemaVersion"], 1, 1) == SCHEMA_VERSION and
+          _int(first["schemaVersion"], 2, 2) == SCHEMA_VERSION and
           first["code"] == "DISPLAY0_GRAPH_REJECTED" and
           type(first["phase"]) is str and type(first["reason"]) is str and
           (first["phase"], first["reason"]) in OBSERVER_FAILURE_PAIRS)

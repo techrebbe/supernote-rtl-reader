@@ -19,7 +19,7 @@ EMPTY_VIEW = {"present": False, "bounds": None,
 
 def success() -> dict:
     return {
-        "event": "native_page_display0_graph", "schemaVersion": 1,
+        "event": "native_page_display0_graph", "schemaVersion": 2,
         "authority": contract.RECORD_AUTHORITY, "manifestSha256": DIGEST,
         "observationOnly": True, "hardwareAdmission": False,
         "semanticCalibration": False, "hostAssertionsOnly": True,
@@ -42,6 +42,15 @@ def success() -> dict:
                       "bitmap": copy.deepcopy(EMPTY_BITMAP)},
         "views": {name: copy.deepcopy(EMPTY_VIEW)
                   for name in contract.VIEW_NAMES},
+        "presentation": {
+            "isSplit": True,
+            "showRect": [ZERO, ZERO, ONE, ONE],
+            "scaleRect": None,
+            "trimmingRect": None,
+            "landscapeTrimmingRect": None,
+            "portraitScaleRect": None,
+            "landscapeScaleRect": None,
+        },
     }
 
 
@@ -53,11 +62,81 @@ def frames(value: dict) -> tuple[bytes, bytes]:
 
 
 class GraphContractTests(unittest.TestCase):
+    def test_v2_authorities_are_exact(self) -> None:
+        self.assertEqual(contract.SCHEMA_VERSION, 2)
+        self.assertEqual(contract.MANIFEST_AUTHORITY,
+                         "rtl-reader-display0-graph-manifest-v2")
+        self.assertEqual(contract.RECORD_AUTHORITY,
+                         "rtl-reader-display0-graph-observation-v2")
+
     def test_valid_raw_calibration_is_not_admission(self) -> None:
         value = contract.parse_graph_frames(frames(success()), DIGEST,
                                             mark_required=False)
         self.assertIs(value["semanticCalibration"], False)
         self.assertIs(value["hardwareAdmission"], False)
+        self.assertIs(value["observationOnly"], True)
+        self.assertEqual(value["presentation"]["showRect"],
+                         [ZERO, ZERO, ONE, ONE])
+
+    def test_every_presentation_rect_accepts_null_or_finite_binary64(self) -> None:
+        for name in contract.PRESENTATION_RECTS:
+            with self.subTest(name=name):
+                for rect in (None, [ZERO, ZERO, ONE, ONE]):
+                    value = success()
+                    value["presentation"][name] = rect
+                    parsed = contract.parse_graph_frames(frames(value), DIGEST,
+                                                         mark_required=False)
+                    self.assertEqual(parsed["presentation"][name], rect)
+        value = success()
+        value["presentation"]["isSplit"] = False
+        parsed = contract.parse_graph_frames(frames(value), DIGEST,
+                                             mark_required=False)
+        self.assertIs(parsed["presentation"]["isSplit"], False)
+
+    def test_presentation_fields_reject_missing_extra_and_wrong_shape(self) -> None:
+        for name in contract.PRESENTATION_RECTS | {"isSplit"}:
+            with self.subTest(name=name, mutation="missing"):
+                value = success()
+                del value["presentation"][name]
+                with self.assertRaises(contract.GraphContractError):
+                    contract.parse_graph_frames(frames(value), DIGEST,
+                                                mark_required=False)
+        for mutation in (
+            lambda p: p.update(unexpected=None),
+            lambda p: p.update(isSplit=1),
+            lambda p: p.update(showRect=[ZERO, ZERO, ONE]),
+            lambda p: p.update(showRect={"left": ZERO}),
+            lambda p: p.update(showRect=False),
+        ):
+            value = success()
+            mutation(value["presentation"])
+            with self.assertRaises(contract.GraphContractError):
+                contract.parse_graph_frames(frames(value), DIGEST,
+                                            mark_required=False)
+
+    def test_presentation_binary64_mutations_fail_closed(self) -> None:
+        for name in contract.PRESENTATION_RECTS:
+            for invalid in (0, "0x7ff8000000000000",
+                            "0x7ff0000000000000", "0xfff0000000000000",
+                            "0x3FF0000000000000", "0xzz00000000000000",
+                            "0x7fefffffffffffff"):
+                with self.subTest(name=name, invalid=invalid):
+                    value = success()
+                    value["presentation"][name] = [ZERO, invalid, ONE, ONE]
+                    with self.assertRaises(contract.GraphContractError):
+                        contract.parse_graph_frames(frames(value), DIGEST,
+                                                    mark_required=False)
+
+    def test_v1_record_is_rejected(self) -> None:
+        for mutate in (
+            lambda v: v.update(schemaVersion=1),
+            lambda v: v.update(authority="rtl-reader-display0-graph-observation-v1"),
+        ):
+            value = success()
+            mutate(value)
+            with self.assertRaises(contract.GraphContractError):
+                contract.parse_graph_frames(frames(value), DIGEST,
+                                            mark_required=False)
 
     def test_mark_required_path_is_not_serialized(self) -> None:
         value = success()
@@ -116,6 +195,11 @@ class GraphContractTests(unittest.TestCase):
         with self.assertRaises(contract.GraphContractError):
             contract.parse_graph_frames(frames(value), DIGEST,
                                         mark_required=False)
+        value = success()
+        del value["presentation"]
+        with self.assertRaises(contract.GraphContractError):
+            contract.parse_graph_frames(frames(value), DIGEST,
+                                        mark_required=False)
 
     def test_malformed_binary64_and_nonfinite_reject(self) -> None:
         for invalid in ("0x7ff8000000000000", "0x7ff0000000000000",
@@ -153,7 +237,7 @@ class GraphContractTests(unittest.TestCase):
 
     def test_error_frames_only_accept_fixed_diagnostic(self) -> None:
         error = {"event": "native_page_display0_graph_error",
-                 "schemaVersion": 1, "code": "DISPLAY0_GRAPH_REJECTED",
+                 "schemaVersion": 2, "code": "DISPLAY0_GRAPH_REJECTED",
                  "phase": "URI", "reason": "WRAPPER"}
         complete = {"event": "native_page_display0_graph_complete",
                     "success": False}
@@ -165,6 +249,11 @@ class GraphContractTests(unittest.TestCase):
         bad = (canonical.canonical_bytes(error, contract.MAX_FRAME_BYTES), raw[1])
         with self.assertRaises(contract.GraphContractError):
             contract.parse_graph_error_frames(bad)
+        error["reason"] = "WRAPPER"
+        error["schemaVersion"] = 1
+        old = (canonical.canonical_bytes(error, contract.MAX_FRAME_BYTES), raw[1])
+        with self.assertRaises(contract.GraphContractError):
+            contract.parse_graph_error_frames(old)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Pinned offline bundle for the separate stock-display graph calibration.
+"""Pinned offline bundle for the stock-display graph and crop observation.
 
 This builds only host-side JavaScript. It does not connect to ADB, attach to the
 reader, or run a device experiment. The existing identity bundle establishes
@@ -18,8 +18,8 @@ HERE = Path(__file__).resolve().parent
 SOURCE = HERE / "native_page_display0_graph_observer.js"
 ENTRYPOINT = base.BUILD / "native_page_display0_graph_entry.js"
 BUNDLE = base.BUILD / "native_page_display0_graph_bundle.js"
-SOURCE_SHA256 = "f2c680ee9ea7039ef5e27621ddc7e07ea69bcf8cb54512e76cfa75a55d48106c"
-BUNDLE_SHA256 = "19de2ae3e2f88a59e631cead2a07d643b2478b174ffa3ff067e7d54a70e7c081"
+SOURCE_SHA256 = "32c12990b4ef93187272d961ffb8bcfc1608e1169d2d8de11b6c1fd3fdea3e95"
+BUNDLE_SHA256 = "b914bd286d35ea5f90218d1211c45bdd6944d2d4a191cd498817a122625d2065"
 
 
 class GraphBundleError(RuntimeError):

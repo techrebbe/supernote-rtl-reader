@@ -11,7 +11,12 @@ const SOURCE = fs.readFileSync(path.join(__dirname,
 const SOURCE_SHA = crypto.createHash('sha256').update(SOURCE).digest('hex');
 const URI = 'file:///storage/emulated/0/Document/RTL_DISPLAY0_CAPTURE_20260927.pdf';
 const MARK = '/storage/emulated/0/Document/RTL_DISPLAY0_CAPTURE_20260927.pdf.mark';
+const PRESENTATION_RECTS = [
+  'showRect', 'scaleRect', 'trimmingRect', 'landscapeTrimmingRect',
+  'portraitScaleRect', 'landscapeScaleRect'
+];
 const C = {
+  baseApplication: 'com.supernote.document.BaseApplication',
   activity: 'com.supernote.document.document.DocumentActivity',
   vm: 'com.supernote.document.document.DocumentViewModel',
   presenter: 'com.supernote.document.handwrite.HandWritePresenter',
@@ -44,7 +49,7 @@ function canonical(value) {
     JSON.stringify(k) + ':' + canonical(value[k])).join(',') + '}';
 }
 function manifest(markPath = null) {
-  return {schemaVersion: 1, authority: 'rtl-reader-display0-graph-manifest-v1',
+  return {schemaVersion: 2, authority: 'rtl-reader-display0-graph-manifest-v2',
     attachment: {packageName: 'com.supernote.document',
       processName: 'com.supernote.document', pid: 2256, startTimeTicks: '4134',
       firmwareFingerprint:
@@ -67,6 +72,11 @@ function object(name, id, fields = {}) {
 }
 function graph(options = {}) {
   const shape = object(C.rect, 'crop', {left: 10, top: 20, right: 220, bottom: 310});
+  const presentationRects = {};
+  for (const field of PRESENTATION_RECTS) {
+    presentationRects[field] = object(C.rect, field,
+      {left: -0, top: 20.5, right: 220, bottom: 310});
+  }
   const matrix = object(C.matrix, 'matrix', {a: 1, b: -0, c: 0,
     d: 1, e: 4, f: 6});
   const inverse = object(C.matrix, 'inverse', {a: 1, b: 0, c: 0,
@@ -91,7 +101,9 @@ function graph(options = {}) {
     options.presenterUriClass || C.stringUri,
     options.presenterUri === undefined ? URI : options.presenterUri);
   const viewModel = object(C.vm, 'vm', {uri: vmUri, currentPage: 1,
-    pageCount: 7, pageInfo: page});
+    pageCount: 7, pageInfo: page, ...presentationRects});
+  const baseApplication = object(C.baseApplication, 'base-application',
+    {isSplit: options.isSplit === undefined ? false : options.isSplit});
   const presenter = object(C.presenter, 'presenter', {uri: presenterUri,
     currentPage: 1, markPath: options.markPath === undefined ? null : options.markPath,
     screenRotation: 0, bitmap: penBitmap});
@@ -111,7 +123,8 @@ function graph(options = {}) {
     digestImage: views.digestImage, mContentView: views.contentView,
     documentViewLayout: views.documentLayout});
   return {activity, viewModel, presenter, page, vmUri, presenterUri,
-    views, attaches, matrix, inverse, shape, origin, display, digest, penBitmap};
+    baseApplication, presentationRects, views, attaches, matrix, inverse,
+    shape, origin, display, digest, penBitmap};
 }
 function run(options = {}) {
   const m = options.manifest || manifest();
@@ -130,7 +143,9 @@ function run(options = {}) {
       pointerSize: options.pointerSize || 8,
       id: options.pid === undefined ? m.attachment.pid : options.pid},
     Java: {
-      use(name) { useCalls++; assert([C.stringUri, C.hierarchicalUri].includes(name));
+      use(name) { useCalls++;
+        if (name === C.baseApplication) return g.baseApplication;
+        assert([C.stringUri, C.hierarchicalUri].includes(name));
         return {name}; },
       cast(value, type) {
         castCalls++;
@@ -201,13 +216,24 @@ function success(result) {
   assert.strictEqual(result.sent.length, 2);
   const value = result.sent[0];
   assert.strictEqual(value.event, 'native_page_display0_graph');
-  assert.strictEqual(value.authority, 'rtl-reader-display0-graph-observation-v1');
+  assert.strictEqual(value.schemaVersion, 2);
+  assert.strictEqual(value.authority, 'rtl-reader-display0-graph-observation-v2');
   assert.strictEqual(value.observationOnly, true);
   assert.strictEqual(value.hardwareAdmission, false);
   assert.strictEqual(value.semanticCalibration, false);
   assert.strictEqual(value.runtimePidMatched, true);
   assert.strictEqual(value.graphStable, true);
   assert.deepStrictEqual(value.rawPageTuple, [1, 7, 1, 1]);
+  assert.deepStrictEqual(Object.keys(value.presentation).sort(),
+    ['isSplit', ...PRESENTATION_RECTS].sort());
+  assert.strictEqual(typeof value.presentation.isSplit, 'boolean');
+  for (const field of PRESENTATION_RECTS) {
+    if (value.presentation[field] !== null) {
+      assert.strictEqual(value.presentation[field].length, 4);
+      for (const encoded of value.presentation[field])
+        assert(/^0x[0-9a-f]{16}$/.test(encoded));
+    }
+  }
   if (value.pageInfo.ctm !== null)
     assert.strictEqual(value.pageInfo.ctm[1], '0x8000000000000000');
   assert.deepStrictEqual(Object.keys(value.views).sort(),
@@ -244,12 +270,21 @@ function failure(result, wanted = null) {
 }
 
 success(run());
+const split = graph({isSplit: true});
+const splitRecord = success(run({graph: split}));
+assert.strictEqual(splitRecord.presentation.isSplit, true);
+assert.strictEqual(splitRecord.presentation.showRect[0], '0x8000000000000000');
+const functionClass = graph();
+function staticWrapper() { throw new Error('target class invoked'); }
+staticWrapper.isSplit = slot(true);
+functionClass.baseApplication = staticWrapper;
+assert.strictEqual(success(run({graph: functionClass})).presentation.isSplit, true);
 for (const a of [C.stringUri, C.hierarchicalUri]) {
   for (const b of [C.stringUri, C.hierarchicalUri]) {
     const result = run({graph: graph({declaredBaseUri: true,
       vmUriClass: a, presenterUriClass: b})});
     success(result);
-    assert.strictEqual(result.useCalls, a === b ? 1 : 2);
+    assert.strictEqual(result.useCalls, a === b ? 2 : 3);
     assert.strictEqual(result.castCalls, 4);
   }
 }
@@ -264,6 +299,47 @@ const nullableRecord = success(run({graph: nullable}));
 assert.strictEqual(nullableRecord.pageInfo.ctm, null);
 assert.strictEqual(nullableRecord.pageInfo.bitmaps.display.present, false);
 assert.strictEqual(nullableRecord.views.digestImage.present, false);
+const nullablePresentation = graph();
+for (const field of PRESENTATION_RECTS)
+  nullablePresentation.viewModel[field] = slot(null);
+const nullablePresentationRecord = success(run({graph: nullablePresentation}));
+for (const field of PRESENTATION_RECTS)
+  assert.strictEqual(nullablePresentationRecord.presentation[field], null);
+
+const changedSplit = graph();
+changedSplit.baseApplication.isSplit = sequence([false, true]);
+failure(run({graph: changedSplit}), 'GRAPH/MISMATCH');
+const missingSplit = graph();
+delete missingSplit.baseApplication.isSplit;
+failure(run({graph: missingSplit}), 'GRAPH/MISMATCH');
+const wrongSplit = graph({isSplit: 1});
+failure(run({graph: wrongSplit}), 'GRAPH/MISMATCH');
+for (const field of PRESENTATION_RECTS) {
+  const changedValue = graph();
+  changedValue.presentationRects[field].right = sequence([220, 221]);
+  failure(run({graph: changedValue}), 'GRAPH/MISMATCH');
+  const changedPresence = graph();
+  changedPresence.viewModel[field] = sequence([
+    changedPresence.presentationRects[field], null]);
+  failure(run({graph: changedPresence}), 'GRAPH/MISMATCH');
+  const changedIdentity = graph();
+  changedIdentity.viewModel[field] = sequence([
+    changedIdentity.presentationRects[field],
+    object(C.rect, field + '-replacement',
+      {left: -0, top: 20.5, right: 220, bottom: 310})]);
+  failure(run({graph: changedIdentity}), 'GRAPH/MISMATCH');
+  const missing = graph();
+  delete missing.viewModel[field];
+  failure(run({graph: missing}), 'GRAPH/MISMATCH');
+  const wrongClass = graph();
+  wrongClass.viewModel[field] = slot(object('android.graphics.Rect', field));
+  failure(run({graph: wrongClass}), 'GRAPH/MISMATCH');
+  for (const invalid of [Infinity, NaN, '20', 1000000001]) {
+    const badCoordinate = graph();
+    badCoordinate.presentationRects[field].top = slot(invalid);
+    failure(run({graph: badCoordinate}), 'GRAPH/MISMATCH');
+  }
+}
 
 for (const [field, value, pair] of [
   ['uri', null, 'URI/SUBTYPE'],

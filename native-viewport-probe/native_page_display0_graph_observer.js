@@ -4,14 +4,15 @@
 // input synthesis, pen ownership, or hardware-admission claim. The host owns
 // PID/start-time, file, task/display, deadline, and post-detach authority.
 (function () {
-  const SCHEMA = 1;
-  const MANIFEST_AUTHORITY = 'rtl-reader-display0-graph-manifest-v1';
-  const RECORD_AUTHORITY = 'rtl-reader-display0-graph-observation-v1';
+  const SCHEMA = 2;
+  const MANIFEST_AUTHORITY = 'rtl-reader-display0-graph-manifest-v2';
+  const RECORD_AUTHORITY = 'rtl-reader-display0-graph-observation-v2';
   const FINGERPRINT =
     'Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys';
   const URI = 'file:///storage/emulated/0/Document/RTL_DISPLAY0_CAPTURE_20260927.pdf';
   const MARK = '/storage/emulated/0/Document/RTL_DISPLAY0_CAPTURE_20260927.pdf.mark';
   const CLASS = Object.freeze({
+    baseApplication: 'com.supernote.document.BaseApplication',
     activity: 'com.supernote.document.document.DocumentActivity',
     vm: 'com.supernote.document.document.DocumentViewModel',
     presenter: 'com.supernote.document.handwrite.HandWritePresenter',
@@ -32,6 +33,10 @@
     ['digestImage', 'digestImage', CLASS.digestImage],
     ['contentView', 'mContentView', CLASS.contentView],
     ['documentLayout', 'documentViewLayout', CLASS.documentLayout]
+  ]);
+  const PRESENTATION_RECTS = Object.freeze([
+    'showRect', 'scaleRect', 'trimmingRect', 'landscapeTrimmingRect',
+    'portraitScaleRect', 'landscapeScaleRect'
   ]);
   const MAX_MANIFEST_BYTES = 4096;
   const MAX_CANDIDATES = 64;
@@ -160,7 +165,7 @@
     return {value, digest};
   }
   function direct(parent, field) {
-    need(parent !== null && typeof parent === 'object');
+    need(parent !== null && (typeof parent === 'object' || typeof parent === 'function'));
     const slot = parent[field];
     need(slot !== null && typeof slot === 'object' && ('value' in slot));
     return slot.value;
@@ -300,6 +305,11 @@
     const mark = direct(presenter, 'markPath');
     need(mark === null || (typeof mark === 'string' && mark === MARK));
     if (manifest.expected.markPath !== null) need(mark === manifest.expected.markPath);
+    const presentation = {isSplit: bool(state.baseApplication, 'isSplit')};
+    for (const field of PRESENTATION_RECTS) {
+      const rect = read('vmPresentation_' + field, vm, field, CLASS.rect, true);
+      presentation[field] = floatFields(rect, ['left', 'top', 'right', 'bottom']);
+    }
     const ctm = read('ctm', page, 'ctm', CLASS.matrix, true);
     const inverse = read('revertCtm', page, 'revertCtm', CLASS.matrix, true);
     const crop = read('trimmingRect', page, 'trimmingRect', CLASS.rect, true);
@@ -317,7 +327,7 @@
       }
       views[name] = view(value, attach);
     }
-    const output = {lifecycle, uriAgreementAndExpectedMatch: true,
+    const output = {lifecycle, presentation, uriAgreementAndExpectedMatch: true,
       markPathPresent: mark !== null,
       markPathMatchedExpected: manifest.expected.markPath === null ? null : true,
       rawPageTuple: [integer(direct(vm, 'currentPage'), 0, 10000000),
@@ -367,6 +377,10 @@
       point('BRIDGE', 'UNAVAILABLE');
       state.env = Java.vm.getEnv();
       need(state.env !== null && typeof state.env.isSameObject === 'function');
+      state.baseApplication = Java.use(CLASS.baseApplication);
+      need(state.baseApplication !== null &&
+        (typeof state.baseApplication === 'object' ||
+          typeof state.baseApplication === 'function'));
       point('JAVA_CHOOSE', 'FAILED');
       need(++walks === 1);
       enteredChoose = true;

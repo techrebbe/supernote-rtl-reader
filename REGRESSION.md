@@ -3403,6 +3403,61 @@ nor touching pen/page state is authorized by this PM gate. No SurfaceControl
 transaction, pen lease, task action or document mutation was attempted.
 Further placement work needs a revised reviewed integration boundary.
 
+### Inner page and 270-degree counter-rotation feasibility — read-only NO-GO, 2026-09-27
+
+The follow-up offline audit inspected the pinned decompiled Document app
+without changing device or application source. `activity_document.xml:2-38`
+places `DocumentImageView` (PDF/text-highlight pixels), `DigestImageView`,
+`HandWriteView` (including committed ink/selection), and the toolbar as
+full-screen siblings. Their first common View ancestor includes chrome;
+there is no established page-only View/RenderNode that owns all visual layers.
+The prior live graph found those views attached at `[0,0,1872,1404]`, but did
+not inspect their parent or RenderNode identities. This is a static boundary
+finding, not a claim that every possible hidden runtime node is impossible.
+
+The apparent landscape rotation is not a simple post-render 90-degree page
+rotation with a 270-degree inverse. `DocumentActivity.setSplit()` at
+`4562-4600` selects split mode from physical rotation and the origin bitmap's
+aspect; its same path sets `HandWritePresenter.screenRotation`.
+`PDFMupdf.loadPage()` at `223-284` renders PDF bounds through a scale-only
+matrix into `PageInfo.originBitmap`, CTM and offsets. In stock split mode,
+`DocumentViewModel.resetShowRect()` at `3046-3064` selects a partial original
+page rectangle; `updateDisplayBitmap()` at `2389-2425` passes that rectangle
+to `TrimmingUtil.adaptiveTrimming()`, which crops via `Bitmap.createBitmap`
+(`TrimmingUtil.java:53-74`) **before** the result reaches
+`DocumentActivity.mImage.setImageBitmap()` at `5016`. For a portrait
+`1404x1872` origin under the nominal `1404x1872` display constants, the
+split rectangle is `1404x1053`; uniform `4/3` scaling yields the observed
+landscape `1872x1404` display bitmap. That numeric match supports the crop
+interpretation, but the live `isSplit` and `showRect` values were not captured
+and must not be presented as directly measured facts.
+
+The other layers are not independent of that state. The ViewModel also crops
+the digest (`2509-2511`) and calls `repository.updateDocumentData()` with
+the origin size and `showRect` (`2392`). `HandWritePresenter` crops its ink
+bitmap (`1219-1223`) and `setHandWriteRotation()` at `1154-1214` sends
+split/non-split rotation modes and recognition offsets to native handwriting.
+Rotating only `mImage` would leave digest, ink, selection and wet pen behind.
+Rotating page *content* 270 degrees while keeping portrait PDF page bounds
+leaves the origin classified as portrait, so stock split/crop remains.
+Changing the effective PDF page bounds/orientation to landscape can instead
+switch off that split branch at physical 90 degrees, but changes the
+`PageInfo` raster/CTM/offsets, repository geometry, hit tests and native
+handwriting rotation/recognition mode. No presentation-only upstream
+270-degree control
+with unchanged canonical annotation geometry was established. A disposable
+counter-rotated PDF would therefore be a *different renderer/writer experiment*,
+not one-variable proof of this presentation-only viewport proposal.
+
+**Outcome:** `NO-GO` for the currently proposed live-stock, one-existing-node
+or 270-degree presentation-only placement. This is not a negative physical-pen
+result, and does not rule out a deliberately redesigned lower-level native
+adapter. No device transform, task action, pen contact, PDF change or `.mark`
+change was performed for this audit. A new proposal must first specify one
+authoritative full-page render, aligned dry/wet ink and selection presentation,
+canonical writer coordinates, navigation semantics, and a verifiable rollback;
+then run the no-pen FULL→LEFT→RIGHT→FULL card before any one-stroke save test.
+
 Before reproducing a failure:
 
 ```powershell

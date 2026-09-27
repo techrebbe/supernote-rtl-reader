@@ -158,6 +158,24 @@ text. Matrix/position alone cannot both fill a portrait-shaped half and keep
 that text upright. See `REGRESSION.md`; a revised boundary is required before
 this card can be executed.
 
+The follow-up proposal to transform one existing inner page view, or to
+counter-rotate the page 270 degrees before the landscape window is composed,
+also has **no admitted presentation-only boundary** on this pinned reader.
+The XML places PDF, digest and handwriting in separate full-screen siblings;
+their common parent includes the toolbar. In stock split mode the ViewModel
+crops `originBitmap` with `showRect` before giving the display bitmap to the
+PDF view, while the handwriting presenter crops its bitmap and programs the
+native pen engine from the same split/rotation state. The raw `90` rotation
+value is not evidence of a separate 90-degree page-pixel rotation to cancel.
+Changing the displayed image alone loses the other layers. Rotating content
+inside unchanged portrait PDF bounds leaves stock split/crop in place;
+changing effective page orientation to landscape can avoid that crop only by
+changing native rendering and writer/coordinate authority.
+See the bounded read-only audit in `REGRESSION.md`. No viewport placement or
+270-degree mutation is authorized by this card; the table below remains a
+future experiment only after a new, independently reviewed renderer/writer
+boundary is specified with an exact rollback.
+
 | Card item | Required evidence |
 | --- | --- |
 | Hypothesis | One real native page/presenter can remain unchanged while only its outer presentation rectangle moves. |

@@ -3314,12 +3314,12 @@ server or ADB forward. This passes only the live display-0 document-identity
 alpha. It does **not** prove a movable native viewport, pen input, annotation
 geometry, writing, erasing, or production-reader safety.
 
-### Display-0 raw graph-calibration candidate — host only, 2026-09-27
+### Display-0 raw graph observation on stock reader — 2026-09-27
 
 The passed identity alpha was reported to the project coordination issue at
 the pushed `dc75899` head. A separate graph observer, strict host parser,
-pinned offline bundle and one-attempt runner were then prepared without a new
-Nomad attachment. They do not modify the frozen virtual-display v2 observer.
+pinned offline bundle and one-attempt runner were then prepared. They do not
+modify the frozen virtual-display v2 observer.
 The new observer reads only direct fields from one retained stock
 `DocumentActivity` graph twice. It reports raw page numbers, matrices,
 bitmap sizes and view bounds without treating them as calibrated page-index,
@@ -3330,17 +3330,49 @@ Raw graph source SHA-256:
 `f2c680ee9ea7039ef5e27621ddc7e07ea69bcf8cb54512e76cfa75a55d48106c`.
 The reproducibly compiled 485,562-byte bundle SHA-256:
 `19de2ae3e2f88a59e631cead2a07d643b2478b174ffa3ff067e7d54a70e7c081`.
-The offline checks passed: 37 Node observer cases, 8 strict-frame parser cases,
-9 fake-device runner/cleanup cases, Python compilation and the pinned bundle
-rebuild. The runner also hashes the exact stock Document APK and framework JAR
-before and after any future attach, in addition to the existing fixed-serial
-reader/process/PDF/absent-`.mark` checks. The current implementation has **not**
-run on the Nomad. Static inspection of the pinned APK indicates the content
-view is exactly `android.widget.FrameLayout`; a different live subtype or
-nullable graph shape will fail closed. The next hardware
-attachment awaits a separate project coordination decision and exact-head
-review. No pen, task launch, host install or document mutation is authorized by
-these host tests.
+The offline checks passed: 37 Node observer cases, 10 strict-frame parser
+cases, 9 fake-device runner/cleanup cases, Python compilation and the pinned
+bundle rebuild. The runner hashes the exact stock Document APK and framework
+JAR before and after attach, in addition to fixed-serial reader/process/PDF
+and absent-`.mark` checks. Static inspection of the pinned APK indicates the
+content view is exactly `android.widget.FrameLayout`; a different live subtype
+or nullable graph shape fails closed.
+
+The first authorized read-only Nomad graph trial returned
+`GRAPH_CHILD_FRAME_REJECTED`. The independent post-trial preflight passed:
+stock reader and disposable PDF unchanged, `.mark` absent, temporary Frida
+server and ADB forward absent. A host contract defect was found and corrected:
+the presenter precomputes its `.mark` pathname even before the file exists,
+but the initial parser equated pathname presence with file existence. Static
+inspection and cross-language tests strongly supported that diagnosis; the
+generic failure code alone did not prove it. The corrected parser still
+requires the expected pathname match whenever a `.mark` file is required and
+the host still verifies actual file absence independently.
+
+After separate user approval, one corrected bounded trial on Nomad
+`SN078C10015092` passed. It sampled one stock `DocumentActivity` graph twice
+while the disposable PAGE 1 PDF was open. The strict record reported
+`graphStable=true`, `runtimePidMatched=true`, URI agreement, resumed lifecycle,
+raw page tuple `[0,2,0,1]`, raw rotation code `90`, origin bitmap
+`1404x1872`, display bitmap `1872x1404`, all five observed native views
+attached at `[0,0,1872,1404]`, `markPathPresent=true` and
+`markPathMatchedExpected=null`. Its manifest digest was
+`6bd5e5cbfa1adb2b85f0dcfc66fffb5ac50a60ff260da3a21e51151bc9a040a4`.
+The raw `PageInfo` fields were `ctm` diagonal
+`0x40025a5a60000000`, `revertCtm` diagonal `0x3fdbe5be60000000`, both
+off-diagonal and translation entries positive zero, integer offset `[0,27]`,
+scale `0x3feeff4560000000`, and null trimming rect. These are uncalibrated
+field values, not an asserted source-page-to-screen transform.
+The runner and an independent immediate preflight both confirmed unchanged
+reader/PDF, absent `.mark`, and removal of the Frida server and ADB forward.
+The raw graph explicitly reports `hardwareAdmission=false` and
+`semanticCalibration=false`; the host trial result reports
+`mutationAuthorized=false`.
+
+This passes only a read-only graph observation on the stock display. The page
+tuple's index base, matrices' meanings, movable-viewport geometry, physical
+pen, tool behavior, save authority and persistence remain unproven. No pen,
+task launch, host install or document mutation was performed by this trial.
 
 Before reproducing a failure:
 

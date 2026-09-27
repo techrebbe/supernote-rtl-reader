@@ -89,6 +89,9 @@ class GraphTrialTests(TestCase):
                 backend.calls.append("child")
                 value = fixture.success()
                 value["manifestSha256"] = trial._sha(manifest)
+                # The stock presenter can precompute this pathname before
+                # any .mark file exists on the disposable document.
+                value["markPathPresent"] = True
                 return fixture.frames(value)
 
             backend.child_graph = bound_child  # type: ignore[assignment]

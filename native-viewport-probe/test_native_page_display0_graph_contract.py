@@ -67,6 +67,29 @@ class GraphContractTests(unittest.TestCase):
                                              mark_required=True)
         self.assertNotIn(".pdf.mark", json.dumps(parsed))
 
+    def test_absent_mark_file_may_still_have_presenter_path(self) -> None:
+        value = success()
+        value["markPathPresent"] = True
+        parsed = contract.parse_graph_frames(frames(value), DIGEST,
+                                             mark_required=False)
+        self.assertIs(parsed["markPathPresent"], True)
+        self.assertIsNone(parsed["markPathMatchedExpected"])
+
+    def test_mark_path_presence_never_substitutes_for_expected_match(self) -> None:
+        for mark_required, present, matched in (
+            (False, False, True), (False, True, True),
+            (False, False, False), (False, True, False),
+            (True, False, True), (True, True, None),
+        ):
+            with self.subTest(mark_required=mark_required,
+                              present=present, matched=matched):
+                value = success()
+                value["markPathPresent"] = present
+                value["markPathMatchedExpected"] = matched
+                with self.assertRaises(contract.GraphContractError):
+                    contract.parse_graph_frames(frames(value), DIGEST,
+                                                mark_required=mark_required)
+
     def test_required_top_level_flags_are_exact(self) -> None:
         for key, changed in (("hardwareAdmission", True),
                              ("semanticCalibration", True),

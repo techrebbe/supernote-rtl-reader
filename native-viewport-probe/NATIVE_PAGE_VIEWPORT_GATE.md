@@ -5,8 +5,8 @@ Status: visual feasibility passed on the pinned Nomad on 2026-09-14; see
 document-identity alpha passed on 2026-09-27; see `REGRESSION.md`. A fully
 retained and independently bound visual/session gate, plus the physical-pen,
 native-tool, persistence and graph-identity portions, remain open. A separate
-raw display-0 graph observer is now host-tested but has not run on the Nomad;
-see `REGRESSION.md`. This is not
+raw display-0 graph observer passed one bounded read-only Nomad observation
+on the disposable PDF on 2026-09-27; see `REGRESSION.md`. This is not
 yet a writable native viewport, two-page reader, production package or release
 candidate.
 

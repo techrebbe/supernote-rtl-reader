@@ -147,7 +147,12 @@ def parse_graph_frames(frames: tuple[bytes, bytes], manifest_sha256: str,
     lifecycle = _keys(first["lifecycle"], {"resumed", "finished", "destroyed"})
     _need(lifecycle == {"resumed": True, "finished": False,
                         "destroyed": False})
-    _need(_bool(first["markPathPresent"]) is mark_required)
+    # The native presenter may precompute its .mark pathname even when the
+    # file does not exist. File absence is independently checked by the host;
+    # this field reports only whether the presenter's string is non-null.
+    present = _bool(first["markPathPresent"])
+    if mark_required:
+        _need(present is True)
     _need(first["markPathMatchedExpected"] is
           (True if mark_required else None))
 

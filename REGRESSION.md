@@ -3314,6 +3314,34 @@ server or ADB forward. This passes only the live display-0 document-identity
 alpha. It does **not** prove a movable native viewport, pen input, annotation
 geometry, writing, erasing, or production-reader safety.
 
+### Display-0 raw graph-calibration candidate — host only, 2026-09-27
+
+The passed identity alpha was reported to the project coordination issue at
+the pushed `dc75899` head. A separate graph observer, strict host parser,
+pinned offline bundle and one-attempt runner were then prepared without a new
+Nomad attachment. They do not modify the frozen virtual-display v2 observer.
+The new observer reads only direct fields from one retained stock
+`DocumentActivity` graph twice. It reports raw page numbers, matrices,
+bitmap sizes and view bounds without treating them as calibrated page-index,
+CTM, viewport or writer semantics. It emits no raw document path, pointer,
+Binder identity, pen action or hardware-admission claim.
+
+Raw graph source SHA-256:
+`f2c680ee9ea7039ef5e27621ddc7e07ea69bcf8cb54512e76cfa75a55d48106c`.
+The reproducibly compiled 485,562-byte bundle SHA-256:
+`19de2ae3e2f88a59e631cead2a07d643b2478b174ffa3ff067e7d54a70e7c081`.
+The offline checks passed: 37 Node observer cases, 8 strict-frame parser cases,
+9 fake-device runner/cleanup cases, Python compilation and the pinned bundle
+rebuild. The runner also hashes the exact stock Document APK and framework JAR
+before and after any future attach, in addition to the existing fixed-serial
+reader/process/PDF/absent-`.mark` checks. The current implementation has **not**
+run on the Nomad. Static inspection of the pinned APK indicates the content
+view is exactly `android.widget.FrameLayout`; a different live subtype or
+nullable graph shape will fail closed. The next hardware
+attachment awaits a separate project coordination decision and exact-head
+review. No pen, task launch, host install or document mutation is authorized by
+these host tests.
+
 Before reproducing a failure:
 
 ```powershell

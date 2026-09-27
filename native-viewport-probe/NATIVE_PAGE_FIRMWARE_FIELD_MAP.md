@@ -139,6 +139,19 @@ observer can therefore compare the page image, handwriting overlay, digest
 overlay, content view, and document container bounds without invoking a View
 getter. This is raw layout evidence only; display identity remains external.
 
+For the separate display-0 raw graph calibration, static inspection of the
+pinned APK resolves the concrete `mContentView` subtype. `DocumentActivity`
+assigns it from `findViewById(R.id.document_main_layout)`; that ID is the root
+`<FrameLayout>` of `R.layout.activity_document`. Both activity creation paths
+use that same layout, directly or through `BaseApplication.defaultView`.
+Therefore the display-0 observer requires exactly
+`android.widget.FrameLayout`, rather than treating the declared `View` type as
+the runtime class. This remains static evidence and must fail closed if the
+live object differs. The decompiled `DocumentActivity.java` SHA-256 is
+`072a36639b926e368ec6e16425c97dc8bc6ca20e135d408ca04eef93946f8553`;
+the decompiled layout XML SHA-256 is
+`277e0689c733be238c2b7797e8790443f0ee2d864e4b24a34d4c49571de2d397`.
+
 ## Required observer revision
 
 The first observer prototype cannot be hardware-enabled with a synthetic flat

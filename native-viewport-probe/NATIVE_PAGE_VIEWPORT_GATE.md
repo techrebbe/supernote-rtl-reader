@@ -151,6 +151,13 @@ The existing visual alpha runner requires global stock-Document absence before
 launch and after cleanup, so its four placement calls cannot simply be reused
 around an adopted live task.
 
+The first PM-selected display-0 whole-window `SurfaceControl` proposal was
+rejected **before mutation** by read-only feasibility evidence: its only
+observed app buffer is landscape `1872x1404` and already displays upright
+text. Matrix/position alone cannot both fill a portrait-shaped half and keep
+that text upright. See `REGRESSION.md`; a revised boundary is required before
+this card can be executed.
+
 | Card item | Required evidence |
 | --- | --- |
 | Hypothesis | One real native page/presenter can remain unchanged while only its outer presentation rectangle moves. |

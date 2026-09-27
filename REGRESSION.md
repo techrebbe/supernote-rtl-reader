@@ -3374,6 +3374,35 @@ tuple's index base, matrices' meanings, movable-viewport geometry, physical
 pen, tool behavior, save authority and persistence remain unproven. No pen,
 task launch, host install or document mutation was performed by this trial.
 
+### Stock compositor placement feasibility — read-only NO-GO, 2026-09-27
+
+After PM direction proposed adopting the existing display-0 stock reader and
+changing only its uniquely bound `SurfaceControl` matrix and position, the
+same disposable PAGE 1 session passed a fresh read-only preflight. One
+`screencap -p` baseline showed the words `DISPOSABLE READER TEST` and `PAGE 1`
+upright in physical landscape. Its local PNG SHA-256 is
+`415879f4eb7781ced6d0be594858814570cc847a0f2756c3c6514a3b1c6e1d4b`;
+the image remains a local diagnostic artifact, not an authenticated repo
+fixture. Read-only SurfaceFlinger output showed one relevant app
+`BufferQueueLayer` at `1872x1404`, identity transform and buffer transform 0,
+under the stock Document window container, with no separate portrait page
+child visible in that layer tree. The earlier strict in-process graph likewise
+observed all five native views at `[0,0,1872,1404]`. An immediate independent
+preflight again passed; PDF and reader remained unchanged, `.mark` absent,
+and no temporary Frida server or forward existed.
+
+This is a feasibility rejection of the **proposed whole-window,
+matrix-and-position-only** placement, not a failed mutation trial. A 0-degree
+uniform fit of a `1872x1404` upright buffer into a `936x1248` half is only
+`936x702`, leaving unused height. A 90-degree rotation followed by uniform
+scale `2/3` produces the desired `936x1248` rectangle but rotates the already
+upright page text sideways. The observed app buffer presents that upright
+text; no separately bound portrait-only page surface was established.
+Neither stretching, cropping, reparenting, changing native layout/configuration
+nor touching pen/page state is authorized by this PM gate. No SurfaceControl
+transaction, pen lease, task action or document mutation was attempted.
+Further placement work needs a revised reviewed integration boundary.
+
 Before reproducing a failure:
 
 ```powershell

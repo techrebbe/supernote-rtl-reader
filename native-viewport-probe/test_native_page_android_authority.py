@@ -191,6 +191,17 @@ class ActivityAuthorityTests(unittest.TestCase):
         self.assertTrue(value.resumed)
         self.assertEqual(value.canonical_bytes(), value.canonical_bytes())
 
+    def test_android_degree_rotation_names_map_to_quarter_turns(self) -> None:
+        for name, expected in ((b"90", 1), (b"180", 2), (b"270", 3)):
+            with self.subTest(name=name):
+                raw = (wire().replace(b"1404, 1872", b"1872, 1404")
+                       .replace(b"300dpi port", b"300dpi land")
+                       .replace(b"mRotation=ROTATION_0",
+                                b"mRotation=ROTATION_" + name))
+                value = authority.parse_document_task_authority(raw, expected_pid=PID)
+                self.assertEqual(value.rotation, expected)
+                self.assertEqual((value.width, value.height), (1872, 1404))
+
     def test_background_document_is_evidence_but_not_live(self) -> None:
         raw = wire(state="STOPPED", stopped="true", visible="false",
                    task_visible="false", now_visible="false", resumed=False)
@@ -899,6 +910,10 @@ class ActivityAuthorityTests(unittest.TestCase):
             wire().replace(b"300dpi", b"0dpi"),
             wire().replace(b"1404, 1872", b"0, 1872"),
             wire().replace(b"ROTATION_0", b"ROTATION_4"),
+            wire().replace(b"ROTATION_0", b"ROTATION_090"),
+            wire().replace(b"ROTATION_0", b"ROTATION_360"),
+            wire().replace(b"mRotation=ROTATION_0",
+                           b"mRotation=ROTATION_90 mRotation=ROTATION_0"),
             wire() + b"\x00",
             (b"ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)\n" +
              b"x" * (authority.MAX_LINE_CHARS + 1) + b"\n"),

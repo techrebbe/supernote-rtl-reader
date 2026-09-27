@@ -854,14 +854,21 @@ def parse_document_task_authority(raw: bytes, *, expected_pid: int,
         r"(?<!\S)mBounds=Rect\(0, 0 - ([0-9]+), ([0-9]+)\)(?=\s|$)",
         configuration_line)
     rotation_match = re.search(
-        r"(?<!\S)mRotation=ROTATION_([0-3])(?=\}|\s|$)",
+        r"(?<!\S)mRotation=ROTATION_([0-9]{1,3})(?=\}|\s|$)",
         configuration_line)
     if bounds is None or rotation_match is None:
         raise AndroidAuthorityError("current configuration value is invalid")
     density = _bounded_int(density_token, "density", 72, 1280)
     width = _bounded_int(bounds.group(1), "display width", 1, 32768)
     height = _bounded_int(bounds.group(2), "display height", 1, 32768)
-    rotation = _bounded_int(rotation_match.group(1), "rotation", 0, 3)
+    # Android's dumpsys uses degrees (ROTATION_90/180/270) on the Nomad;
+    # older synthetic captures used quarter-turn indices. Keep the internal
+    # authority in quarter turns and reject every other spelling/value.
+    rotation_names = {"0": 0, "1": 1, "2": 2, "3": 3,
+                      "90": 1, "180": 2, "270": 3}
+    if rotation_match.group(1) not in rotation_names:
+        raise AndroidAuthorityError("current configuration rotation is invalid")
+    rotation = rotation_names[rotation_match.group(1)]
 
     first_task = re.search(r"^    \* Task\{[^\n]*\}$", stack_block,
                            re.MULTILINE)

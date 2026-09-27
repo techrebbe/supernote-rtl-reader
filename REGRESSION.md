@@ -3229,6 +3229,36 @@ denied-signal fallback are not device-tested. Future executable staging must
 explicitly use 0700 rather than Android's inherited umask. See
 [complete scope, hashes, host/device distinction and cleanup evidence](native-viewport-probe/ISOLATION_PROBE.md).
 
+### Disposable stock-reader display-0 identity alpha — 2026-09-27
+
+The user confirmed that `RTL_DISPLAY0_CAPTURE_20260927.pdf` showed PAGE 1
+with no unsaved ink and approved one faster disposable-only Frida observation.
+The fixed-serial read-only preflight passed after recognizing Android's
+NUL-padded process name and real `ROTATION_90` dumpsys spelling. One bounded
+attach attempt returned `FRIDA_CHILD_FAILED`; it did **not** establish an
+in-process document-identity witness. The immediate post-attempt preflight
+passed: the stock reader remained focused with the same process, the PDF hash
+was unchanged, its `.mark` remained absent, and no Frida server or ADB forward
+remained. No page, pen, annotation, package, or firmware change was made.
+
+Host analysis found the likely setup defect: Frida 17's direct Python API does
+not automatically bundle the Java bridge, while the observer uses `Java`.
+The host must compile and hash a pinned `frida-java-bridge` bundle before a
+separately deliberate repeat. This failed alpha is not a pass for the native
+page viewport, writing, or any production authority.
+
+The host-only correction now pins Frida 17.9.11, `frida-java-bridge` 7.0.13,
+the npm lock and installed bridge tree, the raw observer, and the 479,240-byte
+compiled bundle (`868b5d97e58073b382d24448e8f706aea4e3f6be36920bbdb1910d0e2cb9ee9c`).
+The revised read-only preflight passed, including bundle compilation, and an
+independent source review found no alpha-scope blocker. A fresh live attach
+has **not** yet been counted as a pass; the user must first reconfirm the
+disposable PAGE 1 remains visible because pre-attach app state does not reveal
+the exact document URI.
+Two independent host builds from different temporary directories produced
+byte-identical pinned bundles; this is build portability evidence, not a
+device result.
+
 Before reproducing a failure:
 
 ```powershell

@@ -1,3 +1,5 @@
 virtual_spread/fixtures/page-143-v1/* -text
 virtual_spread/fixtures/page-143-v1/*.pdf binary
 *.sh text eol=lf
+/.gitattributes text eol=lf
+native-viewport-probe/native_page_graph_snapshot_v2.js text eol=lf

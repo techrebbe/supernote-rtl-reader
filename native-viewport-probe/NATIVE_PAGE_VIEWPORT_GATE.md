@@ -10,6 +10,13 @@ on the disposable PDF on 2026-09-27; see `REGRESSION.md`. This is not
 yet a writable native viewport, two-page reader, production package or release
 candidate.
 
+The 2026-09-27 stock display-0 split/crop observation has since closed the
+finished-window and simple 270-degree presentation-only paths as NO-GO. The
+older VirtualDisplay/native-task placement card below is retained as historical
+evidence, **not** as authority to run it beside the live stock reader. The
+new, offline-only visual-renderer proposal has its own bounded card in
+`SHADOW_PAGE_OVERLAY_V1_GATE.md`.
+
 ## Question this gate answers
 
 Can the one real stock Supernote `DocumentActivity` keep one source page, one

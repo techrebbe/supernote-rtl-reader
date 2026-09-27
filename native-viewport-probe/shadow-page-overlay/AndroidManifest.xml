@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.techrebbe.supernote.shadowpageoverlay"
+    android:versionCode="1" android:versionName="0.0.1-shadow-page-visual-only">
+    <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="30" />
+    <!-- Overlay authorization is separate from this prototype; no storage or input permission. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Disposable, debuggable test package only: permits a future run-as seed/cleanup gate. -->
+    <application android:allowBackup="false" android:usesCleartextTraffic="false"
+        android:debuggable="true"
+        android:label="Shadow Page Overlay - Visual Only" android:supportsRtl="false">
+        <!-- Shell is expected to hold DUMP; ordinary apps cannot invoke this probe.
+             A future device gate must verify the actual firmware grant first. -->
+        <service android:name=".ShadowPageOverlayService" android:exported="true"
+            android:permission="android.permission.DUMP" />
+    </application>
+</manifest>

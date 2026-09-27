@@ -3496,6 +3496,34 @@ performed. This evidence closes the proposed existing-stock presentation-only
 and simple 270-degree counter-rotation path as `NO-GO`, while leaving a new
 coordinated full-page renderer/writer architecture to be designed and gated.
 
+### Shadow-page overlay v1 — offline source gate only, 2026-09-27
+
+A separate, Service-only visual prototype is implemented to render zero-based
+page 0 of the SHA-pinned disposable PDF into a full 1404 x 1872 white canvas,
+then place it at FULL, LEFT or RIGHT using the fixed uniform-fit rectangles in
+`native-viewport-probe/SHADOW_PAGE_OVERLAY_V1_GATE.md`. It is designed to open
+a read-only, SHA-verified app-private copy; its manifest declares only an exported,
+`android.permission.DUMP`-gated Service and `SYSTEM_ALERT_WINDOW`. No stock
+reader setter, second Activity, VirtualDisplay, pen route or `.mark` access is
+included. It is a visual-only diagnostic, not a working RTL reader.
+
+The isolated Android 35/JDK 17 unsigned build passed with only
+`AndroidManifest.xml` and `classes.dex` in the APK; the 11 host-only tests
+passed. The existing native renderer/v2 invariant, core, package and mutation
+suites also passed, including 271 mutation rejections. An independent source
+review found no code blocker for retaining this **offline-only** slice.
+
+This is **not a Nomad pass**. The app-private fixture has not been seeded; the
+APK has not been signed/installed/started; overlay AppOps has not changed; and
+the native reader, PDF and `.mark` were not touched by this prototype. Before
+installation, the project still needs runtime Android failure-injection tests,
+a portable/reviewed way to provide the pinned fixture in a fresh checkout,
+an exact reversible AppOps/install/cleanup gate, and physical proof of frame,
+stock-task/focus and e-ink behavior. An opaque application overlay will cover
+stock ink/chrome in its rectangle and does not establish pen pass-through or
+the eventual writable compositing boundary. Explicit teardown and a 30-second
+maximum overlay lifetime are safeguards, not stock-task lifecycle detection.
+
 Before reproducing a failure:
 
 ```powershell

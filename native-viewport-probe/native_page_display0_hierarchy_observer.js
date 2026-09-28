@@ -1,12 +1,11 @@
 'use strict';
 
-// One-shot, observation-only stock-reader hierarchy snapshot. This script
-// neither hooks target methods nor modifies a View. The host authenticates the
-// device, foreground task, process start, PDF and missing .mark on both sides.
+// One-shot stock-reader hierarchy snapshot. No hooks, draw calls or View writes.
+// A predicted simple-case traversal is not an observed draw or final pixels.
 (function () {
-  const VERSION = 1;
-  const MANIFEST_AUTHORITY = 'rtl-reader-display0-hierarchy-manifest-v1';
-  const RECORD_AUTHORITY = 'rtl-reader-display0-hierarchy-observation-v1';
+  const VERSION = 2;
+  const MANIFEST_AUTHORITY = 'rtl-reader-display0-hierarchy-manifest-v2';
+  const RECORD_AUTHORITY = 'rtl-reader-display0-hierarchy-observation-v2';
   const FINGERPRINT =
     'Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys';
   const URI = 'file:///storage/emulated/0/Document/RTL_DISPLAY0_CAPTURE_20260927.pdf';
@@ -21,6 +20,14 @@
     hierarchicalUri: 'android.net.Uri$HierarchicalUri'
   });
   const MAX_CHILDREN = 32;
+  const ROOT_ID = 0x7f09020f;
+  const CHILD_IDS = [0x7f090205, 0x7f090206, 0x7f090201,
+    0x7f09021a, 0x7f090231, 0x7f0904f1,
+    0x7f090225, 0x7f090725, 0x7f090200];
+  const CHILD_CLASSES = [CLASSES.pdf, CLASSES.digest, CLASSES.pen,
+    'android.widget.RelativeLayout', 'android.widget.RelativeLayout',
+    'android.widget.FrameLayout', 'android.widget.RelativeLayout',
+    'android.view.View', 'android.widget.FrameLayout'];
   let done = false, timer = null, state = null, phase = 'MANIFEST', reason = 'INVALID';
   let stage = 'NONE', childIndex = -1, sampleOrdinal = 0;
   function reject() { throw 'HIERARCHY_REJECTED'; }
@@ -129,8 +136,9 @@
     integer(a.pid, 1, 2147483647);
     need(typeof a.startTimeTicks === 'string' && /^[1-9][0-9]{0,19}$/.test(a.startTimeTicks));
     shaText(a.observerSha256);
-    keys(value.expected, ['documentUri', 'markPath']);
-    need(value.expected.documentUri === URI && value.expected.markPath === null);
+    keys(value.expected, ['documentUri', 'markPath', 'pageNumber']);
+    need(value.expected.documentUri === URI && value.expected.markPath === null &&
+      value.expected.pageNumber === 1);
     const c = value.coordinator;
     keys(c, ['maxJavaChooseWalks', 'retainedRootSamples', 'hardDeadlineMs',
       'detachOnDeadline', 'abortOnAnyError', 'noRetry']);
@@ -144,6 +152,10 @@
     const slot = owner[field];
     need(object(slot) && 'value' in slot);
     return slot.value;
+  }
+  function nullableReference(value) {
+    need(value === null || (object(value) && object(value.$h)));
+    return value !== null;
   }
   function exact(value, className) {
     need(object(value) && value.$className === className && object(value.$h));
@@ -195,11 +207,12 @@
   function childSnapshot(v, index, s, root) {
     checkpoint('CHILD_CLASS', index);
     const name = ascii(v.$className, 160);
-    need(object(v.$h));
+    need(object(v.$h) && name === CHILD_CLASSES[index]);
     checkpoint('CHILD_PARENT', index);
     same(s, v.getParent(), root);
     checkpoint('CHILD_ID', index);
     const id = integer(v.getId(), -1, 2147483647);
+    need(id === CHILD_IDS[index]);
     checkpoint('CHILD_VISIBILITY', index);
     const visibility = integer(v.getVisibility(), 0, 8);
     need([0, 4, 8].includes(visibility));
@@ -207,8 +220,11 @@
     const box = bounds(v, visibility === 0);
     checkpoint('CHILD_Z', index);
     const z = f64(v.getZ());
+    checkpoint('CHILD_ANIMATION', index);
+    const base = Java.cast(v, Java.use('android.view.View'));
+    const animationPresent = nullableReference(direct(base, 'mCurrentAnimation'));
     return {index, id, className: name, bounds: box,
-      visibility, z, parentIsRoot: true};
+      visibility, z, animationPresent, parentIsRoot: true};
   }
   function sample(activity, s, previous) {
     point('HIERARCHY', 'MISMATCH');
@@ -222,6 +238,8 @@
     checkpoint('VM_CLASS');
     const vm = direct(activity, 'documentViewModel');
     exact(vm, CLASSES.vm);
+    checkpoint('PAGE_NUMBER');
+    need(integer(direct(vm, 'currentPage'), 0, 2147483647) === 0);
     checkpoint('URI_CLASS');
     const uri = direct(vm, 'uri');
     need(object(uri) && [CLASSES.stringUri, CLASSES.hierarchicalUri].includes(uri.$className));
@@ -250,9 +268,27 @@
     }
     checkpoint('ROOT_CHILD_COUNT');
     const count = integer(frame.getChildCount(), 4, MAX_CHILDREN);
+    need(count === CHILD_IDS.length);
     checkpoint('DRAW_ORDER');
     const customDrawingOrder = frame.isChildrenDrawingOrderEnabled();
     need(typeof customDrawingOrder === 'boolean');
+    checkpoint('ROOT_HARDWARE');
+    const rootHardwareAccelerated = frame.isHardwareAccelerated();
+    need(typeof rootHardwareAccelerated === 'boolean');
+    checkpoint('ROOT_DRAW_STATE');
+    const group = Java.cast(root, Java.use('android.view.ViewGroup'));
+    const rootBase = Java.cast(root, Java.use('android.view.View'));
+    const flags = integer(direct(group, 'mGroupFlags'), -2147483648, 2147483647);
+    need(customDrawingOrder === ((flags & 0x400) !== 0));
+    const transientViewsPresent = nullableReference(direct(group, 'mTransientViews'));
+    const transientIndicesPresent = nullableReference(direct(group, 'mTransientIndices'));
+    need(transientViewsPresent === transientIndicesPresent);
+    const disappearingChildrenPresent = nullableReference(direct(group, 'mDisappearingChildren'));
+    const visibilityChangingChildrenPresent = nullableReference(
+      direct(group, 'mVisibilityChangingChildren'));
+    const transitioningViewsPresent = nullableReference(direct(group, 'mTransitioningViews'));
+    const rootOverlayPresent = nullableReference(direct(rootBase, 'mOverlay'));
+    const layoutAnimationPending = (flags & 0x8) !== 0;
     const children = [];
     for (let i = 0; i < count; i++) {
       checkpoint('CHILD_HANDLE', i);
@@ -271,15 +307,34 @@
     checkpoint('FIELD_ORDER');
     need(Object.keys(fieldIndex).length === 3 &&
       fieldIndex.pdf < fieldIndex.digest && fieldIndex.digest < fieldIndex.pen);
+    need([fieldIndex.pdf, fieldIndex.digest, fieldIndex.pen].every(
+      index => children[index].visibility === 0));
     // These are raw child indices and Z values. A custom draw order or future
     // framework behavior can invalidate any inferred effective compositing.
     checkpoint('ROOT_ID');
     const rootId = integer(root.getId(), -1, 2147483647);
+    need(rootId === ROOT_ID);
     checkpoint('ROOT_BOUNDS');
     const rootBounds = bounds(root, true);
+    const visibleChildIndices = children.filter(child => child.visibility === 0)
+      .map(child => child.index);
+    const anyNonzeroZ = children.some(child =>
+      child.z !== '0x0000000000000000' && child.z !== '0x8000000000000000');
+    const predictionEligible = !customDrawingOrder && !anyNonzeroZ &&
+      !transientViewsPresent && !disappearingChildrenPresent &&
+      !visibilityChangingChildrenPresent && !transitioningViewsPresent &&
+      !rootOverlayPresent && !layoutAnimationPending &&
+      children.every(child => !child.animationPresent);
     const output = {rootClass: CLASSES.root, rootId,
       rootBounds, childCount: count, children,
-      fieldIndex, customDrawingOrder,
+      fieldIndex, customDrawingOrder, rootHardwareAccelerated,
+      transientViewsPresent, transientIndicesPresent,
+      disappearingChildrenPresent, visibilityChangingChildrenPresent,
+      transitioningViewsPresent, rootOverlayPresent, layoutAnimationPending,
+      visibleChildIndices,
+      frameworkPredictedDirectChildOrder: predictionEligible ? visibleChildIndices : null,
+      frameworkPredictionEligible: predictionEligible,
+      actualDrawObserved: false, finalPixelsAdmitted: false,
       effectiveCompositingAdmitted: false,
       uriMatchedExpected: true, lifecycleStable: true};
     if (previous !== null) {

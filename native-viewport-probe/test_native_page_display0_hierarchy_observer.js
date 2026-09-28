@@ -8,6 +8,11 @@ const vm = require('vm');
 
 const SOURCE = fs.readFileSync(path.join(__dirname,
   'native_page_display0_hierarchy_observer.js'), 'utf8');
+assert(!/\.implementation\s*=/.test(SOURCE), 'no process-wide method hooks');
+assert(!/\.getOverlay\s*\(/.test(SOURCE), 'getOverlay creates state');
+assert(!/\.buildOrderedChildList\s*\(/.test(SOURCE), 'ordered-list builder writes state');
+assert(!/\.invalidate\s*\(|\.requestLayout\s*\(|\.draw\s*\(/.test(SOURCE),
+  'no forced drawing or layout');
 const SHA = crypto.createHash('sha256').update(SOURCE).digest('hex');
 const URI = 'file:///storage/emulated/0/Document/RTL_DISPLAY0_CAPTURE_20260927.pdf';
 const C = {
@@ -48,7 +53,7 @@ function make(className, id, fields = {}) {
 }
 function view(className, id, parent, resourceId) {
   const v = make(className, id, {mLeft: 0, mTop: 0,
-    mRight: 1404, mBottom: 1872});
+    mRight: 1404, mBottom: 1872, mCurrentAnimation: null});
   v.getId = () => resourceId;
   v.getVisibility = () => 0;
   v.getZ = () => 0;
@@ -57,11 +62,18 @@ function view(className, id, parent, resourceId) {
 }
 function scene() {
   const uri = make(C.uri, 'uri', {uriString: URI});
-  const model = make(C.vm, 'vm', {uri});
+  const model = make(C.vm, 'vm', {uri, currentPage: 0});
   // mContentView is declared android.view.View in DocumentActivity. Frida's
   // field getter returns a View wrapper even when $className is FrameLayout.
   const rawRoot = view(C.root, 'root', null, ROOT_ID);
+  rawRoot.mOverlay = slot(null);
   const root = Object.create(rawRoot);
+  root.mGroupFlags = slot(0);
+  root.mTransientViews = slot(null);
+  root.mTransientIndices = slot(null);
+  root.mDisappearingChildren = slot(null);
+  root.mVisibilityChangingChildren = slot(null);
+  root.mTransitioningViews = slot(null);
   // Match the pinned stock document_main_layout's nine direct children,
   // including the GONE vertical_view at index 7.
   const children = CHILD_CLASSES.map((name, i) =>
@@ -72,6 +84,11 @@ function scene() {
   root.getChildCount = () => children.length;
   root.getChildAt = i => children[i];
   root.isChildrenDrawingOrderEnabled = () => false;
+  root.isHardwareAccelerated = () => true;
+  root.getOverlay = () => { throw Error('getOverlay would create state'); };
+  root.buildOrderedChildList = () => { throw Error('buildOrderedChildList writes state'); };
+  root.draw = () => { throw Error('draw is forbidden'); };
+  root.invalidate = () => { throw Error('invalidate is forbidden'); };
   const activity = make(C.activity, 'activity', {mResumed: true,
     mFinished: false, mDestroyed: false, documentViewModel: model,
     mContentView: rawRoot, mImage: children[0], digestImage: children[1],
@@ -79,14 +96,14 @@ function scene() {
   return {activity, model, uri, rawRoot, root, children};
 }
 function manifest() {
-  return {schemaVersion: 1,
-    authority: 'rtl-reader-display0-hierarchy-manifest-v1',
+  return {schemaVersion: 2,
+    authority: 'rtl-reader-display0-hierarchy-manifest-v2',
     attachment: {packageName: 'com.supernote.document',
       processName: 'com.supernote.document', pid: 2256,
       startTimeTicks: '4134', firmwareFingerprint:
         'Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys',
       observerSha256: SHA},
-    expected: {documentUri: URI, markPath: null},
+    expected: {documentUri: URI, markPath: null, pageNumber: 1},
     coordinator: {maxJavaChooseWalks: 1, retainedRootSamples: 2,
       hardDeadlineMs: 1000, detachOnDeadline: true,
       abortOnAnyError: true, noRetry: true}};
@@ -99,19 +116,33 @@ function run(changes = () => {}, options = {}) {
   const digest = options.badDigest ? '0'.repeat(64) :
     crypto.createHash('sha256').update(Buffer.from(bytes)).digest('hex');
   const sent = [], retained = [], disposed = [];
-  let chooseCalls = 0, envCalls = 0, frameCasts = 0, onMain = false;
+  let chooseCalls = 0, envCalls = 0, frameCasts = 0;
+  let groupCasts = 0, viewCasts = 0, onMain = false;
   const context = {
     NATIVE_PAGE_HIERARCHY_MANIFEST_UTF8: bytes,
     NATIVE_PAGE_HIERARCHY_MANIFEST_SHA256: digest,
     Process: {arch: 'arm64', pointerSize: 8, id: m.attachment.pid},
     Java: {
-      use(name) { assert([C.uri, C.root].includes(name)); return {name}; },
+      use(name) {
+        assert([C.uri, C.root, 'android.view.ViewGroup', 'android.view.View'].includes(name));
+        return {name};
+      },
       cast(value, clazz) {
-        assert.strictEqual(value.$className, clazz.name);
+        if (clazz.name === C.root || clazz.name === C.uri)
+          assert.strictEqual(value.$className, clazz.name);
         if (clazz.name === C.root) {
           assert.strictEqual(value.$h, g.rawRoot.$h);
           frameCasts++;
           return options.wrongRootCast ? make(C.root, 'impostor') : g.root;
+        }
+        if (clazz.name === 'android.view.ViewGroup') {
+          assert.strictEqual(value.$h, g.rawRoot.$h);
+          groupCasts++;
+          return g.root;
+        }
+        if (clazz.name === 'android.view.View') {
+          viewCasts++;
+          return value.$h === g.rawRoot.$h ? g.rawRoot : value;
         }
         return value;
       },
@@ -147,11 +178,13 @@ function run(changes = () => {}, options = {}) {
     setTimeout() { return 1; }, clearTimeout() {}
   };
   vm.runInNewContext(SOURCE, context);
-  return {g, sent, chooseCalls, envCalls, frameCasts, retained, disposed};
+  return {g, sent, chooseCalls, envCalls, frameCasts, groupCasts,
+    viewCasts, retained, disposed};
 }
 function positive(result) {
   assert.strictEqual(result.sent.length, 2);
-  assert.strictEqual(result.sent[0].event, 'native_page_hierarchy');
+  assert.strictEqual(result.sent[0].event, 'native_page_hierarchy',
+    JSON.stringify(result.sent[0]));
   assert.strictEqual(result.sent[1].success, true);
   assert.strictEqual(result.sent[0].childCount, 9);
   assert.strictEqual(result.sent[0].rootId, ROOT_ID);
@@ -160,6 +193,14 @@ function positive(result) {
   assert.deepStrictEqual(result.sent[0].children.map(child => child.className),
     CHILD_CLASSES);
   assert.deepStrictEqual(result.sent[0].fieldIndex, {pdf: 0, digest: 1, pen: 2});
+  const visible = result.sent[0].children.filter(child => child.visibility === 0)
+    .map(child => child.index);
+  assert.deepStrictEqual(result.sent[0].visibleChildIndices, visible);
+  assert.deepStrictEqual(result.sent[0].frameworkPredictedDirectChildOrder, visible);
+  assert.strictEqual(result.sent[0].frameworkPredictionEligible, true);
+  assert.strictEqual(result.sent[0].rootHardwareAccelerated, true);
+  assert.strictEqual(result.sent[0].actualDrawObserved, false);
+  assert.strictEqual(result.sent[0].finalPixelsAdmitted, false);
   assert.strictEqual(result.sent[0].effectiveCompositingAdmitted, false);
   assert.strictEqual(result.chooseCalls, 1);
   assert.strictEqual(result.envCalls, 1);
@@ -167,6 +208,8 @@ function positive(result) {
   assert.strictEqual(typeof result.g.rawRoot.getChildAt, 'undefined');
   assert.strictEqual(typeof result.g.rawRoot.isChildrenDrawingOrderEnabled, 'undefined');
   assert.strictEqual(result.frameCasts, 2);
+  assert.strictEqual(result.groupCasts, 2);
+  assert.strictEqual(result.viewCasts, 20);
   assert.deepStrictEqual(result.disposed, [0]);
 }
 function negative(result, phase, reason, stage = 'NONE', childIndex = -1,
@@ -199,6 +242,8 @@ for (const visibility of [4, 8]) {
 }
 negative(run(() => {}, {badDigest: true}), 'MANIFEST', 'INVALID');
 negative(run((g, m) => { m.attachment.pid = 0; }), 'MANIFEST', 'INVALID');
+negative(run(g => { g.model.currentPage = slot(1); }),
+  'HIERARCHY', 'MISMATCH', 'PAGE_NUMBER', -1, 1);
 negative(run(g => { g.activity.mContentView = slot(g.children[3]); }),
   'HIERARCHY', 'MISMATCH', 'ROOT_CLASS', -1, 1);
 negative(run(() => {}, {wrongRootCast: true}),
@@ -206,9 +251,11 @@ negative(run(() => {}, {wrongRootCast: true}),
 negative(run(g => { g.children[1].getParent = () => null; }),
   'HIERARCHY', 'MISMATCH', 'CHILD_PARENT', 1, 1);
 negative(run(g => { g.root.getChildAt = i => g.children[i === 1 ? 0 : i]; }),
-  'HIERARCHY', 'MISMATCH', 'CHILD_FIELD_IDENTITY', 1, 1);
+  'HIERARCHY', 'MISMATCH', 'CHILD_CLASS', 1, 1);
 negative(run(g => { g.children[2].getZ = () => NaN; }),
   'HIERARCHY', 'MISMATCH', 'CHILD_Z', 2, 1);
+negative(run(g => { g.children[2].mCurrentAnimation = slot(undefined); }),
+  'HIERARCHY', 'MISMATCH', 'CHILD_ANIMATION', 2, 1);
 negative(run(g => { g.children[0].mRight = slot(0); }),
   'HIERARCHY', 'MISMATCH', 'CHILD_BOUNDS', 0, 1);
 negative(run(g => {
@@ -219,9 +266,25 @@ negative(run(g => {
   let calls = 0;
   g.children[2].getZ = () => ++calls === 1 ? prior() : 3;
 }), 'HIERARCHY', 'MISMATCH', 'SECOND_SAMPLE_VALUES', -1, 2);
+negative(run(g => {
+  let calls = 0;
+  g.root.isHardwareAccelerated = () => ++calls === 1;
+}), 'HIERARCHY', 'MISMATCH', 'SECOND_SAMPLE_VALUES', -1, 2);
+negative(run(g => {
+  let calls = 0;
+  Object.defineProperty(g.children[2], 'mCurrentAnimation', {get() {
+    return slot(++calls === 1 ? null : make('android.view.animation.Animation', 'late'));
+  }});
+}), 'HIERARCHY', 'MISMATCH', 'SECOND_SAMPLE_VALUES', -1, 2);
 negative(run(g => { g.root.isChildrenDrawingOrderEnabled = () => {
   throw Error('C:\\private\\draw-order');
 }; }), 'HIERARCHY', 'MISMATCH', 'DRAW_ORDER', -1, 1);
+negative(run(g => { g.root.isHardwareAccelerated = () => null; }),
+  'HIERARCHY', 'MISMATCH', 'ROOT_HARDWARE', -1, 1);
+negative(run(g => { g.root.mTransientViews = slot(undefined); }),
+  'HIERARCHY', 'MISMATCH', 'ROOT_DRAW_STATE', -1, 1);
+negative(run(g => { g.root.mGroupFlags = slot(0x400); }),
+  'HIERARCHY', 'MISMATCH', 'ROOT_DRAW_STATE', -1, 1);
 negative(run(g => { g.children[8].getParent = () => null; }),
   'HIERARCHY', 'MISMATCH', 'CHILD_PARENT', 8, 1);
 negative(run(g => { g.root.getChildAt = i => i === 8 ? null : g.children[i]; }),
@@ -230,6 +293,8 @@ negative(run(g => { g.children[8].getId = () => true; }),
   'HIERARCHY', 'MISMATCH', 'CHILD_ID', 8, 1);
 negative(run(g => { g.children[8].getVisibility = () => 1; }),
   'HIERARCHY', 'MISMATCH', 'CHILD_VISIBILITY', 8, 1);
+negative(run(g => { g.children[0].getVisibility = () => 8; }),
+  'HIERARCHY', 'MISMATCH', 'FIELD_ORDER', -1, 1);
 negative(run(g => { g.children[8].getZ = () => Infinity; }),
   'HIERARCHY', 'MISMATCH', 'CHILD_Z', 8, 1);
 negative(run(g => { g.model.uri = slot(make(C.uri, 'wrong-uri', {
@@ -239,7 +304,30 @@ negative(run(g => { g.activity.handWriteView = slot(g.children[8]); }),
   'HIERARCHY', 'MISMATCH', 'FIELD_PEN', -1, 1);
 negative(run(g => { g.root.getChildCount = () => 33; }),
   'HIERARCHY', 'MISMATCH', 'ROOT_CHILD_COUNT', -1, 1);
+for (const field of ['mTransientViews', 'mDisappearingChildren',
+  'mVisibilityChangingChildren', 'mTransitioningViews']) {
+  const observed = run(g => {
+    g.root[field] = slot(make('java.util.ArrayList', field));
+    if (field === 'mTransientViews')
+      g.root.mTransientIndices = slot(make('java.util.ArrayList', 'indices'));
+  });
+  assert.strictEqual(observed.sent[1].success, true);
+  assert.strictEqual(observed.sent[0].frameworkPredictionEligible, false);
+  assert.strictEqual(observed.sent[0].frameworkPredictedDirectChildOrder, null);
+}
+for (const change of [
+  g => { g.rawRoot.mOverlay = slot(make('android.view.ViewOverlay', 'overlay')); },
+  g => { g.children[4].mCurrentAnimation = slot(make('android.view.animation.Animation', 'anim')); },
+  g => { g.root.mGroupFlags = slot(0x8); },
+  g => { g.children[2].getZ = () => 3; },
+  g => { g.root.mGroupFlags = slot(0x400); g.root.isChildrenDrawingOrderEnabled = () => true; }
+]) {
+  const observed = run(change);
+  assert.strictEqual(observed.sent[1].success, true);
+  assert.strictEqual(observed.sent[0].frameworkPredictionEligible, false);
+  assert.strictEqual(observed.sent[0].frameworkPredictedDirectChildOrder, null);
+}
 negative(run(g => {
   g.children[0].mRight = slot(0);
 }, {disposeFailure: true}), 'CLEANUP', 'FAILED');
-console.log('native_page_display0_hierarchy_observer: 24 cases PASS');
+console.log('native_page_display0_hierarchy_observer: v2 cases PASS');

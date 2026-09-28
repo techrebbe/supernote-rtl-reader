@@ -1,8 +1,8 @@
-"""One-shot read-only hierarchy observation on the fixed disposable PDF.
+"""One-shot read-only hierarchy and simple-case prediction on the disposable PDF.
 
 Offline ``--build-only`` and ``--preflight-only`` are separate from ``--run``.
 Do not run against the Nomad until the project hardware coordination gate
-authorizes a bounded attachment. This proves no compositing or pen behavior.
+authorizes a bounded attachment. This observes no draw, pixels or pen behavior.
 """
 from __future__ import annotations
 
@@ -30,10 +30,22 @@ HERE = Path(__file__).resolve().parent
 SOURCE = HERE / "native_page_display0_hierarchy_observer.js"
 ENTRYPOINT = base_bundle.BUILD / "native_page_display0_hierarchy_entry.js"
 BUNDLE = base_bundle.BUILD / "native_page_display0_hierarchy_bundle.js"
-SOURCE_SHA256 = "3e2867e0c5b4b9f1ba561c49e2624fe7d298cd6b3fa3182d09f7ecb0f64ab3dc"
-BUNDLE_SHA256 = "bbc1ea864cb1ed07bafc231a81f6b34b6e70a7fd832534a9ec2e608e378787eb"
-MANIFEST_AUTHORITY = "rtl-reader-display0-hierarchy-manifest-v1"
-RECORD_AUTHORITY = "rtl-reader-display0-hierarchy-observation-v1"
+SOURCE_SHA256 = "8f1807c4acd75901f4ac1bb79d671e6005763ffea729b6491dddf86f85e5b1e0"
+BUNDLE_SHA256 = "475e19b8e98448725dca4936922f875e4734b168ea4914245f6839642c75b24d"
+MANIFEST_AUTHORITY = "rtl-reader-display0-hierarchy-manifest-v2"
+RECORD_AUTHORITY = "rtl-reader-display0-hierarchy-observation-v2"
+ROOT_ID = 0x7F09020F
+CHILD_IDS = (0x7F090205, 0x7F090206, 0x7F090201,
+             0x7F09021A, 0x7F090231, 0x7F0904F1,
+             0x7F090225, 0x7F090725, 0x7F090200)
+CHILD_CLASSES = (
+    "com.supernote.document.utils.view.DocumentImageView",
+    "com.supernote.document.utils.view.DigestImageView",
+    "com.supernote.document.handwrite.HandWriteView",
+    "android.widget.RelativeLayout", "android.widget.RelativeLayout",
+    "android.widget.FrameLayout", "android.widget.RelativeLayout",
+    "android.view.View", "android.widget.FrameLayout",
+)
 ERROR_PAIRS = frozenset({
     ("MANIFEST", "INVALID"), ("RUNTIME", "MISMATCH"),
     ("BRIDGE", "UNAVAILABLE"), ("JAVA_CHOOSE", "FAILED"),
@@ -43,11 +55,12 @@ ERROR_PAIRS = frozenset({
     ("OUTPUT", "OVERSIZE"),
 })
 HIERARCHY_STAGES = frozenset({
-    "ACTIVITY_CLASS", "ACTIVITY_LIFECYCLE", "VM_CLASS", "URI_CLASS",
+    "ACTIVITY_CLASS", "ACTIVITY_LIFECYCLE", "VM_CLASS", "PAGE_NUMBER", "URI_CLASS",
     "URI_VALUE", "ROOT_CLASS", "FIELD_PDF", "FIELD_DIGEST", "FIELD_PEN",
     "ROOT_CHILD_COUNT", "DRAW_ORDER", "CHILD_HANDLE", "CHILD_CLASS",
     "CHILD_PARENT", "CHILD_ID", "CHILD_VISIBILITY", "CHILD_BOUNDS",
-    "CHILD_Z", "CHILD_FIELD_IDENTITY", "FIELD_ORDER", "ROOT_ID",
+    "CHILD_Z", "CHILD_ANIMATION", "CHILD_FIELD_IDENTITY", "FIELD_ORDER", "ROOT_ID",
+    "ROOT_HARDWARE", "ROOT_DRAW_STATE",
     "ROOT_BOUNDS", "SECOND_SAMPLE_REFS", "SECOND_SAMPLE_VALUES",
 })
 CHILD_STAGES = frozenset(stage for stage in HIERARCHY_STAGES
@@ -166,7 +179,7 @@ def load_bundle() -> bytes:
 
 def manifest(before: identity.Snapshot) -> bytes:
     value = {
-        "schemaVersion": 1, "authority": MANIFEST_AUTHORITY,
+        "schemaVersion": 2, "authority": MANIFEST_AUTHORITY,
         "attachment": {
             "packageName": "com.supernote.document",
             "processName": "com.supernote.document",
@@ -175,7 +188,8 @@ def manifest(before: identity.Snapshot) -> bytes:
             "firmwareFingerprint": identity.FINGERPRINT,
             "observerSha256": SOURCE_SHA256,
         },
-        "expected": {"documentUri": identity.URI, "markPath": None},
+        "expected": {"documentUri": identity.URI, "markPath": None,
+                     "pageNumber": 1},
         "coordinator": {
             "maxJavaChooseWalks": 1, "retainedRootSamples": 2,
             "hardDeadlineMs": 5000, "detachOnDeadline": True,
@@ -205,10 +219,11 @@ def _box(value: Any, *, positive: bool = True) -> None:
           (x1 >= x0 and y1 >= y0))
 
 
-def _z(value: Any) -> None:
+def _z(value: Any) -> float:
     _need(type(value) is str and re.fullmatch(r"0x[0-9a-f]{16}", value) is not None)
     number = struct.unpack(">d", bytes.fromhex(value[2:]))[0]
     _need(math.isfinite(number) and abs(number) <= 1_000_000_000)
+    return number
 
 
 def _frame(raw: bytes) -> dict[str, Any]:
@@ -230,11 +245,16 @@ def parse_frames(frames: tuple[bytes, bytes], manifest_sha: str) -> dict[str, An
     _dict(first, {"event", "schemaVersion", "authority", "manifestSha256",
                   "observationOnly", "hardwareAdmission", "heapWalks",
                   "retainedRootSamples", "uiThreadSamples", "hierarchyStable", "rootClass",
-                  "rootId", "rootBounds", "childCount", "children",
-                  "fieldIndex", "customDrawingOrder", "effectiveCompositingAdmitted",
-                  "uriMatchedExpected", "lifecycleStable"})
+                  "rootId", "rootBounds", "childCount", "children", "fieldIndex",
+                  "customDrawingOrder", "rootHardwareAccelerated", "transientViewsPresent",
+                  "transientIndicesPresent", "disappearingChildrenPresent",
+                  "visibilityChangingChildrenPresent", "transitioningViewsPresent",
+                  "rootOverlayPresent", "layoutAnimationPending", "visibleChildIndices",
+                  "frameworkPredictedDirectChildOrder", "frameworkPredictionEligible",
+                  "actualDrawObserved", "finalPixelsAdmitted",
+                  "effectiveCompositingAdmitted", "uriMatchedExpected", "lifecycleStable"})
     _need(first["event"] == "native_page_hierarchy" and
-          _int(first["schemaVersion"], 1, 1) == 1 and
+          _int(first["schemaVersion"], 2, 2) == 2 and
           first["authority"] == RECORD_AUTHORITY and
           first["manifestSha256"] == manifest_sha and
           first["observationOnly"] is True and first["hardwareAdmission"] is False and
@@ -243,26 +263,34 @@ def parse_frames(frames: tuple[bytes, bytes], manifest_sha: str) -> dict[str, An
           first["uiThreadSamples"] is True and
           first["hierarchyStable"] is True and
           first["rootClass"] == "android.widget.FrameLayout" and
+          first["actualDrawObserved"] is False and
+          first["finalPixelsAdmitted"] is False and
           first["effectiveCompositingAdmitted"] is False and
           first["uriMatchedExpected"] is True and first["lifecycleStable"] is True and
-          type(first["customDrawingOrder"]) is bool)
-    _int(first["rootId"], -1, 2**31 - 1)
+          all(type(first[name]) is bool for name in (
+              "customDrawingOrder", "rootHardwareAccelerated", "transientViewsPresent",
+              "transientIndicesPresent", "disappearingChildrenPresent",
+              "visibilityChangingChildrenPresent", "transitioningViewsPresent",
+              "rootOverlayPresent", "layoutAnimationPending",
+              "frameworkPredictionEligible")))
+    _need(first["transientViewsPresent"] is first["transientIndicesPresent"])
+    _int(first["rootId"], ROOT_ID, ROOT_ID)
     _box(first["rootBounds"])
-    count = _int(first["childCount"], 4, 32)
+    count = _int(first["childCount"], len(CHILD_IDS), len(CHILD_IDS))
     children = first["children"]
     _need(type(children) is list and len(children) == count)
+    z_values: list[float] = []
     for i, child in enumerate(children):
         _dict(child, {"index", "id", "className", "bounds", "visibility",
-                      "z", "parentIsRoot"})
+                      "z", "animationPresent", "parentIsRoot"})
         _need(_int(child["index"], i, i) == i and child["parentIsRoot"] is True)
-        _int(child["id"], -1, 2**31 - 1)
-        _need(type(child["className"]) is str and
-              0 < len(child["className"]) <= 160 and
-              all(0x20 <= ord(c) <= 0x7e for c in child["className"]))
+        _int(child["id"], CHILD_IDS[i], CHILD_IDS[i])
+        _need(child["className"] == CHILD_CLASSES[i] and
+              type(child["animationPresent"]) is bool)
         visibility = _int(child["visibility"], 0, 8)
         _need(visibility in (0, 4, 8))
         _box(child["bounds"], positive=visibility == 0)
-        _z(child["z"])
+        z_values.append(_z(child["z"]))
     indices = _dict(first["fieldIndex"], {"pdf", "digest", "pen"})
     pdf, digest, pen = [_int(indices[name], 0, count - 1)
                         for name in ("pdf", "digest", "pen")]
@@ -270,7 +298,27 @@ def parse_frames(frames: tuple[bytes, bytes], manifest_sha: str) -> dict[str, An
     for index, class_name in ((pdf, "com.supernote.document.utils.view.DocumentImageView"),
                               (digest, "com.supernote.document.utils.view.DigestImageView"),
                               (pen, "com.supernote.document.handwrite.HandWriteView")):
-        _need(children[index]["className"] == class_name)
+        _need(children[index]["className"] == class_name and
+              children[index]["visibility"] == 0)
+    visible = [child["index"] for child in children if child["visibility"] == 0]
+    reported_visible = first["visibleChildIndices"]
+    _need(type(reported_visible) is list and len(reported_visible) == len(visible))
+    for actual, expected in zip(reported_visible, visible):
+        _int(actual, expected, expected)
+    eligible = (not first["customDrawingOrder"] and all(z == 0 for z in z_values)
+                and not any(first[name] for name in (
+                    "transientViewsPresent", "disappearingChildrenPresent",
+                    "visibilityChangingChildrenPresent", "transitioningViewsPresent",
+                    "rootOverlayPresent", "layoutAnimationPending"))
+                and all(not child["animationPresent"] for child in children))
+    _need(first["frameworkPredictionEligible"] is eligible)
+    predicted = first["frameworkPredictedDirectChildOrder"]
+    if eligible:
+        _need(type(predicted) is list and len(predicted) == len(visible))
+        for actual, expected in zip(predicted, visible):
+            _int(actual, expected, expected)
+    else:
+        _need(predicted is None)
     return first
 
 
@@ -282,7 +330,7 @@ def parse_error_frames(frames: tuple[bytes, bytes]) -> tuple[str, str, str, int,
     _dict(end, {"event", "success"})
     pair = (first["phase"], first["reason"])
     _need(first["event"] == "native_page_hierarchy_error" and
-          _int(first["schemaVersion"], 1, 1) == 1 and
+          _int(first["schemaVersion"], 2, 2) == 2 and
           first["code"] == "HIERARCHY_REJECTED" and
           pair in ERROR_PAIRS and
           end == {"event": "native_page_hierarchy_complete", "success": False})
@@ -352,7 +400,8 @@ def child(pid: int, wire: bytes) -> int:
               value["attachment"]["pid"] == pid and
               value["attachment"]["observerSha256"] == SOURCE_SHA256 and
               value["attachment"]["firmwareFingerprint"] == identity.FINGERPRINT and
-              value["expected"] == {"documentUri": identity.URI, "markPath": None},
+              value["expected"] == {"documentUri": identity.URI, "markPath": None,
+                                    "pageNumber": 1},
               "HIERARCHY_CHILD_INPUT_INVALID")
         compiled = load_bundle()
     except (KeyError, TypeError, canonical.GraphRunnerError, HierarchyError) as error:

@@ -42,7 +42,7 @@ CLASSES = [
 
 def record() -> dict:
     return {
-        "event": "native_page_hierarchy", "schemaVersion": 1,
+        "event": "native_page_hierarchy", "schemaVersion": 2,
         "authority": subject.RECORD_AUTHORITY, "manifestSha256": MANIFEST_SHA,
         "observationOnly": True, "hardwareAdmission": False,
         "uiThreadSamples": True, "heapWalks": 1,
@@ -53,11 +53,22 @@ def record() -> dict:
             {"index": i, "id": CHILD_IDS[i], "className": name,
              "bounds": [0, 0, 0, 0] if i == 7 else [0, 0, 1872, 1404],
              "visibility": 8 if i == 7 else 0,
-             "z": "0x0000000000000000", "parentIsRoot": True}
+             "z": "0x0000000000000000", "animationPresent": False,
+             "parentIsRoot": True}
             for i, name in enumerate(CLASSES)
         ],
         "fieldIndex": {"pdf": 0, "digest": 1, "pen": 2},
-        "customDrawingOrder": False, "effectiveCompositingAdmitted": False,
+        "customDrawingOrder": False, "rootHardwareAccelerated": True,
+        "transientViewsPresent": False, "transientIndicesPresent": False,
+        "disappearingChildrenPresent": False,
+        "visibilityChangingChildrenPresent": False,
+        "transitioningViewsPresent": False, "rootOverlayPresent": False,
+        "layoutAnimationPending": False,
+        "visibleChildIndices": [0, 1, 2, 3, 4, 5, 6, 8],
+        "frameworkPredictedDirectChildOrder": [0, 1, 2, 3, 4, 5, 6, 8],
+        "frameworkPredictionEligible": True,
+        "actualDrawObserved": False, "finalPixelsAdmitted": False,
+        "effectiveCompositingAdmitted": False,
         "uriMatchedExpected": True, "lifecycleStable": True,
     }
 
@@ -73,7 +84,7 @@ def error_frames(phase: str = "HIERARCHY", reason: str = "MISMATCH",
                  stage: str = "CHILD_PARENT", child_index: int = 8,
                  sample: int = 1) -> tuple[bytes, bytes]:
     return (canonical.canonical_bytes({
-        "event": "native_page_hierarchy_error", "schemaVersion": 1,
+        "event": "native_page_hierarchy_error", "schemaVersion": 2,
         "code": "HIERARCHY_REJECTED", "phase": phase, "reason": reason,
         "stage": stage, "childIndex": child_index, "sampleOrdinal": sample,
     }, subject.MAX_FRAME), canonical.canonical_bytes(
@@ -89,7 +100,8 @@ def child_wire() -> bytes:
             "observerSha256": subject.SOURCE_SHA256,
             "firmwareFingerprint": subject.identity.FINGERPRINT,
         },
-        "expected": {"documentUri": subject.identity.URI, "markPath": None},
+        "expected": {"documentUri": subject.identity.URI, "markPath": None,
+                     "pageNumber": 1},
     }, 4096)
 
 
@@ -116,6 +128,8 @@ class HierarchyTrialTests(unittest.TestCase):
                 value = record()
                 value["children"][8]["visibility"] = visibility
                 value["children"][8]["bounds"] = [0, 0, 0, 0]
+                value["visibleChildIndices"] = [0, 1, 2, 3, 4, 5, 6]
+                value["frameworkPredictedDirectChildOrder"] = [0, 1, 2, 3, 4, 5, 6]
                 self.assertEqual(subject.parse_frames(frames(value), MANIFEST_SHA),
                                  value)
                 value["children"][8]["bounds"] = [0, 0, -1, 0]
@@ -127,6 +141,8 @@ class HierarchyTrialTests(unittest.TestCase):
             lambda v: v.update(authority="untrusted"),
             lambda v: v.update(manifestSha256="b" * 64),
             lambda v: v.update(hardwareAdmission=True),
+            lambda v: v.update(actualDrawObserved=True),
+            lambda v: v.update(finalPixelsAdmitted=True),
             lambda v: v.update(effectiveCompositingAdmitted=True),
             lambda v: v.update(uiThreadSamples=False),
             lambda v: v.update(childCount=32),
@@ -134,7 +150,15 @@ class HierarchyTrialTests(unittest.TestCase):
             lambda v: v["children"][0].update(index=True),
             lambda v: v["children"][1].update(parentIsRoot=False),
             lambda v: v["children"][2].update(z="0x7ff0000000000000"),
+            lambda v: v["children"][2].update(animationPresent=True),
             lambda v: v["children"][2].update(bounds=[0, 0, 0, 0]),
+            lambda v: v["children"][2].update(visibility=8),
+            lambda v: v["children"][1].update(id=CHILD_IDS[0]),
+            lambda v: v.update(rootOverlayPresent=True),
+            lambda v: v.update(transientViewsPresent=True),
+            lambda v: v.update(visibleChildIndices=[0, True, 2, 3, 4, 5, 6, 8]),
+            lambda v: v.update(frameworkPredictedDirectChildOrder=[0, True, 2, 3, 4, 5, 6, 8]),
+            lambda v: v.update(frameworkPredictionEligible=False),
             lambda v: v["fieldIndex"].update(pen=1),
             lambda v: v["children"][1].update(className="android.view.View"),
             lambda v: v.update(unknown="extra"),
@@ -144,6 +168,22 @@ class HierarchyTrialTests(unittest.TestCase):
                 mutate(value)
                 with self.assertRaises(subject.HierarchyError):
                     subject.parse_frames(frames(value), MANIFEST_SHA)
+
+    def test_ambiguous_state_is_diagnostic_not_predicted(self) -> None:
+        for change in (
+            lambda v: v.update(rootOverlayPresent=True),
+            lambda v: v.update(disappearingChildrenPresent=True),
+            lambda v: v.update(layoutAnimationPending=True),
+            lambda v: v.update(customDrawingOrder=True),
+            lambda v: v["children"][2].update(z="0x4008000000000000"),
+            lambda v: v["children"][4].update(animationPresent=True),
+        ):
+            with self.subTest(change=change):
+                value = copy.deepcopy(record())
+                change(value)
+                value["frameworkPredictionEligible"] = False
+                value["frameworkPredictedDirectChildOrder"] = None
+                self.assertEqual(subject.parse_frames(frames(value), MANIFEST_SHA), value)
 
     def test_error_record_is_not_success(self) -> None:
         raw = error_frames()
@@ -158,6 +198,8 @@ class HierarchyTrialTests(unittest.TestCase):
     def test_error_frame_stage_index_and_sample_are_strict(self) -> None:
         valid = (
             ("HIERARCHY", "MISMATCH", "DRAW_ORDER", -1, 1),
+            ("HIERARCHY", "MISMATCH", "ROOT_DRAW_STATE", -1, 1),
+            ("HIERARCHY", "MISMATCH", "CHILD_ANIMATION", 2, 2),
             ("HIERARCHY", "MISMATCH", "CHILD_BOUNDS", 31, 2),
             ("MANIFEST", "INVALID", "NONE", -1, 0),
             ("CLEANUP", "FAILED", "NONE", -1, 0),

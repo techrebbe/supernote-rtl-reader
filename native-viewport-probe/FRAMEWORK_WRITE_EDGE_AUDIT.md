@@ -8,9 +8,9 @@ release.
 The locally retained firmware `framework.jar` was checked against the
 SHA-256 pin in `NATIVE_PAGE_FIRMWARE_FIELD_MAP.md`:
 `c3a525a7ef16363a93412182cce693f46dfa1395a570e9620da0d4e27a59631d`.
-Its relevant method bodies have **not** been proven byte-for-byte equivalent
-to AOSP. The ordering below comes from Android 11 AOSP source and is a
-candidate model, not an OEM-firmware claim.
+The AOSP ordering below was the initial candidate model. We subsequently
+inspected the pinned OEM DEX method bodies directly; their relevant edges are
+recorded separately below. No claim of full AOSP/OEM equivalence follows.
 
 | Path | Earliest relevant change in Android 11 AOSP | Consequence for the current Port |
 | --- | --- | --- |
@@ -29,6 +29,29 @@ and [`ViewRootImpl`](https://android.googlesource.com/platform/frameworks/base/+
 `ViewRootImpl` measures before `performLayout`, runs global-layout observers
 after layout, and runs pre-draw observers later still. Neither observer is a
 complete pre-write fence.
+
+## Pinned OEM DEX findings
+
+The same pinned `framework.jar` contains these method bodies in
+`classes3.dex`. We inspected them read-only with the already-installed
+`smali-dexlib2` 3.0.9 library. Offsets below are DEX code units, not source
+lines; branch-specific first writes can differ.
+
+| OEM method | Relevant instruction order |
+| --- | --- |
+| `ViewGroup.addView(View,int,LayoutParams)` | `requestLayout` at 2, `invalidate` at 6, `addViewInner` at 10. `addViewInner` can call transition code at 5/18 before child `setLayoutParams` at 36, array insertion at 43, parent assignment at 52, and attachment at 99. |
+| `View.requestLayout` | Clears the measure cache at 4; attached/in-layout path can call the root at 27; attached and own flags change at 36 and 42/47 before propagation at 61. |
+| `View.measure` / `FrameLayout.onMeasure` | A conditional measure-cache write occurs at 79, remeasure flags at 170, cached dimensions at 208 or virtual `onMeasure` at 221. The frame-layout subclass clears its child list at 33 and measures children at 88. `View.measure` is final. |
+| `ViewGroup.layout(int,int,int,int)` | An optional `LayoutTransition.layoutChange` runs at 18 before `View.layout` at 21; the suppressed branch writes a flag at 26 instead. This method is final. |
+| `View.layout` | Deferred `onMeasure` can run at 12, flags change at 19, and `setOpticalFrame`/`setFrame` run at 37/42 before virtual `onLayout` at 74. |
+| `View.setFrame` | Changed-frame path calls `invalidate` at 45 and OEM `notifyPosChange` at 48 before bound fields are written at 51–57. In this JAR the called `ViewRootImpl.notifyViewFrameChange` is a no-op, but attached-view invalidation can change flags before those bounds writes. |
+
+These OEM-specific edges confirm that subclass `onLayout`, hierarchy, attach,
+and global-layout callbacks are too late for a universal first-write fence.
+They do **not** prove that a temporary `ViewGroup.layout` hook covers other
+setters, transition callbacks, alternate attach paths, or the stock reader's
+writer state. The synthetic trial therefore remains a narrow method-entry
+feasibility check and cannot authorize a production visual child.
 
 ## Firmware-specific boundary still missing
 

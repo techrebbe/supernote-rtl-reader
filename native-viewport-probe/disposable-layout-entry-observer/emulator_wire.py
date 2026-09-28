@@ -204,8 +204,10 @@ def verify_signed_apk(apksigner: Path, apk: Path, apk_sha: str,
     code, output = _invoke([str(apksigner), "verify", "--print-certs",
                             "--verbose", str(apk)], 6.0)
     need(code == 0, "APK_SIGNATURE_INVALID")
-    matches = re.findall(r"(?m)^Signer #([0-9]+) certificate SHA-256 digest: ([0-9a-f]{64})$",
-                         output)
+    digest_line = re.compile(
+        r"Signer #([0-9]+) certificate SHA-256 digest: ([0-9a-f]{64})")
+    matches = [match.groups() for line in output.split("\n")
+               if (match := digest_line.fullmatch(line.removesuffix("\r"))) is not None]
     need(matches == [("1", signer_sha)], "APK_SIGNER_MISMATCH")
 
 

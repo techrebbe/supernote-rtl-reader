@@ -12,6 +12,30 @@ from host_protocol import TrialError
 
 
 class WireTests(unittest.TestCase):
+    def test_apksigner_digest_accepts_crlf_and_lf_without_loosening_pin(self) -> None:
+        executable = Path(sys.executable).resolve()
+        signer = "4d4f0f18e10114c7a801bcdb87dd4fd2d75ebc24ca0ad5bcb6967009e62ead6a"
+        digest_line = f"Signer #1 certificate SHA-256 digest: {signer}"
+        with patch.object(subject, "file_sha"):
+            for newline in ("\r\n", "\n"):
+                with self.subTest(newline=repr(newline)):
+                    output = newline.join(("Verifies", digest_line, "Number of signers: 1", ""))
+                    with patch.object(subject, "_invoke", return_value=(0, output)):
+                        subject.verify_signed_apk(executable, executable,
+                                                  "a" * 64, signer)
+            for output in (digest_line.replace(signer, "b" * 64) + "\r\n",
+                           digest_line + "x\r\n",
+                           "Verifies\r" + digest_line + "\n",
+                           "Verifies\u2028" + digest_line + "\n",
+                           digest_line + "\r\n" +
+                           f"Signer #2 certificate SHA-256 digest: {signer}\r\n"):
+                with self.subTest(output=output):
+                    with patch.object(subject, "_invoke", return_value=(0, output)):
+                        with self.assertRaisesRegex(TrialError,
+                                                    "APK_SIGNER_MISMATCH"):
+                            subject.verify_signed_apk(executable, executable,
+                                                      "a" * 64, signer)
+
     def test_query_requires_one_exact_row(self) -> None:
         self.assertEqual(subject.query_json('Row: 0 json={"pid":2468}\n'),
                          {"pid": 2468})

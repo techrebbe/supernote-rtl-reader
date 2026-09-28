@@ -31,10 +31,12 @@ class RunnerFailure(TrialError):
     """Dominant fixed code plus earlier fixed codes needed to audit cleanup."""
 
     def __init__(self, code: str, *, primary_code: str | None = None,
-                 cleanup_codes: tuple[str, ...] = ()) -> None:
+                 cleanup_codes: tuple[str, ...] = (),
+                 refresh_evidence: dict | None = None) -> None:
         super().__init__(code)
         self.primary_code = primary_code
         self.cleanup_codes = cleanup_codes
+        self.refresh_evidence = refresh_evidence
 
 
 def parser() -> argparse.ArgumentParser:
@@ -131,6 +133,7 @@ def run(args: argparse.Namespace) -> dict:
     failure: TrialError | None = None
     primary_failure: TrialError | None = None
     cleanup_codes: list[str] = []
+    refresh_evidence: dict | None = None
     try:
         adb = ExactAdb(args.adb)
         adb.check_emulator()
@@ -145,6 +148,12 @@ def run(args: argparse.Namespace) -> dict:
         primary_failure = (error if isinstance(error, TrialError)
                            else TrialError("TRIAL_UNCERTAIN"))
         failure = primary_failure
+        evidence_reader = getattr(app, "refresh_failure_evidence", None)
+        if callable(evidence_reader):
+            try:
+                refresh_evidence = evidence_reader()
+            except BaseException:
+                pass  # Diagnostic must never mask the original failure.
         if (app is not None and app.launch_attempted and
                 app.prearm_host_start is None):
             try:
@@ -169,10 +178,16 @@ def run(args: argparse.Namespace) -> dict:
         raise RunnerFailure(cleanup_codes[-1],
                             primary_code=(str(primary_failure)
                                           if primary_failure is not None else None),
-                            cleanup_codes=tuple(cleanup_codes))
+                            cleanup_codes=tuple(cleanup_codes),
+                            refresh_evidence=refresh_evidence)
     if failure is not None:
-        if primary_failure is not None and failure is not primary_failure:
-            raise RunnerFailure(str(failure), primary_code=str(primary_failure))
+        if refresh_evidence is not None or (primary_failure is not None and
+                                            failure is not primary_failure):
+            raise RunnerFailure(str(failure),
+                primary_code=(str(primary_failure)
+                              if primary_failure is not None and
+                                 failure is not primary_failure else None),
+                refresh_evidence=refresh_evidence)
         raise failure
     if verdict is None:
         raise TrialError("TRIAL_UNCERTAIN")
@@ -196,6 +211,8 @@ def main(argv: list[str] | None = None) -> int:
                 output["primaryCode"] = error.primary_code
             if error.cleanup_codes:
                 output["cleanupCodes"] = list(error.cleanup_codes)
+            if error.refresh_evidence is not None:
+                output["refreshEvidence"] = error.refresh_evidence
         print(json.dumps(output,
                          sort_keys=True, separators=(",", ":")))
         return 2

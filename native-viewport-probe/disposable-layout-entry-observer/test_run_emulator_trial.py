@@ -268,7 +268,10 @@ class EntryTests(unittest.TestCase):
         server = FakeServer()
         server.fail_cleanup = True
         app = type("App", (), {"launch_attempted": False,
-                               "prearm_host_start": None})()
+                               "prearm_host_start": None,
+                               "refresh_failure_evidence": lambda self:
+                                   {"phase": "refresh", "polls":
+                                    [{"sampleAgeMs": 678}]}})()
         def failed(*unused):
             raise host.TrialError("TRIAL_PRIMARY_FAILURE")
         def unlock_failed(*unused):
@@ -303,6 +306,8 @@ class EntryTests(unittest.TestCase):
         self.assertEqual(reported["code"], "LOCK_CLEANUP_UNCERTAIN")
         self.assertEqual(reported["primaryCode"], "TRIAL_PRIMARY_FAILURE")
         self.assertEqual(reported["cleanupCodes"], list(error.cleanup_codes))
+        self.assertEqual(reported["refreshEvidence"],
+                         {"phase": "refresh", "polls": [{"sampleAgeMs": 678}]})
 
 
 if __name__ == "__main__":

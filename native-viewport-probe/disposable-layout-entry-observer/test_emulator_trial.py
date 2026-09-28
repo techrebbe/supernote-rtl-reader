@@ -52,10 +52,17 @@ class FakeAdb:
         self.state = refreshed_state()
         self.stopped = False
         self.reject_refresh = False
+        self.reject_command = False
+        self.command_reply_loss = False
+        self.command_identity_override: str | None = None
+        self.post_command_process_drift = False
+        self.command_accepted = False
         self.abort_dies_before_reply = False
 
     def same_process(self, pid, signature) -> bool:
-        return not self.stopped and pid == ADMISSION.pid
+        self.calls.append(("same_process", pid))
+        return (not self.stopped and pid == ADMISSION.pid and
+                not (self.command_accepted and self.post_command_process_drift))
 
     def check_emulator(self) -> None:
         self.calls.append(("check_emulator",))
@@ -74,6 +81,23 @@ class FakeAdb:
                     "completedPaintCountFloor": "5",
                     "requestedElapsedMs": "900",
                     "json": json.dumps(identity("REFRESH_REQUESTED"))}
+        if method == "command":
+            if self.reject_command:
+                return {"ok": "false", "error": "exact pins/token rejected"}
+            self.command_accepted = True
+            if self.command_reply_loss:
+                raise host.TrialError("COMMAND_TIMEOUT_OR_FAILED")
+            response = copy.deepcopy(self.state)
+            response["process"] = identity("TRIAL_WATCHDOG_ACTIVE")
+            if self.command_identity_override is not None:
+                response["process"]["incarnation"] = self.command_identity_override
+            response["trial"] = {"command": argument, "state": "PASS",
+                                 "currentlyValid": True,
+                                 "activeArmDeadlineElapsedMs": 30000,
+                                 "trialDeadlineElapsedMs": 25000}
+            self.state = copy.deepcopy(response)
+            return {"ok": "true", "command": argument,
+                    "json": json.dumps(response)}
         if method == "finish":
             return {"ok": "true", "json": json.dumps(identity("FINISHED"))}
         if method == "abort":
@@ -121,6 +145,142 @@ class TrialAdapterTests(unittest.TestCase):
         self.assertEqual(app._extras(ADMISSION, armed=True,
                                      refreshed=True)["refreshToken"],
                          ("s", "refresh-1"))
+        self.assertFalse(any(call[0] == "same_process" for call in fake.calls))
+
+    def test_fast_cut_then_exact_command_has_no_precommand_os_probe(self) -> None:
+        app, fake = app_with_fake()
+        app.freshen_baseline(ADMISSION)
+        app.execute_and_restore("parent-plus-one", ADMISSION)
+        refresh_at = next(i for i, call in enumerate(fake.calls)
+                          if call[0] == "refresh")
+        command_at = next(i for i, call in enumerate(fake.calls)
+                          if call[0] == "command")
+        self.assertFalse(any(call[0] == "same_process"
+                             for call in fake.calls[refresh_at:command_at]))
+        self.assertTrue(any(call[0] == "same_process"
+                            for call in fake.calls[command_at + 1:]))
+        command = fake.calls[command_at]
+        self.assertEqual(command[2]["pid"], ("i", str(ADMISSION.pid)))
+        self.assertEqual(command[2]["incarnation"],
+                         ("s", ADMISSION.incarnation))
+        self.assertEqual(command[2]["activityToken"],
+                         ("s", ADMISSION.activity_token))
+        self.assertEqual(command[2]["rootToken"],
+                         ("s", ADMISSION.root_token))
+        self.assertEqual(command[2]["armToken"], ("s", "arm-1"))
+        self.assertEqual(command[2]["refreshToken"], ("s", "refresh-1"))
+
+    def test_replacement_state_rejected_before_command_without_os_probe(self) -> None:
+        for field, value in (("pid", ADMISSION.pid + 1),
+                             ("incarnation", "new-incarnation"),
+                             ("activitySerial", ADMISSION.activity_serial + 1)):
+            app, fake = app_with_fake()
+            fake.state["process"][field] = value
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(host.TrialError,
+                                            "APP_IDENTITY_DRIFT"):
+                    app.freshen_baseline(ADMISSION)
+            self.assertFalse(any(call[0] == "same_process" for call in fake.calls))
+            self.assertFalse(any(call[0] == "command" for call in fake.calls))
+        for field in ("activityToken", "rootToken"):
+            app, fake = app_with_fake()
+            fake.state[field] = "replacement-token"
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(host.TrialError,
+                                            "APP_IDENTITY_DRIFT"):
+                    app.freshen_baseline(ADMISSION)
+            self.assertFalse(any(call[0] == "command" for call in fake.calls))
+
+    def test_replacement_between_cut_and_command_is_one_shot_rejection(self) -> None:
+        app, fake = app_with_fake()
+        app.freshen_baseline(ADMISSION)
+        fake.reject_command = True  # App's exact pins/token gate rejects ABA.
+        with self.assertRaisesRegex(host.TrialError,
+                                    "CONTENT_CALL_REJECTED"):
+            app.execute_and_restore("parent-plus-one", ADMISSION)
+        self.assertEqual(sum(call[0] == "command" for call in fake.calls), 1)
+        self.assertFalse(any(call[0] == "same_process" for call in fake.calls))
+
+    def test_command_reply_loss_is_unknown_without_retry(self) -> None:
+        app, fake = app_with_fake()
+        app.freshen_baseline(ADMISSION)
+        fake.command_reply_loss = True
+        with self.assertRaisesRegex(host.TrialError,
+                                    "COMMAND_TIMEOUT_OR_FAILED"):
+            app.execute_and_restore("parent-plus-one", ADMISSION)
+        self.assertEqual(sum(call[0] == "command" for call in fake.calls), 1)
+        self.assertFalse(any(call[0] == "same_process" for call in fake.calls))
+
+    def test_post_command_os_signature_is_required_before_pass(self) -> None:
+        app, fake = app_with_fake()
+        app.freshen_baseline(ADMISSION)
+        fake.post_command_process_drift = True
+        with self.assertRaisesRegex(host.TrialError, "APP_PROCESS_DRIFT"):
+            app.execute_and_restore("parent-plus-one", ADMISSION)
+        command_at = next(i for i, call in enumerate(fake.calls)
+                          if call[0] == "command")
+        self.assertEqual(sum(call[0] == "command" for call in fake.calls), 1)
+        self.assertTrue(any(call[0] == "same_process"
+                            for call in fake.calls[command_at + 1:]))
+
+    def test_accepted_command_response_with_new_incarnation_is_rejected(self) -> None:
+        app, fake = app_with_fake()
+        app.freshen_baseline(ADMISSION)
+        fake.command_identity_override = "new-incarnation"
+        with self.assertRaisesRegex(host.TrialError,
+                                    "APP_IDENTITY_DRIFT"):
+            app.execute_and_restore("parent-plus-one", ADMISSION)
+        self.assertEqual(sum(call[0] == "command" for call in fake.calls), 1)
+        self.assertFalse(any(call[0] == "same_process" for call in fake.calls))
+
+    def test_stale_paint_is_rejected_before_command(self) -> None:
+        app, fake = app_with_fake()
+        app.freshen_baseline(ADMISSION)
+        app.refresh_proof_host_received = time.monotonic() - 2.1
+        with self.assertRaisesRegex(host.TrialError,
+                                    "REFRESH_PAINT_TOO_OLD_FOR_COMMAND"):
+            app.execute_and_restore("parent-plus-one", ADMISSION)
+        self.assertFalse(any(call[0] == "command" for call in fake.calls))
+
+    def test_command_reserve_boundary_is_fail_closed(self) -> None:
+        now = time.monotonic()
+        for upper, accepted in ((1499, True), (1500, False)):
+            app, fake = app_with_fake()
+            app.freshen_baseline(ADMISSION)
+            app.refresh_proof_host_received = now
+            app.refresh_age_upper_at_receipt_ms = upper
+            with self.subTest(upper=upper), \
+                 patch.object(subject.time, "monotonic", return_value=now):
+                if accepted:
+                    app.execute_and_restore("parent-plus-one", ADMISSION)
+                else:
+                    with self.assertRaisesRegex(host.TrialError,
+                        "REFRESH_PAINT_TOO_OLD_FOR_COMMAND"):
+                        app.execute_and_restore("parent-plus-one", ADMISSION)
+            self.assertEqual(sum(call[0] == "command" for call in fake.calls),
+                             1 if accepted else 0)
+
+    def test_slow_provider_response_cannot_admit_after_poll_expiry(self) -> None:
+        app, fake = app_with_fake()
+        ticks = iter((100.0, 100.0, 100.0, 100.0, 100.0, 103.0, 103.0))
+        with patch.object(subject.time, "monotonic", side_effect=lambda: next(ticks)):
+            with self.assertRaisesRegex(host.TrialError,
+                                        "REFRESHED_PAINT_UNAVAILABLE"):
+                app.freshen_baseline(ADMISSION)
+        evidence = app.refresh_failure_evidence()
+        self.assertIsNotNone(evidence)
+        self.assertEqual(len(evidence["polls"]), 1)
+        self.assertFalse(evidence["polls"][0]["withinHostDeadlines"])
+        self.assertFalse(any(call[0] == "command" for call in fake.calls))
+
+    def test_refresh_failure_trace_is_bounded_first_plus_latest(self) -> None:
+        app, _ = app_with_fake()
+        app.refresh_token = "refresh-1"
+        for number in range(20):
+            app._record_refresh_sample({"poll": number})
+        evidence = app.refresh_failure_evidence()
+        self.assertEqual([sample["poll"] for sample in evidence["polls"]],
+                         [0, 13, 14, 15, 16, 17, 18, 19])
 
     def test_ambiguous_refresh_never_retries(self) -> None:
         app, fake = app_with_fake()

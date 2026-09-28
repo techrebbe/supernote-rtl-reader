@@ -5,6 +5,7 @@ layout/paint work, rollback, sentinels and the prearm self-kill watchdog.
 """
 from __future__ import annotations
 
+import math
 from pathlib import Path
 import time
 from typing import Any
@@ -19,6 +20,10 @@ from host_protocol import Admission, ExpectedEntry, PACKAGE, Pins, SERIAL, \
 
 ARM_MARGIN = 1.5
 TRIAL_MS = 5000
+APP_BASELINE_FRESHNESS_MS = 2000
+HOST_SAMPLE_FRESHNESS_MS = 1000
+COMMAND_DELIVERY_RESERVE_MS = 500
+MAX_REFRESH_SAMPLES = 8
 
 
 def _integer(value: Any, minimum: int = 0) -> int:
@@ -53,7 +58,12 @@ class EmulatorApp:
         self.baseline_paint_revision: int | None = None
         self.baseline_frame: dict[str, Any] | None = None
         self.refresh_request_elapsed_ms: int | None = None
+        self.refresh_paint_floor_revision: int | None = None
+        self.refresh_completed_count_floor: int | None = None
         self.refresh_token: str | None = None
+        self.refresh_proof_host_received: float | None = None
+        self.refresh_age_upper_at_receipt_ms: int | None = None
+        self.refresh_samples: list[dict[str, Any]] = []
         self.prearm_host_start: float | None = None
         self.launch_attempted = False
 
@@ -68,15 +78,27 @@ class EmulatorApp:
              self.adb.same_process(admission.pid, self.signature),
              "APP_PROCESS_DRIFT")
 
-    def _state(self, admission: Admission) -> dict[str, Any]:
-        self._require_process(admission)
-        state = self.adb.provider_state(timeout=self._time_left())
+    def _validated_identity_state(self, state: Any,
+                                  admission: Admission) -> dict[str, Any]:
         need(type(state) is dict and state.get("schema") ==
              "layout-fence-synthetic-v1" and
              state.get("activityPresent") is True and
              state.get("activitySerial") == admission.activity_serial and
              state.get("activityToken") == admission.activity_token and
-             state.get("rootToken") == admission.root_token and
+             state.get("rootToken") == admission.root_token,
+             "APP_IDENTITY_DRIFT")
+        process = _identity(state.get("process"), admission)
+        need(self.arm_deadline_ms is None or
+             process.get("armDeadlineElapsedMs") == self.arm_deadline_ms,
+             "APP_ARM_DRIFT")
+        return state
+
+    def _state(self, admission: Admission, *, os_check: bool = True) -> dict[str, Any]:
+        if os_check:
+            self._require_process(admission)
+        state = self._validated_identity_state(
+            self.adb.provider_state(timeout=self._time_left()), admission)
+        need(
              state.get("lifecycle") == "RESUMED" and
              state.get("rootAttached") is True and
              state.get("rootHasFocus") is True and
@@ -88,11 +110,22 @@ class EmulatorApp:
              state.get("rootLayoutRequested") is False and
              state.get("parentLayoutRequested") is False,
              "APP_SCENE_DRIFT")
-        process = _identity(state.get("process"), admission)
-        need(self.arm_deadline_ms is None or
-             process.get("armDeadlineElapsedMs") == self.arm_deadline_ms,
-             "APP_ARM_DRIFT")
         return state
+
+    def refresh_failure_evidence(self) -> dict[str, Any] | None:
+        if self.refresh_token is None:
+            return None
+        return {"phase": "refresh", "requestElapsedMs":
+                self.refresh_request_elapsed_ms,
+                "paintFloorRevision": self.refresh_paint_floor_revision,
+                "completedPaintCountFloor": self.refresh_completed_count_floor,
+                "polls": list(self.refresh_samples)}
+
+    def _record_refresh_sample(self, sample: dict[str, Any]) -> None:
+        # First observation plus the seven most recent; no raw state/tokens.
+        if len(self.refresh_samples) == MAX_REFRESH_SAMPLES:
+            self.refresh_samples.pop(1)
+        self.refresh_samples.append(sample)
 
     def _extras(self, admission: Admission, *, armed: bool,
                 refreshed: bool = False) -> dict[str, tuple[str, str]]:
@@ -222,10 +255,15 @@ class EmulatorApp:
              "ARM_LEASE_TOO_SHORT")
 
     def freshen_baseline(self, admission: Admission) -> None:
-        self._require_process(admission)
+        # The refresh provider consumes the exact five identity pins and arm
+        # token. Do not spend the two-second app paint freshness window on a
+        # second multi-command /proc probe after the already-checked attach.
         need(self.baseline_frame is not None and
              self.baseline_paint_revision is not None,
              "BASELINE_PROOF_MISSING")
+        self.refresh_samples.clear()
+        self.refresh_proof_host_received = None
+        self.refresh_age_upper_at_receipt_ms = None
         fields = self.adb.provider_call("refresh", None,
                     self._extras(admission, armed=True),
                     timeout=self._time_left(3.0))
@@ -246,46 +284,99 @@ class EmulatorApp:
              "REFRESH_FLOOR_INVALID")
         self.refresh_token = token
         self.refresh_request_elapsed_ms = requested
+        self.refresh_paint_floor_revision = floor
+        self.refresh_completed_count_floor = count_floor
         expiry = min(time.monotonic() + 2.5,
                      (self.host_deadline or time.monotonic()) - ARM_MARGIN)
         while time.monotonic() < expiry:
-            state = self._state(admission)
+            poll_started = time.monotonic()
+            state = self._state(admission, os_check=False)
+            poll_received = time.monotonic()
             current = _cut(state.get("current"), admission, self.baseline_frame)
             completed = _cut(state.get("lastCompletedPaint"), admission,
                              self.baseline_frame)
             sample = _integer(state.get("sampleElapsedMs"))
-            if (completed["exactNinePainted"] is True and
-                    completed["startedPaintRevision"] > floor and
-                    completed["completedPaintRevision"] >
-                        self.baseline_paint_revision and
-                    completed["paintStartedElapsedMs"] >= requested and
-                    completed["completedPaintElapsedMs"] >= requested and
-                    current == completed and
-                    sample >= completed["completedPaintElapsedMs"] and
-                    sample - completed["completedPaintElapsedMs"] <= 1000 and
-                    state.get("refreshRequested") is True and
-                    state.get("refreshPaintFloorRevision") == floor and
-                    state.get("refreshCompletedPaintCountFloor") == count_floor and
-                    state.get("refreshRequestedElapsedMs") == requested and
-                    state.get("completedPaintCount", 0) > count_floor and
-                    state["process"].get("armState") == "REFRESH_REQUESTED"):
+            completed_count = _integer(state.get("completedPaintCount"))
+            age_at_sample_ms = sample - completed["completedPaintElapsedMs"]
+            poll_ms = math.ceil(max(0.0, poll_received - poll_started) * 1000)
+            age_upper_ms = age_at_sample_ms + poll_ms
+            refresh_fields_match = (state.get("refreshRequested") is True and
+                state.get("refreshPaintFloorRevision") == floor and
+                state.get("refreshCompletedPaintCountFloor") == count_floor and
+                state.get("refreshRequestedElapsedMs") == requested)
+            new_complete = (completed["exactNinePainted"] is True and
+                completed["startedPaintRevision"] > floor and
+                completed["completedPaintRevision"] >
+                    self.baseline_paint_revision and
+                completed["paintStartedElapsedMs"] >= requested and
+                completed["completedPaintElapsedMs"] >= requested and
+                completed_count > count_floor)
+            scene_same = current == completed
+            arm_current = (state["process"].get("armState") ==
+                           "REFRESH_REQUESTED" and
+                           state["process"].get("armFinished") is False)
+            within_host_deadlines = (poll_received <= expiry and
+                poll_received < (self.host_deadline or 0) - ARM_MARGIN)
+            command_viable = (0 <= age_at_sample_ms <=
+                HOST_SAMPLE_FRESHNESS_MS and
+                age_upper_ms + COMMAND_DELIVERY_RESERVE_MS <
+                    APP_BASELINE_FRESHNESS_MS and within_host_deadlines)
+            self._record_refresh_sample({
+                "startedDelta": completed["startedPaintRevision"] - floor,
+                "completedDelta": completed["completedPaintRevision"] -
+                    self.baseline_paint_revision,
+                "countDelta": completed_count - count_floor,
+                "sampleAgeMs": age_at_sample_ms,
+                "pollRoundTripMs": poll_ms,
+                "ageUpperAtReceiptMs": age_upper_ms,
+                "exactNine": completed["exactNinePainted"],
+                "currentMatchesCompleted": scene_same,
+                "refreshFieldsMatch": refresh_fields_match,
+                "armCurrent": arm_current,
+                "withinHostDeadlines": within_host_deadlines,
+                "commandViable": command_viable})
+            if (new_complete and scene_same and refresh_fields_match and
+                    arm_current and command_viable):
                 self.baseline_frame = completed
                 self.baseline_paint_revision = completed["completedPaintRevision"]
+                self.refresh_proof_host_received = poll_received
+                self.refresh_age_upper_at_receipt_ms = age_upper_ms
                 return
             time.sleep(0.05)
         raise TrialError("REFRESHED_PAINT_UNAVAILABLE")
 
     def execute_and_restore(self, variant: str, admission: Admission) -> None:
-        self._require_process(admission)
-        started = time.monotonic()
         need(self.refresh_token is not None and
-             self.baseline_frame is not None,
+             self.baseline_frame is not None and
+             self.refresh_proof_host_received is not None and
+             self.refresh_age_upper_at_receipt_ms is not None,
              "REFRESH_PROOF_MISSING")
+        # The last /state cut pinned process incarnation, Activity and root.
+        # The command consumes those exact pins plus both one-shot tokens; an
+        # intervening replacement cannot accept it. Re-probe /proc only after
+        # the command so the app's 2s paint-freshness gate remains attainable.
+        started = time.monotonic()
+        age_upper_now_ms = (self.refresh_age_upper_at_receipt_ms +
+            math.ceil(max(0.0, started - self.refresh_proof_host_received) * 1000))
+        remaining_fresh_ms = APP_BASELINE_FRESHNESS_MS - age_upper_now_ms
+        need(remaining_fresh_ms > COMMAND_DELIVERY_RESERVE_MS,
+             "REFRESH_PAINT_TOO_OLD_FOR_COMMAND")
+        # The app checks its own 2s freshness at command execution. A reply
+        # may arrive later; shortening its wait would make an accepted one-shot
+        # command appear lost and unrepeatable without increasing safety.
         fields = self.adb.provider_call("command", variant,
                     self._extras(admission, armed=True, refreshed=True),
                     timeout=self._time_left(3.0))
-        bundle_json(fields, {"ok", "command", "json"})
+        response = self._validated_identity_state(
+            bundle_json(fields, {"ok", "command", "json"}), admission)
         need(fields["command"] == variant, "APP_COMMAND_MISMATCH")
+        need(response["process"].get("armState") ==
+             "TRIAL_WATCHDOG_ACTIVE" and
+             type(response.get("trial")) is dict and
+             response["trial"].get("command") == variant and
+             response["trial"].get("state") != "UNKNOWN",
+             "APP_COMMAND_RESPONSE_INVALID")
+        self._require_process(admission)
         active_deadline = started + TRIAL_MS / 1000.0
         while time.monotonic() < active_deadline:
             state = self._state(admission)

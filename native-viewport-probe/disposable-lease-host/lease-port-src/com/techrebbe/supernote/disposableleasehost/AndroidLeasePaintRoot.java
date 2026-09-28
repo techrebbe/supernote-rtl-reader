@@ -40,15 +40,18 @@ public final class AndroidLeasePaintRoot extends FrameLayout {
         final View[] children;
         final Object[] parents;
         final String[] evidence;
+        final boolean[] paintExpected;
         final String policy;
         final String scene;
         final long mutationRevision;
 
         DirectCut(View[] children, Object[] parents, String[] evidence,
+                boolean[] paintExpected,
                 String policy, String scene, long mutationRevision) {
             this.children = children;
             this.parents = parents;
             this.evidence = evidence;
+            this.paintExpected = paintExpected;
             this.policy = policy;
             this.scene = scene;
             this.mutationRevision = mutationRevision;
@@ -60,6 +63,7 @@ public final class AndroidLeasePaintRoot extends FrameLayout {
                     || !policy.equals(other.policy) || !scene.equals(other.scene)) return false;
             for (int i = 0; i < children.length; i++) {
                 if (children[i] != other.children[i] || parents[i] != other.parents[i]
+                        || paintExpected[i] != other.paintExpected[i]
                         || !evidence[i].equals(other.evidence[i])) return false;
             }
             return true;
@@ -71,6 +75,7 @@ public final class AndroidLeasePaintRoot extends FrameLayout {
     private final LeaseEvidenceMutationLedger mutations = new LeaseEvidenceMutationLedger();
     private final ArrayList<PaintedChild> drawing = new ArrayList<>();
     private TargetOwnedVisualLeaseCore.PaintFrame lastCompleted;
+    private DirectCut completedCut;
     private long completedMutationRevision = -1;
     private boolean drawingActive;
 
@@ -103,18 +108,16 @@ public final class AndroidLeasePaintRoot extends FrameLayout {
         return mutations.isCurrent(completedMutationRevision) ? lastCompleted : null;
     }
 
-    /** A current hierarchy cut paired with the last actual completed paint order. */
+    /** A current hierarchy cut. Its order is empty until this cut has actually painted. */
     public TargetOwnedVisualLeaseCore.Snapshot currentSnapshot() {
         requireMain();
-        if (lastCompleted == null || !mutations.isCurrent(completedMutationRevision)) {
-            throw new IllegalStateException("no stable completed paint pass");
-        }
         DirectCut cut = captureDirect();
-        Object[] order = lastCompletedOrder();
-        if (cut.children.length != order.length) {
-            throw new IllegalStateException("paint order does not cover current hierarchy");
-        }
-        return snapshot(cut, order);
+        // Cleanup needs the structural cut immediately after exact removal.
+        // A stale order must not masquerade as a freshly completed frame.
+        boolean paintCurrent = lastCompleted != null
+                && mutations.isCurrent(completedMutationRevision)
+                && cut.same(completedCut);
+        return snapshot(cut, snapshotOrder(paintCurrent, completedOrder));
     }
 
     @Override protected void dispatchDraw(Canvas canvas) {
@@ -135,6 +138,7 @@ public final class AndroidLeasePaintRoot extends FrameLayout {
                                 SystemClock.elapsedRealtime(), cut);
                 passes.complete(revision);
                 completedOrder = order.clone();
+                completedCut = after;
                 completedMutationRevision = after.mutationRevision;
                 lastCompleted = frame;
             }
@@ -148,37 +152,64 @@ public final class AndroidLeasePaintRoot extends FrameLayout {
     @Override protected boolean drawChild(Canvas canvas, View child, long drawingTime) {
         requireMain();
         if (!drawingActive) throw new IllegalStateException("drawChild outside paint pass");
-        drawing.add(new PaintedChild(child, indexOfChild(child), childEvidence(child)));
+        drawing.add(new PaintedChild(child, indexOfChild(child),
+                childEvidence(child, child.getVisibility())));
         return super.drawChild(canvas, child, drawingTime);
     }
 
     private Object[] verifiedPaintOrder(DirectCut before, DirectCut after) {
-        if (!before.same(after) || drawing.size() != after.children.length) return null;
-        IdentityHashMap<View, Boolean> seen = new IdentityHashMap<>();
+        if (!before.same(after)) return null;
         Object[] order = new Object[drawing.size()];
         for (int i = 0; i < drawing.size(); i++) {
             PaintedChild painted = drawing.get(i);
             if (painted.indexAtPaint < 0 || painted.indexAtPaint >= after.children.length
                     || after.children[painted.indexAtPaint] != painted.view
-                    || !painted.evidenceAtPaint.equals(after.evidence[painted.indexAtPaint])
-                    || seen.put(painted.view, true) != null) return null;
+                    || !painted.evidenceAtPaint.equals(after.evidence[painted.indexAtPaint])) {
+                return null;
+            }
             order[i] = painted.view;
         }
-        return order;
+        return paintParticipantsMatch(after.children, after.paintExpected, order) ? order : null;
     }
 
-    private Object[] lastCompletedOrder() {
-        // Snapshot intentionally has no public arrays. The root owns the
-        // paint-order witness directly, alongside the immutable core frame.
-        if (completedOrder == null) throw new IllegalStateException("no paint order");
-        return completedOrder.clone();
+    // Pure identity check shared by the Android pass and offline contract test.
+    // The expectation comes from visibility, not from the observed draws.
+    static boolean paintParticipantsMatch(Object[] children, boolean[] expected,
+            Object[] observed) {
+        if (children == null || expected == null || observed == null
+                || children.length != expected.length) return false;
+        IdentityHashMap<Object, Boolean> participants = new IdentityHashMap<>();
+        int expectedCount = 0;
+        for (int i = 0; i < children.length; i++) {
+            if (children[i] == null || participants.put(children[i], expected[i]) != null) {
+                return false;
+            }
+            if (expected[i]) expectedCount++;
+        }
+        if (observed.length != expectedCount) return false;
+        IdentityHashMap<Object, Boolean> seen = new IdentityHashMap<>();
+        for (Object child : observed) {
+            if (participants.get(child) != Boolean.TRUE || seen.put(child, true) != null) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static Object[] snapshotOrder(boolean completedPaintCurrent, Object[] completedOrder) {
+        return completedPaintCurrent && completedOrder != null
+                ? completedOrder.clone() : new Object[0];
+    }
+
+    static boolean expectsDrawChild(int visibility) {
+        return visibility == View.VISIBLE;
     }
 
     private Object[] completedOrder;
 
     private TargetOwnedVisualLeaseCore.Snapshot snapshot(DirectCut cut, Object[] order) {
         return new TargetOwnedVisualLeaseCore.Snapshot(this, cut.children, cut.parents,
-                cut.evidence, order, cut.policy, cut.scene);
+                cut.evidence, cut.paintExpected, order, cut.policy, cut.scene);
     }
 
     private DirectCut captureDirect() {
@@ -188,12 +219,18 @@ public final class AndroidLeasePaintRoot extends FrameLayout {
         View[] children = new View[count];
         Object[] parents = new Object[count];
         String[] evidence = new String[count];
+        boolean[] paintExpected = new boolean[count];
         for (int i = 0; i < count; i++) {
             View child = getChildAt(i);
             if (child == null) throw new IllegalStateException("null child");
             children[i] = child;
             parents[i] = child.getParent();
-            evidence[i] = childEvidence(child);
+            int visibility = child.getVisibility();
+            evidence[i] = childEvidence(child, visibility);
+            // Android's ordinary dispatch policy calls drawChild for visible
+            // direct children. Hidden children remain structural evidence;
+            // animation-driven or other unexpected draws fail verification.
+            paintExpected[i] = expectsDrawChild(visibility);
         }
         String sceneStamp = sceneAuthority.sceneStamp();
         if (sceneStamp == null || sceneStamp.isEmpty()) {
@@ -210,7 +247,8 @@ public final class AndroidLeasePaintRoot extends FrameLayout {
         if (!mutations.isCurrent(revisionAtStart)) {
             throw new IllegalStateException("evidence changed during hierarchy snapshot");
         }
-        return new DirectCut(children, parents, evidence, policy, scene, revisionAtStart);
+        return new DirectCut(children, parents, evidence, paintExpected,
+                policy, scene, revisionAtStart);
     }
 
     @Override protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
@@ -220,10 +258,10 @@ public final class AndroidLeasePaintRoot extends FrameLayout {
         super.onLayout(changed, left, top, right, bottom);
     }
 
-    private static String childEvidence(View child) {
+    private static String childEvidence(View child, int visibility) {
         StringBuilder out = new StringBuilder();
         out.append(child.getClass().getName()).append(':').append(child.getId())
-                .append(':').append(child.getVisibility())
+                .append(':').append(visibility)
                 .append(':').append(child.getLeft()).append(',').append(child.getTop())
                 .append(',').append(child.getRight()).append(',').append(child.getBottom())
                 .append(':').append(Float.floatToRawIntBits(child.getAlpha()))

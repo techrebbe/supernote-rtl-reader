@@ -174,16 +174,26 @@ public final class TargetOwnedVisualLeaseCore {
             return true;
         }
 
-        private boolean sameNine(Snapshot other) {
+        // A post-remove cut can prove exact structure before the first new
+        // paint, when no current drawChild order exists. It never substitutes
+        // for sameNine on the later completed restoration frame.
+        private boolean sameNineStructure(Snapshot other) {
             if (other == null || root != other.root || children.length != 9
                     || other.children.length != 9
-                    || other.effectiveDrawOrder.length != effectiveDrawOrder.length
                     || !drawPolicyEvidence.equals(other.drawPolicyEvidence)
                     || !sceneEvidence.equals(other.sceneEvidence)) return false;
             for (int i = 0; i < 9; i++) {
                 if (children[i] != other.children[i] || parents[i] != other.parents[i]
                         || paintExpected[i] != other.paintExpected[i]
                         || !childEvidence[i].equals(other.childEvidence[i])) return false;
+            }
+            return true;
+        }
+
+        private boolean sameNine(Snapshot other) {
+            if (!sameNineStructure(other)
+                    || other.effectiveDrawOrder.length != effectiveDrawOrder.length) {
+                return false;
             }
             for (int i = 0; i < effectiveDrawOrder.length; i++) {
                 if (effectiveDrawOrder[i] != other.effectiveDrawOrder[i]) return false;
@@ -868,7 +878,7 @@ public final class TargetOwnedVisualLeaseCore {
     private boolean liveOriginalNine() {
         return port.processAlive() && port.rootAlive() && port.root() == root
                 && (owned == null || port.parentOf(owned) == null)
-                && before != null && before.sameNine(port.snapshot());
+                && before != null && before.sameNineStructure(port.snapshot());
     }
 
     private boolean pastLatenessBound(long now) {

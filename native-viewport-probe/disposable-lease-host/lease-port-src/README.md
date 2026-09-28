@@ -46,13 +46,16 @@ cover the pinned XML shape with child 7 `GONE`, missing visible children,
 visibility transitions, and an owned child at a distinct structural/paint
 slot. This is an offline representation result, not stock runtime evidence.
 
-The Android root is **not** wired to supply the new expectation: it still
-requires paint count to equal direct-child count, so a GONE child cannot be
-admitted there. Its `currentSnapshot()` also requires a completed frame after
-each mutation, whereas Core cleanup needs an immediate structural snapshot
-after removal. Those Port gaps need separate coordinated design and tests.
-The XML `GONE` value alone does not prove actual stock draw order. Fresh,
-read-only Nomad hierarchy/paint evidence remains required before integration.
+The offline Android paint root now derives expected participants from each
+child's visibility and rejects missing, extra, or duplicate actual
+`drawChild` calls. After a mutation, `currentSnapshot()` can report the
+current structure with an empty paint order; it does not borrow an old frame.
+The Core uses that cut only for the immediate post-removal structural check
+and still requires a later completed paint frame to report restoration.
+These source and host checks do not wire an Activity or exercise a real
+Android child insertion. The Nomad hierarchy capture matched the pinned
+nine-child shape, but neither the XML nor that capture proves stock paint
+order or final e-ink composition.
 
 Remaining gates: independently review these sources; wire an Activity-owned
 scene/lifecycle/mutation authority only in a separate reviewed change; prove

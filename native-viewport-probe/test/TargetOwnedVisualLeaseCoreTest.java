@@ -108,6 +108,9 @@ public final class TargetOwnedVisualLeaseCoreTest {
         int paintInsertSlot = 1;
         boolean autoAddPaint = true;
         boolean autoRemovePaint = true;
+        boolean dropPaintOrderAfterRemove;
+        boolean paintOrderUnavailable;
+        int snapshotsWithoutPaintOrder;
         boolean beginPaintDuringAdd;
         boolean beginPaintBeforeRemove;
         boolean failPaintScheduleAfterAdd;
@@ -213,8 +216,9 @@ public final class TargetOwnedVisualLeaseCoreTest {
                 seenEvidence[i] = evidence.get(seen[i]);
                 seenPaintExpected[i] = paintExpected.get(seen[i]) == Boolean.TRUE;
             }
-            Object[] painted = effectiveDrawOrder.toArray(
-                    new Object[effectiveDrawOrder.size()]);
+            if (paintOrderUnavailable) snapshotsWithoutPaintOrder++;
+            Object[] painted = paintOrderUnavailable ? new Object[0]
+                    : effectiveDrawOrder.toArray(new Object[effectiveDrawOrder.size()]);
             Snapshot captured = useLegacyAllVisibleSnapshot
                     ? new Snapshot(root, seen, seenParents, seenEvidence,
                             painted, drawPolicy, scene)
@@ -289,6 +293,10 @@ public final class TargetOwnedVisualLeaseCoreTest {
                     break;
                 }
             }
+            if (dropPaintOrderAfterRemove) {
+                paintOrderUnavailable = true;
+                lastCompletedPaintFrame = null;
+            }
             now += removeAdvance;
             if (staleRevision > 0) schedulePaintCompletion(staleRevision, 1);
             else if (autoRemovePaint) scheduleFreshPaint(1);
@@ -303,6 +311,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
             events.add(new Event(now + delay, nextOrder++, new Runnable() {
                 @Override public void run() {
                     long begun = ++startedPaintRevision;
+                    paintOrderUnavailable = false;
                     lastCompletedPaintFrame = new PaintFrame(begun, now, snapshot());
                 }
             }));
@@ -1257,6 +1266,9 @@ public final class TargetOwnedVisualLeaseCoreTest {
         paintDrift.effectiveDrawOrder.set(2, firstPaint);
         require(!paintDriftLease.mayDraw(), "paint-order drift allowed drawing");
         paintDrift.runReady();
+        require(paintDriftLease.state() == State.REMOVING,
+                "paint-order drift bypassed the fresh restoration-frame fence");
+        paintDrift.advance(2);
         require(paintDriftLease.state() == State.QUARANTINED,
                 "paint-order drift was reported as restoration");
 
@@ -1458,11 +1470,14 @@ public final class TargetOwnedVisualLeaseCoreTest {
         require(pending.state() == State.PREPARED, "missing-after-add fixture not pending");
         missingAfterAdd.effectiveDrawOrder.remove(missingAfterAdd.original[4]);
         missingAfterAdd.scheduleFreshPaint(1);
-        missingAfterAdd.advance(2);
+        missingAfterAdd.advance(3);
         require(pending.result() == Result.UNKNOWN
                 && missingAfterAdd.drawRequests == 0
                 && missingAfterAdd.removeCalls == 1,
-                "post-add omitted visible child authorized owned pixels");
+                "post-add omitted visible child authorized owned pixels: state="
+                        + pending.state() + " result=" + pending.result()
+                        + " draws=" + missingAfterAdd.drawRequests
+                        + " removes=" + missingAfterAdd.removeCalls);
 
         FakePort newlyVisible = new FakePort();
         newlyVisible.setStockSevenVisible(false);
@@ -1835,6 +1850,83 @@ public final class TargetOwnedVisualLeaseCoreTest {
                 "failed post-removal callback post reported restoration");
     }
 
+    private static void testPostRemoveStructureBeforeFreshPaint() {
+        FakePort delayed = new FakePort();
+        delayed.setStockSevenVisible(false);
+        delayed.completeFreshPaintNow();
+        delayed.paintInsertSlot = 7;
+        delayed.dropPaintOrderAfterRemove = true;
+        delayed.autoRemovePaint = false;
+        Slot delayedSlot = new Slot();
+        TargetOwnedVisualLeaseCore lease = TargetOwnedVisualLeaseCore.startForTest(
+                delayedSlot, delayed, new TargetOwnedVisualLeaseCore.Factory() {
+                    @Override public Object create(DrawGate drawGate) {
+                        return new GateBoundChild(drawGate);
+                    }
+                }, 8, 7, 50, 10, 10, 40);
+        delayed.advance(1);
+        require(lease.state() == State.INSERTED, "post-remove fixture not admitted");
+        lease.requestCleanup(Reason.HOST_STOP);
+        delayed.runReady();
+        long beforeFreshPaint = delayed.startedPaintRevision;
+        require(lease.state() == State.REMOVING && lease.result() == Result.PENDING
+                && delayed.removeCalls == 1 && delayed.children.size() == 9
+                && delayed.paintOrderUnavailable && delayed.lastCompletedPaintFrame == null
+                && delayed.snapshotsWithoutPaintOrder > 0 && delayedSlot.occupied(),
+                "immediate structural cut required or fabricated a completed paint order");
+        delayed.advance(3);
+        require(lease.state() == State.REMOVING && lease.result() == Result.PENDING,
+                "structural-only post-remove cut produced a live rollback claim");
+        delayed.scheduleFreshPaint(1);
+        delayed.advance(3);
+        require(delayed.startedPaintRevision > beforeFreshPaint
+                && delayed.lastCompletedPaintFrame != null
+                && lease.state() == State.REMOVED
+                && lease.result() == Result.LIVE_STRUCTURE_RESTORED
+                && !delayedSlot.occupied(),
+                "fresh eight-painted restoration frame was not required and accepted");
+        delayed.exactNineWithGoneSeven();
+
+        FakePort reordered = new FakePort();
+        reordered.dropPaintOrderAfterRemove = true;
+        reordered.autoRemovePaint = false;
+        Slot reorderedSlot = new Slot();
+        TargetOwnedVisualLeaseCore reorderedLease = start(reorderedSlot, reordered);
+        reorderedLease.requestCleanup(Reason.HOST_STOP);
+        reordered.runReady();
+        require(reorderedLease.state() == State.REMOVING
+                && reordered.paintOrderUnavailable,
+                "reordered-paint fixture did not pass the immediate structural cut");
+        Object firstVisible = reordered.effectiveDrawOrder.get(1);
+        reordered.effectiveDrawOrder.set(1, reordered.effectiveDrawOrder.get(2));
+        reordered.effectiveDrawOrder.set(2, firstVisible);
+        reordered.scheduleFreshPaint(1);
+        reordered.advance(3);
+        require(reordered.lastCompletedPaintFrame != null
+                && reorderedLease.state() == State.QUARANTINED
+                && reorderedLease.result() == Result.UNKNOWN
+                && reorderedSlot.occupied(),
+                "fresh frame with reordered visible siblings passed restoration");
+
+        FakePort sceneDrift = new FakePort();
+        sceneDrift.dropPaintOrderAfterRemove = true;
+        sceneDrift.autoRemovePaint = false;
+        Slot sceneSlot = new Slot();
+        TargetOwnedVisualLeaseCore driftedLease = start(sceneSlot, sceneDrift);
+        driftedLease.requestCleanup(Reason.HOST_STOP);
+        sceneDrift.runReady();
+        require(driftedLease.state() == State.REMOVING,
+                "scene-drift fixture did not pass the immediate structural cut");
+        sceneDrift.evidenceMutationRevision++;
+        sceneDrift.scene = "page B|uri B|render B|root 1404x1872|epoch 2";
+        sceneDrift.scheduleFreshPaint(1);
+        sceneDrift.advance(3);
+        require(sceneDrift.lastCompletedPaintFrame != null
+                && driftedLease.state() == State.QUARANTINED
+                && driftedLease.result() == Result.UNKNOWN && sceneSlot.occupied(),
+                "fresh frame after scene drift passed restoration");
+    }
+
     private static void testSlowPaintReadsAndQueuedStop() {
         FakePort slowPreAdd = new FakePort();
         slowPreAdd.nextCompletedPaintReadAdvance = 50;
@@ -2191,6 +2283,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         testGoneVisibilityAndUnexpectedOmissions();
         testCompletedPaintAdmission();
         testCompletedPaintRestoration();
+        testPostRemoveStructureBeforeFreshPaint();
         testSlowPaintReadsAndQueuedStop();
         testFinalPaintProofAndDispatchFailure();
         testRootProcessLossAndRemoveFailures();

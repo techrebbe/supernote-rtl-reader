@@ -31,7 +31,8 @@ $sources = @(
     (Join-Path $portPackage 'AndroidLeaseVisualView.java'),
     (Join-Path $portPackage 'AndroidLeasePort.java'),
     (Join-Path $PSScriptRoot 'tests\LeasePaintPassLedgerTest.java'),
-    (Join-Path $PSScriptRoot 'tests\LeaseEvidenceMutationLedgerTest.java')
+    (Join-Path $PSScriptRoot 'tests\LeaseEvidenceMutationLedgerTest.java'),
+    (Join-Path $PSScriptRoot 'tests\AndroidLeasePaintRootContractTest.java')
 )
 & $javac -encoding UTF-8 --release 8 -classpath $androidJar -d $classes @sources
 if ($LASTEXITCODE -ne 0) { throw 'Disposable Android Port compilation failed.' }
@@ -39,4 +40,6 @@ if ($LASTEXITCODE -ne 0) { throw 'Disposable Android Port compilation failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Paint pass contract test failed.' }
 & $java -classpath $classes com.techrebbe.supernote.disposableleasehost.LeaseEvidenceMutationLedgerTest
 if ($LASTEXITCODE -ne 0) { throw 'Evidence mutation contract test failed.' }
+& $java -classpath "$classes;$androidJar" com.techrebbe.supernote.disposableleasehost.AndroidLeasePaintRootContractTest
+if ($LASTEXITCODE -ne 0) { throw 'Paint-root visibility contract test failed.' }
 Write-Output 'LEASE_PORT_COMPILE_PASS (offline only; no APK install or device operation)'

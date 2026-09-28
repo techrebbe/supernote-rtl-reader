@@ -60,12 +60,16 @@ $sources+=Join-Path $probeRoot 'test/ViewportFrameTest.java'
 $sources+=Join-Path $probeRoot 'java/com/techrebbe/supernote/viewportprobe/DisplayProbeLayout.java'
 $sources+=Join-Path $probeRoot 'java/com/techrebbe/supernote/viewportprobe/DisplayProbeLifecycle.java'
 $sources+=Join-Path $probeRoot 'test/DisplayProbeLayoutTest.java'
+$sources+=Join-Path $probeRoot 'java/com/techrebbe/supernote/viewportprobe/TargetOwnedVisualLeaseCore.java'
+$sources+=Join-Path $probeRoot 'test/TargetOwnedVisualLeaseCoreTest.java'
 & $javac -encoding UTF-8 --release 8 -d $buildPath @sources
 if ($LASTEXITCODE -ne 0) {throw 'Viewport contract compilation failed'}
 & $java -cp $buildPath ViewportFrameTest
 if ($LASTEXITCODE -ne 0) {throw 'Viewport contract tests failed'}
 & $java -cp $buildPath DisplayProbeLayoutTest
 if ($LASTEXITCODE -ne 0) {throw 'Display surface layout tests failed'}
+& $java -cp $buildPath com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCoreTest
+if ($LASTEXITCODE -ne 0) {throw 'Target-owned visual lease core tests failed'}
 $savedInkSources=@(
     (Join-Path $probeRoot 'host-stubs/android/graphics/Point.java'),
     (Join-Path $probeRoot 'host-stubs/android/graphics/PointF.java'),

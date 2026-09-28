@@ -39,64 +39,90 @@ public final class TargetOwnedVisualLeaseCore {
     }
 
     /**
-     * Immutable captured evidence. Each canonical child string must cover its
-     * class, ID, draw order, visibility, bounds, Z, and layout parameters; the
-     * scene string must cover the available page/URI/render and root geometry.
-     * Strings are compared only as restoration evidence, never removal authority.
+     * Immutable captured evidence. Children are in direct-root order; the
+     * effective draw-order vector separately records exact bottom-to-top child
+     * identities. Each child string covers stable class, ID, visibility,
+     * bounds, Z, and layout parameters, but not an absolute draw rank (which
+     * legitimately shifts when our child is inserted). Draw-policy evidence
+     * covers the ordering mechanism; scene evidence covers available
+     * page/URI/render and root geometry. A Port unable to establish effective
+     * draw order must reject rather than guess from direct child order.
+     * Strings are restoration evidence only, never removal authority.
      */
     public static final class Snapshot {
         private final Object root;
         private final Object[] children;
         private final Object[] parents;
         private final String[] childEvidence;
+        private final Object[] effectiveDrawOrder;
+        private final String drawPolicyEvidence;
         private final String sceneEvidence;
 
         public Snapshot(Object root, Object[] children, Object[] parents,
-                String[] childEvidence, String sceneEvidence) {
+                String[] childEvidence, Object[] effectiveDrawOrder,
+                String drawPolicyEvidence, String sceneEvidence) {
             if (root == null || children == null || parents == null || childEvidence == null
+                    || effectiveDrawOrder == null || drawPolicyEvidence == null
                     || sceneEvidence == null || children.length != parents.length
-                    || children.length != childEvidence.length) {
+                    || children.length != childEvidence.length
+                    || children.length != effectiveDrawOrder.length) {
                 throw new IllegalArgumentException("incomplete hierarchy snapshot");
             }
             this.root = root;
             this.children = children.clone();
             this.parents = parents.clone();
             this.childEvidence = childEvidence.clone();
+            this.effectiveDrawOrder = effectiveDrawOrder.clone();
+            this.drawPolicyEvidence = drawPolicyEvidence;
             this.sceneEvidence = sceneEvidence;
         }
 
         private boolean validNine(Object expectedRoot) {
             if (root != expectedRoot || children.length != 9) return false;
             IdentityHashMap<Object, Boolean> seen = new IdentityHashMap<Object, Boolean>();
+            IdentityHashMap<Object, Boolean> painted = new IdentityHashMap<Object, Boolean>();
             for (int i = 0; i < 9; i++) {
                 if (children[i] == null || parents[i] != expectedRoot
                         || childEvidence[i] == null || seen.put(children[i], true) != null) {
                     return false;
                 }
             }
+            for (Object child : effectiveDrawOrder) {
+                if (seen.get(child) == null || painted.put(child, true) != null) return false;
+            }
             return true;
         }
 
         private boolean sameNine(Snapshot other) {
             if (other == null || root != other.root || children.length != 9
-                    || other.children.length != 9
+                    || other.children.length != 9 || other.effectiveDrawOrder.length != 9
+                    || !drawPolicyEvidence.equals(other.drawPolicyEvidence)
                     || !sceneEvidence.equals(other.sceneEvidence)) return false;
             for (int i = 0; i < 9; i++) {
                 if (children[i] != other.children[i] || parents[i] != other.parents[i]
+                        || effectiveDrawOrder[i] != other.effectiveDrawOrder[i]
                         || !childEvidence[i].equals(other.childEvidence[i])) return false;
             }
             return true;
         }
 
-        private boolean sameNinePlusOwned(Snapshot other, Object owned, int slot) {
+        private boolean sameNinePlusOwned(Snapshot other, Object owned,
+                int directSlot, int paintSlot) {
             if (other == null || root != other.root || other.children.length != 10
-                    || other.children[slot] != owned || other.parents[slot] != root
-                    || other.childEvidence[slot] == null
+                    || other.effectiveDrawOrder.length != 10
+                    || other.children[directSlot] != owned
+                    || other.effectiveDrawOrder[paintSlot] != owned
+                    || other.parents[directSlot] != root
+                    || other.childEvidence[directSlot] == null
+                    || !drawPolicyEvidence.equals(other.drawPolicyEvidence)
                     || !sceneEvidence.equals(other.sceneEvidence)) return false;
             for (int i = 0; i < 9; i++) {
-                int at = i < slot ? i : i + 1;
-                if (children[i] != other.children[at] || parents[i] != other.parents[at]
-                        || !childEvidence[i].equals(other.childEvidence[at])) return false;
+                int directAt = i < directSlot ? i : i + 1;
+                int paintAt = i < paintSlot ? i : i + 1;
+                if (children[i] != other.children[directAt]
+                        || parents[i] != other.parents[directAt]
+                        || effectiveDrawOrder[i] != other.effectiveDrawOrder[paintAt]
+                        || !childEvidence[i].equals(other.childEvidence[directAt])) return false;
             }
             return true;
         }
@@ -126,6 +152,7 @@ public final class TargetOwnedVisualLeaseCore {
     private final Slot slot;
     private final Port port;
     private final int insertSlot;
+    private final int paintSlot;
     private final long lifetimeMillis;
     private final long maxDeadlineLatenessMillis;
     private final long maxVerificationGapMillis;
@@ -163,12 +190,13 @@ public final class TargetOwnedVisualLeaseCore {
     private volatile boolean finalizing;
     private volatile boolean invalidatedWhileFinalizing;
 
-    private TargetOwnedVisualLeaseCore(Slot slot, Port port, int insertSlot,
+    private TargetOwnedVisualLeaseCore(Slot slot, Port port, int insertSlot, int paintSlot,
             long lifetimeMillis, long maxDeadlineLatenessMillis,
             long maxVerificationGapMillis) {
         this.slot = slot;
         this.port = port;
         this.insertSlot = insertSlot;
+        this.paintSlot = paintSlot;
         this.lifetimeMillis = lifetimeMillis;
         this.maxDeadlineLatenessMillis = maxDeadlineLatenessMillis;
         this.maxVerificationGapMillis = maxVerificationGapMillis;
@@ -180,24 +208,28 @@ public final class TargetOwnedVisualLeaseCore {
      * selected by this offline model.
      */
     public static TargetOwnedVisualLeaseCore start(Port port, Factory factory,
-            int provenSlot, long lifetimeMillis, long maxDeadlineLatenessMillis,
+            int provenDirectSlot, int provenPaintSlot, long lifetimeMillis,
+            long maxDeadlineLatenessMillis,
             long maxVerificationGapMillis) {
-        return startForTest(PROCESS_SLOT, port, factory, provenSlot,
+        return startForTest(PROCESS_SLOT, port, factory, provenDirectSlot, provenPaintSlot,
                 lifetimeMillis, maxDeadlineLatenessMillis, maxVerificationGapMillis);
     }
 
     // Isolated slots are available only to the same-package deterministic tests.
     static TargetOwnedVisualLeaseCore startForTest(Slot slot, Port port, Factory factory,
-            int provenSlot, long lifetimeMillis, long maxDeadlineLatenessMillis,
+            int provenDirectSlot, int provenPaintSlot, long lifetimeMillis,
+            long maxDeadlineLatenessMillis,
             long maxVerificationGapMillis) {
-        if (slot == null || port == null || factory == null || provenSlot < 0
-                || provenSlot > 9 || lifetimeMillis <= 0
+        if (slot == null || port == null || factory == null || provenDirectSlot < 0
+                || provenDirectSlot > 9 || provenPaintSlot < 0 || provenPaintSlot > 9
+                || lifetimeMillis <= 0
                 || maxDeadlineLatenessMillis < 0 || maxVerificationGapMillis < 0) {
             throw new IllegalArgumentException("invalid lease arguments");
         }
         port.requireMainThread();
         TargetOwnedVisualLeaseCore lease = new TargetOwnedVisualLeaseCore(
-                slot, port, provenSlot, lifetimeMillis, maxDeadlineLatenessMillis,
+                slot, port, provenDirectSlot, provenPaintSlot,
+                lifetimeMillis, maxDeadlineLatenessMillis,
                 maxVerificationGapMillis);
         if (!slot.acquire(lease)) throw new IllegalStateException("trial already active");
         lease.prepareAndInsert(factory);
@@ -295,7 +327,7 @@ public final class TargetOwnedVisualLeaseCore {
                 return;
             }
             Snapshot insertedWitness = port.snapshot();
-            if (!before.sameNinePlusOwned(insertedWitness, owned, insertSlot)) {
+            if (!before.sameNinePlusOwned(insertedWitness, owned, insertSlot, paintSlot)) {
                 cleanup(Reason.DRIFT);
                 return;
             }
@@ -386,7 +418,7 @@ public final class TargetOwnedVisualLeaseCore {
         try {
             Snapshot drawWitness = port.snapshot();
             if (port.parentOf(owned) == root && ownedEvidence != null
-                    && before.sameNinePlusOwned(drawWitness, owned, insertSlot)
+                    && before.sameNinePlusOwned(drawWitness, owned, insertSlot, paintSlot)
                     && ownedEvidence.equals(drawWitness.childEvidence[insertSlot])) {
                 if (!port.processAlive()) {
                     requestCleanup(Reason.PROCESS_LOSS);

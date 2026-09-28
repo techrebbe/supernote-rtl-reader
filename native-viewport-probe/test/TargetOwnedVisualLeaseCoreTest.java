@@ -40,6 +40,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         final Identity foreignParent = new Identity("foreign parent");
         final Identity[] original = new Identity[9];
         final List<Object> children = new ArrayList<Object>();
+        final List<Object> effectiveDrawOrder = new ArrayList<Object>();
         final IdentityHashMap<Object, Object> parents = new IdentityHashMap<Object, Object>();
         final IdentityHashMap<Object, String> evidence = new IdentityHashMap<Object, String>();
         final List<Event> events = new ArrayList<Event>();
@@ -77,10 +78,12 @@ public final class TargetOwnedVisualLeaseCoreTest {
         int addCalls;
         boolean throwBeforeAdd;
         boolean throwAfterAttach;
+        int paintInsertSlot = 1;
         boolean throwBeforeRemove;
         boolean throwAfterRemove;
         long removeAdvance;
         String scene = "page A|uri A|render A|root 1404x1872|epoch 1";
+        String drawPolicy = "default child order|no transient children|all Z zero";
         Runnable pause;
         Runnable rootLoss;
         Runnable drift;
@@ -89,9 +92,19 @@ public final class TargetOwnedVisualLeaseCoreTest {
             for (int i = 0; i < 9; i++) {
                 original[i] = new Identity("stock " + i);
                 children.add(original[i]);
+                effectiveDrawOrder.add(original[i]);
                 parents.put(original[i], root);
-                evidence.put(original[i], "class|id|draw|visibility|bounds|z|layout " + i);
+                evidence.put(original[i], "class|id|visibility|bounds|z|layout " + i);
             }
+        }
+
+        void useCustomPaintOrder() {
+            // The controlled root exposes this actual non-default order; it
+            // is not inferred from direct-child indices or an inserted child.
+            Object stockOne = effectiveDrawOrder.remove(1);
+            effectiveDrawOrder.add(2, stockOne);
+            drawPolicy = "custom stable sibling order|no transients|all Z zero";
+            paintInsertSlot = 2;
         }
 
         @Override public void requireMainThread() { /* deterministic one-thread executor */ }
@@ -117,7 +130,9 @@ public final class TargetOwnedVisualLeaseCoreTest {
                 seenParents[i] = parents.get(seen[i]);
                 seenEvidence[i] = evidence.get(seen[i]);
             }
-            return new Snapshot(root, seen, seenParents, seenEvidence, scene);
+            return new Snapshot(root, seen, seenParents, seenEvidence,
+                    effectiveDrawOrder.toArray(new Object[effectiveDrawOrder.size()]),
+                    drawPolicy, scene);
         }
         @Override public Object parentOf(Object child) { return parents.get(child); }
         @Override public void add(Object child, int provenSlot) {
@@ -126,6 +141,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
             require(addSawDeadline, "target deadline was not armed before add");
             if (throwBeforeAdd) throw new IllegalStateException("before add");
             children.add(provenSlot, child);
+            effectiveDrawOrder.add(paintInsertSlot, child);
             parents.put(child, root);
             evidence.put(child, "owned visual only");
             now += addAdvance;
@@ -144,6 +160,12 @@ public final class TargetOwnedVisualLeaseCoreTest {
                 }
             }
             if (found) parents.remove(child);
+            for (Iterator<Object> iter = effectiveDrawOrder.iterator(); iter.hasNext();) {
+                if (iter.next() == child) {
+                    iter.remove();
+                    break;
+                }
+            }
             now += removeAdvance;
             if (throwAfterRemove) throw new IllegalStateException("after remove");
         }
@@ -226,13 +248,19 @@ public final class TargetOwnedVisualLeaseCoreTest {
         void advance(long millis) { now += millis; runReady(); }
         void exactNine() {
             require(children.size() == 9, "wrong child count");
+            require(effectiveDrawOrder.size() == 9, "wrong effective draw count");
             for (int i = 0; i < 9; i++) {
                 require(children.get(i) == original[i], "wrong child identity/order at " + i);
+                require(effectiveDrawOrder.get(i) == original[i],
+                        "wrong effective draw identity/order at " + i);
                 require(parents.get(original[i]) == root, "stock child moved");
             }
         }
         void removeOwnedExternally(Object owned) {
             for (Iterator<Object> iter = children.iterator(); iter.hasNext();) {
+                if (iter.next() == owned) { iter.remove(); break; }
+            }
+            for (Iterator<Object> iter = effectiveDrawOrder.iterator(); iter.hasNext();) {
                 if (iter.next() == owned) { iter.remove(); break; }
             }
             parents.remove(owned);
@@ -248,6 +276,13 @@ public final class TargetOwnedVisualLeaseCoreTest {
         if (!condition) throw new AssertionError(message);
     }
 
+    private static void requirePaintOrder(FakePort port, Object[] expected, String message) {
+        require(port.effectiveDrawOrder.size() == expected.length, message + " length");
+        for (int i = 0; i < expected.length; i++) {
+            require(port.effectiveDrawOrder.get(i) == expected[i], message + " at " + i);
+        }
+    }
+
     private static TargetOwnedVisualLeaseCore start(Slot slot, FakePort port) {
         return start(slot, port,
                 new TargetOwnedVisualLeaseCore.Factory() {
@@ -257,7 +292,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
 
     private static TargetOwnedVisualLeaseCore start(Slot slot, FakePort port,
             TargetOwnedVisualLeaseCore.Factory factory) {
-        return TargetOwnedVisualLeaseCore.startForTest(slot, port, factory, 1, 50, 10, 10);
+        return TargetOwnedVisualLeaseCore.startForTest(slot, port, factory, 1, 1, 50, 10, 10);
     }
 
     private static void testNormalAndCollision() {
@@ -267,6 +302,10 @@ public final class TargetOwnedVisualLeaseCoreTest {
         require(lease.state() == State.INSERTED, "not inserted");
         require(port.children.size() == 10 && port.children.get(1) == lease.ownedChild(),
                 "wrong insertion slot");
+        require(port.effectiveDrawOrder.size() == 10
+                && port.effectiveDrawOrder.get(1) == lease.ownedChild()
+                && port.effectiveDrawOrder.get(2) == port.original[1],
+                "effective paint insertion did not shift the original rank");
         require(lease.mayDraw(), "live draw denied");
         try {
             start(slot, new FakePort());
@@ -293,9 +332,9 @@ public final class TargetOwnedVisualLeaseCoreTest {
             @Override public Object create() { return new Identity("owned"); }
         };
         FakePort first = new FakePort();
-        TargetOwnedVisualLeaseCore lease = TargetOwnedVisualLeaseCore.start(first, factory, 1, 50, 10, 10);
+        TargetOwnedVisualLeaseCore lease = TargetOwnedVisualLeaseCore.start(first, factory, 1, 1, 50, 10, 10);
         try {
-            TargetOwnedVisualLeaseCore.start(new FakePort(), factory, 1, 50, 10, 10);
+            TargetOwnedVisualLeaseCore.start(new FakePort(), factory, 1, 1, 50, 10, 10);
             throw new AssertionError("production slot admitted a second lease");
         } catch (IllegalStateException expected) { checks++; }
         lease.requestCleanup(Reason.HOST_STOP);
@@ -303,7 +342,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         first.advance(1);
         require(lease.state() == State.REMOVED, "production slot did not release");
         FakePort second = new FakePort();
-        TargetOwnedVisualLeaseCore next = TargetOwnedVisualLeaseCore.start(second, factory, 1, 50, 10, 10);
+        TargetOwnedVisualLeaseCore next = TargetOwnedVisualLeaseCore.start(second, factory, 1, 1, 50, 10, 10);
         require(next.state() == State.INSERTED, "production slot did not admit safe next lease");
         next.requestCleanup(Reason.HOST_STOP);
         second.runReady();
@@ -818,6 +857,104 @@ public final class TargetOwnedVisualLeaseCoreTest {
                 "changed page/scene evidence passed restoration");
     }
 
+    private static void testEffectiveDrawingOrderEvidence() {
+        TargetOwnedVisualLeaseCore.Factory factory = new TargetOwnedVisualLeaseCore.Factory() {
+            @Override public Object create() { return new Identity("owned"); }
+        };
+
+        FakePort independentlyProvenSlot = new FakePort();
+        independentlyProvenSlot.useCustomPaintOrder();
+        Object[] customBaseline = independentlyProvenSlot.original.clone();
+        customBaseline[1] = independentlyProvenSlot.original[2];
+        customBaseline[2] = independentlyProvenSlot.original[1];
+        requirePaintOrder(independentlyProvenSlot, customBaseline,
+                "custom-order stock baseline");
+        require(independentlyProvenSlot.children.get(1) == independentlyProvenSlot.original[1]
+                && independentlyProvenSlot.drawPolicy.startsWith("custom"),
+                "custom-order fixture did not establish a distinct baseline permutation");
+        TargetOwnedVisualLeaseCore differentSlots = TargetOwnedVisualLeaseCore.startForTest(
+                new Slot(), independentlyProvenSlot, factory, 1, 2, 50, 10, 10);
+        require(differentSlots.state() == State.INSERTED
+                && independentlyProvenSlot.children.get(1) == differentSlots.ownedChild()
+                && independentlyProvenSlot.effectiveDrawOrder.get(2) == differentSlots.ownedChild()
+                && independentlyProvenSlot.effectiveDrawOrder.get(3)
+                    == independentlyProvenSlot.original[1],
+                "separately proven direct and paint slots were conflated");
+        Object[] customInserted = new Object[10];
+        for (int i = 0; i < 9; i++) {
+            customInserted[i < 2 ? i : i + 1] = customBaseline[i];
+        }
+        customInserted[2] = differentSlots.ownedChild();
+        requirePaintOrder(independentlyProvenSlot, customInserted,
+                "custom-order inserted permutation");
+        differentSlots.requestCleanup(Reason.HOST_STOP);
+        independentlyProvenSlot.runReady();
+        independentlyProvenSlot.advance(1);
+        require(differentSlots.result() == Result.LIVE_STRUCTURE_RESTORED,
+                "separately proven paint slot failed exact restoration");
+        requirePaintOrder(independentlyProvenSlot, customBaseline,
+                "custom-order restored permutation");
+        require(independentlyProvenSlot.children.size() == 9
+                && independentlyProvenSlot.drawPolicy.startsWith("custom"),
+                "custom paint permutation was not preserved on restoration");
+
+        FakePort wrongRank = new FakePort();
+        wrongRank.paintInsertSlot = 2;
+        Slot wrongRankSlot = new Slot();
+        TargetOwnedVisualLeaseCore wrongRankLease = start(wrongRankSlot, wrongRank);
+        wrongRank.runReady();
+        wrongRank.advance(1);
+        require(wrongRankLease.state() == State.REMOVED
+                && wrongRankLease.result() == Result.UNKNOWN
+                && wrongRank.removeCalls == 1 && !wrongRankSlot.occupied(),
+                "unproven paint rank was not rejected and exactly removed");
+        wrongRank.exactNine();
+
+        FakePort paintDrift = new FakePort();
+        TargetOwnedVisualLeaseCore paintDriftLease = start(new Slot(), paintDrift);
+        Object firstPaint = paintDrift.effectiveDrawOrder.get(0);
+        paintDrift.effectiveDrawOrder.set(0, paintDrift.effectiveDrawOrder.get(2));
+        paintDrift.effectiveDrawOrder.set(2, firstPaint);
+        require(!paintDriftLease.mayDraw(), "paint-order drift allowed drawing");
+        paintDrift.runReady();
+        require(paintDriftLease.state() == State.QUARANTINED,
+                "paint-order drift was reported as restoration");
+
+        FakePort policyDrift = new FakePort();
+        TargetOwnedVisualLeaseCore policyDriftLease = start(new Slot(), policyDrift);
+        policyDrift.drawPolicy = "custom child drawing order enabled";
+        require(!policyDriftLease.mayDraw(), "draw-policy drift allowed drawing");
+        policyDrift.runReady();
+        require(policyDriftLease.state() == State.QUARANTINED,
+                "draw-policy drift was reported as restoration");
+
+        FakePort duplicatePaint = new FakePort();
+        duplicatePaint.effectiveDrawOrder.set(4, duplicatePaint.original[3]);
+        Slot duplicateSlot = new Slot();
+        TargetOwnedVisualLeaseCore duplicateLease = start(duplicateSlot, duplicatePaint);
+        require(duplicateLease.state() == State.QUARANTINED
+                && duplicateLease.result() == Result.UNKNOWN
+                && duplicatePaint.addCalls == 0 && duplicateSlot.occupied(),
+                "duplicate paint identity passed the nine-child baseline");
+
+        FakePort missingPaint = new FakePort();
+        missingPaint.effectiveDrawOrder.set(4, missingPaint.foreignParent);
+        TargetOwnedVisualLeaseCore missingLease = start(new Slot(), missingPaint);
+        require(missingLease.state() == State.QUARANTINED
+                && missingLease.result() == Result.UNKNOWN && missingPaint.addCalls == 0,
+                "foreign paint identity passed the nine-child baseline");
+
+        FakePort ownedEvidence = new FakePort();
+        TargetOwnedVisualLeaseCore ownedLease = start(new Slot(), ownedEvidence);
+        ownedEvidence.evidence.put(ownedLease.ownedChild(), "owned geometry/Z drift");
+        require(!ownedLease.mayDraw(), "changed owned evidence allowed drawing");
+        ownedEvidence.runReady();
+        ownedEvidence.advance(1);
+        require(ownedLease.state() == State.REMOVED
+                && ownedLease.result() == Result.UNKNOWN && ownedEvidence.removeCalls == 1,
+                "changed owned evidence escaped exact-object cleanup");
+    }
+
     private static void testRootProcessLossAndRemoveFailures() {
         FakePort rootLost = new FakePort();
         TargetOwnedVisualLeaseCore rootLease = start(new Slot(), rootLost);
@@ -915,6 +1052,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         testFinalizationSignals();
         testMovedMissingAndImpostor();
         testNineChildAndEvidenceVerification();
+        testEffectiveDrawingOrderEvidence();
         testRootProcessLossAndRemoveFailures();
         System.out.println("TARGET_OWNED_VISUAL_LEASE_CORE_PASS checks=" + checks);
     }

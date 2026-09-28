@@ -26,6 +26,11 @@ automatic retry. The app never adds a tenth child.
 Activity reuse or lifecycle loss also sets a sticky session taint, even before
 a trial starts or after a historical `PASS`. A tainted instance cannot start
 another trial or report `currentlyValid=true`.
+On the first eligible window-focus gain, the host requests one additional real
+paint. The runner waits until a completed paint revision exceeds the revision
+at that focus gain before anchoring its event witness or sending the command.
+The command itself also rejects any earlier paint. This does not extend the
+2-second baseline freshness limit.
 
 The provider accepts only its own, shell, or root UID. Its distinct authority
 is `com.techrebbe.supernote.leasetrial.probe`. Queries return process

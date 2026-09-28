@@ -27,6 +27,7 @@ public final class LeaseTrialActivity extends Activity {
     private TrialEvidence trial;
     private long activitySerial;
     private long trialToken;
+    private long firstFocusPaintFloorRevision = -1;
     private String lifecycle = "NEW";
     private boolean admitted;
     private final TrialSessionGuard sessionGuard = new TrialSessionGuard();
@@ -113,6 +114,10 @@ public final class LeaseTrialActivity extends Activity {
         if (admitted && !hasFocus) taint("WINDOW_FOCUS_LOST");
         super.onWindowFocusChanged(hasFocus);
         if (admitted) LeaseTrialState.get().record("WINDOW_FOCUS", Boolean.toString(hasFocus));
+        if (sessionGuard.claimInitialFocusPaint(admitted, hasFocus, trial == null)) {
+            firstFocusPaintFloorRevision = root.startedPaintRevision;
+            root.invalidate();
+        }
     }
 
     @Override protected void onNewIntent(Intent intent) {
@@ -133,10 +138,13 @@ public final class LeaseTrialActivity extends Activity {
                 || !"preflight-noop-layout".equals(command) || trial != null
                 || !"RESUMED".equals(lifecycle) || !root.isAttachedToWindow()
                 || !root.hasWindowFocus() || root.isLayoutRequested()
+                || firstFocusPaintFloorRevision < 0
                 || !originalsExact() || root.anyOriginalLayoutRequested()) return false;
         TrialEvidence.Cut baseline = root.lastCompletedFrame();
         TrialEvidence.Cut live = root.captureLive();
-        if (baseline == null || !baseline.sameNineAndRevision(live)
+        if (baseline == null
+                || baseline.startedPaintRevision <= firstFocusPaintFloorRevision
+                || !baseline.sameNineAndRevision(live)
                 || baseline.startedPaintRevision != live.startedPaintRevision
                 || baseline.completedPaintRevision != live.completedPaintRevision
                 || baseline.completedPaintElapsedMs != live.completedPaintElapsedMs) return false;
@@ -276,6 +284,7 @@ public final class LeaseTrialActivity extends Activity {
             state.put("sampleElapsedMs", SystemClock.elapsedRealtime());
             state.put("rootAttached", root.isAttachedToWindow());
             state.put("rootHasFocus", root.hasWindowFocus());
+            state.put("firstFocusPaintFloorRevision", firstFocusPaintFloorRevision);
             state.put("rootLayoutRequested", root.isLayoutRequested());
             state.put("originalsExact", originalsExact());
             state.put("rootLayoutCalls", root.layoutCalls);

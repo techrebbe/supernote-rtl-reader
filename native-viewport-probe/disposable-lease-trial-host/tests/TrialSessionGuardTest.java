@@ -9,6 +9,17 @@ public final class TrialSessionGuardTest {
     }
 
     public static void main(String[] args) {
+        TrialSessionGuard focus = new TrialSessionGuard();
+        check(!focus.claimInitialFocusPaint(false, true, true));
+        check(!focus.claimInitialFocusPaint(true, false, true));
+        check(!focus.claimInitialFocusPaint(true, true, false));
+        check(focus.claimInitialFocusPaint(true, true, true));
+        check(!focus.claimInitialFocusPaint(true, true, true));
+
+        TrialSessionGuard taintedFocus = new TrialSessionGuard();
+        taintedFocus.taint("WINDOW_FOCUS_LOST");
+        check(!taintedFocus.claimInitialFocusPaint(true, true, true));
+
         TrialSessionGuard idle = new TrialSessionGuard();
         check(idle.allowPreflight());
         check(!idle.currentlyValid(false));

@@ -96,9 +96,27 @@ function Assert-SameSession($State, $Anchor, [string]$Label) {
     if ($State.process.pid -ne $Anchor.process.pid -or
             $State.process.incarnation -cne $Anchor.process.incarnation -or
             $State.activitySerial -ne $Anchor.activitySerial -or
+            $State.firstFocusPaintFloorRevision -ne
+                $Anchor.firstFocusPaintFloorRevision -or
             $State.current.rootIdentityHash -ne $Anchor.current.rootIdentityHash) {
         Unknown "$Label changed process, Activity, or root incarnation"
     }
+}
+
+function Has-PostFocusCompletedPaint($State) {
+    if (-not ($State.PSObject.Properties.Name -ccontains
+            'firstFocusPaintFloorRevision')) {
+        Unknown 'state lacks first-focus paint revision'
+    }
+    $floor = $State.firstFocusPaintFloorRevision
+    if (($floor -isnot [int] -and $floor -isnot [long]) -or $floor -lt -1) {
+        Unknown 'state has invalid first-focus paint revision'
+    }
+    if ($floor -lt 0 -or $null -eq $State.lastCompletedPaint) { return $false }
+    $paint = $State.lastCompletedPaint
+    return ($paint.exactNinePainted -ceq $true -and
+        $paint.startedPaintRevision -eq $paint.completedPaintRevision -and
+        $paint.completedPaintRevision -gt $floor)
 }
 
 function Parse-Command([string]$Text) {
@@ -251,6 +269,21 @@ if ($ParserSelfTest) {
     Assert-Cut $cut 'self-test'
     Assert-SameNine $cut $cut 'self-test'
     Assert-SameCut $cut $cut 'self-test'
+    $focusState = [pscustomobject]@{
+        firstFocusPaintFloorRevision = 2; lastCompletedPaint = $cut
+    }
+    if (Has-PostFocusCompletedPaint $focusState) {
+        Fail 'pre-focus paint accepted as post-focus paint'
+    }
+    $cut.startedPaintRevision = 3
+    $cut.completedPaintRevision = 3
+    if (-not (Has-PostFocusCompletedPaint $focusState)) {
+        Fail 'completed post-focus paint was rejected'
+    }
+    $focusState.firstFocusPaintFloorRevision = -1
+    if (Has-PostFocusCompletedPaint $focusState) {
+        Fail 'unfocused state accepted as post-focus paint'
+    }
     $prepaint = Parse-State 'Row: 0 json={"schema":"lease-trial-no-child-state-v1","lastCompletedPaint":null,"trial":{"baseline":null,"layoutEntry":null,"postPaint":null,"secondSample":null}}' 'prepaint self-test'
     if (-not ($prepaint.PSObject.Properties.Name -ccontains 'lastCompletedPaint') -or
             $null -ne $prepaint.lastCompletedPaint) {
@@ -325,7 +358,7 @@ try {
                 $candidate.rootLayoutRequested -eq $false -and
                 $candidate.originalsExact -eq $true -and
                 $candidate.trial.state -ceq 'IDLE' -and
-                $null -ne $candidate.lastCompletedPaint -and
+                (Has-PostFocusCompletedPaint $candidate) -and
                 $candidate.current.startedPaintRevision -eq
                     $candidate.current.completedPaintRevision) {
             $baseline = $candidate

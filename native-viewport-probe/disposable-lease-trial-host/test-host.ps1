@@ -44,8 +44,13 @@ $activity = Get-Content -LiteralPath (Join-Path $source 'LeaseTrialActivity.java
 if ($activity -notmatch 'onNewIntent\(Intent intent\)[\s\S]*?taint\("ACTIVITY_REUSED"\)' -or
         $activity -notmatch 'onPause\(\)[\s\S]*?taint\("ACTIVITY_PAUSED"\)' -or
         $activity -notmatch 'onWindowFocusChanged\(boolean hasFocus\)[\s\S]*?taint\("WINDOW_FOCUS_LOST"\)' -or
+        $activity -notmatch 'claimInitialFocusPaint\(admitted, hasFocus, trial == null\)\)[\s\S]*?firstFocusPaintFloorRevision = root\.startedPaintRevision;[\s\S]*?root\.invalidate\(\);' -or
+        $activity -notmatch 'state\.put\("firstFocusPaintFloorRevision", firstFocusPaintFloorRevision\);' -or
+        $activity -notmatch 'baseline\.startedPaintRevision <= firstFocusPaintFloorRevision' -or
         $activity -notmatch 'return JSONObject\.NULL;' -or
         $activity -notmatch 'sessionGuard\.currentlyValid\(') {
     throw 'Lifecycle/null-cut Activity contract guard failed.'
 }
 Write-Output 'PASS lifecycle and null-cut source contract guard'
+& (Join-Path $root 'emulator-gate.ps1') -ParserSelfTest
+if ($LASTEXITCODE -ne 0) { throw 'No-child runner parser tests failed.' }

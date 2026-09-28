@@ -3,6 +3,7 @@ package com.techrebbe.supernote.leasetrial;
 /** Main-Looper-local, sticky authority for one disposable Activity incarnation. */
 final class TrialSessionGuard {
     private String firstTaint;
+    private boolean initialFocusPaintClaimed;
 
     void taint(String reason) {
         if (reason == null || reason.isEmpty()) {
@@ -16,6 +17,13 @@ final class TrialSessionGuard {
     String reason() { return firstTaint == null ? "NONE" : firstTaint; }
 
     boolean allowPreflight() { return !tainted(); }
+
+    boolean claimInitialFocusPaint(boolean admitted, boolean hasFocus, boolean trialIdle) {
+        if (!admitted || !hasFocus || !trialIdle || tainted()
+                || initialFocusPaintClaimed) return false;
+        initialFocusPaintClaimed = true;
+        return true;
+    }
 
     boolean currentlyValid(boolean historicalProofValid) {
         return !tainted() && historicalProofValid;

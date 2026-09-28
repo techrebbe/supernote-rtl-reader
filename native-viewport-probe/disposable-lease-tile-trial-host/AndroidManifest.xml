@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.techrebbe.supernote.leasetiletrial"
+    android:versionCode="1" android:versionName="0.1-disposable-tile">
+    <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="30" />
+    <!-- Disposable synthetic host: no storage, network, pen, or overlay permissions. -->
+    <application android:allowBackup="false" android:usesCleartextTraffic="false"
+        android:label="Disposable Lease Tile Trial"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <activity android:name=".TileTrialActivity" android:exported="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <provider android:name=".TileTrialProvider" android:exported="true"
+            android:authorities="com.techrebbe.supernote.leasetiletrial.probe" />
+    </application>
+</manifest>

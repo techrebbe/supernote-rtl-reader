@@ -58,15 +58,15 @@ reports slot state and event bounds from one locked evidence cut; each
 ## Query and synthetic controls
 
 The exported test provider accepts only the app, shell, or root UID at runtime.
-It exists solely for a disposable emulator. These commands are examples for a
-future emulator matrix; this scaffold was **not** installed or run on a device.
+It exists solely for a disposable emulator. It has been run on the dedicated
+`RTL_Lease_API30` emulator, **not** on the Nomad or another personal device.
 
 ```text
-adb shell am start -n com.techrebbe.supernote.disposableleasehost/.ProbeActivity
-adb shell content query --uri content://com.techrebbe.supernote.disposableleasehost.probe/identity
-adb shell content query --uri content://com.techrebbe.supernote.disposableleasehost.probe/state
-adb shell content query --uri 'content://com.techrebbe.supernote.disposableleasehost.probe/events?after=0'
-adb shell content call --uri content://com.techrebbe.supernote.disposableleasehost.probe --method command --arg page
+adb -s emulator-5554 shell am start -n com.techrebbe.supernote.disposableleasehost/.ProbeActivity
+adb -s emulator-5554 shell content query --uri content://com.techrebbe.supernote.disposableleasehost.probe/identity
+adb -s emulator-5554 shell content query --uri content://com.techrebbe.supernote.disposableleasehost.probe/state
+adb -s emulator-5554 shell content query --uri 'content://com.techrebbe.supernote.disposableleasehost.probe/events?after=0'
+adb -s emulator-5554 shell content call --uri content://com.techrebbe.supernote.disposableleasehost.probe --method command --arg page
 ```
 
 `command` arguments are `page`, `uri`, `render`, `layout`, `orientation`,
@@ -114,3 +114,29 @@ never invoke the inherited full probe gate, sign, install, launch ADB, or
 change a device. They require a local JDK and Android SDK build-tools 35.0.0.
 The built APK must be separately reviewed and signed for a disposable emulator
 run. Do not reuse it on a personal device or on Nomad.
+
+## Disposable emulator baseline (2026-09-28)
+
+The pinned signed host APK (SHA-256
+`728420a7db5018e18e83ea5d64f03282f00446604e19e9a14fc9bb2436877152`;
+signer certificate SHA-256
+`94d4246035b9bed00164f7dc89aec8b9164d7fac769189729df74fb77b2446f3`)
+was verified against the installed `base.apk` on `emulator-5554`, API 30. The
+emulator-only runner had SHA-256
+`d231ab4453e360584926c00a827e0cbf6e69d88e8a83a729260c805cf9114a65`.
+Its local, ignored evidence is in
+`build/emulator-gate-20260928T034113511Z/` (`summary.json` and 57 raw ADB
+records). The ten *labelled checks* passed: two stable nine-child baselines;
+page, URI, render, layout and orientation changes with inverse operations;
+cover/uncover; finish; and fresh relaunch. The event window was gapless at
+sequences 170–222. All nine child bounds shifted +33 pixels on each axis for
+the layout inset and returned to their original bounds with the same identities
+and layout parameters. The final fresh activity had nine original children and
+no claimed lease. Cover/uncover is one cycle; render/layout rollback restores
+presentation while their monotonic epochs advance.
+
+This proves only the **disposable synthetic host baseline**. No visual child
+was inserted, no pen/PDF/`.mark` was involved, and no stock Supernote reader
+behavior is established. In particular, all nine emulator children are visible,
+whereas the pinned stock reader hierarchy includes a GONE child; its effective
+paint order still requires separate read-only Nomad evidence and authorization.

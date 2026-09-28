@@ -58,11 +58,14 @@ function view(className, id, parent, resourceId) {
 function scene() {
   const uri = make(C.uri, 'uri', {uriString: URI});
   const model = make(C.vm, 'vm', {uri});
-  const root = view(C.root, 'root', null, ROOT_ID);
+  // mContentView is declared android.view.View in DocumentActivity. Frida's
+  // field getter returns a View wrapper even when $className is FrameLayout.
+  const rawRoot = view(C.root, 'root', null, ROOT_ID);
+  const root = Object.create(rawRoot);
   // Match the pinned stock document_main_layout's nine direct children,
   // including the GONE vertical_view at index 7.
   const children = CHILD_CLASSES.map((name, i) =>
-    view(name, 'child-' + i, root, CHILD_IDS[i]));
+    view(name, 'child-' + i, rawRoot, CHILD_IDS[i]));
   children[7].getVisibility = () => 8;
   children[7].mRight = slot(0);
   children[7].mBottom = slot(0);
@@ -71,9 +74,9 @@ function scene() {
   root.isChildrenDrawingOrderEnabled = () => false;
   const activity = make(C.activity, 'activity', {mResumed: true,
     mFinished: false, mDestroyed: false, documentViewModel: model,
-    mContentView: root, mImage: children[0], digestImage: children[1],
+    mContentView: rawRoot, mImage: children[0], digestImage: children[1],
     handWriteView: children[2]});
-  return {activity, model, uri, root, children};
+  return {activity, model, uri, rawRoot, root, children};
 }
 function manifest() {
   return {schemaVersion: 1,
@@ -96,14 +99,22 @@ function run(changes = () => {}, options = {}) {
   const digest = options.badDigest ? '0'.repeat(64) :
     crypto.createHash('sha256').update(Buffer.from(bytes)).digest('hex');
   const sent = [], retained = [], disposed = [];
-  let chooseCalls = 0, envCalls = 0, onMain = false;
+  let chooseCalls = 0, envCalls = 0, frameCasts = 0, onMain = false;
   const context = {
     NATIVE_PAGE_HIERARCHY_MANIFEST_UTF8: bytes,
     NATIVE_PAGE_HIERARCHY_MANIFEST_SHA256: digest,
     Process: {arch: 'arm64', pointerSize: 8, id: m.attachment.pid},
     Java: {
-      use(name) { assert.strictEqual(name, C.uri); return {name}; },
-      cast(value, clazz) { assert.strictEqual(value.$className, clazz.name); return value; },
+      use(name) { assert([C.uri, C.root].includes(name)); return {name}; },
+      cast(value, clazz) {
+        assert.strictEqual(value.$className, clazz.name);
+        if (clazz.name === C.root) {
+          assert.strictEqual(value.$h, g.rawRoot.$h);
+          frameCasts++;
+          return options.wrongRootCast ? make(C.root, 'impostor') : g.root;
+        }
+        return value;
+      },
       retain(value) {
         const copy = Object.create(value);
         const ordinal = retained.length;
@@ -136,7 +147,7 @@ function run(changes = () => {}, options = {}) {
     setTimeout() { return 1; }, clearTimeout() {}
   };
   vm.runInNewContext(SOURCE, context);
-  return {g, sent, chooseCalls, envCalls, retained, disposed};
+  return {g, sent, chooseCalls, envCalls, frameCasts, retained, disposed};
 }
 function positive(result) {
   assert.strictEqual(result.sent.length, 2);
@@ -152,6 +163,10 @@ function positive(result) {
   assert.strictEqual(result.sent[0].effectiveCompositingAdmitted, false);
   assert.strictEqual(result.chooseCalls, 1);
   assert.strictEqual(result.envCalls, 1);
+  assert.strictEqual(typeof result.g.rawRoot.getChildCount, 'undefined');
+  assert.strictEqual(typeof result.g.rawRoot.getChildAt, 'undefined');
+  assert.strictEqual(typeof result.g.rawRoot.isChildrenDrawingOrderEnabled, 'undefined');
+  assert.strictEqual(result.frameCasts, 2);
   assert.deepStrictEqual(result.disposed, [0]);
 }
 function negative(result, phase, reason, stage = 'NONE', childIndex = -1,
@@ -185,6 +200,8 @@ for (const visibility of [4, 8]) {
 negative(run(() => {}, {badDigest: true}), 'MANIFEST', 'INVALID');
 negative(run((g, m) => { m.attachment.pid = 0; }), 'MANIFEST', 'INVALID');
 negative(run(g => { g.activity.mContentView = slot(g.children[3]); }),
+  'HIERARCHY', 'MISMATCH', 'ROOT_CLASS', -1, 1);
+negative(run(() => {}, {wrongRootCast: true}),
   'HIERARCHY', 'MISMATCH', 'ROOT_CLASS', -1, 1);
 negative(run(g => { g.children[1].getParent = () => null; }),
   'HIERARCHY', 'MISMATCH', 'CHILD_PARENT', 1, 1);
@@ -225,4 +242,4 @@ negative(run(g => { g.root.getChildCount = () => 33; }),
 negative(run(g => {
   g.children[0].mRight = slot(0);
 }, {disposeFailure: true}), 'CLEANUP', 'FAILED');
-console.log('native_page_display0_hierarchy_observer: 23 cases PASS');
+console.log('native_page_display0_hierarchy_observer: 24 cases PASS');

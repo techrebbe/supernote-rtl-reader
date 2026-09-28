@@ -231,6 +231,11 @@
     checkpoint('ROOT_CLASS');
     const root = direct(activity, 'mContentView');
     exact(root, CLASSES.root);
+    // The stock field is declared View, so Frida exposes only View methods
+    // on its wrapper even though the runtime object is a FrameLayout.
+    const frame = Java.cast(root, Java.use(CLASSES.root));
+    exact(frame, CLASSES.root);
+    same(s, frame, root);
     const fields = [
       ['pdf', 'mImage', CLASSES.pdf],
       ['digest', 'digestImage', CLASSES.digest],
@@ -244,14 +249,14 @@
       refs[key] = view;
     }
     checkpoint('ROOT_CHILD_COUNT');
-    const count = integer(root.getChildCount(), 4, MAX_CHILDREN);
+    const count = integer(frame.getChildCount(), 4, MAX_CHILDREN);
     checkpoint('DRAW_ORDER');
-    const customDrawingOrder = root.isChildrenDrawingOrderEnabled();
+    const customDrawingOrder = frame.isChildrenDrawingOrderEnabled();
     need(typeof customDrawingOrder === 'boolean');
     const children = [];
     for (let i = 0; i < count; i++) {
       checkpoint('CHILD_HANDLE', i);
-      const child = root.getChildAt(i);
+      const child = frame.getChildAt(i);
       need(object(child) && object(child.$h));
       refs['child' + i] = child;
       children.push(childSnapshot(child, i, s, root));

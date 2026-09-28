@@ -1,6 +1,7 @@
 package com.techrebbe.supernote.viewportprobe;
 
 import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore.Port;
+import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore.PaintFrame;
 import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore.Reason;
 import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore.Registration;
 import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore.Result;
@@ -45,10 +46,14 @@ public final class TargetOwnedVisualLeaseCoreTest {
         final IdentityHashMap<Object, String> evidence = new IdentityHashMap<Object, String>();
         final List<Event> events = new ArrayList<Event>();
         long now = 100;
+        long evidenceMutationRevision = 1;
+        long startedPaintRevision = 1;
+        PaintFrame lastCompletedPaintFrame;
         long nextOrder;
         long dispatchDelay;
         boolean processAlive = true;
         boolean rootAlive = true;
+        boolean onMainThread = true;
         boolean inlineDispatch;
         boolean lossChangesHostState;
         Reason lossOnCancel;
@@ -57,6 +62,10 @@ public final class TargetOwnedVisualLeaseCoreTest {
         int signalOnPostReleaseRootRead;
         int rootReadsAfterRelease;
         boolean callbacksReleased;
+        boolean beginUnfinishedPaintOnRelease;
+        boolean driftSceneOnReleasePaintRead;
+        boolean driftSceneOnFinalSnapshot;
+        int snapshotsUntilSceneDrift;
         TargetOwnedVisualLeaseCore activeLease;
         boolean armed;
         boolean addSawDeadline;
@@ -64,6 +73,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         long armAdvance;
         long scheduleAdvance;
         long snapshotAdvance;
+        long nextCompletedPaintReadAdvance;
         long addAdvance;
         boolean nullRegistration;
         boolean firePauseWhileArming;
@@ -74,11 +84,24 @@ public final class TargetOwnedVisualLeaseCoreTest {
         boolean loseProcessWhileArming;
         boolean detachRootAfterAdd;
         boolean snapshotFailure;
+        Runnable afterNextSnapshot;
+        Runnable afterNextCompletedPaintRead;
         int removeCalls;
         int addCalls;
         boolean throwBeforeAdd;
         boolean throwAfterAttach;
+        boolean sceneAbaDuringAdd;
         int paintInsertSlot = 1;
+        boolean autoAddPaint = true;
+        boolean autoRemovePaint = true;
+        boolean beginPaintDuringAdd;
+        boolean beginPaintBeforeRemove;
+        boolean failPaintScheduleAfterAdd;
+        boolean failPaintScheduleAfterRemove;
+        boolean failNextSchedule;
+        boolean failNextDispatch;
+        Runnable lastScheduledCallback;
+        int drawRequests;
         boolean throwBeforeRemove;
         boolean throwAfterRemove;
         long removeAdvance;
@@ -96,19 +119,39 @@ public final class TargetOwnedVisualLeaseCoreTest {
                 parents.put(original[i], root);
                 evidence.put(original[i], "class|id|visibility|bounds|z|layout " + i);
             }
+            lastCompletedPaintFrame = new PaintFrame(startedPaintRevision, now, snapshot());
         }
 
         void useCustomPaintOrder() {
             // The controlled root exposes this actual non-default order; it
             // is not inferred from direct-child indices or an inserted child.
+            evidenceMutationRevision++;
             Object stockOne = effectiveDrawOrder.remove(1);
             effectiveDrawOrder.add(2, stockOne);
             drawPolicy = "custom stable sibling order|no transients|all Z zero";
             paintInsertSlot = 2;
+            lastCompletedPaintFrame = new PaintFrame(startedPaintRevision, now, snapshot());
         }
 
-        @Override public void requireMainThread() { /* deterministic one-thread executor */ }
+        @Override public long evidenceMutationRevision() {
+            return evidenceMutationRevision;
+        }
+        @Override public void requireMainThread() {
+            if (!onMainThread) throw new IllegalStateException("not on main thread");
+        }
         @Override public long elapsedRealtimeMillis() { return now; }
+        @Override public long startedPaintRevision() { return startedPaintRevision; }
+        @Override public PaintFrame lastCompletedPaintFrame() {
+            now += nextCompletedPaintReadAdvance;
+            nextCompletedPaintReadAdvance = 0;
+            PaintFrame completed = lastCompletedPaintFrame;
+            if (afterNextCompletedPaintRead != null) {
+                Runnable hook = afterNextCompletedPaintRead;
+                afterNextCompletedPaintRead = null;
+                hook.run();
+            }
+            return completed;
+        }
         @Override public boolean processAlive() { return processAlive; }
         @Override public boolean rootAlive() { return rootAlive; }
         @Override public Object root() {
@@ -130,9 +173,19 @@ public final class TargetOwnedVisualLeaseCoreTest {
                 seenParents[i] = parents.get(seen[i]);
                 seenEvidence[i] = evidence.get(seen[i]);
             }
-            return new Snapshot(root, seen, seenParents, seenEvidence,
+            Snapshot captured = new Snapshot(root, seen, seenParents, seenEvidence,
                     effectiveDrawOrder.toArray(new Object[effectiveDrawOrder.size()]),
                     drawPolicy, scene);
+            if (afterNextSnapshot != null) {
+                Runnable hook = afterNextSnapshot;
+                afterNextSnapshot = null;
+                hook.run();
+            }
+            if (snapshotsUntilSceneDrift > 0 && --snapshotsUntilSceneDrift == 0) {
+                evidenceMutationRevision++;
+                scene = "page B|uri B|render B|root 1404x1872|epoch 2";
+            }
+            return captured;
         }
         @Override public Object parentOf(Object child) { return parents.get(child); }
         @Override public void add(Object child, int provenSlot) {
@@ -140,17 +193,34 @@ public final class TargetOwnedVisualLeaseCoreTest {
             require(armed, "lifecycle callbacks were not armed before add");
             require(addSawDeadline, "target deadline was not armed before add");
             if (throwBeforeAdd) throw new IllegalStateException("before add");
+            evidenceMutationRevision++;
             children.add(provenSlot, child);
             effectiveDrawOrder.add(paintInsertSlot, child);
             parents.put(child, root);
             evidence.put(child, "owned visual only");
+            if (sceneAbaDuringAdd) {
+                String originalScene = scene;
+                evidenceMutationRevision++;
+                scene = "page B|uri B|render B|root 1404x1872|epoch 2";
+                evidenceMutationRevision++;
+                scene = originalScene;
+            }
+            if (beginPaintDuringAdd) {
+                final long staleRevision = ++startedPaintRevision;
+                schedulePaintCompletion(staleRevision, 1);
+            } else if (autoAddPaint) {
+                scheduleFreshPaint(1);
+            }
             now += addAdvance;
+            if (failPaintScheduleAfterAdd) failNextSchedule = true;
             if (detachRootAfterAdd) rootAlive = false;
             if (throwAfterAttach) throw new IllegalStateException("attached then threw");
         }
         @Override public void remove(Object child) {
             removeCalls++;
             if (throwBeforeRemove) throw new IllegalStateException("before remove");
+            evidenceMutationRevision++;
+            final long staleRevision = beginPaintBeforeRemove ? ++startedPaintRevision : -1;
             boolean found = false;
             for (Iterator<Object> iter = children.iterator(); iter.hasNext();) {
                 if (iter.next() == child) {
@@ -167,15 +237,46 @@ public final class TargetOwnedVisualLeaseCoreTest {
                 }
             }
             now += removeAdvance;
+            if (staleRevision > 0) schedulePaintCompletion(staleRevision, 1);
+            else if (autoRemovePaint) scheduleFreshPaint(1);
+            if (failPaintScheduleAfterRemove) failNextSchedule = true;
             if (throwAfterRemove) throw new IllegalStateException("after remove");
         }
+        @Override public void requestDraw(Object child) {
+            require(parents.get(child) == root, "requestDraw on detached child");
+            drawRequests++;
+        }
+        void scheduleFreshPaint(long delay) {
+            events.add(new Event(now + delay, nextOrder++, new Runnable() {
+                @Override public void run() {
+                    long begun = ++startedPaintRevision;
+                    lastCompletedPaintFrame = new PaintFrame(begun, now, snapshot());
+                }
+            }));
+        }
+        void schedulePaintCompletion(final long begunRevision, long delay) {
+            events.add(new Event(now + delay, nextOrder++, new Runnable() {
+                @Override public void run() {
+                    lastCompletedPaintFrame = new PaintFrame(begunRevision, now, snapshot());
+                }
+            }));
+        }
         @Override public void dispatch(Runnable callback) {
+            if (failNextDispatch) {
+                failNextDispatch = false;
+                throw new IllegalStateException("injected Handler dispatch failure");
+            }
             if (inlineDispatch) callback.run();
             else schedule(callback, dispatchDelay);
         }
         @Override public void schedule(Runnable callback, long delayMillis) {
             require(delayMillis >= 0, "negative delay");
+            if (failNextSchedule) {
+                failNextSchedule = false;
+                throw new IllegalStateException("injected Handler post failure");
+            }
             events.add(new Event(now + delayMillis, nextOrder++, callback));
+            lastScheduledCallback = callback;
             if (armed && !addSawDeadline && delayMillis > 0) {
                 addSawDeadline = true;
                 deadlineDelay = delayMillis;
@@ -196,8 +297,12 @@ public final class TargetOwnedVisualLeaseCoreTest {
             rootLoss = onRootLoss;
             drift = onPageOrLayoutDrift;
             now += armAdvance;
-            if (changeSceneWhileArming) scene = "page B|uri B|render B|epoch 2";
+            if (changeSceneWhileArming) {
+                evidenceMutationRevision++;
+                scene = "page B|uri B|render B|epoch 2";
+            }
             if (reorderWhileArming) {
+                evidenceMutationRevision++;
                 Object first = children.get(0);
                 children.set(0, children.get(1));
                 children.set(1, first);
@@ -209,6 +314,16 @@ public final class TargetOwnedVisualLeaseCoreTest {
             return new Registration() {
                 @Override public void release() {
                     if (lossOnRelease != null) signalLoss(lossOnRelease);
+                    if (beginUnfinishedPaintOnRelease) startedPaintRevision++;
+                    if (driftSceneOnReleasePaintRead) {
+                        afterNextCompletedPaintRead = new Runnable() {
+                            @Override public void run() {
+                                evidenceMutationRevision++;
+                                scene = "page B|uri B|render B|root 1404x1872|epoch 2";
+                            }
+                        };
+                    }
+                    if (driftSceneOnFinalSnapshot) snapshotsUntilSceneDrift = 2;
                     armed = false;
                     pause = null;
                     rootLoss = null;
@@ -245,7 +360,25 @@ public final class TargetOwnedVisualLeaseCoreTest {
             }
             throw new AssertionError("callback loop did not settle");
         }
-        void advance(long millis) { now += millis; runReady(); }
+        void advance(long millis) {
+            long target = now + millis;
+            for (int steps = 0; steps < 100; steps++) {
+                Event next = null;
+                for (Event candidate : events) {
+                    if (candidate.due <= target && (next == null
+                            || candidate.due < next.due
+                            || (candidate.due == next.due && candidate.order < next.order))) {
+                        next = candidate;
+                    }
+                }
+                if (next == null) break;
+                now = Math.max(now, next.due);
+                events.remove(next);
+                next.callback.run();
+            }
+            now = Math.max(now, target);
+            runReady();
+        }
         void exactNine() {
             require(children.size() == 9, "wrong child count");
             require(effectiveDrawOrder.size() == 9, "wrong effective draw count");
@@ -257,6 +390,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
             }
         }
         void removeOwnedExternally(Object owned) {
+            evidenceMutationRevision++;
             for (Iterator<Object> iter = children.iterator(); iter.hasNext();) {
                 if (iter.next() == owned) { iter.remove(); break; }
             }
@@ -292,7 +426,10 @@ public final class TargetOwnedVisualLeaseCoreTest {
 
     private static TargetOwnedVisualLeaseCore start(Slot slot, FakePort port,
             TargetOwnedVisualLeaseCore.Factory factory) {
-        return TargetOwnedVisualLeaseCore.startForTest(slot, port, factory, 1, 1, 50, 10, 10);
+        TargetOwnedVisualLeaseCore lease = TargetOwnedVisualLeaseCore.startForTest(
+                slot, port, factory, 1, 1, 50, 10, 10, 40);
+        if (lease.state() == State.PREPARED && port.autoAddPaint) port.advance(1);
+        return lease;
     }
 
     private static void testNormalAndCollision() {
@@ -316,7 +453,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         port.runReady();
         require(lease.state() == State.REMOVING, "verification was not deferred");
         require(port.removeCalls == 1, "duplicate removal");
-        port.advance(1);
+        port.advance(2);
         require(lease.state() == State.REMOVED, "not removed");
         require(lease.result() == Result.LIVE_STRUCTURE_RESTORED,
                 "live structure not verified");
@@ -332,21 +469,23 @@ public final class TargetOwnedVisualLeaseCoreTest {
             @Override public Object create() { return new Identity("owned"); }
         };
         FakePort first = new FakePort();
-        TargetOwnedVisualLeaseCore lease = TargetOwnedVisualLeaseCore.start(first, factory, 1, 1, 50, 10, 10);
+        TargetOwnedVisualLeaseCore lease = TargetOwnedVisualLeaseCore.start(first, factory, 1, 1, 50, 10, 10, 40);
+        first.advance(1);
         try {
-            TargetOwnedVisualLeaseCore.start(new FakePort(), factory, 1, 1, 50, 10, 10);
+            TargetOwnedVisualLeaseCore.start(new FakePort(), factory, 1, 1, 50, 10, 10, 40);
             throw new AssertionError("production slot admitted a second lease");
         } catch (IllegalStateException expected) { checks++; }
         lease.requestCleanup(Reason.HOST_STOP);
         first.runReady();
-        first.advance(1);
+        first.advance(2);
         require(lease.state() == State.REMOVED, "production slot did not release");
         FakePort second = new FakePort();
-        TargetOwnedVisualLeaseCore next = TargetOwnedVisualLeaseCore.start(second, factory, 1, 1, 50, 10, 10);
+        TargetOwnedVisualLeaseCore next = TargetOwnedVisualLeaseCore.start(second, factory, 1, 1, 50, 10, 10, 40);
+        second.advance(1);
         require(next.state() == State.INSERTED, "production slot did not admit safe next lease");
         next.requestCleanup(Reason.HOST_STOP);
         second.runReady();
-        second.advance(1);
+        second.advance(2);
         require(next.state() == State.REMOVED, "next production lease did not finish");
     }
 
@@ -358,7 +497,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         require(lease.state() == State.REMOVING, "attached throw was not cleaned");
         require(port.removeCalls == 1 && port.parentOf(lease.ownedChild()) == null,
                 "exact attached object remained");
-        port.advance(1);
+        port.advance(2);
         require(lease.state() == State.REMOVED && lease.result() == Result.UNKNOWN,
                 "insertion failure was silently passed");
         require(lease.failure() != null && !slot.occupied(), "failure not recorded");
@@ -474,7 +613,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         require(slowAddLease.state() == State.REMOVING && slowAdd.addCalls == 1
                 && slowAdd.removeCalls == 1 && slowAddLease.deadlineLatenessExceeded(),
                 "late attached-but-PREPARED child was not removed and flagged");
-        slowAdd.advance(1);
+        slowAdd.advance(2);
         require(slowAddLease.state() == State.QUARANTINED && slowAddSlot.occupied(),
                 "late add produced a live restoration or released its slot");
         slowAdd.exactNine();
@@ -575,7 +714,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         signaled.drift.run();
         require(!signaledLease.mayDraw(), "signaled drift painted while cleanup queued");
         signaled.runReady();
-        signaled.advance(1);
+        signaled.advance(2);
         require(signaledLease.state() == State.REMOVED
                 && signaledLease.result() == Result.UNKNOWN,
                 "drift callback produced a live rollback claim");
@@ -592,11 +731,11 @@ public final class TargetOwnedVisualLeaseCoreTest {
 
         FakePort slowWitness = new FakePort();
         TargetOwnedVisualLeaseCore slowLease = start(new Slot(), slowWitness);
-        slowWitness.snapshotAdvance = 60;
+        slowWitness.snapshotAdvance = 59; // start's separate paint pass cost one millisecond
         require(!slowLease.mayDraw(), "draw crossed deadline inside witness capture");
         slowWitness.snapshotAdvance = 0;
         slowWitness.runReady();
-        slowWitness.advance(1);
+        slowWitness.advance(2);
         require(slowLease.state() == State.REMOVED,
                 "slow witness did not schedule expired cleanup");
 
@@ -605,7 +744,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         ownedChanged.evidence.put(ownedLease.ownedChild(), "owned Z/geometry changed");
         require(!ownedLease.mayDraw(), "owned child drift painted after insertion");
         ownedChanged.runReady();
-        ownedChanged.advance(1);
+        ownedChanged.advance(2);
         require(ownedLease.state() == State.REMOVED && ownedLease.result() == Result.UNKNOWN,
                 "owned child drift was reported as live restoration");
         ownedChanged.exactNine();
@@ -616,6 +755,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         TargetOwnedVisualLeaseCore timely = start(new Slot(), onBound);
         timely.requestCleanup(Reason.HOST_STOP);
         onBound.runReady();
+        onBound.advance(1); // Fresh post-removal frame establishes sample one.
         onBound.now += 10; // Inclusive ten-millisecond verification gap.
         onBound.runReady();
         require(timely.state() == State.REMOVED
@@ -627,6 +767,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         TargetOwnedVisualLeaseCore delayed = start(stalledSlot, stalled);
         delayed.requestCleanup(Reason.HOST_STOP);
         stalled.runReady();
+        stalled.advance(1); // Fresh nine-child paint, then pending second sample.
         require(delayed.state() == State.REMOVING && stalled.removeCalls == 1,
                 "first restoration sample was not taken");
         stalled.now += 100; // UI loop stalls before the queued second sample.
@@ -640,6 +781,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         TargetOwnedVisualLeaseCore slow = start(new Slot(), slowSecondSnapshot);
         slow.requestCleanup(Reason.HOST_STOP);
         slowSecondSnapshot.runReady();
+        slowSecondSnapshot.advance(1);
         slowSecondSnapshot.snapshotAdvance = 20;
         slowSecondSnapshot.advance(1);
         require(slow.state() == State.QUARANTINED && slow.result() == Result.UNKNOWN,
@@ -656,7 +798,8 @@ public final class TargetOwnedVisualLeaseCoreTest {
             TargetOwnedVisualLeaseCore lease = start(slot, port);
             port.activeLease = lease;
             lease.requestCleanup(Reason.HOST_STOP);
-            port.runReady(); // First sample; the verifier is still queued.
+            port.runReady();
+            port.advance(1); // Fresh nine-child frame; verifier is still queued.
             port.inlineDispatch = i == 0 || i == 2;
             port.lossChangesHostState = i == 0 || i == 3;
             if (i < 2) port.lossOnCancel = losses[i];
@@ -673,6 +816,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         TargetOwnedVisualLeaseCore queuedLease = start(queuedSlot, queued);
         queuedLease.requestCleanup(Reason.HOST_STOP);
         queued.runReady();
+        queued.advance(1);
         queued.dispatchDelay = 2;
         queuedLease.requestCleanup(Reason.ROOT_LOSS); // Signal now; dispatch after verifier.
         queued.advance(1);
@@ -688,6 +832,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         commitSeam.activeLease = seamLease;
         seamLease.requestCleanup(Reason.HOST_STOP);
         commitSeam.runReady();
+        commitSeam.advance(1);
         commitSeam.lossOnPostReleaseRootRead = Reason.ROOT_LOSS;
         commitSeam.signalOnPostReleaseRootRead = 3;
         commitSeam.advance(1);
@@ -705,7 +850,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         require(!expired.mayDraw(), "expired draw painted before callback");
         require(stalled.children.size() == 10, "draw guard hid callback ordering");
         stalled.runReady();
-        stalled.advance(1);
+        stalled.advance(2);
         require(expired.state() == State.REMOVED && !expired.mayDraw()
                 && expired.result() == Result.LIVE_STRUCTURE_RESTORED
                 && !expired.deadlineLatenessExceeded(),
@@ -716,7 +861,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         TargetOwnedVisualLeaseCore onBound = start(new Slot(), boundary);
         boundary.now = 160; // Deadline 150; lateness bound 10 is inclusive.
         boundary.runReady();
-        boundary.advance(1);
+        boundary.advance(2);
         require(onBound.state() == State.REMOVED && !onBound.deadlineLatenessExceeded(),
                 "on-bound callback was treated as late");
 
@@ -725,7 +870,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         TargetOwnedVisualLeaseCore late = start(stalledSlot, stalledTooLong);
         stalledTooLong.now = 170; // Main-loop stall beyond the declared bound.
         stalledTooLong.runReady();
-        stalledTooLong.advance(1);
+        stalledTooLong.advance(2);
         require(late.state() == State.QUARANTINED && late.result() == Result.UNKNOWN
                 && late.deadlineLatenessExceeded() && stalledSlot.occupied()
                 && stalledTooLong.removeCalls == 1,
@@ -740,7 +885,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
                 && afterSleep.deadlineLatenessExceeded(),
                 "sleep-resume draw ignored elapsed-realtime lateness");
         resumed.runReady();
-        resumed.advance(1);
+        resumed.advance(2);
         require(afterSleep.state() == State.QUARANTINED
                 && afterSleep.result() == Result.UNKNOWN && resumedSlot.occupied(),
                 "sleep-resume late cleanup reported live restoration");
@@ -752,7 +897,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         slowRemoval.removeAdvance = 20;
         removalCrossedBound.requestCleanup(Reason.HOST_STOP);
         slowRemoval.runReady();
-        slowRemoval.advance(1);
+        slowRemoval.advance(2);
         require(removalCrossedBound.state() == State.QUARANTINED
                 && removalCrossedBound.deadlineLatenessExceeded(),
                 "slow exact removal crossed bound but reported live restoration");
@@ -762,7 +907,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         paused.pause.run();
         activity.requestCleanup(Reason.HOST_STOP);
         paused.runReady();
-        paused.advance(1);
+        paused.advance(2);
         require(activity.state() == State.REMOVED && activity.result() == Result.UNKNOWN,
                 "lifecycle abort reported a live rollback");
         require(paused.removeCalls == 1, "pause/host-stop were not idempotent");
@@ -873,7 +1018,8 @@ public final class TargetOwnedVisualLeaseCoreTest {
                 && independentlyProvenSlot.drawPolicy.startsWith("custom"),
                 "custom-order fixture did not establish a distinct baseline permutation");
         TargetOwnedVisualLeaseCore differentSlots = TargetOwnedVisualLeaseCore.startForTest(
-                new Slot(), independentlyProvenSlot, factory, 1, 2, 50, 10, 10);
+                new Slot(), independentlyProvenSlot, factory, 1, 2, 50, 10, 10, 40);
+        independentlyProvenSlot.advance(1);
         require(differentSlots.state() == State.INSERTED
                 && independentlyProvenSlot.children.get(1) == differentSlots.ownedChild()
                 && independentlyProvenSlot.effectiveDrawOrder.get(2) == differentSlots.ownedChild()
@@ -889,7 +1035,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
                 "custom-order inserted permutation");
         differentSlots.requestCleanup(Reason.HOST_STOP);
         independentlyProvenSlot.runReady();
-        independentlyProvenSlot.advance(1);
+        independentlyProvenSlot.advance(2);
         require(differentSlots.result() == Result.LIVE_STRUCTURE_RESTORED,
                 "separately proven paint slot failed exact restoration");
         requirePaintOrder(independentlyProvenSlot, customBaseline,
@@ -903,7 +1049,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         Slot wrongRankSlot = new Slot();
         TargetOwnedVisualLeaseCore wrongRankLease = start(wrongRankSlot, wrongRank);
         wrongRank.runReady();
-        wrongRank.advance(1);
+        wrongRank.advance(2);
         require(wrongRankLease.state() == State.REMOVED
                 && wrongRankLease.result() == Result.UNKNOWN
                 && wrongRank.removeCalls == 1 && !wrongRankSlot.occupied(),
@@ -949,10 +1095,525 @@ public final class TargetOwnedVisualLeaseCoreTest {
         ownedEvidence.evidence.put(ownedLease.ownedChild(), "owned geometry/Z drift");
         require(!ownedLease.mayDraw(), "changed owned evidence allowed drawing");
         ownedEvidence.runReady();
-        ownedEvidence.advance(1);
+        ownedEvidence.advance(2);
         require(ownedLease.state() == State.REMOVED
                 && ownedLease.result() == Result.UNKNOWN && ownedEvidence.removeCalls == 1,
                 "changed owned evidence escaped exact-object cleanup");
+    }
+
+    private static void testCompletedPaintAdmission() {
+        FakePort betweenAddAndPollAba = new FakePort();
+        Slot abaSlot = new Slot();
+        TargetOwnedVisualLeaseCore abaLease = TargetOwnedVisualLeaseCore.startForTest(
+                abaSlot, betweenAddAndPollAba, new TargetOwnedVisualLeaseCore.Factory() {
+                    @Override public Object create() { return new Identity("owned"); }
+                }, 1, 1, 50, 10, 10, 40);
+        require(abaLease.state() == State.PREPARED
+                && betweenAddAndPollAba.drawRequests == 0,
+                "ABA fixture painted before completed frame");
+        String originalScene = betweenAddAndPollAba.scene;
+        betweenAddAndPollAba.evidenceMutationRevision++;
+        betweenAddAndPollAba.scene = "page B|uri B|render B|root 1404x1872|epoch 2";
+        betweenAddAndPollAba.evidenceMutationRevision++;
+        betweenAddAndPollAba.scene = originalScene;
+        betweenAddAndPollAba.advance(1); // Frame and live snapshot both look unchanged.
+        require(betweenAddAndPollAba.drawRequests == 0
+                && betweenAddAndPollAba.removeCalls == 1
+                && !abaLease.mayDraw(),
+                "scene ABA between add and paint poll was adopted as baseline");
+        betweenAddAndPollAba.advance(2);
+        require(abaLease.result() == Result.UNKNOWN,
+                "admission ABA produced a live rollback claim");
+
+        FakePort insideAddAba = new FakePort();
+        insideAddAba.sceneAbaDuringAdd = true;
+        TargetOwnedVisualLeaseCore insideAddLease = start(new Slot(), insideAddAba);
+        require(insideAddAba.addCalls == 1 && insideAddAba.removeCalls == 1
+                && insideAddAba.drawRequests == 0 && !insideAddLease.mayDraw(),
+                "unrelated reentrant ABA inside add passed exact-one-revision contract");
+        insideAddAba.advance(2);
+        require(insideAddLease.result() == Result.UNKNOWN,
+                "inside-add scene ABA produced a live rollback claim");
+
+        FakePort delayed = new FakePort();
+        delayed.autoAddPaint = false;
+        TargetOwnedVisualLeaseCore delayedLease = start(new Slot(), delayed);
+        require(delayedLease.state() == State.PREPARED && delayed.children.size() == 10
+                && delayed.drawRequests == 0 && !delayedLease.mayDraw(),
+                "attached child painted before a completed ten-child frame");
+        delayed.scheduleFreshPaint(5);
+        delayed.advance(4);
+        require(delayedLease.state() == State.PREPARED && !delayedLease.mayDraw()
+                && delayed.drawRequests == 0,
+                "pending admission painted before its delayed frame");
+        delayed.advance(1);
+        require(delayedLease.state() == State.INSERTED && delayed.drawRequests == 1
+                && delayedLease.mayDraw(),
+                "fresh completed ten-child frame did not admit drawing");
+
+        FakePort noFrame = new FakePort();
+        noFrame.autoAddPaint = false;
+        Slot noFrameSlot = new Slot();
+        TargetOwnedVisualLeaseCore noFrameLease = start(noFrameSlot, noFrame);
+        require(noFrameLease.state() == State.PREPARED && !noFrameLease.mayDraw(),
+                "missing paint frame was admitted");
+        noFrame.advance(40);
+        require(noFrameLease.state() == State.REMOVING && noFrame.removeCalls == 1
+                && noFrame.drawRequests == 0,
+                "paint-wait timeout retained an attached pending child");
+        noFrame.advance(2);
+        require(noFrameLease.state() == State.REMOVED
+                && noFrameLease.result() == Result.UNKNOWN && !noFrameSlot.occupied(),
+                "missing admission frame produced a live rollback claim");
+
+        FakePort staleBegin = new FakePort();
+        staleBegin.autoAddPaint = false;
+        staleBegin.beginPaintDuringAdd = true;
+        TargetOwnedVisualLeaseCore staleLease = start(new Slot(), staleBegin);
+        staleBegin.advance(1); // Completes a frame begun before the post-add fence.
+        require(staleLease.state() == State.PREPARED && !staleLease.mayDraw()
+                && staleBegin.drawRequests == 0,
+                "pre-add-begun frame was mistaken for fresh admission");
+        staleBegin.scheduleFreshPaint(1);
+        staleBegin.advance(2);
+        require(staleLease.state() == State.INSERTED && staleBegin.drawRequests == 1,
+                "later genuinely begun frame did not admit after stale frame");
+
+        FakePort staleBaseline = new FakePort();
+        staleBaseline.now = 141; // Completed nine-child frame is 41 ms old.
+        TargetOwnedVisualLeaseCore baselineLease = start(new Slot(), staleBaseline);
+        require(staleBaseline.addCalls == 0 && !baselineLease.mayDraw(),
+                "stale pre-add nine-child paint frame admitted mutation");
+        staleBaseline.advance(1);
+        require(baselineLease.result() == Result.UNKNOWN,
+                "stale pre-add frame was reported as a live pass");
+
+        FakePort wrongPaintSlot = new FakePort();
+        wrongPaintSlot.paintInsertSlot = 2;
+        TargetOwnedVisualLeaseCore wrongPaintLease = start(new Slot(), wrongPaintSlot);
+        require(!wrongPaintLease.mayDraw() && wrongPaintSlot.drawRequests == 0,
+                "completed frame at wrong paint rank admitted pixels");
+        wrongPaintSlot.advance(2);
+        require(wrongPaintLease.result() == Result.UNKNOWN
+                && wrongPaintSlot.removeCalls == 1,
+                "wrong paint rank escaped exact-object cleanup");
+
+        FakePort sceneDrift = new FakePort();
+        sceneDrift.autoAddPaint = false;
+        TargetOwnedVisualLeaseCore sceneLease = start(new Slot(), sceneDrift);
+        sceneDrift.scene = "page B|uri B|render B|root 1404x1872|epoch 2";
+        sceneDrift.scheduleFreshPaint(1);
+        sceneDrift.advance(2);
+        require(sceneLease.state() == State.QUARANTINED
+                && sceneLease.result() == Result.UNKNOWN && sceneDrift.drawRequests == 0,
+                "pending scene drift admitted a completed frame");
+
+        FakePort metadataDrift = new FakePort();
+        metadataDrift.autoAddPaint = false;
+        TargetOwnedVisualLeaseCore metadataLease = start(new Slot(), metadataDrift);
+        metadataDrift.evidence.put(metadataDrift.original[4], "stock layout changed");
+        metadataDrift.scheduleFreshPaint(1);
+        metadataDrift.advance(2);
+        require(metadataLease.state() == State.QUARANTINED
+                && metadataLease.result() == Result.UNKNOWN
+                && metadataDrift.drawRequests == 0,
+                "pending metadata drift admitted a completed frame");
+
+        FakePort pausedPending = new FakePort();
+        pausedPending.autoAddPaint = false;
+        TargetOwnedVisualLeaseCore pausedLease = start(new Slot(), pausedPending);
+        pausedPending.pause.run();
+        require(!pausedLease.mayDraw(), "pending child painted after pause signal");
+        pausedPending.runReady();
+        pausedPending.advance(2);
+        require(pausedLease.state() == State.REMOVED
+                && pausedLease.result() == Result.UNKNOWN
+                && pausedPending.removeCalls == 1 && pausedPending.drawRequests == 0,
+                "pause during pending admission escaped exact-object cleanup");
+
+        FakePort rootLostPending = new FakePort();
+        rootLostPending.autoAddPaint = false;
+        TargetOwnedVisualLeaseCore rootLostLease = start(new Slot(), rootLostPending);
+        rootLostPending.rootAlive = false;
+        rootLostPending.rootLoss.run();
+        rootLostPending.runReady();
+        require(rootLostLease.state() == State.QUARANTINED
+                && rootLostLease.result() == Result.UNKNOWN
+                && rootLostPending.removeCalls == 1 && rootLostPending.drawRequests == 0,
+                "pending root loss admitted pixels or a live pass");
+
+        FakePort processLostPending = new FakePort();
+        processLostPending.autoAddPaint = false;
+        TargetOwnedVisualLeaseCore processLostLease = start(new Slot(), processLostPending);
+        processLostPending.processAlive = false;
+        processLostLease.requestCleanup(Reason.PROCESS_LOSS);
+        processLostPending.runReady();
+        require(processLostLease.state() == State.QUARANTINED
+                && processLostLease.result() == Result.UNKNOWN
+                && processLostPending.drawRequests == 0,
+                "pending process loss admitted pixels or a live pass");
+
+        FakePort preAddReentry = new FakePort();
+        preAddReentry.inlineDispatch = true;
+        TargetOwnedVisualLeaseCore preAddLease = start(new Slot(), preAddReentry,
+                new TargetOwnedVisualLeaseCore.Factory() {
+                    @Override public Object create() {
+                        preAddReentry.afterNextSnapshot = new Runnable() {
+                            @Override public void run() { preAddReentry.pause.run(); }
+                        };
+                        return new Identity("owned");
+                    }
+                });
+        require(preAddLease.state() == State.REMOVING && preAddReentry.addCalls == 0,
+                "pre-add snapshot reentry bypassed the terminal-state check");
+        preAddReentry.advance(1);
+        require(preAddLease.result() == Result.UNKNOWN,
+                "pre-add reentrant pause manufactured live restoration");
+
+        FakePort admissionReentry = new FakePort();
+        admissionReentry.autoAddPaint = false;
+        admissionReentry.inlineDispatch = true;
+        TargetOwnedVisualLeaseCore reentrantLease = start(new Slot(), admissionReentry);
+        admissionReentry.scheduleFreshPaint(1);
+        admissionReentry.advance(1); // Poll precedes the completed frame.
+        admissionReentry.afterNextSnapshot = new Runnable() {
+            @Override public void run() { reentrantLease.requestCleanup(Reason.HOST_STOP); }
+        };
+        admissionReentry.advance(1);
+        require(reentrantLease.state() == State.REMOVING
+                && admissionReentry.drawRequests == 0 && !reentrantLease.mayDraw(),
+                "post-paint snapshot reentry resurrected admission after stop");
+        admissionReentry.advance(2);
+        require(reentrantLease.state() == State.REMOVED
+                && reentrantLease.result() == Result.UNKNOWN,
+                "reentrant stop during admission produced a live pass");
+
+        FakePort addThrow = new FakePort();
+        addThrow.throwAfterAttach = true;
+        TargetOwnedVisualLeaseCore addThrowLease = start(new Slot(), addThrow);
+        require(!addThrowLease.mayDraw() && addThrow.drawRequests == 0
+                && addThrow.removeCalls == 1,
+                "add-then-throw admitted pixels before cleanup");
+
+        FakePort failedPost = new FakePort();
+        failedPost.failPaintScheduleAfterAdd = true;
+        TargetOwnedVisualLeaseCore failedPostLease = start(new Slot(), failedPost);
+        failedPost.advance(2);
+        require(failedPostLease.state() == State.REMOVED
+                && failedPostLease.result() == Result.UNKNOWN
+                && failedPostLease.failure() != null
+                && failedPost.removeCalls == 1 && failedPost.drawRequests == 0,
+                "failed admission callback post left a drawable child");
+
+        FakePort lateCallback = new FakePort();
+        lateCallback.autoAddPaint = false;
+        TargetOwnedVisualLeaseCore lateLease = start(new Slot(), lateCallback);
+        Runnable oldPoll = lateCallback.lastScheduledCallback;
+        lateLease.requestCleanup(Reason.HOST_STOP);
+        lateCallback.runReady();
+        lateCallback.advance(2);
+        require(lateLease.state() == State.REMOVED, "explicit stop did not settle");
+        oldPoll.run(); // A queued poll can arrive after terminal cleanup.
+        require(lateLease.state() == State.REMOVED && lateCallback.removeCalls == 1
+                && lateCallback.drawRequests == 0,
+                "late paint callback re-admitted or re-removed the child");
+    }
+
+    private static void testCompletedPaintRestoration() {
+        FakePort noRemovalFrame = new FakePort();
+        noRemovalFrame.autoRemovePaint = false;
+        Slot noRemovalSlot = new Slot();
+        TargetOwnedVisualLeaseCore noRemovalLease = start(noRemovalSlot, noRemovalFrame);
+        noRemovalLease.requestCleanup(Reason.HOST_STOP);
+        noRemovalFrame.runReady();
+        require(noRemovalFrame.children.size() == 9
+                && noRemovalLease.state() == State.REMOVING,
+                "structural nine was mistaken for a painted restoration");
+        noRemovalFrame.advance(39);
+        require(noRemovalLease.state() == State.REMOVING,
+                "post-removal paint wait was not bounded correctly");
+        noRemovalFrame.advance(1);
+        require(noRemovalLease.state() == State.QUARANTINED
+                && noRemovalLease.result() == Result.UNKNOWN
+                && noRemovalSlot.occupied(),
+                "missing fresh nine-child frame manufactured live restoration");
+
+        FakePort staleRemoval = new FakePort();
+        staleRemoval.beginPaintBeforeRemove = true;
+        staleRemoval.autoRemovePaint = false;
+        TargetOwnedVisualLeaseCore staleRemovalLease = start(new Slot(), staleRemoval);
+        staleRemovalLease.requestCleanup(Reason.HOST_STOP);
+        staleRemoval.runReady();
+        staleRemoval.advance(1); // Frame begun before remove, completed afterward.
+        require(staleRemovalLease.state() == State.REMOVING,
+                "pre-removal-begun frame was mistaken for restoration");
+        staleRemoval.scheduleFreshPaint(1);
+        staleRemoval.advance(3);
+        require(staleRemovalLease.state() == State.REMOVED
+                && staleRemovalLease.result() == Result.LIVE_STRUCTURE_RESTORED,
+                "later fresh nine-child frame was not accepted");
+
+        FakePort failedPost = new FakePort();
+        failedPost.failPaintScheduleAfterRemove = true;
+        Slot failedPostSlot = new Slot();
+        TargetOwnedVisualLeaseCore failedPostLease = start(failedPostSlot, failedPost);
+        failedPostLease.requestCleanup(Reason.HOST_STOP);
+        failedPost.runReady();
+        require(failedPostLease.state() == State.QUARANTINED
+                && failedPostLease.result() == Result.UNKNOWN
+                && failedPostSlot.occupied() && failedPost.removeCalls == 1
+                && failedPost.parentOf(failedPostLease.ownedChild()) == null,
+                "failed post-removal callback post reported restoration");
+    }
+
+    private static void testSlowPaintReadsAndQueuedStop() {
+        FakePort slowPreAdd = new FakePort();
+        slowPreAdd.nextCompletedPaintReadAdvance = 50;
+        TargetOwnedVisualLeaseCore preAddLease = start(new Slot(), slowPreAdd);
+        require(slowPreAdd.addCalls == 0 && preAddLease.result() == Result.PENDING,
+                "pre-add paint read crossed the deadline but still attached a child");
+        slowPreAdd.advance(1);
+        require(preAddLease.state() == State.REMOVED
+                && preAddLease.result() == Result.UNKNOWN,
+                "expired pre-add frame produced a live rollback claim");
+
+        FakePort agedPreAddPaint = new FakePort();
+        agedPreAddPaint.nextCompletedPaintReadAdvance = 30;
+        TargetOwnedVisualLeaseCore agedLease = TargetOwnedVisualLeaseCore.startForTest(
+                new Slot(), agedPreAddPaint, new TargetOwnedVisualLeaseCore.Factory() {
+                    @Override public Object create() { return new Identity("owned"); }
+                }, 1, 1, 50, 10, 10, 25);
+        require(agedPreAddPaint.now == 130 && agedPreAddPaint.addCalls == 0
+                && agedLease.reason() == Reason.DRIFT,
+                "paint aged past pre-add freshness bound before a live deadline");
+        agedPreAddPaint.advance(1);
+        require(agedLease.state() == State.REMOVED
+                && agedLease.result() == Result.UNKNOWN,
+                "stale pre-add paint produced a live rollback claim");
+
+        FakePort preAddMutation = new FakePort();
+        TargetOwnedVisualLeaseCore preAddMutationLease = start(new Slot(), preAddMutation,
+                new TargetOwnedVisualLeaseCore.Factory() {
+                    @Override public Object create() {
+                        preAddMutation.afterNextSnapshot = new Runnable() {
+                            @Override public void run() {
+                                preAddMutation.evidenceMutationRevision++;
+                                preAddMutation.scene = "page B";
+                            }
+                        };
+                        return new Identity("owned");
+                    }
+                });
+        require(preAddMutation.addCalls == 0
+                && preAddMutationLease.result() != Result.LIVE_STRUCTURE_RESTORED,
+                "pre-add snapshot mutation escaped the evidence fence");
+
+        FakePort slowAdmission = new FakePort();
+        slowAdmission.autoAddPaint = false;
+        TargetOwnedVisualLeaseCore admissionLease = start(new Slot(), slowAdmission);
+        slowAdmission.scheduleFreshPaint(1);
+        slowAdmission.advance(1); // Frame completes after the first poll.
+        slowAdmission.afterNextSnapshot = new Runnable() {
+            @Override public void run() { slowAdmission.now += 40; }
+        };
+        slowAdmission.advance(1);
+        require(admissionLease.state() == State.REMOVING
+                && slowAdmission.drawRequests == 0 && slowAdmission.removeCalls == 1,
+                "admission snapshot crossed paint-wait bound and requested pixels");
+        slowAdmission.advance(2);
+        require(admissionLease.result() == Result.UNKNOWN,
+                "late admission read produced a live rollback claim");
+
+        FakePort admissionMutation = new FakePort();
+        admissionMutation.autoAddPaint = false;
+        TargetOwnedVisualLeaseCore mutatedAdmissionLease = start(new Slot(),
+                admissionMutation);
+        admissionMutation.scheduleFreshPaint(1);
+        admissionMutation.advance(1);
+        admissionMutation.afterNextSnapshot = new Runnable() {
+            @Override public void run() {
+                admissionMutation.evidenceMutationRevision++;
+                admissionMutation.scene = "page B";
+            }
+        };
+        admissionMutation.advance(1);
+        require(admissionMutation.drawRequests == 0
+                && admissionMutation.removeCalls == 1
+                && mutatedAdmissionLease.result() == Result.UNKNOWN,
+                "admission snapshot mutation promoted a drawable child");
+
+        FakePort queuedStop = new FakePort();
+        queuedStop.autoAddPaint = false;
+        TargetOwnedVisualLeaseCore queuedLease = start(new Slot(), queuedStop);
+        queuedStop.scheduleFreshPaint(1);
+        queuedStop.advance(1);
+        queuedStop.dispatchDelay = 10;
+        queuedStop.afterNextSnapshot = new Runnable() {
+            @Override public void run() { queuedLease.requestCleanup(Reason.HOST_STOP); }
+        };
+        queuedStop.advance(1);
+        require(queuedLease.state() == State.REMOVING
+                && queuedStop.drawRequests == 0 && queuedStop.removeCalls == 1
+                && !queuedLease.mayDraw(),
+                "queued HOST_STOP during admission snapshot promoted pending child");
+        queuedStop.advance(2);
+        require(queuedLease.result() == Result.UNKNOWN,
+                "queued stop during pending admission produced a live pass");
+
+        FakePort drawStop = new FakePort();
+        TargetOwnedVisualLeaseCore drawLease = start(new Slot(), drawStop);
+        drawStop.dispatchDelay = 10;
+        drawStop.afterNextSnapshot = new Runnable() {
+            @Override public void run() { drawLease.requestCleanup(Reason.HOST_STOP); }
+        };
+        require(!drawLease.mayDraw() && drawLease.failure() == null,
+                "queued HOST_STOP during draw witness escaped the draw guard");
+        drawStop.advance(12);
+        require(drawLease.state() == State.REMOVED
+                && drawLease.result() == Result.LIVE_STRUCTURE_RESTORED,
+                "queued draw-stop changed successful exact-object rollback");
+
+        FakePort drawMutation = new FakePort();
+        TargetOwnedVisualLeaseCore mutatedDrawLease = start(new Slot(), drawMutation);
+        drawMutation.afterNextSnapshot = new Runnable() {
+            @Override public void run() {
+                drawMutation.evidenceMutationRevision++;
+                drawMutation.scene = "page B";
+            }
+        };
+        require(!mutatedDrawLease.mayDraw(),
+                "draw witness captured before scene mutation still authorized pixels");
+        drawMutation.runReady();
+        require(mutatedDrawLease.result() == Result.UNKNOWN,
+                "draw-time scene mutation produced a live rollback claim");
+
+        FakePort slowRestoration = new FakePort();
+        Slot slowRestorationSlot = new Slot();
+        TargetOwnedVisualLeaseCore restorationLease = start(slowRestorationSlot,
+                slowRestoration);
+        restorationLease.requestCleanup(Reason.HOST_STOP);
+        slowRestoration.runReady();
+        slowRestoration.afterNextSnapshot = new Runnable() {
+            @Override public void run() { slowRestoration.snapshotAdvance = 40; }
+        };
+        slowRestoration.advance(1);
+        require(restorationLease.state() == State.QUARANTINED
+                && restorationLease.result() == Result.UNKNOWN
+                && slowRestorationSlot.occupied(),
+                "restoration snapshot crossed paint-wait bound and accepted sample");
+    }
+
+    private static void testFinalPaintProofAndDispatchFailure() {
+        FakePort expiredFrame = new FakePort();
+        Slot expiredSlot = new Slot();
+        TargetOwnedVisualLeaseCore expiredLease = TargetOwnedVisualLeaseCore.startForTest(
+                expiredSlot, expiredFrame, new TargetOwnedVisualLeaseCore.Factory() {
+                    @Override public Object create() { return new Identity("owned"); }
+                }, 1, 1, 50, 10, 100, 5);
+        expiredFrame.advance(1);
+        expiredLease.requestCleanup(Reason.HOST_STOP);
+        expiredFrame.runReady();
+        expiredFrame.advance(1); // Accept fresh nine-child frame.
+        require(expiredLease.state() == State.REMOVING,
+                "expired-frame fixture did not reach two-sample restoration");
+        expiredFrame.now += 5; // Verification gap is 100; paint age alone fails.
+        expiredFrame.runReady();
+        require(expiredLease.state() == State.QUARANTINED
+                && expiredLease.result() == Result.UNKNOWN && expiredSlot.occupied(),
+                "expired paint proof passed the final sample");
+
+        FakePort unfinished = new FakePort();
+        Slot unfinishedSlot = new Slot();
+        TargetOwnedVisualLeaseCore unfinishedLease = start(unfinishedSlot, unfinished);
+        unfinishedLease.requestCleanup(Reason.HOST_STOP);
+        unfinished.runReady();
+        unfinished.advance(1);
+        unfinished.startedPaintRevision++; // A newer paint began but did not finish.
+        unfinished.advance(1);
+        require(unfinishedLease.state() == State.QUARANTINED
+                && unfinishedLease.result() == Result.UNKNOWN && unfinishedSlot.occupied(),
+                "unfinished newer paint was ignored at final restoration proof");
+
+        FakePort superseded = new FakePort();
+        Slot supersededSlot = new Slot();
+        TargetOwnedVisualLeaseCore supersededLease = start(supersededSlot, superseded);
+        supersededLease.requestCleanup(Reason.HOST_STOP);
+        superseded.runReady();
+        superseded.advance(1);
+        long newRevision = ++superseded.startedPaintRevision;
+        superseded.lastCompletedPaintFrame = new PaintFrame(newRevision,
+                superseded.now, superseded.snapshot());
+        superseded.advance(1);
+        require(supersededLease.state() == State.QUARANTINED
+                && supersededLease.result() == Result.UNKNOWN && supersededSlot.occupied(),
+                "superseded nine-child paint was accepted as the original proof");
+
+        FakePort commitSeam = new FakePort();
+        Slot commitSlot = new Slot();
+        TargetOwnedVisualLeaseCore commitLease = start(commitSlot, commitSeam);
+        commitLease.requestCleanup(Reason.HOST_STOP);
+        commitSeam.runReady();
+        commitSeam.advance(1);
+        commitSeam.beginUnfinishedPaintOnRelease = true;
+        commitSeam.advance(1);
+        require(commitLease.state() == State.QUARANTINED
+                && commitLease.result() == Result.UNKNOWN && commitSlot.occupied(),
+                "new paint during callback release escaped terminal proof");
+
+        FakePort sceneDuringProof = new FakePort();
+        Slot sceneSlot = new Slot();
+        TargetOwnedVisualLeaseCore sceneLease = start(sceneSlot, sceneDuringProof);
+        sceneLease.requestCleanup(Reason.HOST_STOP);
+        sceneDuringProof.runReady();
+        sceneDuringProof.advance(1);
+        sceneDuringProof.driftSceneOnReleasePaintRead = true;
+        sceneDuringProof.advance(1);
+        require(sceneLease.state() == State.QUARANTINED
+                && sceneLease.result() == Result.UNKNOWN && sceneSlot.occupied(),
+                "scene drift during paint-proof read escaped terminal nine-child check");
+
+        FakePort finalSnapshotDrift = new FakePort();
+        Slot finalSnapshotSlot = new Slot();
+        TargetOwnedVisualLeaseCore finalSnapshotLease = start(finalSnapshotSlot,
+                finalSnapshotDrift);
+        finalSnapshotLease.requestCleanup(Reason.HOST_STOP);
+        finalSnapshotDrift.runReady();
+        finalSnapshotDrift.advance(1);
+        finalSnapshotDrift.driftSceneOnFinalSnapshot = true;
+        finalSnapshotDrift.advance(1);
+        require(finalSnapshotLease.state() == State.QUARANTINED
+                && finalSnapshotLease.result() == Result.UNKNOWN
+                && finalSnapshotSlot.occupied()
+                && finalSnapshotDrift.snapshotsUntilSceneDrift == 0,
+                "final snapshot mutated scene after capture without tripping revision fence");
+
+        FakePort rejectedDispatch = new FakePort();
+        Slot rejectedSlot = new Slot();
+        TargetOwnedVisualLeaseCore rejectedLease = start(rejectedSlot, rejectedDispatch);
+        rejectedDispatch.failNextDispatch = true;
+        rejectedLease.requestCleanup(Reason.HOST_STOP);
+        require(rejectedLease.state() == State.QUARANTINED
+                && rejectedLease.result() == Result.UNKNOWN
+                && rejectedDispatch.removeCalls == 1 && !rejectedLease.mayDraw(),
+                "rejected cleanup dispatch left a drawable child");
+        rejectedDispatch.advance(2);
+        require(rejectedLease.failure() != null && rejectedSlot.occupied()
+                && rejectedDispatch.children.size() == 9,
+                "rejected cleanup dispatch released authority or skipped exact removal");
+
+        FakePort rejectedOffMain = new FakePort();
+        Slot offMainSlot = new Slot();
+        TargetOwnedVisualLeaseCore offMainLease = start(offMainSlot, rejectedOffMain);
+        rejectedOffMain.onMainThread = false;
+        rejectedOffMain.failNextDispatch = true;
+        offMainLease.requestCleanup(Reason.HOST_STOP);
+        rejectedOffMain.onMainThread = true;
+        require(offMainLease.state() == State.QUARANTINED
+                && offMainLease.result() == Result.UNKNOWN
+                && rejectedOffMain.children.size() == 10
+                && rejectedOffMain.removeCalls == 0 && offMainSlot.occupied()
+                && !offMainLease.mayDraw(),
+                "off-main rejected dispatch mutated hierarchy or allowed drawing");
     }
 
     private static void testRootProcessLossAndRemoveFailures() {
@@ -1053,6 +1714,10 @@ public final class TargetOwnedVisualLeaseCoreTest {
         testMovedMissingAndImpostor();
         testNineChildAndEvidenceVerification();
         testEffectiveDrawingOrderEvidence();
+        testCompletedPaintAdmission();
+        testCompletedPaintRestoration();
+        testSlowPaintReadsAndQueuedStop();
+        testFinalPaintProofAndDispatchFailure();
         testRootProcessLossAndRemoveFailures();
         System.out.println("TARGET_OWNED_VISUAL_LEASE_CORE_PASS checks=" + checks);
     }

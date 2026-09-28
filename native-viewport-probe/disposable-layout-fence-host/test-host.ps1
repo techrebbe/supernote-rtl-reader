@@ -46,6 +46,18 @@ $activity = Get-Content -LiteralPath (Join-Path $source 'TrialActivity.java') -R
 $root = Get-Content -LiteralPath (Join-Path $source 'TrialRoot.java') -Raw
 $parent = Get-Content -LiteralPath (Join-Path $source 'TrialParent.java') -Raw
 $process = Get-Content -LiteralPath (Join-Path $source 'TrialProcess.java') -Raw
+if ($activity -notmatch 'if \(before == TrialEvidence\.State\.WAIT_FIRST_PAINT\s*&& trial\.state\(\) == TrialEvidence\.State\.WAIT_RESTORE_CALL\) \{\s*(?://[^\r\n]*\r?\n\s*)*requestRestore\(\);\s*\} else if' -or
+        $activity -notmatch 'else if \(cleanupPending && before == TrialEvidence\.State\.WAIT_RESTORE_CALL\) \{\s*unknownAndRestore\("EXTRA_PAINT_BEFORE_RESTORE"\);') {
+    throw 'Changed-frame restore must be requested synchronously and extra paints fail closed.'
+}
+$restoreMethod = [regex]::Match($activity,
+    '(?s)private void requestRestore\(\) \{(.*?)\r?\n    \}\s*private void unknownAndRestore')
+if (-not $restoreMethod.Success -or
+        $restoreMethod.Groups[1].Value -notmatch 'parent\.requestLayout\(\);\s*if \(trial\.state\(\) == TrialEvidence\.State\.UNKNOWN\) \{\s*(?://[^\r\n]*\r?\n\s*)*root\.invalidate\(\);\s*\}' -or
+        [regex]::Matches($restoreMethod.Groups[1].Value, 'root\.invalidate\(\);').Count -ne 1 -or
+        $activity -notmatch 'if \(!cleanupVerified\.get\(\) && !cleanupPending\) requestRestore\(\);') {
+    throw 'Normal restore must use parent layout only; UNKNOWN cleanup keeps explicit redraw.'
+}
 if ($activity -notmatch 'proof\.put\("abaAway", cutJson\(trial == null \? null : trial\.abaAway\(\)\)\);' -or
         $activity -notmatch 'if \(cut == null\) return JSONObject\.NULL;') {
     throw 'ABA proof JSON key and null serialization contract failed.'

@@ -73,8 +73,8 @@ Its reviewed bundle is 476101 bytes with SHA-256
 The raw observer source alone is not an executable Frida 17 bundle; the runner
 requires an explicit bundle path and matching SHA-256.
 
-The executable pins the final synthetic APK SHA-256
-`7b970be2c80a64b10921d011e5236ad6754b6a78395313fcc700db4faf64c9af`,
+The executable pins the current synthetic APK SHA-256
+`1b23a3be88a21193160329fffa4039735b685fbb5e01e594888ab12f5ca5d610`,
 signer `4d4f0f18e10114c7a801bcdb87dd4fd2d75ebc24ca0ad5bcb6967009e62ead6a`,
 server `9dcb1c12fa528070f2f6590b245e2c66cb1f931e0975bc911d9ff476394879d7`
 (110837320 bytes), and bundle digest/size above. CLI hashes cannot redefine

@@ -149,7 +149,52 @@ public final class TrialEvidenceTest {
         return proof;
     }
 
+    private static void unrequestedRestoredPaint() {
+        Fixture f = new Fixture();
+        TrialEvidence.Bounds target = f.base.withRightDelta(1);
+        TrialEvidence.Cut firstFrame = f.firstFrame(target, 11, 21, 4);
+        TrialEvidence.Trial proof = waitingForRestore(f, firstFrame);
+        check(proof.onParentPreCall(firstFrame, f.base, 12, 1030),
+                "restore entry remains the first changed frame");
+        proof.onParentLayoutAfter(f.restoreAfter(12, 22, 5, firstFrame), 1031);
+        TrialEvidence.Cut restored = f.restoredFrame(12, 22, 5);
+        proof.onCompletedPaint(restored, 1041);
+        check(proof.state() == TrialEvidence.State.WAIT_SECOND_PAINT_REQUEST,
+                "first restored paint waits for an explicit second request");
+        TrialEvidence.Cut unsolicited = f.cutAt(f.base, 12, 22, 5,
+                8, 1045, 12, 22, 8, 1046);
+        proof.onCompletedPaint(unsolicited, 1047);
+        check(proof.state() == TrialEvidence.State.UNKNOWN
+                        && "UNREQUESTED_SECOND_PAINT".equals(proof.reason())
+                        && !proof.rollbackVerified(),
+                "unsolicited restored paint cannot satisfy the two-paint proof");
+    }
+
     private static void restoreEntryDiagnostic() {
+        Fixture repeated = new Fixture();
+        TrialEvidence.Bounds repeatedTarget = repeated.base.withRightDelta(1);
+        TrialEvidence.Cut repeatedFirst = repeated.firstFrame(repeatedTarget, 11, 21, 4);
+        TrialEvidence.Trial repeatedProof = waitingForRestore(repeated, repeatedFirst);
+        TrialEvidence.Cut repeatedPaint = repeated.cutAt(repeatedTarget, 11, 21, 4,
+                7, 1025, 11, 21, 7, 1026);
+        check(!repeatedProof.onParentPreCall(repeatedPaint, repeated.base, 12, 1030)
+                        && repeatedProof.state() == TrialEvidence.State.UNKNOWN
+                        && "RESTORE_ENTRY_DRIFT".equals(repeatedProof.reason())
+                        && !repeatedProof.rollbackVerified(),
+                "intervening same-state paint cannot become restore proof");
+        TrialEvidence.RestoreEntryDiff repeatedDiff = repeatedProof.restoreEntryDrift();
+        check(repeatedDiff != null && repeatedDiff.sameRoot
+                        && repeatedDiff.firstBounds.equals(repeatedDiff.entryBounds)
+                        && repeatedDiff.parentPreCallRevision.firstFrame
+                                == repeatedDiff.parentPreCallRevision.entry
+                        && repeatedDiff.observedWriteOrdinal.firstFrame
+                                == repeatedDiff.observedWriteOrdinal.entry
+                        && repeatedDiff.rootLayoutCalls.firstFrame
+                                == repeatedDiff.rootLayoutCalls.entry
+                        && repeatedDiff.completedPaintRevision.firstFrame == 6
+                        && repeatedDiff.completedPaintRevision.entry == 7,
+                "duplicate-paint diagnostic isolates paint revision drift");
+
         Fixture f = new Fixture();
         TrialEvidence.Bounds target = f.base.withRightDelta(1);
         TrialEvidence.Cut firstFrame = f.firstFrame(target, 11, 21, 4);
@@ -559,6 +604,7 @@ public final class TrialEvidenceTest {
         directBypass(TrialEvidence.Command.DIRECT_LAYOUT);
         directBypass(TrialEvidence.Command.DIRECT_OFFSET);
         abaControl();
+        unrequestedRestoredPaint();
         restoreEntryDiagnostic();
         adversarial();
         postPassArmValidity();

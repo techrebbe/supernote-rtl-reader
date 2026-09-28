@@ -20,7 +20,7 @@ from host_protocol import Pins, TrialError, VARIANTS, need, run_mockable
 
 
 # Reviewed synthetic artifacts only. CLI digests are assertions, not authority.
-REVIEWED_APK_SHA256 = "7b970be2c80a64b10921d011e5236ad6754b6a78395313fcc700db4faf64c9af"
+REVIEWED_APK_SHA256 = "1b23a3be88a21193160329fffa4039735b685fbb5e01e594888ab12f5ca5d610"
 REVIEWED_SIGNER_SHA256 = "4d4f0f18e10114c7a801bcdb87dd4fd2d75ebc24ca0ad5bcb6967009e62ead6a"
 REVIEWED_SERVER_SHA256 = "9dcb1c12fa528070f2f6590b245e2c66cb1f931e0975bc911d9ff476394879d7"
 REVIEWED_SERVER_BYTES = 110_837_320

@@ -540,9 +540,9 @@ public final class TrialActivity extends Activity
         }
         if (before == TrialEvidence.State.WAIT_FIRST_PAINT
                 && trial.state() == TrialEvidence.State.WAIT_RESTORE_CALL) {
-            if (!main.post(new Runnable() {
-                @Override public void run() { requestRestore(); }
-            })) unknownAndRestore("RESTORE_POST_REJECTED");
+            // Request the parent rollback before another traversal can paint the
+            // changed bounds. The request queues layout; it does not mutate them here.
+            requestRestore();
         } else if (trial.state() == TrialEvidence.State.WAIT_SECOND_PAINT_REQUEST) {
             scheduleSecondPaint();
         } else if (trial.state() == TrialEvidence.State.WAIT_FINAL_SAMPLE) {
@@ -627,7 +627,11 @@ public final class TrialActivity extends Activity
         cleanupRequestedElapsedMs = SystemClock.elapsedRealtime();
         parent.setDesiredDelta(0);
         parent.requestLayout();
-        root.invalidate();
+        if (trial.state() == TrialEvidence.State.UNKNOWN) {
+            // Same-bounds cleanup may need its own redraw; normal restoration
+            // already requests a changed-bounds parent layout.
+            root.invalidate();
+        }
         TrialProcess.get().record("RESTORE_REQUESTED", "root=" + root.getRootToken());
     }
 

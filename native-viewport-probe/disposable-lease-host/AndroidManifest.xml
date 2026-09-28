@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.techrebbe.supernote.disposableleasehost"
+    android:versionCode="1" android:versionName="0.1-disposable">
+    <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="30" />
+    <!-- Deliberately no storage, network, pen, accessibility, or overlay permissions. -->
+    <application android:name=".ProbeApplication" android:allowBackup="false"
+        android:usesCleartextTraffic="false"
+        android:label="Disposable Lease Host"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <activity android:name=".ProbeActivity" android:exported="true"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity android:name=".CoverActivity" android:exported="false" />
+        <!-- Disposable test-only, read/query plus bounded command channel. -->
+        <provider android:name=".ProbeProvider" android:exported="true"
+            android:authorities="com.techrebbe.supernote.disposableleasehost.probe" />
+    </application>
+</manifest>

@@ -282,6 +282,99 @@ class TrialAdapterTests(unittest.TestCase):
         self.assertEqual([sample["poll"] for sample in evidence["polls"]],
                          [0, 13, 14, 15, 16, 17, 18, 19])
 
+    def test_scene_drift_captures_only_existing_scalar_state(self) -> None:
+        app, fake = app_with_fake()
+        fake.state["parentLayoutRequested"] = True
+        fake.state["sessionTaintReason"] = "NONE"
+        fake.state["rootBounds"] = {"left": 0, "top": 0,
+                                    "right": 100, "bottom": 200}
+        fake.state["parentPreCallRevision"] = 4
+        fake.state["observedWriteOrdinal"] = 4
+        fake.state["rootLayoutCallCount"] = 3
+        fake.state["trial"] = {"state": "WAIT_FIRST_CALL",
+                               "reason": "PENDING",
+                               "command": "parent-plus-one",
+                               "currentlyValid": False}
+        app.command_host_started = time.monotonic() - 0.1
+        with self.assertRaisesRegex(host.TrialError, "APP_SCENE_DRIFT"):
+            app._state(ADMISSION, phase="trial-poll", os_check=False)
+        scene = app.scene_failure_evidence()
+        evidence = scene["failedState"]
+        self.assertEqual(evidence["phase"], "trial-poll")
+        self.assertEqual(evidence["parentLayoutRequested"], True)
+        self.assertEqual(evidence["rootLayoutRequested"], False)
+        self.assertEqual(evidence["trialState"], "WAIT_FIRST_CALL")
+        self.assertEqual(evidence["trialReason"], "PENDING")
+        self.assertEqual(evidence["armState"], "REFRESH_REQUESTED")
+        self.assertEqual(evidence["rootBounds"], fake.state["rootBounds"])
+        self.assertGreaterEqual(evidence["hostMsSinceCommand"], 100)
+        self.assertEqual(scene["firstTrialPoll"], evidence)
+        self.assertEqual([call[0] for call in fake.calls], ["state"])
+        serialized = json.dumps(scene)
+        for secret in (ADMISSION.incarnation, ADMISSION.activity_token,
+                       ADMISSION.root_token, "arm-1", "refresh-1"):
+            self.assertNotIn(secret, serialized)
+
+    def test_command_response_and_failed_trial_poll_have_distinct_phases(self) -> None:
+        app, fake = app_with_fake()
+        app.freshen_baseline(ADMISSION)
+        fake.state["parentLayoutRequested"] = True
+        with self.assertRaisesRegex(host.TrialError, "APP_SCENE_DRIFT"):
+            app.execute_and_restore("parent-plus-one", ADMISSION)
+        evidence = app.scene_failure_evidence()
+        self.assertEqual(evidence["commandResponse"]["phase"],
+                         "command-response")
+        self.assertTrue(evidence["commandResponse"]["parentLayoutRequested"])
+        self.assertEqual(evidence["firstTrialPoll"]["phase"], "trial-poll")
+        self.assertTrue(evidence["firstTrialPoll"]["parentLayoutRequested"])
+        self.assertEqual(evidence["failedState"]["phase"], "trial-poll")
+        self.assertTrue(evidence["failedState"]["parentLayoutRequested"])
+        self.assertEqual(sum(call[0] == "state" for call in fake.calls), 2)
+
+    def test_first_trial_poll_persists_before_later_scene_failure(self) -> None:
+        app, fake = app_with_fake()
+        app.command_host_started = time.monotonic()
+        app._state(ADMISSION, phase="trial-poll", os_check=False)
+        fake.state["parentLayoutRequested"] = True
+        with self.assertRaisesRegex(host.TrialError, "APP_SCENE_DRIFT"):
+            app._state(ADMISSION, phase="trial-poll", os_check=False)
+        evidence = app.scene_failure_evidence()
+        self.assertFalse(evidence["firstTrialPoll"]["parentLayoutRequested"])
+        self.assertTrue(evidence["failedState"]["parentLayoutRequested"])
+        self.assertEqual([call[0] for call in fake.calls], ["state", "state"])
+
+    def test_unexpected_diagnostic_labels_cannot_leak_tokens(self) -> None:
+        app, fake = app_with_fake()
+        secret = "12345678-1234-1234-1234-123456789abc"
+        fake.state["lifecycle"] = secret
+        fake.state["sessionTaintReason"] = secret
+        fake.state["process"]["armState"] = secret
+        fake.state["trial"] = {"state": secret, "reason": secret,
+                                "command": secret}
+        with self.assertRaisesRegex(host.TrialError, "APP_SCENE_DRIFT"):
+            app._state(ADMISSION, phase="trial-poll", os_check=False)
+        evidence = app.scene_failure_evidence()
+        self.assertNotIn(secret, json.dumps(evidence))
+        for field in ("lifecycle", "sessionTaintReason", "armState",
+                      "trialState", "trialReason", "trialCommand"):
+            self.assertIsNone(evidence["failedState"][field])
+
+    def test_non_scene_error_does_not_emit_scene_evidence(self) -> None:
+        app, _ = app_with_fake()
+        app.command_response_evidence = {"phase": "command-response"}
+        app.first_trial_poll_evidence = {"phase": "trial-poll"}
+        self.assertIsNone(app.scene_failure_evidence())
+
+    def test_diagnostic_failure_never_changes_scene_drift_verdict(self) -> None:
+        app, fake = app_with_fake()
+        fake.state["sessionTainted"] = True
+        with patch.object(subject, "_scene_diagnostic",
+                          side_effect=RuntimeError("diagnostic failed")):
+            with self.assertRaisesRegex(host.TrialError, "APP_SCENE_DRIFT"):
+                app._state(ADMISSION, phase="main-barrier", os_check=False)
+        self.assertEqual(app.scene_failure_evidence()["failedState"],
+                         {"phase": "main-barrier", "capture": "UNAVAILABLE"})
+
     def test_ambiguous_refresh_never_retries(self) -> None:
         app, fake = app_with_fake()
         fake.reject_refresh = True

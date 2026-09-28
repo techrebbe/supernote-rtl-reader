@@ -244,6 +244,11 @@ class EntryTests(unittest.TestCase):
             prearm_host_start = 123.0
             cleaned = False
             def cleanup_unarmed_launch(self): self.cleaned = True
+            def scene_failure_evidence(self):
+                return {"commandResponse": {"phase": "command-response"},
+                        "firstTrialPoll": {"phase": "trial-poll"},
+                        "failedState": {"phase": "trial-poll",
+                                        "parentLayoutRequested": True}}
         app = App()
         def failed(*unused):
             raise host.TrialError("TRIAL_UNCERTAIN")
@@ -259,8 +264,11 @@ class EntryTests(unittest.TestCase):
                             EmulatorApp=lambda *a: app,
                             WorkerTransport=lambda *a: object(),
                             run_mockable=failed):
-            with self.assertRaisesRegex(host.TrialError, "TRIAL_UNCERTAIN"):
+            with self.assertRaises(subject.RunnerFailure) as caught:
                 subject.run(args())
+        self.assertEqual(str(caught.exception), "TRIAL_UNCERTAIN")
+        self.assertEqual(caught.exception.scene_evidence["failedState"]["phase"],
+                         "trial-poll")
         self.assertFalse(app.cleaned)
         self.assertTrue(server.cleaned)
 
@@ -271,7 +279,11 @@ class EntryTests(unittest.TestCase):
                                "prearm_host_start": None,
                                "refresh_failure_evidence": lambda self:
                                    {"phase": "refresh", "polls":
-                                    [{"sampleAgeMs": 678}]}})()
+                                    [{"sampleAgeMs": 678}]},
+                               "scene_failure_evidence": lambda self:
+                                   {"commandResponse": {"phase": "command-response"},
+                                    "firstTrialPoll": {"phase": "trial-poll"},
+                                    "failedState": {"phase": "trial-poll"}}})()
         def failed(*unused):
             raise host.TrialError("TRIAL_PRIMARY_FAILURE")
         def unlock_failed(*unused):
@@ -308,6 +320,10 @@ class EntryTests(unittest.TestCase):
         self.assertEqual(reported["cleanupCodes"], list(error.cleanup_codes))
         self.assertEqual(reported["refreshEvidence"],
                          {"phase": "refresh", "polls": [{"sampleAgeMs": 678}]})
+        self.assertEqual(reported["sceneEvidence"],
+                         {"commandResponse": {"phase": "command-response"},
+                          "firstTrialPoll": {"phase": "trial-poll"},
+                          "failedState": {"phase": "trial-poll"}})
 
 
 if __name__ == "__main__":

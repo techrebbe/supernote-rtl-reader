@@ -17,7 +17,17 @@ public final class TargetOwnedVisualLeaseCore {
     }
     public enum Result { PENDING, LIVE_STRUCTURE_RESTORED, UNKNOWN }
 
-    public interface Factory { Object create(); }
+    /** Immutable capability handed to the owned child before it can attach. */
+    public static final class DrawGate {
+        private final TargetOwnedVisualLeaseCore lease;
+
+        private DrawGate(TargetOwnedVisualLeaseCore lease) { this.lease = lease; }
+
+        public boolean mayDraw() { return lease.mayDraw(); }
+    }
+
+    /** Must construct the child with this exact gate; no late binding. */
+    public interface Factory { Object create(DrawGate drawGate); }
     public interface Registration { void release(); }
 
     public interface Port {
@@ -39,10 +49,11 @@ public final class TargetOwnedVisualLeaseCore {
         Object root();
         Snapshot snapshot();
         Object parentOf(Object child);
+        // Must reject a child not already bound to this exact gate identity.
         // The owned insertion is exactly one evidence mutation. This call
         // must not reenter unrelated scene/hierarchy changes; if it cannot
         // guarantee that, it must throw and leave cleanup to exact identity.
-        void add(Object child, int provenSlot);
+        void add(Object child, int provenSlot, DrawGate drawGate);
         void remove(Object child);
         void requestDraw(Object child);
         // Must throw if Handler.post returns false. A rejected cleanup wakeup
@@ -185,6 +196,7 @@ public final class TargetOwnedVisualLeaseCore {
 
     private final Slot slot;
     private final Port port;
+    private final DrawGate drawGate;
     private final int insertSlot;
     private final int paintSlot;
     private final long lifetimeMillis;
@@ -251,6 +263,7 @@ public final class TargetOwnedVisualLeaseCore {
             long maxVerificationGapMillis, long maxPaintWaitMillis) {
         this.slot = slot;
         this.port = port;
+        this.drawGate = new DrawGate(this);
         this.insertSlot = insertSlot;
         this.paintSlot = paintSlot;
         this.lifetimeMillis = lifetimeMillis;
@@ -323,7 +336,9 @@ public final class TargetOwnedVisualLeaseCore {
                 return;
             }
             deadlineMillis = now + lifetimeMillis;
-            owned = factory.create(); // The process-local slot is already held.
+            // The process-local slot is already held. The child receives its
+            // final gate in construction, before add or any paint callback.
+            owned = factory.create(drawGate);
             if (owned == null) {
                 cleanup(Reason.INSERTION_FAILURE);
                 return;
@@ -365,7 +380,7 @@ public final class TargetOwnedVisualLeaseCore {
             }
             adding = true;
             try {
-                port.add(owned, insertSlot);
+                port.add(owned, insertSlot, drawGate);
                 // Pin before any further Port read can reenter and mutate the
                 // scene; an ABA before the paint poll must never be adopted.
                 postAddEvidenceRevision = port.evidenceMutationRevision();

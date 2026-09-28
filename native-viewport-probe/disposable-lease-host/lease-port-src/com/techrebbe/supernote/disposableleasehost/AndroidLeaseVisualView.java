@@ -6,7 +6,6 @@ import android.graphics.Paint;
 import android.os.Looper;
 import android.view.MotionEvent;
 import android.view.View;
-import android.view.ViewParent;
 
 import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore;
 
@@ -17,10 +16,13 @@ import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore;
  */
 public final class AndroidLeaseVisualView extends View {
     private final Paint paint = new Paint();
-    private TargetOwnedVisualLeaseCore lease;
+    private final TargetOwnedVisualLeaseCore.DrawGate drawGate;
+    private boolean claimedForAdd;
 
-    public AndroidLeaseVisualView(Context context) {
+    public AndroidLeaseVisualView(Context context, TargetOwnedVisualLeaseCore.DrawGate drawGate) {
         super(context);
+        if (drawGate == null) throw new IllegalArgumentException("prebound draw gate required");
+        this.drawGate = drawGate;
         setBackground(null);
         setForeground(null);
         setElevation(0f);
@@ -35,23 +37,24 @@ public final class AndroidLeaseVisualView extends View {
         paint.setStyle(Paint.Style.FILL);
     }
 
-    public void bindLease(TargetOwnedVisualLeaseCore lease) {
+    /** One-shot use prevents a previously removed view from being reinserted. */
+    void claimForAdd() {
         requireMain();
-        if (lease == null || this.lease != null || lease.ownedChild() != this) {
-            throw new IllegalStateException("only the exact owned lease may bind");
+        if (claimedForAdd || getParent() != null) {
+            throw new IllegalStateException("owned child already used");
         }
-        ViewParent parent = getParent();
-        if (parent instanceof AndroidLeasePaintRoot) {
-            ((AndroidLeasePaintRoot) parent).beforeEvidenceMutation();
-        }
-        this.lease = lease;
+        claimedForAdd = true;
     }
 
-    public boolean hasBoundLease() { return lease != null; }
+    boolean wasClaimedForAdd() { return claimedForAdd; }
+
+    boolean usesDrawGate(TargetOwnedVisualLeaseCore.DrawGate expected) {
+        return expected != null && drawGate == expected;
+    }
 
     @Override public void draw(Canvas canvas) {
         requireMain();
-        if (lease == null || !lease.mayDraw()) return;
+        if (!drawGate.mayDraw()) return;
         super.draw(canvas);
     }
 

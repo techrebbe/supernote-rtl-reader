@@ -1,6 +1,7 @@
 package com.techrebbe.supernote.viewportprobe;
 
 import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore.Port;
+import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore.DrawGate;
 import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore.PaintFrame;
 import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore.Reason;
 import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore.Registration;
@@ -17,12 +18,20 @@ public final class TargetOwnedVisualLeaseCoreTest {
     private static int checks;
 
     // Deliberately hostile: equality cannot identify any child or its parent.
-    private static final class Identity {
+    private static class Identity {
         final String name;
         Identity(String name) { this.name = name; }
         @Override public boolean equals(Object other) { return other instanceof Identity; }
         @Override public int hashCode() { return 1; }
         @Override public String toString() { return name; }
+    }
+
+    private static final class GateBoundChild extends Identity {
+        final DrawGate drawGate;
+        GateBoundChild(DrawGate drawGate) {
+            super("owned");
+            this.drawGate = drawGate;
+        }
     }
 
     private static final class Event {
@@ -88,6 +97,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         Runnable afterNextCompletedPaintRead;
         int removeCalls;
         int addCalls;
+        DrawGate gateSeenAtAdd;
         boolean throwBeforeAdd;
         boolean throwAfterAttach;
         boolean sceneAbaDuringAdd;
@@ -188,10 +198,17 @@ public final class TargetOwnedVisualLeaseCoreTest {
             return captured;
         }
         @Override public Object parentOf(Object child) { return parents.get(child); }
-        @Override public void add(Object child, int provenSlot) {
+        @Override public void add(Object child, int provenSlot, DrawGate drawGate) {
             addCalls++;
             require(armed, "lifecycle callbacks were not armed before add");
             require(addSawDeadline, "target deadline was not armed before add");
+            if (!(child instanceof GateBoundChild)
+                    || ((GateBoundChild) child).drawGate != drawGate) {
+                throw new IllegalStateException("factory child lacks exact draw gate");
+            }
+            gateSeenAtAdd = drawGate;
+            require(!gateSeenAtAdd.mayDraw(),
+                    "factory child lacked a closed draw gate before add");
             if (throwBeforeAdd) throw new IllegalStateException("before add");
             evidenceMutationRevision++;
             children.add(provenSlot, child);
@@ -420,7 +437,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
     private static TargetOwnedVisualLeaseCore start(Slot slot, FakePort port) {
         return start(slot, port,
                 new TargetOwnedVisualLeaseCore.Factory() {
-                    @Override public Object create() { return new Identity("owned"); }
+                    @Override public Object create(DrawGate drawGate) { return new GateBoundChild(drawGate); }
                 });
     }
 
@@ -430,6 +447,102 @@ public final class TargetOwnedVisualLeaseCoreTest {
                 slot, port, factory, 1, 1, 50, 10, 10, 40);
         if (lease.state() == State.PREPARED && port.autoAddPaint) port.advance(1);
         return lease;
+    }
+
+    private static void testPreboundDrawGate() {
+        FakePort port = new FakePort();
+        port.autoAddPaint = false;
+        Slot slot = new Slot();
+        final DrawGate[] supplied = new DrawGate[1];
+        final GateBoundChild[] created = new GateBoundChild[1];
+        TargetOwnedVisualLeaseCore lease = start(slot, port,
+                new TargetOwnedVisualLeaseCore.Factory() {
+                    @Override public Object create(DrawGate drawGate) {
+                        require(drawGate != null && slot.occupied()
+                                && port.addCalls == 0 && port.children.size() == 9,
+                                "draw gate was not supplied before child construction/add");
+                        require(!drawGate.mayDraw(),
+                                "newly supplied factory gate permitted pending pixels");
+                        supplied[0] = drawGate;
+                        created[0] = new GateBoundChild(drawGate);
+                        return created[0];
+                    }
+                });
+        require(lease.ownedChild() == created[0]
+                && port.gateSeenAtAdd == supplied[0]
+                && created[0].drawGate == supplied[0]
+                && lease.state() == State.PREPARED
+                && !supplied[0].mayDraw() && port.drawRequests == 0,
+                "add did not receive the exact prebound, pixel-silent gate");
+        port.scheduleFreshPaint(1);
+        port.advance(2);
+        require(lease.state() == State.INSERTED && supplied[0].mayDraw(),
+                "prebound gate did not open after completed-paint admission");
+        lease.requestCleanup(Reason.HOST_STOP);
+        require(!supplied[0].mayDraw(), "queued stop left prebound gate drawable");
+        port.runReady();
+        port.advance(2);
+        require(lease.state() == State.REMOVED
+                && lease.result() == Result.LIVE_STRUCTURE_RESTORED
+                && !supplied[0].mayDraw(),
+                "prebound gate reopened after verified rollback");
+    }
+
+    private static void testPortRejectsWrongDrawGate() {
+        FakePort anchorPort = new FakePort();
+        final DrawGate[] oldGate = new DrawGate[1];
+        TargetOwnedVisualLeaseCore anchor = start(new Slot(), anchorPort,
+                new TargetOwnedVisualLeaseCore.Factory() {
+                    @Override public Object create(DrawGate drawGate) {
+                        oldGate[0] = drawGate;
+                        return new GateBoundChild(drawGate);
+                    }
+                });
+        anchor.requestCleanup(Reason.HOST_STOP);
+        anchorPort.runReady();
+        anchorPort.advance(2);
+        require(oldGate[0] != null && !oldGate[0].mayDraw()
+                && anchor.result() == Result.LIVE_STRUCTURE_RESTORED,
+                "wrong-gate fixture did not retire its first gate");
+
+        FakePort unboundPort = new FakePort();
+        Slot unboundSlot = new Slot();
+        TargetOwnedVisualLeaseCore unbound = start(unboundSlot, unboundPort,
+                new TargetOwnedVisualLeaseCore.Factory() {
+                    @Override public Object create(DrawGate drawGate) {
+                        return new GateBoundChild(null);
+                    }
+                });
+        require(unbound.state() == State.REMOVING
+                && unboundPort.addCalls == 1 && unboundPort.removeCalls == 0
+                && unboundPort.children.size() == 9 && unboundPort.gateSeenAtAdd == null,
+                "Port.add accepted a child without the supplied gate");
+        unboundPort.advance(1);
+        require(unbound.state() == State.REMOVED && unbound.result() == Result.UNKNOWN
+                && unbound.failure() != null && !unboundSlot.occupied(),
+                "unbound child failure escaped safe unattached cleanup");
+        unboundPort.exactNine();
+
+        FakePort wrongPort = new FakePort();
+        Slot wrongSlot = new Slot();
+        final DrawGate[] offeredGate = new DrawGate[1];
+        TargetOwnedVisualLeaseCore wrong = start(wrongSlot, wrongPort,
+                new TargetOwnedVisualLeaseCore.Factory() {
+                    @Override public Object create(DrawGate drawGate) {
+                        offeredGate[0] = drawGate;
+                        return new GateBoundChild(oldGate[0]);
+                    }
+                });
+        require(offeredGate[0] != null && offeredGate[0] != oldGate[0]
+                && wrong.state() == State.REMOVING
+                && wrongPort.addCalls == 1 && wrongPort.removeCalls == 0
+                && wrongPort.children.size() == 9 && wrongPort.gateSeenAtAdd == null,
+                "Port.add accepted a child bound to a foreign gate");
+        wrongPort.advance(1);
+        require(wrong.state() == State.REMOVED && wrong.result() == Result.UNKNOWN
+                && wrong.failure() != null && !wrongSlot.occupied(),
+                "foreign gate failure escaped safe unattached cleanup");
+        wrongPort.exactNine();
     }
 
     private static void testNormalAndCollision() {
@@ -466,7 +579,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
 
     private static void testProductionSlot() {
         TargetOwnedVisualLeaseCore.Factory factory = new TargetOwnedVisualLeaseCore.Factory() {
-            @Override public Object create() { return new Identity("owned"); }
+            @Override public Object create(DrawGate drawGate) { return new GateBoundChild(drawGate); }
         };
         FakePort first = new FakePort();
         TargetOwnedVisualLeaseCore lease = TargetOwnedVisualLeaseCore.start(first, factory, 1, 1, 50, 10, 10, 40);
@@ -516,9 +629,9 @@ public final class TargetOwnedVisualLeaseCoreTest {
         FakePort factoryTime = new FakePort();
         TargetOwnedVisualLeaseCore timeLease = start(new Slot(), factoryTime,
                 new TargetOwnedVisualLeaseCore.Factory() {
-                    @Override public Object create() {
+                    @Override public Object create(DrawGate drawGate) {
                         factoryTime.now += 20;
-                        return new Identity("owned");
+                        return new GateBoundChild(drawGate);
                     }
                 });
         require(timeLease.state() == State.INSERTED && factoryTime.deadlineDelay == 30,
@@ -531,9 +644,9 @@ public final class TargetOwnedVisualLeaseCoreTest {
         Slot expiredSlot = new Slot();
         TargetOwnedVisualLeaseCore expired = start(expiredSlot, expiredFactory,
                 new TargetOwnedVisualLeaseCore.Factory() {
-                    @Override public Object create() {
+                    @Override public Object create(DrawGate drawGate) {
                         expiredFactory.now += 60;
-                        return new Identity("owned");
+                        return new GateBoundChild(drawGate);
                     }
                 });
         require(expired.state() == State.REMOVING && expiredFactory.addCalls == 0,
@@ -624,7 +737,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         Slot childSlot = new Slot();
         TargetOwnedVisualLeaseCore childLease = start(childSlot, nullChild,
                 new TargetOwnedVisualLeaseCore.Factory() {
-                    @Override public Object create() { return null; }
+                    @Override public Object create(DrawGate drawGate) { return null; }
                 });
         require(childLease.state() == State.REMOVING && nullChild.addCalls == 0,
                 "null factory child was not verified");
@@ -635,14 +748,19 @@ public final class TargetOwnedVisualLeaseCoreTest {
 
         FakePort failedFactory = new FakePort();
         Slot failedSlot = new Slot();
+        final DrawGate[] gateBeforeFactoryThrow = new DrawGate[1];
         TargetOwnedVisualLeaseCore failedLease = start(failedSlot, failedFactory,
                 new TargetOwnedVisualLeaseCore.Factory() {
-                    @Override public Object create() {
+                    @Override public Object create(DrawGate drawGate) {
+                        gateBeforeFactoryThrow[0] = drawGate;
                         throw new IllegalStateException("factory failure");
                     }
                 });
         failedFactory.advance(1);
-        require(failedLease.state() == State.REMOVED && failedLease.failure() != null
+        require(gateBeforeFactoryThrow[0] != null
+                && !gateBeforeFactoryThrow[0].mayDraw()
+                && failedFactory.addCalls == 0
+                && failedLease.state() == State.REMOVED && failedLease.failure() != null
                 && !failedSlot.occupied(), "factory exception leaked an unattached lease");
 
         FakePort noRegistration = new FakePort();
@@ -665,12 +783,18 @@ public final class TargetOwnedVisualLeaseCoreTest {
         Slot foreignSlot = new Slot();
         Identity foreignChild = new Identity("borrowed from foreign hierarchy");
         foreignFactory.parents.put(foreignChild, foreignFactory.foreignParent);
+        final DrawGate[] gateBeforeForeignChild = new DrawGate[1];
         TargetOwnedVisualLeaseCore borrowed = start(foreignSlot, foreignFactory,
                 new TargetOwnedVisualLeaseCore.Factory() {
-                    @Override public Object create() { return foreignChild; }
+                    @Override public Object create(DrawGate drawGate) {
+                        gateBeforeForeignChild[0] = drawGate;
+                        return foreignChild;
+                    }
                 });
         require(borrowed.state() == State.QUARANTINED
                 && borrowed.reason() == Reason.INSERTION_FAILURE
+                && gateBeforeForeignChild[0] != null
+                && !gateBeforeForeignChild[0].mayDraw()
                 && foreignFactory.addCalls == 0 && foreignFactory.removeCalls == 0
                 && foreignFactory.parentOf(foreignChild) == foreignFactory.foreignParent
                 && foreignSlot.occupied(),
@@ -1004,7 +1128,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
 
     private static void testEffectiveDrawingOrderEvidence() {
         TargetOwnedVisualLeaseCore.Factory factory = new TargetOwnedVisualLeaseCore.Factory() {
-            @Override public Object create() { return new Identity("owned"); }
+            @Override public Object create(DrawGate drawGate) { return new GateBoundChild(drawGate); }
         };
 
         FakePort independentlyProvenSlot = new FakePort();
@@ -1106,7 +1230,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         Slot abaSlot = new Slot();
         TargetOwnedVisualLeaseCore abaLease = TargetOwnedVisualLeaseCore.startForTest(
                 abaSlot, betweenAddAndPollAba, new TargetOwnedVisualLeaseCore.Factory() {
-                    @Override public Object create() { return new Identity("owned"); }
+                    @Override public Object create(DrawGate drawGate) { return new GateBoundChild(drawGate); }
                 }, 1, 1, 50, 10, 10, 40);
         require(abaLease.state() == State.PREPARED
                 && betweenAddAndPollAba.drawRequests == 0,
@@ -1257,11 +1381,11 @@ public final class TargetOwnedVisualLeaseCoreTest {
         preAddReentry.inlineDispatch = true;
         TargetOwnedVisualLeaseCore preAddLease = start(new Slot(), preAddReentry,
                 new TargetOwnedVisualLeaseCore.Factory() {
-                    @Override public Object create() {
+                    @Override public Object create(DrawGate drawGate) {
                         preAddReentry.afterNextSnapshot = new Runnable() {
                             @Override public void run() { preAddReentry.pause.run(); }
                         };
-                        return new Identity("owned");
+                        return new GateBoundChild(drawGate);
                     }
                 });
         require(preAddLease.state() == State.REMOVING && preAddReentry.addCalls == 0,
@@ -1381,7 +1505,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         agedPreAddPaint.nextCompletedPaintReadAdvance = 30;
         TargetOwnedVisualLeaseCore agedLease = TargetOwnedVisualLeaseCore.startForTest(
                 new Slot(), agedPreAddPaint, new TargetOwnedVisualLeaseCore.Factory() {
-                    @Override public Object create() { return new Identity("owned"); }
+                    @Override public Object create(DrawGate drawGate) { return new GateBoundChild(drawGate); }
                 }, 1, 1, 50, 10, 10, 25);
         require(agedPreAddPaint.now == 130 && agedPreAddPaint.addCalls == 0
                 && agedLease.reason() == Reason.DRIFT,
@@ -1394,14 +1518,14 @@ public final class TargetOwnedVisualLeaseCoreTest {
         FakePort preAddMutation = new FakePort();
         TargetOwnedVisualLeaseCore preAddMutationLease = start(new Slot(), preAddMutation,
                 new TargetOwnedVisualLeaseCore.Factory() {
-                    @Override public Object create() {
+                    @Override public Object create(DrawGate drawGate) {
                         preAddMutation.afterNextSnapshot = new Runnable() {
                             @Override public void run() {
                                 preAddMutation.evidenceMutationRevision++;
                                 preAddMutation.scene = "page B";
                             }
                         };
-                        return new Identity("owned");
+                        return new GateBoundChild(drawGate);
                     }
                 });
         require(preAddMutation.addCalls == 0
@@ -1508,7 +1632,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         Slot expiredSlot = new Slot();
         TargetOwnedVisualLeaseCore expiredLease = TargetOwnedVisualLeaseCore.startForTest(
                 expiredSlot, expiredFrame, new TargetOwnedVisualLeaseCore.Factory() {
-                    @Override public Object create() { return new Identity("owned"); }
+                    @Override public Object create(DrawGate drawGate) { return new GateBoundChild(drawGate); }
                 }, 1, 1, 50, 10, 100, 5);
         expiredFrame.advance(1);
         expiredLease.requestCleanup(Reason.HOST_STOP);
@@ -1702,6 +1826,8 @@ public final class TargetOwnedVisualLeaseCoreTest {
     }
 
     public static void main(String[] args) {
+        testPreboundDrawGate();
+        testPortRejectsWrongDrawGate();
         testNormalAndCollision();
         testProductionSlot();
         testAttachThenThrow();

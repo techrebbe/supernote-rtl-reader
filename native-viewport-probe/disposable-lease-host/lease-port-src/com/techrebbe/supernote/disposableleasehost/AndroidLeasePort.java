@@ -105,16 +105,18 @@ public final class AndroidLeasePort implements TargetOwnedVisualLeaseCore.Port {
         return ((View) child).getParent();
     }
 
-    @Override public void add(Object child, int provenSlot) {
+    @Override public void add(Object child, int provenSlot,
+            TargetOwnedVisualLeaseCore.DrawGate drawGate) {
         requireMainThread();
         if (!(child instanceof AndroidLeaseVisualView) || provenSlot < 0 || provenSlot > 9
                 || root.getChildCount() != 9 || !rootAlive()) {
             throw new IllegalStateException("unproved disposable insertion");
         }
         AndroidLeaseVisualView owned = (AndroidLeaseVisualView) child;
-        if (owned.getParent() != null || owned.hasBoundLease()) {
-            throw new IllegalStateException("child already used");
+        if (!owned.usesDrawGate(drawGate)) {
+            throw new IllegalStateException("owned child has the wrong draw gate");
         }
+        owned.claimForAdd();
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(64, 64);
         root.beforeEvidenceMutation();
         root.addView(owned, provenSlot, params);
@@ -138,7 +140,7 @@ public final class AndroidLeasePort implements TargetOwnedVisualLeaseCore.Port {
         requireMainThread();
         if (!(child instanceof AndroidLeaseVisualView)
                 || ((View) child).getParent() != root
-                || !((AndroidLeaseVisualView) child).hasBoundLease()) {
+                || !((AndroidLeaseVisualView) child).wasClaimedForAdd()) {
             throw new IllegalStateException("unbound or detached visual");
         }
         ((View) child).invalidate();

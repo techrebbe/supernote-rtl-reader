@@ -57,6 +57,12 @@ The ten-child cut inserts only tile `10778471` after the first identity. A
 second state read still reported the same PID/incarnation, `RESTORED`, nine
 structural and nine painted children, and those same nine original identities.
 
+An optional later screenshot attempt was refused before insertion because its
+baseline paint was over the one-second freshness limit. The new process
+reported `READY`, `startAttempted=false`, nine structural/nine painted
+children, no tile parent, and no temporary screenshot file. It is not counted
+as pixel evidence and was not retried in that process.
+
 ## Boundary
 
 This passes the **isolated emulator view-lifecycle card**: an app-owned child

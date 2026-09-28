@@ -9,6 +9,7 @@ import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore.Result;
 import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore.Slot;
 import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore.Snapshot;
 import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore.State;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
@@ -431,6 +432,24 @@ public final class TargetOwnedVisualLeaseCoreTest {
         require(port.effectiveDrawOrder.size() == expected.length, message + " length");
         for (int i = 0; i < expected.length; i++) {
             require(port.effectiveDrawOrder.get(i) == expected[i], message + " at " + i);
+        }
+    }
+
+    private static void requireCapturedTenChildFrame(PaintFrame frame, Object owned,
+            Object stockFour, String stockFourEvidence, String message) {
+        if (frame == null) throw new AssertionError(message + ": no completed frame");
+        try {
+            Field childrenField = Snapshot.class.getDeclaredField("children");
+            Field evidenceField = Snapshot.class.getDeclaredField("childEvidence");
+            childrenField.setAccessible(true);
+            evidenceField.setAccessible(true);
+            Object[] capturedChildren = (Object[]) childrenField.get(frame.snapshot);
+            String[] capturedEvidence = (String[]) evidenceField.get(frame.snapshot);
+            require(capturedChildren.length == 10 && capturedEvidence.length == 10
+                    && capturedChildren[1] == owned && capturedChildren[5] == stockFour
+                    && stockFourEvidence.equals(capturedEvidence[5]), message);
+        } catch (ReflectiveOperationException reflectionFailure) {
+            throw new AssertionError(message, reflectionFailure);
         }
     }
 
@@ -1226,6 +1245,79 @@ public final class TargetOwnedVisualLeaseCoreTest {
     }
 
     private static void testCompletedPaintAdmission() {
+        FakePort deferredLayout = new FakePort();
+        deferredLayout.autoAddPaint = false;
+        Slot deferredLayoutSlot = new Slot();
+        TargetOwnedVisualLeaseCore deferredLayoutLease = start(deferredLayoutSlot,
+                deferredLayout);
+        require(deferredLayoutLease.state() == State.PREPARED
+                && deferredLayout.children.size() == 10
+                && deferredLayout.removeCalls == 0 && deferredLayout.drawRequests == 0
+                && !deferredLayoutLease.mayDraw(),
+                "deferred-layout fixture was not pending after owned add");
+        deferredLayout.evidenceMutationRevision++; // Before stock geometry changes.
+        String changedGeometry = "class|id|visibility|bounds 12,24,72,84|z|layout 4";
+        deferredLayout.evidence.put(deferredLayout.original[4], changedGeometry);
+        deferredLayout.scheduleFreshPaint(0);
+        deferredLayout.runReady(); // Complete ten-child paint before the t+1 admission poll.
+        requireCapturedTenChildFrame(deferredLayout.lastCompletedPaintFrame,
+                deferredLayoutLease.ownedChild(), deferredLayout.original[4], changedGeometry,
+                "deferred layout frame omitted owned child or changed stock geometry");
+        require(deferredLayoutLease.state() == State.PREPARED
+                && deferredLayout.drawRequests == 0 && deferredLayout.removeCalls == 0,
+                "completed deferred-layout frame admitted or removed owned child early");
+        deferredLayout.advance(1);
+        require(!deferredLayoutLease.mayDraw() && deferredLayout.drawRequests == 0
+                && deferredLayout.removeCalls == 1
+                && deferredLayout.parentOf(deferredLayoutLease.ownedChild()) == null
+                && !deferredLayout.containsIdentity(deferredLayoutLease.ownedChild())
+                && deferredLayoutLease.state() == State.QUARANTINED
+                && deferredLayoutLease.result() == Result.UNKNOWN
+                && deferredLayoutLease.reason() == Reason.DRIFT
+                && deferredLayoutSlot.occupied(),
+                "deferred stock layout admitted pixels or certified uncertain restoration");
+        deferredLayout.exactNine();
+
+        FakePort layoutAba = new FakePort();
+        layoutAba.autoAddPaint = false;
+        Slot layoutAbaSlot = new Slot();
+        TargetOwnedVisualLeaseCore layoutAbaLease = start(layoutAbaSlot, layoutAba);
+        require(layoutAbaLease.state() == State.PREPARED
+                && layoutAba.children.size() == 10
+                && layoutAba.removeCalls == 0 && layoutAba.drawRequests == 0
+                && !layoutAbaLease.mayDraw(),
+                "layout ABA fixture was not pending after owned add");
+        String originalGeometry = layoutAba.evidence.get(layoutAba.original[4]);
+        layoutAba.evidenceMutationRevision++; // Outbound deferred layout.
+        layoutAba.evidence.put(layoutAba.original[4],
+                "class|id|visibility|bounds 12,24,72,84|z|layout 4");
+        layoutAba.evidenceMutationRevision++; // Inverse layout is another mutation.
+        layoutAba.evidence.put(layoutAba.original[4], originalGeometry);
+        layoutAba.scheduleFreshPaint(0); // Frame and live metadata now match baseline.
+        layoutAba.runReady(); // Complete ten-child paint before the t+1 admission poll.
+        requireCapturedTenChildFrame(layoutAba.lastCompletedPaintFrame,
+                layoutAbaLease.ownedChild(), layoutAba.original[4], originalGeometry,
+                "layout ABA frame omitted owned child or failed to restore metadata");
+        require(layoutAbaLease.state() == State.PREPARED
+                && layoutAba.drawRequests == 0 && layoutAba.removeCalls == 0,
+                "completed layout ABA frame admitted or removed owned child early");
+        layoutAba.advance(1);
+        require(layoutAba.drawRequests == 0 && layoutAba.removeCalls == 1
+                && layoutAba.parentOf(layoutAbaLease.ownedChild()) == null
+                && !layoutAba.containsIdentity(layoutAbaLease.ownedChild())
+                && !layoutAbaLease.mayDraw()
+                && layoutAbaLease.state() == State.REMOVING
+                && layoutAbaLease.result() == Result.PENDING
+                && layoutAbaLease.reason() == Reason.DRIFT,
+                "deferred layout ABA bypassed the admission revision fence");
+        layoutAba.advance(2);
+        require(layoutAbaLease.state() == State.REMOVED
+                && layoutAbaLease.result() == Result.UNKNOWN
+                && layoutAbaLease.reason() == Reason.DRIFT
+                && !layoutAbaSlot.occupied(),
+                "restored stock metadata promoted an ABA lease to a live pass");
+        layoutAba.exactNine();
+
         FakePort betweenAddAndPollAba = new FakePort();
         Slot abaSlot = new Slot();
         TargetOwnedVisualLeaseCore abaLease = TargetOwnedVisualLeaseCore.startForTest(

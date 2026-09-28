@@ -25,11 +25,27 @@ TOKEN = re.compile(r"[A-Za-z0-9._-]{1,128}\Z")
 SERVER_PATH = re.compile(r"/data/local/tmp/layout-frida-[0-9a-f]{16}\Z")
 SERVER_SCRIPT_PATH = r"/data/local/tmp/layout-frida-[0-9a-f]{16}"
 SERVER_SCRIPTS = (
-    re.compile(r"\[ ! -e " + SERVER_SCRIPT_PATH + r" \] && echo ABSENT"),
+    re.compile(r"\[ ! -e (" + SERVER_SCRIPT_PATH +
+               r") \] && \[ ! -L \1 \] && echo ABSENT"),
     re.compile(SERVER_SCRIPT_PATH +
                r" -l 127\.0\.0\.1:27042 >/dev/null 2>&1 & echo \$!"),
     re.compile(r"if \[ -d /proc/[1-9][0-9]{0,9} \]; "
                r"then echo PRESENT; else echo ABSENT; fi"),
+)
+CLEANUP_DIAGNOSTIC_CODES = frozenset({
+    "COMMAND_INVALID", "COMMAND_TIMEOUT_OR_FAILED", "COMMAND_OUTPUT_OVERSIZE",
+    "COMMAND_OUTPUT_INVALID", "ADB_COMMAND_FAILED", "SERVER_SCRIPT_INVALID",
+    "FORWARD_OWNERSHIP_LOST", "FORWARD_CLEANUP_UNCERTAIN",
+    "SERVER_IDENTITY_UNCERTAIN", "SERVER_PROC_UNCERTAIN", "SERVER_STAT_INVALID",
+    "SERVER_OWNERSHIP_LOST", "SERVER_EXIT_UNCERTAIN",
+    "SERVER_LISTENER_REMAINING", "SERVER_STAGE_STILL_IN_USE",
+    "SERVER_STAGE_OWNERSHIP_LOST", "SERVER_STAGE_REMOVAL_UNCERTAIN",
+    "SERVER_NET_TABLE_INVALID",
+    "CLEANUP_DIAGNOSTIC_UNAVAILABLE",
+})
+NET_TABLE_HEADER = (
+    "sl", "local_address", "rem_address", "st", "tx_queue", "rx_queue",
+    "tr", "tm->when", "retrnsmt", "uid", "timeout", "inode",
 )
 
 
@@ -272,20 +288,48 @@ class OwnedFridaServer:
         self.pid: int | None = None
         self.start_ticks: int | None = None
         self.prior_forwards: list[str] | None = None
+        # Fixed-code, bounded postmortem evidence; never raw ADB output.
+        self.cleanup_evidence: list[dict[str, str]] = []
+
+    def _record_cleanup_failure(self, phase: str, error: TrialError) -> None:
+        code = str(error)
+        self.cleanup_evidence.append({
+            "phase": phase,
+            "code": (code if code in CLEANUP_DIAGNOSTIC_CODES
+                     else "CLEANUP_DIAGNOSTIC_UNAVAILABLE"),
+        })
 
     def _forward_rows(self) -> list[str]:
         output = self.adb.run("forward", "--list")
         return [row.strip() for row in output.splitlines() if row.strip()]
 
     def _remote_listening(self) -> bool:
+        listening = False
         for table in ("/proc/net/tcp", "/proc/net/tcp6"):
             content = self.adb.shell("cat", table)
-            for line in content.splitlines()[1:]:
+            lines = content.splitlines()
+            need(bool(lines) and tuple(lines[0].split()) == NET_TABLE_HEADER,
+                 "SERVER_NET_TABLE_INVALID")
+            address_width = 8 if table.endswith("/tcp") else 32
+            address = rf"[0-9A-Fa-f]{{{address_width}}}:[0-9A-Fa-f]{{4}}"
+            for line in lines[1:]:
                 fields = line.split()
-                if (len(fields) >= 4 and fields[1].endswith(":69A2") and
-                        fields[3] == "0A"):
-                    return True
-        return False
+                need(len(fields) >= 10 and
+                     re.fullmatch(r"[0-9]+:", fields[0]) is not None and
+                     re.fullmatch(address, fields[1]) is not None and
+                     re.fullmatch(address, fields[2]) is not None and
+                     re.fullmatch(r"[0-9A-Fa-f]{2}", fields[3]) is not None and
+                     re.fullmatch(r"[0-9A-Fa-f]{8}:[0-9A-Fa-f]{8}",
+                                  fields[4]) is not None and
+                     re.fullmatch(r"[0-9A-Fa-f]{2}:[0-9A-Fa-f]{8}",
+                                  fields[5]) is not None and
+                     re.fullmatch(r"[0-9A-Fa-f]{8}", fields[6]) is not None and
+                     all(re.fullmatch(r"[0-9]+", field) is not None
+                         for field in fields[7:10]),
+                     "SERVER_NET_TABLE_INVALID")
+                listening |= (fields[1][-4:].upper() == "69A2" and
+                              fields[3].upper() == "0A")
+        return listening
 
     def prepare(self) -> None:
         prior = self._forward_rows()
@@ -297,7 +341,7 @@ class OwnedFridaServer:
         self.prior_forwards = prior
         # The shell expression is constant except for a SHA-derived safe path.
         absent = self.adb.server_script(
-            f"[ ! -e {self.remote} ] && echo ABSENT")
+            f"[ ! -e {self.remote} ] && [ ! -L {self.remote} ] && echo ABSENT")
         need(absent.strip() == "ABSENT", "SERVER_STAGE_OCCUPIED")
         self.adb.run("push", str(self.binary), self.remote, timeout=6.0)
         self.staged = True
@@ -351,6 +395,7 @@ class OwnedFridaServer:
         # A launch may have succeeded even when its PID/stat response was
         # lost. In that case neither the process nor staged binary may be
         # declared cleaned up from a guessed identity.
+        self.cleanup_evidence = []
         uncertain = self.launch_attempted and not self.started
         if self.forwarded:
             try:
@@ -363,20 +408,24 @@ class OwnedFridaServer:
                 need(sorted(self._forward_rows()) ==
                      sorted(self.prior_forwards or []),
                      "FORWARD_CLEANUP_UNCERTAIN")
-            except TrialError:
+            except TrialError as error:
+                self._record_cleanup_failure("forward", error)
                 uncertain = True
         if self.started:
             try:
-                need(self._server_status() == "SAME", "SERVER_OWNERSHIP_LOST")
-                self.adb.shell("kill", "-TERM", str(self.pid))
-                expiry = time.monotonic() + 1.0
                 status = self._server_status()
-                while status == "SAME" and time.monotonic() < expiry:
-                    time.sleep(0.05)
+                need(status in {"SAME", "GONE"}, "SERVER_PROC_UNCERTAIN")
+                if status == "SAME":
+                    self.adb.shell("kill", "-TERM", str(self.pid))
+                    expiry = time.monotonic() + 1.0
                     status = self._server_status()
+                    while status == "SAME" and time.monotonic() < expiry:
+                        time.sleep(0.05)
+                        status = self._server_status()
                 need(status == "GONE", "SERVER_EXIT_UNCERTAIN")
                 self.started = False
-            except TrialError:
+            except TrialError as error:
+                self._record_cleanup_failure("process", error)
                 uncertain = True
         if self.staged and not self.started and not uncertain:
             try:
@@ -391,7 +440,11 @@ class OwnedFridaServer:
                                 f"{self.digest} {self.remote}"},
                      "SERVER_STAGE_OWNERSHIP_LOST")
                 self.adb.shell("rm", self.remote)
+                need(self.adb.server_script(
+                     f"[ ! -e {self.remote} ] && [ ! -L {self.remote} ] && echo ABSENT").strip() ==
+                     "ABSENT", "SERVER_STAGE_REMOVAL_UNCERTAIN")
                 self.staged = False
-            except TrialError:
+            except TrialError as error:
+                self._record_cleanup_failure("stage", error)
                 uncertain = True
         need(not uncertain, "SERVER_CLEANUP_UNCERTAIN")

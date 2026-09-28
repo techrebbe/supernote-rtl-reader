@@ -35,6 +35,7 @@ class FakeServer:
         self.prepared = False
         self.cleaned = False
         self.fail_cleanup = False
+        self.cleanup_evidence = []
 
     def prepare(self) -> None:
         self.prepared = True
@@ -42,6 +43,8 @@ class FakeServer:
     def cleanup(self) -> None:
         self.cleaned = True
         if self.fail_cleanup:
+            self.cleanup_evidence = [{"phase": "process",
+                                      "code": "SERVER_EXIT_UNCERTAIN"}]
             raise host.TrialError("SERVER_CLEANUP_UNCERTAIN")
 
 
@@ -184,6 +187,20 @@ class EntryTests(unittest.TestCase):
                 subject.run(args())
         self.assertTrue(server.cleaned)
 
+    def test_cleanup_evidence_is_exact_fixed_codes_only(self) -> None:
+        expected = [{"phase": "process", "code": "SERVER_EXIT_UNCERTAIN"}]
+        self.assertEqual(subject._safe_server_cleanup_evidence(expected), expected)
+        self.assertIsNot(subject._safe_server_cleanup_evidence(expected), expected)
+        self.assertIsNone(subject._safe_server_cleanup_evidence([]))
+        self.assertIsNone(subject._safe_server_cleanup_evidence(expected * 4))
+        self.assertIsNone(subject._safe_server_cleanup_evidence(
+            [{"phase": "process", "code": "SERVER_EXIT_UNCERTAIN",
+              "rawPath": "SECRET"}]))
+        self.assertIsNone(subject._safe_server_cleanup_evidence(
+            [{"phase": "process", "code": "SECRET"}]))
+        self.assertIsNone(subject._safe_server_cleanup_evidence(
+            [{"phase": "SECRET", "code": "SERVER_EXIT_UNCERTAIN"}]))
+
     def test_uncertain_lock_cleanup_overrides_trial_pass(self) -> None:
         server = FakeServer()
         def unlock_failed(*unused):
@@ -307,6 +324,8 @@ class EntryTests(unittest.TestCase):
         self.assertEqual(error.primary_code, "TRIAL_PRIMARY_FAILURE")
         self.assertEqual(error.cleanup_codes,
                          ("SERVER_CLEANUP_UNCERTAIN", "LOCK_CLEANUP_UNCERTAIN"))
+        self.assertEqual(error.server_cleanup_evidence,
+                         [{"phase": "process", "code": "SERVER_EXIT_UNCERTAIN"}])
         output = io.StringIO()
         with patch.object(subject, "parser") as parser, \
              patch.object(subject, "run", side_effect=error), \
@@ -318,6 +337,8 @@ class EntryTests(unittest.TestCase):
         self.assertEqual(reported["code"], "LOCK_CLEANUP_UNCERTAIN")
         self.assertEqual(reported["primaryCode"], "TRIAL_PRIMARY_FAILURE")
         self.assertEqual(reported["cleanupCodes"], list(error.cleanup_codes))
+        self.assertEqual(reported["serverCleanupEvidence"],
+                         error.server_cleanup_evidence)
         self.assertEqual(reported["refreshEvidence"],
                          {"phase": "refresh", "polls": [{"sampleAgeMs": 678}]})
         self.assertEqual(reported["sceneEvidence"],

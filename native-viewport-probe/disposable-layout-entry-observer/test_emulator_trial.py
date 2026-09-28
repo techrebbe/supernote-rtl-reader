@@ -212,20 +212,28 @@ class TrialAdapterTests(unittest.TestCase):
     def test_replacement_between_cut_and_command_is_one_shot_rejection(self) -> None:
         app, fake = app_with_fake()
         app.freshen_baseline(ADMISSION)
+        now = time.monotonic()
+        app.refresh_proof_host_received = now
+        app.refresh_age_upper_at_receipt_ms = 1582
         fake.reject_command = True  # App's exact pins/token gate rejects ABA.
-        with self.assertRaisesRegex(host.TrialError,
-                                    "CONTENT_CALL_REJECTED"):
-            app.execute_and_restore("parent-plus-one", ADMISSION)
+        with patch.object(subject.time, "monotonic", return_value=now):
+            with self.assertRaisesRegex(host.TrialError,
+                                        "CONTENT_CALL_REJECTED"):
+                app.execute_and_restore("parent-plus-one", ADMISSION)
         self.assertEqual(sum(call[0] == "command" for call in fake.calls), 1)
         self.assertFalse(any(call[0] == "same_process" for call in fake.calls))
 
     def test_command_reply_loss_is_unknown_without_retry(self) -> None:
         app, fake = app_with_fake()
         app.freshen_baseline(ADMISSION)
+        now = time.monotonic()
+        app.refresh_proof_host_received = now
+        app.refresh_age_upper_at_receipt_ms = 1582
         fake.command_reply_loss = True
-        with self.assertRaisesRegex(host.TrialError,
-                                    "COMMAND_TIMEOUT_OR_FAILED"):
-            app.execute_and_restore("parent-plus-one", ADMISSION)
+        with patch.object(subject.time, "monotonic", return_value=now):
+            with self.assertRaisesRegex(host.TrialError,
+                                        "COMMAND_TIMEOUT_OR_FAILED"):
+                app.execute_and_restore("parent-plus-one", ADMISSION)
         self.assertEqual(sum(call[0] == "command" for call in fake.calls), 1)
         self.assertFalse(any(call[0] == "same_process" for call in fake.calls))
 
@@ -260,9 +268,9 @@ class TrialAdapterTests(unittest.TestCase):
             app.execute_and_restore("parent-plus-one", ADMISSION)
         self.assertFalse(any(call[0] == "command" for call in fake.calls))
 
-    def test_command_reserve_boundary_is_fail_closed(self) -> None:
+    def test_command_conservative_age_boundary_is_strict(self) -> None:
         now = time.monotonic()
-        for upper, accepted in ((1499, True), (1500, False)):
+        for upper, accepted in ((1999, True), (2000, False)):
             app, fake = app_with_fake()
             app.freshen_baseline(ADMISSION)
             app.refresh_proof_host_received = now
@@ -277,6 +285,61 @@ class TrialAdapterTests(unittest.TestCase):
                         app.execute_and_restore("parent-plus-one", ADMISSION)
             self.assertEqual(sum(call[0] == "command" for call in fake.calls),
                              1 if accepted else 0)
+
+    def test_elapsed_after_receipt_rejected_before_one_shot_command(self) -> None:
+        app, fake = app_with_fake()
+        now = time.monotonic()
+        app.freshen_baseline(ADMISSION)
+        app.refresh_proof_host_received = now - 0.418
+        app.refresh_age_upper_at_receipt_ms = 1582
+        with patch.object(subject.time, "monotonic", return_value=now):
+            with self.assertRaisesRegex(host.TrialError,
+                                        "REFRESH_PAINT_TOO_OLD_FOR_COMMAND"):
+                app.execute_and_restore("parent-plus-one", ADMISSION)
+        self.assertFalse(any(call[0] == "command" for call in fake.calls))
+
+    def test_refresh_784_sample_plus_798_roundtrip_is_command_viable(self) -> None:
+        app, fake = app_with_fake()
+        fake.state["sampleElapsedMs"] = 1794  # 1794 - paint at 1010 = 784.
+        clock = [100.0]
+        app.host_deadline = 120.0
+        original_state = fake.provider_state
+        def delayed_state(*, timeout=3.0):
+            clock[0] += 0.797999  # Ceils to 798 ms despite binary float rounding.
+            return original_state(timeout=timeout)
+        with patch.object(subject.time, "monotonic",
+                          side_effect=lambda: clock[0]), \
+             patch.object(fake, "provider_state", side_effect=delayed_state):
+            app.freshen_baseline(ADMISSION)
+            app.execute_and_restore("parent-plus-one", ADMISSION)
+        sample = app.refresh_failure_evidence()["polls"][0]
+        self.assertEqual(sample["sampleAgeMs"], 784)
+        self.assertEqual(sample["pollRoundTripMs"], 798)
+        self.assertEqual(sample["ageUpperAtReceiptMs"], 1582)
+        self.assertTrue(sample["commandViable"])
+        self.assertEqual(sum(call[0] == "command" for call in fake.calls), 1)
+
+    def test_refresh_upper_age_2000_at_receipt_never_commands(self) -> None:
+        app, fake = app_with_fake()
+        fake.state["sampleElapsedMs"] = 2010  # 2010 - 1010 = 1000.
+        clock = [100.0]
+        app.host_deadline = 120.0
+        original_state = fake.provider_state
+        def delayed_state(*, timeout=3.0):
+            clock[0] += 0.999999  # Ceils to 1000 ms.
+            return original_state(timeout=timeout)
+        with patch.object(subject.time, "monotonic",
+                          side_effect=lambda: clock[0]), \
+             patch.object(fake, "provider_state", side_effect=delayed_state):
+            with self.assertRaisesRegex(host.TrialError,
+                                        "REFRESHED_PAINT_UNAVAILABLE"):
+                app.freshen_baseline(ADMISSION)
+        first = app.refresh_failure_evidence()["polls"][0]
+        self.assertEqual(first["sampleAgeMs"], 1000)
+        self.assertEqual(first["pollRoundTripMs"], 1000)
+        self.assertEqual(first["ageUpperAtReceiptMs"], 2000)
+        self.assertFalse(first["commandViable"])
+        self.assertFalse(any(call[0] == "command" for call in fake.calls))
 
     def test_slow_provider_response_cannot_admit_after_poll_expiry(self) -> None:
         app, fake = app_with_fake()

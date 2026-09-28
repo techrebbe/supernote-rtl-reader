@@ -14,7 +14,8 @@ import sys
 
 from emulator_trial import EmulatorApp, WorkerTransport
 from emulator_wire import (ExactAdb, OwnedFridaServer, file_sha,
-                           verify_installed_apk, verify_signed_apk)
+                           verify_installed_apk, verify_signed_apk,
+                           CLEANUP_DIAGNOSTIC_CODES)
 from host_protocol import Pins, TrialError, VARIANTS, need, run_mockable
 
 
@@ -33,12 +34,30 @@ class RunnerFailure(TrialError):
     def __init__(self, code: str, *, primary_code: str | None = None,
                  cleanup_codes: tuple[str, ...] = (),
                  refresh_evidence: dict | None = None,
-                 scene_evidence: dict | None = None) -> None:
+                 scene_evidence: dict | None = None,
+                 server_cleanup_evidence: list[dict[str, str]] | None = None) -> None:
         super().__init__(code)
         self.primary_code = primary_code
         self.cleanup_codes = cleanup_codes
         self.refresh_evidence = refresh_evidence
         self.scene_evidence = scene_evidence
+        self.server_cleanup_evidence = server_cleanup_evidence
+
+
+def _safe_server_cleanup_evidence(value: object) -> list[dict[str, str]] | None:
+    """Expose only fixed cleanup phase/code pairs, never raw device output."""
+    if type(value) is not list or not 1 <= len(value) <= 3:
+        return None
+    result = []
+    for item in value:
+        if (type(item) is not dict or item.keys() != {"phase", "code"} or
+                type(item["phase"]) is not str or
+                item["phase"] not in {"forward", "process", "stage"} or
+                type(item["code"]) is not str or
+                item["code"] not in CLEANUP_DIAGNOSTIC_CODES):
+            return None
+        result.append({"phase": item["phase"], "code": item["code"]})
+    return result
 
 
 def parser() -> argparse.ArgumentParser:
@@ -137,6 +156,7 @@ def run(args: argparse.Namespace) -> dict:
     cleanup_codes: list[str] = []
     refresh_evidence: dict | None = None
     scene_evidence: dict | None = None
+    server_cleanup_evidence: list[dict[str, str]] | None = None
     try:
         adb = ExactAdb(args.adb)
         adb.check_emulator()
@@ -176,6 +196,8 @@ def run(args: argparse.Namespace) -> dict:
             try:
                 server.cleanup()
             except BaseException:
+                server_cleanup_evidence = _safe_server_cleanup_evidence(
+                    getattr(server, "cleanup_evidence", None))
                 failure = TrialError("SERVER_CLEANUP_UNCERTAIN")
                 cleanup_codes.append(str(failure))
         try:
@@ -189,7 +211,8 @@ def run(args: argparse.Namespace) -> dict:
                                           if primary_failure is not None else None),
                             cleanup_codes=tuple(cleanup_codes),
                             refresh_evidence=refresh_evidence,
-                            scene_evidence=scene_evidence)
+                            scene_evidence=scene_evidence,
+                            server_cleanup_evidence=server_cleanup_evidence)
     if failure is not None:
         if refresh_evidence is not None or scene_evidence is not None or \
            (primary_failure is not None and
@@ -227,6 +250,8 @@ def main(argv: list[str] | None = None) -> int:
                 output["refreshEvidence"] = error.refresh_evidence
             if error.scene_evidence is not None:
                 output["sceneEvidence"] = error.scene_evidence
+            if error.server_cleanup_evidence is not None:
+                output["serverCleanupEvidence"] = error.server_cleanup_evidence
         print(json.dumps(output,
                          sort_keys=True, separators=(",", ":")))
         return 2

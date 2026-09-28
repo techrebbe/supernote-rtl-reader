@@ -22,7 +22,6 @@ ARM_MARGIN = 1.5
 TRIAL_MS = 5000
 APP_BASELINE_FRESHNESS_MS = 2000
 HOST_SAMPLE_FRESHNESS_MS = 1000
-COMMAND_DELIVERY_RESERVE_MS = 500
 MAX_REFRESH_SAMPLES = 8
 
 # Diagnostic strings are projected onto known, static app vocabulary. An
@@ -499,8 +498,8 @@ class EmulatorApp:
                 poll_received < (self.host_deadline or 0) - ARM_MARGIN)
             command_viable = (0 <= age_at_sample_ms <=
                 HOST_SAMPLE_FRESHNESS_MS and
-                age_upper_ms + COMMAND_DELIVERY_RESERVE_MS <
-                    APP_BASELINE_FRESHNESS_MS and within_host_deadlines)
+                age_upper_ms < APP_BASELINE_FRESHNESS_MS and
+                within_host_deadlines)
             self._record_refresh_sample({
                 "startedDelta": completed["startedPaintRevision"] - floor,
                 "completedDelta": completed["completedPaintRevision"] -
@@ -540,7 +539,7 @@ class EmulatorApp:
         age_upper_now_ms = (self.refresh_age_upper_at_receipt_ms +
             math.ceil(max(0.0, started - self.refresh_proof_host_received) * 1000))
         remaining_fresh_ms = APP_BASELINE_FRESHNESS_MS - age_upper_now_ms
-        need(remaining_fresh_ms > COMMAND_DELIVERY_RESERVE_MS,
+        need(remaining_fresh_ms > 0,
              "REFRESH_PAINT_TOO_OLD_FOR_COMMAND")
         # The app checks its own 2s freshness at command execution. A reply
         # may arrive later; shortening its wait would make an accepted one-shot

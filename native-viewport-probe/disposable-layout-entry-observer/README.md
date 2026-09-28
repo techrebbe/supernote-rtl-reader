@@ -3,7 +3,8 @@
 This directory is separate from the stock-reader hierarchy observer. It is
 for the disposable API-30 emulator app only: package
 `com.techrebbe.supernote.layoutfencetrial`, one fresh process per variant, no
-document, PDF, pen, Nomad, or stock process. No device trial has run.
+document, PDF, pen, Nomad, or stock process. The bounded emulator attempts and
+their UNKNOWN outcomes are recorded in `EMULATOR_EVIDENCE.md`.
 
 `layout_entry_observer.js` temporarily replaces
 `android.view.ViewGroup.layout(int,int,int,int)` process-wide. It selects one
@@ -49,12 +50,20 @@ or initial paint instead permits one exact synthetic-package force-stop after
 rechecking the emulator and installed APK, then reports UNKNOWN and halts.
 No write, arm, trial, revert, unload, or sentinel is automatically retried.
 Unknown CLI wire rendering or deadline drift is UNKNOWN.
+The host sends the one-shot command only while the conservative age bound of
+the completed refresh paint is strictly under the app's 2-second limit. The
+app independently rechecks actual completed-paint freshness and exact scene
+identity before any layout mutation; a late command is rejected, not retried.
 The runner's local lock is exclusive. On Windows, new locks use handle-owned
 delete-on-close; an existing lock is never removed or treated as stale by the
 runner. A missing/replaced lock or a new owner appearing during release is
 conservatively UNKNOWN, without deleting the replacement. Cleanup uncertainty
 dominates the verdict; `primaryCode` and `cleanupCodes` retain earlier fixed
-failure codes in the UNKNOWN result for audit.
+failure codes in the UNKNOWN result for audit. `serverCleanupEvidence`, when
+present, contains only fixed phase/reason codes. A previously authenticated
+server process that has already exited is not killed; staged-file removal
+still requires no listener or process using it, its exact hash, and verified
+post-removal absence.
 
 Frida 17's bare Python script loader does not provide `Java` automatically.
 `build_layout_entry_bundle.py` uses the project's installed, authenticated

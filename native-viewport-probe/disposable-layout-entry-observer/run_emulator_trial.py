@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import stat
 import sys
 
 from emulator_trial import EmulatorApp, WorkerTransport
@@ -24,6 +25,16 @@ REVIEWED_SERVER_SHA256 = "9dcb1c12fa528070f2f6590b245e2c66cb1f931e0975bc911d9ff4
 REVIEWED_SERVER_BYTES = 110_837_320
 REVIEWED_BUNDLE_SHA256 = "241fd6a94067b26a737df8ddf6c192b82895006472c434cae4cbd06dc29a2d66"
 REVIEWED_BUNDLE_BYTES = 476_101
+
+
+class RunnerFailure(TrialError):
+    """Dominant fixed code plus earlier fixed codes needed to audit cleanup."""
+
+    def __init__(self, code: str, *, primary_code: str | None = None,
+                 cleanup_codes: tuple[str, ...] = ()) -> None:
+        super().__init__(code)
+        self.primary_code = primary_code
+        self.cleanup_codes = cleanup_codes
 
 
 def parser() -> argparse.ArgumentParser:
@@ -42,8 +53,15 @@ def parser() -> argparse.ArgumentParser:
 
 def _lock() -> tuple[int, Path]:
     path = Path(__file__).resolve().with_name(".synthetic-emulator.lock")
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+    if os.name == "nt":
+        # Windows cannot reliably unlink a CRT-open file. This flag ties
+        # deletion to our exact handle at close, never to a later path lookup.
+        temporary = getattr(os, "O_TEMPORARY", 0)
+        need(temporary != 0, "TRIAL_LOCK_UNSUPPORTED")
+        flags |= temporary
     try:
-        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        fd = os.open(path, flags, 0o600)
     except OSError as error:
         raise TrialError("TRIAL_LOCK_PRESENT") from error
     return fd, path
@@ -52,11 +70,29 @@ def _lock() -> tuple[int, Path]:
 def _unlock(fd: int, path: Path) -> None:
     try:
         owner = os.fstat(fd)
-        current = path.stat()
-        if owner.st_ino == current.st_ino and owner.st_dev == current.st_dev:
+        current = path.lstat()
+        need(stat.S_ISREG(owner.st_mode) and stat.S_ISREG(current.st_mode) and
+             owner.st_ino != 0 and current.st_ino != 0 and
+             owner.st_ino == current.st_ino and owner.st_dev == current.st_dev,
+             "LOCK_CLEANUP_UNCERTAIN")
+        if os.name != "nt":
             path.unlink()
+    except OSError as error:
+        raise TrialError("LOCK_CLEANUP_UNCERTAIN") from error
     finally:
-        os.close(fd)
+        try:
+            os.close(fd)
+        except OSError as error:
+            raise TrialError("LOCK_CLEANUP_UNCERTAIN") from error
+    # On Windows O_TEMPORARY removes only our handle's file. A replacement
+    # remains untouched and is an uncertain cleanup, never a clean verdict.
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        raise TrialError("LOCK_CLEANUP_UNCERTAIN") from error
+    raise TrialError("LOCK_CLEANUP_UNCERTAIN")
 
 
 def _exact_size(path: Path, size: int) -> None:
@@ -93,6 +129,8 @@ def run(args: argparse.Namespace) -> dict:
     app: EmulatorApp | None = None
     verdict: dict | None = None
     failure: TrialError | None = None
+    primary_failure: TrialError | None = None
+    cleanup_codes: list[str] = []
     try:
         adb = ExactAdb(args.adb)
         adb.check_emulator()
@@ -104,7 +142,9 @@ def run(args: argparse.Namespace) -> dict:
                                     args.bundle, args.bundle_sha256)
         verdict = run_mockable(app, transport, pins, args.variant)
     except BaseException as error:
-        failure = error if type(error) is TrialError else TrialError("TRIAL_UNCERTAIN")
+        primary_failure = (error if isinstance(error, TrialError)
+                           else TrialError("TRIAL_UNCERTAIN"))
+        failure = primary_failure
         if (app is not None and app.launch_attempted and
                 app.prearm_host_start is None):
             try:
@@ -112,17 +152,27 @@ def run(args: argparse.Namespace) -> dict:
                 failure = TrialError("PREFLIGHT_UNKNOWN_CLEANED")
             except BaseException:
                 failure = TrialError("PREARM_CLEANUP_UNCERTAIN")
+                cleanup_codes.append(str(failure))
     finally:
         if server is not None:
             try:
                 server.cleanup()
             except BaseException:
                 failure = TrialError("SERVER_CLEANUP_UNCERTAIN")
+                cleanup_codes.append(str(failure))
         try:
             _unlock(fd, lock_path)
         except BaseException:
             failure = TrialError("LOCK_CLEANUP_UNCERTAIN")
+            cleanup_codes.append(str(failure))
+    if cleanup_codes:
+        raise RunnerFailure(cleanup_codes[-1],
+                            primary_code=(str(primary_failure)
+                                          if primary_failure is not None else None),
+                            cleanup_codes=tuple(cleanup_codes))
     if failure is not None:
+        if primary_failure is not None and failure is not primary_failure:
+            raise RunnerFailure(str(failure), primary_code=str(primary_failure))
         raise failure
     if verdict is None:
         raise TrialError("TRIAL_UNCERTAIN")
@@ -136,11 +186,17 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0
     except TrialError as error:
-        print(json.dumps({"verdict": "UNKNOWN", "code": str(error),
-                          "observationOnly": True,
-                          "compositingAdmitted": False,
-                          "completeMutationCoverage": False,
-                          "portRevision": -1},
+        output = {"verdict": "UNKNOWN", "code": str(error),
+                  "observationOnly": True,
+                  "compositingAdmitted": False,
+                  "completeMutationCoverage": False,
+                  "portRevision": -1}
+        if isinstance(error, RunnerFailure):
+            if error.primary_code is not None:
+                output["primaryCode"] = error.primary_code
+            if error.cleanup_codes:
+                output["cleanupCodes"] = list(error.cleanup_codes)
+        print(json.dumps(output,
                          sort_keys=True, separators=(",", ":")))
         return 2
 

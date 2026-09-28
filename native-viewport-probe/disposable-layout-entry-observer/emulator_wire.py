@@ -23,6 +23,14 @@ SHA = re.compile(r"[0-9a-f]{64}\Z")
 DECIMAL = re.compile(r"[1-9][0-9]{0,9}\Z")
 TOKEN = re.compile(r"[A-Za-z0-9._-]{1,128}\Z")
 SERVER_PATH = re.compile(r"/data/local/tmp/layout-frida-[0-9a-f]{16}\Z")
+SERVER_SCRIPT_PATH = r"/data/local/tmp/layout-frida-[0-9a-f]{16}"
+SERVER_SCRIPTS = (
+    re.compile(r"\[ ! -e " + SERVER_SCRIPT_PATH + r" \] && echo ABSENT"),
+    re.compile(SERVER_SCRIPT_PATH +
+               r" -l 127\.0\.0\.1:27042 >/dev/null 2>&1 & echo \$!"),
+    re.compile(r"if \[ -d /proc/[1-9][0-9]{0,9} \]; "
+               r"then echo PRESENT; else echo ABSENT; fi"),
+)
 
 
 def file_sha(path: Path, expected: str, *, maximum: int) -> None:
@@ -130,6 +138,15 @@ class ExactAdb:
               allow_failure: bool = False) -> str:
         return self.run("shell", *args, timeout=timeout,
                         allow_failure=allow_failure)
+
+    def server_script(self, script: str, *, timeout: float = 3.0) -> str:
+        # ADB joins shell arguments into one remote command. Preserve the
+        # exact sh -c script as one remotely quoted word, admitting only the
+        # three reviewed server scripts with their safe digest/PID components.
+        need(type(script) is str and
+             any(pattern.fullmatch(script) is not None
+                 for pattern in SERVER_SCRIPTS), "SERVER_SCRIPT_INVALID")
+        return self.shell("sh", "-c", f"'{script}'", timeout=timeout)
 
     def check_emulator(self) -> None:
         need(self.run("get-state").strip() == "device" and
@@ -279,8 +296,8 @@ class OwnedFridaServer:
              "SERVER_OCCUPIED")
         self.prior_forwards = prior
         # The shell expression is constant except for a SHA-derived safe path.
-        absent = self.adb.shell("sh", "-c",
-                                f"[ ! -e {self.remote} ] && echo ABSENT")
+        absent = self.adb.server_script(
+            f"[ ! -e {self.remote} ] && echo ABSENT")
         need(absent.strip() == "ABSENT", "SERVER_STAGE_OCCUPIED")
         self.adb.run("push", str(self.binary), self.remote, timeout=6.0)
         self.staged = True
@@ -293,7 +310,7 @@ class OwnedFridaServer:
         launch = (f"{self.remote} -l 127.0.0.1:27042 "
                   ">/dev/null 2>&1 & echo $!")
         self.launch_attempted = True
-        value = self.adb.shell("sh", "-c", launch).strip()
+        value = self.adb.server_script(launch).strip()
         need(DECIMAL.fullmatch(value) is not None, "SERVER_START_INVALID")
         self.pid = int(value)
         self.start_ticks = _proc_start(self.adb, self.pid)
@@ -316,8 +333,9 @@ class OwnedFridaServer:
         """SAME or confirmed GONE; unreadable identity raises UNKNOWN."""
         need(self.pid is not None and self.start_ticks is not None,
              "SERVER_IDENTITY_UNCERTAIN")
-        presence = self.adb.shell("sh", "-c", f"if [ -d /proc/{self.pid} ]; "
-                                  "then echo PRESENT; else echo ABSENT; fi").strip()
+        presence = self.adb.server_script(
+            f"if [ -d /proc/{self.pid} ]; "
+            "then echo PRESENT; else echo ABSENT; fi").strip()
         need(presence in {"PRESENT", "ABSENT"}, "SERVER_PROC_UNCERTAIN")
         if presence == "ABSENT":
             return "GONE"

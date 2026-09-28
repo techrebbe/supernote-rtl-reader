@@ -77,6 +77,35 @@ class WireTests(unittest.TestCase):
         self.assertIn("activitySerial:l:1", argv)
         self.assertIn("rootToken:s:root-1", argv)
 
+    def test_server_scripts_are_one_quoted_remote_argument(self) -> None:
+        adb = subject.ExactAdb(Path(sys.executable).resolve())
+        remote = "/data/local/tmp/layout-frida-" + "a" * 16
+        scripts = (
+            f"[ ! -e {remote} ] && echo ABSENT",
+            f"{remote} -l 127.0.0.1:27042 >/dev/null 2>&1 & echo $!",
+            "if [ -d /proc/2468 ]; then echo PRESENT; else echo ABSENT; fi",
+        )
+        for script in scripts:
+            with self.subTest(script=script):
+                with patch.object(subject, "_invoke", return_value=(0, "OK\n")) as invoke:
+                    self.assertEqual(adb.server_script(script), "OK\n")
+                self.assertEqual(invoke.call_args.args[0],
+                    [str(Path(sys.executable).resolve()), "-s", "emulator-5554",
+                     "shell", "sh", "-c", f"'{script}'"])
+
+    def test_server_script_rejects_injection_and_unreviewed_commands(self) -> None:
+        adb = subject.ExactAdb(Path(sys.executable).resolve())
+        safe = "[ ! -e /data/local/tmp/layout-frida-" + "a" * 16 + " ] && echo ABSENT"
+        with patch.object(subject, "_invoke") as invoke:
+            for script in (safe + "; id", safe + "'", safe + "\n", "id",
+                           "if [ -d /proc/1 ]; then echo PRESENT; rm /x; fi",
+                           "[ ! -e /data/local/tmp/layout-frida-../../x ] && echo ABSENT"):
+                with self.subTest(script=script):
+                    with self.assertRaisesRegex(TrialError,
+                                                "SERVER_SCRIPT_INVALID"):
+                        adb.server_script(script)
+        invoke.assert_not_called()
+
     def test_unknown_method_never_reaches_transport(self) -> None:
         adb = subject.ExactAdb(Path(sys.executable).resolve())
         with patch.object(subject, "_invoke") as invoke:

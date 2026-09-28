@@ -49,6 +49,12 @@ or initial paint instead permits one exact synthetic-package force-stop after
 rechecking the emulator and installed APK, then reports UNKNOWN and halts.
 No write, arm, trial, revert, unload, or sentinel is automatically retried.
 Unknown CLI wire rendering or deadline drift is UNKNOWN.
+The runner's local lock is exclusive. On Windows, new locks use handle-owned
+delete-on-close; an existing lock is never removed or treated as stale by the
+runner. A missing/replaced lock or a new owner appearing during release is
+conservatively UNKNOWN, without deleting the replacement. Cleanup uncertainty
+dominates the verdict; `primaryCode` and `cleanupCodes` retain earlier fixed
+failure codes in the UNKNOWN result for audit.
 
 Frida 17's bare Python script loader does not provide `Java` automatically.
 `build_layout_entry_bundle.py` uses the project's installed, authenticated
@@ -56,8 +62,7 @@ Frida 17.9.11 compiler and `frida-java-bridge` 7.0.13 without npm/network.
 Its reviewed bundle is 476101 bytes with SHA-256
 `241fd6a94067b26a737df8ddf6c192b82895006472c434cae4cbd06dc29a2d66`.
 The raw observer source alone is not an executable Frida 17 bundle; the runner
-requires an explicit bundle path and matching SHA-256. No emulator trial has
-run from this observer yet.
+requires an explicit bundle path and matching SHA-256.
 
 The executable pins the final synthetic APK SHA-256
 `d4c38a2c2b914819ec41c13e7e4b08fa78eba1767f40335b135dac99092bad0c`,

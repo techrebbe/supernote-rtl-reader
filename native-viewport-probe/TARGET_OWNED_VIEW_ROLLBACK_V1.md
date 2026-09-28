@@ -80,6 +80,11 @@ question: a Java field reference may be replaced while depicting the same
 page, and a stable reference may be repainted. The runtime observation must
 establish the strongest available page/render witness before defining its
 comparison; a guessed surrogate cannot authorize insertion.
+Nine structural children do not imply nine `drawChild` dispatches: a `GONE`
+child remains in the exact structural set but may be absent from the actual
+paint-order witness. The runtime dispatch order must be observed separately;
+omission of an expected visible child fails closed. The stock paint witness
+remains unmeasured by this design note.
 
 Acquire one process-local trial slot atomically before constructing a view.
 Reject a second start while a lease is `PREPARED`, `INSERTED`, or `REMOVING`;

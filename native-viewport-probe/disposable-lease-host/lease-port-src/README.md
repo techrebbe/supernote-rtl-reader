@@ -35,15 +35,27 @@ prove that no evidence mutates. Genuine scene, root, or original changes must
 still bump before mutation and reject the lease. Do not simply suppress
 `onLayout` bumps or relabel them as the add.
 
-The disposable host paints nine **visible** synthetic children. In the pinned
-stock `activity_document.xml`, child 7 is `GONE`; stock `ViewGroup.dispatchDraw`
-may skip it, while the current core requires nine identities in its effective
-paint order. This emulator scaffold cannot establish stock draw-order
-compatibility. Fresh, read-only Nomad hierarchy/paint evidence and a separately
-reviewed representation decision remain required before any stock integration.
+The disposable host paints nine **visible** synthetic children. The offline
+Core now represents nine exact structural originals separately from their
+actual `drawChild` order: a Snapshot may independently mark one original as
+not expected to paint, and an eight-identity completed order must contain
+every expected visible original exactly once. Admission, owned-child rank,
+draw gating, and live rollback compare that same expectation. The legacy
+Snapshot constructor still means all nine are expected to paint. Host tests
+cover the pinned XML shape with child 7 `GONE`, missing visible children,
+visibility transitions, and an owned child at a distinct structural/paint
+slot. This is an offline representation result, not stock runtime evidence.
+
+The Android root is **not** wired to supply the new expectation: it still
+requires paint count to equal direct-child count, so a GONE child cannot be
+admitted there. Its `currentSnapshot()` also requires a completed frame after
+each mutation, whereas Core cleanup needs an immediate structural snapshot
+after removal. Those Port gaps need separate coordinated design and tests.
+The XML `GONE` value alone does not prove actual stock draw order. Fresh,
+read-only Nomad hierarchy/paint evidence remains required before integration.
 
 Remaining gates: independently review these sources; wire an Activity-owned
 scene/lifecycle/mutation authority only in a separate reviewed change; prove
 pixel silence and actual draw order on the disposable emulator; then determine
-whether the stock nine-child assumption is valid. No insertion on the Nomad is
-authorized by this scaffold.
+whether the stock structural and paint assumptions are valid. No insertion on
+the Nomad is authorized by this scaffold.

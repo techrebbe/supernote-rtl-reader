@@ -86,7 +86,10 @@ public final class TargetOwnedVisualLeaseCore {
     /**
      * Immutable captured evidence. Children are in direct-root order; the
      * effective draw-order vector separately records exact bottom-to-top child
-     * identities. Each child string covers stable class, ID, visibility,
+     * identities actually dispatched to drawChild. paintExpected is independently
+     * derived from each child's visibility/draw policy, never from that vector;
+     * a non-painted structural child must remain in children and parents. Each
+     * child string covers stable class, ID, visibility,
      * bounds, Z, and layout parameters, but not an absolute draw rank (which
      * legitimately shifts when our child is inserted). Draw-policy evidence
      * covers the ordering mechanism; scene evidence covers available
@@ -99,6 +102,7 @@ public final class TargetOwnedVisualLeaseCore {
         private final Object[] children;
         private final Object[] parents;
         private final String[] childEvidence;
+        private final boolean[] paintExpected;
         private final Object[] effectiveDrawOrder;
         private final String drawPolicyEvidence;
         private final String sceneEvidence;
@@ -106,47 +110,83 @@ public final class TargetOwnedVisualLeaseCore {
         public Snapshot(Object root, Object[] children, Object[] parents,
                 String[] childEvidence, Object[] effectiveDrawOrder,
                 String drawPolicyEvidence, String sceneEvidence) {
+            this(root, children, parents, childEvidence, allPaintExpected(children),
+                    effectiveDrawOrder, drawPolicyEvidence, sceneEvidence);
+            if (children.length != effectiveDrawOrder.length) {
+                throw new IllegalArgumentException("all-visible paint order is incomplete");
+            }
+        }
+
+        // The all-visible constructor above preserves the unwired emulator
+        // Port's existing contract. A Port with a GONE/INVISIBLE child must
+        // supply this independent expectation explicitly.
+        public Snapshot(Object root, Object[] children, Object[] parents,
+                String[] childEvidence, boolean[] paintExpected,
+                Object[] effectiveDrawOrder, String drawPolicyEvidence,
+                String sceneEvidence) {
             if (root == null || children == null || parents == null || childEvidence == null
-                    || effectiveDrawOrder == null || drawPolicyEvidence == null
+                    || paintExpected == null || effectiveDrawOrder == null
+                    || drawPolicyEvidence == null
                     || sceneEvidence == null || children.length != parents.length
                     || children.length != childEvidence.length
-                    || children.length != effectiveDrawOrder.length) {
+                    || children.length != paintExpected.length) {
                 throw new IllegalArgumentException("incomplete hierarchy snapshot");
             }
             this.root = root;
             this.children = children.clone();
             this.parents = parents.clone();
             this.childEvidence = childEvidence.clone();
+            this.paintExpected = paintExpected.clone();
             this.effectiveDrawOrder = effectiveDrawOrder.clone();
             this.drawPolicyEvidence = drawPolicyEvidence;
             this.sceneEvidence = sceneEvidence;
         }
 
+        private static boolean[] allPaintExpected(Object[] children) {
+            if (children == null) return null;
+            boolean[] expected = new boolean[children.length];
+            for (int i = 0; i < expected.length; i++) expected[i] = true;
+            return expected;
+        }
+
         private boolean validNine(Object expectedRoot) {
             if (root != expectedRoot || children.length != 9) return false;
-            IdentityHashMap<Object, Boolean> seen = new IdentityHashMap<Object, Boolean>();
+            IdentityHashMap<Object, Boolean> expected = new IdentityHashMap<Object, Boolean>();
             IdentityHashMap<Object, Boolean> painted = new IdentityHashMap<Object, Boolean>();
+            int expectedPaintCount = 0;
             for (int i = 0; i < 9; i++) {
                 if (children[i] == null || parents[i] != expectedRoot
-                        || childEvidence[i] == null || seen.put(children[i], true) != null) {
+                        || childEvidence[i] == null
+                        || expected.put(children[i], paintExpected[i]) != null) {
                     return false;
                 }
+                if (paintExpected[i]) expectedPaintCount++;
+            }
+            // The offline representation admits the existing nine-visible
+            // host or one non-painted stock child, not arbitrary omissions.
+            if (expectedPaintCount < 8 || effectiveDrawOrder.length != expectedPaintCount) {
+                return false;
             }
             for (Object child : effectiveDrawOrder) {
-                if (seen.get(child) == null || painted.put(child, true) != null) return false;
+                if (expected.get(child) != Boolean.TRUE
+                        || painted.put(child, true) != null) return false;
             }
             return true;
         }
 
         private boolean sameNine(Snapshot other) {
             if (other == null || root != other.root || children.length != 9
-                    || other.children.length != 9 || other.effectiveDrawOrder.length != 9
+                    || other.children.length != 9
+                    || other.effectiveDrawOrder.length != effectiveDrawOrder.length
                     || !drawPolicyEvidence.equals(other.drawPolicyEvidence)
                     || !sceneEvidence.equals(other.sceneEvidence)) return false;
             for (int i = 0; i < 9; i++) {
                 if (children[i] != other.children[i] || parents[i] != other.parents[i]
-                        || effectiveDrawOrder[i] != other.effectiveDrawOrder[i]
+                        || paintExpected[i] != other.paintExpected[i]
                         || !childEvidence[i].equals(other.childEvidence[i])) return false;
+            }
+            for (int i = 0; i < effectiveDrawOrder.length; i++) {
+                if (effectiveDrawOrder[i] != other.effectiveDrawOrder[i]) return false;
             }
             return true;
         }
@@ -154,20 +194,25 @@ public final class TargetOwnedVisualLeaseCore {
         private boolean sameNinePlusOwned(Snapshot other, Object owned,
                 int directSlot, int paintSlot) {
             if (other == null || root != other.root || other.children.length != 10
-                    || other.effectiveDrawOrder.length != 10
+                    || other.effectiveDrawOrder.length != effectiveDrawOrder.length + 1
+                    || paintSlot > effectiveDrawOrder.length
                     || other.children[directSlot] != owned
                     || other.effectiveDrawOrder[paintSlot] != owned
                     || other.parents[directSlot] != root
+                    || !other.paintExpected[directSlot]
                     || other.childEvidence[directSlot] == null
                     || !drawPolicyEvidence.equals(other.drawPolicyEvidence)
                     || !sceneEvidence.equals(other.sceneEvidence)) return false;
             for (int i = 0; i < 9; i++) {
                 int directAt = i < directSlot ? i : i + 1;
-                int paintAt = i < paintSlot ? i : i + 1;
                 if (children[i] != other.children[directAt]
                         || parents[i] != other.parents[directAt]
-                        || effectiveDrawOrder[i] != other.effectiveDrawOrder[paintAt]
+                        || paintExpected[i] != other.paintExpected[directAt]
                         || !childEvidence[i].equals(other.childEvidence[directAt])) return false;
+            }
+            for (int i = 0; i < effectiveDrawOrder.length; i++) {
+                int paintAt = i < paintSlot ? i : i + 1;
+                if (effectiveDrawOrder[i] != other.effectiveDrawOrder[paintAt]) return false;
             }
             return true;
         }
@@ -326,6 +371,7 @@ public final class TargetOwnedVisualLeaseCore {
             root = port.root();
             before = port.snapshot();
             if (root == null || !before.validNine(root)
+                    || paintSlot > before.effectiveDrawOrder.length
                     || port.evidenceMutationRevision() != baselineEvidenceRevision) {
                 quarantine(Reason.DRIFT, null);
                 return;

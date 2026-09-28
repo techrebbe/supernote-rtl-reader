@@ -54,6 +54,8 @@ public final class TargetOwnedVisualLeaseCoreTest {
         final List<Object> effectiveDrawOrder = new ArrayList<Object>();
         final IdentityHashMap<Object, Object> parents = new IdentityHashMap<Object, Object>();
         final IdentityHashMap<Object, String> evidence = new IdentityHashMap<Object, String>();
+        final IdentityHashMap<Object, Boolean> paintExpected =
+                new IdentityHashMap<Object, Boolean>();
         final List<Event> events = new ArrayList<Event>();
         long now = 100;
         long evidenceMutationRevision = 1;
@@ -64,6 +66,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         boolean processAlive = true;
         boolean rootAlive = true;
         boolean onMainThread = true;
+        boolean useLegacyAllVisibleSnapshot;
         boolean inlineDispatch;
         boolean lossChangesHostState;
         Reason lossOnCancel;
@@ -129,8 +132,32 @@ public final class TargetOwnedVisualLeaseCoreTest {
                 effectiveDrawOrder.add(original[i]);
                 parents.put(original[i], root);
                 evidence.put(original[i], "class|id|visibility|bounds|z|layout " + i);
+                paintExpected.put(original[i], true);
             }
             lastCompletedPaintFrame = new PaintFrame(startedPaintRevision, now, snapshot());
+        }
+
+        void setStockSevenVisible(boolean visible) {
+            Object stockSeven = original[7];
+            if (paintExpected.get(stockSeven) == Boolean.valueOf(visible)) {
+                throw new AssertionError("stock seven visibility did not change");
+            }
+            evidenceMutationRevision++;
+            paintExpected.put(stockSeven, visible);
+            evidence.put(stockSeven, "class|id|visibility="
+                    + (visible ? "VISIBLE" : "GONE") + "|bounds|z|layout 7");
+            if (visible) {
+                effectiveDrawOrder.add(effectiveDrawOrder.indexOf(original[8]), stockSeven);
+            } else {
+                for (Iterator<Object> iter = effectiveDrawOrder.iterator(); iter.hasNext();) {
+                    if (iter.next() == stockSeven) { iter.remove(); break; }
+                }
+            }
+        }
+
+        void completeFreshPaintNow() {
+            long revision = ++startedPaintRevision;
+            lastCompletedPaintFrame = new PaintFrame(revision, now, snapshot());
         }
 
         void useCustomPaintOrder() {
@@ -180,13 +207,19 @@ public final class TargetOwnedVisualLeaseCoreTest {
             Object[] seen = children.toArray(new Object[children.size()]);
             Object[] seenParents = new Object[seen.length];
             String[] seenEvidence = new String[seen.length];
+            boolean[] seenPaintExpected = new boolean[seen.length];
             for (int i = 0; i < seen.length; i++) {
                 seenParents[i] = parents.get(seen[i]);
                 seenEvidence[i] = evidence.get(seen[i]);
+                seenPaintExpected[i] = paintExpected.get(seen[i]) == Boolean.TRUE;
             }
-            Snapshot captured = new Snapshot(root, seen, seenParents, seenEvidence,
-                    effectiveDrawOrder.toArray(new Object[effectiveDrawOrder.size()]),
-                    drawPolicy, scene);
+            Object[] painted = effectiveDrawOrder.toArray(
+                    new Object[effectiveDrawOrder.size()]);
+            Snapshot captured = useLegacyAllVisibleSnapshot
+                    ? new Snapshot(root, seen, seenParents, seenEvidence,
+                            painted, drawPolicy, scene)
+                    : new Snapshot(root, seen, seenParents, seenEvidence,
+                            seenPaintExpected, painted, drawPolicy, scene);
             if (afterNextSnapshot != null) {
                 Runnable hook = afterNextSnapshot;
                 afterNextSnapshot = null;
@@ -216,6 +249,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
             effectiveDrawOrder.add(paintInsertSlot, child);
             parents.put(child, root);
             evidence.put(child, "owned visual only");
+            paintExpected.put(child, true);
             if (sceneAbaDuringAdd) {
                 String originalScene = scene;
                 evidenceMutationRevision++;
@@ -248,6 +282,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
                 }
             }
             if (found) parents.remove(child);
+            if (found) paintExpected.remove(child);
             for (Iterator<Object> iter = effectiveDrawOrder.iterator(); iter.hasNext();) {
                 if (iter.next() == child) {
                     iter.remove();
@@ -407,6 +442,21 @@ public final class TargetOwnedVisualLeaseCoreTest {
                 require(parents.get(original[i]) == root, "stock child moved");
             }
         }
+        void exactNineWithGoneSeven() {
+            require(children.size() == 9, "wrong structural child count after GONE rollback");
+            require(effectiveDrawOrder.size() == 8, "wrong GONE paint count");
+            for (int i = 0; i < 9; i++) {
+                require(children.get(i) == original[i], "GONE structural order at " + i);
+                require(parents.get(original[i]) == root, "GONE structural parent at " + i);
+                require(paintExpected.get(original[i]) == Boolean.valueOf(i != 7),
+                        "GONE paint expectation at " + i);
+                if (i != 7) {
+                    int paintAt = i < 7 ? i : i - 1;
+                    require(effectiveDrawOrder.get(paintAt) == original[i],
+                            "GONE paint order at " + i);
+                }
+            }
+        }
         void removeOwnedExternally(Object owned) {
             evidenceMutationRevision++;
             for (Iterator<Object> iter = children.iterator(); iter.hasNext();) {
@@ -416,6 +466,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
                 if (iter.next() == owned) { iter.remove(); break; }
             }
             parents.remove(owned);
+            paintExpected.remove(owned);
         }
         boolean containsIdentity(Object child) {
             for (Object candidate : children) if (candidate == child) return true;
@@ -1244,6 +1295,208 @@ public final class TargetOwnedVisualLeaseCoreTest {
                 "changed owned evidence escaped exact-object cleanup");
     }
 
+    private static void testGoneChildPaintRepresentation() {
+        TargetOwnedVisualLeaseCore.Factory factory = new TargetOwnedVisualLeaseCore.Factory() {
+            @Override public Object create(DrawGate drawGate) {
+                return new GateBoundChild(drawGate);
+            }
+        };
+
+        FakePort gone = new FakePort();
+        gone.setStockSevenVisible(false);
+        gone.completeFreshPaintNow();
+        gone.exactNineWithGoneSeven();
+        Object[] legacyParents = new Object[9];
+        String[] legacyEvidence = new String[9];
+        for (int i = 0; i < 9; i++) {
+            legacyParents[i] = gone.root;
+            legacyEvidence[i] = gone.evidence.get(gone.original[i]);
+        }
+        try {
+            new Snapshot(gone.root, gone.original, legacyParents, legacyEvidence,
+                    gone.effectiveDrawOrder.toArray(new Object[8]),
+                    gone.drawPolicy, gone.scene);
+            throw new AssertionError("legacy all-visible constructor accepted omitted child");
+        } catch (IllegalArgumentException expected) { checks++; }
+        gone.paintInsertSlot = 7;
+        Slot goneSlot = new Slot();
+        TargetOwnedVisualLeaseCore lease = TargetOwnedVisualLeaseCore.startForTest(
+                goneSlot, gone, factory, 8, 7, 50, 10, 10, 40);
+        gone.advance(1);
+        require(lease.state() == State.INSERTED && lease.mayDraw()
+                && gone.children.size() == 10 && gone.children.get(8) == lease.ownedChild(),
+                "nine-structural/eight-painted baseline did not admit exact owned child");
+        Object[] insertedOrder = new Object[9];
+        for (int i = 0; i < 7; i++) insertedOrder[i] = gone.original[i];
+        insertedOrder[7] = lease.ownedChild();
+        insertedOrder[8] = gone.original[8];
+        requirePaintOrder(gone, insertedOrder, "GONE baseline owned paint order");
+        lease.requestCleanup(Reason.HOST_STOP);
+        gone.runReady();
+        gone.advance(2);
+        require(lease.state() == State.REMOVED
+                && lease.result() == Result.LIVE_STRUCTURE_RESTORED
+                && gone.removeCalls == 1 && !goneSlot.occupied(),
+                "eight-painted rollback did not restore exact nine-child structure");
+        gone.exactNineWithGoneSeven();
+
+        FakePort impossibleRank = new FakePort();
+        impossibleRank.setStockSevenVisible(false);
+        impossibleRank.completeFreshPaintNow();
+        Slot impossibleSlot = new Slot();
+        TargetOwnedVisualLeaseCore impossible = TargetOwnedVisualLeaseCore.startForTest(
+                impossibleSlot, impossibleRank, factory, 8, 9, 50, 10, 10, 40);
+        require(impossible.state() == State.QUARANTINED
+                && impossible.result() == Result.UNKNOWN
+                && impossibleRank.addCalls == 0 && impossibleSlot.occupied(),
+                "paint slot beyond eight original dispatches reached insertion");
+
+        FakePort wrongRank = new FakePort();
+        wrongRank.setStockSevenVisible(false);
+        wrongRank.completeFreshPaintNow();
+        wrongRank.paintInsertSlot = 8;
+        Slot wrongRankSlot = new Slot();
+        TargetOwnedVisualLeaseCore misplaced = TargetOwnedVisualLeaseCore.startForTest(
+                wrongRankSlot, wrongRank, factory, 8, 7, 50, 10, 10, 40);
+        wrongRank.advance(3);
+        require(misplaced.state() == State.REMOVED
+                && misplaced.result() == Result.UNKNOWN
+                && wrongRank.drawRequests == 0 && wrongRank.removeCalls == 1
+                && !wrongRankSlot.occupied(),
+                "unproven owned paint rank was admitted with a GONE sibling: state="
+                        + misplaced.state() + " result=" + misplaced.result()
+                        + " draws=" + wrongRank.drawRequests
+                        + " removes=" + wrongRank.removeCalls);
+        wrongRank.exactNineWithGoneSeven();
+    }
+
+    private static void testLegacyAllVisibleSnapshotCompatibility() {
+        FakePort legacy = new FakePort();
+        legacy.useLegacyAllVisibleSnapshot = true;
+        legacy.completeFreshPaintNow();
+        TargetOwnedVisualLeaseCore lease = start(new Slot(), legacy);
+        require(lease.state() == State.INSERTED && lease.mayDraw()
+                && legacy.effectiveDrawOrder.size() == 10,
+                "legacy all-visible Snapshot did not admit the unchanged host shape");
+        lease.requestCleanup(Reason.HOST_STOP);
+        legacy.runReady();
+        legacy.advance(2);
+        require(lease.state() == State.REMOVED
+                && lease.result() == Result.LIVE_STRUCTURE_RESTORED,
+                "legacy all-visible Snapshot failed exact rollback");
+        legacy.exactNine();
+    }
+
+    private static void testGoneChildWithCustomPaintOrder() {
+        FakePort custom = new FakePort();
+        custom.useCustomPaintOrder();
+        custom.setStockSevenVisible(false);
+        custom.completeFreshPaintNow();
+        Object[] baselineOrder = new Object[] {
+                custom.original[0], custom.original[2], custom.original[1],
+                custom.original[3], custom.original[4], custom.original[5],
+                custom.original[6], custom.original[8]
+        };
+        requirePaintOrder(custom, baselineOrder, "GONE custom-order baseline");
+        TargetOwnedVisualLeaseCore lease = TargetOwnedVisualLeaseCore.startForTest(
+                new Slot(), custom, new TargetOwnedVisualLeaseCore.Factory() {
+                    @Override public Object create(DrawGate drawGate) {
+                        return new GateBoundChild(drawGate);
+                    }
+                }, 8, 2, 50, 10, 10, 40);
+        custom.advance(1);
+        Object[] insertedOrder = new Object[] {
+                custom.original[0], custom.original[2], lease.ownedChild(),
+                custom.original[1], custom.original[3], custom.original[4],
+                custom.original[5], custom.original[6], custom.original[8]
+        };
+        require(lease.state() == State.INSERTED && lease.mayDraw()
+                && custom.children.size() == 10
+                && custom.children.get(8) == lease.ownedChild(),
+                "GONE custom paint order did not admit distinct direct/paint slots");
+        requirePaintOrder(custom, insertedOrder, "GONE custom-order owned paint");
+        lease.requestCleanup(Reason.HOST_STOP);
+        custom.runReady();
+        custom.advance(2);
+        require(lease.state() == State.REMOVED
+                && lease.result() == Result.LIVE_STRUCTURE_RESTORED
+                && custom.children.size() == 9,
+                "GONE custom paint order failed exact restoration");
+        requirePaintOrder(custom, baselineOrder, "GONE custom-order restored paint");
+        for (int i = 0; i < 9; i++) {
+            require(custom.children.get(i) == custom.original[i]
+                    && custom.parents.get(custom.original[i]) == custom.root,
+                    "GONE custom-order structural restoration at " + i);
+        }
+    }
+
+    private static void testGoneVisibilityAndUnexpectedOmissions() {
+        FakePort omittedVisible = new FakePort();
+        omittedVisible.effectiveDrawOrder.remove(omittedVisible.original[4]);
+        omittedVisible.completeFreshPaintNow();
+        Slot omittedSlot = new Slot();
+        TargetOwnedVisualLeaseCore missing = start(omittedSlot, omittedVisible);
+        require(missing.state() == State.QUARANTINED
+                && missing.result() == Result.UNKNOWN
+                && omittedVisible.addCalls == 0 && omittedSlot.occupied(),
+                "unexpected omitted visible child passed baseline admission");
+
+        FakePort paintedGone = new FakePort();
+        paintedGone.setStockSevenVisible(false);
+        paintedGone.effectiveDrawOrder.set(4, paintedGone.original[7]);
+        paintedGone.completeFreshPaintNow();
+        TargetOwnedVisualLeaseCore extraPaint = start(new Slot(), paintedGone);
+        require(extraPaint.state() == State.QUARANTINED
+                && paintedGone.addCalls == 0,
+                "GONE child appearing in actual paint order passed baseline admission");
+
+        FakePort missingAfterAdd = new FakePort();
+        missingAfterAdd.setStockSevenVisible(false);
+        missingAfterAdd.completeFreshPaintNow();
+        missingAfterAdd.autoAddPaint = false;
+        TargetOwnedVisualLeaseCore pending = start(new Slot(), missingAfterAdd);
+        require(pending.state() == State.PREPARED, "missing-after-add fixture not pending");
+        missingAfterAdd.effectiveDrawOrder.remove(missingAfterAdd.original[4]);
+        missingAfterAdd.scheduleFreshPaint(1);
+        missingAfterAdd.advance(2);
+        require(pending.result() == Result.UNKNOWN
+                && missingAfterAdd.drawRequests == 0
+                && missingAfterAdd.removeCalls == 1,
+                "post-add omitted visible child authorized owned pixels");
+
+        FakePort newlyVisible = new FakePort();
+        newlyVisible.setStockSevenVisible(false);
+        newlyVisible.completeFreshPaintNow();
+        newlyVisible.paintInsertSlot = 7;
+        TargetOwnedVisualLeaseCore shown = TargetOwnedVisualLeaseCore.startForTest(
+                new Slot(), newlyVisible, new TargetOwnedVisualLeaseCore.Factory() {
+                    @Override public Object create(DrawGate drawGate) {
+                        return new GateBoundChild(drawGate);
+                    }
+                }, 8, 7, 50, 10, 10, 40);
+        newlyVisible.advance(1);
+        require(shown.state() == State.INSERTED, "newly-visible fixture did not admit");
+        newlyVisible.setStockSevenVisible(true);
+        newlyVisible.completeFreshPaintNow();
+        require(!shown.mayDraw(), "newly visible stock child retained draw authority");
+        newlyVisible.runReady();
+        newlyVisible.advance(2);
+        require(shown.result() == Result.UNKNOWN
+                && newlyVisible.removeCalls == 1,
+                "newly visible transition produced live rollback PASS");
+
+        FakePort newlyHidden = new FakePort();
+        TargetOwnedVisualLeaseCore hidden = start(new Slot(), newlyHidden);
+        newlyHidden.setStockSevenVisible(false);
+        newlyHidden.completeFreshPaintNow();
+        require(!hidden.mayDraw(), "newly GONE stock child retained draw authority");
+        newlyHidden.runReady();
+        newlyHidden.advance(2);
+        require(hidden.result() == Result.UNKNOWN
+                && newlyHidden.removeCalls == 1,
+                "newly hidden transition produced live rollback PASS");
+    }
+
     private static void testCompletedPaintAdmission() {
         FakePort deferredLayout = new FakePort();
         deferredLayout.autoAddPaint = false;
@@ -1932,6 +2185,10 @@ public final class TargetOwnedVisualLeaseCoreTest {
         testMovedMissingAndImpostor();
         testNineChildAndEvidenceVerification();
         testEffectiveDrawingOrderEvidence();
+        testGoneChildPaintRepresentation();
+        testLegacyAllVisibleSnapshotCompatibility();
+        testGoneChildWithCustomPaintOrder();
+        testGoneVisibilityAndUnexpectedOmissions();
         testCompletedPaintAdmission();
         testCompletedPaintRestoration();
         testSlowPaintReadsAndQueuedStop();

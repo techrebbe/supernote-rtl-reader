@@ -47,6 +47,8 @@ NET_TABLE_HEADER = (
     "sl", "local_address", "rem_address", "st", "tx_queue", "rx_queue",
     "tr", "tm->when", "retrnsmt", "uid", "timeout", "inode",
 )
+NET6_TABLE_HEADER = (NET_TABLE_HEADER[:2] + ("remote_address",) +
+                     NET_TABLE_HEADER[3:])
 
 
 def file_sha(path: Path, expected: str, *, maximum: int) -> None:
@@ -308,7 +310,9 @@ class OwnedFridaServer:
         for table in ("/proc/net/tcp", "/proc/net/tcp6"):
             content = self.adb.shell("cat", table)
             lines = content.splitlines()
-            need(bool(lines) and tuple(lines[0].split()) == NET_TABLE_HEADER,
+            expected_header = (NET_TABLE_HEADER if table == "/proc/net/tcp"
+                               else NET6_TABLE_HEADER)
+            need(bool(lines) and tuple(lines[0].split()) == expected_header,
                  "SERVER_NET_TABLE_INVALID")
             address_width = 8 if table.endswith("/tcp") else 32
             address = rf"[0-9A-Fa-f]{{{address_width}}}:[0-9A-Fa-f]{{4}}"

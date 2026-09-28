@@ -13,6 +13,8 @@ from host_protocol import TrialError
 
 NET_HEADER = ("sl local_address rem_address st tx_queue rx_queue tr "
               "tm->when retrnsmt uid timeout inode\n")
+NET6_HEADER = ("sl local_address remote_address st tx_queue rx_queue tr "
+               "tm->when retrnsmt uid timeout inode\n")
 TCP_ROW = ("0: 0100007F:69A2 00000000:0000 0A "
            "00000000:00000000 00:00000000 00000000 0 0 123 1\n")
 TCP6_ROW = ("1: " + "0" * 32 + ":69A2 " + "0" * 32 + ":0000 0A "
@@ -38,7 +40,7 @@ class CleanupAdb:
         self.rm_removes_stage = True
         self.post_rm_symlink = False
         self.net_tcp = NET_HEADER
-        self.net_tcp6 = NET_HEADER
+        self.net_tcp6 = NET6_HEADER
 
     def run(self, *args: str, **unused) -> str:
         self.actions.append(("run", *args))
@@ -192,20 +194,23 @@ class WireTests(unittest.TestCase):
             server = subject.OwnedFridaServer(fake, Path(sys.executable), digest)
         self.assertFalse(server._remote_listening())  # Valid header-only tables.
         fake.net_tcp = NET_HEADER + TCP_ROW
-        fake.net_tcp6 = NET_HEADER + TCP6_ROW
+        fake.net_tcp6 = NET6_HEADER + TCP6_ROW
         self.assertTrue(server._remote_listening())
         self.assertIn(("shell", "cat", "/proc/net/tcp6"), fake.actions)
         for table in ("net_tcp", "net_tcp6"):
-            for malformed in ("", "different header\n", NET_HEADER + "0: 0100007F:69A2\n",
-                              NET_HEADER + "0: ZZ00007F:69A2 00000000:0000 0A "
-                                           "00000000:00000000 00:00000000 "
-                                           "00000000 0 0 123 1\n"):
+            header = NET_HEADER if table == "net_tcp" else NET6_HEADER
+            wrong_spelling = NET6_HEADER if table == "net_tcp" else NET_HEADER
+            for malformed in ("", "different header\n", wrong_spelling,
+                              header + "0: 0100007F:69A2\n",
+                              header + "0: ZZ00007F:69A2 00000000:0000 0A "
+                                       "00000000:00000000 00:00000000 "
+                                       "00000000 0 0 123 1\n"):
                 with self.subTest(table=table, malformed=malformed):
                     setattr(fake, table, malformed)
                     with self.assertRaisesRegex(TrialError,
                                                 "SERVER_NET_TABLE_INVALID"):
                         server._remote_listening()
-                    setattr(fake, table, NET_HEADER +
+                    setattr(fake, table, header +
                             (TCP_ROW if table == "net_tcp" else TCP6_ROW))
 
     def test_invalid_net_table_retains_stage_with_fixed_cleanup_evidence(self) -> None:

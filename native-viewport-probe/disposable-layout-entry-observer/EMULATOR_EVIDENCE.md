@@ -30,3 +30,18 @@ reader mutation coverage, final compositing, pen geometry, or Nomad behavior.
 Next bounded trial requires independently reviewed timing and cleanup changes.
 It must remain one-shot, retain app-side exact fresh-paint authority, and stop
 on any uncertain identity or cleanup. No Nomad, PDF, or pen action occurred.
+
+## 2026-09-28: stricter network-table preflight
+
+- Reviewed source commit: `87b9b4c` on `agent/disposable-owned-child`.
+- One bounded `parent-plus-one` attempt returned `UNKNOWN` with
+  `SERVER_NET_TABLE_INVALID` before staging the server or launching the app.
+- Read-only inspection found the emulator uses `rem_address` in the tcp header
+  and `remote_address` in the tcp6 header. The new parser expected the former
+  in both tables; this is a precise dialect mismatch, not evidence of a
+  listener or layout result.
+- Independent postflight found no synthetic app or Frida process, staged
+  server file, ADB forward, or local runner lock. No PDF or pen action occurred.
+
+The next attempt requires an exact-header variant fix, offline tests, and
+independent review. The failed preflight is not a synthetic layout PASS.

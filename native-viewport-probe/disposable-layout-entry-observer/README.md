@@ -65,7 +65,7 @@ The raw observer source alone is not an executable Frida 17 bundle; the runner
 requires an explicit bundle path and matching SHA-256.
 
 The executable pins the final synthetic APK SHA-256
-`d4c38a2c2b914819ec41c13e7e4b08fa78eba1767f40335b135dac99092bad0c`,
+`7b970be2c80a64b10921d011e5236ad6754b6a78395313fcc700db4faf64c9af`,
 signer `4d4f0f18e10114c7a801bcdb87dd4fd2d75ebc24ca0ad5bcb6967009e62ead6a`,
 server `9dcb1c12fa528070f2f6590b245e2c66cb1f931e0975bc911d9ff476394879d7`
 (110837320 bytes), and bundle digest/size above. CLI hashes cannot redefine

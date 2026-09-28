@@ -46,6 +46,24 @@ def refreshed_state() -> dict:
             "completedPaintCount": 6}
 
 
+def restore_entry_witness() -> dict:
+    return {"sameRoot": True, "sameRootToken": True,
+            "sameScene": False, "childCount": [9, 9],
+            "childIdentityMismatchIndices": [],
+            "parentIdentityMismatchIndices": [],
+            "childEvidenceMismatchIndices": [2],
+            "bounds": [[0, 0, 1059, 200], [0, 0, 1059, 200]],
+            "parentPreCallRevision": [2, 2],
+            "observedWriteOrdinal": [2, 2],
+            "rootLayoutCalls": [2, 2],
+            "startedPaintRevision": [4, 5],
+            "paintStartedElapsedMs": [1000, 1050],
+            "paintStartParentRevision": [2, 2],
+            "paintStartWriteOrdinal": [2, 2],
+            "completedPaintRevision": [4, 5],
+            "completedPaintElapsedMs": [1005, 1055]}
+
+
 class FakeAdb:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
@@ -364,6 +382,74 @@ class TrialAdapterTests(unittest.TestCase):
         app.command_response_evidence = {"phase": "command-response"}
         app.first_trial_poll_evidence = {"phase": "trial-poll"}
         self.assertIsNone(app.scene_failure_evidence())
+
+    def test_restore_entry_drift_projects_exact_primitive_witness(self) -> None:
+        app, fake = app_with_fake()
+        witness = restore_entry_witness()
+        fake.state["trial"] = {"state": "UNKNOWN",
+                               "reason": "RESTORE_ENTRY_DRIFT",
+                               "command": "parent-plus-one",
+                               "restoreEntryDrift": witness}
+        fake.state["sessionTainted"] = True
+        with self.assertRaisesRegex(host.TrialError, "APP_SCENE_DRIFT"):
+            app._state(ADMISSION, phase="trial-poll", os_check=False)
+        evidence = app.scene_failure_evidence()["failedState"]
+        self.assertEqual(evidence["restoreEntryDrift"], witness)
+        self.assertIsNot(evidence["restoreEntryDrift"], witness)
+        self.assertEqual([call[0] for call in fake.calls], ["state"])
+
+    def test_restore_entry_drift_rejects_malformed_or_text_payload(self) -> None:
+        witness = restore_entry_witness()
+        bad_values = []
+        for key, replacement in (
+                ("sameRoot", 1), ("childCount", [9, True]),
+                ("childIdentityMismatchIndices", [2, 2]),
+                ("parentIdentityMismatchIndices", [4, 1]),
+                ("childEvidenceMismatchIndices", [9]),
+                ("bounds", [[0, 0, "SECRET", 200], [0, 0, 1059, 200]]),
+                ("startedPaintRevision", [4, "SECRET"])):
+            bad = copy.deepcopy(witness)
+            bad[key] = replacement
+            bad_values.append(bad)
+        extra = copy.deepcopy(witness)
+        extra["rootToken"] = "SECRET"
+        bad_values.append(extra)
+        missing = copy.deepcopy(witness)
+        del missing["sameScene"]
+        bad_values.append(missing)
+        for bad in bad_values:
+            with self.subTest(bad=bad):
+                state = refreshed_state()
+                state["trial"] = {"state": "UNKNOWN",
+                                  "reason": "RESTORE_ENTRY_DRIFT",
+                                  "restoreEntryDrift": bad}
+                projected = subject._scene_diagnostic(
+                    state, "trial-poll", None)
+                self.assertIsNone(projected["restoreEntryDrift"])
+                self.assertNotIn("SECRET", json.dumps(projected))
+
+    def test_restore_entry_witness_only_on_exact_unknown_reason(self) -> None:
+        state = refreshed_state()
+        state["trial"] = {"state": "PASS", "reason": "RESTORE_ENTRY_DRIFT",
+                          "restoreEntryDrift": restore_entry_witness()}
+        self.assertNotIn("restoreEntryDrift",
+                         subject._scene_diagnostic(state, "trial-poll", None))
+        state["trial"]["state"] = "UNKNOWN"
+        state["trial"]["reason"] = "TRIAL_TIMEOUT"
+        self.assertNotIn("restoreEntryDrift",
+                         subject._scene_diagnostic(state, "trial-poll", None))
+
+    def test_malformed_restore_witness_preserves_scene_failure(self) -> None:
+        app, fake = app_with_fake()
+        fake.state["sessionTainted"] = True
+        fake.state["trial"] = {"state": "UNKNOWN",
+                               "reason": "RESTORE_ENTRY_DRIFT",
+                               "restoreEntryDrift": {"rawToken": "SECRET"}}
+        with self.assertRaisesRegex(host.TrialError, "APP_SCENE_DRIFT"):
+            app._state(ADMISSION, phase="trial-poll", os_check=False)
+        self.assertIsNone(app.scene_failure_evidence()["failedState"]
+                          ["restoreEntryDrift"])
+        self.assertEqual([call[0] for call in fake.calls], ["state"])
 
     def test_diagnostic_failure_never_changes_scene_drift_verdict(self) -> None:
         app, fake = app_with_fake()

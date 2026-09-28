@@ -872,6 +872,8 @@ public final class TrialActivity extends Activity
             proof.put("abaAway", cutJson(trial == null ? null : trial.abaAway()));
             proof.put("firstAfter", cutJson(trial == null ? null : trial.firstAfter()));
             proof.put("firstFrame", cutJson(trial == null ? null : trial.firstFrame()));
+            proof.put("restoreEntryDrift", restoreEntryDriftJson(
+                    trial == null ? null : trial.restoreEntryDrift()));
             proof.put("restoreAfter", cutJson(trial == null ? null : trial.restoreAfter()));
             proof.put("restoredFrame", cutJson(trial == null ? null : trial.restoredFrame()));
             proof.put("secondFrame", cutJson(trial == null ? null : trial.secondFrame()));
@@ -920,6 +922,63 @@ public final class TrialActivity extends Activity
         }
         out.put("children", children);
         out.put("effectivePaintOrder", order);
+        return out;
+    }
+
+    /** Only comparison results cross the provider wire, never tokens or child text. */
+    private static Object restoreEntryDriftJson(TrialEvidence.RestoreEntryDiff diff)
+            throws JSONException {
+        if (diff == null) return JSONObject.NULL;
+        JSONObject out = new JSONObject();
+        out.put("sameRoot", diff.sameRoot);
+        out.put("sameRootToken", diff.sameRootToken);
+        out.put("sameScene", diff.sameScene);
+        out.put("childCount", numberPairJson(diff.firstChildCount, diff.entryChildCount));
+        out.put("childIdentityMismatchIndices",
+                indexArrayJson(diff.childIdentityMismatchIndices()));
+        out.put("parentIdentityMismatchIndices",
+                indexArrayJson(diff.parentIdentityMismatchIndices()));
+        out.put("childEvidenceMismatchIndices",
+                indexArrayJson(diff.childEvidenceMismatchIndices()));
+        JSONArray bounds = new JSONArray();
+        bounds.put(boundsArrayJson(diff.firstBounds));
+        bounds.put(boundsArrayJson(diff.entryBounds));
+        out.put("bounds", bounds);
+        out.put("parentPreCallRevision", numberPairJson(diff.parentPreCallRevision));
+        out.put("observedWriteOrdinal", numberPairJson(diff.observedWriteOrdinal));
+        out.put("rootLayoutCalls", numberPairJson(diff.rootLayoutCalls));
+        out.put("startedPaintRevision", numberPairJson(diff.startedPaintRevision));
+        out.put("paintStartedElapsedMs", numberPairJson(diff.paintStartedElapsedMs));
+        out.put("paintStartParentRevision", numberPairJson(diff.paintStartParentRevision));
+        out.put("paintStartWriteOrdinal", numberPairJson(diff.paintStartWriteOrdinal));
+        out.put("completedPaintRevision", numberPairJson(diff.completedPaintRevision));
+        out.put("completedPaintElapsedMs", numberPairJson(diff.completedPaintElapsedMs));
+        return out;
+    }
+
+    private static JSONArray numberPairJson(TrialEvidence.RestoreEntryDiff.LongPair pair) {
+        return numberPairJson(pair.firstFrame, pair.entry);
+    }
+
+    private static JSONArray numberPairJson(long firstFrame, long entry) {
+        JSONArray out = new JSONArray();
+        out.put(firstFrame);
+        out.put(entry);
+        return out;
+    }
+
+    private static JSONArray boundsArrayJson(TrialEvidence.Bounds bounds) {
+        JSONArray out = new JSONArray();
+        out.put(bounds.left);
+        out.put(bounds.top);
+        out.put(bounds.right);
+        out.put(bounds.bottom);
+        return out;
+    }
+
+    private static JSONArray indexArrayJson(int[] indices) {
+        JSONArray out = new JSONArray();
+        for (int index : indices) out.put(index);
         return out;
     }
 

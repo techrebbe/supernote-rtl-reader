@@ -73,6 +73,17 @@ _REASON_LABELS = frozenset({
     "RESTORED_AFTER_UNKNOWN_TWO_PAINTS", "UNKNOWN_CLEANUP_VERIFIED",
     "SENTINEL_REJECTED", "SENTINEL_UNKNOWN", "SENTINEL_PASS",
 })
+_DRIFT_FLAGS = ("sameRoot", "sameRootToken", "sameScene")
+_DRIFT_INDEX_FIELDS = ("childIdentityMismatchIndices",
+                       "parentIdentityMismatchIndices",
+                       "childEvidenceMismatchIndices")
+_DRIFT_PAIRS = ("parentPreCallRevision", "observedWriteOrdinal",
+                "rootLayoutCalls", "startedPaintRevision",
+                "paintStartedElapsedMs", "paintStartParentRevision",
+                "paintStartWriteOrdinal", "completedPaintRevision",
+                "completedPaintElapsedMs")
+_DRIFT_KEYS = frozenset((*_DRIFT_FLAGS, "childCount",
+                         *_DRIFT_INDEX_FIELDS, "bounds", *_DRIFT_PAIRS))
 
 
 def _integer(value: Any, minimum: int = 0) -> int:
@@ -91,6 +102,40 @@ def _identity(value: Any, admission: Admission) -> dict[str, Any]:
          "APP_IDENTITY_DRIFT")
     _integer(value.get("sampleElapsedMs"))
     return value
+
+
+def _restore_entry_drift(value: Any) -> dict[str, Any] | None:
+    """Copy only the app's exact primitive comparator witness, or reject it."""
+    def integer(item: Any, maximum: int, minimum: int = 0) -> bool:
+        return type(item) is int and minimum <= item <= maximum
+
+    def pair(item: Any, maximum: int, minimum: int = 0) -> bool:
+        return (type(item) is list and len(item) == 2 and
+                all(integer(member, maximum, minimum) for member in item))
+
+    if type(value) is not dict or value.keys() != _DRIFT_KEYS:
+        return None
+    if any(type(value[key]) is not bool for key in _DRIFT_FLAGS):
+        return None
+    if not pair(value["childCount"], 2**31 - 1):
+        return None
+    for key in _DRIFT_INDEX_FIELDS:
+        indices = value[key]
+        if (type(indices) is not list or len(indices) > 9 or
+                any(not integer(index, 8) for index in indices) or
+                indices != sorted(set(indices))):
+            return None
+    bounds = value["bounds"]
+    if (type(bounds) is not list or len(bounds) != 2 or
+            any(type(row) is not list or len(row) != 4 or
+                any(not integer(coordinate, 2**31 - 1, -(2**31))
+                    for coordinate in row) for row in bounds)):
+        return None
+    if any(not pair(value[key], 2**63 - 1) for key in _DRIFT_PAIRS):
+        return None
+    return {key: value[key] if key in _DRIFT_FLAGS else list(value[key])
+            if key != "bounds" else [list(row) for row in value[key]]
+            for key in _DRIFT_KEYS}
 
 
 def _scene_diagnostic(state: dict[str, Any], phase: str,
@@ -113,7 +158,7 @@ def _scene_diagnostic(state: dict[str, Any], phase: str,
     bounds = state.get("rootBounds") if type(state.get("rootBounds")) is dict else {}
     since_command = (None if command_started is None else
         number(math.ceil(max(0.0, time.monotonic() - command_started) * 1000)))
-    return {
+    summary = {
         "phase": phase,
         "hostMsSinceCommand": since_command,
         "sampleElapsedMs": number(state.get("sampleElapsedMs")),
@@ -146,6 +191,11 @@ def _scene_diagnostic(state: dict[str, Any], phase: str,
         "lastCompletedPaintRevision": number(completed.get("completedPaintRevision")),
         "lastCompletedPaintElapsedMs": number(completed.get("completedPaintElapsedMs")),
     }
+    if (trial.get("state") == "UNKNOWN" and
+            trial.get("reason") == "RESTORE_ENTRY_DRIFT"):
+        summary["restoreEntryDrift"] = _restore_entry_drift(
+            trial.get("restoreEntryDrift"))
+    return summary
 
 
 class EmulatorApp:

@@ -1,6 +1,7 @@
 package com.techrebbe.supernote.layoutfencetrial;
 
 import java.util.IdentityHashMap;
+import java.util.Arrays;
 
 /** Pure-Java, path-scoped evidence. This never certifies complete mutation coverage. */
 public final class TrialEvidence {
@@ -199,6 +200,104 @@ public final class TrialEvidence {
         }
     }
 
+    /** Failure-only, fixed-size comparison of the cut immediately before restore. */
+    public static final class RestoreEntryDiff {
+        public static final class LongPair {
+            public final long firstFrame;
+            public final long entry;
+
+            private LongPair(long firstFrame, long entry) {
+                this.firstFrame = firstFrame;
+                this.entry = entry;
+            }
+        }
+
+        public final boolean sameRoot;
+        public final boolean sameRootToken;
+        public final boolean sameScene;
+        public final int firstChildCount;
+        public final int entryChildCount;
+        public final Bounds firstBounds;
+        public final Bounds entryBounds;
+        public final LongPair parentPreCallRevision;
+        public final LongPair observedWriteOrdinal;
+        public final LongPair rootLayoutCalls;
+        public final LongPair startedPaintRevision;
+        public final LongPair paintStartedElapsedMs;
+        public final LongPair paintStartParentRevision;
+        public final LongPair paintStartWriteOrdinal;
+        public final LongPair completedPaintRevision;
+        public final LongPair completedPaintElapsedMs;
+        private final int[] childIdentityMismatchIndices;
+        private final int[] parentIdentityMismatchIndices;
+        private final int[] childEvidenceMismatchIndices;
+
+        private RestoreEntryDiff(Cut firstFrame, Cut entry) {
+            sameRoot = firstFrame.root == entry.root;
+            sameRootToken = firstFrame.rootToken.equals(entry.rootToken);
+            sameScene = firstFrame.scene.equals(entry.scene);
+            firstChildCount = firstFrame.childCount;
+            entryChildCount = entry.childCount;
+            firstBounds = firstFrame.bounds;
+            entryBounds = entry.bounds;
+            parentPreCallRevision = pair(firstFrame.parentPreCallRevision,
+                    entry.parentPreCallRevision);
+            observedWriteOrdinal = pair(firstFrame.observedWriteOrdinal,
+                    entry.observedWriteOrdinal);
+            rootLayoutCalls = pair(firstFrame.rootLayoutCalls, entry.rootLayoutCalls);
+            startedPaintRevision = pair(firstFrame.startedPaintRevision,
+                    entry.startedPaintRevision);
+            paintStartedElapsedMs = pair(firstFrame.paintStartedElapsedMs,
+                    entry.paintStartedElapsedMs);
+            paintStartParentRevision = pair(firstFrame.paintStartParentRevision,
+                    entry.paintStartParentRevision);
+            paintStartWriteOrdinal = pair(firstFrame.paintStartWriteOrdinal,
+                    entry.paintStartWriteOrdinal);
+            completedPaintRevision = pair(firstFrame.completedPaintRevision,
+                    entry.completedPaintRevision);
+            completedPaintElapsedMs = pair(firstFrame.completedPaintElapsedMs,
+                    entry.completedPaintElapsedMs);
+
+            int[] children = new int[ORIGINAL_COUNT];
+            int[] parents = new int[ORIGINAL_COUNT];
+            int[] evidence = new int[ORIGINAL_COUNT];
+            int childDifferences = 0;
+            int parentDifferences = 0;
+            int evidenceDifferences = 0;
+            for (int i = 0; i < ORIGINAL_COUNT; i++) {
+                if (firstFrame.children[i] != entry.children[i]) {
+                    children[childDifferences++] = i;
+                }
+                if (firstFrame.parents[i] != entry.parents[i]) {
+                    parents[parentDifferences++] = i;
+                }
+                if (firstFrame.childEvidence[i] == null
+                        || !firstFrame.childEvidence[i].equals(entry.childEvidence[i])) {
+                    evidence[evidenceDifferences++] = i;
+                }
+            }
+            childIdentityMismatchIndices = Arrays.copyOf(children, childDifferences);
+            parentIdentityMismatchIndices = Arrays.copyOf(parents, parentDifferences);
+            childEvidenceMismatchIndices = Arrays.copyOf(evidence, evidenceDifferences);
+        }
+
+        private static LongPair pair(long firstFrame, long entry) {
+            return new LongPair(firstFrame, entry);
+        }
+
+        public int[] childIdentityMismatchIndices() {
+            return childIdentityMismatchIndices.clone();
+        }
+
+        public int[] parentIdentityMismatchIndices() {
+            return parentIdentityMismatchIndices.clone();
+        }
+
+        public int[] childEvidenceMismatchIndices() {
+            return childEvidenceMismatchIndices.clone();
+        }
+    }
+
     /** A refresh is only an invalidate request; this proves a later completed paint. */
     public static boolean refreshedBaseline(Cut requestEntry, Cut completed, Cut live,
             long paintFloorRevision, long requestElapsedMs, long nowElapsedMs) {
@@ -238,6 +337,7 @@ public final class TrialEvidence {
         private Cut restoredFrame;
         private Cut secondFrame;
         private Cut secondSample;
+        private RestoreEntryDiff restoreEntryDrift;
         private long secondPaintRequestElapsedMs;
         private long secondPaintStartRevisionFloor;
         private boolean bypassObserved;
@@ -289,6 +389,9 @@ public final class TrialEvidence {
                 expected = baseline.bounds;
             } else if (state == State.WAIT_RESTORE_CALL) {
                 if (firstFrame == null || !firstFrame.sameLiveFrame(entry)) {
+                    if (firstFrame != null && restoreEntryDrift == null) {
+                        restoreEntryDrift = new RestoreEntryDiff(firstFrame, entry);
+                    }
                     unknown("RESTORE_ENTRY_DRIFT");
                     return false;
                 }
@@ -524,6 +627,7 @@ public final class TrialEvidence {
         public Cut secondFrame() { return secondFrame; }
         public Cut secondSample() { return secondSample; }
         public Cut abaAway() { return abaAway; }
+        public RestoreEntryDiff restoreEntryDrift() { return restoreEntryDrift; }
         public boolean bypassObserved() { return bypassObserved; }
         public boolean rollbackVerified() { return state == State.PASS && secondSample != null; }
         public boolean completeMutationCoverage() { return false; }

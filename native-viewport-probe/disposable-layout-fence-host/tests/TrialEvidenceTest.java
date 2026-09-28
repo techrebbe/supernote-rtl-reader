@@ -128,6 +128,110 @@ public final class TrialEvidenceTest {
         check(!proof.completeMutationCoverage(), "path proof is never complete authority");
         check(!proof.bypassObserved(), "parent call not bypass");
         check(proof.abaAway() == null, "non-ABA parent JSON cut is null");
+        check(proof.restoreEntryDrift() == null,
+                "successful restoration has no failure-only entry diagnostic");
+    }
+
+    private static TrialEvidence.Trial waitingForRestore(Fixture f,
+            TrialEvidence.Cut firstFrame) {
+        TrialEvidence.Cut baseline = f.baseline();
+        TrialEvidence.Trial proof = TrialEvidence.Trial.begin(
+                TrialEvidence.Command.PARENT_PLUS, baseline, 1005);
+        TrialEvidence.Bounds target = f.base.withRightDelta(1);
+        check(proof.onParentPreCall(baseline, target, 11, 1010),
+                "diagnostic fixture first pre-call");
+        proof.onParentLayoutAfter(f.firstAfter(target, 11, 21, 4), 1011);
+        proof.onCompletedPaint(firstFrame, 1021);
+        check(proof.state() == TrialEvidence.State.WAIT_RESTORE_CALL,
+                "diagnostic fixture reached restore entry");
+        check(proof.restoreEntryDrift() == null,
+                "diagnostic absent before a failed restore comparison");
+        return proof;
+    }
+
+    private static void restoreEntryDiagnostic() {
+        Fixture f = new Fixture();
+        TrialEvidence.Bounds target = f.base.withRightDelta(1);
+        TrialEvidence.Cut firstFrame = f.firstFrame(target, 11, 21, 4);
+        TrialEvidence.Trial proof = waitingForRestore(f, firstFrame);
+        TrialEvidence.Cut oneChangedField = f.cutAt(target, 11, 21, 4,
+                6, 1019, 11, 21, 6, 1021);
+        check(!firstFrame.sameLiveFrame(oneChangedField),
+                "one changed completion time fails original exact guard");
+        check(!proof.onParentPreCall(oneChangedField, f.base, 12, 1030),
+                "restore entry with one changed field rejected");
+        check(proof.state() == TrialEvidence.State.UNKNOWN
+                        && "RESTORE_ENTRY_DRIFT".equals(proof.reason()),
+                "diagnostic cannot turn rejected restore into admission");
+        TrialEvidence.RestoreEntryDiff diff = proof.restoreEntryDrift();
+        check(diff != null && diff.sameRoot && diff.sameRootToken && diff.sameScene,
+                "unchanged identities represented only by equality booleans");
+        check(diff.firstChildCount == 9 && diff.entryChildCount == 9
+                        && diff.firstBounds.equals(target) && diff.entryBounds.equals(target),
+                "unchanged count and bounds retained as numeric pairs");
+        check(diff.childIdentityMismatchIndices().length == 0
+                        && diff.parentIdentityMismatchIndices().length == 0
+                        && diff.childEvidenceMismatchIndices().length == 0,
+                "one scalar drift has no child identity or evidence mismatch");
+        check(diff.completedPaintElapsedMs.firstFrame == 1020
+                        && diff.completedPaintElapsedMs.entry == 1021,
+                "failed pre-bump completion-time pair retained exactly");
+        check(diff.parentPreCallRevision.firstFrame == diff.parentPreCallRevision.entry
+                        && diff.observedWriteOrdinal.firstFrame == diff.observedWriteOrdinal.entry
+                        && diff.rootLayoutCalls.firstFrame == diff.rootLayoutCalls.entry
+                        && diff.startedPaintRevision.firstFrame == diff.startedPaintRevision.entry
+                        && diff.paintStartedElapsedMs.firstFrame == diff.paintStartedElapsedMs.entry
+                        && diff.paintStartParentRevision.firstFrame
+                                == diff.paintStartParentRevision.entry
+                        && diff.paintStartWriteOrdinal.firstFrame
+                                == diff.paintStartWriteOrdinal.entry
+                        && diff.completedPaintRevision.firstFrame
+                                == diff.completedPaintRevision.entry,
+                "all other exact-cut numeric fields agree");
+        check(!proof.onParentPreCall(firstFrame, f.base, 12, 1031)
+                        && proof.state() == TrialEvidence.State.UNKNOWN
+                        && proof.restoreEntryDrift() == diff,
+                "UNKNOWN and first diagnostic remain sticky after later input");
+
+        Fixture changed = new Fixture();
+        TrialEvidence.Bounds changedTarget = changed.base.withRightDelta(1);
+        TrialEvidence.Cut changedFirst = changed.firstFrame(changedTarget, 11, 21, 4);
+        TrialEvidence.Trial multi = waitingForRestore(changed, changedFirst);
+        Object[] children = changed.children.clone();
+        Object[] parents = changed.parents.clone();
+        String[] metadata = changed.metadata.clone();
+        children[2] = new Object();
+        parents[3] = new Object();
+        metadata[4] = "private child text must not be retained in diagnostic";
+        TrialEvidence.Cut changedEntry = new TrialEvidence.Cut(changed.root,
+                TrialContract.rootToken("process", "one"), "other scene",
+                changedTarget, 9, children, parents, metadata,
+                changed.children.clone(), 11, 21, 4, 6, 1019,
+                11, 21, 6, 1020);
+        check(!multi.onParentPreCall(changedEntry, changed.base, 12, 1030),
+                "multi-field restore drift also rejected");
+        TrialEvidence.RestoreEntryDiff multiDiff = multi.restoreEntryDrift();
+        check(multi.state() == TrialEvidence.State.UNKNOWN && multiDiff != null
+                        && !multiDiff.sameScene,
+                "scene mismatch exposes equality only and keeps UNKNOWN");
+        check(multiDiff.childIdentityMismatchIndices().length == 1
+                        && multiDiff.childIdentityMismatchIndices()[0] == 2
+                        && multiDiff.parentIdentityMismatchIndices().length == 1
+                        && multiDiff.parentIdentityMismatchIndices()[0] == 3
+                        && multiDiff.childEvidenceMismatchIndices().length == 1
+                        && multiDiff.childEvidenceMismatchIndices()[0] == 4,
+                "bounded mismatch indices identify changed slots without payload");
+
+        Fixture missing = new Fixture();
+        TrialEvidence.Bounds missingTarget = missing.base.withRightDelta(1);
+        TrialEvidence.Trial missingEntry = waitingForRestore(missing,
+                missing.firstFrame(missingTarget, 11, 21, 4));
+        check(!missingEntry.onParentPreCall(null, missing.base, 12, 1030),
+                "null restore entry rejected before diagnostic construction");
+        check(missingEntry.state() == TrialEvidence.State.UNKNOWN
+                        && "PARENT_PRECALL_NOT_EXCLUSIVE".equals(missingEntry.reason())
+                        && missingEntry.restoreEntryDrift() == null,
+                "null entry preserves original unknown path with no diagnostic");
     }
 
     private static void unchangedControl() {
@@ -455,6 +559,7 @@ public final class TrialEvidenceTest {
         directBypass(TrialEvidence.Command.DIRECT_LAYOUT);
         directBypass(TrialEvidence.Command.DIRECT_OFFSET);
         abaControl();
+        restoreEntryDiagnostic();
         adversarial();
         postPassArmValidity();
         refreshBaselineEvidence();

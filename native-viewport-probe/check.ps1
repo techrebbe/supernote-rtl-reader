@@ -7,12 +7,54 @@ param(
     [string]$Node='node'
 )
 $ErrorActionPreference='Stop'
-$probeRoot=$PSScriptRoot
+$probeRoot=[IO.Path]::GetFullPath($PSScriptRoot)
 $repoRoot=Split-Path $probeRoot -Parent
-$buildPath=Join-Path $probeRoot ('build/check-' + [guid]::NewGuid().ToString('N'))
+
+# This rejects reparse ancestors present at inspection time. It does not
+# prevent concurrent directory replacement after the check.
+function Assert-OrdinaryDirectoryChain {
+    param([Parameter(Mandatory=$true)][string]$LiteralPath)
+    $current = [IO.Path]::GetFullPath($LiteralPath)
+    while ($true) {
+        $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+        if ($item -isnot [IO.DirectoryInfo] -or
+                ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Build output has a non-directory or reparse ancestor: $current"
+        }
+        $parent = Split-Path -Path $current -Parent
+        if ([string]::IsNullOrEmpty($parent) -or
+                [string]::Equals($parent, $current,
+                    [StringComparison]::OrdinalIgnoreCase)) {break}
+        $current = $parent
+    }
+}
+
+function Get-SafeBuildParent {
+    param([Parameter(Mandatory=$true)][string]$ProbeRoot)
+    $root = [IO.Path]::GetFullPath($ProbeRoot)
+    Assert-OrdinaryDirectoryChain -LiteralPath $root
+    $parent = [IO.Path]::GetFullPath((Join-Path $root 'build'))
+    $prefix = $root.TrimEnd([char[]]@('\', '/')) +
+        [IO.Path]::DirectorySeparatorChar
+    if (-not $parent.StartsWith($prefix,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Refusing build output outside probe root.'
+    }
+    $existing = Get-Item -LiteralPath $parent -Force -ErrorAction SilentlyContinue
+    if ($null -eq $existing) {
+        New-Item -ItemType Directory -Path $parent | Out-Null
+    }
+    Assert-OrdinaryDirectoryChain -LiteralPath $parent
+    return $parent
+}
+
+$buildParent=Get-SafeBuildParent -ProbeRoot $probeRoot
+$buildPath=Join-Path $buildParent ('check-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $buildPath | Out-Null
+Assert-OrdinaryDirectoryChain -LiteralPath $buildPath
 $builderSourceAuthority=$null
 $builderSnapshotAuthority=$null
+$gateTestSourceAuthority=$null
 
 function ConvertTo-CanonicalScriptBytes([byte[]]$Raw) {
     foreach ($separator in @(
@@ -51,6 +93,39 @@ function Get-Sha256Lower([byte[]]$Bytes) {
 }
 
 try {
+$gateTests=Join-Path $probeRoot 'test-saved-ink-builder-gates.ps1'
+$expectedGateTestsSha256='1b2b15eed49d601ab21a2641795aaa9ae2a92bb00c4c0ba0c0a25c845f811f34'
+$gateTestItem=Get-Item -LiteralPath $gateTests -Force
+if (($gateTestItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        -not (Test-Path -LiteralPath $gateTests -PathType Leaf) -or
+        $gateTestItem.Length -lt 1 -or $gateTestItem.Length -gt 65536) {
+    throw 'SavedInk builder gate tests are not one bounded ordinary file'
+}
+$gateTestSourceAuthority=[IO.FileStream]::new(
+    $gateTests,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+if ($gateTestSourceAuthority.Length -ne $gateTestItem.Length) {
+    throw 'SavedInk builder gate test identity changed during capture'
+}
+$gateTestRaw=[byte[]]::new([int]$gateTestSourceAuthority.Length)
+$gateTestAt=0
+while ($gateTestAt -lt $gateTestRaw.Length) {
+    $read=$gateTestSourceAuthority.Read(
+        $gateTestRaw,$gateTestAt,$gateTestRaw.Length-$gateTestAt)
+    if ($read -le 0) {throw 'SavedInk builder gate tests were truncated'}
+    $gateTestAt+=$read
+}
+if ((Get-Sha256Lower (ConvertTo-CanonicalScriptBytes $gateTestRaw)) -cne
+        $expectedGateTestsSha256) {
+    throw 'SavedInk builder gate tests differ from reviewed source authority'
+}
+$gateTestOutput=@(& $gateTests)
+if ($gateTestOutput.Count -ne 1 -or
+        $gateTestOutput[0] -cne 'SAVED_INK_BUILDER_GATE_TESTS_PASS tests=11' -or
+        -not [Linq.Enumerable]::SequenceEqual(
+            [byte[]]$gateTestRaw,[byte[]][IO.File]::ReadAllBytes($gateTests))) {
+    throw 'SavedInk builder negative gates failed or changed during execution'
+}
+Write-Output $gateTestOutput[0]
 $javac=Join-Path $Jdk 'bin/javac.exe'
 $java=Join-Path $Jdk 'bin/java.exe'
 $sourceRoot=Join-Path $repoRoot 'native-spread-module/src/com/techrebbe/supernote/spreadprobe/v2'
@@ -96,7 +171,7 @@ if ($LASTEXITCODE -ne 0) {throw 'Saved-ink Java framed golden emission failed'}
 # retained handle denies writes, deletion and name replacement through the
 # child build and final Python gate.
 $savedInkBuilder=Join-Path $probeRoot 'build-saved-ink-reader.ps1'
-$expectedSavedInkBuilderSha256='5e5bf09b002c2dbed900081067f561c3fd25b37064a6de158eb66acf1408823b'
+$expectedSavedInkBuilderSha256='07b727dc75b03ec1859fc41174f0602013608cbf95b9aaf6e0bdab4abe24520e'
 $builderItem=Get-Item -LiteralPath $savedInkBuilder -Force
 if (($builderItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
         -not (Test-Path -LiteralPath $savedInkBuilder -PathType Leaf) -or
@@ -415,6 +490,7 @@ if (@($testOutput | Where-Object {
 if ($LASTEXITCODE -ne 0) {throw 'Pen-boundary observation tests failed'}
 Write-Output 'HOST CHECKS PASS. Not a hardware/collector/viewport readiness claim.'
 } finally {
+    if ($null -ne $gateTestSourceAuthority) {$gateTestSourceAuthority.Dispose()}
     if ($null -ne $builderSnapshotAuthority) {$builderSnapshotAuthority.Dispose()}
     if ($null -ne $builderSourceAuthority) {$builderSourceAuthority.Dispose()}
 }

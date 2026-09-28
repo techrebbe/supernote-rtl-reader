@@ -50,8 +50,9 @@ $jdkRelease = Join-Path $Jdk 'release'
 $jdkModules = Join-Path $Jdk 'lib\modules'
 $jdkBin = Join-Path $Jdk 'bin'
 
+$expectedSourceSha256 = '67b4991fdeb6ed385665487af02add44e15be54c7f54b441d5a797d38f9ee148'
+$expectedSourceBytes = 48933L
 $expectedFiles = @{
-    $source = @('67b4991fdeb6ed385665487af02add44e15be54c7f54b441d5a797d38f9ee148', 48933L)
     $jdkRelease = @('00d3211a59bc9f2577f93962e9210de8578c49fd2625022cb38606817d3a71f9', 1306L)
     $jdkModules = @('81f0e1bb87cd303ddcce2b216e27da416bd20799d9a9811ea1b070123cefff0f', 125748850L)
     $javac = @('ff58ff79e356c4f62e0fdf67af6f71dcc7b8fb63edb5156d3eb064342e2a56a5', 23664L)
@@ -131,16 +132,21 @@ function Get-CanonicalSourceBytes {
 function Assert-PinnedSource {
     param(
         [Parameter(Mandatory=$true)][string]$LiteralPath,
-        [Parameter(Mandatory=$true)][string]$ExpectedSha256
+        [Parameter(Mandatory=$true)][string]$ExpectedSha256,
+        [long]$ExpectedBytes = 0
     )
     if (-not (Test-Path -LiteralPath $LiteralPath -PathType Leaf)) {
         throw "Pinned source is missing: $LiteralPath"
     }
     $item = Get-Item -LiteralPath $LiteralPath -Force
-    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+            $item.Length -lt 1 -or $item.Length -gt 1048576) {
         throw "Pinned source is not an ordinary file: $LiteralPath"
     }
     $canonical = Get-CanonicalSourceBytes -LiteralPath $LiteralPath
+    if ($ExpectedBytes -gt 0 -and $canonical.Length -ne $ExpectedBytes) {
+        throw "Pinned canonical source size changed: $LiteralPath"
+    }
     $hasher = [Security.Cryptography.SHA256]::Create()
     try {
         $actual = ([BitConverter]::ToString(
@@ -151,10 +157,50 @@ function Assert-PinnedSource {
     }
 }
 
+# This rejects reparse ancestors present at inspection time. It does not
+# prevent concurrent directory replacement after the check.
+function Assert-OrdinaryDirectoryChain {
+    param([Parameter(Mandatory=$true)][string]$LiteralPath)
+    $current = [IO.Path]::GetFullPath($LiteralPath)
+    while ($true) {
+        $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+        if ($item -isnot [IO.DirectoryInfo] -or
+                ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Build output has a non-directory or reparse ancestor: $current"
+        }
+        $parent = Split-Path -Path $current -Parent
+        if ([string]::IsNullOrEmpty($parent) -or
+                [string]::Equals($parent, $current,
+                    [StringComparison]::OrdinalIgnoreCase)) {break}
+        $current = $parent
+    }
+}
+
+function Get-SafeBuildParent {
+    param([Parameter(Mandatory=$true)][string]$ProbeRoot)
+    $root = [IO.Path]::GetFullPath($ProbeRoot)
+    Assert-OrdinaryDirectoryChain -LiteralPath $root
+    $parent = [IO.Path]::GetFullPath((Join-Path $root 'build'))
+    $prefix = $root.TrimEnd([char[]]@('\', '/')) +
+        [IO.Path]::DirectorySeparatorChar
+    if (-not $parent.StartsWith($prefix,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Refusing build output outside probe root.'
+    }
+    $existing = Get-Item -LiteralPath $parent -Force -ErrorAction SilentlyContinue
+    if ($null -eq $existing) {
+        New-Item -ItemType Directory -Path $parent | Out-Null
+    }
+    Assert-OrdinaryDirectoryChain -LiteralPath $parent
+    return $parent
+}
+
 foreach ($entry in $expectedFiles.GetEnumerator()) {
     Assert-PinnedFile -LiteralPath $entry.Key `
         -ExpectedSha256 $entry.Value[0] -ExpectedBytes $entry.Value[1]
 }
+Assert-PinnedSource -LiteralPath $source `
+    -ExpectedSha256 $expectedSourceSha256 -ExpectedBytes $expectedSourceBytes
 if ($expectedPackagerSha256 -notmatch '^[0-9a-f]{64}$' -or
         $expectedTestsSha256 -notmatch '^[0-9a-f]{64}$' -or
         $expectedInvokerSha256 -notmatch '^[0-9a-f]{64}$' -or
@@ -189,12 +235,10 @@ foreach ($name in $ambientJavaNames) {
     }
 }
 
-$buildParent = [IO.Path]::GetFullPath((Join-Path $probeRoot 'build'))
-if (-not $buildParent.StartsWith($probeRoot, [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'Refusing build output outside probe root.'
-}
+$buildParent = Get-SafeBuildParent -ProbeRoot $probeRoot
 $buildRoot = Join-Path $buildParent ('saved-ink-v2-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $buildRoot | Out-Null
+Assert-OrdinaryDirectoryChain -LiteralPath $buildRoot
 
 # Retain the reviewed wrapper from one exact capture. The retained read handle
 # denies writes, deletion and name replacement while each fresh child executes
@@ -385,7 +429,7 @@ if ($firstHash -cne $secondHash) {
 }
 
 $finalArtifact = Join-Path $buildRoot `
-    ('saved-ink-reader-v2-' + $expectedFiles[$source][0].Substring(0, 12) + '.jar')
+    ('saved-ink-reader-v2-' + $expectedSourceSha256.Substring(0, 12) + '.jar')
 Invoke-Packager @('publish-copy', '--source', $first, '--output', $finalArtifact)
 Invoke-Packager @(
     'verify-final', '--artifact', $finalArtifact,
@@ -416,6 +460,8 @@ foreach ($entry in $expectedFiles.GetEnumerator()) {
     Assert-PinnedFile -LiteralPath $entry.Key `
         -ExpectedSha256 $entry.Value[0] -ExpectedBytes $entry.Value[1]
 }
+Assert-PinnedSource -LiteralPath $source `
+    -ExpectedSha256 $expectedSourceSha256 -ExpectedBytes $expectedSourceBytes
 Assert-PinnedSource -LiteralPath $packager -ExpectedSha256 $expectedPackagerSha256
 Assert-PinnedSource -LiteralPath $tests -ExpectedSha256 $expectedTestsSha256
 Assert-PinnedSource -LiteralPath $invoker -ExpectedSha256 $expectedInvokerSha256

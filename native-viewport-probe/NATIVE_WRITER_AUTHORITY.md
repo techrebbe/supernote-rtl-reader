@@ -80,3 +80,15 @@ and region writes. The pass did not establish a page/region/writable getter or
 pre-write fence, but it was not an exhaustive proof that no such path exists.
 The result remains **UNKNOWN / NO-GO**, with no Nomad trial authorized by this
 finding.
+
+### Disposable offline boundary probes
+
+`writer-witness-fake/` models the proposed pre-write generation, process/service
+incarnation, partial page/region/writable updates, pen-effect ordering, and
+detach cleanup under deterministic host concurrency. `frida-fake-service/`
+checks the pinned Frida runtime against an executable that this project owns,
+including a post-detach original-call sentinel. These are **mechanism checks**,
+not observations of Supernote's service. Neither proves that every stock setter
+and pen worker uses a common gate, or that a live hook can be installed and
+removed quiescently. The Android Port remains fail-closed until those facts and
+the exact disposable-PDF hardware rollback are independently verified.

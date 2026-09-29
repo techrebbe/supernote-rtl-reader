@@ -69,3 +69,14 @@ Existing context: `NATIVE_ENGINE_STARTUP.md`, `NATIVE_PEN_BOUNDARY.md`,
 `NATIVE_PAGE_FIRMWARE_FIELD_MAP.md`, the pinned decompiled
 `HandWriteClient.java` and `JniHandWriteClient.java`, and the disposable
 stock-reader baseline. No device operation was performed for this audit.
+
+### Bounded transaction-surface follow-up
+
+The pinned `onTransact` jump table covers codes 0–21. A bounded static pass
+verified that code 1 mutates writable-region state and code 4 waits to remove
+trail data from a queue; neither is the required non-mutating combined getter.
+Another reply path increments a counter *after* a queue pop, not before page
+and region writes. The pass did not establish a page/region/writable getter or
+pre-write fence, but it was not an exhaustive proof that no such path exists.
+The result remains **UNKNOWN / NO-GO**, with no Nomad trial authorized by this
+finding.

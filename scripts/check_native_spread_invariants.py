@@ -977,17 +977,17 @@ def check(repo_root: Path) -> None:
         ),
         (
             app_path,
-            "6606708256234c109530d03b8de7888179bb3886bc2def6bbde3b6f549dd6123",
+            "1c6dd75fbbd2389cd15e9ba2fb9d4d750257373b342e353157dfd186716e7071",
             "Native Spread UI authority source",
         ),
         (
             workflow_path,
-            "80e7733a663c32e39a871aa5eb4aa11e7e6857635b2c5af4b2063b6083cd56a3",
+            "6f9c384702aadbfd9307277566317c4dbff1a8e8bb1add8243297eef6e4d73cb",
             "Native Spread companion-build workflow",
         ),
         (
             plugin_build_path,
-            "cab3726f8249eee4c7cc31dc14934b8d7b164e86d7a152cd6807b4863ebbe5e9",
+            "02c0a88d45fd627e88163d22afa2393a3b6db3c0d27fdaaf676972f1295c07c5",
             "native plugin build entrypoint",
         ),
         (

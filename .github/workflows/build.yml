@@ -53,6 +53,8 @@ jobs:
           python3 scripts/test_native_reader_v2_mutations.py .
           python3 scripts/check_native_reader_v2_invariants.py .
           python3 scripts/check_native_invariants.py .
+          python3 scripts/check_edit_return_invariants.py .
+          node scripts/test_edit_return.js
           python3 scripts/check_native_spread_invariants.py .
           python3 scripts/test_build_provenance.py .
           python3 scripts/test_plugin_packaging_fail_closed.py

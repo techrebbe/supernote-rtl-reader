@@ -17,6 +17,14 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import {PluginCommAPI, PluginDocAPI, PluginManager} from 'sn-plugin-lib';
+import {
+  EDIT_BLOCKED_MESSAGES,
+  buildEditPayload,
+  buildEditReturnRecord,
+  chooseInitialPage,
+  editAvailability,
+  listEditTargets,
+} from './editReturn';
 
 const {PdfRendererModule, ReaderPreferencesModule} = NativeModules;
 const SWIPE_THRESHOLD = 56;
@@ -208,7 +216,7 @@ function viewModeLabel(mode) {
   return 'Auto';
 }
 
-function decodePreferences(raw, context) {
+function decodePreferences(raw, context, now = Date.now()) {
   let saved = null;
   if (typeof raw === 'string' && raw.length > 0) {
     try {
@@ -229,15 +237,10 @@ function decodePreferences(raw, context) {
     ? 'native_fill'
     : 'fit';
 
-  const hasSavedPage = Number.isInteger(saved?.lastPageIndex);
-  const hasPriorNativeAnchor = Number.isInteger(saved?.nativePageIndexAtOpen);
-  const nativePositionChanged =
-    hasPriorNativeAnchor && saved.nativePageIndexAtOpen !== context.pageIndex;
-
-  const useSavedPage = hasSavedPage && !nativePositionChanged;
-  const pageIndex = useSavedPage
-    ? clampPage(saved.lastPageIndex, context.totalPages)
-    : clampPage(context.pageIndex, context.totalPages);
+  // Page selection (saved RTL page vs native page vs Edit return) lives in
+  // ./editReturn so it can be tested on the host.
+  const choice = chooseInitialPage(saved, context, now);
+  const pageIndex = clampPage(choice.rawPage, context.totalPages);
 
   return {
     direction,
@@ -247,7 +250,8 @@ function decodePreferences(raw, context) {
     showNativeSpreadHeader,
     spreadSizing,
     pageIndex,
-    source: useSavedPage ? 'saved' : nativePositionChanged ? 'native-changed' : 'native',
+    source: choice.source,
+    editReturnStatus: choice.editReturnStatus,
   };
 }
 
@@ -302,6 +306,7 @@ export default function App() {
   const [nativeSpreadCompatible, setNativeSpreadCompatible] = useState(false);
   const [nativeSpreadBusy, setNativeSpreadBusy] = useState(false);
   const [nativeSpreadError, setNativeSpreadError] = useState(null);
+  const [editNotice, setEditNotice] = useState(null);
   const [nativeSpreadAuthorityState, setNativeSpreadAuthorityState] =
     useState('unknown');
   const [nativeSpreadAuthorityDetail, setNativeSpreadAuthorityDetail] = useState(
@@ -340,6 +345,7 @@ export default function App() {
   const spreadSizingRef = useRef(spreadSizing);
   const filePathRef = useRef(null);
   const nativePageIndexAtOpenRef = useRef(null);
+  const editReturnRef = useRef(null);
   const latestPreferencesRef = useRef(null);
   const preferencesSaveTimerRef = useRef(null);
   const cacheRef = useRef(new Map());
@@ -394,6 +400,7 @@ export default function App() {
       spreadSizing,
       lastPageIndex: pageIndex,
       nativePageIndexAtOpen: nativePageIndexAtOpenRef.current,
+      ...(editReturnRef.current ? {editReturn: editReturnRef.current} : {}),
       updatedAt: Date.now(),
     };
   }
@@ -572,6 +579,8 @@ export default function App() {
 
         filePathRef.current = context.filePath;
         nativePageIndexAtOpenRef.current = context.pageIndex;
+        // A pending Edit return is consumed by this open; the next save drops it.
+        editReturnRef.current = null;
         directionRef.current = restoredDirection;
         viewModeRef.current = restored.viewMode;
         const restoredCoverSeparate = nativeSpreadHasPersistedAppearance
@@ -628,6 +637,11 @@ export default function App() {
         console.log(
           `RTL_READER_OPENED file=${context.filePath} nativePage=${context.pageIndex + 1} readerPage=${restored.pageIndex + 1}`,
         );
+        if (restored.editReturnStatus !== 'none') {
+          console.log(
+            `RTL_READER_EDIT_RETURN status=${restored.editReturnStatus} source=${restored.source} nativePage=${context.pageIndex + 1}`,
+          );
+        }
       } catch (error) {
         console.error('RTL_READER_INIT_FAILED', error);
         if (mountedRef.current) {
@@ -830,6 +844,56 @@ export default function App() {
       console.warn('RTL_READER_PREFS_CLOSE_SAVE_FAILED', error);
     }
 
+    PluginManager.closePluginView().catch(error =>
+      console.error('RTL_READER_CLOSE_FAILED', error),
+    );
+  };
+
+  // Edit a page in Supernote's stock reader: save lastPageIndex=page plus an
+  // editReturn record, then take the ordinary Close path so the existing native
+  // handoff (index.js -> handoffLastSavedPage) opens the stock reader on it.
+  // Fails closed: if the save fails the plugin stays open and nothing is handed off.
+  const editPage = async page => {
+    const availability = editAvailability({
+      ready: preferencesReady && Boolean(documentContext),
+      busy: nativeSpreadBusyRef.current,
+      fatalError,
+      authorityResolved: nativeSpreadAuthorityResolved,
+      nativeSpreadEnabled,
+    });
+    if (!availability.allowed) {
+      setEditNotice(EDIT_BLOCKED_MESSAGES[availability.reason]);
+      return;
+    }
+    const record = buildEditReturnRecord({
+      filePath: filePathRef.current,
+      editPage: page,
+      totalPages: totalPagesRef.current,
+      nativePageAtOpen: nativePageIndexAtOpenRef.current,
+      now: Date.now(),
+    });
+    const payload = buildEditPayload(latestPreferencesRef.current, record, Date.now());
+    if (!payload) {
+      setEditNotice('This page cannot be opened for editing.');
+      return;
+    }
+    if (preferencesSaveTimerRef.current) {
+      clearTimeout(preferencesSaveTimerRef.current);
+      preferencesSaveTimerRef.current = null;
+    }
+    editReturnRef.current = record;
+    latestPreferencesRef.current = payload;
+    pageIndexRef.current = page;
+    try {
+      await savePreferences('edit', payload);
+    } catch (error) {
+      console.warn('RTL_READER_PREFS_EDIT_SAVE_FAILED', error);
+      editReturnRef.current = null;
+      setEditNotice('Could not save the reader position; editing was not started.');
+      return;
+    }
+    console.log(`RTL_READER_EDIT_REQUESTED page=${page + 1}`);
+    setPageIndex(page);
     PluginManager.closePluginView().catch(error =>
       console.error('RTL_READER_CLOSE_FAILED', error),
     );
@@ -1353,6 +1417,14 @@ export default function App() {
       ? `Auto → ${viewModeLabel(effectiveMode)}`
       : viewModeLabel(viewMode);
   const statusCover = coverSeparate ? 'Cover separate' : 'Cover paired';
+  const editTargets = listEditTargets({
+    mode: effectiveMode,
+    pageIndex,
+    visual:
+      effectiveMode === 'spread' && Number.isInteger(pageIndex)
+        ? getVisualSpread(pageIndex, coverSeparate, totalPages, direction)
+        : null,
+  });
 
   return (
     <SafeAreaView style={styles.root}>
@@ -1449,9 +1521,21 @@ export default function App() {
               <Text style={styles.statusPrimary}>
                 {direction.toUpperCase()} · {statusLayout}
               </Text>
-              <Text style={styles.statusSecondary}>{statusCover}</Text>
+              <Text style={styles.statusSecondary}>{editNotice ?? statusCover}</Text>
             </View>
             <View style={styles.headerActions}>
+              {editTargets.map(target => (
+                <Pressable
+                  key={target.side}
+                  disabled={nativeSpreadBusy}
+                  onPress={() => editPage(target.page)}
+                  style={[
+                    styles.headerButton,
+                    nativeSpreadBusy && styles.segmentButtonDisabled,
+                  ]}>
+                  <Text style={styles.headerButtonText}>{target.label}</Text>
+                </Pressable>
+              ))}
               <Pressable
                 onPress={() => setSettingsOpen(true)}
                 style={styles.headerButton}>

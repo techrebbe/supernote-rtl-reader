@@ -3,6 +3,7 @@ package com.techrebbe.supernote.viewportprobe;
 import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore.Port;
 import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore.DrawGate;
 import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore.PaintFrame;
+import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore.PageWriterWitness;
 import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore.Reason;
 import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore.Registration;
 import com.techrebbe.supernote.viewportprobe.TargetOwnedVisualLeaseCore.Result;
@@ -59,6 +60,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
         final List<Event> events = new ArrayList<Event>();
         long now = 100;
         long evidenceMutationRevision = 1;
+        long pageWriterRevision = 1;
         long startedPaintRevision = 1;
         PaintFrame lastCompletedPaintFrame;
         long nextOrder;
@@ -78,6 +80,16 @@ public final class TargetOwnedVisualLeaseCoreTest {
         boolean beginUnfinishedPaintOnRelease;
         boolean driftSceneOnReleasePaintRead;
         boolean driftSceneOnFinalSnapshot;
+        boolean pageWriterWitnessAvailable = true;
+        boolean pageWriterRevisionAvailable = true;
+        boolean useDefaultPageWriterMethods;
+        boolean writerAbaDuringAdd;
+        boolean writerAbaOnRelease;
+        boolean stopOnPostReleaseWriterRead;
+        boolean abaAfterSecondReleasedWriterRead;
+        boolean abaOnNextClockRead;
+        int pageWriterReadsAfterRelease;
+        Runnable afterNextPageWriterWitnessRead;
         int snapshotsUntilSceneDrift;
         TargetOwnedVisualLeaseCore activeLease;
         boolean armed;
@@ -123,6 +135,9 @@ public final class TargetOwnedVisualLeaseCoreTest {
         boolean throwAfterRemove;
         long removeAdvance;
         String scene = "page A|uri A|render A|root 1404x1872|epoch 1";
+        Identity pageIdentity = new Identity("page A");
+        Identity writerIdentity = new Identity("native writer A");
+        boolean writerEnabled = true;
         String drawPolicy = "default child order|no transient children|all Z zero";
         Runnable pause;
         Runnable rootLoss;
@@ -177,10 +192,46 @@ public final class TargetOwnedVisualLeaseCoreTest {
         @Override public long evidenceMutationRevision() {
             return evidenceMutationRevision;
         }
+        @Override public long pageWriterMutationRevision() {
+            if (useDefaultPageWriterMethods) return Port.super.pageWriterMutationRevision();
+            return pageWriterRevisionAvailable ? pageWriterRevision : -1;
+        }
+        @Override public PageWriterWitness pageWriterWitness() {
+            if (useDefaultPageWriterMethods) return Port.super.pageWriterWitness();
+            if (!pageWriterWitnessAvailable) return null;
+            PageWriterWitness captured = new PageWriterWitness(
+                    pageIdentity, writerIdentity, writerEnabled, pageWriterRevision);
+            if (afterNextPageWriterWitnessRead != null) {
+                Runnable hook = afterNextPageWriterWitnessRead;
+                afterNextPageWriterWitnessRead = null;
+                hook.run();
+            }
+            if (callbacksReleased && stopOnPostReleaseWriterRead) {
+                stopOnPostReleaseWriterRead = false;
+                activeLease.requestCleanup(Reason.DRIFT);
+            }
+            if (callbacksReleased && ++pageWriterReadsAfterRelease == 2
+                    && abaAfterSecondReleasedWriterRead) {
+                abaOnNextClockRead = true;
+            }
+            return captured;
+        }
+        void abaWriterEnablement() {
+            pageWriterRevision++;
+            writerEnabled = !writerEnabled;
+            pageWriterRevision++;
+            writerEnabled = !writerEnabled;
+        }
         @Override public void requireMainThread() {
             if (!onMainThread) throw new IllegalStateException("not on main thread");
         }
-        @Override public long elapsedRealtimeMillis() { return now; }
+        @Override public long elapsedRealtimeMillis() {
+            if (abaOnNextClockRead) {
+                abaOnNextClockRead = false;
+                abaWriterEnablement();
+            }
+            return now;
+        }
         @Override public long startedPaintRevision() { return startedPaintRevision; }
         @Override public PaintFrame lastCompletedPaintFrame() {
             now += nextCompletedPaintReadAdvance;
@@ -254,6 +305,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
             parents.put(child, root);
             evidence.put(child, "owned visual only");
             paintExpected.put(child, true);
+            if (writerAbaDuringAdd) abaWriterEnablement();
             if (sceneAbaDuringAdd) {
                 String originalScene = scene;
                 evidenceMutationRevision++;
@@ -386,6 +438,7 @@ public final class TargetOwnedVisualLeaseCoreTest {
                         };
                     }
                     if (driftSceneOnFinalSnapshot) snapshotsUntilSceneDrift = 2;
+                    if (writerAbaOnRelease) abaWriterEnablement();
                     armed = false;
                     pause = null;
                     rootLoss = null;
@@ -2262,6 +2315,172 @@ public final class TargetOwnedVisualLeaseCoreTest {
         detachedThenThrow.exactNine();
     }
 
+    private static void testPageWriterWitnessAdmission() {
+        FakePort inheritedDefaults = new FakePort();
+        Slot defaultSlot = new Slot();
+        inheritedDefaults.useDefaultPageWriterMethods = true;
+        TargetOwnedVisualLeaseCore defaultLease = start(defaultSlot, inheritedDefaults);
+        require(defaultLease.state() == State.QUARANTINED
+                && inheritedDefaults.addCalls == 0 && defaultSlot.occupied(),
+                "unwired Port defaults admitted a visual child");
+
+        FakePort missing = new FakePort();
+        Slot missingSlot = new Slot();
+        missing.pageWriterWitnessAvailable = false;
+        TargetOwnedVisualLeaseCore missingLease = start(missingSlot, missing);
+        require(missingLease.state() == State.QUARANTINED && missing.addCalls == 0
+                && missingSlot.occupied(),
+                "missing typed page/writer authority admitted a visual child");
+
+        FakePort unknownRevision = new FakePort();
+        unknownRevision.pageWriterRevisionAvailable = false;
+        TargetOwnedVisualLeaseCore unknownLease = start(new Slot(), unknownRevision);
+        require(unknownLease.state() == State.QUARANTINED
+                && unknownRevision.addCalls == 0,
+                "unknown page/writer revision admitted a visual child");
+
+        FakePort preAddAba = new FakePort();
+        long unchangedSceneRevision = preAddAba.evidenceMutationRevision;
+        TargetOwnedVisualLeaseCore preAddLease = start(new Slot(), preAddAba,
+                new TargetOwnedVisualLeaseCore.Factory() {
+                    @Override public Object create(DrawGate drawGate) {
+                        preAddAba.abaWriterEnablement();
+                        return new GateBoundChild(drawGate);
+                    }
+                });
+        require(preAddLease.state() == State.QUARANTINED && preAddAba.addCalls == 0
+                && preAddAba.writerEnabled
+                && preAddAba.evidenceMutationRevision == unchangedSceneRevision,
+                "pre-add writer enablement ABA escaped the typed revision fence");
+
+        FakePort addAba = new FakePort();
+        addAba.writerAbaDuringAdd = true;
+        TargetOwnedVisualLeaseCore addLease = start(new Slot(), addAba);
+        require(addLease.state() == State.QUARANTINED && addAba.addCalls == 1
+                && addAba.removeCalls == 1 && addAba.writerEnabled,
+                "writer ABA inside add escaped exact-child cleanup");
+        addAba.exactNine();
+
+        FakePort admissionAba = new FakePort();
+        admissionAba.autoAddPaint = false;
+        TargetOwnedVisualLeaseCore admissionLease = start(new Slot(), admissionAba);
+        admissionAba.scheduleFreshPaint(1);
+        admissionAba.afterNextPageWriterWitnessRead = new Runnable() {
+            @Override public void run() { admissionAba.abaWriterEnablement(); }
+        };
+        admissionAba.advance(2);
+        require(admissionLease.state() == State.QUARANTINED
+                && admissionAba.drawRequests == 0 && admissionAba.removeCalls == 1
+                && admissionAba.writerEnabled,
+                "reentrant writer ABA during admission requested pixels");
+        admissionAba.exactNine();
+    }
+
+    private static void testPageWriterWitnessDrawAndRollback() {
+        for (int changed = 0; changed < 3; changed++) {
+            FakePort port = new FakePort();
+            Slot slot = new Slot();
+            TargetOwnedVisualLeaseCore lease = start(slot, port);
+            require(lease.state() == State.INSERTED && lease.mayDraw()
+                    && port.writerEnabled,
+                    "stable enabled native writer should not itself block a visual lease");
+            long unchangedSceneRevision = port.evidenceMutationRevision;
+            long unchangedWriterRevision = port.pageWriterRevision;
+            // Deliberately violate the Port's revision promise as well:
+            // typed identity/enablement must not collapse to an epoch check.
+            if (changed == 0) {
+                port.pageIdentity = new Identity("page A"); // equals() lies.
+            } else if (changed == 1) {
+                port.writerIdentity = new Identity("native writer A");
+            } else {
+                port.writerEnabled = false;
+            }
+            require(!lease.mayDraw() && port.evidenceMutationRevision == unchangedSceneRevision
+                    && port.pageWriterRevision == unchangedWriterRevision,
+                    "typed page/writer drift allowed drawing in case " + changed);
+            port.runReady();
+            require(lease.state() == State.QUARANTINED
+                    && lease.result() == Result.UNKNOWN && slot.occupied()
+                    && port.removeCalls == 1,
+                    "typed drift made a live rollback claim in case " + changed);
+            port.exactNine();
+        }
+
+        FakePort drawAba = new FakePort();
+        Slot drawSlot = new Slot();
+        TargetOwnedVisualLeaseCore drawLease = start(drawSlot, drawAba);
+        drawAba.afterNextPageWriterWitnessRead = new Runnable() {
+            @Override public void run() { drawAba.abaWriterEnablement(); }
+        };
+        require(!drawLease.mayDraw(),
+                "reentrant writer ABA during draw witness authorized pixels");
+        drawAba.runReady();
+        require(drawLease.state() == State.QUARANTINED
+                && drawLease.result() == Result.UNKNOWN && drawSlot.occupied()
+                && drawAba.removeCalls == 1,
+                "reentrant draw ABA produced a live rollback claim");
+        drawAba.exactNine();
+
+        FakePort restorationAba = new FakePort();
+        Slot restorationSlot = new Slot();
+        TargetOwnedVisualLeaseCore restorationLease = start(restorationSlot, restorationAba);
+        restorationLease.requestCleanup(Reason.HOST_STOP);
+        restorationAba.runReady();
+        restorationAba.abaWriterEnablement();
+        restorationAba.advance(2);
+        require(restorationLease.state() == State.QUARANTINED
+                && restorationLease.result() == Result.UNKNOWN
+                && restorationSlot.occupied(),
+                "writer ABA after exact removal passed restoration frame");
+        restorationAba.exactNine();
+
+        FakePort releaseAba = new FakePort();
+        Slot releaseSlot = new Slot();
+        TargetOwnedVisualLeaseCore releaseLease = start(releaseSlot, releaseAba);
+        releaseLease.requestCleanup(Reason.HOST_STOP);
+        releaseAba.runReady();
+        releaseAba.advance(1);
+        releaseAba.writerAbaOnRelease = true;
+        releaseAba.advance(1);
+        require(releaseLease.state() == State.QUARANTINED
+                && releaseLease.result() == Result.UNKNOWN && releaseSlot.occupied()
+                && releaseAba.writerEnabled && releaseAba.removeCalls == 1,
+                "writer ABA during callback release passed the terminal commit");
+        releaseAba.exactNine();
+
+        FakePort lateClockAba = new FakePort();
+        Slot lateClockSlot = new Slot();
+        TargetOwnedVisualLeaseCore lateClockLease = start(lateClockSlot, lateClockAba);
+        lateClockLease.requestCleanup(Reason.HOST_STOP);
+        lateClockAba.runReady();
+        lateClockAba.advance(1);
+        lateClockAba.abaAfterSecondReleasedWriterRead = true;
+        lateClockAba.advance(1);
+        require(lateClockAba.pageWriterReadsAfterRelease >= 2
+                && !lateClockAba.abaOnNextClockRead
+                && lateClockAba.pageWriterRevision == 3 && lateClockAba.writerEnabled
+                && lateClockLease.state() == State.QUARANTINED
+                && lateClockLease.result() == Result.UNKNOWN && lateClockSlot.occupied(),
+                "writer ABA after final typed read escaped the pure commit fence");
+        lateClockAba.exactNine();
+
+        FakePort reentrant = new FakePort();
+        Slot reentrantSlot = new Slot();
+        TargetOwnedVisualLeaseCore reentrantLease = start(reentrantSlot, reentrant);
+        reentrant.activeLease = reentrantLease;
+        reentrantLease.requestCleanup(Reason.HOST_STOP);
+        reentrant.runReady();
+        reentrant.advance(1);
+        reentrant.stopOnPostReleaseWriterRead = true;
+        reentrant.advance(1);
+        require(reentrantLease.state() == State.QUARANTINED
+                && !reentrant.stopOnPostReleaseWriterRead
+                && reentrantLease.result() == Result.UNKNOWN && reentrantSlot.occupied()
+                && reentrant.removeCalls == 1,
+                "reentrant stop from terminal page/writer read released the slot");
+        reentrant.exactNine();
+    }
+
     public static void main(String[] args) {
         testPreboundDrawGate();
         testPortRejectsWrongDrawGate();
@@ -2287,6 +2506,8 @@ public final class TargetOwnedVisualLeaseCoreTest {
         testSlowPaintReadsAndQueuedStop();
         testFinalPaintProofAndDispatchFailure();
         testRootProcessLossAndRemoveFailures();
+        testPageWriterWitnessAdmission();
+        testPageWriterWitnessDrawAndRollback();
         System.out.println("TARGET_OWNED_VISUAL_LEASE_CORE_PASS checks=" + checks);
     }
 }

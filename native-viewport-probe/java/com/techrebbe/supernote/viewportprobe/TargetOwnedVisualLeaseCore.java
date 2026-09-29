@@ -37,6 +37,21 @@ public final class TargetOwnedVisualLeaseCore {
         // non-reentrant, and never reuse a value during a lease. Other Port
         // reads may reenter; the final revision read fences those effects.
         long evidenceMutationRevision();
+        // Independent native-authority witness for the one fixed source page
+        // and its existing writer. Advance this revision synchronously BEFORE
+        // either identity or writer enablement changes; never reuse a value
+        // during a lease. Mutations must be serialized with this main-Looper
+        // draw gate; otherwise this seam is unavailable. The revision read
+        // must be pure and non-reentrant.
+        // The witness read may reenter, so every decision fences it with the
+        // revision read. A Port without independently authenticated native
+        // sampling returns the defaults and cannot admit a lease. UI flags,
+        // presenter booleans and a method call are not remote writer-state
+        // proof. No stock-hardware writerEnabled signal is authenticated yet;
+        // the Android Port inherits these unavailable defaults. This does not
+        // grant pen access or prove writer silence.
+        default long pageWriterMutationRevision() { return -1; }
+        default PageWriterWitness pageWriterWitness() { return null; }
         void requireMainThread();
         long elapsedRealtimeMillis();
         // A completed child-paint pass, not an onDraw/pre-draw entry or a
@@ -80,6 +95,38 @@ public final class TargetOwnedVisualLeaseCore {
             this.begunRevision = begunRevision;
             this.completedElapsedRealtimeMillis = completedElapsedRealtimeMillis;
             this.snapshot = snapshot;
+        }
+    }
+
+    /**
+     * A typed observation, not a page/writer handle for the owned child. The
+     * Port must bind these exact, incarnation-specific identities to the same
+     * source page and native writer represented by its scene evidence; a
+     * mutable view/model holder or value-equal ID is insufficient. Unknown
+     * identity or enablement is represented by no witness, never a guess.
+     */
+    public static final class PageWriterWitness {
+        public final Object pageIdentity;
+        public final Object writerIdentity;
+        public final boolean writerEnabled;
+        public final long mutationRevision;
+
+        public PageWriterWitness(Object pageIdentity, Object writerIdentity,
+                boolean writerEnabled, long mutationRevision) {
+            if (pageIdentity == null || writerIdentity == null || mutationRevision < 0) {
+                throw new IllegalArgumentException("incomplete page/writer witness");
+            }
+            this.pageIdentity = pageIdentity;
+            this.writerIdentity = writerIdentity;
+            this.writerEnabled = writerEnabled;
+            this.mutationRevision = mutationRevision;
+        }
+
+        private boolean same(PageWriterWitness other) {
+            return other != null && pageIdentity == other.pageIdentity
+                    && writerIdentity == other.writerIdentity
+                    && writerEnabled == other.writerEnabled
+                    && mutationRevision == other.mutationRevision;
         }
     }
 
@@ -289,6 +336,7 @@ public final class TargetOwnedVisualLeaseCore {
     private Object owned;
     private String ownedEvidence;
     private Snapshot before;
+    private PageWriterWitness beforePageWriter;
     private long baselineEvidenceRevision = -1;
     private long postAddEvidenceRevision = -1;
     private long admissionEvidenceRevision = -1;
@@ -374,14 +422,19 @@ public final class TargetOwnedVisualLeaseCore {
                 return;
             }
             baselineEvidenceRevision = port.evidenceMutationRevision();
-            if (baselineEvidenceRevision < 0) {
+            long pageWriterRevision = port.pageWriterMutationRevision();
+            if (baselineEvidenceRevision < 0 || pageWriterRevision < 0) {
                 quarantine(Reason.DRIFT, null);
                 return;
             }
             root = port.root();
             before = port.snapshot();
+            beforePageWriter = port.pageWriterWitness();
             if (root == null || !before.validNine(root)
                     || paintSlot > before.effectiveDrawOrder.length
+                    || beforePageWriter == null
+                    || beforePageWriter.mutationRevision != pageWriterRevision
+                    || port.pageWriterMutationRevision() != pageWriterRevision
                     || port.evidenceMutationRevision() != baselineEvidenceRevision) {
                 quarantine(Reason.DRIFT, null);
                 return;
@@ -451,7 +504,8 @@ public final class TargetOwnedVisualLeaseCore {
                 return;
             }
             if (baselineEvidenceRevision == Long.MAX_VALUE
-                    || postAddEvidenceRevision != baselineEvidenceRevision + 1) {
+                    || postAddEvidenceRevision != baselineEvidenceRevision + 1
+                    || !pageWriterStillCurrent()) {
                 cleanup(Reason.DRIFT);
                 return;
             }
@@ -479,7 +533,8 @@ public final class TargetOwnedVisualLeaseCore {
                 quarantine(Reason.INSERTION_FAILURE, null);
                 return;
             }
-            if (port.evidenceMutationRevision() != postAddEvidenceRevision) {
+            if (!pageWriterStillCurrent()
+                    || port.evidenceMutationRevision() != postAddEvidenceRevision) {
                 cleanup(Reason.DRIFT);
                 return;
             }
@@ -492,7 +547,8 @@ public final class TargetOwnedVisualLeaseCore {
                 cleanup(Reason.DEADLINE);
                 return;
             }
-            if (port.evidenceMutationRevision() != postAddEvidenceRevision) {
+            if (!pageWriterStillCurrent()
+                    || port.evidenceMutationRevision() != postAddEvidenceRevision) {
                 cleanup(Reason.DRIFT);
                 return;
             }
@@ -509,6 +565,15 @@ public final class TargetOwnedVisualLeaseCore {
         return new Runnable() {
             @Override public void run() { requestCleanup(invalidation); }
         };
+    }
+
+    private boolean pageWriterStillCurrent() {
+        if (beforePageWriter == null) return false;
+        long revision = port.pageWriterMutationRevision();
+        if (revision != beforePageWriter.mutationRevision) return false;
+        PageWriterWitness current = port.pageWriterWitness();
+        return beforePageWriter.same(current)
+                && port.pageWriterMutationRevision() == revision;
     }
 
     private Reason preInsertionBlock() {
@@ -537,7 +602,8 @@ public final class TargetOwnedVisualLeaseCore {
                 || frame.completedElapsedRealtimeMillis > confirmedNow
                 || confirmedNow - frame.completedElapsedRealtimeMillis > maxPaintWaitMillis
                 || !before.sameNine(frame.snapshot)) return Reason.DRIFT;
-        if (port.evidenceMutationRevision() != evidenceAtStart) return Reason.DRIFT;
+        if (!pageWriterStillCurrent()
+                || port.evidenceMutationRevision() != evidenceAtStart) return Reason.DRIFT;
         if (pendingCleanupRequest != null) return pendingCleanupRequest;
         return null;
     }
@@ -602,7 +668,8 @@ public final class TargetOwnedVisualLeaseCore {
                 return;
             }
             if (paintWaitExpired(confirmedNow)) { cleanup(Reason.DRIFT); return; }
-            if (port.evidenceMutationRevision() != evidenceAtStart) {
+            if (!pageWriterStillCurrent()
+                    || port.evidenceMutationRevision() != evidenceAtStart) {
                 cleanup(Reason.DRIFT);
                 return;
             }
@@ -659,7 +726,7 @@ public final class TargetOwnedVisualLeaseCore {
                 return;
             }
             long confirmedNow = port.elapsedRealtimeMillis();
-            if (paintWaitExpired(confirmedNow)
+            if (paintWaitExpired(confirmedNow) || !pageWriterStillCurrent()
                     || port.evidenceMutationRevision() != evidenceAtStart) {
                 quarantine(reason, null);
                 return;
@@ -774,7 +841,10 @@ public final class TargetOwnedVisualLeaseCore {
                 }
                 if (lifecycleInvalidation == null && pendingCleanupRequest == null
                         && !dispatchFailed) {
-                    if (port.evidenceMutationRevision() == evidenceAtStart) return true;
+                    if (pageWriterStillCurrent()
+                            && lifecycleInvalidation == null && pendingCleanupRequest == null
+                            && !dispatchFailed
+                            && port.evidenceMutationRevision() == evidenceAtStart) return true;
                     requestCleanup(Reason.DRIFT);
                     return false;
                 }
@@ -841,6 +911,7 @@ public final class TargetOwnedVisualLeaseCore {
             }
             long evidenceAfterRemoval = port.evidenceMutationRevision();
             if (evidenceAfterRemoval < 0 || !liveOriginalNine()
+                    || !pageWriterStillCurrent()
                     || port.evidenceMutationRevision() != evidenceAfterRemoval) {
                 quarantine(requested, null);
                 return;
@@ -914,6 +985,10 @@ public final class TargetOwnedVisualLeaseCore {
                 quarantine(reason, null);
                 return;
             }
+            if (!pageWriterStillCurrent()) {
+                quarantine(reason, null);
+                return;
+            }
             if (!restorationPaintStillCurrent()) {
                 quarantine(reason, null);
                 return;
@@ -934,6 +1009,7 @@ public final class TargetOwnedVisualLeaseCore {
                 if (finalizationUnsafe()) return;
                 // Callback teardown may itself trigger a hierarchy transition.
                 if (verificationGapExceeded() || !liveOriginalNine()
+                        || !pageWriterStillCurrent()
                         || !restorationPaintStillCurrent()
                         || verificationGapExceeded()) {
                     quarantine(reason, null);
@@ -945,7 +1021,10 @@ public final class TargetOwnedVisualLeaseCore {
                     // invalidation without beginning another paint. Finish
                     // the commit witness with a fresh live-nine read.
                     if (verificationGapExceeded() || !restorationPaintStillCurrent()
-                            || !liveOriginalNine() || verificationGapExceeded()
+                            || !liveOriginalNine() || !pageWriterStillCurrent()
+                            || verificationGapExceeded()
+                            || port.pageWriterMutationRevision()
+                                    != beforePageWriter.mutationRevision
                             || port.evidenceMutationRevision()
                                     != restorationEvidenceRevision) {
                         quarantine(reason, null);

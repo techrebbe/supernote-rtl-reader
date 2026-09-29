@@ -30,7 +30,11 @@ behavior, or native Gum C quiescence. An injection restriction or access denial
 is a hard stop, not a reason to retry with broader privileges or another target.
 
 The host also pins the SHA-256 of the reviewed local C source, JS hook, and
-prebuilt Windows executable. Rebuilding with a different compiler or source
+prebuilt Windows executable, plus the Frida 17.9.11 Python sources, native
+extension, and eligible CPython 3.12 bytecode caches. Rebuilding with a
+different compiler or source
 requires a new artifact review and an explicit pin update; matching hashes
 identify this local test artifact but do not independently prove a portable,
-reproducible build.
+reproducible build. Pre/post hashes do not bind the exact executable bytes
+loaded by Windows against a malicious concurrent file replacement. This probe
+is diagnostic only and must not authorize a stock-reader hook or pen input.

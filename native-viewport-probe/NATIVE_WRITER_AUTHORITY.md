@@ -81,6 +81,22 @@ pre-write fence, but it was not an exhaustive proof that no such path exists.
 The result remains **UNKNOWN / NO-GO**, with no Nomad trial authorized by this
 finding.
 
+### Shared-gate cross-check in the pinned binary
+
+A separate bounded instruction-level pass found different service mutexes for
+Binder transactions 0 (`+0x28`) and 1 (`+0x50`). `setAppInfo` at RVA `0xb5f00`
+writes page/layer at `+0x1098/+0x109c` without its own lock. The region setter
+at RVA `0xb5a70` uses a native `+0x1048` lock for the ordinary vector at
+`+0x10a0` and the writable sentinel flag at `+0x10d1`; the derived write-area
+vector at `+0x10b8` is written under a separate `+0x10fc` lock. The pen worker
+reads/copies these fields around RVAs `0xaf068`, `0xaf190`, and `0xafd70`
+without the region-setter lock. At pen-up, `penUpPushTrail` (`0xba2ac`) copies
+the write-area vector and page/layer around `0xba318`–`0xba34c` without a
+surrounding common mutex. Its later use of `+0x1048` protects a different
+metadata section. These observations rule out treating the **observed** setter
+entry points or Binder replies as one atomic writer witness; they do not prove
+there is no unexamined endpoint or viable replacement boundary.
+
 ### Disposable offline boundary probes
 
 `writer-witness-fake/` models the proposed pre-write generation, process/service

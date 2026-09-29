@@ -1,10 +1,12 @@
-# Synthetic layout method-entry observer (offline-tested candidate)
+# Synthetic layout method-entry observer (disposable emulator only)
 
 This directory is separate from the stock-reader hierarchy observer. It is
 for the disposable API-30 emulator app only: package
 `com.techrebbe.supernote.layoutfencetrial`, one fresh process per variant, no
-document, PDF, pen, Nomad, or stock process. The bounded emulator attempts and
-their UNKNOWN outcomes are recorded in `EMULATOR_EVIDENCE.md`.
+document, PDF, pen, Nomad, or stock process. `EMULATOR_EVIDENCE.md` records
+both historical UNKNOWN attempts and the exact final-build six-command
+`PASS_SYNTHETIC_EDGE_ONLY` matrix. That result is limited to this synthetic
+host; it does not establish stock-reader or native-child authority.
 
 `layout_entry_observer.js` temporarily replaces
 `android.view.ViewGroup.layout(int,int,int,int)` process-wide. It selects one
@@ -41,6 +43,14 @@ refresh, a newly completed exact paint, one app command (5-second active trial
 deadline), independent proof-cut comparison, quiescence barrier, hook revert,
 `after-disarm` sentinel with no new callback, script unload/detach,
 `after-unload` sentinel, exact post-unload evidence, then provider finish.
+The app's version-2 paint-order proof may retain one non-voting redraw between
+the first restored paint and its explicit second-paint request for the four
+commands with a separate restore phase: `parent-plus-one`, `parent-minus-one`,
+`direct-root-layout`, and `direct-root-offset`. `unchanged-bounds` and
+`away-back-aba` have no separate restore frame and cannot use this allowance.
+The host validates that extra cut, the later request timestamp/revision floor,
+the distinct requested frame, and final stability;
+it never treats an unsolicited frame itself as rollback verification.
 Only after a fully verified finish does the runner use exact-serial
 `am force-stop` on the synthetic package to prepare for a fresh next variant.
 Any uncertain post-prearm path uses the app's exact-token abort and/or its
@@ -64,6 +74,12 @@ present, contains only fixed phase/reason codes. A previously authenticated
 server process that has already exited is not killed; staged-file removal
 still requires no listener or process using it, its exact hash, and verified
 post-removal absence.
+On `APP_TRIAL_TIMEOUT`, `trialTimeoutEvidence` separately reports only the
+fixed, token-free command-response, first trial-poll, and latest trial-poll
+summaries already returned by the app. It includes phase and paint counters,
+the app deadline, and presence flags for proof milestones, but performs no
+additional device query after the host poll cutoff. It is diagnostic only:
+the result stays UNKNOWN, and neither the five-second gate nor cleanup changes.
 
 Frida 17's bare Python script loader does not provide `Java` automatically.
 `build_layout_entry_bundle.py` uses the project's installed, authenticated
@@ -74,8 +90,8 @@ The raw observer source alone is not an executable Frida 17 bundle; the runner
 requires an explicit bundle path and matching SHA-256.
 
 The executable pins the current synthetic APK SHA-256
-`1b23a3be88a21193160329fffa4039735b685fbb5e01e594888ab12f5ca5d610`,
-signer `4d4f0f18e10114c7a801bcdb87dd4fd2d75ebc24ca0ad5bcb6967009e62ead6a`,
+`e04e8bfbd42c058bdf59d8ccadad39e35b72e03a019f3f7aea81e594906b9b87`,
+signer `62c9966a8b614096cdc4949a25e93b394b8b03830ef221be8257677c69cf7be2`,
 server `9dcb1c12fa528070f2f6590b245e2c66cb1f931e0975bc911d9ff476394879d7`
 (110837320 bytes), and bundle digest/size above. CLI hashes cannot redefine
 these authorities.

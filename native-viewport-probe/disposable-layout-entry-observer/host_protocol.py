@@ -187,8 +187,13 @@ def run_mockable(app: App, transport: Transport, pins: Pins,
     On any uncertain attached path, it stops only the pinned disposable process.
     """
     need(type(variant) is str and variant in VARIANTS, "VARIANT_INVALID")
-    admission = app.preflight()
-    admission.check(pins)
+    try:
+        admission = app.preflight()
+        admission.check(pins)
+    except BaseException as error:
+        if type(error) is TrialError:
+            raise
+        raise TrialError("TRIAL_UNCERTAIN_PREFLIGHT") from None
     session: Session | None = None
     prearm_attempted = False
     attached = False
@@ -196,47 +201,63 @@ def run_mockable(app: App, transport: Transport, pins: Pins,
     detach_attempted = False
     failure: TrialError | None = None
     checked: dict[str, Any] | None = None
+    phase_code = "TRIAL_UNCERTAIN_PREARM"
     try:
         prearm_attempted = True
         app.prearm(admission)
+        phase_code = "TRIAL_UNCERTAIN_ATTACH"
         session = transport.attach(admission.pid)
         attached = True
+        phase_code = "TRIAL_UNCERTAIN_ARM"
         arm = session.hook.arm(admission.observer_config())
         need(type(arm) is dict and arm == {"ok": True, "phase": "ARMED",
              "hookInstalled": True, "pid": admission.pid,
              "rootToken": admission.root_token}, "ARM_UNCERTAIN")
+        phase_code = "TRIAL_UNCERTAIN_REFRESH"
         app.freshen_baseline(admission)
+        phase_code = "TRIAL_UNCERTAIN_EXECUTE"
         app.execute_and_restore(variant, admission)
         # This must be a completed provider round-trip on the app main Looper;
         # a hook-produced frame alone is not a quiescence barrier.
+        phase_code = "TRIAL_UNCERTAIN_BARRIER"
         app.main_barrier(admission)
+        phase_code = "TRIAL_UNCERTAIN_APP_EVIDENCE"
         expected = app.expected_entries(variant, admission)
         need(type(expected) is tuple and len(expected) <= MAX_EVENTS and
              all(type(entry) is ExpectedEntry for entry in expected),
              "APP_EVIDENCE_INVALID")
+        phase_code = "TRIAL_UNCERTAIN_ARMED_SNAPSHOT"
         checked = checked_snapshot(session.hook.snapshot(), expected, phase="ARMED")
+        phase_code = "TRIAL_UNCERTAIN_DISARM"
         disarm = session.hook.disarm()
         need(type(disarm) is dict and disarm == {"ok": True, "phase": "DISARMED",
              "code": "DISARMED", "cleanupCertain": True,
              "callbacks": checked["callbacks"],
              "forwardAttempts": checked["forwardAttempts"]},
              "DISARM_UNCERTAIN")
+        phase_code = "TRIAL_UNCERTAIN_REVERT_SENTINEL"
         app.sentinel_after_revert(admission)
+        phase_code = "TRIAL_UNCERTAIN_DISARMED_SNAPSHOT"
         after_sentinel = checked_snapshot(session.hook.snapshot(), expected,
                                           phase="DISARMED")
         need(after_sentinel["callbacks"] == checked["callbacks"] and
              after_sentinel["forwardAttempts"] == checked["forwardAttempts"] and
              after_sentinel["events"] == checked["events"],
              "REVERT_SENTINEL_FAILED")
+        phase_code = "TRIAL_UNCERTAIN_UNLOAD"
         unload_attempted = True
         session.hook.unload()
+        phase_code = "TRIAL_UNCERTAIN_DETACH"
         detach_attempted = True
         session.detach()
+        phase_code = "TRIAL_UNCERTAIN_UNLOAD_SENTINEL"
         app.sentinel_after_unload(admission)
+        phase_code = "TRIAL_UNCERTAIN_POST_UNLOAD"
         app.post_unload_verify(admission)
+        phase_code = "TRIAL_UNCERTAIN_FINISH"
         app.finish_lease(admission)
     except BaseException as error:
-        failure = error if type(error) is TrialError else TrialError("TRIAL_UNCERTAIN")
+        failure = error if type(error) is TrialError else TrialError(phase_code)
     if failure is not None:
         stop_ok = False
         try:

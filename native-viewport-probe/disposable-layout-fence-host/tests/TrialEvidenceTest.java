@@ -3,6 +3,10 @@ package com.techrebbe.supernote.layoutfencetrial;
 /** Deterministic Java-8 checks; no Android runtime, Frida, ADB or device. */
 public final class TrialEvidenceTest {
     private static int checks;
+    private static final TrialEvidence.Command[] RESTORING_COMMANDS = {
+        TrialEvidence.Command.PARENT_PLUS, TrialEvidence.Command.PARENT_MINUS,
+        TrialEvidence.Command.DIRECT_LAYOUT, TrialEvidence.Command.DIRECT_OFFSET
+    };
 
     private static void check(boolean condition, String message) {
         checks++;
@@ -149,25 +153,321 @@ public final class TrialEvidenceTest {
         return proof;
     }
 
-    private static void unrequestedRestoredPaint() {
-        Fixture f = new Fixture();
-        TrialEvidence.Bounds target = f.base.withRightDelta(1);
-        TrialEvidence.Cut firstFrame = f.firstFrame(target, 11, 21, 4);
-        TrialEvidence.Trial proof = waitingForRestore(f, firstFrame);
-        check(proof.onParentPreCall(firstFrame, f.base, 12, 1030),
+    private static TrialEvidence.Trial waitingForSecondPaintRequest(Fixture f) {
+        return waitingForSecondPaintRequest(f, TrialEvidence.Command.PARENT_PLUS);
+    }
+
+    private static TrialEvidence.Trial waitingForSecondPaintRequest(Fixture f,
+            TrialEvidence.Command command) {
+        boolean direct = command == TrialEvidence.Command.DIRECT_LAYOUT
+                || command == TrialEvidence.Command.DIRECT_OFFSET;
+        TrialEvidence.Bounds target = command == TrialEvidence.Command.PARENT_MINUS
+                ? f.base.withRightDelta(-1)
+                : command == TrialEvidence.Command.DIRECT_OFFSET
+                    ? f.base.shiftedRight(1) : f.base.withRightDelta(1);
+        long firstRevision = direct ? 10 : 11;
+        long firstLayout = command == TrialEvidence.Command.DIRECT_OFFSET ? 3 : 4;
+        TrialEvidence.Cut baseline = f.baseline();
+        TrialEvidence.Trial proof = TrialEvidence.Trial.begin(command, baseline, 1005);
+        TrialEvidence.Cut after = f.firstAfter(target, firstRevision, 21, firstLayout);
+        if (direct) proof.onDirectAfter(baseline, after, 1010);
+        else {
+            check(proof.onParentPreCall(baseline, target, 11, 1010),
+                    "restoring command first pre-call");
+            proof.onParentLayoutAfter(after, 1011);
+        }
+        check(!proof.claimUnchangedFirstPaintRequest(after),
+                command.wire + " cannot claim an unchanged-control first paint");
+        TrialEvidence.Cut firstFrame = f.firstFrame(target, firstRevision, 21,
+                firstLayout);
+        proof.onCompletedPaint(firstFrame, 1021);
+        check(proof.state() == TrialEvidence.State.WAIT_RESTORE_CALL,
+                "restoring command has a distinct restore phase");
+        long restoreRevision = firstRevision + 1;
+        check(proof.onParentPreCall(firstFrame, f.base, restoreRevision, 1030),
                 "restore entry remains the first changed frame");
-        proof.onParentLayoutAfter(f.restoreAfter(12, 22, 5, firstFrame), 1031);
-        TrialEvidence.Cut restored = f.restoredFrame(12, 22, 5);
-        proof.onCompletedPaint(restored, 1041);
+        TrialEvidence.Cut restoreAfter = f.restoreAfter(restoreRevision, 22,
+                firstLayout + 1, firstFrame);
+        proof.onParentLayoutAfter(restoreAfter, 1031);
+        check(proof.shouldRequestRestorePaint(restoreAfter)
+                        == (command == TrialEvidence.Command.DIRECT_OFFSET),
+                command.wire + " post-restore redraw remains command-specific");
+        check(!proof.claimUnchangedFirstPaintRequest(restoreAfter),
+                command.wire + " restore cannot claim an unchanged-control first paint");
+        proof.onCompletedPaint(f.restoredFrame(restoreRevision, 22,
+                firstLayout + 1), 1041);
         check(proof.state() == TrialEvidence.State.WAIT_SECOND_PAINT_REQUEST,
                 "first restored paint waits for an explicit second request");
-        TrialEvidence.Cut unsolicited = f.cutAt(f.base, 12, 22, 5,
+        return proof;
+    }
+
+    private static TrialEvidence.Cut interveningFrame(Fixture f,
+            TrialEvidence.Trial proof) {
+        TrialEvidence.Cut restored = proof.restoredFrame();
+        long revision = restored.startedPaintRevision + 1;
+        return f.cutAt(f.base, restored.parentPreCallRevision,
+                restored.observedWriteOrdinal, restored.rootLayoutCalls,
+                revision, restored.completedPaintElapsedMs + 5,
+                restored.parentPreCallRevision, restored.observedWriteOrdinal,
+                revision, restored.completedPaintElapsedMs + 6);
+    }
+
+    private static void oneInterveningRestoredPaint() {
+        Fixture f = new Fixture();
+        TrialEvidence.Trial proof = waitingForSecondPaintRequest(f);
+        TrialEvidence.Cut firstRestored = proof.restoredFrame();
+        TrialEvidence.Cut intervening = f.cutAt(f.base, 12, 22, 5,
                 8, 1045, 12, 22, 8, 1046);
-        proof.onCompletedPaint(unsolicited, 1047);
-        check(proof.state() == TrialEvidence.State.UNKNOWN
-                        && "UNREQUESTED_SECOND_PAINT".equals(proof.reason())
+        proof.onCompletedPaint(intervening, 1047);
+        check(proof.state() == TrialEvidence.State.WAIT_SECOND_PAINT_REQUEST
+                        && proof.interveningRestoredFrame() == intervening
+                        && proof.restoredFrame() == firstRestored
+                        && proof.secondPaintAnchor() == intervening
                         && !proof.rollbackVerified(),
-                "unsolicited restored paint cannot satisfy the two-paint proof");
+                "one exact intervening frame remains non-voting");
+    }
+
+    private static void interveningThenRequestedPaint() {
+        Fixture f = new Fixture();
+        TrialEvidence.Trial proof = waitingForSecondPaintRequest(f);
+        TrialEvidence.Cut firstRestored = proof.restoredFrame();
+        TrialEvidence.Cut intervening = f.cutAt(f.base, 12, 22, 5,
+                8, 1045, 12, 22, 8, 1046);
+        proof.onCompletedPaint(intervening, 1047);
+        check(proof.state() == TrialEvidence.State.WAIT_SECOND_PAINT_REQUEST
+                        && proof.restoredFrame() == firstRestored,
+                "first restored frame remains immutable");
+        check(proof.requestSecondPaint(intervening, intervening, 1075),
+                "later explicit request uses intervening frame as quiet anchor");
+        check(proof.secondPaintRequestElapsedMs() == 1075
+                        && proof.secondPaintStartRevisionFloor() == 8,
+                "request time and paint floor retained for independent host proof");
+        TrialEvidence.Cut second = f.cutAt(f.base, 12, 22, 5,
+                9, 1076, 12, 22, 9, 1077);
+        proof.onCompletedPaint(second, 1078);
+        check(proof.state() == TrialEvidence.State.WAIT_FINAL_SAMPLE,
+                "intervening frame did not substitute for requested frame");
+        proof.onSecondSample(second, second, 1079);
+        check(proof.state() == TrialEvidence.State.PASS && proof.rollbackVerified(),
+                "fresh requested frame plus stable final sample verifies rollback");
+        check(!proof.currentlyValid(intervening, intervening, 1080, 30000),
+                "superseded intervening frame cannot serve as live PASS");
+    }
+
+    private static void oneExtraAcrossRestoringCommands() {
+        for (TrialEvidence.Command command : RESTORING_COMMANDS) {
+            Fixture f = new Fixture();
+            TrialEvidence.Trial proof = waitingForSecondPaintRequest(f, command);
+            TrialEvidence.Cut restored = proof.restoredFrame();
+            TrialEvidence.Cut extra = interveningFrame(f, proof);
+            proof.onCompletedPaint(extra, 1047);
+            check(proof.state() == TrialEvidence.State.WAIT_SECOND_PAINT_REQUEST
+                            && proof.restoredFrame() == restored
+                            && proof.interveningRestoredFrame() == extra
+                            && proof.secondPaintAnchor() == extra
+                            && !proof.rollbackVerified(),
+                    command.wire + " extra frame is non-voting and leaves restore immutable");
+            check(proof.requestSecondPaint(extra, extra, 1075),
+                    command.wire + " requires a later explicit paint request");
+            check(proof.secondPaintStartRevisionFloor() == extra.startedPaintRevision,
+                    command.wire + " request floor is the extra frame");
+            TrialEvidence.Cut second = f.cutAt(f.base,
+                    extra.parentPreCallRevision, extra.observedWriteOrdinal,
+                    extra.rootLayoutCalls, extra.startedPaintRevision + 1, 1076,
+                    extra.parentPreCallRevision, extra.observedWriteOrdinal,
+                    extra.startedPaintRevision + 1, 1077);
+            proof.onCompletedPaint(second, 1078);
+            check(proof.state() == TrialEvidence.State.WAIT_FINAL_SAMPLE,
+                    command.wire + " extra cannot replace requested paint");
+            proof.onSecondSample(second, second, 1079);
+            check(proof.state() == TrialEvidence.State.PASS
+                            && proof.rollbackVerified()
+                            && !proof.completeMutationCoverage(),
+                    command.wire + " distinct requested paint verifies scoped rollback");
+        }
+    }
+
+    private static void extraFrameDriftAcrossRestoringCommands() {
+        for (TrialEvidence.Command command : RESTORING_COMMANDS) {
+            for (int mutation = 0; mutation < 7; mutation++) {
+                Fixture f = new Fixture();
+                TrialEvidence.Trial proof = waitingForSecondPaintRequest(f, command);
+                TrialEvidence.Cut restored = proof.restoredFrame();
+                TrialEvidence.Cut extra = interveningFrame(f, proof);
+                TrialEvidence.Cut changed;
+                if (mutation == 0) {
+                    changed = f.cutAt(f.base, extra.parentPreCallRevision,
+                            extra.observedWriteOrdinal + 1, extra.rootLayoutCalls,
+                            extra.startedPaintRevision, 1045,
+                            extra.parentPreCallRevision, extra.observedWriteOrdinal + 1,
+                            extra.completedPaintRevision, 1046);
+                } else if (mutation == 1) {
+                    changed = f.cutAt(f.base.withRightDelta(1),
+                            extra.parentPreCallRevision, extra.observedWriteOrdinal,
+                            extra.rootLayoutCalls, extra.startedPaintRevision, 1045,
+                            extra.parentPreCallRevision, extra.observedWriteOrdinal,
+                            extra.completedPaintRevision, 1046);
+                } else if (mutation == 2) {
+                    changed = f.cutAt(f.base, extra.parentPreCallRevision,
+                            extra.observedWriteOrdinal, extra.rootLayoutCalls,
+                            restored.startedPaintRevision + 2, 1045,
+                            extra.parentPreCallRevision, extra.observedWriteOrdinal,
+                            restored.startedPaintRevision + 2, 1046);
+                } else if (mutation == 3) {
+                    changed = f.cutAt(f.base, extra.parentPreCallRevision,
+                            extra.observedWriteOrdinal, extra.rootLayoutCalls,
+                            extra.startedPaintRevision,
+                            restored.completedPaintElapsedMs - 1,
+                            extra.parentPreCallRevision, extra.observedWriteOrdinal,
+                            extra.completedPaintRevision, 1046);
+                } else if (mutation == 4) {
+                    Fixture other = new Fixture();
+                    changed = other.cutAt(other.base, extra.parentPreCallRevision,
+                            extra.observedWriteOrdinal, extra.rootLayoutCalls,
+                            extra.startedPaintRevision, 1045,
+                            extra.parentPreCallRevision, extra.observedWriteOrdinal,
+                            extra.completedPaintRevision, 1046);
+                } else if (mutation == 5) {
+                    Object[] wrongOrder = f.children.clone();
+                    wrongOrder[0] = wrongOrder[1];
+                    changed = f.cutAt(f.base, extra.parentPreCallRevision,
+                            extra.observedWriteOrdinal, extra.rootLayoutCalls,
+                            extra.startedPaintRevision, 1045,
+                            extra.parentPreCallRevision, extra.observedWriteOrdinal,
+                            extra.completedPaintRevision, 1046, wrongOrder, "scene");
+                } else {
+                    changed = f.cutAt(f.base, extra.parentPreCallRevision,
+                            extra.observedWriteOrdinal, extra.rootLayoutCalls,
+                            extra.startedPaintRevision, 1045,
+                            extra.parentPreCallRevision, extra.observedWriteOrdinal,
+                            extra.completedPaintRevision, 2041);
+                }
+                proof.onCompletedPaint(changed, mutation == 6 ? 2042 : 1047);
+                check(proof.state() == TrialEvidence.State.UNKNOWN
+                                && "UNREQUESTED_SECOND_PAINT".equals(proof.reason()),
+                        command.wire + " extra mutation " + mutation + " rejected");
+            }
+            Fixture f = new Fixture();
+            TrialEvidence.Trial duplicate = waitingForSecondPaintRequest(f, command);
+            duplicate.onCompletedPaint(interveningFrame(f, duplicate), 1047);
+            TrialEvidence.Cut anchor = duplicate.interveningRestoredFrame();
+            duplicate.onCompletedPaint(f.cutAt(f.base,
+                    anchor.parentPreCallRevision, anchor.observedWriteOrdinal,
+                    anchor.rootLayoutCalls, anchor.startedPaintRevision + 1, 1048,
+                    anchor.parentPreCallRevision, anchor.observedWriteOrdinal,
+                    anchor.startedPaintRevision + 1, 1049), 1050);
+            check(duplicate.state() == TrialEvidence.State.UNKNOWN
+                            && "UNREQUESTED_SECOND_PAINT".equals(duplicate.reason()),
+                    command.wire + " second unsolicited frame rejected");
+
+            Fixture earlyFixture = new Fixture();
+            TrialEvidence.Trial early = waitingForSecondPaintRequest(
+                    earlyFixture, command);
+            TrialEvidence.Cut earlyExtra = interveningFrame(earlyFixture, early);
+            early.onCompletedPaint(earlyExtra, 1047);
+            check(!early.requestSecondPaint(earlyExtra, earlyExtra, 1070)
+                            && early.state() == TrialEvidence.State.UNKNOWN,
+                    command.wire + " request before the extra-frame quiet gap rejected");
+
+            Fixture staleFixture = new Fixture();
+            TrialEvidence.Trial stale = waitingForSecondPaintRequest(
+                    staleFixture, command);
+            TrialEvidence.Cut staleExtra = interveningFrame(staleFixture, stale);
+            stale.onCompletedPaint(staleExtra, 1047);
+            check(stale.requestSecondPaint(staleExtra, staleExtra, 1075),
+                    command.wire + " setup later request");
+            stale.onCompletedPaint(staleExtra, 1078);
+            check(stale.state() == TrialEvidence.State.UNKNOWN
+                            && "SECOND_COMPLETED_PAINT_MISMATCH".equals(stale.reason()),
+                    command.wire + " extra frame cannot impersonate requested paint");
+        }
+    }
+
+    private static void noRestoreCommandsRejectExtra() {
+        for (TrialEvidence.Command command : new TrialEvidence.Command[] {
+                TrialEvidence.Command.UNCHANGED, TrialEvidence.Command.ABA}) {
+            Fixture f = new Fixture();
+            TrialEvidence.Cut baseline = f.baseline();
+            TrialEvidence.Trial proof = TrialEvidence.Trial.begin(command, baseline, 1005);
+            if (command == TrialEvidence.Command.UNCHANGED) {
+                check(proof.onParentPreCall(baseline, f.base, 11, 1010),
+                        "unchanged setup pre-call");
+                proof.onParentLayoutAfter(f.firstAfter(f.base, 11, 21, 3), 1011);
+                proof.onCompletedPaint(f.firstFrame(f.base, 11, 21, 3), 1021);
+            } else {
+                TrialEvidence.Bounds away = f.base.withRightDelta(1);
+                check(proof.onParentPreCall(baseline, away, 11, 1010),
+                        "ABA setup away pre-call");
+                TrialEvidence.Cut awayAfter = f.firstAfter(away, 11, 21, 4);
+                proof.onParentLayoutAfter(awayAfter, 1011);
+                check(proof.onParentPreCall(awayAfter, f.base, 12, 1012),
+                        "ABA setup return pre-call");
+                proof.onParentLayoutAfter(f.firstAfter(f.base, 12, 22, 5), 1013);
+                proof.onCompletedPaint(f.cut(f.base, 12, 22, 5,
+                        6, 12, 22, 6, 1020), 1021);
+            }
+            TrialEvidence.Cut first = proof.restoredFrame();
+            check(proof.state() == TrialEvidence.State.WAIT_SECOND_PAINT_REQUEST
+                            && proof.restoreAfter() == null
+                            && proof.firstFrame() == first,
+                    command.wire + " has no separate restored-frame phase");
+            proof.onCompletedPaint(f.cutAt(f.base,
+                    first.parentPreCallRevision, first.observedWriteOrdinal,
+                    first.rootLayoutCalls, first.startedPaintRevision + 1, 1045,
+                    first.parentPreCallRevision, first.observedWriteOrdinal,
+                    first.startedPaintRevision + 1, 1046), 1047);
+            check(proof.state() == TrialEvidence.State.UNKNOWN
+                            && "UNREQUESTED_SECOND_PAINT".equals(proof.reason()),
+                    command.wire + " unsolicited frame remains rejected");
+        }
+    }
+
+    private static void rejectedInterveningRestoredPaints() {
+        Fixture f = new Fixture();
+        TrialEvidence.Trial duplicate = waitingForSecondPaintRequest(f);
+        TrialEvidence.Cut first = f.cutAt(f.base, 12, 22, 5,
+                8, 1045, 12, 22, 8, 1046);
+        duplicate.onCompletedPaint(first, 1047);
+        duplicate.onCompletedPaint(f.cutAt(f.base, 12, 22, 5,
+                9, 1048, 12, 22, 9, 1049), 1050);
+        check(duplicate.state() == TrialEvidence.State.UNKNOWN
+                        && "UNREQUESTED_SECOND_PAINT".equals(duplicate.reason()),
+                "second intervening frame is never silently accepted");
+
+        TrialEvidence.Trial altered = waitingForSecondPaintRequest(new Fixture());
+        Fixture alteredFixture = new Fixture();
+        // This different fixture has different child identities despite matching numbers.
+        altered.onCompletedPaint(alteredFixture.cutAt(alteredFixture.base, 12, 22, 5,
+                8, 1045, 12, 22, 8, 1046), 1047);
+        check(altered.state() == TrialEvidence.State.UNKNOWN,
+                "different root and children rejected");
+
+        Fixture changed = new Fixture();
+        TrialEvidence.Trial revisionDrift = waitingForSecondPaintRequest(changed);
+        revisionDrift.onCompletedPaint(changed.cutAt(changed.base, 12, 23, 5,
+                8, 1045, 12, 23, 8, 1046), 1047);
+        check(revisionDrift.state() == TrialEvidence.State.UNKNOWN,
+                "extra write ordinal rejected");
+
+        Fixture wrongOrder = new Fixture();
+        TrialEvidence.Trial orderDrift = waitingForSecondPaintRequest(wrongOrder);
+        Object[] painted = wrongOrder.children.clone();
+        painted[0] = painted[1];
+        orderDrift.onCompletedPaint(wrongOrder.cutAt(wrongOrder.base,
+                12, 22, 5, 8, 1045, 12, 22, 8, 1046,
+                painted, "scene"), 1047);
+        check(orderDrift.state() == TrialEvidence.State.UNKNOWN,
+                "wrong painted order rejected");
+
+        Fixture shortGap = new Fixture();
+        TrialEvidence.Trial early = waitingForSecondPaintRequest(shortGap);
+        TrialEvidence.Cut quiet = shortGap.cutAt(shortGap.base, 12, 22, 5,
+                8, 1045, 12, 22, 8, 1046);
+        early.onCompletedPaint(quiet, 1047);
+        check(!early.requestSecondPaint(quiet, quiet, 1070)
+                        && early.state() == TrialEvidence.State.UNKNOWN,
+                "request less than 25 ms after extra frame remains UNKNOWN");
+
     }
 
     private static void restoreEntryDiagnostic() {
@@ -285,7 +585,10 @@ public final class TrialEvidenceTest {
         TrialEvidence.Trial proof = TrialEvidence.Trial.begin(
                 TrialEvidence.Command.UNCHANGED, baseline, 1005);
         check(proof.onParentPreCall(baseline, f.base, 11, 1010), "noop pre-call");
-        proof.onParentLayoutAfter(f.firstAfter(f.base, 11, 21, 4), 1011);
+        TrialEvidence.Cut after = f.firstAfter(f.base, 11, 21, 4);
+        proof.onParentLayoutAfter(after, 1011);
+        check(!proof.shouldRequestRestorePaint(after),
+                "unchanged control does not request a restore redraw");
         TrialEvidence.Cut frame = f.firstFrame(f.base, 11, 21, 4);
         proof.onCompletedPaint(frame, 1021);
         check(proof.state() == TrialEvidence.State.WAIT_SECOND_PAINT_REQUEST,
@@ -298,6 +601,48 @@ public final class TrialEvidenceTest {
         check(proof.state() == TrialEvidence.State.PASS, "noop control pass");
         check(proof.reason().equals("PARENT_PATH_RESTORED"), "scoped result label");
         check(proof.abaAway() == null, "unchanged JSON ABA cut is null");
+    }
+
+    private static void unchangedFirstPaintGate() {
+        Fixture f = new Fixture();
+        TrialEvidence.Cut baseline = f.baseline();
+        TrialEvidence.Trial proof = TrialEvidence.Trial.begin(
+                TrialEvidence.Command.UNCHANGED, baseline, 1005);
+        check(!proof.claimUnchangedFirstPaintRequest(baseline),
+                "unchanged control cannot request paint before a parent return");
+        check(proof.onParentPreCall(baseline, f.base, 11, 1010),
+                "unchanged control pre-call admitted");
+        TrialEvidence.Cut after = f.firstAfter(f.base, 11, 21, 3);
+        check(!proof.claimUnchangedFirstPaintRequest(after),
+                "pending unchanged parent call cannot request paint");
+        proof.onParentLayoutAfter(after, 1011);
+        check(proof.state() == TrialEvidence.State.WAIT_FIRST_PAINT
+                        && proof.firstAfter() == after
+                        && proof.firstFrame() == null,
+                "same-bounds parent return is verified but still awaits paint");
+        check(!proof.claimUnchangedFirstPaintRequest(f.firstAfter(f.base, 11, 21, 3)),
+                "lookalike parent-return cut cannot request paint");
+        check(proof.claimUnchangedFirstPaintRequest(after),
+                "exact verified unchanged return requests first paint");
+        check(!proof.claimUnchangedFirstPaintRequest(after),
+                "unchanged first-paint request can be claimed only once");
+        proof.onCompletedPaint(f.firstFrame(f.base, 11, 21, 3), 1021);
+        check(!proof.claimUnchangedFirstPaintRequest(after),
+                "completed first paint cannot request another first paint");
+
+        Fixture rejectedFixture = new Fixture();
+        TrialEvidence.Cut rejectedBaseline = rejectedFixture.baseline();
+        TrialEvidence.Trial rejected = TrialEvidence.Trial.begin(
+                TrialEvidence.Command.UNCHANGED, rejectedBaseline, 1005);
+        check(rejected.onParentPreCall(rejectedBaseline, rejectedFixture.base, 11, 1010),
+                "rejected unchanged fixture pre-call admitted");
+        TrialEvidence.Cut wrongGeometry = rejectedFixture.firstAfter(
+                rejectedFixture.base.withRightDelta(1), 11, 21, 4);
+        rejected.onParentLayoutAfter(wrongGeometry, 1011);
+        check(rejected.state() == TrialEvidence.State.UNKNOWN
+                        && rejected.firstAfter() == null
+                        && !rejected.claimUnchangedFirstPaintRequest(wrongGeometry),
+                "rejected unchanged geometry must never request paint");
     }
 
     private static void directBypass(TrialEvidence.Command command) {
@@ -334,6 +679,55 @@ public final class TrialEvidenceTest {
         check(proof.abaAway() == null, "direct JSON ABA cut is null");
     }
 
+    private static TrialEvidence.Trial offsetWaitingForRestore(Fixture f) {
+        TrialEvidence.Cut baseline = f.baseline();
+        TrialEvidence.Trial proof = TrialEvidence.Trial.begin(
+                TrialEvidence.Command.DIRECT_OFFSET, baseline, 1005);
+        TrialEvidence.Bounds shifted = f.base.shiftedRight(1);
+        TrialEvidence.Cut after = f.firstAfter(shifted, 10, 21, 3);
+        proof.onDirectAfter(baseline, after, 1010);
+        check(!proof.shouldRequestRestorePaint(after),
+                "direct offset write is not a verified restore");
+        TrialEvidence.Cut firstFrame = f.firstFrame(shifted, 10, 21, 3);
+        proof.onCompletedPaint(firstFrame, 1021);
+        check(proof.state() == TrialEvidence.State.WAIT_RESTORE_CALL
+                        && !proof.shouldRequestRestorePaint(firstFrame),
+                "changed paint alone does not request the restore redraw");
+        check(proof.onParentPreCall(firstFrame, f.base, 11, 1030),
+                "direct offset restore pre-call admitted");
+        return proof;
+    }
+
+    private static void directOffsetRestorePaintGate() {
+        Fixture f = new Fixture();
+        TrialEvidence.Trial proof = offsetWaitingForRestore(f);
+        TrialEvidence.Cut restored = f.restoreAfter(11, 22, 4, proof.firstFrame());
+        check(!proof.shouldRequestRestorePaint(restored),
+                "pending parent call has not verified restore geometry");
+        proof.onParentLayoutAfter(restored, 1031);
+        check(proof.state() == TrialEvidence.State.WAIT_RESTORE_PAINT
+                        && proof.restoreAfter() == restored
+                        && proof.shouldRequestRestorePaint(restored),
+                "exact verified direct-offset parent return requests a redraw");
+        check(!proof.shouldRequestRestorePaint(f.restoreAfter(11, 22, 4,
+                        proof.firstFrame())),
+                "a lookalike cut cannot authorize the redraw");
+        proof.onCompletedPaint(f.restoredFrame(11, 22, 4), 1041);
+        check(!proof.shouldRequestRestorePaint(restored),
+                "completed restored paint closes the one-time request stage");
+
+        Fixture rejectedFixture = new Fixture();
+        TrialEvidence.Trial rejected = offsetWaitingForRestore(rejectedFixture);
+        TrialEvidence.Cut wrongGeometry = rejectedFixture.cut(
+                rejectedFixture.base.shiftedRight(1), 11, 22, 4,
+                6, 10, 21, 6, 1020);
+        rejected.onParentLayoutAfter(wrongGeometry, 1031);
+        check(rejected.state() == TrialEvidence.State.UNKNOWN
+                        && rejected.restoreAfter() == null
+                        && !rejected.shouldRequestRestorePaint(wrongGeometry),
+                "rejected restore geometry must never request a redraw");
+    }
+
     private static void abaControl() {
         Fixture f = new Fixture();
         TrialEvidence.Cut baseline = f.baseline();
@@ -344,12 +738,20 @@ public final class TrialEvidenceTest {
         TrialEvidence.Cut awayAfter = f.firstAfter(away, 11, 21, 4);
         proof.onParentLayoutAfter(awayAfter, 1011);
         check(proof.state() == TrialEvidence.State.WAIT_ABA_RETURN, "ABA away seen");
+        check(!proof.shouldRequestRestorePaint(awayAfter),
+                "ABA away call does not request a restore redraw");
+        check(!proof.claimUnchangedFirstPaintRequest(awayAfter),
+                "ABA away call does not claim an unchanged first paint");
         check(proof.onParentPreCall(awayAfter, f.base, 12, 1012),
                 "ABA return pre-call");
         TrialEvidence.Cut backAfter = f.firstAfter(f.base, 12, 22, 5);
         proof.onParentLayoutAfter(backAfter, 1013);
         check(proof.state() == TrialEvidence.State.WAIT_FIRST_PAINT,
                 "same final bounds still need later paint");
+        check(!proof.shouldRequestRestorePaint(backAfter),
+                "ABA return does not request a direct-offset redraw");
+        check(!proof.claimUnchangedFirstPaintRequest(backAfter),
+                "ABA return does not claim an unchanged first paint");
         TrialEvidence.Cut frame = f.cut(f.base, 12, 22, 5, 6, 12, 22, 6, 1020);
         proof.onCompletedPaint(frame, 1021);
         check(proof.requestSecondPaint(frame, frame, 1050), "ABA second request");
@@ -601,10 +1003,17 @@ public final class TrialEvidenceTest {
         parentPulse(TrialEvidence.Command.PARENT_PLUS, 1);
         parentPulse(TrialEvidence.Command.PARENT_MINUS, -1);
         unchangedControl();
+        unchangedFirstPaintGate();
         directBypass(TrialEvidence.Command.DIRECT_LAYOUT);
         directBypass(TrialEvidence.Command.DIRECT_OFFSET);
+        directOffsetRestorePaintGate();
         abaControl();
-        unrequestedRestoredPaint();
+        oneInterveningRestoredPaint();
+        interveningThenRequestedPaint();
+        oneExtraAcrossRestoringCommands();
+        extraFrameDriftAcrossRestoringCommands();
+        noRestoreCommandsRejectExtra();
+        rejectedInterveningRestoredPaints();
         restoreEntryDiagnostic();
         adversarial();
         postPassArmValidity();

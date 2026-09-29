@@ -105,9 +105,13 @@ class FakeApp:
             2468, "incarnation-1", 1, "activity-1", "root-1", True)
         self.expected = (ENTRY,)
         self.fail_post = False
+        self.preflight_error: Exception | None = None
+        self.execute_error: Exception | None = None
 
     def preflight(self) -> subject.Admission:
         self.trace.append("preflight")
+        if self.preflight_error is not None:
+            raise self.preflight_error
         return self.admission
 
     def prearm(self, admission: subject.Admission) -> None:
@@ -118,6 +122,8 @@ class FakeApp:
 
     def execute_and_restore(self, variant: str, admission: subject.Admission) -> None:
         self.trace.append("execute:" + variant)
+        if self.execute_error is not None:
+            raise self.execute_error
 
     def main_barrier(self, admission: subject.Admission) -> None:
         self.trace.append("main_barrier")
@@ -174,6 +180,14 @@ class HostProtocolTests(unittest.TestCase):
             subject.run_mockable(app, transport, PINS, "parent-plus-one")
         self.assertEqual(trace, ["preflight"])
 
+    def test_unexpected_preflight_failure_has_fixed_code_and_no_attach(self) -> None:
+        trace, app, transport = self.setup_case()
+        app.preflight_error = RuntimeError("private launch response")
+        with self.assertRaises(subject.TrialError) as caught:
+            subject.run_mockable(app, transport, PINS, "parent-plus-one")
+        self.assertEqual(str(caught.exception), "TRIAL_UNCERTAIN_PREFLIGHT")
+        self.assertEqual(trace, ["preflight"])
+
     def test_missing_entry_stops_exact_disposable_process(self) -> None:
         trace, app, transport = self.setup_case()
         app.expected = ()
@@ -193,10 +207,87 @@ class HostProtocolTests(unittest.TestCase):
     def test_arm_timeout_stops_only_attached_disposable_process(self) -> None:
         trace, app, transport = self.setup_case()
         transport.session.hook.arm_timeout = True
-        with self.assertRaisesRegex(subject.TrialError, "TRIAL_UNCERTAIN"):
+        with self.assertRaisesRegex(subject.TrialError, "^TRIAL_UNCERTAIN_ARM$"):
             subject.run_mockable(app, transport, PINS, "parent-plus-one")
         self.assertEqual(trace, ["preflight", "prearm", "attach:2468", "arm",
                                  "stop:2468:incarnation-1", "unload", "detach"])
+
+    def test_unexpected_execute_failure_has_fixed_phase_and_same_cleanup(self) -> None:
+        trace, app, transport = self.setup_case()
+        app.execute_error = RuntimeError("private command response token")
+        with self.assertRaises(subject.TrialError) as caught:
+            subject.run_mockable(app, transport, PINS, "parent-plus-one")
+        self.assertEqual(str(caught.exception), "TRIAL_UNCERTAIN_EXECUTE")
+        self.assertEqual(trace, ["preflight", "prearm", "attach:2468", "arm",
+                                 "refresh", "execute:parent-plus-one",
+                                 "stop:2468:incarnation-1", "unload", "detach"])
+
+    def test_every_unexpected_phase_has_fixed_code_and_exact_cleanup(self) -> None:
+        steps = ("preflight", "prearm", "attach:2468", "arm", "refresh",
+                 "execute:parent-plus-one", "main_barrier", "expected_entries",
+                 "snapshot", "disarm", "sentinel", "snapshot", "unload",
+                 "detach", "sentinel_after_unload", "post_unload_verify",
+                 "finish_lease")
+        # The second snapshot is a separate phase. Each literal is asserted
+        # directly so a swapped or missing diagnostic cannot pass this table.
+        cases = (
+            ("TRIAL_UNCERTAIN_PREFLIGHT", "app", "preflight", 1, 0),
+            ("TRIAL_UNCERTAIN_PREARM", "app", "prearm", 1, 1),
+            ("TRIAL_UNCERTAIN_ATTACH", "transport", "attach", 1, 2),
+            ("TRIAL_UNCERTAIN_ARM", "hook", "arm", 1, 3),
+            ("TRIAL_UNCERTAIN_REFRESH", "app", "freshen_baseline", 1, 4),
+            ("TRIAL_UNCERTAIN_EXECUTE", "app", "execute_and_restore", 1, 5),
+            ("TRIAL_UNCERTAIN_BARRIER", "app", "main_barrier", 1, 6),
+            ("TRIAL_UNCERTAIN_APP_EVIDENCE", "app", "expected_entries", 1, 7),
+            ("TRIAL_UNCERTAIN_ARMED_SNAPSHOT", "hook", "snapshot", 1, 8),
+            ("TRIAL_UNCERTAIN_DISARM", "hook", "disarm", 1, 9),
+            ("TRIAL_UNCERTAIN_REVERT_SENTINEL", "app", "sentinel_after_revert", 1, 10),
+            ("TRIAL_UNCERTAIN_DISARMED_SNAPSHOT", "hook", "snapshot", 2, 11),
+            ("TRIAL_UNCERTAIN_UNLOAD", "hook", "unload", 1, 12),
+            ("TRIAL_UNCERTAIN_DETACH", "session", "detach", 1, 13),
+            ("TRIAL_UNCERTAIN_UNLOAD_SENTINEL", "app", "sentinel_after_unload", 1, 14),
+            ("TRIAL_UNCERTAIN_POST_UNLOAD", "app", "post_unload_verify", 1, 15),
+            ("TRIAL_UNCERTAIN_FINISH", "app", "finish_lease", 1, 16),
+        )
+        self.assertEqual(len(cases), len(steps))
+        for code, owner, method, occurrence, step_index in cases:
+            with self.subTest(code=code):
+                trace, app, transport = self.setup_case()
+                owners = {"app": app, "transport": transport,
+                          "session": transport.session,
+                          "hook": transport.session.hook}
+                target = owners[owner]
+                original = getattr(target, method)
+                call_count = [0]
+
+                def inject(*args, **kwargs):
+                    call_count[0] += 1
+                    result = original(*args, **kwargs)
+                    if call_count[0] == occurrence:
+                        raise RuntimeError("private untrusted command token")
+                    return result
+
+                setattr(target, method, inject)
+                with self.assertRaises(subject.TrialError) as caught:
+                    subject.run_mockable(app, transport, PINS, "parent-plus-one")
+                self.assertEqual(str(caught.exception), code)
+                self.assertNotIn("private", str(caught.exception))
+                self.assertEqual(call_count[0], occurrence)
+                cleanup = ([] if step_index == 0 else
+                           ["stop:2468:incarnation-1"])
+                if 3 <= step_index <= 11:
+                    cleanup += ["unload", "detach"]
+                elif step_index == 12:
+                    cleanup += ["detach"]
+                self.assertEqual(trace, list(steps[:step_index + 1]) + cleanup)
+
+    def test_execute_trial_error_code_is_preserved(self) -> None:
+        trace, app, transport = self.setup_case()
+        app.execute_error = subject.TrialError("APP_TRIAL_TIMEOUT")
+        with self.assertRaises(subject.TrialError) as caught:
+            subject.run_mockable(app, transport, PINS, "parent-plus-one")
+        self.assertEqual(str(caught.exception), "APP_TRIAL_TIMEOUT")
+        self.assertEqual(trace[-3:], ["stop:2468:incarnation-1", "unload", "detach"])
 
     def test_revert_uncertainty_stops_process(self) -> None:
         trace, app, transport = self.setup_case()
@@ -216,14 +307,14 @@ class HostProtocolTests(unittest.TestCase):
     def test_post_unload_failure_stops_exact_process(self) -> None:
         trace, app, transport = self.setup_case()
         app.fail_post = True
-        with self.assertRaisesRegex(subject.TrialError, "TRIAL_UNCERTAIN"):
+        with self.assertRaisesRegex(subject.TrialError, "^TRIAL_UNCERTAIN_POST_UNLOAD$"):
             subject.run_mockable(app, transport, PINS, "parent-plus-one")
         self.assertEqual(trace[-1], "stop:2468:incarnation-1")
 
     def test_unload_failure_is_not_retried(self) -> None:
         trace, app, transport = self.setup_case()
         transport.session.hook.fail_unload = True
-        with self.assertRaisesRegex(subject.TrialError, "TRIAL_UNCERTAIN"):
+        with self.assertRaisesRegex(subject.TrialError, "^TRIAL_UNCERTAIN_UNLOAD$"):
             subject.run_mockable(app, transport, PINS, "parent-plus-one")
         self.assertEqual(trace.count("unload"), 1)
         self.assertIn("stop:2468:incarnation-1", trace)

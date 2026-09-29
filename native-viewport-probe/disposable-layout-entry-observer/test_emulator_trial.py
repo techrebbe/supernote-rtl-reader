@@ -445,6 +445,66 @@ class TrialAdapterTests(unittest.TestCase):
         app.command_response_evidence = {"phase": "command-response"}
         app.first_trial_poll_evidence = {"phase": "trial-poll"}
         self.assertIsNone(app.scene_failure_evidence())
+        self.assertIsNone(app.timeout_failure_evidence())
+
+    def test_timeout_uses_only_first_and_latest_returned_poll(self) -> None:
+        app, fake = app_with_fake()
+        app.freshen_baseline(ADMISSION)
+        app.host_deadline = 120.0
+        app.refresh_proof_host_received = 100.0
+        app.refresh_age_upper_at_receipt_ms = 1000
+        clock = [100.0]
+        secret = "never-serialize-this-root-token"
+        original_call = fake.provider_call
+        original_state = fake.provider_state
+        poll_count = [0]
+
+        def pending_call(method, argument, extras, *, timeout=3.0):
+            fields = original_call(method, argument, extras, timeout=timeout)
+            if method == "command":
+                fake.state["trial"].update(state="WAIT_FIRST_PAINT",
+                                           reason=secret)
+                fields["json"] = json.dumps(fake.state)
+            return fields
+
+        def delayed_state(*, timeout=3.0):
+            poll_count[0] += 1
+            clock[0] += 2.5
+            state = original_state(timeout=timeout)
+            state["sampleElapsedMs"] = 1100 + poll_count[0]
+            state["trial"]["firstAfter"] = {"rootToken": secret}
+            return state
+
+        def advance(seconds):
+            clock[0] += seconds
+
+        state_calls_before = sum(call[0] == "state" for call in fake.calls)
+        with patch.object(subject.time, "monotonic",
+                          side_effect=lambda: clock[0]), \
+             patch.object(subject.time, "sleep", side_effect=advance), \
+             patch.object(fake, "provider_call", side_effect=pending_call), \
+             patch.object(fake, "provider_state", side_effect=delayed_state):
+            with self.assertRaisesRegex(host.TrialError, "APP_TRIAL_TIMEOUT"):
+                app.execute_and_restore("direct-root-offset", ADMISSION)
+        self.assertEqual(poll_count[0], 2)
+        self.assertEqual(sum(call[0] == "state" for call in fake.calls) -
+                         state_calls_before, 2)
+        evidence = app.timeout_failure_evidence()
+        self.assertIsNone(app.scene_failure_evidence())
+        self.assertEqual(evidence["commandResponse"]["trialState"],
+                         "WAIT_FIRST_PAINT")
+        self.assertEqual(evidence["firstTrialPoll"]["sampleElapsedMs"], 1101)
+        self.assertEqual(evidence["lastTrialPoll"]["sampleElapsedMs"], 1102)
+        self.assertEqual(evidence["lastTrialPoll"]["trialDeadlineElapsedMs"],
+                         25000)
+        self.assertEqual(evidence["lastTrialPoll"]["hostMsSinceCommand"],
+                         5050)
+        self.assertTrue(evidence["lastTrialPoll"]["trialMilestones"]
+                        ["firstAfter"])
+        self.assertFalse(evidence["lastTrialPoll"]["trialMilestones"]
+                         ["firstFrame"])
+        self.assertIsNone(evidence["lastTrialPoll"]["trialReason"])
+        self.assertNotIn(secret, json.dumps(evidence))
 
     def test_restore_entry_drift_projects_exact_primitive_witness(self) -> None:
         app, fake = app_with_fake()

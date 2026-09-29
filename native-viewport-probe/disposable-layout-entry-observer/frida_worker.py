@@ -255,6 +255,7 @@ if __name__ == "__main__":
         args = sys.argv[1:]
         need(len(args) == 5 and args[0] == "__worker" and
              PID_RE.fullmatch(args[1]) is not None, "WORKER_INPUT_INVALID")
-        raise SystemExit(_child(int(args[1]), Path(args[2]), Path(args[3]), args[4]))
+        status = _child(int(args[1]), Path(args[2]), Path(args[3]), args[4])
     except BaseException:
-        raise SystemExit(2)
+        status = 2
+    raise SystemExit(status)

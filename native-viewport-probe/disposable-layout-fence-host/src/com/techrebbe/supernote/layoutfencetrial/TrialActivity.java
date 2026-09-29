@@ -474,11 +474,20 @@ public final class TrialActivity extends Activity
         requireMain();
         if (trial == null || trial.state() == TrialEvidence.State.UNKNOWN
                 || trial.state() == TrialEvidence.State.PASS) return;
-        trial.onParentLayoutAfter(root.captureLive(), SystemClock.elapsedRealtime());
+        TrialEvidence.Cut after = root.captureLive();
+        trial.onParentLayoutAfter(after, SystemClock.elapsedRealtime());
         if (trial.state() == TrialEvidence.State.UNKNOWN) unknownAndRestore(trial.reason());
-        else TrialProcess.get().record("PARENT_LAYOUT_AFTER", "state=" + trial.state()
-                + " bounds=" + rawRootBounds() + " revision="
-                + root.getParentPreCallRevision());
+        else {
+            // A direct offset can be restored geometrically without scheduling a draw.
+            // Only its validated parent-return cut requests the missing paint.
+            if (trial.shouldRequestRestorePaint(after)) root.invalidate();
+            // An unchanged parent call can likewise leave the first paint unscheduled.
+            // Claim its exact verified return once; ABA and restore variants do not claim it.
+            if (trial.claimUnchangedFirstPaintRequest(after)) root.invalidate();
+            TrialProcess.get().record("PARENT_LAYOUT_AFTER", "state=" + trial.state()
+                    + " bounds=" + rawRootBounds() + " revision="
+                    + root.getParentPreCallRevision());
+        }
     }
 
     @Override public void onParentAnomaly(String reason) {
@@ -544,6 +553,11 @@ public final class TrialActivity extends Activity
             // changed bounds. The request queues layout; it does not mutate them here.
             requestRestore();
         } else if (trial.state() == TrialEvidence.State.WAIT_SECOND_PAINT_REQUEST) {
+            if (trial.interveningRestoredFrame() == frame) {
+                TrialProcess.get().record("INTERVENING_RESTORED_PAINT",
+                        "revision=" + frame.startedPaintRevision
+                        + " nonVoting=true");
+            }
             scheduleSecondPaint();
         } else if (trial.state() == TrialEvidence.State.WAIT_FINAL_SAMPLE) {
             scheduleFinalSample();
@@ -554,10 +568,18 @@ public final class TrialActivity extends Activity
 
     private void scheduleSecondPaint() {
         final long token = trialToken;
+        final TrialEvidence.Cut scheduledAnchor = trial.secondPaintAnchor();
+        if (scheduledAnchor == null) {
+            unknownAndRestore("SECOND_PAINT_SCENE_NOT_STABLE");
+            return;
+        }
         if (!main.postDelayed(new Runnable() {
             @Override public void run() {
                 if (token != trialToken || trial == null
                         || trial.state() != TrialEvidence.State.WAIT_SECOND_PAINT_REQUEST) return;
+                // A later same-state frame replaces only the request anchor.
+                // Its new timer owns the request; this older timer does nothing.
+                if (trial.secondPaintAnchor() != scheduledAnchor) return;
                 if (watchdogExpired.get() || !safeRootForCleanup()
                         || parent.isLayoutRequested() || root.isLayoutRequested()
                         || root.originalsHavePendingLayout(originals)) {
@@ -880,6 +902,13 @@ public final class TrialActivity extends Activity
                     trial == null ? null : trial.restoreEntryDrift()));
             proof.put("restoreAfter", cutJson(trial == null ? null : trial.restoreAfter()));
             proof.put("restoredFrame", cutJson(trial == null ? null : trial.restoredFrame()));
+            proof.put("paintOrderProofVersion", 2);
+            proof.put("interveningRestoredFrame", cutJson(trial == null ? null
+                    : trial.interveningRestoredFrame()));
+            proof.put("secondPaintRequestElapsedMs", trial == null ? 0
+                    : trial.secondPaintRequestElapsedMs());
+            proof.put("secondPaintStartRevisionFloor", trial == null ? 0
+                    : trial.secondPaintStartRevisionFloor());
             proof.put("secondFrame", cutJson(trial == null ? null : trial.secondFrame()));
             proof.put("secondSample", cutJson(trial == null ? null : trial.secondSample()));
             out.put("trial", proof);

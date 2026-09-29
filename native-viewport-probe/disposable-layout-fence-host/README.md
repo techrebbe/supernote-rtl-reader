@@ -1,7 +1,9 @@
 # Disposable layout-fence host (synthetic API 30 only)
 
-This is a separate, unsigned emulator-only package. It contains exactly nine
-visible `TextView` children under one `TrialRoot` inside its sole `TrialParent`.
+This is a separate emulator-only package, built unsigned by default; the
+reviewed runtime artifact was signed with a disposable test key. It contains
+exactly nine visible `TextView` children under one `TrialRoot` inside its sole
+`TrialParent`.
 It does not open a reader, document, PDF, annotation, pen input, storage,
 network, overlay, or Supernote process. No child is added during a trial.
 
@@ -26,6 +28,22 @@ must match that second frame. A stale paint begun before the write or before
 the second-paint request is rejected by its paint-start provenance. All commands
 are one-shot per process incarnation. A replacement Activity in that process is
 rejected, and a rejected command is not retried.
+
+For `parent-plus-one`, `parent-minus-one`, `direct-root-layout`, and
+`direct-root-offset`, one additional completed paint may occur after the first
+restored frame but before the explicit second-paint request. These four
+commands have a separate restore phase; `unchanged-bounds` and `away-back-aba`
+do not, and still reject an unsolicited frame. The allowed extra paint is
+retained separately as `interveningRestoredFrame` and is **non-voting**: it
+must have the exact original root, scene, children, paint order, baseline
+bounds, and unchanged parent/write/layout counters, with the next paint
+revision and monotonic timing. The first restored frame remains immutable.
+The 25 ms quiet gap is restarted from this extra frame, and a distinct
+app-requested paint plus a stable final sample are still mandatory. Another
+unsolicited frame, any drift, or an expired window remains `UNKNOWN`.
+`paintOrderProofVersion=2` exposes this bounded event order and the second
+request timestamp/revision floor for independent validation. It does not
+identify the cause of the extra redraw or expand mutation coverage.
 
 Provider authority: `com.techrebbe.supernote.layoutfencetrial.probe`.
 Read-only `/identity`, `/state`, and `/events?after=<sequence>` are available to
@@ -111,3 +129,13 @@ Run `test-host.ps1` for pure-Java evidence tests and static isolation checks.
 Run `build.ps1` for the same checks plus an offline API-30 unsigned APK build.
 Both create fresh ignored `build/` generations and do not sign, install, run
 ADB, or operate a device. No emulator trial result is claimed by source/build.
+
+`sign-emulator.ps1` accepts only this host's ignored unsigned APK and an
+independently reviewed SHA-256 assertion. It creates a fresh seven-day
+emulator-only key, signs into a separate ignored generation, and verifies the
+single signer plus exact synthetic package/version. It never uses the user's
+Android debug key and never contacts a device. Each invocation creates a new
+certificate; it is **not** upgrade-compatible with a previously installed
+test APK. Replacing that exact disposable package requires a separately
+reviewed emulator-only uninstall/install, which erases the synthetic app's
+private state. No such operation is implied by building or signing.

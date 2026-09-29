@@ -178,6 +178,10 @@ def _scene_diagnostic(state: dict[str, Any], phase: str,
         "trialReason": label(trial.get("reason"), _REASON_LABELS),
         "trialCommand": label(trial.get("command"), _COMMAND_LABELS),
         "trialCurrentlyValid": flag(trial.get("currentlyValid")),
+        "trialDeadlineElapsedMs": number(trial.get("trialDeadlineElapsedMs")),
+        "trialMilestones": {key: type(trial.get(key)) is dict for key in (
+            "firstAfter", "firstFrame", "restoreAfter", "restoredFrame",
+            "interveningRestoredFrame", "secondFrame", "secondSample")},
         "rootBounds": {key: number(bounds.get(key)) for key in
                        ("left", "top", "right", "bottom")},
         "parentPreCallRevision": number(state.get("parentPreCallRevision")),
@@ -220,6 +224,8 @@ class EmulatorApp:
         self.command_host_started: float | None = None
         self.command_response_evidence: dict[str, Any] | None = None
         self.first_trial_poll_evidence: dict[str, Any] | None = None
+        self.last_trial_poll_evidence: dict[str, Any] | None = None
+        self.trial_timeout_sample: dict[str, Any] | None = None
         self.scene_failure_sample: dict[str, Any] | None = None
         self.prearm_host_start: float | None = None
         self.launch_attempted = False
@@ -256,13 +262,15 @@ class EmulatorApp:
             self._require_process(admission)
         state = self._validated_identity_state(
             self.adb.provider_state(timeout=self._time_left()), admission)
-        if phase == "trial-poll" and self.first_trial_poll_evidence is None:
+        if phase == "trial-poll":
             try:
-                self.first_trial_poll_evidence = _scene_diagnostic(
+                projected = _scene_diagnostic(
                     state, phase, self.command_host_started)
             except BaseException:
-                self.first_trial_poll_evidence = {"phase": phase,
-                                                  "capture": "UNAVAILABLE"}
+                projected = {"phase": phase, "capture": "UNAVAILABLE"}
+            if self.first_trial_poll_evidence is None:
+                self.first_trial_poll_evidence = projected
+            self.last_trial_poll_evidence = projected
         scene_ok = (
              state.get("lifecycle") == "RESUMED" and
              state.get("rootAttached") is True and
@@ -299,6 +307,13 @@ class EmulatorApp:
         return {"commandResponse": self.command_response_evidence,
                 "firstTrialPoll": self.first_trial_poll_evidence,
                 "failedState": self.scene_failure_sample}
+
+    def timeout_failure_evidence(self) -> dict[str, Any] | None:
+        if self.trial_timeout_sample is None:
+            return None
+        return {"commandResponse": self.command_response_evidence,
+                "firstTrialPoll": self.first_trial_poll_evidence,
+                "lastTrialPoll": self.trial_timeout_sample}
 
     def _record_refresh_sample(self, sample: dict[str, Any]) -> None:
         # First observation plus the seven most recent; no raw state/tokens.
@@ -578,6 +593,11 @@ class EmulatorApp:
                 return
             need(trial.get("state") != "UNKNOWN", "APP_TRIAL_UNKNOWN")
             time.sleep(0.05)
+        # Do not make another provider call after the bounded poll window.
+        # Retain only the fixed, token-free projection already observed.
+        self.trial_timeout_sample = (self.last_trial_poll_evidence if
+            self.last_trial_poll_evidence is not None else
+            {"phase": "trial-poll", "capture": "NO_POLL"})
         raise TrialError("APP_TRIAL_TIMEOUT")
 
     def main_barrier(self, admission: Admission) -> None:

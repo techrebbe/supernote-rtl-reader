@@ -33,7 +33,8 @@ public final class TrialEvidence {
         }
 
         boolean needsLaterRestore() {
-            return this != UNCHANGED && this != ABA;
+            return this == PARENT_PLUS || this == PARENT_MINUS
+                    || this == DIRECT_LAYOUT || this == DIRECT_OFFSET;
         }
     }
 
@@ -335,12 +336,14 @@ public final class TrialEvidence {
         private Cut firstFrame;
         private Cut restoreAfter;
         private Cut restoredFrame;
+        private Cut interveningRestoredFrame;
         private Cut secondFrame;
         private Cut secondSample;
         private RestoreEntryDiff restoreEntryDrift;
         private long secondPaintRequestElapsedMs;
         private long secondPaintStartRevisionFloor;
         private boolean bypassObserved;
+        private boolean unchangedFirstPaintRequested;
 
         private Trial(Command command, Cut baseline, long deadlineElapsedMs) {
             this.command = command;
@@ -477,7 +480,7 @@ public final class TrialEvidence {
 
         public void onCompletedPaint(Cut frame, long nowElapsedMs) {
             if (state == State.WAIT_SECOND_PAINT_REQUEST) {
-                unknown("UNREQUESTED_SECOND_PAINT");
+                onInterveningRestoredPaint(frame, nowElapsedMs);
                 return;
             }
             if (state == State.WAIT_SECOND_PAINT) {
@@ -517,16 +520,39 @@ public final class TrialEvidence {
             }
         }
 
+        /** One post-restore redraw may be observed, but never counts as the requested proof. */
+        private void onInterveningRestoredPaint(Cut frame, long nowElapsedMs) {
+            if (!command.needsLaterRestore() || restoreAfter == null
+                    || interveningRestoredFrame != null
+                    || !live(nowElapsedMs) || frame == null || restoredFrame == null
+                    || !frame.exactNinePainted()
+                    || !restoredFrame.sameOriginals(frame)
+                    || !baseline.bounds.equals(frame.bounds)
+                    || frame.parentPreCallRevision != restoredFrame.parentPreCallRevision
+                    || frame.observedWriteOrdinal != restoredFrame.observedWriteOrdinal
+                    || frame.rootLayoutCalls != restoredFrame.rootLayoutCalls
+                    || frame.startedPaintRevision != restoredFrame.startedPaintRevision + 1
+                    || frame.paintStartedElapsedMs < restoredFrame.completedPaintElapsedMs
+                    || frame.completedPaintElapsedMs > nowElapsedMs
+                    || frame.completedPaintElapsedMs - restoredFrame.completedPaintElapsedMs
+                            > MAX_SECOND_SAMPLE_GAP_MS) {
+                unknown("UNREQUESTED_SECOND_PAINT");
+                return;
+            }
+            interveningRestoredFrame = frame;
+        }
+
         /** The app must request a new frame only after the first restored paint. */
         public boolean requestSecondPaint(Cut live, Cut latestFrame, long nowElapsedMs) {
+            Cut anchor = secondPaintAnchor();
             if (state != State.WAIT_SECOND_PAINT_REQUEST || !live(nowElapsedMs)
-                    || restoredFrame == null || live == null || latestFrame == null
-                    || nowElapsedMs < restoredFrame.completedPaintElapsedMs
+                    || anchor == null || live == null || latestFrame == null
+                    || nowElapsedMs < anchor.completedPaintElapsedMs
                             + SECOND_SAMPLE_GAP_MS
-                    || nowElapsedMs - restoredFrame.completedPaintElapsedMs
+                    || nowElapsedMs - anchor.completedPaintElapsedMs
                             > MAX_SECOND_SAMPLE_GAP_MS
-                    || !restoredFrame.sameLiveFrame(latestFrame)
-                    || !restoredFrame.sameLiveFrame(live)
+                    || !anchor.sameLiveFrame(latestFrame)
+                    || !anchor.sameLiveFrame(live)
                     || !live.exactNinePainted() || !baseline.sameOriginals(live)
                     || !baseline.bounds.equals(live.bounds)) {
                 unknown("SECOND_PAINT_REQUEST_NOT_FRESH");
@@ -539,19 +565,20 @@ public final class TrialEvidence {
         }
 
         private void onSecondCompletedPaint(Cut frame, long nowElapsedMs) {
-            if (!live(nowElapsedMs) || frame == null || restoredFrame == null
-                    || !frame.exactNinePainted() || !restoredFrame.sameOriginals(frame)
+            Cut anchor = secondPaintAnchor();
+            if (!live(nowElapsedMs) || frame == null || anchor == null
+                    || !frame.exactNinePainted() || !anchor.sameOriginals(frame)
                     || !baseline.bounds.equals(frame.bounds)
-                    || frame.parentPreCallRevision != restoredFrame.parentPreCallRevision
-                    || frame.observedWriteOrdinal != restoredFrame.observedWriteOrdinal
-                    || frame.rootLayoutCalls != restoredFrame.rootLayoutCalls
+                    || frame.parentPreCallRevision != anchor.parentPreCallRevision
+                    || frame.observedWriteOrdinal != anchor.observedWriteOrdinal
+                    || frame.rootLayoutCalls != anchor.rootLayoutCalls
                     || frame.startedPaintRevision <= secondPaintStartRevisionFloor
-                    || frame.completedPaintRevision <= restoredFrame.completedPaintRevision
+                    || frame.completedPaintRevision <= anchor.completedPaintRevision
                     || frame.paintStartedElapsedMs < secondPaintRequestElapsedMs
-                    || frame.paintStartedElapsedMs < restoredFrame.completedPaintElapsedMs
+                    || frame.paintStartedElapsedMs < anchor.completedPaintElapsedMs
                             + SECOND_SAMPLE_GAP_MS
                     || frame.completedPaintElapsedMs < frame.paintStartedElapsedMs
-                    || frame.completedPaintElapsedMs - restoredFrame.completedPaintElapsedMs
+                    || frame.completedPaintElapsedMs - anchor.completedPaintElapsedMs
                             > MAX_SECOND_SAMPLE_GAP_MS
                     || frame.completedPaintElapsedMs > nowElapsedMs) {
                 unknown("SECOND_COMPLETED_PAINT_MISMATCH");
@@ -621,9 +648,30 @@ public final class TrialEvidence {
         public String reason() { return reason; }
         public Cut baseline() { return baseline; }
         public Cut firstAfter() { return firstAfter; }
+        /** One unchanged-bounds redraw, only for the exact verified parent return. */
+        public boolean claimUnchangedFirstPaintRequest(Cut after) {
+            if (command != Command.UNCHANGED || state != State.WAIT_FIRST_PAINT
+                    || unchangedFirstPaintRequested || firstAfter == null
+                    || firstAfter != after || !baseline.bounds.equals(after.bounds)) return false;
+            unchangedFirstPaintRequested = true;
+            return true;
+        }
         public Cut firstFrame() { return firstFrame; }
         public Cut restoreAfter() { return restoreAfter; }
+        /** Direct offset needs a redraw only after this exact parent restore is verified. */
+        public boolean shouldRequestRestorePaint(Cut after) {
+            return command == Command.DIRECT_OFFSET
+                    && state == State.WAIT_RESTORE_PAINT
+                    && restoreAfter != null && restoreAfter == after
+                    && baseline.bounds.equals(after.bounds);
+        }
         public Cut restoredFrame() { return restoredFrame; }
+        public Cut interveningRestoredFrame() { return interveningRestoredFrame; }
+        public Cut secondPaintAnchor() {
+            return interveningRestoredFrame == null ? restoredFrame : interveningRestoredFrame;
+        }
+        public long secondPaintRequestElapsedMs() { return secondPaintRequestElapsedMs; }
+        public long secondPaintStartRevisionFloor() { return secondPaintStartRevisionFloor; }
         public Cut secondFrame() { return secondFrame; }
         public Cut secondSample() { return secondSample; }
         public Cut abaAway() { return abaAway; }

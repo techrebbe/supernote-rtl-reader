@@ -5,7 +5,9 @@ import hashlib
 import json
 from pathlib import Path
 import queue
+import subprocess
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -119,6 +121,70 @@ class WorkerTests(unittest.TestCase):
                                   source, "0" * 64, 2468,
                                   popen=lambda *a, **kw: calls.append((a, kw)))
         self.assertEqual(calls, [])
+
+    def test_subprocess_exit_status_matches_clean_and_failed_child(self) -> None:
+        # Exercise the actual __main__ footer without importing real Frida or
+        # contacting its remote server. The fake module stays in this temp site.
+        with tempfile.TemporaryDirectory() as temporary:
+            site = Path(temporary)
+            (site / "frida.py").write_text(
+                "class Script:\n"
+                "    def on(self, *args): pass\n"
+                "    def load(self): pass\n"
+                "    def unload(self): pass\n"
+                "class Session:\n"
+                "    def create_script(self, source): return Script()\n"
+                "    def detach(self): pass\n"
+                "class Device:\n"
+                "    def attach(self, pid): return Session()\n"
+                "class Manager:\n"
+                "    def add_remote_device(self, address): return Device()\n"
+                "def get_device_manager(): return Manager()\n",
+                encoding="utf-8")
+            distribution = site / "frida-17.9.11.dist-info"
+            distribution.mkdir()
+            (distribution / "METADATA").write_text(
+                "Metadata-Version: 2.1\nName: frida\nVersion: 17.9.11\n",
+                encoding="utf-8")
+            bundle = site / "inert-bundle.js"
+            bundle.write_text("// fake Frida never evaluates this bundle\n",
+                              encoding="utf-8")
+            digest = hashlib.sha256(bundle.read_bytes()).hexdigest()
+            command = [sys.executable, "-B", str(Path(subject.__file__).resolve()),
+                       "__worker", "2468", str(site), str(bundle), digest]
+
+            def run(requests: list[dict]) -> tuple[int, list[dict], bytes]:
+                payload = b"".join(subject._json_line(request)
+                                   for request in requests)
+                completed = subprocess.run(
+                    command, input=payload, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, timeout=10, check=False,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                frames = [json.loads(line) for line in completed.stdout.splitlines()]
+                return completed.returncode, frames, completed.stderr
+
+            status, frames, stderr = run([
+                {"seq": 1, "op": "unload", "value": None},
+                {"seq": 2, "op": "detach", "value": None},
+            ])
+            self.assertEqual(status, 0)
+            self.assertEqual(frames, [
+                {"event": "ready", "pid": 2468},
+                {"seq": 1, "ok": True, "value": {"unloaded": True}},
+                {"seq": 2, "ok": True, "value": {"detached": True}},
+            ])
+            self.assertEqual(stderr, b"")
+
+            status, frames, stderr = run([
+                {"seq": 1, "op": "invalid", "value": None},
+            ])
+            self.assertEqual(status, 2)
+            self.assertEqual(frames, [
+                {"event": "ready", "pid": 2468},
+                {"seq": 1, "ok": False,
+                 "value": {"code": "WORKER_OPERATION_FAILED"}},
+            ])
+            self.assertEqual(stderr, b"")
 
 
 if __name__ == "__main__":

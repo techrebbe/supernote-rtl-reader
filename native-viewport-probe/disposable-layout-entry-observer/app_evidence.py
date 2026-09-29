@@ -12,6 +12,8 @@ from host_protocol import Admission, ExpectedEntry, TrialError, need
 
 SCHEMA = "layout-fence-synthetic-v1"
 SCENE_PREFIX = "probe://disposable/layout-fence/nine:"
+RESTORING_VARIANTS = frozenset(("parent-plus-one", "parent-minus-one",
+                                "direct-root-layout", "direct-root-offset"))
 
 
 def _int(value: Any, minimum: int = 0) -> int:
@@ -111,6 +113,9 @@ def derive_entries(state: dict[str, Any], admission: Admission,
          "APP_PROCESS_DRIFT")
     proof = state.get("trial")
     need(type(proof) is dict and proof.get("command") == variant and
+         type(proof.get("paintOrderProofVersion")) is int and
+         proof["paintOrderProofVersion"] == 2 and
+         "interveningRestoredFrame" in proof and
          proof.get("state") == "PASS" and proof.get("currentlyValid") is True and
          proof.get("rollbackVerified") is True and
          proof.get("completeMutationCoverage") is False and
@@ -121,6 +126,66 @@ def derive_entries(state: dict[str, Any], admission: Admission,
     first = _cut(proof.get("firstAfter"), admission, base)
     first_frame = _cut(proof.get("firstFrame"), admission, base)
     restored_frame = _cut(proof.get("restoredFrame"), admission, base)
+    counters = ("parentPreCallRevision", "observedWriteOrdinal",
+                "rootLayoutCallCount")
+    need(all(first_frame[key] == first[key] for key in counters) and
+         _int(first_frame["startedPaintRevision"]) >
+             _int(first["startedPaintRevision"]) and
+         first_frame["paintStartParentRevision"] ==
+             first_frame["parentPreCallRevision"] and
+         first_frame["paintStartWriteOrdinal"] ==
+             first_frame["observedWriteOrdinal"],
+         "APP_PROOF_DRIFT")
+    restore_value = proof.get("restoreAfter")
+    if variant in RESTORING_VARIANTS:
+        restore = _cut(restore_value, admission, base)
+        prior_paint = ("startedPaintRevision", "paintStartedElapsedMs",
+                       "paintStartParentRevision", "paintStartWriteOrdinal",
+                       "completedPaintRevision", "completedPaintElapsedMs")
+        need(all(restore[key] == first_frame[key] for key in prior_paint) and
+             all(restored_frame[key] == restore[key] for key in counters) and
+             restored_frame["paintStartParentRevision"] ==
+                 restore["parentPreCallRevision"] and
+             restored_frame["paintStartWriteOrdinal"] ==
+                 restore["observedWriteOrdinal"] and
+             _int(restored_frame["startedPaintRevision"]) >
+                 _int(restore["startedPaintRevision"]) and
+             restored_frame["completedPaintRevision"] ==
+                 restored_frame["startedPaintRevision"],
+             "APP_PROOF_DRIFT")
+    else:
+        need(restore_value is None and restored_frame == first_frame,
+             "APP_PROOF_DRIFT")
+        restore = None
+    intervening_value = proof["interveningRestoredFrame"]
+    need(intervening_value is None or variant in RESTORING_VARIANTS,
+         "APP_PROOF_DRIFT")
+    anchor = restored_frame
+    if intervening_value is not None:
+        intervening = _cut(intervening_value, admission, base)
+        need(intervening["exactNinePainted"] is True and
+             intervening["effectivePaintOrder"] ==
+                 restored_frame["effectivePaintOrder"] and
+             _bounds(intervening["bounds"]) == _bounds(base["bounds"]) and
+             all(intervening[key] == restored_frame[key] for key in
+                 ("parentPreCallRevision", "observedWriteOrdinal",
+                  "rootLayoutCallCount")) and
+             _int(intervening["startedPaintRevision"]) ==
+                 _int(restored_frame["startedPaintRevision"]) + 1 and
+             intervening["completedPaintRevision"] ==
+                 intervening["startedPaintRevision"] and
+             intervening["paintStartParentRevision"] ==
+                 intervening["parentPreCallRevision"] and
+             intervening["paintStartWriteOrdinal"] ==
+                 intervening["observedWriteOrdinal"] and
+             _int(intervening["paintStartedElapsedMs"]) >=
+                 _int(restored_frame["completedPaintElapsedMs"]) and
+             _int(intervening["completedPaintElapsedMs"]) >=
+                 _int(intervening["paintStartedElapsedMs"]) and
+             _int(intervening["completedPaintElapsedMs"]) -
+                 _int(restored_frame["completedPaintElapsedMs"]) <= 1000,
+             "APP_PROOF_DRIFT")
+        anchor = intervening
     second_frame = _cut(proof.get("secondFrame"), admission, base)
     second = _cut(proof.get("secondSample"), admission, base)
     current = _cut(state.get("current"), admission, base)
@@ -147,6 +212,27 @@ def derive_entries(state: dict[str, Any], admission: Admission,
             _int(restored_frame["completedPaintElapsedMs"]) and
          second == second_frame == current == latest,
          "APP_PROOF_DRIFT")
+    request_ms = _int(proof.get("secondPaintRequestElapsedMs"))
+    floor = _int(proof.get("secondPaintStartRevisionFloor"))
+    need(floor == _int(anchor["startedPaintRevision"]) and
+         request_ms >= _int(anchor["completedPaintElapsedMs"]) + 25 and
+         request_ms - _int(anchor["completedPaintElapsedMs"]) <= 1000 and
+         all(second_frame[key] == anchor[key] for key in
+             ("parentPreCallRevision", "observedWriteOrdinal",
+              "rootLayoutCallCount")) and
+         second_frame["paintStartParentRevision"] ==
+             second_frame["parentPreCallRevision"] and
+         second_frame["paintStartWriteOrdinal"] ==
+             second_frame["observedWriteOrdinal"] and
+         _int(second_frame["startedPaintRevision"]) > floor and
+         second_frame["completedPaintRevision"] ==
+             second_frame["startedPaintRevision"] and
+         _int(second_frame["paintStartedElapsedMs"]) >= request_ms and
+         _int(second_frame["completedPaintElapsedMs"]) >=
+             _int(second_frame["paintStartedElapsedMs"]) and
+         _int(second_frame["completedPaintElapsedMs"]) -
+             _int(anchor["completedPaintElapsedMs"]) <= 1000,
+         "APP_PROOF_DRIFT")
     base_rect = _bounds(base["bounds"])
     first_rect = _bounds(first["bounds"])
     base_rev = _int(base["parentPreCallRevision"])
@@ -155,7 +241,6 @@ def derive_entries(state: dict[str, Any], admission: Admission,
     first_rev = _int(first["parentPreCallRevision"])
     first_write = _int(first["observedWriteOrdinal"])
     first_layout = _int(first["rootLayoutCallCount"])
-    restored = proof.get("restoreAfter")
     aba = proof.get("abaAway")
     if variant in ("parent-plus-one", "parent-minus-one"):
         delta = 1 if variant == "parent-plus-one" else -1
@@ -163,7 +248,6 @@ def derive_entries(state: dict[str, Any], admission: Admission,
                             base_rect[3]) and first_rev == base_rev + 1 and
              first_write == base_write + 1 and first_layout == base_layout + 1 and
              aba is None, "APP_PROOF_DRIFT")
-        restore = _cut(restored, admission, base)
         need(_bounds(restore["bounds"]) == base_rect and
              restore["parentPreCallRevision"] == base_rev + 2 and
              restore["observedWriteOrdinal"] == base_write + 2 and
@@ -177,7 +261,7 @@ def derive_entries(state: dict[str, Any], admission: Admission,
     if variant == "unchanged-bounds":
         need(first_rect == base_rect and first_rev == base_rev + 1 and
              first_write == base_write + 1 and first_layout == base_layout and
-             restored is None and aba is None, "APP_PROOF_DRIFT")
+             restore is None and aba is None, "APP_PROOF_DRIFT")
         return (_entry(base, first, before_write=first_write,
                        before_layout=base_layout),)
     if variant == "direct-root-layout":
@@ -185,7 +269,6 @@ def derive_entries(state: dict[str, Any], admission: Admission,
                             base_rect[3]) and first_rev == base_rev and
              first_write == base_write + 1 and first_layout == base_layout + 1 and
              aba is None, "APP_PROOF_DRIFT")
-        restore = _cut(restored, admission, base)
         need(_bounds(restore["bounds"]) == base_rect and
              restore["parentPreCallRevision"] == base_rev + 1 and
              restore["observedWriteOrdinal"] == base_write + 2 and
@@ -201,7 +284,6 @@ def derive_entries(state: dict[str, Any], admission: Admission,
                             base_rect[3]) and first_rev == base_rev and
              first_write == base_write + 1 and first_layout == base_layout and
              aba is None, "APP_PROOF_DRIFT")
-        restore = _cut(restored, admission, base)
         need(_bounds(restore["bounds"]) == base_rect and
              restore["parentPreCallRevision"] == base_rev + 1 and
              restore["observedWriteOrdinal"] == base_write + 2 and
@@ -219,7 +301,7 @@ def derive_entries(state: dict[str, Any], admission: Admission,
              away["rootLayoutCallCount"] == base_layout + 1 and
              first_rect == base_rect and first_rev == base_rev + 2 and
              first_write == base_write + 2 and first_layout == base_layout + 2 and
-             restored is None, "APP_PROOF_DRIFT")
+             restore is None, "APP_PROOF_DRIFT")
         return (_entry(base, away,
                        before_write=away["observedWriteOrdinal"],
                        before_layout=base_layout),

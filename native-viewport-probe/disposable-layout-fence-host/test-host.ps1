@@ -58,6 +58,21 @@ if (-not $restoreMethod.Success -or
         $activity -notmatch 'if \(!cleanupVerified\.get\(\) && !cleanupPending\) requestRestore\(\);') {
     throw 'Normal restore must use parent layout only; UNKNOWN cleanup keeps explicit redraw.'
 }
+$afterParentMethod = [regex]::Match($activity,
+    '(?s)@Override public void afterParentRootLayout\(\) \{(.*?)\r?\n    \}\s*@Override public void onParentAnomaly')
+if (-not $afterParentMethod.Success -or
+        $afterParentMethod.Groups[1].Value -notmatch '(?s)TrialEvidence\.Cut after = root\.captureLive\(\);\s*trial\.onParentLayoutAfter\(after, SystemClock\.elapsedRealtime\(\)\);\s*if \(trial\.state\(\) == TrialEvidence\.State\.UNKNOWN\) unknownAndRestore\(trial\.reason\(\)\);\s*else \{.*?if \(trial\.shouldRequestRestorePaint\(after\)\) root\.invalidate\(\);.*?if \(trial\.claimUnchangedFirstPaintRequest\(after\)\) root\.invalidate\(\);' -or
+        [regex]::Matches($afterParentMethod.Groups[1].Value, 'root\.invalidate\(\);').Count -ne 2) {
+    throw 'Only verified direct-offset restore and unchanged first-return cuts may request their missing paints.'
+}
+if ($activity -notmatch 'final TrialEvidence\.Cut scheduledAnchor = trial\.secondPaintAnchor\(\);' -or
+        $activity -notmatch 'if \(trial\.secondPaintAnchor\(\) != scheduledAnchor\) return;' -or
+        $activity -notmatch 'proof\.put\("paintOrderProofVersion", 2\);' -or
+        $activity -notmatch 'proof\.put\("interveningRestoredFrame", cutJson\(' -or
+        $activity -notmatch 'proof\.put\("secondPaintRequestElapsedMs", trial == null \? 0' -or
+        $activity -notmatch 'proof\.put\("secondPaintStartRevisionFloor", trial == null \? 0') {
+    throw 'Intervening paint must rebase only the pending timer and expose bounded proof.'
+}
 if ($activity -notmatch 'proof\.put\("abaAway", cutJson\(trial == null \? null : trial\.abaAway\(\)\)\);' -or
         $activity -notmatch 'if \(cut == null\) return JSONObject\.NULL;') {
     throw 'ABA proof JSON key and null serialization contract failed.'

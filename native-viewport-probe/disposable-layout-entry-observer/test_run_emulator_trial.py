@@ -289,6 +289,114 @@ class EntryTests(unittest.TestCase):
         self.assertFalse(app.cleaned)
         self.assertTrue(server.cleaned)
 
+    def test_timeout_evidence_is_separate_and_preserves_cleanup_result(self) -> None:
+        server = FakeServer()
+        server.fail_cleanup = True
+        expected = {"commandResponse": {"trialState": "WAIT_FIRST_PAINT"},
+                    "firstTrialPoll": {"sampleElapsedMs": 1001},
+                    "lastTrialPoll": {"sampleElapsedMs": 1002}}
+        class App:
+            launch_attempted = False
+            prearm_host_start = 123.0
+            def scene_failure_evidence(self): return None
+            def timeout_failure_evidence(self): return expected
+        def timed_out(*unused):
+            raise host.TrialError("APP_TRIAL_TIMEOUT")
+        with patch.multiple(subject, verify_signed_apk=lambda *a: None,
+                            verify_installed_apk=lambda *a: None,
+                            _exact_size=lambda *a: None,
+                            file_sha=lambda *a, **k: None,
+                            _lock=lambda: (17, Path("ignored")),
+                            _unlock=lambda *a: None,
+                            ExactAdb=lambda *a: type("A", (),
+                                {"check_emulator": lambda self: None})(),
+                            OwnedFridaServer=lambda *a: server,
+                            EmulatorApp=lambda *a: App(),
+                            WorkerTransport=lambda *a: object(),
+                            run_mockable=timed_out):
+            with self.assertRaises(subject.RunnerFailure) as caught:
+                subject.run(args())
+        error = caught.exception
+        self.assertEqual(str(error), "SERVER_CLEANUP_UNCERTAIN")
+        self.assertEqual(error.primary_code, "APP_TRIAL_TIMEOUT")
+        self.assertIsNone(error.scene_evidence)
+        self.assertEqual(error.trial_timeout_evidence, expected)
+        self.assertTrue(server.cleaned)
+        output = io.StringIO()
+        with patch.object(subject, "parser") as parser, \
+             patch.object(subject, "run", side_effect=error), \
+             redirect_stdout(output):
+            parser.return_value.parse_args.return_value = args()
+            self.assertEqual(subject.main([]), 2)
+        reported = json.loads(output.getvalue())
+        self.assertEqual(reported["code"], "SERVER_CLEANUP_UNCERTAIN")
+        self.assertEqual(reported["primaryCode"], "APP_TRIAL_TIMEOUT")
+        self.assertEqual(reported["trialTimeoutEvidence"], expected)
+        self.assertNotIn("sceneEvidence", reported)
+
+    def test_timeout_evidence_surfaces_with_clean_cleanup(self) -> None:
+        server = FakeServer()
+        expected = {"commandResponse": {"trialState": "WAIT_FIRST_PAINT"},
+                    "firstTrialPoll": None,
+                    "lastTrialPoll": {"phase": "trial-poll",
+                                      "capture": "NO_POLL"}}
+        class App:
+            launch_attempted = False
+            prearm_host_start = 123.0
+            def timeout_failure_evidence(self): return expected
+        def timed_out(*unused):
+            raise host.TrialError("APP_TRIAL_TIMEOUT")
+        with patch.multiple(subject, verify_signed_apk=lambda *a: None,
+                            verify_installed_apk=lambda *a: None,
+                            _exact_size=lambda *a: None,
+                            file_sha=lambda *a, **k: None,
+                            _lock=lambda: (17, Path("ignored")),
+                            _unlock=lambda *a: None,
+                            ExactAdb=lambda *a: type("A", (),
+                                {"check_emulator": lambda self: None})(),
+                            OwnedFridaServer=lambda *a: server,
+                            EmulatorApp=lambda *a: App(),
+                            WorkerTransport=lambda *a: object(),
+                            run_mockable=timed_out):
+            with self.assertRaises(subject.RunnerFailure) as caught:
+                subject.run(args())
+        error = caught.exception
+        self.assertEqual(str(error), "APP_TRIAL_TIMEOUT")
+        self.assertIsNone(error.primary_code)
+        self.assertEqual(error.trial_timeout_evidence, expected)
+        self.assertEqual(error.cleanup_codes, ())
+        self.assertTrue(server.cleaned)
+
+    def test_timeout_reader_is_not_called_for_other_primary_failure(self) -> None:
+        server = FakeServer()
+        class App:
+            launch_attempted = False
+            prearm_host_start = 123.0
+            timeout_reads = 0
+            def timeout_failure_evidence(self):
+                self.timeout_reads += 1
+                return {"lastTrialPoll": {"phase": "trial-poll"}}
+        app = App()
+        def failed(*unused):
+            raise host.TrialError("APP_TRIAL_UNKNOWN")
+        with patch.multiple(subject, verify_signed_apk=lambda *a: None,
+                            verify_installed_apk=lambda *a: None,
+                            _exact_size=lambda *a: None,
+                            file_sha=lambda *a, **k: None,
+                            _lock=lambda: (17, Path("ignored")),
+                            _unlock=lambda *a: None,
+                            ExactAdb=lambda *a: type("A", (),
+                                {"check_emulator": lambda self: None})(),
+                            OwnedFridaServer=lambda *a: server,
+                            EmulatorApp=lambda *a: app,
+                            WorkerTransport=lambda *a: object(),
+                            run_mockable=failed):
+            with self.assertRaisesRegex(host.TrialError,
+                                        "APP_TRIAL_UNKNOWN"):
+                subject.run(args())
+        self.assertEqual(app.timeout_reads, 0)
+        self.assertTrue(server.cleaned)
+
     def test_cleanup_uncertainty_dominates_but_preserves_primary_code(self) -> None:
         server = FakeServer()
         server.fail_cleanup = True

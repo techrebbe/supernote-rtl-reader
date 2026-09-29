@@ -20,8 +20,8 @@ from host_protocol import Pins, TrialError, VARIANTS, need, run_mockable
 
 
 # Reviewed synthetic artifacts only. CLI digests are assertions, not authority.
-REVIEWED_APK_SHA256 = "1b23a3be88a21193160329fffa4039735b685fbb5e01e594888ab12f5ca5d610"
-REVIEWED_SIGNER_SHA256 = "4d4f0f18e10114c7a801bcdb87dd4fd2d75ebc24ca0ad5bcb6967009e62ead6a"
+REVIEWED_APK_SHA256 = "e04e8bfbd42c058bdf59d8ccadad39e35b72e03a019f3f7aea81e594906b9b87"
+REVIEWED_SIGNER_SHA256 = "62c9966a8b614096cdc4949a25e93b394b8b03830ef221be8257677c69cf7be2"
 REVIEWED_SERVER_SHA256 = "9dcb1c12fa528070f2f6590b245e2c66cb1f931e0975bc911d9ff476394879d7"
 REVIEWED_SERVER_BYTES = 110_837_320
 REVIEWED_BUNDLE_SHA256 = "241fd6a94067b26a737df8ddf6c192b82895006472c434cae4cbd06dc29a2d66"
@@ -35,12 +35,14 @@ class RunnerFailure(TrialError):
                  cleanup_codes: tuple[str, ...] = (),
                  refresh_evidence: dict | None = None,
                  scene_evidence: dict | None = None,
+                 trial_timeout_evidence: dict | None = None,
                  server_cleanup_evidence: list[dict[str, str]] | None = None) -> None:
         super().__init__(code)
         self.primary_code = primary_code
         self.cleanup_codes = cleanup_codes
         self.refresh_evidence = refresh_evidence
         self.scene_evidence = scene_evidence
+        self.trial_timeout_evidence = trial_timeout_evidence
         self.server_cleanup_evidence = server_cleanup_evidence
 
 
@@ -156,6 +158,7 @@ def run(args: argparse.Namespace) -> dict:
     cleanup_codes: list[str] = []
     refresh_evidence: dict | None = None
     scene_evidence: dict | None = None
+    trial_timeout_evidence: dict | None = None
     server_cleanup_evidence: list[dict[str, str]] | None = None
     try:
         adb = ExactAdb(args.adb)
@@ -183,6 +186,13 @@ def run(args: argparse.Namespace) -> dict:
                 scene_evidence = scene_reader()
             except BaseException:
                 pass
+        if str(primary_failure) == "APP_TRIAL_TIMEOUT":
+            timeout_reader = getattr(app, "timeout_failure_evidence", None)
+            if callable(timeout_reader):
+                try:
+                    trial_timeout_evidence = timeout_reader()
+                except BaseException:
+                    pass  # Diagnostic cannot mask the timeout or cleanup result.
         if (app is not None and app.launch_attempted and
                 app.prearm_host_start is None):
             try:
@@ -212,9 +222,11 @@ def run(args: argparse.Namespace) -> dict:
                             cleanup_codes=tuple(cleanup_codes),
                             refresh_evidence=refresh_evidence,
                             scene_evidence=scene_evidence,
+                            trial_timeout_evidence=trial_timeout_evidence,
                             server_cleanup_evidence=server_cleanup_evidence)
     if failure is not None:
         if refresh_evidence is not None or scene_evidence is not None or \
+           trial_timeout_evidence is not None or \
            (primary_failure is not None and
                                             failure is not primary_failure):
             raise RunnerFailure(str(failure),
@@ -222,7 +234,8 @@ def run(args: argparse.Namespace) -> dict:
                               if primary_failure is not None and
                                  failure is not primary_failure else None),
                 refresh_evidence=refresh_evidence,
-                scene_evidence=scene_evidence)
+                scene_evidence=scene_evidence,
+                trial_timeout_evidence=trial_timeout_evidence)
         raise failure
     if verdict is None:
         raise TrialError("TRIAL_UNCERTAIN")
@@ -250,6 +263,8 @@ def main(argv: list[str] | None = None) -> int:
                 output["refreshEvidence"] = error.refresh_evidence
             if error.scene_evidence is not None:
                 output["sceneEvidence"] = error.scene_evidence
+            if error.trial_timeout_evidence is not None:
+                output["trialTimeoutEvidence"] = error.trial_timeout_evidence
             if error.server_cleanup_evidence is not None:
                 output["serverCleanupEvidence"] = error.server_cleanup_evidence
         print(json.dumps(output,

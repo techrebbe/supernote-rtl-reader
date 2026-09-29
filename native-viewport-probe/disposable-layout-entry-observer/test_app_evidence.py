@@ -18,6 +18,9 @@ B = (0, 0, 100, 200)
 W = (0, 0, 101, 200)
 M = (0, 0, 99, 200)
 O = (1, 0, 101, 200)
+RESTORING = ("parent-plus-one", "parent-minus-one",
+             "direct-root-layout", "direct-root-offset")
+NON_RESTORING = ("unchanged-bounds", "away-back-aba")
 
 
 def box(rect):
@@ -73,6 +76,12 @@ def state_for(variant):
         restore = cut(B, first["parentPreCallRevision"] + 1,
                       first["observedWriteOrdinal"] + 1,
                       first["rootLayoutCallCount"] + 1, 9, exact=False)
+        # The restore layout has not painted yet; it still carries the first
+        # changed frame's paint-start and completion provenance.
+        for key in ("startedPaintRevision", "paintStartedElapsedMs",
+                    "paintStartParentRevision", "paintStartWriteOrdinal",
+                    "completedPaintRevision", "completedPaintElapsedMs"):
+            restore[key] = first_frame[key]
         restored_frame = cut(B, restore["parentPreCallRevision"],
                              restore["observedWriteOrdinal"],
                              restore["rootLayoutCallCount"], 10)
@@ -81,7 +90,7 @@ def state_for(variant):
                  restored_frame["rootLayoutCallCount"],
                  restored_frame["completedPaintRevision"] + 1)
     second["paintStartedElapsedMs"] = (
-        restored_frame["completedPaintElapsedMs"] + 1)
+        restored_frame["completedPaintElapsedMs"] + 30)
     second["completedPaintElapsedMs"] = second["paintStartedElapsedMs"] + 1
     return {"schema": subject.SCHEMA,
             "process": {"pid": 2468, "incarnation": "incarnation-1",
@@ -98,14 +107,49 @@ def state_for(variant):
             "current": copy.deepcopy(second),
             "lastCompletedPaint": copy.deepcopy(second),
             "trial": {"command": variant, "state": "PASS",
+                      "paintOrderProofVersion": 2,
                       "currentlyValid": True, "rollbackVerified": True,
                       "completeMutationCoverage": False,
                       "bypassObserved": direct,
                       "baseline": base, "firstAfter": first,
                       "firstFrame": first_frame, "restoreAfter": restore,
                       "restoredFrame": restored_frame,
+                      "interveningRestoredFrame": None,
+                      "secondPaintRequestElapsedMs":
+                          restored_frame["completedPaintElapsedMs"] + 25,
+                      "secondPaintStartRevisionFloor":
+                          restored_frame["startedPaintRevision"],
                       "secondFrame": copy.deepcopy(second),
                       "secondSample": second, "abaAway": aba}}
+
+
+def with_intervening_restored_paint(state):
+    restored = state["trial"]["restoredFrame"]
+    intervening = cut(B, restored["parentPreCallRevision"],
+                      restored["observedWriteOrdinal"],
+                      restored["rootLayoutCallCount"],
+                      restored["startedPaintRevision"] + 1)
+    intervening["paintStartedElapsedMs"] = (
+        restored["completedPaintElapsedMs"] + 1)
+    intervening["completedPaintElapsedMs"] = (
+        intervening["paintStartedElapsedMs"] + 1)
+    second = cut(B, restored["parentPreCallRevision"],
+                 restored["observedWriteOrdinal"],
+                 restored["rootLayoutCallCount"],
+                 intervening["startedPaintRevision"] + 1)
+    second["paintStartedElapsedMs"] = (
+        intervening["completedPaintElapsedMs"] + 30)
+    second["completedPaintElapsedMs"] = second["paintStartedElapsedMs"] + 1
+    state["trial"]["interveningRestoredFrame"] = intervening
+    state["trial"]["secondPaintRequestElapsedMs"] = (
+        intervening["completedPaintElapsedMs"] + 25)
+    state["trial"]["secondPaintStartRevisionFloor"] = (
+        intervening["startedPaintRevision"])
+    state["trial"]["secondFrame"] = copy.deepcopy(second)
+    state["trial"]["secondSample"] = copy.deepcopy(second)
+    state["current"] = copy.deepcopy(second)
+    state["lastCompletedPaint"] = copy.deepcopy(second)
+    return state
 
 
 class EvidenceTests(unittest.TestCase):
@@ -164,6 +208,137 @@ class EvidenceTests(unittest.TestCase):
         state["trial"]["firstFrame"]["effectivePaintOrder"][0:2] = [2, 1]
         with self.assertRaisesRegex(host.TrialError, "APP_PROOF_INVALID"):
             subject.derive_entries(state, ADMISSION, "parent-plus-one")
+
+    def test_one_intervening_paint_is_non_voting(self) -> None:
+        for variant in RESTORING:
+            with self.subTest(variant=variant):
+                state = with_intervening_restored_paint(state_for(variant))
+                restored = copy.deepcopy(state["trial"]["restoredFrame"])
+                events = subject.derive_entries(state, ADMISSION, variant)
+                self.assertEqual(len(events), 1 if variant == "direct-root-offset" else 2)
+                self.assertEqual(state["trial"]["restoredFrame"], restored)
+                self.assertEqual(restored["startedPaintRevision"], 10)
+                self.assertEqual(state["trial"]["interveningRestoredFrame"]
+                                 ["startedPaintRevision"], 11)
+                self.assertEqual(state["trial"]["secondFrame"]
+                                 ["startedPaintRevision"], 12)
+                self.assertEqual(state["trial"]["secondPaintStartRevisionFloor"], 11)
+
+    def test_intervening_paint_cannot_replace_requested_second(self) -> None:
+        for variant in RESTORING:
+            with self.subTest(variant=variant):
+                state = with_intervening_restored_paint(state_for(variant))
+                stale = copy.deepcopy(state["trial"]["interveningRestoredFrame"])
+                for name in ("secondFrame", "secondSample"):
+                    state["trial"][name] = copy.deepcopy(stale)
+                state["current"] = copy.deepcopy(stale)
+                state["lastCompletedPaint"] = copy.deepcopy(stale)
+                with self.assertRaisesRegex(host.TrialError, "APP_PROOF_DRIFT"):
+                    subject.derive_entries(state, ADMISSION, variant)
+
+    def test_intervening_paint_or_request_drift_rejected(self) -> None:
+        mutations = (("rootLayoutCallCount", 99),
+                     ("observedWriteOrdinal", 99),
+                     ("parentPreCallRevision", 99),
+                     ("startedPaintRevision", 13),
+                     ("paintStartedElapsedMs", 1),
+                     ("paintStartParentRevision", 99),
+                     ("paintStartWriteOrdinal", 99),
+                     ("completedPaintRevision", 99),
+                     ("bounds", box(W)),
+                     ("rootToken", "other-root"),
+                     ("completedPaintElapsedMs", 4000))
+        for variant in RESTORING:
+            for field, value in mutations:
+                with self.subTest(variant=variant, field=field):
+                    state = with_intervening_restored_paint(state_for(variant))
+                    state["trial"]["interveningRestoredFrame"][field] = value
+                    with self.assertRaises(host.TrialError):
+                        subject.derive_entries(state, ADMISSION, variant)
+            state = with_intervening_restored_paint(state_for(variant))
+            state["trial"]["secondPaintRequestElapsedMs"] = (
+                state["trial"]["interveningRestoredFrame"]
+                     ["completedPaintElapsedMs"])
+            with self.subTest(variant=variant, field="secondPaintRequestElapsedMs"):
+                with self.assertRaisesRegex(host.TrialError, "APP_PROOF_DRIFT"):
+                    subject.derive_entries(state, ADMISSION, variant)
+
+    def test_extra_request_floor_and_requested_start_are_distinct(self) -> None:
+        for variant in RESTORING:
+            with self.subTest(variant=variant, field="requestFloor"):
+                state = with_intervening_restored_paint(state_for(variant))
+                state["trial"]["secondPaintStartRevisionFloor"] = (
+                    state["trial"]["restoredFrame"]["startedPaintRevision"])
+                with self.assertRaisesRegex(host.TrialError, "APP_PROOF_DRIFT"):
+                    subject.derive_entries(state, ADMISSION, variant)
+            with self.subTest(variant=variant, field="requestedStart"):
+                state = with_intervening_restored_paint(state_for(variant))
+                early_start = state["trial"]["secondPaintRequestElapsedMs"] - 1
+                for frame in (state["trial"]["secondFrame"],
+                              state["trial"]["secondSample"], state["current"],
+                              state["lastCompletedPaint"]):
+                    frame["paintStartedElapsedMs"] = early_start
+                with self.assertRaisesRegex(host.TrialError, "APP_PROOF_DRIFT"):
+                    subject.derive_entries(state, ADMISSION, variant)
+            with self.subTest(variant=variant, field="requestGap"):
+                state = with_intervening_restored_paint(state_for(variant))
+                state["trial"]["secondPaintRequestElapsedMs"] = (
+                    state["trial"]["interveningRestoredFrame"]
+                         ["completedPaintElapsedMs"] + 1001)
+                with self.assertRaisesRegex(host.TrialError, "APP_PROOF_DRIFT"):
+                    subject.derive_entries(state, ADMISSION, variant)
+
+    def test_restore_after_keeps_first_frame_paint_provenance(self) -> None:
+        for variant in RESTORING:
+            for with_extra in (False, True):
+                for field in ("startedPaintRevision", "paintStartedElapsedMs",
+                              "paintStartParentRevision", "paintStartWriteOrdinal",
+                              "completedPaintRevision", "completedPaintElapsedMs"):
+                    with self.subTest(variant=variant, with_extra=with_extra,
+                                      field=field):
+                        state = state_for(variant)
+                        if with_extra:
+                            state = with_intervening_restored_paint(state)
+                        state["trial"]["restoreAfter"][field] += 1
+                        with self.assertRaisesRegex(host.TrialError,
+                                                    "APP_PROOF_DRIFT"):
+                            subject.derive_entries(state, ADMISSION, variant)
+
+    def test_restored_paint_counters_must_match_restore_after(self) -> None:
+        for variant in RESTORING:
+            for with_extra in (False, True):
+                with self.subTest(variant=variant, with_extra=with_extra):
+                    state = state_for(variant)
+                    if with_extra:
+                        state = with_intervening_restored_paint(state)
+                    restore = state["trial"]["restoreAfter"]
+                    self.assertIsNotNone(restore)
+                    cuts = [state["trial"]["restoredFrame"],
+                            state["trial"]["secondFrame"],
+                            state["trial"]["secondSample"], state["current"],
+                            state["lastCompletedPaint"]]
+                    if with_extra:
+                        cuts.append(state["trial"]["interveningRestoredFrame"])
+                    for frame in cuts:
+                        frame["parentPreCallRevision"] = 99
+                        frame["observedWriteOrdinal"] = 99
+                        frame["rootLayoutCallCount"] = 99
+                        frame["paintStartParentRevision"] = 99
+                        frame["paintStartWriteOrdinal"] = 99
+                    with self.assertRaisesRegex(host.TrialError, "APP_PROOF_DRIFT"):
+                        subject.derive_entries(state, ADMISSION, variant)
+
+    def test_proof_version_and_non_restoring_variants_cannot_use_extra(self) -> None:
+        state = state_for("parent-plus-one")
+        del state["trial"]["paintOrderProofVersion"]
+        with self.assertRaisesRegex(host.TrialError, "APP_TRIAL_NOT_VALID"):
+            subject.derive_entries(state, ADMISSION, "parent-plus-one")
+        for variant in NON_RESTORING:
+            with self.subTest(variant=variant):
+                state = with_intervening_restored_paint(state_for(variant))
+                self.assertIsNone(state["trial"]["restoreAfter"])
+                with self.assertRaisesRegex(host.TrialError, "APP_PROOF_DRIFT"):
+                    subject.derive_entries(state, ADMISSION, variant)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,10 @@
 # Native writer authority: bounded static audit (2026-09-29)
 
 This note is a **NO-GO for live writer admission**, not a firmware modification or
-Nomad hardware pass. It explains why the offline `PageWriterWitness` contract in
+Nomad hardware pass. The final bounded architecture decision is in
+[NATIVE_VIEWPORT_FINAL_VIABILITY.md](NATIVE_VIEWPORT_FINAL_VIABILITY.md);
+earlier gate proposals below are preserved as history, not authorization for
+another Nomad trace. This note explains why the offline `PageWriterWitness` contract in
 `TargetOwnedVisualLeaseCore` remains unavailable in `AndroidLeasePort`. The
 original PDF, `.mark`, native reader, and DrawPath service remain authoritative.
 
@@ -51,7 +54,7 @@ authority can prove exact page and writer identity, effective writable state,
 and a non-reusable pre-change generation. The current Android Port therefore
 must continue to reject visual-child admission.
 
-## Next bounded gate
+## Historical bounded-gate proposal (superseded by final NO-GO)
 
 1. Continue an **offline** audit of the pinned service's transaction and dump
    surface for a genuinely read-only page/region query and a pre-write
@@ -108,3 +111,24 @@ not observations of Supernote's service. Neither proves that every stock setter
 and pen worker uses a common gate, or that a live hook can be installed and
 removed quiescently. The Android Port remains fail-closed until those facts and
 the exact disposable-PDF hardware rollback are independently verified.
+
+### Pen-worker lock is not a page/writer fence
+
+A further bounded inspection of the same pinned ELF found that
+`ThreadDrawPath::run` receives points through the queue at RVA `0xae650` and
+holds its `this+0x1c` mutex across the `penUpPushTrail(true)` call at
+`0xb0c44`. Neither `setAppInfo` (`0xb5f00`) nor the writable-region setter
+(`0xb5a70`) takes that mutex. The region setter instead uses `this+0x1048`,
+and the worker's derived write-area update (`0xb8f14`) uses `this+0x10fc`.
+`penUpPushTrail` copies the derived area and page/layer around
+`0xba318`–`0xba34c` without a mutex shared by both setters.
+
+Consequently, queue-pop and pen-up are possible **observation points**, not a
+quiescent admission gate or an atomic combined page/region/writable witness.
+More observation of setter and pen-up ordering would not satisfy the required
+pre-write authority. Making the state atomic would require a separately
+reviewed service-owned synchronization and contact-order fence spanning both
+setters and the worker, with reversible deployment and independent hardware
+rollback proof. Under the final bounded decision, no further speculative
+Nomad trace is proposed. No service hook or device action was performed for
+this inspection.

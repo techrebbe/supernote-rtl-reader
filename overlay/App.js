@@ -309,6 +309,7 @@ export default function App() {
   const [nativeSpreadError, setNativeSpreadError] = useState(null);
   const [editNotice, setEditNotice] = useState(null);
   const [editBusy, setEditBusy] = useState(false);
+  const [editRecoveryAvailable, setEditRecoveryAvailable] = useState(false);
   const [nativeSpreadAuthorityState, setNativeSpreadAuthorityState] =
     useState('unknown');
   const [nativeSpreadAuthorityDetail, setNativeSpreadAuthorityDetail] = useState(
@@ -349,11 +350,48 @@ export default function App() {
   const nativePageIndexAtOpenRef = useRef(null);
   const editReturnRef = useRef(null);
   const editInFlightRef = useRef(false);
+  const closeInFlightRef = useRef(false);
+  const readerClosedRef = useRef(false);
+  const transitionTokenRef = useRef(null);
+  const editRecoveryRef = useRef(null);
+  const preferencesWriteRef = useRef(Promise.resolve());
+  const readerTransitionLocked = () =>
+    readerClosedRef.current || editInFlightRef.current || closeInFlightRef.current ||
+    Boolean(globalThis.RTL_READER_TRANSITION_IN_FLIGHT);
+  const beginReaderTransition = () => {
+    if (!mountedRef.current || readerTransitionLocked()) return false;
+    const token = {
+      allowClose: false,
+      recoverAfterUnmount: async () => {
+        const retry = editRecoveryRef.current;
+        if (mountedRef.current || !retry) return false;
+        editRecoveryRef.current = null;
+        try {
+          // The captured rollback repairs only preferences. Captured Close
+          // retries skip native calls once this component has unmounted.
+          await retry();
+        } catch (error) {
+          console.error('RTL_READER_ORPHAN_RECOVERY_FAILED', error);
+          editRecoveryRef.current = retry;
+        }
+        return globalThis.RTL_READER_TRANSITION_IN_FLIGHT === null;
+      },
+    };
+    transitionTokenRef.current = token;
+    globalThis.RTL_READER_TRANSITION_IN_FLIGHT = token;
+    return true;
+  };
+  const releaseReaderTransition = () => {
+    if (globalThis.RTL_READER_TRANSITION_IN_FLIGHT === transitionTokenRef.current) {
+      globalThis.RTL_READER_TRANSITION_IN_FLIGHT = null;
+    }
+    transitionTokenRef.current = null;
+  };
   // All page changes go through this guard: nothing may move the page while an
   // Edit hand-off is in flight. (Kept as a setter shadow so navigation code
   // that build patch scripts match verbatim stays unchanged.)
   const setPageIndex = value => {
-    if (editInFlightRef.current) return;
+    if (readerTransitionLocked()) return;
     setPageIndexRaw(value);
   };
   const displayRef = useRef(null);
@@ -393,7 +431,7 @@ export default function App() {
     const subscription = BackHandler.addEventListener(
       'hardwareBackPress',
       () => {
-        if (!nativeSpreadBusyRef.current) return false;
+        if (!nativeSpreadBusyRef.current && !readerTransitionLocked()) return false;
         setNativeSpreadError(
           'Wait for the native reader change to finish before closing.',
         );
@@ -403,7 +441,8 @@ export default function App() {
     return () => subscription.remove();
   }, []);
 
-  if (preferencesReady && documentContext && Number.isInteger(pageIndex)) {
+  if (preferencesReady && documentContext && Number.isInteger(pageIndex) &&
+      !readerTransitionLocked()) {
     latestPreferencesRef.current = {
       version: 1,
       direction,
@@ -523,14 +562,24 @@ export default function App() {
 
   const savePreferences = async (reason, payload = latestPreferencesRef.current) => {
     const filePath = filePathRef.current;
-    if (!filePath || !payload || !ReaderPreferencesModule?.save) return;
-    // While an Edit is in flight only the Edit's own saves may write.
-    if (editInFlightRef.current && !reason.startsWith('edit')) return;
-
-    await ReaderPreferencesModule.save(filePath, JSON.stringify(payload));
-    console.log(
-      `RTL_READER_PREFS_SAVED reason=${reason} page=${payload.lastPageIndex + 1} direction=${payload.direction} view=${payload.viewMode} cover=${payload.coverSeparate} divider=${payload.showSpreadDivider} header=${payload.showNativeSpreadHeader} sizing=${payload.spreadSizing}`,
-    );
+    const editWrite = reason === 'edit' || reason === 'edit-rollback';
+    const closeWrite = reason === 'close' && closeInFlightRef.current;
+    if (!filePath || !payload || !ReaderPreferencesModule?.save) {
+      if (editWrite || closeWrite) throw new Error('Reader preferences are unavailable.');
+      return;
+    }
+    if (readerTransitionLocked() && !editWrite && !closeWrite) return;
+    const serialized = JSON.stringify(payload);
+    // Serialize even across React activations. Clearing a debounce timer does
+    // not cancel a save that already entered the native bridge.
+    const prior = globalThis.RTL_READER_PREFERENCES_WRITE_CHAIN ?? preferencesWriteRef.current;
+    const write = prior.catch(() => {}).then(async () => {
+      await ReaderPreferencesModule.save(filePath, serialized);
+      console.log(`RTL_READER_PREFS_SAVED reason=${reason} page=${payload.lastPageIndex + 1}`);
+    });
+    preferencesWriteRef.current = write;
+    globalThis.RTL_READER_PREFERENCES_WRITE_CHAIN = write;
+    await write;
   };
 
   useEffect(() => {
@@ -550,6 +599,12 @@ export default function App() {
           throw new Error('RTL Reader v0.1.0 currently supports PDF documents only.');
         }
 
+        // The previous activation's unmount may have queued its final page
+        // behind an already pending save. Never restore an intermediate value.
+        const pendingWrites = globalThis.RTL_READER_PREFERENCES_WRITE_CHAIN ??
+          preferencesWriteRef.current;
+        await pendingWrites.catch(() => {});
+        if (!mountedRef.current) return;
         const rawPreferences = await ReaderPreferencesModule.load(context.filePath);
         const restored = decodePreferences(rawPreferences, context);
         let nativeSpread = null;
@@ -677,11 +732,9 @@ export default function App() {
         clearTimeout(preferencesSaveTimerRef.current);
       }
       const payload = latestPreferencesRef.current;
-      if (filePathRef.current && payload && ReaderPreferencesModule?.save) {
-        ReaderPreferencesModule.save(
-          filePathRef.current,
-          JSON.stringify(payload),
-        ).catch(error => console.warn('RTL_READER_PREFS_UNMOUNT_SAVE_FAILED', error));
+      if (!readerTransitionLocked() && filePathRef.current && payload) {
+        savePreferences('unmount', payload)
+          .catch(error => console.warn('RTL_READER_PREFS_UNMOUNT_SAVE_FAILED', error));
       }
     };
   }, []);
@@ -843,38 +896,76 @@ export default function App() {
   ]);
 
   const close = async () => {
-    if (editInFlightRef.current) return;
+    if (readerTransitionLocked()) return;
     if (nativeSpreadBusyRef.current) {
       setNativeSpreadError(
         'Wait for the native reader change to finish before closing.',
       );
       return;
     }
+    if (!beginReaderTransition()) return;
+    closeInFlightRef.current = true;
+    setEditBusy(true);
     if (preferencesSaveTimerRef.current) {
       clearTimeout(preferencesSaveTimerRef.current);
       preferencesSaveTimerRef.current = null;
     }
 
     try {
-      await savePreferences('close');
+      if (latestPreferencesRef.current) {
+        await savePreferences('close');
+      } else {
+        // A never-ready reader has no document-bound page to save or hand off.
+        transitionTokenRef.current.skipHandoff = true;
+      }
     } catch (error) {
       console.warn('RTL_READER_PREFS_CLOSE_SAVE_FAILED', error);
+      closeInFlightRef.current = false;
+      releaseReaderTransition();
+      if (mountedRef.current) {
+        setEditBusy(false);
+        setEditNotice('Could not save the reader position; the reader stayed open.');
+      }
+      return;
     }
 
-    PluginManager.closePluginView().catch(error =>
-      console.error('RTL_READER_CLOSE_FAILED', error),
-    );
+    const finishClose = async () => {
+      if (mountedRef.current) {
+        transitionTokenRef.current.allowClose = true;
+        try {
+          await PluginManager.closePluginView();
+          readerClosedRef.current = true;
+        } catch (error) {
+          console.error('RTL_READER_CLOSE_FAILED', error);
+          transitionTokenRef.current.allowClose = false;
+          editRecoveryRef.current = finishClose;
+          if (mountedRef.current) {
+            setEditRecoveryAvailable(true);
+            setEditNotice(EDIT_BLOCKED_MESSAGES.close_failed);
+          }
+          return;
+        }
+      }
+      closeInFlightRef.current = false;
+      editRecoveryRef.current = null;
+      releaseReaderTransition();
+      if (mountedRef.current) {
+        setEditBusy(false);
+        setEditRecoveryAvailable(false);
+      }
+    };
+    await finishClose();
   };
 
   // Edit a page in Supernote's stock reader: save lastPageIndex=page plus an
   // editReturn record, then run the existing native handoff HERE (not in the
   // close wrapper) so its result can be checked before anything is presented as
-  // started. Exclusive (editInFlightRef) and fail-closed: on any failure every
-  // in-memory and on-disk change is rolled back and the plugin stays open.
+  // started. A failed rollback remains fenced until an explicit retry persists
+  // the previous preferences; no page/tool/Close operation may escape the fence.
   // Success means only "stock config rewritten, restart scheduled"; the restart
   // is delayed and unacknowledged (hardware test E2 verifies the outcome).
   const editPage = async page => {
-    if (editInFlightRef.current) return;
+    if (!mountedRef.current || readerTransitionLocked()) return;
     const liveMode = effectiveModeRef.current;
     const livePage = pageIndexRef.current;
     const {settled} = listEditTargets({
@@ -923,7 +1014,9 @@ export default function App() {
       return;
     }
 
+    if (!beginReaderTransition()) return;
     editInFlightRef.current = true;
+    globalThis.RTL_READER_EDIT_HANDOFF_DONE = false;
     setEditBusy(true);
     setEditNotice(null);
     if (preferencesSaveTimerRef.current) {
@@ -942,16 +1035,31 @@ export default function App() {
         await savePreferences('edit-rollback', previous.payload);
       } catch (error) {
         console.warn('RTL_READER_EDIT_ROLLBACK_SAVE_FAILED', error);
+        editRecoveryRef.current = () => rollback(failure);
+        if (mountedRef.current) {
+          setEditRecoveryAvailable(true);
+          setEditNotice(EDIT_BLOCKED_MESSAGES.rollback_failed);
+        }
+        return;
       }
       editInFlightRef.current = false;
-      setEditBusy(false);
-      setEditNotice(EDIT_BLOCKED_MESSAGES[failure]);
+      editRecoveryRef.current = null;
+      releaseReaderTransition();
+      if (mountedRef.current) {
+        setEditBusy(false);
+        setEditRecoveryAvailable(false);
+        setEditNotice(EDIT_BLOCKED_MESSAGES[failure]);
+      }
     };
 
     try {
       await savePreferences('edit', payload);
     } catch (error) {
       console.warn('RTL_READER_PREFS_EDIT_SAVE_FAILED', error);
+      await rollback('save_failed');
+      return;
+    }
+    if (!mountedRef.current) {
       await rollback('save_failed');
       return;
     }
@@ -964,6 +1072,7 @@ export default function App() {
       handoff = evaluateHandoff(
         await ReaderPreferencesModule.handoffLastSavedPage(),
         page,
+        record.filePath,
       );
     } catch (error) {
       console.warn('RTL_READER_EDIT_HANDOFF_FAILED', error?.message ?? String(error));
@@ -978,15 +1087,58 @@ export default function App() {
     // Tell the close wrapper (index.js) the handoff already ran this activation.
     globalThis.RTL_READER_EDIT_HANDOFF_DONE = true;
     console.log(`RTL_READER_EDIT_REQUESTED page=${page + 1}`);
-    setPageIndexRaw(page);
-    PluginManager.closePluginView().catch(error => {
-      console.error('RTL_READER_CLOSE_FAILED', error);
+    if (mountedRef.current) setPageIndexRaw(page);
+    const finishEditClose = async () => {
+      if (mountedRef.current) {
+        transitionTokenRef.current.allowClose = true;
+        try {
+          await PluginManager.closePluginView();
+          readerClosedRef.current = true;
+        } catch (error) {
+          console.error('RTL_READER_CLOSE_FAILED', error);
+          transitionTokenRef.current.allowClose = false;
+          editRecoveryRef.current = finishEditClose;
+          if (mountedRef.current) {
+            setEditRecoveryAvailable(true);
+            setEditNotice(EDIT_BLOCKED_MESSAGES.close_failed);
+          }
+          return;
+        }
+      }
+      // A successful native handoff survives an external unmount. Never issue
+      // another close/handoff or roll back its already accepted Edit record.
       editInFlightRef.current = false;
-      setEditBusy(false);
-    });
+      editRecoveryRef.current = null;
+      releaseReaderTransition();
+      if (mountedRef.current) {
+        setEditBusy(false);
+        setEditRecoveryAvailable(false);
+      }
+    };
+    await finishEditClose();
+  };
+
+  const retryEditRecovery = async () => {
+    const retry = editRecoveryRef.current;
+    if (!mountedRef.current || !retry) return;
+    editRecoveryRef.current = null;
+    setEditRecoveryAvailable(false);
+    try {
+      await retry();
+    } catch (error) {
+      console.error('RTL_READER_EDIT_RECOVERY_FAILED', error);
+      editRecoveryRef.current = retry;
+      if (mountedRef.current) setEditRecoveryAvailable(true);
+    }
+  };
+
+  const openSettings = () => {
+    if (readerTransitionLocked()) return;
+    setSettingsOpen(true);
   };
 
   const closeSettings = () => {
+    if (readerTransitionLocked()) return;
     if (nativeSpreadBusyRef.current) {
       setNativeSpreadError(
         'Wait for the native reader change to finish before closing.',
@@ -1071,6 +1223,7 @@ export default function App() {
   }
 
   const setDirectionValue = async next => {
+    if (readerTransitionLocked()) return;
     if (
       (next !== 'rtl' && next !== 'ltr') ||
       nativeSpreadBusyRef.current
@@ -1095,6 +1248,7 @@ export default function App() {
   };
 
   const setViewModeValue = next => {
+    if (readerTransitionLocked()) return;
     if (!['auto', 'single', 'spread'].includes(next)) return;
     viewModeRef.current = next;
     setViewMode(next);
@@ -1102,6 +1256,7 @@ export default function App() {
   };
 
   const setCoverSeparateValue = async next => {
+    if (readerTransitionLocked()) return;
     if (nativeSpreadBusyRef.current) return;
     if (!nativeSpreadAuthorityResolved) {
       reportNativeSpreadAuthorityLocked();
@@ -1174,6 +1329,7 @@ export default function App() {
     nextSizing,
     nextHeader,
   ) => {
+    if (readerTransitionLocked()) return;
     if (nativeSpreadBusyRef.current) return;
     if (!nativeSpreadAuthorityResolved) {
       reportNativeSpreadAuthorityLocked();
@@ -1258,6 +1414,7 @@ export default function App() {
   };
 
   const setNativeSpreadReadOnly = async enabled => {
+    if (readerTransitionLocked()) return false;
     const filePath = filePathRef.current;
     if (
       !filePath ||
@@ -1310,6 +1467,7 @@ export default function App() {
   };
 
   const setNativeSpreadEditableMode = async () => {
+    if (readerTransitionLocked()) return;
     const filePath = filePathRef.current;
     if (
       !filePath ||
@@ -1360,6 +1518,7 @@ export default function App() {
   };
 
   const reconcileNativeSpreadRecovery = async () => {
+    if (readerTransitionLocked()) return;
     const filePath = filePathRef.current;
     if (
       !filePath ||
@@ -1421,6 +1580,7 @@ export default function App() {
   };
 
   const restoreNativeBackup = async () => {
+    if (readerTransitionLocked()) return;
     const filePath = filePathRef.current;
     if (
       !filePath ||
@@ -1459,6 +1619,7 @@ export default function App() {
   };
 
   const openJump = () => {
+    if (readerTransitionLocked()) return;
     setJumpText(Number.isInteger(pageIndex) ? String(pageIndex + 1) : '');
     setJumpOpen(true);
   };
@@ -1469,6 +1630,7 @@ export default function App() {
   };
 
   const submitJump = () => {
+    if (readerTransitionLocked()) return;
     const requested = Number.parseInt(jumpText, 10);
     if (!Number.isFinite(requested)) return;
     const target = clampPage(requested - 1, totalPagesRef.current);
@@ -1627,12 +1789,13 @@ export default function App() {
                 </Pressable>
               ))}
               <Pressable
-                onPress={() => setSettingsOpen(true)}
+                disabled={editBusy}
+                onPress={openSettings}
                 style={styles.headerButton}>
                 <Text style={styles.headerButtonText}>Settings</Text>
               </Pressable>
               <Pressable
-                disabled={nativeSpreadBusy}
+                disabled={nativeSpreadBusy || editBusy}
                 onPress={close}
                 style={[
                   styles.headerButton,
@@ -2049,6 +2212,17 @@ export default function App() {
                 <Text style={styles.panelButtonText}>Go</Text>
               </Pressable>
             </View>
+          </View>
+        </View>
+      )}
+
+      {editRecoveryAvailable && (
+        <View style={styles.modalBackdrop}>
+          <View style={styles.jumpPanel}>
+            <Text style={styles.errorText}>{editNotice}</Text>
+            <Pressable onPress={retryEditRecovery} style={styles.panelButton}>
+              <Text style={styles.panelButtonText}>Retry recovery</Text>
+            </Pressable>
           </View>
         </View>
       )}

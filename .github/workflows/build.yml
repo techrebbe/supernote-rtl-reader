@@ -55,6 +55,7 @@ jobs:
           python3 scripts/check_native_invariants.py .
           python3 scripts/check_edit_return_invariants.py .
           node scripts/test_edit_return.js
+          node scripts/test_edit_lifecycle.js
           python3 scripts/check_native_spread_invariants.py .
           python3 scripts/test_build_provenance.py .
           python3 scripts/test_plugin_packaging_fail_closed.py
@@ -724,7 +725,7 @@ jobs:
       - name: Upload plugin package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: supernote-rtl-reader-v0.4.24-edit-exp1-native-reader-v2
+          name: supernote-rtl-reader-v0.4.24-edit-exp2-native-reader-v2
           path: out/*.snplg
           if-no-files-found: error
           retention-days: 3

@@ -254,6 +254,7 @@ def main() -> None:
     text = replace_once(text, old_go_by, new_go_by, "navigation timing")
 
     old_submit_jump = r'''  const submitJump = () => {
+    if (readerTransitionLocked()) return;
     const requested = Number.parseInt(jumpText, 10);
     if (!Number.isFinite(requested)) return;
     const target = clampPage(requested - 1, totalPagesRef.current);
@@ -264,6 +265,7 @@ def main() -> None:
     setJumpOpen(false);
   };'''
     new_submit_jump = r'''  const submitJump = () => {
+    if (readerTransitionLocked()) return;
     const requested = Number.parseInt(jumpText, 10);
     if (!Number.isFinite(requested)) return;
     const target = clampPage(requested - 1, totalPagesRef.current);

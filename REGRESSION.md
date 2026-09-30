@@ -2986,6 +2986,37 @@ silently dropped from the derived PDF. The complete 173-test generator suite
 and both repository invariant suites pass. These generator-only corrections do
 not change the hardware-tested companion APK or runtime path.
 
+## v0.4.24-edit-exp2 - OFFLINE CANDIDATE; HARDWARE PENDING
+
+This focused correction is based on Claude's exact Edit/Return head
+`904ee54a8b26d05dd6faa2eb37ffd1a909e35d90`, without changing that branch.
+The installable plug-in identity is `0.4.24-edit-exp2`, version code `44`, with
+runtime marker `RTL_READER_OPEN v0.4.24-edit-exp2-native-reader-v2`.
+
+The generated native Single display is accepted without requiring the legacy
+bitmap URI. Edit verifies its immediate handoff's document and page, serializes
+accepted preference writes across activations, and drains them before reopening.
+Navigation, Settings, Back, ordinary Close, and reactivation cannot race Edit.
+Failed rollback retains its fence until a successful preferences-only retry;
+accepted handoffs retry only closing, not a second handoff. Recovery remains
+reachable with hidden chrome or a renderer error, including after unmount.
+
+The Node regression suites execute actual generated display producers, App
+callbacks, initialization/unmount logic, and the index close/activation paths
+with deferred bridge responses: 38 Edit/Return tests and 37 lifecycle tests pass.
+The existing Java core passes 85,407 assertions; all 271 mutation cases and ten
+interleaving groups pass. Renderer/v2/Edit/cross-layer invariants, packaging,
+provenance, and fake-ADB trace-helper gates pass. Source pins were updated only for
+reviewed App/helper/workflow changes and extended to protect index.js and the
+direct-render guard generator. Native writer, annotation format, native renderer,
+companion APK, and packaging/signing implementation remain unchanged.
+
+No Nomad installation or hardware pass is claimed. The next gate is a disposable
+PDF: Edit from settled portrait/Single and each spread half, exact stock page,
+native writing/save, then RTL return after page changes and rotation. The existing
+stock restart route still requires hardware observation; immediate bridge success
+does not prove the target activity has completed loading.
+
 ## Failure capture
 
 Before reproducing a failure:

@@ -541,6 +541,7 @@ def check(repo_root: Path) -> None:
     )
     app_path = repo_root / "overlay" / "App.js"
     edit_return_path = repo_root / "overlay" / "editReturn.js"
+    index_path = repo_root / "overlay" / "index.js"
     workflow_path = repo_root / ".github" / "workflows" / "build.yml"
     plugin_build_path = repo_root / "build.sh"
     packager_patch_path = repo_root / "scripts" / "patch_plugin_packager.py"
@@ -978,17 +979,27 @@ def check(repo_root: Path) -> None:
         ),
         (
             app_path,
-            "977af11f016c52c4664a4da40e8b48829243e2f78efd780df39b0ba2a0d265d5",
+            "6412fc02e2586ad4dbb905d35cc69badb69199565112d8e72a00931f4769ad30",
             "Native Spread UI authority source",
         ),
         (
             edit_return_path,
-            "0fb42ce08cc56b2e303ae5c9b909f790c708925ae499e6a722fc6b096633aecd",
+            "3b6de3826f67e5ead78324cbc6df0a86bc6df6d78c9042598ef4645827c61538",
             "Edit/Return page-authority module",
         ),
         (
+            index_path,
+            "d1eadadfb5af74d571cc023a2d7addc1577638d1fc3e94a355a1a24e52f28781",
+            "Edit/Return activation and close authority",
+        ),
+        (
+            direct_patch_path,
+            "161d732a4469f178a855ee81b2742434b5ecf8fd6a7d8ca962f39b2898af98cb",
+            "direct-render Edit/Return transition guard generation",
+        ),
+        (
             workflow_path,
-            "c8677e5a99e4f9ecc3a2cc8f39e49f1482e8958cd5c9be2c543f07939bc96f07",
+            "7f301c7311e3a2da50e015a29abc5b807c8800f629a27c7096690c0494eaa0d2",
             "Native Spread companion-build workflow",
         ),
         (
@@ -2406,7 +2417,7 @@ def check(repo_root: Path) -> None:
             "nativeSpreadBusyRef.current = true;",
             "if (nativeSpreadBusyRef.current) return;",
             "BackHandler.addEventListener(",
-            "if (!nativeSpreadBusyRef.current) return false;",
+            "if (!nativeSpreadBusyRef.current && !readerTransitionLocked()) return false;",
             "Wait for the native reader change to finish before closing.",
             "const [showSpreadDivider, setShowSpreadDivider]",
             "const [showNativeSpreadHeader, setShowNativeSpreadHeader]",

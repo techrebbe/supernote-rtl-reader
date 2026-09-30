@@ -1,10 +1,13 @@
 'use strict';
 // Deterministic host tests for the RTL Reader Close / native-handoff / reopen
 // page-selection logic. Run: node scripts/test_edit_return.js
+// Generated-source tests require Python 3 (or its path in PYTHON_BIN).
 // No device, ADB, or React Native runtime is used.
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const {spawnSync} = require('node:child_process');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -14,8 +17,7 @@ const er = require(path.join(ROOT, 'overlay/editReturn.js'));
 // --- Subject under test -----------------------------------------------------
 // Evaluate the real pure helpers from overlay/App.js (a JSX file that cannot be
 // required directly) so the tests exercise the shipped text, not a copy.
-function loadHelpersFromAppJs() {
-  const src = fs.readFileSync(path.join(ROOT, 'overlay/App.js'), 'utf8');
+function loadHelpersFromAppJs(src = fs.readFileSync(path.join(ROOT, 'overlay/App.js'), 'utf8')) {
   const grab = (startMarker, endMarker) => {
     const s = src.indexOf(startMarker);
     const e = src.indexOf(endMarker, s);
@@ -23,10 +25,10 @@ function loadHelpersFromAppJs() {
     return src.slice(s, e);
   };
   const code =
-    grab('function clampPage(', 'function cacheKey(') +
+    grab('function clampPage(', 'function normalizePage(') +
     grab('function normalizePage(', 'function viewModeLabel(') +
     grab('function decodePreferences(', 'function SegmentedButton(') +
-    '\nreturn {decodePreferences, getSpreadPair, getVisualSpread};';
+    '\nreturn {decodePreferences, cacheKey, normalizePage, getSpreadPair, getVisualSpread};';
   const noop = () => {};
   return new Function('console', 'chooseInitialPage', code)(
     {warn: noop, log: noop, error: noop},
@@ -296,13 +298,194 @@ test('Edit is unsettled whenever the completed render is not the requested view 
   assert.equal(er.listEditTargets({...args, display: {...shown, rightPageIndex: 99}}).settled, false, 'right slot differs');
 });
 
-test('Handoff result must name the requested page and not be a skip (finding 2)', () => {
-  assert.deepEqual(er.evaluateHandoff({pageIndex: 31, uid: 1000}, 31), {ok: true, reason: 'ok'});
-  assert.equal(er.evaluateHandoff({annotationRecovery: true, uid: 1000}, 31).reason, 'recovery_skipped');
-  assert.equal(er.evaluateHandoff({pageIndex: 30}, 31).reason, 'page_mismatch');
-  assert.equal(er.evaluateHandoff({}, 31).reason, 'page_mismatch');
-  assert.equal(er.evaluateHandoff(null, 31).reason, 'no_result');
-  assert.equal(er.evaluateHandoff(undefined, 31).reason, 'no_result');
+// Run the real App.js build transforms, then execute the actual render effect
+// and completion callback with host-only dependencies. Synthetic display shapes
+// miss the packaged native single-page path, which has no bitmap URI field.
+function generateNativeAppSource(t) {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'rtl-edit-display-'));
+  t.after(() => fs.rmSync(temp, {recursive: true, force: true}));
+  const generatedPath = path.join(temp, 'App.js');
+  fs.copyFileSync(path.join(ROOT, 'overlay/App.js'), generatedPath);
+
+  const candidates = process.env.PYTHON_BIN
+    ? [{command: process.env.PYTHON_BIN, args: []}]
+    : [
+        {command: 'python3', args: []},
+        {command: 'python', args: []},
+        {command: 'py', args: ['-3']},
+      ];
+  const python = candidates.find(candidate =>
+    spawnSync(candidate.command, [...candidate.args, '--version'], {encoding: 'utf8'}).status === 0,
+  );
+  assert.ok(python, 'Python 3 is required for generated App.js regression tests; set PYTHON_BIN');
+
+  const build = fs.readFileSync(path.join(ROOT, 'build.sh'), 'utf8');
+  const patches = ['patch_direct_view.py', 'install_native.py', 'patch_initial_layout.py'];
+  const positions = patches.map(script => build.indexOf(`scripts/${script}`));
+  assert.ok(
+    positions.every((position, index) => position >= 0 && (index === 0 || position > positions[index - 1])),
+    'test must follow the build\'s native display and measured-layout transforms',
+  );
+  for (const script of patches) {
+    // Native installation also patches App.js prefetch state. Call its actual
+    // App-only transform without materializing unrelated Android project files.
+    const args = script === 'install_native.py'
+      ? [
+          '-B', '-c',
+          'import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); ' +
+            'from install_native import patch_app_prefetch_direction; ' +
+            'patch_app_prefetch_direction(Path(sys.argv[2]))',
+          path.join(ROOT, 'scripts'), generatedPath,
+        ]
+      : [path.join(ROOT, 'scripts', script), generatedPath];
+    const result = spawnSync(
+      python.command,
+      [...python.args, ...args],
+      {encoding: 'utf8'},
+    );
+    assert.equal(result.status, 0, `${script} failed: ${result.error ?? result.stderr}`);
+  }
+  const source = fs.readFileSync(generatedPath, 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(source.includes('const pageAreaReady = pageAreaLayout.width > 0 && pageAreaLayout.height > 0;'));
+  assert.ok(source.includes('requestedWidth={Math.max(600, measuredPageWidth)}'));
+  return source;
+}
+
+async function runDisplayProducer(source, options = {}) {
+  const src = source.replace(/\r\n/g, '\n');
+  const token = src.indexOf('    const token = ++renderTokenRef.current;');
+  const start = src.lastIndexOf('  useEffect(() => {', token);
+  const end = src.indexOf('\n\n  const close = async () => {', token);
+  assert.ok(token >= 0 && start >= 0 && end > token, 'actual render-effect markers must exist');
+
+  const mode = src.match(/  const effectiveMode =\n[\s\S]*?;/);
+  assert.ok(mode, 'actual view-mode expression must exist');
+  const layoutStart = src.indexOf('  const pageAreaReady =');
+  const modeSource = layoutStart >= 0
+    ? src.slice(layoutStart, mode.index + mode[0].length)
+    : mode[0];
+
+  const captured = {display: null, rendering: false, fatalError: null};
+  const effects = [];
+  const environment = {
+    ...loadHelpersFromAppJs(src),
+    viewMode: 'auto',
+    isLandscape: false,
+    pageAreaLayout: {width: 600, height: 1000},
+    preferencesReady: true,
+    documentContext: ctx(4, 20),
+    pageIndex: 4,
+    direction: 'rtl',
+    coverSeparate: true,
+    window: {width: 600},
+    totalPagesRef: {current: 20},
+    renderTokenRef: {current: 0},
+    mountedRef: {current: true},
+    cacheRef: {current: new Map()},
+    nativeRenderRef: {current: {expected: new Set(), loaded: new Set()}},
+    interactionTimingRef: {current: {pageIndex: null, startedAtMs: 0}},
+    lastNavigationDeltaRef: {current: 1},
+    renderPdfPage: async page => ({imageUri: `bitmap://${page}`, pageCount: 20}),
+    prefetchAround: () => {},
+    setDisplay: value => { captured.display = value; },
+    setRendering: value => { captured.rendering = value; },
+    setFatalError: value => { captured.fatalError = value; },
+    setTotalPages: () => {},
+    useEffect: effect => effects.push(effect),
+    console: {log() {}, warn() {}, error() {}},
+    ...options,
+  };
+  const producer = new Function(
+    ...Object.keys(environment),
+    `${modeSource}\n${src.slice(start, end)}\n` +
+      'return {effectiveMode, complete: typeof handleNativeRendered === "function" ? handleNativeRendered : null};',
+  )(...Object.values(environment));
+  assert.equal(effects.length, 1, 'execute only the shipped foreground render effect');
+  effects[0]();
+  // The legacy effect launches its asynchronous bitmap renderer without awaiting
+  // it. Let its real promise continuation settle before inspecting the result.
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(captured.fatalError, null, 'producer must not fail behind the settlement assertions');
+  return {...producer, captured};
+}
+
+test('Edit settlement accepts actual legacy and generated portrait/Single displays', async t => {
+  const sources = [
+    ['legacy bitmap', fs.readFileSync(path.join(ROOT, 'overlay/App.js'), 'utf8'), false],
+    ['generated native', generateNativeAppSource(t), true],
+  ];
+  for (const [label, source, native] of sources) {
+    for (const [view, options] of [
+      ['portrait Auto', {}],
+      ['explicit Single in landscape', {viewMode: 'single', isLandscape: true, pageAreaLayout: {width: 1000, height: 600}}],
+    ]) {
+      await t.test(`${label}: ${view}`, async () => {
+        const state = await runDisplayProducer(source, options);
+        assert.equal(state.effectiveMode, 'single');
+        assert.equal(Object.hasOwn(state.captured.display, 'single'), !native,
+          'native display deliberately carries page identity without a bitmap URI');
+        const args = {mode: 'single', pageIndex: 4, display: state.captured.display, rendering: state.captured.rendering};
+        if (native) {
+          assert.equal(args.rendering, true);
+          assert.equal(er.listEditTargets(args).settled, false, 'native completion is still in flight');
+          state.complete({nativeEvent: {pageIndex: 3, pageCount: 20}});
+          assert.equal(state.captured.rendering, true, 'unrelated completion cannot settle this page');
+          state.complete({nativeEvent: {pageIndex: 4, pageCount: 20}});
+        }
+        args.rendering = state.captured.rendering;
+        assert.equal(args.rendering, false, 'actual producer completed the requested page');
+        assert.deepEqual(er.listEditTargets(args), {targets: [{side: 'single', page: 4, label: 'Edit p.5'}], settled: true});
+        assert.equal(er.listEditTargets({...args, pageIndex: 5}).settled, false, 'different requested page');
+        assert.equal(er.listEditTargets({...args, mode: 'spread', expectedVisual: getVisualSpread(4, true, 20, 'rtl')}).settled, false, 'rotation before the new render');
+        assert.equal(er.listEditTargets({...args, rendering: true}).settled, false, 'next render in flight');
+      });
+    }
+
+    await t.test(`${label}: spread slots remain authoritative`, async () => {
+      const state = await runDisplayProducer(source, {isLandscape: true, pageAreaLayout: {width: 1000, height: 600}});
+      const visual = getVisualSpread(4, true, 20, 'rtl');
+      assert.equal(state.effectiveMode, 'spread');
+      const args = {mode: 'spread', pageIndex: 4, expectedVisual: visual, display: state.captured.display, rendering: state.captured.rendering};
+      if (native) {
+        const expected = [visual.left, visual.right].filter(Number.isInteger);
+        for (const page of expected) {
+          assert.equal(er.listEditTargets({...args, rendering: state.captured.rendering}).settled, false);
+          state.complete({nativeEvent: {pageIndex: page, pageCount: 20}});
+        }
+      }
+      args.rendering = state.captured.rendering;
+      assert.equal(args.rendering, false);
+      assert.equal(er.listEditTargets(args).settled, true);
+      assert.equal(er.listEditTargets({...args, expectedVisual: getVisualSpread(6, true, 20, 'rtl')}).settled, false);
+      assert.equal(er.listEditTargets({...args, mode: 'single'}).settled, false);
+    });
+  }
+
+  await t.test('generated native request waits for measured page-area layout', async () => {
+    const generated = sources[1][1];
+    const beforeLayout = await runDisplayProducer(generated, {pageAreaLayout: {width: 0, height: 0}});
+    assert.equal(beforeLayout.captured.display, null);
+    assert.equal(er.listEditTargets({mode: 'single', pageIndex: 4, ...beforeLayout.captured}).settled, false);
+    const measured = await runDisplayProducer(generated, {isLandscape: false, pageAreaLayout: {width: 1000, height: 600}});
+    assert.equal(measured.effectiveMode, 'spread', 'measured layout overrides stale portrait window mode');
+    assert.equal(measured.captured.display.kind, 'spread');
+  });
+});
+
+test('Handoff result must name the requested document and page and not be a skip (finding 2)', () => {
+  const filePath = '/doc/a.pdf';
+  const result = {filePath, pageIndex: 31, uid: 1000};
+  assert.deepEqual(er.evaluateHandoff(result, 31, filePath), {ok: true, reason: 'ok'});
+  assert.equal(er.evaluateHandoff({annotationRecovery: true, uid: 1000}, 31, filePath).reason, 'recovery_skipped');
+  assert.equal(er.evaluateHandoff({...result, pageIndex: 30}, 31, filePath).reason, 'page_mismatch');
+  assert.equal(er.evaluateHandoff({filePath}, 31, filePath).reason, 'page_mismatch');
+  assert.equal(er.evaluateHandoff({...result, filePath: '/doc/b.pdf'}, 31, filePath).reason, 'document_mismatch');
+  for (const missing of [undefined, null, '']) {
+    assert.equal(er.evaluateHandoff({...result, filePath: missing}, 31, filePath).reason, 'document_mismatch');
+    assert.equal(er.evaluateHandoff(result, 31, missing).reason, 'document_mismatch');
+  }
+  assert.equal(er.evaluateHandoff(null, 31, filePath).reason, 'no_result');
+  assert.equal(er.evaluateHandoff(undefined, 31, filePath).reason, 'no_result');
 });
 
 test('Rotation between Edit and return cannot change the resume page; pairing always contains it', () => {

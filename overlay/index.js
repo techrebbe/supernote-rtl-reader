@@ -17,8 +17,12 @@ let handoffAttemptedThisActivation = false;
 // synchronize the just-saved lastPageIndex with Supernote's native reader.
 // Regardless of handoff success/failure, still perform the normal plugin close.
 PluginManager.closePluginView = async (...args) => {
+  const transition = globalThis.RTL_READER_TRANSITION_IN_FLIGHT;
+  if (transition && transition.allowClose !== true) {
+    throw new Error('Reader hand-off or recovery is still in progress.');
+  }
   // Edit already ran (and checked) the native handoff itself this activation.
-  if (globalThis.RTL_READER_EDIT_HANDOFF_DONE === true) {
+  if (globalThis.RTL_READER_EDIT_HANDOFF_DONE === true || transition?.skipHandoff === true) {
     handoffAttemptedThisActivation = true;
   }
   if (!handoffAttemptedThisActivation) {
@@ -73,10 +77,26 @@ PluginManager.registerButton(1, ['DOC'], {
 PluginManager.registerButtonListener({
   onButtonPress: event => {
     if (event?.id === RTL_READER_BUTTON_ID) {
-      handoffAttemptedThisActivation = false;
-      globalThis.RTL_READER_EDIT_HANDOFF_DONE = false;
-      console.log('RTL_READER_OPEN v0.4.24-edit-exp1-native-reader-v2');
-      DeviceEventEmitter.emit(RTL_READER_ACTIVATE_EVENT);
+      const activate = () => {
+        if (globalThis.RTL_READER_TRANSITION_IN_FLIGHT) return;
+        handoffAttemptedThisActivation = false;
+        globalThis.RTL_READER_EDIT_HANDOFF_DONE = false;
+        console.log('RTL_READER_OPEN v0.4.24-edit-exp2-native-reader-v2');
+        DeviceEventEmitter.emit(RTL_READER_ACTIVATE_EVENT);
+      };
+      const transition = globalThis.RTL_READER_TRANSITION_IN_FLIGHT;
+      if (transition) {
+        console.log('RTL_READER_ACTIVATION_BLOCKED reason=transition_in_flight');
+        if (typeof transition.recoverAfterUnmount === 'function') {
+          Promise.resolve().then(() => transition.recoverAfterUnmount())
+            .then(recovered => {
+              if (recovered === true) activate();
+            })
+            .catch(error => console.warn('RTL_READER_ORPHAN_RECOVERY_FAILED', error));
+        }
+        return;
+      }
+      activate();
     }
   },
 });

@@ -108,8 +108,7 @@ function listEditTargets({mode, pageIndex, expectedVisual, display, rendering}) 
       !rendering &&
       display?.kind === 'single' &&
       isPageIndex(pageIndex) &&
-      display.singlePageIndex === pageIndex &&
-      Boolean(display.single);
+      display.singlePageIndex === pageIndex;
   } else {
     for (const side of ['left', 'right']) {
       const page = expectedVisual?.[side];
@@ -153,9 +152,12 @@ function editAvailability({
 // success: the native side resolves {annotationRecovery:true} when it skipped
 // the handoff. The restart itself is delayed and unacknowledged, so "ok" means
 // "config rewritten and restart scheduled", nothing more.
-function evaluateHandoff(result, editPage) {
+function evaluateHandoff(result, editPage, filePath) {
   if (!result || typeof result !== 'object') return {ok: false, reason: 'no_result'};
   if (result.annotationRecovery === true) return {ok: false, reason: 'recovery_skipped'};
+  if (typeof filePath !== 'string' || !filePath || result.filePath !== filePath) {
+    return {ok: false, reason: 'document_mismatch'};
+  }
   if (result.pageIndex !== editPage) return {ok: false, reason: 'page_mismatch'};
   return {ok: true, reason: 'ok'};
 }
@@ -171,6 +173,10 @@ const EDIT_BLOCKED_MESSAGES = {
   edit_in_progress: 'An edit hand-off is already in progress.',
   handoff_failed: 'The stock reader hand-off did not complete; editing was not started.',
   save_failed: 'Could not save the reader position; editing was not started.',
+  rollback_failed:
+    'Reader position recovery could not be saved. Retry recovery before continuing.',
+  close_failed:
+    'The reader did not close. Retry recovery before continuing.',
   no_page: 'This page cannot be opened for editing.',
 };
 

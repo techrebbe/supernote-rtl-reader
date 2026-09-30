@@ -165,19 +165,24 @@ test('stale, mismatched, or malformed records are rejected with a reason', () =>
   assert.equal(verdict(rec({createdAt: 'now'})).reason, 'malformed');
   assert.equal(verdict(rec({filePath: '/doc/b.pdf'})).reason, 'document');
   assert.equal(verdict(rec(), ctx(31, 120)).reason, 'page_count_changed');
-  assert.equal(verdict(rec({editPage: 150, totalPages: null}), ctx(31, 100)).reason, 'page_out_of_range');
+  assert.equal(verdict(rec({editPage: 150, totalPages: 100}), ctx(31, 100)).reason, 'page_out_of_range');
+  for (const bad of [null, undefined, 0, -3, 2.5, '100', NaN]) {
+    assert.equal(verdict(rec({totalPages: bad})).reason, 'page_count_unknown', `record totalPages=${bad}`);
+  }
+  assert.equal(verdict(rec(), ctx(31, null)).reason, 'page_count_unknown');
   assert.equal(verdict(rec(), ctx(31), NOW + er.EDIT_RETURN_MAX_AGE_MS + 1).reason, 'stale');
   assert.equal(verdict(rec(), ctx(31), NOW - er.EDIT_RETURN_MAX_FUTURE_SKEW_MS - 1).reason, 'clock');
   assert.equal(verdict(rec(), ctx(31), NOW + er.EDIT_RETURN_MAX_AGE_MS).valid, true);
 });
-
 test('record builder rejects impossible pages', () => {
   const b = o => er.buildEditReturnRecord({filePath: '/d.pdf', editPage: 3, totalPages: 10, nativePageAtOpen: 0, now: NOW, ...o});
   assert.equal(b({editPage: -1}), null);
   assert.equal(b({editPage: 10}), null);
   assert.equal(b({editPage: 1.5}), null);
   assert.equal(b({filePath: ''}), null);
-  assert.equal(b({totalPages: null}).totalPages, null);
+  assert.equal(b({totalPages: null}), null);
+  assert.equal(b({totalPages: 0}), null);
+  assert.equal(b({now: NaN}), null);
 });
 
 // --- Edit/Return: state table -----------------------------------------------
@@ -210,21 +215,28 @@ test('E4 handoff did not happen (stock still at old page) -> RTL follows what st
   assert.equal(r.pageIndex, 10);
 });
 
-test('E5 stale record (older than max age) -> legacy rule, record ignored', () => {
+test('E5 stale record (older than max age) -> dropped: native page, NOT the saved page', () => {
   const r = reopen(edited(10), 10, NOW + er.EDIT_RETURN_MAX_AGE_MS + 1);
-  assert.deepEqual([r.pageIndex, r.source, r.editReturnStatus], [31, 'saved', 'ignored:stale']);
+  assert.deepEqual([r.pageIndex, r.source, r.editReturnStatus], [10, 'native-edit-rejected', 'ignored:stale']);
 });
 
-test('E6 document replaced (page count differs) -> record ignored, legacy rule', () => {
+test('E6 document replaced (page count differs) -> record dropped, native page wins', () => {
   const r = reopen(edited(10), 5, NOW + 60_000, 40);
   assert.equal(r.editReturnStatus, 'ignored:page_count_changed');
-  assert.equal(r.pageIndex, 5);
+  assert.deepEqual([r.pageIndex, r.source], [5, 'native-edit-rejected']);
 });
 
 test('E7 record for another path is ignored', () => {
   const p = edited();
   p.editReturn.filePath = '/doc/other.pdf';
-  assert.equal(reopen(p, 31).editReturnStatus, 'ignored:document');
+  const r = reopen(p, 7);
+  assert.equal(r.editReturnStatus, 'ignored:document');
+  assert.deepEqual([r.pageIndex, r.source], [7, 'native-edit-rejected']);
+});
+
+test('E7b unknown page count on reopen -> record dropped, saved page not restored', () => {
+  const r = decode(JSON.stringify(edited(10)), ctx(4, null), NOW + 60_000);
+  assert.deepEqual([r.pageIndex, r.source, r.editReturnStatus], [4, 'native-edit-rejected', 'ignored:page_count_unknown']);
 });
 
 test('E8 the record is consumed: a payload saved after reopen carries none', () => {
@@ -245,23 +257,52 @@ test('edit payload keeps other settings, sets page + record, does not mutate inp
 });
 
 // --- Rotation / spread geometry ---------------------------------------------
-test('Edit targets map to the page shown in each physical slot; blank slots offer none', () => {
+test('Edit targets map to the page shown in each physical slot; settled only when the completed render matches', () => {
   for (const cover of [false, true]) {
     for (const direction of ['rtl', 'ltr']) {
       for (const total of [1, 2, 3, 10, 11]) {
         for (let page = 0; page < total; page += 1) {
           const visual = getVisualSpread(page, cover, total, direction);
-          const spread = er.listEditTargets({mode: 'spread', pageIndex: page, visual});
-          for (const t of spread) assert.equal(t.page, visual[t.side]);
-          assert.equal(spread.length, [visual.left, visual.right].filter(v => v !== null).length);
-          assert.ok(spread.some(t => t.page === page), 'current page is editable in spread');
-          const single = er.listEditTargets({mode: 'single', pageIndex: page, visual: null});
-          assert.deepEqual(single.map(t => t.page), [page]);
+          const shown = {kind: 'spread', leftPageIndex: visual.left, rightPageIndex: visual.right};
+          const spread = er.listEditTargets({mode: 'spread', pageIndex: page, expectedVisual: visual, display: shown, rendering: false});
+          for (const t of spread.targets) assert.equal(t.page, visual[t.side]);
+          assert.equal(spread.targets.length, [visual.left, visual.right].filter(v => v !== null).length);
+          assert.ok(spread.targets.some(t => t.page === page), 'current page is editable in spread');
+          assert.equal(spread.settled, true);
+          const single = er.listEditTargets({mode: 'single', pageIndex: page, display: {kind: 'single', single: 'u', singlePageIndex: page}, rendering: false});
+          assert.deepEqual(single.targets.map(t => t.page), [page]);
+          assert.equal(single.settled, true);
         }
       }
     }
   }
-  assert.deepEqual(er.listEditTargets({mode: 'single', pageIndex: null, visual: null}), []);
+  assert.deepEqual(er.listEditTargets({mode: 'single', pageIndex: null, display: null, rendering: false}), {targets: [], settled: false});
+});
+
+test('Edit is unsettled whenever the completed render is not the requested view (finding 1)', () => {
+  const v = getVisualSpread(4, true, 20, 'rtl');
+  const shown = {kind: 'spread', leftPageIndex: v.left, rightPageIndex: v.right};
+  const args = {mode: 'spread', pageIndex: 4, expectedVisual: v, display: shown, rendering: false};
+  assert.equal(er.listEditTargets(args).settled, true);
+  assert.equal(er.listEditTargets({...args, rendering: true}).settled, false, 'render in flight');
+  const next = getVisualSpread(6, true, 20, 'rtl');
+  assert.equal(er.listEditTargets({...args, pageIndex: 6, expectedVisual: next}).settled, false, 'page turned, old render still shown');
+  assert.equal(er.listEditTargets({...args, expectedVisual: getVisualSpread(4, true, 20, 'ltr')}).settled, false, 'direction flipped');
+  assert.equal(er.listEditTargets({...args, mode: 'single', display: shown}).settled, false, 'rotated to single, spread still shown');
+  assert.equal(er.listEditTargets({mode: 'single', pageIndex: 3, display: {kind: 'single', single: 'u', singlePageIndex: 2}, rendering: false}).settled, false);
+  assert.equal(er.listEditTargets({mode: 'single', pageIndex: 3, display: {kind: 'spread'}, rendering: false}).settled, false, 'rotated to portrait, spread still shown');
+  assert.equal(er.listEditTargets({...args, display: null}).settled, false);
+  assert.equal(er.listEditTargets({...args, display: {...shown, leftPageIndex: 99}}).settled, false, 'left slot differs');
+  assert.equal(er.listEditTargets({...args, display: {...shown, rightPageIndex: 99}}).settled, false, 'right slot differs');
+});
+
+test('Handoff result must name the requested page and not be a skip (finding 2)', () => {
+  assert.deepEqual(er.evaluateHandoff({pageIndex: 31, uid: 1000}, 31), {ok: true, reason: 'ok'});
+  assert.equal(er.evaluateHandoff({annotationRecovery: true, uid: 1000}, 31).reason, 'recovery_skipped');
+  assert.equal(er.evaluateHandoff({pageIndex: 30}, 31).reason, 'page_mismatch');
+  assert.equal(er.evaluateHandoff({}, 31).reason, 'page_mismatch');
+  assert.equal(er.evaluateHandoff(null, 31).reason, 'no_result');
+  assert.equal(er.evaluateHandoff(undefined, 31).reason, 'no_result');
 });
 
 test('Rotation between Edit and return cannot change the resume page; pairing always contains it', () => {
@@ -284,14 +325,18 @@ test('Rotation between Edit and return cannot change the resume page; pairing al
 
 // --- Availability gate (mirrors Close, plus native-spread) ------------------
 test('Edit availability fails closed', () => {
-  const ok = {ready: true, busy: false, fatalError: null, authorityResolved: true, nativeSpreadEnabled: false};
+  const ok = {ready: true, busy: false, editInFlight: false, fatalError: null, authorityResolved: true, nativeSpreadConfigured: false, nativeSpreadEnabled: false, displaySettled: true};
   assert.deepEqual(er.editAvailability(ok), {allowed: true, reason: 'ok'});
   assert.equal(er.editAvailability({...ok, ready: false}).reason, 'not_ready');
   assert.equal(er.editAvailability({...ok, fatalError: 'x'}).reason, 'not_ready');
+  assert.equal(er.editAvailability({...ok, editInFlight: true}).reason, 'edit_in_progress');
   assert.equal(er.editAvailability({...ok, busy: true}).reason, 'busy');
   assert.equal(er.editAvailability({...ok, authorityResolved: false}).reason, 'authority_unresolved');
   assert.equal(er.editAvailability({...ok, nativeSpreadEnabled: true}).reason, 'native_spread_active');
-  for (const reason of ['not_ready', 'busy', 'authority_unresolved', 'native_spread_active']) {
-    assert.ok(er.EDIT_BLOCKED_MESSAGES[reason]);
+  // Finding 4: configured read-only Native Spread reports enabled=false but must still block.
+  assert.equal(er.editAvailability({...ok, nativeSpreadConfigured: true, nativeSpreadEnabled: false}).reason, 'native_spread_active');
+  assert.equal(er.editAvailability({...ok, displaySettled: false}).reason, 'page_unsettled');
+  for (const reason of ['not_ready', 'busy', 'authority_unresolved', 'native_spread_active', 'page_unsettled', 'edit_in_progress', 'handoff_failed', 'save_failed', 'no_page']) {
+    assert.ok(er.EDIT_BLOCKED_MESSAGES[reason], reason);
   }
 });

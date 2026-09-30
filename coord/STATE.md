@@ -1,4 +1,4 @@
-# STATE — RTL Reader (updated 2026-09-29 by claude)
+# STATE — RTL Reader (updated 2026-09-30 by claude)
 
 ## Goal
 RTL two-page spread reading of PDFs (Hebrew books) on Supernote Nomad with Supernote's native annotation kept intact. Original PDFs/.mark are never rewritten by RTL Reader.
@@ -19,7 +19,7 @@ RTL two-page spread reading of PDFs (Hebrew books) on Supernote Nomad with Super
 ## Tasks
 | id | owner | branch | status |
 |----|-------|--------|--------|
-| T-001 Edit/Return groundwork | claude | claude/edit-return-groundwork | implemented, host-verified; awaiting Codex review |
+| T-001 Edit/Return groundwork | claude | claude/edit-return-groundwork | Codex findings 1-6 + identity addressed (`reviews/T-001-codex.md`); host-verified; candidate `0.4.24-edit-exp1`; awaiting build of exact APK + user approval of `tasks/T-001-hardware-plan.md` |
 
 ## Known unknowns (do not claim otherwise)
 - Whether annotations made in the stock reader show in the RTL spread. Source inspection says the RTL renderer (Android PdfRenderer path) never reads `.mark`; expected NOT shown. Hardware test E1 in `tasks/T-001.md`.
@@ -29,7 +29,7 @@ RTL two-page spread reading of PDFs (Hebrew books) on Supernote Nomad with Super
 Nomad access: user approval per task + reservation via GitHub issue #23. No device work is authorized right now.
 
 ## Next permitted
-Codex independent review of T-001 (commits on `claude/edit-return-groundwork`). Nothing merges to `main` without user approval.
+Build the exact-head APK (CI or Codex; this host cannot run gradle) and record commit + SHA-256; Codex re-check of the correction commit. Nomad steps only after user approval of `tasks/T-001-hardware-plan.md`. Nothing merges to `main` without user approval.
 
 ## Needs user approval
-Any Nomad action; merging; the three frozen-digest updates in `check_native_spread_invariants.py`; releases.
+Any Nomad action; merging; the frozen-digest updates in `check_native_spread_invariants.py` (App.js, build.yml, build.sh pins; new editReturn.js pin); releases.

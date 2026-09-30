@@ -540,6 +540,7 @@ def check(repo_root: Path) -> None:
         repo_root / "scripts" / "test_trace_helper_fail_closed.ps1"
     )
     app_path = repo_root / "overlay" / "App.js"
+    edit_return_path = repo_root / "overlay" / "editReturn.js"
     workflow_path = repo_root / ".github" / "workflows" / "build.yml"
     plugin_build_path = repo_root / "build.sh"
     packager_patch_path = repo_root / "scripts" / "patch_plugin_packager.py"
@@ -977,12 +978,17 @@ def check(repo_root: Path) -> None:
         ),
         (
             app_path,
-            "1c6dd75fbbd2389cd15e9ba2fb9d4d750257373b342e353157dfd186716e7071",
+            "977af11f016c52c4664a4da40e8b48829243e2f78efd780df39b0ba2a0d265d5",
             "Native Spread UI authority source",
         ),
         (
+            edit_return_path,
+            "0fb42ce08cc56b2e303ae5c9b909f790c708925ae499e6a722fc6b096633aecd",
+            "Edit/Return page-authority module",
+        ),
+        (
             workflow_path,
-            "6f9c384702aadbfd9307277566317c4dbff1a8e8bb1add8243297eef6e4d73cb",
+            "c8677e5a99e4f9ecc3a2cc8f39e49f1482e8958cd5c9be2c543f07939bc96f07",
             "Native Spread companion-build workflow",
         ),
         (

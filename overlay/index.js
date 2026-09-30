@@ -17,6 +17,10 @@ let handoffAttemptedThisActivation = false;
 // synchronize the just-saved lastPageIndex with Supernote's native reader.
 // Regardless of handoff success/failure, still perform the normal plugin close.
 PluginManager.closePluginView = async (...args) => {
+  // Edit already ran (and checked) the native handoff itself this activation.
+  if (globalThis.RTL_READER_EDIT_HANDOFF_DONE === true) {
+    handoffAttemptedThisActivation = true;
+  }
   if (!handoffAttemptedThisActivation) {
     handoffAttemptedThisActivation = true;
     try {
@@ -70,7 +74,8 @@ PluginManager.registerButtonListener({
   onButtonPress: event => {
     if (event?.id === RTL_READER_BUTTON_ID) {
       handoffAttemptedThisActivation = false;
-      console.log('RTL_READER_OPEN v0.4.23-native-reader-v2');
+      globalThis.RTL_READER_EDIT_HANDOFF_DONE = false;
+      console.log('RTL_READER_OPEN v0.4.24-edit-exp1-native-reader-v2');
       DeviceEventEmitter.emit(RTL_READER_ACTIVATE_EVENT);
     }
   },

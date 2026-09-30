@@ -23,6 +23,7 @@ import {
   buildEditReturnRecord,
   chooseInitialPage,
   editAvailability,
+  evaluateHandoff,
   listEditTargets,
 } from './editReturn';
 
@@ -279,7 +280,7 @@ export default function App() {
 
   const [documentContext, setDocumentContext] = useState(null);
   const [preferencesReady, setPreferencesReady] = useState(false);
-  const [pageIndex, setPageIndex] = useState(null);
+  const [pageIndex, setPageIndexRaw] = useState(null);
   const [totalPages, setTotalPages] = useState(null);
   const [display, setDisplay] = useState({kind: 'single', single: null});
   const [rendering, setRendering] = useState(true);
@@ -307,6 +308,7 @@ export default function App() {
   const [nativeSpreadBusy, setNativeSpreadBusy] = useState(false);
   const [nativeSpreadError, setNativeSpreadError] = useState(null);
   const [editNotice, setEditNotice] = useState(null);
+  const [editBusy, setEditBusy] = useState(false);
   const [nativeSpreadAuthorityState, setNativeSpreadAuthorityState] =
     useState('unknown');
   const [nativeSpreadAuthorityDetail, setNativeSpreadAuthorityDetail] = useState(
@@ -346,6 +348,16 @@ export default function App() {
   const filePathRef = useRef(null);
   const nativePageIndexAtOpenRef = useRef(null);
   const editReturnRef = useRef(null);
+  const editInFlightRef = useRef(false);
+  // All page changes go through this guard: nothing may move the page while an
+  // Edit hand-off is in flight. (Kept as a setter shadow so navigation code
+  // that build patch scripts match verbatim stays unchanged.)
+  const setPageIndex = value => {
+    if (editInFlightRef.current) return;
+    setPageIndexRaw(value);
+  };
+  const displayRef = useRef(null);
+  const renderingRef = useRef(true);
   const latestPreferencesRef = useRef(null);
   const preferencesSaveTimerRef = useRef(null);
   const cacheRef = useRef(new Map());
@@ -370,6 +382,8 @@ export default function App() {
   totalPagesRef.current = totalPages;
   effectiveModeRef.current = effectiveMode;
   coverSeparateRef.current = coverSeparate;
+  displayRef.current = display;
+  renderingRef.current = rendering;
   showSpreadDividerRef.current = showSpreadDivider;
   showNativeSpreadHeaderRef.current = showNativeSpreadHeader;
   spreadSizingRef.current = spreadSizing;
@@ -398,7 +412,7 @@ export default function App() {
       showSpreadDivider,
       showNativeSpreadHeader,
       spreadSizing,
-      lastPageIndex: pageIndex,
+      lastPageIndex: editReturnRef.current ? editReturnRef.current.editPage : pageIndex,
       nativePageIndexAtOpen: nativePageIndexAtOpenRef.current,
       ...(editReturnRef.current ? {editReturn: editReturnRef.current} : {}),
       updatedAt: Date.now(),
@@ -510,6 +524,8 @@ export default function App() {
   const savePreferences = async (reason, payload = latestPreferencesRef.current) => {
     const filePath = filePathRef.current;
     if (!filePath || !payload || !ReaderPreferencesModule?.save) return;
+    // While an Edit is in flight only the Edit's own saves may write.
+    if (editInFlightRef.current && !reason.startsWith('edit')) return;
 
     await ReaderPreferencesModule.save(filePath, JSON.stringify(payload));
     console.log(
@@ -827,6 +843,7 @@ export default function App() {
   ]);
 
   const close = async () => {
+    if (editInFlightRef.current) return;
     if (nativeSpreadBusyRef.current) {
       setNativeSpreadError(
         'Wait for the native reader change to finish before closing.',
@@ -850,16 +867,40 @@ export default function App() {
   };
 
   // Edit a page in Supernote's stock reader: save lastPageIndex=page plus an
-  // editReturn record, then take the ordinary Close path so the existing native
-  // handoff (index.js -> handoffLastSavedPage) opens the stock reader on it.
-  // Fails closed: if the save fails the plugin stays open and nothing is handed off.
+  // editReturn record, then run the existing native handoff HERE (not in the
+  // close wrapper) so its result can be checked before anything is presented as
+  // started. Exclusive (editInFlightRef) and fail-closed: on any failure every
+  // in-memory and on-disk change is rolled back and the plugin stays open.
+  // Success means only "stock config rewritten, restart scheduled"; the restart
+  // is delayed and unacknowledged (hardware test E2 verifies the outcome).
   const editPage = async page => {
+    if (editInFlightRef.current) return;
+    const liveMode = effectiveModeRef.current;
+    const livePage = pageIndexRef.current;
+    const {settled} = listEditTargets({
+      mode: liveMode,
+      pageIndex: livePage,
+      expectedVisual:
+        liveMode === 'spread' && Number.isInteger(livePage)
+          ? getVisualSpread(
+              livePage,
+              coverSeparateRef.current,
+              totalPagesRef.current,
+              directionRef.current,
+            )
+          : null,
+      display: displayRef.current,
+      rendering: renderingRef.current,
+    });
     const availability = editAvailability({
       ready: preferencesReady && Boolean(documentContext),
       busy: nativeSpreadBusyRef.current,
+      editInFlight: editInFlightRef.current,
       fatalError,
       authorityResolved: nativeSpreadAuthorityResolved,
+      nativeSpreadConfigured,
       nativeSpreadEnabled,
+      displaySettled: settled,
     });
     if (!availability.allowed) {
       setEditNotice(EDIT_BLOCKED_MESSAGES[availability.reason]);
@@ -872,31 +913,77 @@ export default function App() {
       nativePageAtOpen: nativePageIndexAtOpenRef.current,
       now: Date.now(),
     });
-    const payload = buildEditPayload(latestPreferencesRef.current, record, Date.now());
+    const previous = {
+      payload: latestPreferencesRef.current,
+      editReturn: editReturnRef.current,
+    };
+    const payload = buildEditPayload(previous.payload, record, Date.now());
     if (!payload) {
-      setEditNotice('This page cannot be opened for editing.');
+      setEditNotice(EDIT_BLOCKED_MESSAGES.no_page);
       return;
     }
+
+    editInFlightRef.current = true;
+    setEditBusy(true);
+    setEditNotice(null);
     if (preferencesSaveTimerRef.current) {
       clearTimeout(preferencesSaveTimerRef.current);
       preferencesSaveTimerRef.current = null;
     }
     editReturnRef.current = record;
     latestPreferencesRef.current = payload;
-    pageIndexRef.current = page;
+
+    const rollback = async failure => {
+      editReturnRef.current = previous.editReturn;
+      latestPreferencesRef.current = previous.payload;
+      try {
+        // Undo the on-disk Edit state too, so a failed Edit cannot leak into a
+        // later handoff or return decision.
+        await savePreferences('edit-rollback', previous.payload);
+      } catch (error) {
+        console.warn('RTL_READER_EDIT_ROLLBACK_SAVE_FAILED', error);
+      }
+      editInFlightRef.current = false;
+      setEditBusy(false);
+      setEditNotice(EDIT_BLOCKED_MESSAGES[failure]);
+    };
+
     try {
       await savePreferences('edit', payload);
     } catch (error) {
       console.warn('RTL_READER_PREFS_EDIT_SAVE_FAILED', error);
-      editReturnRef.current = null;
-      setEditNotice('Could not save the reader position; editing was not started.');
+      await rollback('save_failed');
       return;
     }
+
+    let handoff;
+    try {
+      if (!ReaderPreferencesModule?.handoffLastSavedPage) {
+        throw new Error('Native handoff method is not registered.');
+      }
+      handoff = evaluateHandoff(
+        await ReaderPreferencesModule.handoffLastSavedPage(),
+        page,
+      );
+    } catch (error) {
+      console.warn('RTL_READER_EDIT_HANDOFF_FAILED', error?.message ?? String(error));
+      handoff = {ok: false, reason: 'threw'};
+    }
+    if (!handoff.ok) {
+      console.warn(`RTL_READER_EDIT_HANDOFF_REJECTED reason=${handoff.reason}`);
+      await rollback('handoff_failed');
+      return;
+    }
+
+    // Tell the close wrapper (index.js) the handoff already ran this activation.
+    globalThis.RTL_READER_EDIT_HANDOFF_DONE = true;
     console.log(`RTL_READER_EDIT_REQUESTED page=${page + 1}`);
-    setPageIndex(page);
-    PluginManager.closePluginView().catch(error =>
-      console.error('RTL_READER_CLOSE_FAILED', error),
-    );
+    setPageIndexRaw(page);
+    PluginManager.closePluginView().catch(error => {
+      console.error('RTL_READER_CLOSE_FAILED', error);
+      editInFlightRef.current = false;
+      setEditBusy(false);
+    });
   };
 
   const closeSettings = () => {
@@ -1417,13 +1504,15 @@ export default function App() {
       ? `Auto → ${viewModeLabel(effectiveMode)}`
       : viewModeLabel(viewMode);
   const statusCover = coverSeparate ? 'Cover separate' : 'Cover paired';
-  const editTargets = listEditTargets({
+  const {targets: editTargets, settled: editSettled} = listEditTargets({
     mode: effectiveMode,
     pageIndex,
-    visual:
+    expectedVisual:
       effectiveMode === 'spread' && Number.isInteger(pageIndex)
         ? getVisualSpread(pageIndex, coverSeparate, totalPages, direction)
         : null,
+    display,
+    rendering,
   });
 
   return (
@@ -1527,11 +1616,12 @@ export default function App() {
               {editTargets.map(target => (
                 <Pressable
                   key={target.side}
-                  disabled={nativeSpreadBusy}
+                  disabled={nativeSpreadBusy || editBusy || !editSettled}
                   onPress={() => editPage(target.page)}
                   style={[
                     styles.headerButton,
-                    nativeSpreadBusy && styles.segmentButtonDisabled,
+                    (nativeSpreadBusy || editBusy || !editSettled) &&
+                      styles.segmentButtonDisabled,
                   ]}>
                   <Text style={styles.headerButtonText}>{target.label}</Text>
                 </Pressable>

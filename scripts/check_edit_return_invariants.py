@@ -20,6 +20,7 @@ EDIT_NAMES = (
     "buildEditReturnRecord",
     "chooseInitialPage",
     "editAvailability",
+    "evaluateHandoff",
     "listEditTargets",
 )
 
@@ -77,20 +78,39 @@ def main(root: Path) -> None:
     # 4. Edit is Close-with-a-page: gated, saved, then the ordinary close path.
     edit = between(app, "const editPage = async page => {", "const closeSettings", "editPage")
     order = [edit.find(marker) for marker in (
-        "editAvailability({", "buildEditPayload(", "await savePreferences('edit', payload)",
+        "editAvailability({", "buildEditPayload(", "editInFlightRef.current = true;",
+        "await savePreferences('edit', payload)",
+        "evaluateHandoff(",
+        "await ReaderPreferencesModule.handoffLastSavedPage()", "globalThis.RTL_READER_EDIT_HANDOFF_DONE = true",
         "PluginManager.closePluginView()",
     )]
     require(all(i >= 0 for i in order) and order == sorted(order), "editPage steps out of order")
-    catch = between(edit, "} catch (error) {", "console.log(`RTL_READER_EDIT_REQUESTED", "editPage catch")
-    require("return;" in catch, "editPage must abort when the save fails")
-    for forbidden in ("handoffLastSavedPage", "NativeModules", "ReaderPreferencesModule", "kill"):
-        require(forbidden not in edit, f"editPage must reuse the Close handoff, found {forbidden!r}")
+    require(edit.count("await rollback(") == 2 and "rollback('handoff_failed')" in edit
+            and "rollback('save_failed')" in edit, "editPage must roll back on save and handoff failure")
+    require("await savePreferences('edit-rollback', previous.payload)" in edit
+            and "editReturnRef.current = previous.editReturn;" in edit
+            and "latestPreferencesRef.current = previous.payload;" in edit,
+            "rollback must restore memory and disk state")
+    for forbidden in ("NativeModules", "kill", "startActivity"):
+        require(forbidden not in edit, f"editPage must not add another restart path, found {forbidden!r}")
+    require(edit.count("handoffLastSavedPage") == 2, "editPage must call handoffLastSavedPage exactly once")
     require(
         app.count("const editPage = async page =>") == 1 and app.count("editPage(") == 1,
         "editPage must be declared once and called only from the Edit buttons",
     )
-    require("disabled={nativeSpreadBusy}\n                  onPress={() => editPage(target.page)}" in app,
-            "Edit buttons must be disabled while native changes are busy")
+    # Exclusivity: nothing else may write prefs or move pages while an Edit is in flight.
+    for marker in (
+        "if (editInFlightRef.current && !reason.startsWith('edit')) return;",
+        "const close = async () => {\n    if (editInFlightRef.current) return;",
+        "const setPageIndex = value => {\n    if (editInFlightRef.current) return;\n    setPageIndexRaw(value);",
+    ):
+        require(marker in app, f"missing Edit exclusivity guard: {marker!r}")
+    # The close wrapper must not run a second handoff after Edit already did.
+    require("globalThis.RTL_READER_EDIT_HANDOFF_DONE === true" in index
+            and "globalThis.RTL_READER_EDIT_HANDOFF_DONE = false" in index,
+            "index.js must skip the wrapper handoff when Edit already ran it")
+    require("disabled={nativeSpreadBusy || editBusy || !editSettled}\n                  onPress={() => editPage(target.page)}" in app,
+            "Edit buttons must be disabled while busy, editing, or before the render settles")
 
     # 5. No new kill site; the single existing handoff path stays intact.
     kills = kotlin.count("Os.kill(")

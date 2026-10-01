@@ -16,7 +16,8 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import {PluginCommAPI, PluginDocAPI, PluginManager} from 'sn-plugin-lib';
+import {PluginCommAPI, PluginDocAPI, PluginFileAPI, PluginManager} from 'sn-plugin-lib';
+import {createSavedInkController} from './savedInk';
 import {
   EDIT_BLOCKED_MESSAGES,
   buildEditPayload,
@@ -28,6 +29,10 @@ import {
 } from './editReturn';
 
 const {PdfRendererModule, ReaderPreferencesModule} = NativeModules;
+const {SavedInkModule} = NativeModules;
+// First integrated slice deliberately retains T005's proven geometry/identity.
+const SAVED_INK_FIXTURE = '/storage/emulated/0/Document/RTL_RAPID_TOOLS_T004_20261001.pdf';
+const SAVED_INK_PAGE = 2;
 const SWIPE_THRESHOLD = 56;
 const TAP_SLOP = 18;
 const EDGE_ZONE = 0.28;
@@ -310,6 +315,7 @@ export default function App() {
   const [editNotice, setEditNotice] = useState(null);
   const [editBusy, setEditBusy] = useState(false);
   const [editRecoveryAvailable, setEditRecoveryAvailable] = useState(false);
+  const [savedInk, setSavedInk] = useState({status: 'unavailable'});
   const [nativeSpreadAuthorityState, setNativeSpreadAuthorityState] =
     useState('unknown');
   const [nativeSpreadAuthorityDetail, setNativeSpreadAuthorityDetail] = useState(
@@ -400,6 +406,7 @@ export default function App() {
   const preferencesSaveTimerRef = useRef(null);
   const cacheRef = useRef(new Map());
   const prefetchingRef = useRef(new Set());
+  const savedInkContextRef = useRef(null);
 
   const reportNativeSpreadAuthorityLocked = () => {
     setNativeSpreadError(
@@ -426,6 +433,74 @@ export default function App() {
   showNativeSpreadHeaderRef.current = showNativeSpreadHeader;
   spreadSizingRef.current = spreadSizing;
   pageAreaWidthRef.current = Math.max(1, window.width);
+
+  const savedInkVisible = preferencesReady && documentContext?.filePath === SAVED_INK_FIXTURE &&
+    totalPages === 8 && Number.isInteger(pageIndex) && !editBusy && !readerTransitionLocked() &&
+    (effectiveMode === 'single'
+      ? pageIndex === SAVED_INK_PAGE
+      : Object.values(getVisualSpread(pageIndex, coverSeparate, totalPages, direction)).includes(SAVED_INK_PAGE));
+  savedInkContextRef.current = savedInkVisible
+    ? {filePath: documentContext.filePath, pageIndex: SAVED_INK_PAGE, totalPages: 8}
+    : null;
+  const savedInkTokenFor = page =>
+    savedInkVisible && savedInk.status === 'ready' && page === SAVED_INK_PAGE &&
+    savedInk.filePath === documentContext?.filePath
+      ? savedInk.savedInkToken : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    let controller = null;
+    let previousWasClean = false;
+    const previousCleanup = globalThis.RTL_READER_INK_CLEANUP ?? Promise.resolve(true);
+    setSavedInk({status: savedInkVisible ? 'loading' : 'unavailable'});
+    const run = Promise.resolve(previousCleanup).then(async clean => {
+      previousWasClean = clean === true;
+      if (cancelled || !savedInkVisible) return;
+      if (clean !== true || !SavedInkModule) {
+        setSavedInk({status: 'error', reason: clean !== true ? 'cleanup_failed' : 'module_unavailable'});
+        return;
+      }
+      const pluginDir = await PluginManager.getPluginDirPath();
+      if (cancelled) return;
+      const currentContext = async () => {
+        const filePath = await requireResult(PluginCommAPI.getCurrentFilePath(), 'Current document');
+        if (cancelled || readerTransitionLocked() || !savedInkContextRef.current) return null;
+        return {...savedInkContextRef.current, filePath, pluginDir};
+      };
+      controller = createSavedInkController({
+        currentContext,
+        prepare: ({filePath, pageIndex: page, width, height, pluginDir: directory}) =>
+          SavedInkModule.prepare(filePath, page, width, height, directory),
+        finish: ({token, missingMark}) => SavedInkModule.finish(token, missingMark),
+        discard: ({token}) => SavedInkModule.discard(token),
+        generateThumbnail: (...args) => PluginFileAPI.generateMarkThumbnails(...args),
+      });
+      const context = await currentContext();
+      if (cancelled) return;
+      const result = await controller.run(context);
+      if (cancelled || readerTransitionLocked() || !savedInkContextRef.current) return;
+      setSavedInk({...result, filePath: context?.filePath});
+      console.log(`RTL_READER_SAVED_INK status=${result.status} reason=${result.reason ?? 'none'} page=3`);
+    }).catch(error => {
+      if (!cancelled) setSavedInk({status: 'error', reason: error?.message ?? 'request_failed'});
+    });
+    return () => {
+      cancelled = true;
+      controller?.cancel();
+      // Never discard while the SDK may still be writing. Remounts wait for the
+      // previous request AND owned cleanup, not for a guessed timeout.
+      globalThis.RTL_READER_INK_CLEANUP = run.then(async () => {
+        if (!controller) return previousWasClean;
+        const result = await controller.dispose();
+        const clean = result.status === 'disposed';
+        if (!clean) console.warn('RTL_READER_SAVED_INK_CLEANUP_FAILED', result.reason);
+        return clean;
+      }).catch(error => {
+        console.warn('RTL_READER_SAVED_INK_CLEANUP_FAILED', error);
+        return false;
+      });
+    };
+  }, [savedInkVisible, documentContext?.filePath]);
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener(
@@ -1772,7 +1847,11 @@ export default function App() {
               <Text style={styles.statusPrimary}>
                 {direction.toUpperCase()} · {statusLayout}
               </Text>
-              <Text style={styles.statusSecondary}>{editNotice ?? statusCover}</Text>
+              <Text style={styles.statusSecondary}>{editNotice ?? (
+                savedInkVisible
+                  ? `${statusCover} · Ink ${savedInk.status === 'ready' ? 'shown' : savedInk.status} (no text highlights)`
+                  : statusCover
+              )}</Text>
             </View>
             <View style={styles.headerActions}>
               {editTargets.map(target => (
@@ -1837,6 +1916,9 @@ export default function App() {
                 <Text style={styles.settingsTitle}>Reading settings</Text>
                 <Text style={styles.settingsSummary}>
                   {direction.toUpperCase()} · {statusLayout}
+                </Text>
+                <Text style={styles.settingsSummary}>
+                  Saved ink alpha: T004 PAGE 3 only. Text highlights are not shown.
                 </Text>
               </View>
               <Pressable

@@ -51,6 +51,7 @@ popd >/dev/null
 cp "$ROOT/overlay/App.js" "$PROJECT/App.js"
 cp "$ROOT/overlay/index.js" "$PROJECT/index.js"
 cp "$ROOT/overlay/editReturn.js" "$PROJECT/editReturn.js"
+cp "$ROOT/overlay/savedInk.js" "$PROJECT/savedInk.js"
 cp "$ROOT/overlay/app.json" "$PROJECT/app.json"
 cp "$ROOT/PluginConfig.json" "$PROJECT/PluginConfig.json"
 

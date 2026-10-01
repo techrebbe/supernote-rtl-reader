@@ -621,6 +621,7 @@ class PdfPageView(
     var pendingContentMode: String = "fit"
     var pendingPrefetchPageIndexes: List<Int> = emptyList()
     var pendingRequestStartedAtMs: Double = 0.0
+    var pendingSavedInkToken: String? = null
 
     private val renderGeneration = AtomicLong(0L)
     private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -628,6 +629,8 @@ class PdfPageView(
     private var pageBitmap: Bitmap? = null
     private var pageBitmapMetadata: VisibleBitmapMetadata? = null
     private var pendingRenderedEvent: PendingRenderedEvent? = null
+    private var savedInkToken: String? = null
+    private var savedInkLease: SavedInkRegistry.Lease? = null
 
     init {
         setWillNotDraw(false)
@@ -635,6 +638,9 @@ class PdfPageView(
     }
 
     fun commitProps() {
+        // Ink authority is independent of the background render/cache signature.
+        // A token-only update must repaint without rasterizing or caching ink into the PDF.
+        commitSavedInkProps()
         val filePath = pendingFilePath
         val pageIndex = pendingPageIndex
         val requestedWidth = pendingRequestedWidth
@@ -725,7 +731,29 @@ class PdfPageView(
         renderGeneration.incrementAndGet()
         committedSignature = null
         pendingRenderedEvent = null
+        clearSavedInk()
         replaceBitmap(null, null, cachePrevious = false)
+    }
+
+    private fun clearSavedInk() {
+        savedInkLease?.release()
+        savedInkLease = null
+        savedInkToken = null
+    }
+
+    private fun commitSavedInkProps() {
+        val token = pendingSavedInkToken
+        val oldLease = savedInkLease
+        if (token == savedInkToken && oldLease != null && oldLease.matchesPage(pendingFilePath, pendingPageIndex)) return
+        clearSavedInk()
+        val lease = SavedInkRegistry.acquire(token)
+        if (lease != null && lease.matchesPage(pendingFilePath, pendingPageIndex)) {
+            savedInkLease = lease
+            savedInkToken = token
+        } else {
+            lease?.release()
+        }
+        invalidate()
     }
 
     private fun replaceBitmap(
@@ -887,6 +915,24 @@ override fun onDraw(canvas: Canvas) {
         val saveCount = canvas.save()
         canvas.clipRect(0f, 0f, width.toFloat(), height.toFloat())
         canvas.drawBitmap(bitmap, null, destination, bitmapPaint)
+        // Transparent native ink is a separate immutable layer using the EXACT
+        // background destination/clip; never composite into the PDF bitmap/LRU.
+        val ink = savedInkLease
+        val key = pageBitmapMetadata?.key
+        if (ink != null && key != null) {
+            if (!ink.matchesPage(pendingFilePath, pendingPageIndex)) {
+                clearSavedInk()
+            } else if (ink.matchesPage(key.canonicalPath, key.pageIndex)) {
+                if (ink.matches(key.canonicalPath, key.length, key.modified, key.pageIndex, bitmap.width, bitmap.height)) {
+                    canvas.drawBitmap(ink.bitmap, null, destination, bitmapPaint)
+                } else {
+                    clearSavedInk()
+                }
+            }
+            // An old background may remain while this page's render is pending.
+            // Never draw on that other page, but retain this page-bound lease until
+            // its actual background arrives rather than silently losing the update.
+        }
         canvas.restoreToCount(saveCount)
 
         val pending = pendingRenderedEvent

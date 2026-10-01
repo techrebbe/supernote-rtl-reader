@@ -24,6 +24,8 @@ EXPECTED_NATIVE_CLASS_DESCRIPTORS = (
     b"Lcom/supernotertlreader/ReaderPreferencesModule;",
     b"Lcom/supernotertlreader/PdfRendererPackage;",
     b"Lcom/supernotertlreader/PdfPageView;",
+    b"Lcom/supernotertlreader/SavedInkModule;",
+    b"Lcom/supernotertlreader/SavedInkRegistry;",
 )
 MINIMUM_NATIVE_APK_SIZE = 1_000_000
 EXPECTED_ANDROID_PACKAGE = "com.supernotertlreader"

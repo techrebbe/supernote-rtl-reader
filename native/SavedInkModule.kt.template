@@ -1,0 +1,263 @@
+package __PACKAGE__
+
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.system.Os
+import android.system.OsConstants
+import android.util.Log
+import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReactContextBaseJavaModule
+import com.facebook.react.bridge.ReactMethod
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileInputStream
+import java.security.MessageDigest
+import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+
+/**
+ * Experimental T006 saved-ink display only. Not an atomic snapshot or durable-save
+ * witness. JS calls the supported native thumbnail API; this worker never does.
+ * The T005 alpha/alignment evidence is limited to this exact T004 PAGE 3 fixture.
+ * Native highlights are not in that PNG. No arbitrary document/PNG URI loader.
+ */
+class SavedInkModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
+    companion object {
+        private const val FIXTURE = "/storage/emulated/0/Document/RTL_RAPID_TOOLS_T004_20261001.pdf"
+        private const val FIXTURE_SHA256 = "ffb6c3b889ed455841d3c4f50a0813d844109c3c97255b4bbb5e4b949c9592c9"
+        private const val PAGE = 2
+        private const val WIDTH = 1404
+        private const val HEIGHT = 1872
+        private const val MAX_BYTES = 16L * 1024 * 1024
+        private const val MAX_SOURCE_BYTES = 32L * 1024 * 1024
+    }
+
+    private data class Snapshot(
+        val device: Long, val inode: Long, val size: Long,
+        val mtime: Long, val ctime: Long, val modified: Long, val sha256: String,
+    )
+    private data class Request(
+        val token: String, val pdf: File, val mark: File, val directory: File,
+        val source: Snapshot, val annotation: Snapshot?,
+        var finished: Boolean = false, var inkToken: String? = null,
+    ) { val png: File get() = File(directory, "ink.png") }
+
+    private val worker = Executors.newSingleThreadExecutor()
+    private val closed = AtomicBoolean(false)
+    private val requests = HashMap<String, Request>() // Worker-owned; at most one retained request/bitmap.
+
+    override fun getName(): String = "SavedInkModule"
+
+    private fun read(file: File, maxBytes: Long, captureBytes: Boolean = false): Pair<Snapshot, ByteArray?> {
+        val before = Os.lstat(file.absolutePath)
+        val modified = file.lastModified()
+        require(OsConstants.S_ISREG(before.st_mode) && before.st_size in 1..maxBytes) { "Expected bounded regular file" }
+        val descriptor = Os.open(file.absolutePath, OsConstants.O_RDONLY or OsConstants.O_NOFOLLOW, 0)
+        val hash = MessageDigest.getInstance("SHA-256")
+        val bytes = if (captureBytes) ByteArrayOutputStream(before.st_size.toInt()) else null
+        try {
+            val input = FileInputStream(descriptor)
+            val opened = Os.fstat(descriptor)
+            require(opened.st_dev == before.st_dev && opened.st_ino == before.st_ino && opened.st_size == before.st_size &&
+                opened.st_mtime == before.st_mtime && opened.st_ctime == before.st_ctime) { "File changed before read" }
+            val buffer = ByteArray(64 * 1024)
+            var count = 0L
+            while (true) {
+                val amount = input.read(buffer)
+                if (amount < 0) break
+                count += amount
+                require(count <= maxBytes) { "File exceeds saved-ink limit" }
+                hash.update(buffer, 0, amount)
+                bytes?.write(buffer, 0, amount)
+            }
+            val after = Os.fstat(descriptor)
+            require(count == before.st_size && after.st_size == before.st_size && after.st_mtime == opened.st_mtime &&
+                after.st_ctime == opened.st_ctime) { "File changed during read" }
+        } finally { Os.close(descriptor) }
+        val latest = Os.lstat(file.absolutePath)
+        require(latest.st_dev == before.st_dev && latest.st_ino == before.st_ino && latest.st_size == before.st_size &&
+            latest.st_mtime == before.st_mtime && latest.st_ctime == before.st_ctime && file.lastModified() == modified) {
+            "File path changed during read"
+        }
+        return Pair(Snapshot(before.st_dev, before.st_ino, before.st_size, before.st_mtime, before.st_ctime, modified,
+            hash.digest().joinToString("") { "%02x".format(it.toInt() and 255) }), bytes?.toByteArray())
+    }
+
+    private fun digest(file: File, maxBytes: Long): Snapshot = read(file, maxBytes).first
+
+    private fun markSnapshot(file: File): Snapshot? = try {
+        Os.lstat(file.absolutePath)
+        digest(file, MAX_SOURCE_BYTES)
+    } catch (error: android.system.ErrnoException) {
+        if (error.errno == OsConstants.ENOENT) null else throw error
+    }
+
+    private fun task(promise: Promise, action: () -> Unit) {
+        if (closed.get()) { promise.reject("SAVED_INK_REJECTED", "Module invalidated"); return }
+        try {
+            worker.execute {
+                try { require(!closed.get()) { "Module invalidated" }; action() }
+                catch (error: Throwable) { promise.reject("SAVED_INK_REJECTED", error.message, error) }
+            }
+        } catch (error: Exception) { promise.reject("SAVED_INK_REJECTED", error.message, error) }
+    }
+
+    @ReactMethod
+    fun prepare(filePath: String, pageIndex: Int, width: Int, height: Int, pluginDirectory: String, promise: Promise) = task(promise) {
+        require(filePath == FIXTURE && pageIndex == PAGE && width == WIDTH && height == HEIGHT) {
+            "Saved ink experiment supports only disposable T004 PAGE 3 at 1404x1872"
+        }
+        require(requests.isEmpty() && SavedInkRegistry.isEmpty()) { "Saved ink is still pending or retained" }
+        val pdf = File(FIXTURE)
+        val source = digest(pdf, MAX_SOURCE_BYTES)
+        require(source.sha256 == FIXTURE_SHA256) { "Disposable source identity mismatch" }
+        val mark = File("$FIXTURE.mark")
+        val annotation = markSnapshot(mark)
+        // Native SDK allowlist uses this path spelling from PluginManager.getPluginDirPath().
+        val plugin = File(pluginDirectory)
+        val expectedPlugin = File(reactApplicationContext.filesDir, "plugins/snrtl20260726001")
+        require(plugin.isAbsolute && plugin.canonicalFile == expectedPlugin.canonicalFile &&
+            OsConstants.S_ISDIR(Os.lstat(plugin.absolutePath).st_mode)) { "Production plugin directory mismatch" }
+        val privateRoot = File(plugin, "saved-ink-cache")
+        require(privateRoot.mkdir() || privateRoot.isDirectory) { "Cannot create private saved-ink cache" }
+        require(privateRoot.canonicalFile.parentFile == expectedPlugin.canonicalFile &&
+            OsConstants.S_ISDIR(Os.lstat(privateRoot.absolutePath).st_mode)) { "Invalid private saved-ink cache" }
+        val token = UUID.randomUUID().toString()
+        val directory = File(privateRoot, token)
+        require(directory.mkdir() && directory.canonicalFile.parentFile == privateRoot.canonicalFile) { "Cannot create owned ink directory" }
+        val request = Request(token, pdf, mark, directory, source, annotation)
+        requests[token] = request
+        require(!closed.get()) { "Module invalidated" }
+        promise.resolve(Arguments.createMap().apply {
+            putString("token", token); putString("filePath", FIXTURE); putInt("pageIndex", PAGE)
+            putString("pngPath", request.png.absolutePath); putInt("width", WIDTH); putInt("height", HEIGHT)
+            putBoolean("sourceVerified", true)
+        })
+    }
+
+    private fun unchanged(request: Request): Boolean =
+        digest(request.pdf, MAX_SOURCE_BYTES) == request.source && markSnapshot(request.mark) == request.annotation
+
+    @ReactMethod
+    fun finish(token: String, missingMark: Boolean, promise: Promise) = task(promise) {
+        val request = requests[token] ?: error("Unknown saved-ink request")
+        require(!request.finished) { "Saved-ink request already finished" }
+        require(unchanged(request)) { "PDF or annotations changed; reject saved ink" }
+        val result = Arguments.createMap().apply {
+            putString("token", token); putString("filePath", FIXTURE); putInt("pageIndex", PAGE)
+            putString("pngPath", request.png.absolutePath)
+            putBoolean("sourceUnchanged", true); putBoolean("markUnchanged", true)
+        }
+        if (missingMark) {
+            // SDK1302 can mean a missing annotation page OR sidecar; never claim annotation completeness.
+            require(!request.png.exists()) { "Missing-mark result produced an unexpected PNG" }
+            request.finished = true
+            result.putBoolean("missingMark", true)
+        } else {
+            val (png, captured) = read(request.png, MAX_BYTES, true)
+            val bytes = captured ?: error("Missing PNG bytes")
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            require(bounds.outMimeType == "image/png" && bounds.outWidth == WIDTH && bounds.outHeight == HEIGHT) {
+                "Native PNG format/dimensions mismatch"
+            }
+            var bitmap: Bitmap? = BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
+                BitmapFactory.Options().apply { inMutable = false; inPreferredConfig = Bitmap.Config.ARGB_8888 })
+                ?: error("Cannot decode saved ink")
+            try {
+                val decoded = bitmap ?: error("Missing bitmap")
+                require(!decoded.isMutable && decoded.width == WIDTH && decoded.height == HEIGHT && decoded.hasAlpha()) {
+                    "Saved ink is not the immutable transparent fixed-fixture raster"
+                }
+                var alphaMin = 255
+                var alphaMax = 0
+                val row = IntArray(WIDTH)
+                for (y in 0 until HEIGHT) {
+                    decoded.getPixels(row, 0, WIDTH, 0, y, WIDTH, 1)
+                    for (pixel in row) {
+                        val alpha = pixel ushr 24
+                        if (alpha < alphaMin) alphaMin = alpha
+                        if (alpha > alphaMax) alphaMax = alpha
+                    }
+                }
+                require(alphaMin == 0 && alphaMax > 0) { "Expected transparent background and visible fixture ink" }
+                require(digest(request.png, MAX_BYTES) == png && unchanged(request) && !closed.get()) { "Saved-ink evidence changed" }
+                val source = request.source
+                val annotation = request.annotation ?: error("Decoded ink requires unchanged native mark sidecar")
+                val inkToken = SavedInkRegistry.publish(token, decoded, SavedInkRegistry.SourceStamp(
+                    request.pdf.canonicalPath, source.size, source.modified, source.device, source.inode, source.mtime, source.ctime,
+                ), SavedInkRegistry.SourceStamp(
+                    request.mark.canonicalPath, annotation.size, annotation.modified,
+                    annotation.device, annotation.inode, annotation.mtime, annotation.ctime,
+                ), PAGE)
+                bitmap = null // Registry now owns it; only owner+view reference release may recycle it.
+                request.inkToken = inkToken
+                request.finished = true
+                result.putString("savedInkToken", inkToken)
+                result.putBoolean("missingMark", false); result.putBoolean("decoded", true)
+                result.putInt("width", WIDTH); result.putInt("height", HEIGHT)
+                result.putString("sha256", png.sha256); result.putDouble("byteLength", png.size.toDouble())
+                result.putInt("alphaMin", alphaMin); result.putInt("alphaMax", alphaMax)
+            } finally { bitmap?.let { if (!it.isRecycled) it.recycle() } }
+        }
+        promise.resolve(result)
+    }
+
+    private fun removeOwned(request: Request) {
+        SavedInkRegistry.revoke(request.inkToken)
+        val root = request.directory.parentFile
+        require(request.directory.canonicalFile.parentFile == root.canonicalFile &&
+            OsConstants.S_ISDIR(Os.lstat(request.directory.absolutePath).st_mode)) { "Owned ink directory changed" }
+        val children = request.directory.listFiles() ?: error("Cannot inspect owned ink directory")
+        require(children.all { it.name == "ink.png" && OsConstants.S_ISREG(Os.lstat(it.absolutePath).st_mode) }) {
+            "Unexpected private ink contents; retain for inspection"
+        }
+        require(!request.png.exists() || request.png.delete()) { "Cannot remove owned PNG" }
+        require(request.directory.delete()) { "Cannot remove owned ink directory" }
+        requests.remove(request.token)
+    }
+
+    @ReactMethod
+    fun discard(token: String, promise: Promise) = task(promise) {
+        val request = requests[token] ?: error("Unknown saved-ink request")
+        removeOwned(request)
+        // Removing the PNG/owner alone is not completion: mounted page views can
+        // still retain revoked leases. Resolve only at the target-owned main-UI
+        // drain boundary, so a subsequent prepare can deterministically succeed.
+        SavedInkRegistry.drainRevoked(request.inkToken) { drained ->
+            if (drained) {
+                promise.resolve(Arguments.createMap().apply { putString("token", token); putBoolean("discarded", true) })
+            } else {
+                promise.reject("SAVED_INK_REJECTED", "Saved-ink UI drain could not be verified")
+            }
+        }
+    }
+
+    override fun invalidate() {
+        if (closed.compareAndSet(false, true)) {
+            worker.execute {
+                requests.values.toList().forEach { request ->
+                    SavedInkRegistry.revoke(request.inkToken)
+                    // An unfinished JS SDK call may still write its assigned PNG.
+                    // Never remove/reroute that path while its completion is unknown.
+                    if (!request.finished) {
+                        Log.w("RTL_READER", "RTL_READER_SAVED_INK_UNFINISHED_RETAINED token=${request.token}")
+                        return@forEach
+                    }
+                    try {
+                        removeOwned(request)
+                        SavedInkRegistry.drainRevoked(request.inkToken) { drained ->
+                            if (!drained) Log.e("RTL_READER", "RTL_READER_SAVED_INK_UI_DRAIN_UNCONFIRMED")
+                        }
+                    }
+                    catch (error: Throwable) { Log.e("RTL_READER", "RTL_READER_SAVED_INK_CLEANUP_FAILED", error) }
+                }
+            }
+            worker.shutdown()
+        }
+        super.invalidate()
+    }
+}

@@ -32,6 +32,11 @@ class PdfPageViewManager : SimpleViewManager<PdfPageView>() {
         view.setContentMode(contentMode)
     }
 
+    @ReactProp(name = "savedInkToken")
+    fun setSavedInkToken(view: PdfPageView, savedInkToken: String?) {
+        view.pendingSavedInkToken = savedInkToken
+    }
+
     @ReactProp(name = "prefetchPageIndexes")
     fun setPrefetchPageIndexes(view: PdfPageView, pageIndexes: ReadableArray?) {
         if (pageIndexes == null) {

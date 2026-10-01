@@ -11,6 +11,7 @@ class PdfRendererPackage : ReactPackage {
     ): List<NativeModule> = listOf(
         PdfRendererModule(reactContext),
         ReaderPreferencesModule(reactContext),
+        SavedInkModule(reactContext),
     )
 
     override fun createViewManagers(

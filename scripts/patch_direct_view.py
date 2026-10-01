@@ -330,6 +330,7 @@ def main() -> None:
                 <NativePdfPageView
                   filePath={documentContext?.filePath ?? ''}
                   pageIndex={display.leftPageIndex}
+                  savedInkToken={savedInkTokenFor(display.leftPageIndex)}
                   requestedWidth={Math.max(360, Math.floor(window.width / 2))}
                   contentMode={spreadSizing}
                   prefetchPageIndexes={display.prefetchPageIndexes ?? []}
@@ -348,6 +349,7 @@ def main() -> None:
                 <NativePdfPageView
                   filePath={documentContext?.filePath ?? ''}
                   pageIndex={display.rightPageIndex}
+                  savedInkToken={savedInkTokenFor(display.rightPageIndex)}
                   requestedWidth={Math.max(360, Math.floor(window.width / 2))}
                   contentMode={spreadSizing}
                   prefetchPageIndexes={display.prefetchPageIndexes ?? []}
@@ -365,6 +367,7 @@ def main() -> None:
           <NativePdfPageView
             filePath={documentContext?.filePath ?? ''}
             pageIndex={display.singlePageIndex}
+            savedInkToken={savedInkTokenFor(display.singlePageIndex)}
             requestedWidth={Math.max(600, Math.round(window.width))}
             contentMode="fit"
             prefetchPageIndexes={display.prefetchPageIndexes ?? []}

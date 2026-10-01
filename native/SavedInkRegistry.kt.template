@@ -1,0 +1,140 @@
+package __PACKAGE__
+
+import android.graphics.Bitmap
+import android.os.Handler
+import android.os.Looper
+import android.system.Os
+import android.system.OsConstants
+import java.io.File
+import java.util.UUID
+import kotlin.math.abs
+
+/**
+ * Process-local opaque image ownership, not a file/image loader or save witness.
+ * T006 intentionally supports only T004 PAGE 3's 1404x1872 transparent ink.
+ * Native text highlights were absent from that API output and are not claimed.
+ */
+internal object SavedInkRegistry {
+    internal data class SourceStamp(
+        val canonicalPath: String, val length: Long, val modified: Long,
+        val device: Long, val inode: Long, val mtime: Long, val ctime: Long,
+    )
+
+    private class Entry(
+        val token: String, val bitmap: Bitmap, val source: SourceStamp,
+        val annotation: SourceStamp?, val pageIndex: Int,
+    ) {
+        var owner = true
+        val leases = HashSet<Lease>()
+    }
+
+    private val lock = Any()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val entries = HashMap<String, Entry>() // At most one, including revoked view leases.
+
+    internal class Lease internal constructor(private val token: String, val bitmap: Bitmap) {
+        private var released = false
+
+        fun matchesPage(path: String?, pageIndex: Int): Boolean = synchronized(lock) {
+            val entry = entries[token] ?: return@synchronized false
+            if (released || !entry.owner || path.isNullOrBlank() || entry.pageIndex != pageIndex) return@synchronized false
+            try { File(path).canonicalPath == entry.source.canonicalPath } catch (_: Exception) { false }
+        }
+
+        fun matches(path: String, length: Long, modified: Long, pageIndex: Int, bitmapWidth: Int, bitmapHeight: Int): Boolean =
+            synchronized(lock) {
+                if (released) return@synchronized false
+                val entry = entries[token] ?: return@synchronized false
+                val source = entry.source
+                if (!entry.owner || bitmap.isRecycled || entry.pageIndex != pageIndex ||
+                    path != source.canonicalPath || length != source.length || modified != source.modified ||
+                    bitmapWidth <= 0 || bitmapHeight <= 0 ||
+                    // PdfRenderer rounds raster height to one pixel; do not stretch another page shape.
+                    abs(bitmapWidth.toLong() * 1872L - bitmapHeight.toLong() * 1404L) > 1404L) {
+                    return@synchronized false
+                }
+                try {
+                    liveMatches(source) && entry.annotation?.let(::liveMatches) == true
+                } catch (_: Exception) { false }
+            }
+
+        fun release() = synchronized(lock) {
+            check(Looper.myLooper() == Looper.getMainLooper()) { "Ink view lease release requires Android main thread" }
+            if (!released) {
+                released = true
+                entries[token]?.let { entry ->
+                    entry.leases.remove(this)
+                    reap(entry)
+                }
+            }
+        }
+    }
+
+    fun isEmpty(): Boolean = synchronized(lock) { entries.isEmpty() }
+
+    /** Ownership of bitmap transfers only after success; caller recycles on rejection. */
+    fun publish(token: String, bitmap: Bitmap, source: SourceStamp, annotation: SourceStamp?, pageIndex: Int): String = synchronized(lock) {
+        require(entries.isEmpty()) { "Previous saved ink is still retained by a view" }
+        require(UUID.fromString(token).toString() == token) { "Expected native-issued UUID ink token" }
+        require(!bitmap.isRecycled && !bitmap.isMutable && bitmap.width == 1404 && bitmap.height == 1872 && pageIndex == 2) {
+            "Invalid immutable fixed-fixture ink bitmap"
+        }
+        require(annotation != null) { "A decoded ink bitmap requires an unchanged mark sidecar" }
+        entries[token] = Entry(token, bitmap, source, annotation, pageIndex)
+        token
+    }
+
+    fun acquire(token: String?): Lease? = synchronized(lock) {
+        check(Looper.myLooper() == Looper.getMainLooper()) { "Ink view lease acquisition requires Android main thread" }
+        val entry = entries[token] ?: return@synchronized null
+        if (!entry.owner || entry.bitmap.isRecycled) return@synchronized null
+        Lease(entry.token, entry.bitmap).also { entry.leases.add(it) }
+    }
+
+    fun revoke(token: String?) = synchronized(lock) {
+        entries[token]?.let { entry ->
+            entry.owner = false
+            reap(entry)
+        }
+    }
+
+    /**
+     * Completion means this revoked token has no remaining owner or view leases.
+     * Android draws and view-lease release run on the same main Looper: enqueueing
+     * the drain after revocation cannot recycle a bitmap during an in-flight
+     * onDraw. Released leases retained by a view fail matchesPage/matches and
+     * therefore cannot draw a recycled bitmap. No timing delay/poll/retry.
+     */
+    fun drainRevoked(token: String?, complete: (Boolean) -> Unit) {
+        val accepted = mainHandler.post {
+            val revokedLeases = synchronized(lock) {
+                val entry = entries[token]
+                if (entry?.owner == true) null else entry?.leases?.toList() ?: emptyList()
+            }
+            if (revokedLeases == null) {
+                complete(false) // Never force-release a still-owned entry.
+                return@post
+            }
+            revokedLeases.forEach { it.release() }
+            complete(synchronized(lock) { !entries.containsKey(token) })
+        }
+        if (!accepted) complete(false) // Reject rather than claim an unobserved UI drain.
+    }
+
+    private fun reap(entry: Entry) {
+        if (!entry.owner && entry.leases.isEmpty()) {
+            entries.remove(entry.token)
+            if (!entry.bitmap.isRecycled) entry.bitmap.recycle()
+        }
+    }
+
+    // Cheap per-draw invalidation complements (does not replace) the worker's
+    // before/after SHA checks. This is not an atomic or durable-save witness.
+    private fun liveMatches(source: SourceStamp): Boolean {
+        val file = File(source.canonicalPath)
+        val live = Os.lstat(source.canonicalPath)
+        return OsConstants.S_ISREG(live.st_mode) && file.canonicalPath == source.canonicalPath &&
+            live.st_dev == source.device && live.st_ino == source.inode && live.st_size == source.length &&
+            live.st_mtime == source.mtime && live.st_ctime == source.ctime && file.lastModified() == source.modified
+    }
+}

@@ -135,7 +135,7 @@ def main() -> None:
     )
     require(
         plugin_config,
-        ['"versionCode": "44"', '"versionName": "0.4.24-edit-exp2"'],
+        ['"versionCode": "45"', '"versionName": "0.4.24-ink-exp1"'],
         "plugin version",
     )
     require(
@@ -161,7 +161,7 @@ def main() -> None:
         not in root_build
     ):
         fail("plugin build does not execute the exclusive v2 invariant gate")
-    if "RTL_READER_OPEN v0.4.24-edit-exp2-native-reader-v2" not in index:
+    if "RTL_READER_OPEN v0.4.24-ink-exp1-native-reader-v2" not in index:
         fail("runtime marker does not identify the v2 plugin build")
     require(
         guidance,
@@ -3435,7 +3435,7 @@ def main() -> None:
             "python3 scripts/test_build_provenance.py .",
             "out/build-provenance/SupernoteRtlReader.bundle",
             "out/build-provenance/app.npk",
-            "supernote-rtl-reader-v0.4.24-edit-exp2-native-reader-v2",
+            "supernote-rtl-reader-v0.4.24-ink-exp1-native-reader-v2",
             "native-spread-upgrade-artifact:",
             "github.event_name == 'workflow_dispatch'",
             "github.actor == github.repository_owner",

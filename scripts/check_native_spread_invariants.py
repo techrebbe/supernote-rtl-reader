@@ -979,7 +979,7 @@ def check(repo_root: Path) -> None:
         ),
         (
             app_path,
-            "6412fc02e2586ad4dbb905d35cc69badb69199565112d8e72a00931f4769ad30",
+            "9219227a74650de9006ecd672250576b01a16d3fbd26c14404dd74411126b9b3",
             "Native Spread UI authority source",
         ),
         (
@@ -987,24 +987,40 @@ def check(repo_root: Path) -> None:
             "3b6de3826f67e5ead78324cbc6df0a86bc6df6d78c9042598ef4645827c61538",
             "Edit/Return page-authority module",
         ),
+        # T006 read-only image ownership is separate from writer/save authority.
+        (
+            repo_root / "overlay" / "savedInk.js",
+            "8661e7a238d698eacacae725d432e6607a7079ca57d3fce897b85741f9eac07c",
+            "saved-ink request and cleanup controller",
+        ),
+        (
+            repo_root / "native" / "SavedInkModule.kt.template",
+            "168467e199e1347ff5ea7144bf28e7c30604d7db7089599ca34f4acca5ea7b29",
+            "saved-ink fixture verification and owned output cleanup",
+        ),
+        (
+            repo_root / "native" / "SavedInkRegistry.kt.template",
+            "2de9b8f032fa596b621f6acf71b7cd0705e59dc8876728830ce46e8d281dd8b3",
+            "saved-ink opaque bitmap and UI lease ownership",
+        ),
         (
             index_path,
-            "d1eadadfb5af74d571cc023a2d7addc1577638d1fc3e94a355a1a24e52f28781",
+            "c9116af59cc326c9af396a9d20434687b2190b13b33509e3e755a02d724b4182",
             "Edit/Return activation and close authority",
         ),
         (
             direct_patch_path,
-            "161d732a4469f178a855ee81b2742434b5ecf8fd6a7d8ca962f39b2898af98cb",
+            "12005c6f1c807cec2abd805f9292cf31583ba4e96e4eb92c9313aa14586be7d8",
             "direct-render Edit/Return transition guard generation",
         ),
         (
             workflow_path,
-            "7f301c7311e3a2da50e015a29abc5b807c8800f629a27c7096690c0494eaa0d2",
+            "0a258179c41549369adb79394b5fe495f9dee74a40ace54cf04685d8db5f6558",
             "Native Spread companion-build workflow",
         ),
         (
             plugin_build_path,
-            "02c0a88d45fd627e88163d22afa2393a3b6db3c0d27fdaaf676972f1295c07c5",
+            "aecbf1327b52e3e07110bd1864892c272b6f9329f7d102ceeb96f3015268f6d2",
             "native plugin build entrypoint",
         ),
         (
@@ -1014,7 +1030,7 @@ def check(repo_root: Path) -> None:
         ),
         (
             package_verifier_path,
-            "b7cf13aaea2df510772e7e25ad8ff2dd51c49e3a29bbe35ab52f591c76728e52",
+            "4d44688a876ebac736b6d80eaf40b97c181e3b6c2379da81fa8b1564585c7df0",
             "finished native plugin package verifier",
         ),
         (

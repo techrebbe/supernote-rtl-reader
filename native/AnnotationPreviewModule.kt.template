@@ -1,0 +1,188 @@
+package __PACKAGE__
+
+import android.graphics.BitmapFactory
+import android.system.Os
+import android.system.OsConstants
+import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReactContextBaseJavaModule
+import com.facebook.react.bridge.ReactMethod
+import java.io.File
+import java.io.FileInputStream
+import java.io.ByteArrayOutputStream
+import java.security.MessageDigest
+import java.util.UUID
+import java.util.concurrent.Executors
+
+/** Disposable, manual handwriting-renderer probe. Not a production overlay or save witness. */
+class AnnotationPreviewModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
+    companion object {
+        private const val FIXTURE = "/storage/emulated/0/Document/RTL_RAPID_TOOLS_T004_20261001.pdf"
+        private const val FIXTURE_SHA256 = "ffb6c3b889ed455841d3c4f50a0813d844109c3c97255b4bbb5e4b949c9592c9"
+        private const val PAGE = 2 // Native API's zero-based original PAGE 3.
+        private const val WIDTH = 1404
+        private const val HEIGHT = 1872
+        private const val MAX_BYTES = 16L * 1024 * 1024
+        private const val MAX_SOURCE_BYTES = 32L * 1024 * 1024
+    }
+
+    private data class Snapshot(val device: Long, val inode: Long, val size: Long, val sha256: String)
+    private data class Request(
+        val token: String, val pdf: File, val mark: File, val directory: File,
+        val source: Snapshot, val annotation: Snapshot?,
+    ) {
+        val png: File get() = File(directory, "ink.png")
+    }
+
+    // All I/O and bitmap inspection stay off the React/native UI thread.
+    private val worker = Executors.newSingleThreadExecutor()
+    private val requests = HashMap<String, Request>() // Worker-owned, at most one retained request.
+
+    override fun getName(): String = "AnnotationPreviewModule"
+
+    private fun read(file: File, maxBytes: Long, captureBytes: Boolean = false): Pair<Snapshot, ByteArray?> {
+        val before = Os.lstat(file.absolutePath)
+        require(OsConstants.S_ISREG(before.st_mode) && before.st_size in 1..maxBytes) {
+            "Expected bounded regular file"
+        }
+        val descriptor = Os.open(file.absolutePath, OsConstants.O_RDONLY or OsConstants.O_NOFOLLOW, 0)
+        val hash = MessageDigest.getInstance("SHA-256")
+        val bytes = if (captureBytes) ByteArrayOutputStream(before.st_size.toInt()) else null
+        try {
+            val input = FileInputStream(descriptor)
+            val opened = Os.fstat(descriptor)
+            require(opened.st_dev == before.st_dev && opened.st_ino == before.st_ino && opened.st_size == before.st_size) {
+                "File changed before read"
+            }
+            val buffer = ByteArray(64 * 1024)
+            var count = 0L
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                count += read
+                require(count <= maxBytes) { "File exceeds probe limit" }
+                hash.update(buffer, 0, read)
+                bytes?.write(buffer, 0, read)
+            }
+            val after = Os.fstat(descriptor)
+            require(count == before.st_size && after.st_size == before.st_size && after.st_mtime == opened.st_mtime && after.st_ctime == opened.st_ctime) {
+                "File changed during read"
+            }
+        } finally { Os.close(descriptor) }
+        val latest = Os.lstat(file.absolutePath)
+        require(latest.st_dev == before.st_dev && latest.st_ino == before.st_ino && latest.st_size == before.st_size &&
+            latest.st_mtime == before.st_mtime && latest.st_ctime == before.st_ctime) { "File path changed during read" }
+        return Pair(Snapshot(before.st_dev, before.st_ino, before.st_size, hash.digest().joinToString("") { "%02x".format(it.toInt() and 255) }), bytes?.toByteArray())
+    }
+
+    private fun digest(file: File, maxBytes: Long): Snapshot = read(file, maxBytes).first
+
+    private fun markSnapshot(file: File): Snapshot? {
+        return try {
+            Os.lstat(file.absolutePath)
+            digest(file, MAX_SOURCE_BYTES)
+        } catch (error: android.system.ErrnoException) {
+            if (error.errno == OsConstants.ENOENT) null else throw error
+        }
+    }
+
+    private fun task(promise: Promise, action: () -> Unit) {
+        worker.execute {
+            try { action() } catch (error: Throwable) { promise.reject("ANNOTATION_PREVIEW_REJECTED", error.message, error) }
+        }
+    }
+
+    @ReactMethod
+    fun prepare(filePath: String, pageIndex: Int, width: Int, height: Int, pluginDirectory: String, promise: Promise) = task(promise) {
+        require(filePath == FIXTURE && pageIndex == PAGE && width == WIDTH && height == HEIGHT) {
+            "This probe is restricted to disposable T004 PAGE 3 at 1404x1872"
+        }
+        require(requests.isEmpty()) { "A preview is still retained or pending" }
+        val pdf = File(FIXTURE)
+        val source = digest(pdf, MAX_SOURCE_BYTES)
+        require(source.sha256 == FIXTURE_SHA256) { "Disposable source identity mismatch" }
+        val mark = File("$FIXTURE.mark")
+        val annotation = markSnapshot(mark)
+        // SDK output allowlist is rooted at PluginManager.getPluginDirPath(), not cacheDir.
+        // Validate against this diagnostic's install directory; retain the SDK's path spelling.
+        val plugin = File(pluginDirectory)
+        val expectedPlugin = File(reactApplicationContext.filesDir, "plugins/snrtlinkprobe20261001")
+        require(plugin.isAbsolute && plugin.canonicalFile == expectedPlugin.canonicalFile &&
+            OsConstants.S_ISDIR(Os.lstat(plugin.absolutePath).st_mode)) { "Diagnostic plugin directory mismatch" }
+        val privateRoot = File(plugin, "annotation-probe-cache")
+        require(privateRoot.mkdir() || privateRoot.isDirectory) { "Cannot create private preview cache" }
+        require(privateRoot.canonicalFile.parentFile == expectedPlugin.canonicalFile &&
+            OsConstants.S_ISDIR(Os.lstat(privateRoot.absolutePath).st_mode)) { "Invalid private preview cache" }
+        val token = UUID.randomUUID().toString()
+        val directory = File(privateRoot, token)
+        require(directory.mkdir() && directory.canonicalFile.parentFile == privateRoot.canonicalFile) { "Cannot create unique preview directory" }
+        val request = Request(token, pdf, mark, directory, source, annotation)
+        requests[token] = request
+        promise.resolve(Arguments.createMap().apply {
+            putString("token", token); putString("filePath", FIXTURE); putInt("pageIndex", PAGE)
+            putString("pngPath", request.png.absolutePath); putInt("width", WIDTH); putInt("height", HEIGHT)
+            putBoolean("sourceVerified", true)
+        })
+    }
+
+    @ReactMethod
+    fun finish(token: String, missingMark: Boolean, promise: Promise) = task(promise) {
+        val request = requests[token] ?: error("Unknown preview token")
+        require(digest(request.pdf, MAX_SOURCE_BYTES) == request.source && markSnapshot(request.mark) == request.annotation) {
+            "Disposable PDF or annotations changed; do not display this result"
+        }
+        val result = Arguments.createMap().apply {
+            putString("token", token); putString("filePath", FIXTURE); putInt("pageIndex", PAGE)
+            putBoolean("sourceUnchanged", true); putBoolean("markUnchanged", true)
+        }
+        if (missingMark) {
+            // 1302 means missing annotation page OR sidecar. Do not claim absence from this signal.
+            require(!request.png.exists()) { "Missing-page response unexpectedly produced a PNG" }
+            result.putBoolean("missingMark", true)
+        } else {
+            val (png, capturedBytes) = read(request.png, MAX_BYTES, true)
+            val pngBytes = capturedBytes ?: error("Missing captured PNG")
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(pngBytes, 0, pngBytes.size, bounds)
+            require(bounds.outMimeType == "image/png" && bounds.outWidth == WIDTH && bounds.outHeight == HEIGHT) {
+                "Native PNG dimensions or format do not match the requested contract"
+            }
+            val bitmap = BitmapFactory.decodeByteArray(pngBytes, 0, pngBytes.size) ?: error("Cannot decode preview PNG")
+            var alphaMin = 255
+            var alphaMax = 0
+            try {
+                require(bitmap.width == WIDTH && bitmap.height == HEIGHT) { "Decoded PNG dimensions changed" }
+                val row = IntArray(WIDTH)
+                for (y in 0 until HEIGHT) {
+                    bitmap.getPixels(row, 0, WIDTH, 0, y, WIDTH, 1)
+                    for (pixel in row) {
+                        val alpha = pixel ushr 24
+                        if (alpha < alphaMin) alphaMin = alpha
+                        if (alpha > alphaMax) alphaMax = alpha
+                    }
+                }
+            } finally { bitmap.recycle() }
+            require(digest(request.png, MAX_BYTES) == png && digest(request.pdf, MAX_SOURCE_BYTES) == request.source &&
+                markSnapshot(request.mark) == request.annotation) { "Preview evidence changed during inspection" }
+            result.putString("pngPath", request.png.absolutePath); result.putInt("width", WIDTH); result.putInt("height", HEIGHT)
+            result.putBoolean("decoded", true); result.putString("sha256", png.sha256); result.putDouble("byteLength", png.size.toDouble())
+            result.putInt("alphaMin", alphaMin); result.putInt("alphaMax", alphaMax)
+        }
+        promise.resolve(result)
+    }
+
+    @ReactMethod
+    fun discard(token: String, promise: Promise) = task(promise) {
+        val request = requests[token] ?: error("Unknown preview token")
+        val root = request.directory.parentFile
+        require(request.directory.canonicalFile.parentFile == root.canonicalFile &&
+            OsConstants.S_ISDIR(Os.lstat(request.directory.absolutePath).st_mode)) { "Preview directory changed" }
+        val children = request.directory.listFiles() ?: error("Cannot inspect preview directory")
+        require(children.all { it.name == "ink.png" && !it.isDirectory }) { "Unexpected private cache contents; retain for inspection" }
+        require(!request.png.exists() || request.png.delete()) { "Cannot remove owned PNG" }
+        require(request.directory.delete()) { "Cannot remove owned preview directory" }
+        requests.remove(token)
+        promise.resolve(Arguments.createMap().apply { putString("token", token); putBoolean("discarded", true) })
+    }
+}

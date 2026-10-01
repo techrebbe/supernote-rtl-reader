@@ -1,0 +1,11 @@
+{
+  "name": "RTL Ink Probe",
+  "pluginKey": "SupernoteRtlInkProbe",
+  "pluginID": "snrtlinkprobe20261001",
+  "iconPath": "assets/icon.png",
+  "desc": "Disposable-only native handwriting PNG contract probe",
+  "versionCode": "1",
+  "versionName": "0.0.1-ink-probe",
+  "jsMainPath": "index",
+  "author": "techrebbe"
+}

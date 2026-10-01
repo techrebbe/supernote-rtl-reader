@@ -21,6 +21,34 @@ PluginManager.closePluginView = async (...args) => {
   if (transition && transition.allowClose !== true) {
     throw new Error('Reader hand-off or recovery is still in progress.');
   }
+  // Last-resort gate for callers outside App's Close/Edit callbacks. Never
+  // hand off/restart the native reader or close the host while the SDK can
+  // still write its owned PNG, or while native bitmap leases remain undrained.
+  const inkLifecycle = globalThis.RTL_READER_INK_LIFECYCLE;
+  const inkExitPending = {};
+  globalThis.RTL_READER_INK_EXIT_PENDING = inkExitPending;
+  let inkClean = false;
+  try {
+    inkClean = await (inkLifecycle?.quiesce() ??
+      globalThis.RTL_READER_INK_CLEANUP ?? Promise.resolve(true));
+  } catch (_) {
+    // Keep a failed/rejected cleanup fenced; never fall through to handoff.
+  }
+  if (inkClean !== true) {
+    globalThis.RTL_READER_INK_CLEANUP_BLOCKED = true;
+    if (globalThis.RTL_READER_INK_EXIT_PENDING === inkExitPending) {
+      globalThis.RTL_READER_INK_EXIT_PENDING = null;
+    }
+    throw new Error('Saved ink cleanup could not be verified; the reader stayed open.');
+  }
+  if (globalThis.RTL_READER_INK_EXIT_PENDING === inkExitPending) {
+    globalThis.RTL_READER_INK_EXIT_PENDING = null;
+  }
+  if (globalThis.RTL_READER_TRANSITION_IN_FLIGHT !== transition ||
+      (transition && transition.allowClose !== true) ||
+      (!transition && globalThis.RTL_READER_INK_LIFECYCLE !== inkLifecycle)) {
+    throw new Error('Reader hand-off or recovery changed while saved ink was settling.');
+  }
   // Edit already ran (and checked) the native handoff itself this activation.
   if (globalThis.RTL_READER_EDIT_HANDOFF_DONE === true || transition?.skipHandoff === true) {
     handoffAttemptedThisActivation = true;
@@ -81,7 +109,7 @@ PluginManager.registerButtonListener({
         if (globalThis.RTL_READER_TRANSITION_IN_FLIGHT) return;
         handoffAttemptedThisActivation = false;
         globalThis.RTL_READER_EDIT_HANDOFF_DONE = false;
-        console.log('RTL_READER_OPEN v0.4.24-ink-exp1-native-reader-v2');
+        console.log('RTL_READER_OPEN v0.4.24-ink-exp2-native-reader-v2');
         DeviceEventEmitter.emit(RTL_READER_ACTIVATE_EVENT);
       };
       const transition = globalThis.RTL_READER_TRANSITION_IN_FLIGHT;

@@ -96,6 +96,8 @@ function harness(hooks = {}) {
       savedInkVisible: visible,
       documentContext,
       savedInkContextRef: contextRef,
+      savedInkLifecycleRef: {current: null},
+      mountedRef: {current: true},
       SavedInkModule: options.moduleAbsent ? undefined : native,
       PluginManager: {
         getPluginDirPath: (...args) => invoke('pluginDir', async () => DIR, args),
@@ -132,14 +134,18 @@ function harness(hooks = {}) {
       get state() { return updates.at(-1); },
       get ready() { return updates.filter(value => value.status === 'ready'); },
       tokenFor(page, overrides = {}) {
-        return new Function('savedInkVisible', 'savedInk', 'documentContext', 'SAVED_INK_PAGE', `${code.accessor}\nreturn savedInkTokenFor;`)(
+        return new Function('savedInkVisible', 'savedInk', 'documentContext', 'SAVED_INK_PAGE',
+          'savedInkContextRef', 'readerTransitionLocked', `${code.accessor}\nreturn savedInkTokenFor;`)(
           overrides.visible ?? visible,
           overrides.state ?? instance.state ?? {},
           overrides.documentContext ?? documentContext,
           2,
+          contextRef,
+          () => transitionLocked,
         )(page);
       },
       cleanup() { cleanup(); return sharedGlobal.RTL_READER_INK_CLEANUP; },
+      quiesce() { return sharedGlobal.RTL_READER_INK_LIFECYCLE.quiesce(); },
     };
     mounts.push(instance);
     return instance;

@@ -33,6 +33,8 @@ const {SavedInkModule} = NativeModules;
 // First integrated slice deliberately retains T005's proven geometry/identity.
 const SAVED_INK_FIXTURE = '/storage/emulated/0/Document/RTL_RAPID_TOOLS_T004_20261001.pdf';
 const SAVED_INK_PAGE = 2;
+const SAVED_INK_CLEANUP_FAILED_MESSAGE =
+  'Saved ink cleanup could not be verified; the reader stayed open. Close and Edit are blocked until cleanup is resolved.';
 const SWIPE_THRESHOLD = 56;
 const TAP_SLOP = 18;
 const EDGE_ZONE = 0.28;
@@ -407,6 +409,28 @@ export default function App() {
   const cacheRef = useRef(new Map());
   const prefetchingRef = useRef(new Set());
   const savedInkContextRef = useRef(null);
+  const savedInkLifecycleRef = useRef(null);
+
+  const quiesceSavedInk = async () => {
+    // Fence publication synchronously, without relying on the next React effect
+    // cleanup. Handoff may restart the SDK's reader, so it must wait for the
+    // actual writer settlement AND native owner/view-lease cleanup acknowledgment.
+    savedInkContextRef.current = null;
+    if (mountedRef.current) setSavedInk({status: 'unavailable', reason: 'transition'});
+    let clean = false;
+    try {
+      clean = await (savedInkLifecycleRef.current?.quiesce() ??
+        globalThis.RTL_READER_INK_CLEANUP ?? Promise.resolve(true));
+    } catch (_) {
+      // A rejected prior cleanup is no more authoritative than a false result.
+    }
+    if (clean !== true) {
+      globalThis.RTL_READER_INK_CLEANUP_BLOCKED = true;
+      const error = new Error(SAVED_INK_CLEANUP_FAILED_MESSAGE);
+      error.savedInkCleanupFailed = true;
+      throw error;
+    }
+  };
 
   const reportNativeSpreadAuthorityLocked = () => {
     setNativeSpreadError(
@@ -443,7 +467,8 @@ export default function App() {
     ? {filePath: documentContext.filePath, pageIndex: SAVED_INK_PAGE, totalPages: 8}
     : null;
   const savedInkTokenFor = page =>
-    savedInkVisible && savedInk.status === 'ready' && page === SAVED_INK_PAGE &&
+    savedInkVisible && savedInkContextRef.current && !readerTransitionLocked() &&
+    savedInk.status === 'ready' && page === SAVED_INK_PAGE &&
     savedInk.filePath === documentContext?.filePath
       ? savedInk.savedInkToken : null;
 
@@ -451,12 +476,14 @@ export default function App() {
     let cancelled = false;
     let controller = null;
     let previousWasClean = false;
+    let cleanupPromise = null;
     const previousCleanup = globalThis.RTL_READER_INK_CLEANUP ?? Promise.resolve(true);
     setSavedInk({status: savedInkVisible ? 'loading' : 'unavailable'});
     const run = Promise.resolve(previousCleanup).then(async clean => {
       previousWasClean = clean === true;
       if (cancelled || !savedInkVisible) return;
       if (clean !== true || !SavedInkModule) {
+        if (clean !== true) globalThis.RTL_READER_INK_CLEANUP_BLOCKED = true;
         setSavedInk({status: 'error', reason: clean !== true ? 'cleanup_failed' : 'module_unavailable'});
         return;
       }
@@ -478,18 +505,21 @@ export default function App() {
       const context = await currentContext();
       if (cancelled) return;
       const result = await controller.run(context);
+      if (result.reason === 'cleanup_failed') globalThis.RTL_READER_INK_CLEANUP_BLOCKED = true;
       if (cancelled || readerTransitionLocked() || !savedInkContextRef.current) return;
       setSavedInk({...result, filePath: context?.filePath});
       console.log(`RTL_READER_SAVED_INK status=${result.status} reason=${result.reason ?? 'none'} page=3`);
     }).catch(error => {
+      if (!previousWasClean) globalThis.RTL_READER_INK_CLEANUP_BLOCKED = true;
       if (!cancelled) setSavedInk({status: 'error', reason: error?.message ?? 'request_failed'});
     });
-    return () => {
+    const stop = () => {
+      if (cleanupPromise) return cleanupPromise;
       cancelled = true;
       controller?.cancel();
       // Never discard while the SDK may still be writing. Remounts wait for the
       // previous request AND owned cleanup, not for a guessed timeout.
-      globalThis.RTL_READER_INK_CLEANUP = run.then(async () => {
+      cleanupPromise = run.then(async () => {
         if (!controller) return previousWasClean;
         const result = await controller.dispose();
         const clean = result.status === 'disposed';
@@ -498,7 +528,30 @@ export default function App() {
       }).catch(error => {
         console.warn('RTL_READER_SAVED_INK_CLEANUP_FAILED', error);
         return false;
+      }).then(clean => {
+        if (clean !== true) globalThis.RTL_READER_INK_CLEANUP_BLOCKED = true;
+        else if (globalThis.RTL_READER_INK_CLEANUP === cleanupPromise) {
+          // Only the current cleanup authority can clear a prior failure latch.
+          globalThis.RTL_READER_INK_CLEANUP_BLOCKED = false;
+        }
+        return clean;
       });
+      globalThis.RTL_READER_INK_CLEANUP = cleanupPromise;
+      return cleanupPromise;
+    };
+    const lifecycle = {
+      quiesce() {
+        savedInkContextRef.current = null;
+        if (mountedRef.current) setSavedInk({status: 'unavailable', reason: 'transition'});
+        return stop();
+      },
+    };
+    savedInkLifecycleRef.current = lifecycle;
+    globalThis.RTL_READER_INK_LIFECYCLE = lifecycle;
+    return () => {
+      stop();
+      if (savedInkLifecycleRef.current === lifecycle) savedInkLifecycleRef.current = null;
+      if (globalThis.RTL_READER_INK_LIFECYCLE === lifecycle) globalThis.RTL_READER_INK_LIFECYCLE = null;
     };
   }, [savedInkVisible, documentContext?.filePath]);
 
@@ -506,6 +559,13 @@ export default function App() {
     const subscription = BackHandler.addEventListener(
       'hardwareBackPress',
       () => {
+        if (globalThis.RTL_READER_INK_EXIT_PENDING ||
+            globalThis.RTL_READER_INK_CLEANUP_BLOCKED === true) {
+          setEditNotice(globalThis.RTL_READER_INK_EXIT_PENDING
+            ? 'Wait for saved ink cleanup to finish before closing.'
+            : SAVED_INK_CLEANUP_FAILED_MESSAGE);
+          return true;
+        }
         if (!nativeSpreadBusyRef.current && !readerTransitionLocked()) return false;
         setNativeSpreadError(
           'Wait for the native reader change to finish before closing.',
@@ -987,6 +1047,7 @@ export default function App() {
     }
 
     try {
+      await quiesceSavedInk();
       if (latestPreferencesRef.current) {
         await savePreferences('close');
       } else {
@@ -999,7 +1060,9 @@ export default function App() {
       releaseReaderTransition();
       if (mountedRef.current) {
         setEditBusy(false);
-        setEditNotice('Could not save the reader position; the reader stayed open.');
+        setEditNotice(error?.savedInkCleanupFailed
+          ? SAVED_INK_CLEANUP_FAILED_MESSAGE
+          : 'Could not save the reader position; the reader stayed open.');
       }
       return;
     }
@@ -1123,15 +1186,17 @@ export default function App() {
       if (mountedRef.current) {
         setEditBusy(false);
         setEditRecoveryAvailable(false);
-        setEditNotice(EDIT_BLOCKED_MESSAGES[failure]);
+        setEditNotice(failure === 'ink_cleanup_failed'
+          ? SAVED_INK_CLEANUP_FAILED_MESSAGE : EDIT_BLOCKED_MESSAGES[failure]);
       }
     };
 
     try {
+      await quiesceSavedInk();
       await savePreferences('edit', payload);
     } catch (error) {
       console.warn('RTL_READER_PREFS_EDIT_SAVE_FAILED', error);
-      await rollback('save_failed');
+      await rollback(error?.savedInkCleanupFailed ? 'ink_cleanup_failed' : 'save_failed');
       return;
     }
     if (!mountedRef.current) {

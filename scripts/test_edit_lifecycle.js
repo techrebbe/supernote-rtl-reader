@@ -82,8 +82,9 @@ async function bounded(promise, label = 'callback completion') {
 }
 
 function harness(options = {}) {
+  const file = options.filePath ?? FILE;
   const state = {
-    documentContext: {filePath: FILE, pageIndex: NATIVE_OPEN_PAGE, totalPages: 40},
+    documentContext: {filePath: file, pageIndex: NATIVE_OPEN_PAGE, totalPages: 40},
     preferencesReady: true,
     pageIndex: READER_PAGE,
     totalPages: 40,
@@ -101,6 +102,7 @@ function harness(options = {}) {
   const effects = [];
   const timers = new Map();
   const backHandlers = [];
+  const hostHides = [];
   const saves = [];
   const handoffs = [];
   const closes = [];
@@ -109,6 +111,7 @@ function harness(options = {}) {
   const activations = [];
   const buttonListeners = [];
   const logs = [];
+  const trace = options.trace || [];
   const savePlans = [...(options.savePlans || [])];
   const handoffPlans = [...(options.handoffPlans || [])];
   const closePlans = [...(options.closePlans || [])];
@@ -128,6 +131,7 @@ function harness(options = {}) {
 
   const native = {
     save(filePath, raw) {
+      trace.push('save');
       const payload = JSON.parse(raw);
       const call = {filePath, payload, done: false};
       saves.push(call);
@@ -137,8 +141,9 @@ function harness(options = {}) {
       });
     },
     handoffLastSavedPage() {
-      handoffs.push({persisted: copy(store.get(FILE))});
-      return executePlan(handoffPlans.shift(), {filePath: FILE, pageIndex: EDIT_PAGE});
+      trace.push('handoff');
+      handoffs.push({persisted: copy(store.get(file))});
+      return executePlan(handoffPlans.shift(), {filePath: file, pageIndex: EDIT_PAGE});
     },
     load(filePath) {
       const payload = copy(store.get(filePath));
@@ -163,16 +168,21 @@ function harness(options = {}) {
   const context = vm.createContext({
     ...er,
     globalThis: globals,
-    NativeModules: {ReaderPreferencesModule: native, PdfRendererModule: {renderPage() { throw new Error('Unexpected PDF render'); }}},
+    NativeModules: {ReaderPreferencesModule: native, SavedInkModule: options.savedInkModule,
+      PdfRendererModule: {renderPage() { throw new Error('Unexpected PDF render'); }}},
+    createSavedInkController: options.createSavedInkController,
+    PluginFileAPI: options.pluginFileAPI,
     PluginManager: {
+      getPluginDirPath: options.getPluginDirPath,
       closePluginView() {
-        closes.push({persisted: copy(store.get(FILE))});
+        trace.push('close');
+        closes.push({persisted: copy(store.get(file))});
         return executePlan(closePlans.shift(), undefined);
       },
       registerButtonListener(listener) { buttonListeners.push(listener); },
     },
     PluginCommAPI: {
-      getCurrentFilePath: () => Promise.resolve({success: true, result: FILE}),
+      getCurrentFilePath: () => Promise.resolve({success: true, result: file}),
       getCurrentPageNum: () => Promise.resolve({success: true, result: NATIVE_OPEN_PAGE}),
     },
     PluginDocAPI: {getCurrentTotalPages: () => Promise.resolve({success: true, result: 40})},
@@ -222,11 +232,11 @@ function harness(options = {}) {
     return callback;
   }
   render();
-  callback.filePathRef.current = FILE;
+  callback.filePathRef.current = file;
   callback.nativePageIndexAtOpenRef.current = NATIVE_OPEN_PAGE;
   render();
   const baseline = copy(callback.latestPreferencesRef.current);
-  if (!store.has(FILE) && baseline) store.set(FILE, copy(baseline));
+  if (!store.has(file) && baseline) store.set(file, copy(baseline));
   const backEffect = effects.find(({effect}) => effect.toString().includes('BackHandler.addEventListener'));
   assert.ok(backEffect, 'BackHandler effect was not captured');
   backEffect.effect();
@@ -240,20 +250,31 @@ function harness(options = {}) {
     saves,
     handoffs,
     closes,
+    hostHides,
     nativeChanges,
     loads,
     activations,
     store,
     logs,
-    get persisted() { return copy(store.get(FILE)); },
+    trace,
+    get persisted() { return copy(store.get(file)); },
     render,
-    back() { return backHandlers.some(handler => handler()); },
+    back() {
+      const consumed = backHandlers.some(handler => handler());
+      if (!consumed) hostHides.push({reason: 'hardwareBack'});
+      return consumed;
+    },
     closeViaWrapper(...args) { return context.PluginManager.closePluginView(...args); },
     pressButton(event = {id: 100}) {
       assert.equal(buttonListeners.length, 1, 'Actual index button listener must be installed');
       return buttonListeners[0].onButtonPress(event);
     },
     unmount() { callback.unmountCleanup(); },
+    runSavedInkEffect() {
+      const effect = effects.find(({effect}) => effect.toString().includes('let cancelled = false;'));
+      assert.ok(effect, 'Actual saved-ink lifecycle effect was not captured');
+      return effect.effect();
+    },
     runPreferenceEffect() {
       const effect = effects.find(({effect}) => effect.toString().includes("savePreferences('debounced')"));
       assert.ok(effect, 'Debounced preference effect was not captured');
@@ -311,6 +332,327 @@ async function assertSuppressed(h) {
 
 const tests = [];
 function test(name, fn) { tests.push([name, fn]); }
+
+// These integration cases run the actual App effect, actual production
+// controller, actual Close/Edit callback, and actual index wrapper together.
+// Deferred native discard models its explicit main-Looper lease-drain ACK;
+// resolving the SDK alone must never release the handoff/host-close boundary.
+const INK_FILE = '/storage/emulated/0/Document/RTL_RAPID_TOOLS_T004_20261001.pdf';
+const INK_DIR = '/data/user/0/com.ratta.supernote.pluginhost/files/plugins/snrtl20260726001';
+const INK_TOKEN = 'f3d09692-3a12-48cb-823b-62041968c761';
+const INK_CONTROLLER = path.join(ROOT, 'overlay/savedInk.js');
+const inkPrepared = () => ({
+  token: INK_TOKEN, filePath: INK_FILE, pageIndex: 2, width: 1404, height: 1872,
+  sourceVerified: true, pngPath: `${INK_DIR}/saved-ink-cache/${INK_TOKEN}/ink.png`,
+});
+const inkFinished = () => ({
+  ...inkPrepared(), savedInkToken: INK_TOKEN, sourceUnchanged: true, markUnchanged: true,
+  decoded: true, sha256: 'a'.repeat(64), byteLength: 1000, alphaMin: 0, alphaMax: 255,
+});
+
+function inkHarness(hooks = {}, options = {}) {
+  delete require.cache[require.resolve(INK_CONTROLLER)];
+  const {createSavedInkController} = require(INK_CONTROLLER);
+  const controllers = [];
+  const trace = [];
+  const defaults = {
+    pluginDir: () => INK_DIR,
+    prepare: inkPrepared,
+    generate: () => ({success: true, result: true}),
+    finish: inkFinished,
+    discard: token => ({token, discarded: true}),
+  };
+  const invoke = name => (...args) => {
+    trace.push(name);
+    return Promise.resolve().then(() => (hooks[name] || defaults[name])(...args)).then(result => {
+      trace.push(`${name}:settled`);
+      return result;
+    });
+  };
+  const h = harness({
+    indexWrapper: true,
+    handoffPlans: [{filePath: INK_FILE, pageIndex: 2}],
+    ...options,
+    filePath: INK_FILE,
+    trace,
+    state: {
+      documentContext: {filePath: INK_FILE, pageIndex: 2, totalPages: 8},
+      pageIndex: 2, totalPages: 8,
+      display: {kind: 'spread', leftPageIndex: 3, rightPageIndex: 2},
+      ...options.state,
+    },
+    createSavedInkController(deps) {
+      const controller = createSavedInkController(deps);
+      controllers.push(controller);
+      return controller;
+    },
+    getPluginDirPath: invoke('pluginDir'),
+    pluginFileAPI: {generateMarkThumbnails: invoke('generate')},
+    savedInkModule: {prepare: invoke('prepare'), finish: invoke('finish'), discard: invoke('discard')},
+  });
+  const cleanup = h.runSavedInkEffect();
+  return Object.assign(h, {controllers, inkCleanup: cleanup});
+}
+
+for (const operation of ['close', 'edit']) {
+  for (const stage of ['pluginDir', 'prepare', 'generate', 'finish']) {
+    test(`${operation} quiesces actual ${stage} work and native lease drain before save/handoff/host close`, async () => {
+      const pending = deferred();
+      const drained = deferred();
+      const h = inkHarness({[stage]: () => pending.promise, discard: () => drained.promise});
+      await flush();
+      assert.ok(h.trace.includes(stage), `The actual effect must enter ${stage}`);
+      const transition = operation === 'close' ? h.callback.close() : h.callback.editPage(2);
+      assert.equal(h.callback.savedInkContextRef.current, null, 'Publication authority is hidden synchronously');
+      assert.equal(h.state.savedInk.status, 'unavailable');
+      await flush();
+      assert.equal(h.saves.length, 0);
+      assert.equal(h.handoffs.length, 0);
+      assert.equal(h.closes.length, 0);
+      assert.ok(!h.trace.includes('discard'), 'Never remove output before its real native/SDK settlement');
+      await h.callback.close();
+      await h.callback.editPage(2);
+      assert.equal(h.back(), true, 'Pending quiescence retains the transition fence');
+      pending.resolve(stage === 'pluginDir' ? INK_DIR : stage === 'prepare' ? inkPrepared() :
+        stage === 'finish' ? inkFinished() : {success: true, result: true});
+      await flush();
+      if (stage !== 'pluginDir') {
+        assert.ok(h.trace.includes('discard'));
+        assert.equal(h.saves.length, 0, 'SDK settlement alone is not a native lease-drain acknowledgment');
+        assert.equal(h.handoffs.length, 0);
+        assert.equal(h.closes.length, 0);
+        drained.resolve({token: INK_TOKEN, discarded: true});
+      }
+      await bounded(transition);
+      assert.equal(h.saves.length, 1);
+      assert.equal(h.handoffs.length, 1, 'Edit and wrapper must not duplicate the native handoff');
+      assert.equal(h.closes.length, 1);
+      if (stage !== 'pluginDir') {
+        assert.ok(h.trace.indexOf('discard:settled') < h.trace.indexOf('save'));
+        assert.ok(h.trace.indexOf('discard:settled') < h.trace.indexOf('handoff'));
+        assert.ok(h.trace.indexOf('discard:settled') < h.trace.indexOf('close'));
+        assert.equal(h.controllers[0].getState().disposed, true);
+      }
+      h.inkCleanup();
+      assert.equal(await h.context.RTL_READER_INK_CLEANUP, true);
+    });
+  }
+}
+
+test('settled ink hides immediately and Close still waits for retained view-lease drain', async () => {
+  const drained = deferred();
+  const h = inkHarness({discard: () => drained.promise});
+  await flush();
+  h.render();
+  assert.equal(h.callback.savedInkTokenFor(2), INK_TOKEN);
+  const closing = h.callback.close();
+  assert.equal(h.callback.savedInkTokenFor(2), null, 'Even the cached ready-state accessor must hide its token');
+  await flush();
+  assert.equal(h.saves.length, 0);
+  assert.equal(h.handoffs.length, 0);
+  assert.equal(h.closes.length, 0);
+  drained.resolve({token: INK_TOKEN, discarded: true});
+  await bounded(closing);
+  assert.equal(h.closes.length, 1);
+  h.inkCleanup();
+});
+
+for (const operation of ['close', 'edit']) {
+  test(`${operation} fails visibly closed on actual cleanup failure and never hands off`, async () => {
+    const generation = deferred();
+    const h = inkHarness({generate: () => generation.promise, discard: async () => { throw Error('drain rejected'); }});
+    await flush();
+    const transition = operation === 'close' ? h.callback.close() : h.callback.editPage(2);
+    generation.resolve({success: true, result: true});
+    await bounded(transition);
+    assert.equal(h.handoffs.length, 0);
+    assert.equal(h.closes.length, 0);
+    assert.equal(h.callback.readerClosedRef.current, false);
+    assert.equal(h.callback.savedInkTokenFor(2), null);
+    assert.ok(h.state.editNotice.includes('Saved ink cleanup could not be verified'));
+    assert.equal(h.context.RTL_READER_TRANSITION_IN_FLIGHT, null,
+      'Finished rollback/failed Close releases its original transition normally');
+    assert.equal(h.context.RTL_READER_INK_CLEANUP_BLOCKED, true);
+    assert.equal(h.back(), true, 'Physical Back cannot dismiss the host after failed ink cleanup');
+    assert.equal(h.hostHides.length, 0);
+    assert.equal(h.handoffs.length, 0);
+    assert.equal(h.closes.length, 0);
+    assert.deepEqual(h.persisted, h.baseline, 'An unaccepted Edit must restore the exact previous preferences');
+    assert.equal(h.saves.length, operation === 'edit' ? 1 : 0);
+    await h.callback.close();
+    await h.callback.editPage(2);
+    assert.equal(h.handoffs.length, 0);
+    assert.equal(h.closes.length, 0);
+    assert.equal(h.trace.filter(name => name === 'generate').length, 1, 'Failed cleanup never starts a replacement SDK writer');
+    assert.equal(h.back(), true, 'The failure latch survives further rejected Close/Edit attempts');
+    assert.equal(h.hostHides.length, 0);
+    h.inkCleanup();
+    assert.equal(await h.context.RTL_READER_INK_CLEANUP, false);
+  });
+}
+
+test('Back cleanup-failure latch clears only after current native cleanup is verified', async () => {
+  const drained = deferred();
+  const h = inkHarness({discard: () => drained.promise},
+    {globals: {RTL_READER_INK_CLEANUP_BLOCKED: true, RTL_READER_INK_CLEANUP: Promise.resolve(true)}});
+  await flush();
+  const cleanup = h.callback.quiesceSavedInk();
+  await flush();
+  assert.equal(h.back(), true, 'A pending cleanup cannot clear an existing Back fence');
+  assert.equal(h.hostHides.length, 0);
+  drained.resolve({token: INK_TOKEN, discarded: true});
+  await bounded(cleanup);
+  assert.equal(h.context.RTL_READER_INK_CLEANUP_BLOCKED, false);
+  assert.equal(h.back(), false, 'Normal Back resumes after an exact native cleanup acknowledgment');
+  assert.equal(h.hostHides.length, 1);
+  assert.equal(h.handoffs.length, 0);
+  assert.equal(h.closes.length, 0);
+  h.inkCleanup();
+});
+
+test('autonomous generation and discard rejection fence Back before any Close or Edit', async () => {
+  const h = inkHarness({
+    generate: async () => { throw Error('generation rejected'); },
+    discard: async () => { throw Error('discard rejected'); },
+  });
+  await flush();
+  assert.equal(h.state.savedInk.status, 'error');
+  assert.equal(h.state.savedInk.reason, 'cleanup_failed');
+  assert.equal(h.state.savedInk.handle.token, INK_TOKEN);
+  assert.equal(h.controllers[0].getState().retained, true);
+  assert.equal(h.controllers[0].getState().disposed, false);
+  assert.equal(h.context.RTL_READER_TRANSITION_IN_FLIGHT, undefined);
+  assert.equal(h.context.RTL_READER_INK_EXIT_PENDING, undefined);
+  assert.equal(h.context.RTL_READER_INK_CLEANUP_BLOCKED, true);
+  assert.equal(h.back(), true, 'Ordinary run-cleanup failure must consume Back without a transition fence');
+  assert.equal(h.hostHides.length, 0);
+  assert.equal(h.handoffs.length, 0);
+  assert.equal(h.closes.length, 0);
+  assert.equal(h.saves.length, 0);
+  assert.ok(h.state.editNotice.includes('Saved ink cleanup could not be verified'));
+  h.inkCleanup();
+  assert.equal(await h.context.RTL_READER_INK_CLEANUP, false);
+  assert.equal(h.back(), true);
+  assert.equal(h.hostHides.length, 0);
+});
+
+test('Edit cleanup failure keeps rollback exclusive until prior preferences are restored', async () => {
+  const generation = deferred();
+  const restoration = deferred();
+  const h = inkHarness({generate: () => generation.promise, discard: async () => { throw Error('cleanup failed'); }},
+    {savePlans: [restoration.promise]});
+  await flush();
+  const editing = h.callback.editPage(2);
+  generation.resolve({success: true, result: true});
+  await flush();
+  assert.equal(h.saves.length, 1);
+  assert.equal(h.saves[0].done, false);
+  assert.equal(h.callback.editInFlightRef.current, true);
+  await assertSuppressed(h);
+  restoration.resolve();
+  await bounded(editing);
+  assert.deepEqual(h.persisted, h.baseline);
+  assert.equal(h.callback.editInFlightRef.current, false);
+  assert.equal(h.handoffs.length, 0);
+  assert.equal(h.closes.length, 0);
+  h.inkCleanup();
+});
+
+test('actual index wrapper independently quiesces active SDK and native drain before handoff', async () => {
+  const generation = deferred();
+  const drained = deferred();
+  const h = inkHarness({generate: () => generation.promise, discard: () => drained.promise});
+  await flush();
+  const closing = h.closeViaWrapper();
+  assert.equal(h.callback.savedInkContextRef.current, null);
+  assert.equal(h.state.savedInk.status, 'unavailable');
+  const exitOwner = h.context.RTL_READER_INK_EXIT_PENDING;
+  assert.ok(exitOwner, 'The unfenced wrapper establishes its Back guard synchronously');
+  assert.equal(h.back(), true, 'Physical Back stays fenced while the SDK is pending');
+  assert.equal(h.hostHides.length, 0);
+  await flush();
+  assert.equal(h.handoffs.length, 0);
+  assert.equal(h.closes.length, 0);
+  generation.resolve({success: true, result: true});
+  await flush();
+  assert.equal(h.context.RTL_READER_INK_EXIT_PENDING, exitOwner);
+  assert.equal(h.back(), true, 'SDK settlement does not permit Back before the native drain ACK');
+  assert.equal(h.hostHides.length, 0);
+  assert.equal(h.handoffs.length, 0);
+  assert.equal(h.closes.length, 0);
+  drained.resolve({token: INK_TOKEN, discarded: true});
+  await bounded(closing);
+  assert.equal(h.handoffs.length, 1);
+  assert.equal(h.closes.length, 1);
+  assert.equal(h.context.RTL_READER_INK_EXIT_PENDING, null);
+  assert.ok(h.trace.indexOf('discard:settled') < h.trace.indexOf('handoff'));
+  h.inkCleanup();
+});
+
+for (const failure of ['false', 'rejected', 'malformed']) {
+  test(`actual index wrapper rejects ${failure} prior cleanup without handoff/host close`, async () => {
+    const cleanup = deferred();
+    const h = harness({indexWrapper: true, globals: {RTL_READER_INK_CLEANUP: cleanup.promise}});
+    const closing = h.closeViaWrapper();
+    const rejected = assert.rejects(closing, /Saved ink cleanup could not be verified/);
+    assert.ok(h.context.RTL_READER_INK_EXIT_PENDING, 'No-lifecycle fallback also fences pending cleanup');
+    assert.equal(h.back(), true);
+    assert.equal(h.hostHides.length, 0);
+    if (failure === 'rejected') cleanup.reject(Error('prior cleanup rejected'));
+    else cleanup.resolve(failure === 'false' ? false : {status: 'disposed'});
+    await bounded(rejected);
+    assert.equal(h.context.RTL_READER_INK_EXIT_PENDING, null);
+    assert.equal(h.context.RTL_READER_INK_CLEANUP_BLOCKED, true);
+    assert.equal(h.back(), true, 'Failed cleanup retains the exit fence after its pending token is released');
+    assert.equal(h.hostHides.length, 0);
+    assert.equal(h.handoffs.length, 0);
+    assert.equal(h.closes.length, 0);
+  });
+}
+
+test('no-lifecycle wrapper fallback consumes Back until exact prior cleanup settles cleanly', async () => {
+  const cleanup = deferred();
+  const h = harness({indexWrapper: true, globals: {RTL_READER_INK_CLEANUP: cleanup.promise}});
+  const closing = h.closeViaWrapper();
+  assert.ok(h.context.RTL_READER_INK_EXIT_PENDING);
+  assert.equal(h.back(), true);
+  assert.equal(h.hostHides.length, 0);
+  assert.equal(h.handoffs.length, 0);
+  assert.equal(h.closes.length, 0);
+  cleanup.resolve(true);
+  await bounded(closing);
+  assert.equal(h.context.RTL_READER_INK_EXIT_PENDING, null);
+  assert.equal(h.handoffs.length, 1);
+  assert.equal(h.closes.length, 1);
+});
+
+test('actual index wrapper rechecks transition authority after awaiting ink cleanup', async () => {
+  const cleanup = deferred();
+  const h = harness({indexWrapper: true, globals: {RTL_READER_INK_CLEANUP: cleanup.promise}});
+  const closing = h.closeViaWrapper();
+  h.context.RTL_READER_TRANSITION_IN_FLIGHT = {allowClose: false};
+  cleanup.resolve(true);
+  await assert.rejects(closing, /changed while saved ink was settling/);
+  assert.equal(h.handoffs.length, 0);
+  assert.equal(h.closes.length, 0);
+});
+
+test('unfenced index close cannot target a replacement activation after awaiting old ink cleanup', async () => {
+  const cleanup = deferred();
+  const h = harness({indexWrapper: true, globals: {RTL_READER_INK_CLEANUP: cleanup.promise}});
+  const closing = h.closeViaWrapper();
+  const replacementExitOwner = {};
+  h.context.RTL_READER_INK_EXIT_PENDING = replacementExitOwner;
+  h.context.RTL_READER_INK_LIFECYCLE = {quiesce: async () => true};
+  cleanup.resolve(true);
+  await assert.rejects(closing, /changed while saved ink was settling/);
+  assert.equal(h.handoffs.length, 0);
+  assert.equal(h.closes.length, 0);
+  assert.equal(h.context.RTL_READER_INK_EXIT_PENDING, replacementExitOwner,
+    'An older wrapper cannot clear another activation\'s pending exit authority');
+  assert.equal(h.back(), true);
+  assert.equal(h.hostHides.length, 0);
+});
 
 test('repeated Edit is single-flight; normal Close, navigation, settings, and Back are suppressed', async () => {
   const saving = deferred();

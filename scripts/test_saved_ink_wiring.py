@@ -49,13 +49,14 @@ class WiringTests(unittest.TestCase):
 
     def test_candidate_identity_and_ci_gates(self):
         config = json.loads((ROOT / "PluginConfig.json").read_text(encoding="utf-8"))
-        self.assertEqual(config["versionName"], "0.4.24-ink-exp3")
-        self.assertEqual(config["versionCode"], "47")
+        self.assertEqual(config["versionName"], "0.4.24-ink-exp4")
+        self.assertEqual(config["versionCode"], "48")
         self.assertEqual(config["pluginID"], "snrtl20260726001")
-        self.assertIn("RTL_READER_OPEN v0.4.24-ink-exp3-native-reader-v2",
+        self.assertIn("RTL_READER_OPEN v0.4.24-ink-exp4-native-reader-v2",
                       (ROOT / "overlay/index.js").read_text(encoding="utf-8"))
         workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
-        for gate in ("test_saved_ink.js", "test_saved_ink_app.js", "test_saved_ink_wiring.py"):
+        for gate in ("test_saved_ink.js", "test_saved_ink_app.js",
+                     "test_saved_ink_landscape_app.js", "test_saved_ink_wiring.py"):
             self.assertIn(gate, workflow)
 
     def test_cleanup_acknowledges_exact_main_thread_lease_drain(self):

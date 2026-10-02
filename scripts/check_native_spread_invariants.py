@@ -979,7 +979,7 @@ def check(repo_root: Path) -> None:
         ),
         (
             app_path,
-            "2840706d2348b629ad18814cd23ed0455c069bcfaf424d24b6089ed9de374ae8",
+            "aac63fc4f2f9d857e3ac34b1deb80364d2d0108668af9746af1ac44482443e2c",
             "Native Spread UI authority source",
         ),
         (
@@ -1017,7 +1017,7 @@ def check(repo_root: Path) -> None:
         ),
         (
             index_path,
-            "17e2b2030e3257595d26443b75bd24b3699118a05be7a449cb187f7d5d07586f",
+            "ced663315040a6aa2fd185f16c9e64f1655bbe14e2b94b7b1e34672e878faa09",
             "Edit/Return activation and close authority",
         ),
         (
@@ -1027,7 +1027,7 @@ def check(repo_root: Path) -> None:
         ),
         (
             workflow_path,
-            "5ceaac9f923405e1e315321316967f19488c83afd4545d0f59e3907f61b7e92b",
+            "ec613a7d8ceba49a7ababa8e252e8f07addb2b532e300b41b963237045f9b1d9",
             "Native Spread companion-build workflow",
         ),
         (

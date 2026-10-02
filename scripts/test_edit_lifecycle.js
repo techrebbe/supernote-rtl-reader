@@ -1206,7 +1206,7 @@ test('initialized Close with missing preference storage remains open without nat
   assert.ok(h.state.editNotice.includes('Could not save'));
 });
 
-test('ordinary ink eligibility comes from exact source/page and portrait fit, never a general PDF aspect guess', () => {
+test('ordinary ink eligibility comes from exact source/page and vetted Fit views, never a general PDF aspect guess', () => {
   const file = '/storage/emulated/0/Document/RTL_INK_GEOMETRY_T008_20261002.pdf';
   const state = {documentContext: {filePath: file}, totalPages: 2, pageIndex: 0,
     viewMode: 'single', spreadSizing: 'fit', display: {kind: 'single', singlePageIndex: 0}};
@@ -1220,7 +1220,16 @@ test('ordinary ink eligibility comes from exact source/page and portrait fit, ne
     assert.equal(bad.callback.savedInkContextRef.current, null);
   }
   const landscape = harness({filePath: file, state, window: {width: 1872, height: 1404}});
-  assert.equal(landscape.callback.savedInkVisible, false);
+  assert.equal(landscape.callback.savedInkVisible, true);
+  for (const viewMode of ['auto', 'spread']) {
+    const spread = harness({filePath: file, state: {...state, viewMode}, window: {width: 1872, height: 1404}});
+    assert.equal(spread.callback.savedInkVisible, true);
+    assert.equal(spread.callback.savedInkContextRef.current.pageIndex, 0);
+  }
+  const portraitSpread = harness({filePath: file, state: {...state, viewMode: 'spread'}, window: {width: 1404, height: 1872}});
+  assert.equal(portraitSpread.callback.savedInkVisible, false);
+  const square = harness({filePath: file, state, window: {width: 1404, height: 1404}});
+  assert.equal(square.callback.savedInkVisible, false);
 });
 
 (async () => {

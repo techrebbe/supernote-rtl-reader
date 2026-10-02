@@ -2,6 +2,7 @@ import React, {useEffect, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   BackHandler,
+  Dimensions,
   Image,
   Keyboard,
   NativeModules,
@@ -315,6 +316,7 @@ export default function App() {
   const [editBusy, setEditBusy] = useState(false);
   const [editRecoveryAvailable, setEditRecoveryAvailable] = useState(false);
   const [savedInk, setSavedInk] = useState({status: 'unavailable'});
+  const [savedInkPresentationEpoch, setSavedInkPresentationEpoch] = useState(0);
   const [nativeSpreadAuthorityState, setNativeSpreadAuthorityState] =
     useState('unknown');
   const [nativeSpreadAuthorityDetail, setNativeSpreadAuthorityDetail] = useState(
@@ -407,6 +409,8 @@ export default function App() {
   const prefetchingRef = useRef(new Set());
   const savedInkContextRef = useRef(null);
   const savedInkLifecycleRef = useRef(null);
+  const savedInkPresentationEpochRef = useRef(0);
+  const savedInkPresentationKeyRef = useRef(null);
 
   const quiesceSavedInk = async () => {
     // Fence publication synchronously, without relying on the next React effect
@@ -458,17 +462,30 @@ export default function App() {
   const savedInkProfile = selectSavedInkProfile(documentContext?.filePath, totalPages);
   const savedInkVisible = preferencesReady && savedInkProfile !== null &&
     (!savedInkProfile.needsCanvasWitness ||
-      (effectiveMode === 'single' && spreadSizing === 'fit' && window.height > window.width)) &&
+      (spreadSizing === 'fit' &&
+        ((effectiveMode === 'single' && (window.height > window.width || isLandscape)) ||
+          (effectiveMode === 'spread' && isLandscape)))) &&
     Number.isInteger(pageIndex) && !editBusy && !readerTransitionLocked() &&
     (effectiveMode === 'single'
       ? pageIndex === savedInkProfile.pageIndex
       : Object.values(getVisualSpread(pageIndex, coverSeparate, totalPages, direction)).includes(savedInkProfile.pageIndex));
+  // T008 keeps one source-bound portrait canvas in every vetted Fit view. A
+  // presentation key is a cancellation fence, never new geometry authority.
+  // T004 retains its original eligibility and lifecycle without this witness.
+  const savedInkPresentationKey = savedInkProfile?.needsCanvasWitness
+    ? `${savedInkPresentationEpoch}:${window.width}:${window.height}:${effectiveMode}:${spreadSizing}`
+    : null;
+  savedInkPresentationKeyRef.current = savedInkPresentationKey;
   savedInkContextRef.current = savedInkVisible
     ? {filePath: documentContext.filePath, pageIndex: savedInkProfile.pageIndex, totalPages}
     : null;
   const savedInkTokenFor = page =>
     savedInkVisible && savedInkContextRef.current && !readerTransitionLocked() &&
     savedInk.status === 'ready' && page === savedInkContextRef.current.pageIndex &&
+    (savedInkPresentationKey === null ||
+      (savedInk.presentationKey === savedInkPresentationKey &&
+        savedInkPresentationKeyRef.current === savedInkPresentationKey &&
+        savedInkPresentationEpochRef.current === savedInkPresentationEpoch)) &&
     savedInk.filePath === documentContext?.filePath
       ? savedInk.savedInkToken : null;
 
@@ -477,21 +494,24 @@ export default function App() {
     let controller = null;
     let previousWasClean = false;
     let cleanupPromise = null;
+    const presentationCurrent = () => savedInkPresentationKey === null ||
+      (savedInkPresentationKeyRef.current === savedInkPresentationKey &&
+        savedInkPresentationEpochRef.current === savedInkPresentationEpoch);
     const previousCleanup = globalThis.RTL_READER_INK_CLEANUP ?? Promise.resolve(true);
     setSavedInk({status: savedInkVisible ? 'loading' : 'unavailable'});
     const run = Promise.resolve(previousCleanup).then(async clean => {
       previousWasClean = clean === true;
-      if (cancelled || !savedInkVisible) return;
+      if (cancelled || !presentationCurrent() || !savedInkVisible) return;
       if (clean !== true || !SavedInkModule) {
         if (clean !== true) globalThis.RTL_READER_INK_CLEANUP_BLOCKED = true;
         setSavedInk({status: 'error', reason: clean !== true ? 'cleanup_failed' : 'module_unavailable'});
         return;
       }
       const pluginDir = await PluginManager.getPluginDirPath();
-      if (cancelled) return;
+      if (cancelled || !presentationCurrent()) return;
       const currentContext = async () => {
         const filePath = await requireResult(PluginCommAPI.getCurrentFilePath(), 'Current document');
-        if (cancelled || readerTransitionLocked() || !savedInkContextRef.current) return null;
+        if (cancelled || !presentationCurrent() || readerTransitionLocked() || !savedInkContextRef.current) return null;
         return {...savedInkContextRef.current, filePath, pluginDir};
       };
       controller = createSavedInkController({
@@ -504,15 +524,16 @@ export default function App() {
         getPageSize: (...args) => PluginFileAPI.getPageSize(...args),
       });
       const context = await currentContext();
-      if (cancelled) return;
+      if (cancelled || !presentationCurrent()) return;
       const result = await controller.run(context);
       if (result.reason === 'cleanup_failed') globalThis.RTL_READER_INK_CLEANUP_BLOCKED = true;
-      if (cancelled || readerTransitionLocked() || !savedInkContextRef.current) return;
-      setSavedInk({...result, filePath: context?.filePath});
+      if (cancelled || !presentationCurrent() || readerTransitionLocked() || !savedInkContextRef.current) return;
+      setSavedInk({...result, filePath: context?.filePath,
+        ...(savedInkPresentationKey === null ? {} : {presentationKey: savedInkPresentationKey})});
       console.log(`RTL_READER_SAVED_INK status=${result.status} reason=${result.reason ?? 'none'} page=${(context?.pageIndex ?? -1) + 1}`);
     }).catch(error => {
       if (!previousWasClean) globalThis.RTL_READER_INK_CLEANUP_BLOCKED = true;
-      if (!cancelled) setSavedInk({status: 'error', reason: error?.message ?? 'request_failed'});
+      if (!cancelled && presentationCurrent()) setSavedInk({status: 'error', reason: error?.message ?? 'request_failed'});
     });
     const stop = () => {
       if (cleanupPromise) return cleanupPromise;
@@ -549,12 +570,25 @@ export default function App() {
     };
     savedInkLifecycleRef.current = lifecycle;
     globalThis.RTL_READER_INK_LIFECYCLE = lifecycle;
+    const rotation = savedInkPresentationKey === null ? null : Dimensions.addEventListener('change', () => {
+      // Event epochs cover portrait -> landscape -> portrait ABA even if React
+      // batches away the intermediate render. Hide first; cleanup still waits
+      // for the real SDK writer and native view-lease drain acknowledgment.
+      savedInkPresentationEpochRef.current += 1;
+      savedInkContextRef.current = null;
+      if (mountedRef.current) {
+        setSavedInk({status: 'unavailable', reason: 'presentation_changed'});
+        setSavedInkPresentationEpoch(savedInkPresentationEpochRef.current);
+      }
+      stop();
+    });
     return () => {
+      rotation?.remove();
       stop();
       if (savedInkLifecycleRef.current === lifecycle) savedInkLifecycleRef.current = null;
       if (globalThis.RTL_READER_INK_LIFECYCLE === lifecycle) globalThis.RTL_READER_INK_LIFECYCLE = null;
     };
-  }, [savedInkVisible, documentContext?.filePath]);
+  }, [savedInkVisible, documentContext?.filePath, savedInkPresentationKey]);
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener(
@@ -1984,7 +2018,7 @@ export default function App() {
                   {direction.toUpperCase()} · {statusLayout}
                 </Text>
                 <Text style={styles.settingsSummary}>
-                  Saved ink alpha: T004 page 3; T008 page 1 in portrait Fit only.
+                  Saved ink alpha: T004 page 3; T008 page 1 in portrait Single or landscape Single/Spread, Fit only.
                   Other pages and native text highlights are unavailable.
                 </Text>
               </View>

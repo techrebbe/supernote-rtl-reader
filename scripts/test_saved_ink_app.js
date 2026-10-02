@@ -24,7 +24,7 @@ function once(source, marker) {
 function appSource() {
   const source = fs.readFileSync(APP, 'utf8').replace(/\r\n/g, '\n');
   const effectStart = once(source, '  useEffect(() => {\n    let cancelled = false;');
-  const effectEndMarker = '  }, [savedInkVisible, documentContext?.filePath]);';
+  const effectEndMarker = '  }, [savedInkVisible, documentContext?.filePath, savedInkPresentationKey]);';
   const effectEnd = once(source, effectEndMarker);
   assert.ok(effectEnd > effectStart);
   const effect = source.slice(effectStart, effectEnd + effectEndMarker.length);
@@ -99,6 +99,12 @@ function harness(hooks = {}) {
       documentContext,
       savedInkContextRef: contextRef,
       savedInkLifecycleRef: {current: null},
+      savedInkPresentationKey: null,
+      savedInkPresentationEpoch: 0,
+      savedInkPresentationKeyRef: {current: null},
+      savedInkPresentationEpochRef: {current: 0},
+      Dimensions: {addEventListener() { throw Error('Legacy T004 must not add a presentation witness'); }},
+      setSavedInkPresentationEpoch() { throw Error('Legacy T004 must not change presentation epochs'); },
       mountedRef: {current: true},
       SavedInkModule: options.moduleAbsent ? undefined : native,
       PluginManager: {
@@ -124,7 +130,7 @@ function harness(hooks = {}) {
       setSavedInk: value => updates.push(value),
       console: {log: (...args) => logs.push(args), warn: (...args) => logs.push(args)},
       useEffect(effect, dependencies) {
-        assert.deepEqual(dependencies, [visible, documentContext.filePath]);
+        assert.deepEqual(dependencies, [visible, documentContext.filePath, null]);
         cleanup = effect();
       },
     };
@@ -137,13 +143,18 @@ function harness(hooks = {}) {
       get ready() { return updates.filter(value => value.status === 'ready'); },
       tokenFor(page, overrides = {}) {
         return new Function('savedInkVisible', 'savedInk', 'documentContext', 'SAVED_INK_PAGE',
-          'savedInkContextRef', 'readerTransitionLocked', `${code.accessor}\nreturn savedInkTokenFor;`)(
+          'savedInkContextRef', 'readerTransitionLocked', 'savedInkPresentationKey', 'savedInkPresentationEpoch',
+          'savedInkPresentationKeyRef', 'savedInkPresentationEpochRef', `${code.accessor}\nreturn savedInkTokenFor;`)(
           overrides.visible ?? visible,
           overrides.state ?? instance.state ?? {},
           overrides.documentContext ?? documentContext,
           2,
           contextRef,
           () => transitionLocked,
+          null,
+          0,
+          scope.savedInkPresentationKeyRef,
+          scope.savedInkPresentationEpochRef,
         )(page);
       },
       cleanup() { cleanup(); return sharedGlobal.RTL_READER_INK_CLEANUP; },

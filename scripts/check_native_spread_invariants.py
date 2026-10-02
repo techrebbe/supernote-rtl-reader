@@ -1037,7 +1037,7 @@ def check(repo_root: Path) -> None:
         ),
         (
             packager_patch_path,
-            "6bf380d6ca8bde781523a6e3e49c70c7612cb4fe74a51d43afa61974301698fb",
+            "535135f31365440d2ce0a32f14e5fa838c21c22fef45d3ff56604201d21da7f6",
             "generated plugin-packager hardening",
         ),
         (
@@ -1047,7 +1047,7 @@ def check(repo_root: Path) -> None:
         ),
         (
             package_test_path,
-            "d01d274cb40907a834e446476a33c19cb2cbb42a4978d1f4d88ddd1dadb48598",
+            "38ba847b2324aa8443af284e2a1b9722b3f226367ba644a6e33bbee1b35f9710",
             "native plugin packaging failure-injection tests",
         ),
     )

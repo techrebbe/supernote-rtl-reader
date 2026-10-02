@@ -27,6 +27,9 @@ from patch_plugin_packager import (
     UPSTREAM_PACKAGE_UPDATE,
     UPSTREAM_APK_SELECTION,
     UPSTREAM_SOFT_NATIVE_BUILD,
+    UPSTREAM_AUTOLINK_OUTPUT_FILTER,
+    UPSTREAM_NATIVE_CODE_PATH_UPDATE,
+    UPSTREAM_ICON_PATH_UPDATE,
     patch_text,
 )
 from verify_plugin_package import (
@@ -218,6 +221,9 @@ def test_packager_patch() -> None:
         + UPSTREAM_PACKAGE_UPDATE
         + "later\n"
         + UPSTREAM_SOFT_NATIVE_BUILD
+        + UPSTREAM_AUTOLINK_OUTPUT_FILTER
+        + UPSTREAM_NATIVE_CODE_PATH_UPDATE
+        + UPSTREAM_ICON_PATH_UPDATE
         + "suffix\n"
     )
     patched = patch_text(upstream)

@@ -184,6 +184,64 @@ STRICT_APK_SELECTION = '''    [[ -z "$apk_path" ]] && { write_color_output "Gene
     local new_apk="app.npk"
 '''
 
+# These are JSON package-relative paths, not Windows filesystem arguments.
+# Git Bash otherwise translates them before native jq.exe receives them.
+# Scope each exclusion to this command and retain the caller's exclusions.
+UPSTREAM_NATIVE_CODE_PATH_UPDATE = '''
+        jq --arg path "/$new_apk" '.nativeCodePackage = $path' "$build_generated_config_file" > "${build_generated_config_file}.tmp" && mv "${build_generated_config_file}.tmp" "$build_generated_config_file"
+'''
+STRICT_NATIVE_CODE_PATH_UPDATE = '''
+        MSYS2_ARG_CONV_EXCL="${MSYS2_ARG_CONV_EXCL:+${MSYS2_ARG_CONV_EXCL};}/$new_apk" jq --arg path "/$new_apk" '.nativeCodePackage = $path' "$build_generated_config_file" > "${build_generated_config_file}.tmp" && mv "${build_generated_config_file}.tmp" "$build_generated_config_file"
+'''
+UPSTREAM_ICON_PATH_UPDATE = '''
+        jq --arg path "/$icon_file_name" '.iconPath = $path' "$build_generated_config_file" > "${build_generated_config_file}.tmp" && mv "${build_generated_config_file}.tmp" "$build_generated_config_file"
+'''
+STRICT_ICON_PATH_UPDATE = '''
+        MSYS2_ARG_CONV_EXCL="${MSYS2_ARG_CONV_EXCL:+${MSYS2_ARG_CONV_EXCL};}/$icon_file_name" jq --arg path "/$icon_file_name" '.iconPath = $path' "$build_generated_config_file" > "${build_generated_config_file}.tmp" && mv "${build_generated_config_file}.tmp" "$build_generated_config_file"
+'''
+
+UPSTREAM_AUTOLINK_OUTPUT_FILTER = '''
+    if [[ -n "$exclude_raw" ]]; then
+        local IFS='|'
+        local excludes=()
+        read -r -a excludes <<< "$exclude_raw"
+        while IFS= read -r p; do
+            [[ -z "$p" ]] && continue
+            local skip=0
+            for ex in "${excludes[@]}"; do
+                [[ "$p" == "$ex" ]] && { skip=1; break; }
+            done
+            [[ "$skip" -eq 0 ]] && printf "%s\\n" "$p"
+        done <<< "$pkgs" | sort -u
+    else
+        printf "%s\\n" "$pkgs" | sort -u
+    fi
+'''
+STRICT_AUTOLINK_OUTPUT_FILTER = '''
+    local excludes=()
+    if [[ -n "$exclude_raw" ]]; then
+        local IFS='|'
+        read -r -a excludes <<< "$exclude_raw"
+    fi
+    while IFS= read -r p; do
+        # Native Windows Python uses CRLF. Remove only that one terminal CR;
+        # embedded or doubled CRs remain unexpected package identifiers.
+        p="${p%$'\\r'}"
+        if [[ "$p" == *$'\\r'* ]]; then
+            # Emit an unambiguous invalid identifier: the caller's scanner
+            # fallback masks return codes and sort may collate residual CRs.
+            printf '%s\\n' '__RTL_INVALID_AUTOLINK_CR__'
+            continue
+        fi
+        [[ -z "$p" ]] && continue
+        local skip=0
+        for ex in "${excludes[@]}"; do
+            [[ "$p" == "$ex" ]] && { skip=1; break; }
+        done
+        [[ "$skip" -eq 0 ]] && printf "%s\\n" "$p"
+    done <<< "$pkgs" | sort -u
+'''
+
 
 def fail(message: str) -> None:
     raise SystemExit(f"patch_plugin_packager.py: {message}")
@@ -197,6 +255,24 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
 
 
 def patch_text(text: str) -> str:
+    text = replace_once(
+        text,
+        UPSTREAM_NATIVE_CODE_PATH_UPDATE,
+        STRICT_NATIVE_CODE_PATH_UPDATE,
+        "nativeCodePackage JSON path update",
+    )
+    text = replace_once(
+        text,
+        UPSTREAM_ICON_PATH_UPDATE,
+        STRICT_ICON_PATH_UPDATE,
+        "iconPath JSON path update",
+    )
+    text = replace_once(
+        text,
+        UPSTREAM_AUTOLINK_OUTPUT_FILTER,
+        STRICT_AUTOLINK_OUTPUT_FILTER,
+        "autolinking scanner output filter",
+    )
     text = replace_once(
         text,
         APK_COPY_FUNCTION_MARKER,

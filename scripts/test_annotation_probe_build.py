@@ -41,6 +41,9 @@ def minimal_upstream_script(name_assignment=UPSTREAM_NAME):
         build.packager.UPSTREAM_PACKAGE_SCAN,
         build.packager.UPSTREAM_PACKAGE_UPDATE,
         build.packager.UPSTREAM_SOFT_NATIVE_BUILD,
+        build.packager.UPSTREAM_AUTOLINK_OUTPUT_FILTER,
+        build.packager.UPSTREAM_NATIVE_CODE_PATH_UPDATE,
+        build.packager.UPSTREAM_ICON_PATH_UPDATE,
     ))
 
 

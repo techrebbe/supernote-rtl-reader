@@ -3,9 +3,9 @@
   "pluginKey": "SupernoteRtlInkProbe",
   "pluginID": "snrtlinkprobe20261001",
   "iconPath": "assets/icon.png",
-  "desc": "Disposable-only native handwriting PNG contract probe",
-  "versionCode": "1",
-  "versionName": "0.0.1-ink-probe",
+  "desc": "Disposable T008 landscape canonical-canvas observation",
+  "versionCode": "2",
+  "versionName": "0.0.2-landscape-probe",
   "jsMainPath": "index",
   "author": "techrebbe"
 }

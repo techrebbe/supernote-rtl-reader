@@ -1,5 +1,5 @@
 'use strict';
-// Pure orchestration for the DISABLED, MANUAL T004 annotation PNG probe.
+// Pure orchestration for the DISABLED, MANUAL disposable annotation PNG probe.
 // No React Native, device, filesystem, timers, or production composition.
 // Native prepare owns exact fixture SHA validation and issues an opaque token.
 // Native finish owns stable source/mark checks and bounded PNG decoding.
@@ -15,6 +15,12 @@ const MAX_PNG_BYTES = 16 * 1024 * 1024;
 const MISSING_MARK_CODE = 1302;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
+const T008_PROFILE_ID = 't008-page1-landscape-probe-v1';
+const T008_PROFILE = Object.freeze({
+  filePath: '/storage/emulated/0/Document/RTL_INK_GEOMETRY_T008_20261002.pdf',
+  pageIndex: 0, totalPages: 2,
+  sourceSha256: 'bd0fd00b4879cedb1b768a19deb2901a6d50dc7373decc8ef60e445613d83e64',
+});
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -24,7 +30,10 @@ function isToken(value) {
   return typeof value === 'string' && UUID.test(value);
 }
 
-function validContext(value) {
+function validContext(value, profile) {
+  if (profile) return isRecord(value) && value.filePath === profile.filePath &&
+    value.pageIndex === profile.pageIndex && value.totalPages === profile.totalPages &&
+    value.orientation === 'landscape';
   return isRecord(value) &&
     typeof value.filePath === 'string' &&
     value.filePath.startsWith('/') &&
@@ -54,9 +63,14 @@ function reasonOf(error, fallback) {
 }
 
 function createAnnotationPreviewProbe(deps, options = {}) {
+  if (options.profileId !== undefined && options.profileId !== T008_PROFILE_ID) {
+    throw new TypeError('Unsupported diagnostic profile');
+  }
+  const profile = options.profileId === T008_PROFILE_ID ? T008_PROFILE : null;
   for (const name of ['prepare', 'finish', 'discard', 'generateThumbnail', 'currentContext']) {
     if (typeof deps?.[name] !== 'function') throw new TypeError(`Missing probe dependency: ${name}`);
   }
+  if (profile && typeof deps.getPageSize !== 'function') throw new TypeError('Missing probe dependency: getPageSize');
   const enabled = options.enabled === true;
   let epoch = 0;
   let active = false;
@@ -65,10 +79,26 @@ function createAnnotationPreviewProbe(deps, options = {}) {
   async function requireCurrent(expected, requestEpoch) {
     const context = await deps.currentContext();
     if (requestEpoch !== epoch) throw fault('cancelled');
-    if (!validContext(context) || context.filePath !== expected.filePath ||
+    if (!validContext(context, profile) || context.filePath !== expected.filePath ||
         context.pageIndex !== expected.pageIndex || context.totalPages !== expected.totalPages) {
       throw fault('context_changed');
     }
+  }
+
+  async function observeCanvas(context, requestEpoch) {
+    const response = await deps.getPageSize(context.filePath, context.pageIndex);
+    await requireCurrent(context, requestEpoch);
+    const size = response?.result;
+    if (!isRecord(response) || response.success !== true || !isRecord(size) ||
+        !Number.isInteger(size.width) || !Number.isInteger(size.height) ||
+        !((size.width === WIDTH && size.height === HEIGHT) ||
+          (size.width === HEIGHT && size.height === WIDTH))) {
+      throw fault('canvas_invalid');
+    }
+    // Record the real nominal native canvas, never reinterpret it as thumbnail
+    // coordinates. The explicitly requested output stays 1404x1872; a human/
+    // image comparison must establish canonical alignment before production use.
+    return Object.freeze({width: size.width, height: size.height});
   }
 
   async function discardToken(token) {
@@ -107,12 +137,18 @@ function createAnnotationPreviewProbe(deps, options = {}) {
     let token = null;
     let cleanupAttempted = false;
     let stage = 'context';
+    let nativePageSizeBefore = null;
+    let nativePageSizeAfter = null;
     try {
       const initial = await deps.currentContext();
       if (requestEpoch !== epoch) throw fault('cancelled');
-      if (!validContext(initial)) throw fault('fixture_context_required');
+      if (!validContext(initial, profile)) throw fault('fixture_context_required');
       // Copy identity: a dependency cannot mutate our expected snapshot in place.
       const context = {filePath: initial.filePath, pageIndex: initial.pageIndex, totalPages: initial.totalPages};
+      if (profile) {
+        stage = 'canvas';
+        nativePageSizeBefore = await observeCanvas(context, requestEpoch);
+      }
       stage = 'prepare';
       const prepared = await deps.prepare({
         filePath: context.filePath, pageIndex: context.pageIndex, width: WIDTH, height: HEIGHT,
@@ -122,6 +158,7 @@ function createAnnotationPreviewProbe(deps, options = {}) {
       if (!token || !isRecord(prepared) || prepared.sourceVerified !== true ||
           prepared.filePath !== context.filePath || prepared.pageIndex !== context.pageIndex ||
           prepared.width !== WIDTH || prepared.height !== HEIGHT ||
+          (profile && (prepared.sourceSha256 !== profile.sourceSha256 || prepared.pageCount !== profile.totalPages)) ||
           !validOutputPath(prepared.pngPath, token)) {
         throw fault('prepare_invalid');
       }
@@ -135,6 +172,13 @@ function createAnnotationPreviewProbe(deps, options = {}) {
         context.filePath, context.pageIndex, pngPath, {width: WIDTH, height: HEIGHT},
       );
       await requireCurrent(context, requestEpoch);
+      if (profile) {
+        stage = 'canvas';
+        nativePageSizeAfter = await observeCanvas(context, requestEpoch);
+        if (nativePageSizeBefore.width !== nativePageSizeAfter.width ||
+            nativePageSizeBefore.height !== nativePageSizeAfter.height) throw fault('canvas_changed');
+      }
+      stage = 'generate';
       const generated = isRecord(api) && api.success === true && api.result === true;
       const missingMark = isRecord(api) && api.success === false &&
         isRecord(api.error) && api.error.code === MISSING_MARK_CODE;
@@ -144,7 +188,8 @@ function createAnnotationPreviewProbe(deps, options = {}) {
       await requireCurrent(context, requestEpoch);
       if (!isRecord(checked) || checked.token !== token || checked.filePath !== context.filePath ||
           checked.pageIndex !== context.pageIndex || checked.sourceUnchanged !== true ||
-          checked.markUnchanged !== true) {
+          checked.markUnchanged !== true ||
+          (profile && (checked.sourceSha256 !== profile.sourceSha256 || checked.pageCount !== profile.totalPages))) {
         throw fault('finish_invalid');
       }
       if (missingMark) {
@@ -156,7 +201,9 @@ function createAnnotationPreviewProbe(deps, options = {}) {
         await discardToken(token);
         token = null;
         await requireCurrent(context, requestEpoch);
-        return {status: 'blank', reason: 'missing_mark_page', evidence: {...checked}, geometryVerified: false};
+        return {status: 'blank', reason: 'missing_mark_page',
+          evidence: profile ? Object.freeze({...checked, nativePageSizeBefore, nativePageSizeAfter}) : {...checked},
+          geometryVerified: false};
       }
       if (checked.missingMark === true || checked.pngPath !== pngPath || checked.width !== WIDTH || checked.height !== HEIGHT ||
           checked.decoded !== true || typeof checked.sha256 !== 'string' || !SHA256.test(checked.sha256) ||
@@ -169,7 +216,8 @@ function createAnnotationPreviewProbe(deps, options = {}) {
       token = null;
       return {
         status: 'preview', handle: retainedHandle, imageUri: `file://${pngPath}`,
-        evidence: {...checked}, geometryVerified: false, annotationCompleteness: 'unknown',
+        evidence: profile ? Object.freeze({...checked, nativePageSizeBefore, nativePageSizeAfter}) : {...checked},
+        geometryVerified: false, annotationCompleteness: 'unknown',
       };
     } catch (error) {
       const reason = reasonOf(error, `${stage}_failed`);
@@ -203,5 +251,6 @@ function createAnnotationPreviewProbe(deps, options = {}) {
 
 module.exports = {
   FIXTURE_NAME, PAGE_INDEX, TOTAL_PAGES, WIDTH, HEIGHT, MAX_PNG_BYTES,
+  T008_PROFILE_ID, T008_PROFILE,
   createAnnotationPreviewProbe,
 };

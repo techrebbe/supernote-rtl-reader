@@ -17,10 +17,20 @@ import java.util.concurrent.Executors
 
 /** Disposable, manual handwriting-renderer probe. Not a production overlay or save witness. */
 class AnnotationPreviewModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
+    private data class Fixture(val filePath: String, val pageIndex: Int, val sourceSha256: String, val pageCount: Int)
+
     companion object {
-        private const val FIXTURE = "/storage/emulated/0/Document/RTL_RAPID_TOOLS_T004_20261001.pdf"
-        private const val FIXTURE_SHA256 = "ffb6c3b889ed455841d3c4f50a0813d844109c3c97255b4bbb5e4b949c9592c9"
-        private const val PAGE = 2 // Native API's zero-based original PAGE 3.
+        private val FIXTURES = listOf(
+            Fixture(
+                "/storage/emulated/0/Document/RTL_RAPID_TOOLS_T004_20261001.pdf", 2, // Original PAGE 3.
+                "ffb6c3b889ed455841d3c4f50a0813d844109c3c97255b4bbb5e4b949c9592c9", 8,
+            ),
+            Fixture(
+                "/storage/emulated/0/Document/RTL_INK_GEOMETRY_T008_20261002.pdf", 0, // Original PAGE 1.
+                "bd0fd00b4879cedb1b768a19deb2901a6d50dc7373decc8ef60e445613d83e64", 2,
+            ),
+        )
+        // Fixed diagnostic output contract; this does not imply source-page geometry.
         private const val WIDTH = 1404
         private const val HEIGHT = 1872
         private const val MAX_BYTES = 16L * 1024 * 1024
@@ -29,7 +39,7 @@ class AnnotationPreviewModule(context: ReactApplicationContext) : ReactContextBa
 
     private data class Snapshot(val device: Long, val inode: Long, val size: Long, val sha256: String)
     private data class Request(
-        val token: String, val pdf: File, val mark: File, val directory: File,
+        val token: String, val fixture: Fixture, val pdf: File, val mark: File, val directory: File,
         val source: Snapshot, val annotation: Snapshot?,
     ) {
         val png: File get() = File(directory, "ink.png")
@@ -95,14 +105,16 @@ class AnnotationPreviewModule(context: ReactApplicationContext) : ReactContextBa
 
     @ReactMethod
     fun prepare(filePath: String, pageIndex: Int, width: Int, height: Int, pluginDirectory: String, promise: Promise) = task(promise) {
-        require(filePath == FIXTURE && pageIndex == PAGE && width == WIDTH && height == HEIGHT) {
-            "This probe is restricted to disposable T004 PAGE 3 at 1404x1872"
+        val fixture = FIXTURES.singleOrNull { it.filePath == filePath && it.pageIndex == pageIndex }
+            ?: error("This probe is restricted to disposable T004 PAGE 3 or T008 PAGE 1")
+        require(width == WIDTH && height == HEIGHT) {
+            "This probe requires fixed 1404x1872 output"
         }
         require(requests.isEmpty()) { "A preview is still retained or pending" }
-        val pdf = File(FIXTURE)
+        val pdf = File(fixture.filePath)
         val source = digest(pdf, MAX_SOURCE_BYTES)
-        require(source.sha256 == FIXTURE_SHA256) { "Disposable source identity mismatch" }
-        val mark = File("$FIXTURE.mark")
+        require(source.sha256 == fixture.sourceSha256) { "Disposable source identity mismatch" }
+        val mark = File("${fixture.filePath}.mark")
         val annotation = markSnapshot(mark)
         // SDK output allowlist is rooted at PluginManager.getPluginDirPath(), not cacheDir.
         // Validate against this diagnostic's install directory; retain the SDK's path spelling.
@@ -117,10 +129,11 @@ class AnnotationPreviewModule(context: ReactApplicationContext) : ReactContextBa
         val token = UUID.randomUUID().toString()
         val directory = File(privateRoot, token)
         require(directory.mkdir() && directory.canonicalFile.parentFile == privateRoot.canonicalFile) { "Cannot create unique preview directory" }
-        val request = Request(token, pdf, mark, directory, source, annotation)
+        val request = Request(token, fixture, pdf, mark, directory, source, annotation)
         requests[token] = request
         promise.resolve(Arguments.createMap().apply {
-            putString("token", token); putString("filePath", FIXTURE); putInt("pageIndex", PAGE)
+            putString("token", token); putString("filePath", request.fixture.filePath); putInt("pageIndex", request.fixture.pageIndex)
+            putString("sourceSha256", request.source.sha256); putInt("pageCount", request.fixture.pageCount)
             putString("pngPath", request.png.absolutePath); putInt("width", WIDTH); putInt("height", HEIGHT)
             putBoolean("sourceVerified", true)
         })
@@ -133,7 +146,8 @@ class AnnotationPreviewModule(context: ReactApplicationContext) : ReactContextBa
             "Disposable PDF or annotations changed; do not display this result"
         }
         val result = Arguments.createMap().apply {
-            putString("token", token); putString("filePath", FIXTURE); putInt("pageIndex", PAGE)
+            putString("token", token); putString("filePath", request.fixture.filePath); putInt("pageIndex", request.fixture.pageIndex)
+            putString("sourceSha256", request.source.sha256); putInt("pageCount", request.fixture.pageCount)
             putBoolean("sourceUnchanged", true); putBoolean("markUnchanged", true)
         }
         if (missingMark) {

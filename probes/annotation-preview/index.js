@@ -21,7 +21,7 @@ PluginManager.registerButton(1, ['DOC'], {
 PluginManager.registerButtonListener({onButtonPress: event => {
   if (event?.id === 101) {
     if (globalThis.RTL_INK_PROBE_BUSY === true) return;
-    console.log('RTL_READER_OPEN v0.0.1-ink-probe');
+    console.log('RTL_READER_OPEN v0.0.2-landscape-probe');
     DeviceEventEmitter.emit('RTL_INK_PROBE_ACTIVATE');
   }
 }});

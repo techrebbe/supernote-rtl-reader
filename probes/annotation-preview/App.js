@@ -1,7 +1,7 @@
 import React, {useEffect, useRef, useState} from 'react';
-import {BackHandler, DeviceEventEmitter, Image, NativeModules, Pressable, StyleSheet, Text, View} from 'react-native';
+import {BackHandler, DeviceEventEmitter, Dimensions, Image, NativeModules, Pressable, StyleSheet, Text, View} from 'react-native';
 import {PluginCommAPI, PluginDocAPI, PluginFileAPI, PluginManager} from 'sn-plugin-lib';
-import {createAnnotationPreviewProbe} from './annotationPreview';
+import {createAnnotationPreviewProbe, T008_PROFILE_ID} from './annotationPreview';
 
 const {AnnotationPreviewModule} = NativeModules;
 
@@ -12,10 +12,13 @@ async function result(promise) {
 }
 
 async function currentContext() {
+  const filePath = await result(PluginCommAPI.getCurrentFilePath());
+  const pageIndex = await result(PluginCommAPI.getCurrentPageNum());
+  const totalPages = await result(PluginDocAPI.getCurrentTotalPages());
+  const window = Dimensions.get('window');
   return {
-    filePath: await result(PluginCommAPI.getCurrentFilePath()),
-    pageIndex: await result(PluginCommAPI.getCurrentPageNum()),
-    totalPages: await result(PluginDocAPI.getCurrentTotalPages()),
+    filePath, pageIndex, totalPages,
+    orientation: window.width > window.height ? 'landscape' : 'portrait',
   };
 }
 
@@ -34,8 +37,14 @@ function getSession() {
       finish: ({token, missingMark}) => AnnotationPreviewModule.finish(token, missingMark),
       discard: ({token}) => AnnotationPreviewModule.discard(token),
       generateThumbnail: (...args) => PluginFileAPI.generateMarkThumbnails(...args),
-    }, {enabled: true});
-    session = {probe, value: null, closing: false, notice: 'Disposable T004 PDF, PAGE 3 only. No writing or page changes during this probe.'};
+      getPageSize: async (...args) => {
+        const response = await PluginFileAPI.getPageSize(...args);
+        console.log(`RTL_INK_PROBE_CANVAS success=${response?.success === true} width=${response?.result?.width} height=${response?.result?.height}`);
+        return response;
+      },
+    }, {enabled: true, profileId: T008_PROFILE_ID});
+    session = {probe, value: null, closing: false, attempted: false, presentationEpoch: 0,
+      notice: 'Disposable T008 PDF, PAGE 1, landscape only. One fixed 1404×1872 request; do not write, rotate or turn pages.'};
   }
   return session;
 }
@@ -43,6 +52,14 @@ function getSession() {
 function publish(shared) {
   globalThis.RTL_INK_PROBE_BUSY = shared.closing || shared.probe.getState().busy || shared.probe.getState().retained;
   DeviceEventEmitter.emit(SESSION_EVENT);
+}
+
+function invalidatePresentation(shared) {
+  shared.presentationEpoch += 1;
+  shared.probe.cancel();
+  // Keep the exact cleanup capability without republishing a completed image on
+  // remount. Native ownership is not released by UI lifetime or rotation.
+  shared.value = shared.value?.handle ? {status: 'stale', handle: shared.value.handle} : null;
 }
 
 export default function App() {
@@ -60,6 +77,11 @@ export default function App() {
       setNotice(shared.notice);
     };
     const listener = DeviceEventEmitter.addListener(SESSION_EVENT, synchronize);
+    const rotation = Dimensions.addEventListener('change', () => {
+      invalidatePresentation(shared); // Includes landscape -> portrait -> landscape ABA.
+      shared.notice = 'Window changed. Any preview is invalid; cleanup is required before leaving.';
+      publish(shared);
+    });
     synchronize(); // Close the render-to-passive-effect missed-event window.
     const back = BackHandler.addEventListener('hardwareBackPress', () => {
       if (shared.closing || shared.probe.getState().busy || shared.probe.getState().retained) return true;
@@ -67,23 +89,32 @@ export default function App() {
     });
     return () => {
       mounted.current = false;
-      shared.probe.cancel();
+      invalidatePresentation(shared);
       listener.remove();
+      rotation.remove();
       back.remove();
       // Do not discard in cleanup: the session retains both pending call and retry handle.
     };
   }, []);
 
   const run = async () => {
-    if (shared.closing || shared.probe.getState().busy || shared.probe.getState().retained) return;
+    if (shared.attempted || shared.closing || shared.probe.getState().busy || shared.probe.getState().retained) return;
+    shared.attempted = true; // One attempt per diagnostic JS session, including failures.
+    const presentationEpoch = shared.presentationEpoch;
     shared.notice = 'Waiting for the native handwriting renderer. Do not navigate or draw.';
     const pending = shared.probe.run({manual: true});
     publish(shared);
-    const value = await pending;
+    let value = await pending;
+    // A completed controller result can await delivery while the view unmounts.
+    // Fence that separate UI-publication window without discarding its handle.
+    if (presentationEpoch !== shared.presentationEpoch) value = {
+      status: 'stale', reason: 'presentation_changed', ...(value?.handle ? {handle: value.handle} : {}),
+    };
     shared.value = value;
     console.log(`RTL_INK_PROBE_RESULT status=${value.status} reason=${value.reason || 'none'}`);
+    if (value.status === 'preview') console.log(`RTL_INK_PROBE_EVIDENCE ${JSON.stringify(value.evidence)}`);
     shared.notice = value.status === 'preview'
-      ? `PNG ${value.evidence.width}×${value.evidence.height}; alpha ${value.evidence.alphaMin}–${value.evidence.alphaMax}. Alignment/highlight coverage NOT validated.`
+      ? `PNG ${value.evidence.width}×${value.evidence.height}; native canvas ${value.evidence.nativePageSizeBefore.width}×${value.evidence.nativePageSizeBefore.height}. Alignment NOT validated; inspect the retained output.`
       : `${value.status}: ${value.reason || 'no image'}`;
     publish(shared);
   };
@@ -116,7 +147,7 @@ export default function App() {
     <Text style={styles.title}>Native handwriting contract probe</Text>
     <Text style={styles.notice}>{notice}</Text>
     <View style={styles.actions}>
-      <Pressable disabled={busy || Boolean(outcome?.handle)} onPress={run} style={styles.button}>
+      <Pressable disabled={busy || shared.attempted || Boolean(outcome?.handle)} onPress={run} style={styles.button}>
         <Text>Generate once</Text>
       </Pressable>
       <Pressable disabled={busy} onPress={close} style={styles.button}><Text>Return to stock reader</Text></Pressable>

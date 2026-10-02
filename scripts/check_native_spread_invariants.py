@@ -979,7 +979,7 @@ def check(repo_root: Path) -> None:
         ),
         (
             app_path,
-            "04877c1946d72c60df45319917b5d269e48639091b0d1818a41f84bf9cd0e7dd",
+            "2840706d2348b629ad18814cd23ed0455c069bcfaf424d24b6089ed9de374ae8",
             "Native Spread UI authority source",
         ),
         (
@@ -987,25 +987,37 @@ def check(repo_root: Path) -> None:
             "3b6de3826f67e5ead78324cbc6df0a86bc6df6d78c9042598ef4645827c61538",
             "Edit/Return page-authority module",
         ),
-        # T006 read-only image ownership is separate from writer/save authority.
+        # T008 scoped independent review: exact disposable profile/geometry and
+        # unchanged T006/code46 cleanup fences. These are read-only display pins;
+        # no legacy writer, save, handoff or Edit-return authority is repinned.
         (
             repo_root / "overlay" / "savedInk.js",
-            "8661e7a238d698eacacae725d432e6607a7079ca57d3fce897b85741f9eac07c",
+            "0bbe85df2c7c9c1b7d37aaf1bbb74eba8dd3383c8fdd56e8753c9f5fc2428402",
             "saved-ink request and cleanup controller",
         ),
         (
             repo_root / "native" / "SavedInkModule.kt.template",
-            "168467e199e1347ff5ea7144bf28e7c30604d7db7089599ca34f4acca5ea7b29",
+            "b9c38d8161534a58e744c1248f00ebcfd9348bc0f4db73cc8978c5bcb0203452",
             "saved-ink fixture verification and owned output cleanup",
         ),
         (
             repo_root / "native" / "SavedInkRegistry.kt.template",
-            "2de9b8f032fa596b621f6acf71b7cd0705e59dc8876728830ce46e8d281dd8b3",
+            "b41b5223438e7adef37e70ea12a1b976cedb453d7a47e6e422ee23f9db739844",
             "saved-ink opaque bitmap and UI lease ownership",
         ),
         (
+            repo_root / "native" / "SavedInkProfiles.kt.template",
+            "6b78841cb1f47c86a68ccecb0f35f24ef778456468b6f5879c37cb52f4da10ba",
+            "hash-bound disposable source and background geometry profiles",
+        ),
+        (
+            repo_root / "native" / "SavedInkFitGeometry.java.template",
+            "901c07009e4c86e1ad33044a65e9401fad3eb18c7325e8a9af98f702f13bfba2",
+            "restricted binary32 portrait fit geometry",
+        ),
+        (
             index_path,
-            "f6da119dc09c6d7b841a67efda5710ab1d76d613a3b32dc139b79fb2e94ea26b",
+            "17e2b2030e3257595d26443b75bd24b3699118a05be7a449cb187f7d5d07586f",
             "Edit/Return activation and close authority",
         ),
         (
@@ -1015,7 +1027,7 @@ def check(repo_root: Path) -> None:
         ),
         (
             workflow_path,
-            "e6955438828eb5c0d03113448050057bc61218fc593aac4a12e5716b7144e14e",
+            "5ceaac9f923405e1e315321316967f19488c83afd4545d0f59e3907f61b7e92b",
             "Native Spread companion-build workflow",
         ),
         (

@@ -2,7 +2,9 @@ package __PACKAGE__
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
@@ -30,6 +32,14 @@ private data class RenderKey(
     val modified: Long,
     val pageIndex: Int,
     val requestedWidth: Int,
+    val geometryId: String?,
+    val profileStamp: SavedInkProfiles.SourceStamp?,
+)
+
+private data class RenderRequest(
+    val file: File,
+    val key: RenderKey,
+    val background: SavedInkProfiles.VerifiedBackground?,
 )
 
 private data class CachedBitmap(
@@ -216,6 +226,8 @@ private object PdfDirectRenderEngine {
     private var activePath: String? = null
     private var activeLength: Long = -1L
     private var activeModified: Long = -1L
+    private var activeGeometryId: String? = null
+    private var activeProfileStamp: SavedInkProfiles.SourceStamp? = null
     private var activeDescriptor: ParcelFileDescriptor? = null
     private var activeRenderer: PdfRenderer? = null
 
@@ -271,7 +283,7 @@ private object PdfDirectRenderEngine {
         Log.i(LOG_TAG, "RTL_READER_NATIVE_VIEW_VISIBLE_CACHED page=${key.pageIndex + 1}")
     }
 
-    private fun makeKey(filePath: String, pageIndex: Int, requestedWidth: Int): Pair<File, RenderKey> {
+    private fun makeKey(filePath: String, pageIndex: Int, requestedWidth: Int): RenderRequest {
         val file = File(filePath)
         if (!file.exists() || !file.isFile) {
             throw IllegalArgumentException("PDF file is not accessible: $filePath")
@@ -280,15 +292,21 @@ private object PdfDirectRenderEngine {
             throw IllegalArgumentException("Invalid PDF page index: $pageIndex")
         }
         val canonicalPath = file.canonicalPath
-        return Pair(
-            file,
-            RenderKey(
+        // Background geometry is read-only source authority, independent of any
+        // ink token/mark file. Exact-profile verification fails closed on change.
+        val background = SavedInkProfiles.verifyBackground(filePath, pageIndex)
+        return RenderRequest(
+            file = File(canonicalPath),
+            key = RenderKey(
                 canonicalPath = canonicalPath,
-                length = file.length(),
-                modified = file.lastModified(),
+                length = background?.stamp?.length ?: file.length(),
+                modified = background?.stamp?.modified ?: file.lastModified(),
                 pageIndex = pageIndex,
                 requestedWidth = requestedWidth.coerceIn(320, 2200),
+                geometryId = background?.id,
+                profileStamp = background?.stamp,
             ),
+            background = background,
         )
     }
 
@@ -308,25 +326,42 @@ private object PdfDirectRenderEngine {
         activePath = null
         activeLength = -1L
         activeModified = -1L
+        activeGeometryId = null
+        activeProfileStamp = null
     }
 
-    private fun ensureRendererLocked(file: File, key: RenderKey): Pair<PdfRenderer, Boolean> {
+    private fun ensureRendererLocked(request: RenderRequest): Pair<PdfRenderer, Boolean> {
+        val key = request.key
+        val background = request.background
+        check(background?.id == key.geometryId && background?.stamp == key.profileStamp)
         val existing = activeRenderer
         val canReuse =
             existing != null &&
                 activePath == key.canonicalPath &&
                 activeLength == key.length &&
-                activeModified == key.modified
+                activeModified == key.modified &&
+                activeGeometryId == key.geometryId &&
+                activeProfileStamp == key.profileStamp
 
         if (canReuse) {
+            try {
+                background?.validateDescriptor(checkNotNull(activeDescriptor).fileDescriptor)
+                background?.validatePath()
+            } catch (error: Throwable) {
+                closeRendererLocked()
+                clearCache()
+                throw error
+            }
             return Pair(existing!!, true)
         }
 
         closeRendererLocked()
         clearCache()
 
-        val descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        val descriptor = ParcelFileDescriptor.open(request.file, ParcelFileDescriptor.MODE_READ_ONLY)
         val renderer = try {
+            background?.validateDescriptor(descriptor.fileDescriptor)
+            background?.validatePath()
             PdfRenderer(descriptor)
         } catch (error: Throwable) {
             try {
@@ -339,6 +374,8 @@ private object PdfDirectRenderEngine {
         activePath = key.canonicalPath
         activeLength = key.length
         activeModified = key.modified
+        activeGeometryId = key.geometryId
+        activeProfileStamp = key.profileStamp
         activeDescriptor = descriptor
         activeRenderer = renderer
 
@@ -350,13 +387,14 @@ private object PdfDirectRenderEngine {
     }
 
     private fun renderLocked(
-        file: File,
-        key: RenderKey,
+        request: RenderRequest,
         totalStarted: Long,
         detectTrimming: Boolean,
     ): DirectRenderResult {
+        val key = request.key
+        val background = request.background
         val openStarted = SystemClock.elapsedRealtime()
-        val (renderer, reusedRenderer) = ensureRendererLocked(file, key)
+        val (renderer, reusedRenderer) = ensureRendererLocked(request)
         val openMs = SystemClock.elapsedRealtime() - openStarted
 
         if (key.pageIndex >= renderer.pageCount) {
@@ -369,24 +407,50 @@ private object PdfDirectRenderEngine {
         var bitmap: Bitmap? = null
         try {
             page = renderer.openPage(key.pageIndex)
-            val height = max(
+            if (background != null) {
+                check(renderer.pageCount == 2 && page.width == 612 && page.height == 792) {
+                    "Verified T008 background does not match the actual Android PDF page."
+                }
+            }
+            val geometry = background?.geometry
+            val width = geometry?.canvasWidth ?: key.requestedWidth
+            val height = geometry?.canvasHeight ?: max(
                 1,
                 (key.requestedWidth.toDouble() * page.height.toDouble() / page.width.toDouble()).roundToInt(),
             )
 
-            bitmap = Bitmap.createBitmap(key.requestedWidth, height, Bitmap.Config.ARGB_8888)
+            bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             bitmap.eraseColor(Color.WHITE)
 
             val renderStarted = SystemClock.elapsedRealtime()
-            page.render(
-                bitmap,
-                null,
-                null,
-                PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY,
-            )
+            if (background != null) {
+                val geometry = background.geometry
+                // Use the uniform stock CTM, not independent x/y fitting to the
+                // rounded inner bitmap. Keep native ink's full portrait canvas.
+                val matrix = Matrix().apply {
+                    setScale(geometry.ctmScale, geometry.ctmScale)
+                    postTranslate(geometry.offsetX.toFloat(), geometry.offsetY.toFloat())
+                }
+                val innerRect = Rect(
+                    geometry.offsetX,
+                    geometry.offsetY,
+                    geometry.offsetX + geometry.innerWidth,
+                    geometry.offsetY + geometry.innerHeight,
+                )
+                page.render(bitmap, innerRect, matrix, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                background.validateDescriptor(checkNotNull(activeDescriptor).fileDescriptor)
+                background.validatePath()
+            } else {
+                page.render(
+                    bitmap,
+                    null,
+                    null,
+                    PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY,
+                )
+            }
             val renderMs = SystemClock.elapsedRealtime() - renderStarted
             val trimmingRect =
-                if (detectTrimming) NativeFillTrimming.detect(bitmap) else null
+                if (detectTrimming && background == null) NativeFillTrimming.detect(bitmap) else null
             val totalMs = SystemClock.elapsedRealtime() - totalStarted
 
             val result = DirectRenderResult(
@@ -411,6 +475,21 @@ private object PdfDirectRenderEngine {
         }
     }
 
+    private fun validateCachedBackground(request: RenderRequest, cached: CachedBitmap) {
+        val background = request.background ?: return
+        try {
+            background.validatePath()
+            val geometry = background.geometry
+            check(cached.pageCount == 2 && cached.bitmap.width == geometry.canvasWidth &&
+                cached.bitmap.height == geometry.canvasHeight && cached.trimmingRect == null) {
+                "Cached T008 background does not match its verified canvas."
+            }
+        } catch (error: Throwable) {
+            recycleCached(cached)
+            throw error
+        }
+    }
+
     fun renderForeground(
         filePath: String,
         pageIndex: Int,
@@ -420,15 +499,17 @@ private object PdfDirectRenderEngine {
     ): DirectRenderResult? {
         val totalStarted = SystemClock.elapsedRealtime()
         if (!isCurrent()) return null
-        val (file, key) = makeKey(filePath, pageIndex, requestedWidth)
+        val request = makeKey(filePath, pageIndex, requestedWidth)
+        val key = request.key
 
         takeCached(key)?.let { cached ->
             if (!isCurrent()) {
                 putCached(key, cached)
                 return null
             }
+            validateCachedBackground(request, cached)
             val trimmingRect =
-                if (detectTrimming) {
+                if (detectTrimming && request.background == null) {
                     cached.trimmingRect?.let(::RectF)
                         ?: NativeFillTrimming.detect(cached.bitmap)
                 } else {
@@ -467,8 +548,9 @@ private object PdfDirectRenderEngine {
                     putCached(key, cached)
                     return null
                 }
+                validateCachedBackground(request, cached)
                 val trimmingRect =
-                    if (detectTrimming) {
+                    if (detectTrimming && request.background == null) {
                         cached.trimmingRect?.let(::RectF)
                             ?: NativeFillTrimming.detect(cached.bitmap)
                     } else {
@@ -494,7 +576,7 @@ private object PdfDirectRenderEngine {
             }
 
             if (!isCurrent()) return null
-            val result = renderLocked(file, key, totalStarted, detectTrimming)
+            val result = renderLocked(request, totalStarted, detectTrimming)
             Log.i(
                 LOG_TAG,
                 "RTL_READER_NATIVE_VIEW_RENDER page=${pageIndex + 1} reused=${result.reusedRenderer} cacheHit=false " +
@@ -514,13 +596,12 @@ private object PdfDirectRenderEngine {
         detectTrimming: Boolean,
     ) {
         pageIndexes.distinct().filter { it >= 0 }.forEach { pageIndex ->
-            val pair = try {
+            val request = try {
                 makeKey(filePath, pageIndex, requestedWidth)
             } catch (_: Throwable) {
                 return@forEach
             }
-            val file = pair.first
-            val key = pair.second
+            val key = request.key
             if (
                 hasCached(key) ||
                 activePrefetch.contains(key) ||
@@ -563,8 +644,7 @@ private object PdfDirectRenderEngine {
                         }
 
                         val result = renderLocked(
-                            file,
-                            key,
+                            request,
                             totalStarted,
                             detectTrimming,
                         )
@@ -790,7 +870,8 @@ class PdfPageView(
         Log.i(
             "RTL_READER",
             "RTL_READER_NATIVE_VIEW_DISPLAY page=${pending.pageIndex + 1} cacheHit=${pending.result.cacheHit} " +
-                "interactionMs=${if (interactionMs >= 0L) interactionMs else "none"} nativeMs=${pending.result.totalMs}",
+                "interactionMs=${if (interactionMs >= 0L) interactionMs else "none"} nativeMs=${pending.result.totalMs} " +
+                "geometryId=${pending.result.key.geometryId ?: "default"}",
         )
 
         val event = Arguments.createMap().apply {
@@ -923,7 +1004,8 @@ override fun onDraw(canvas: Canvas) {
             if (!ink.matchesPage(pendingFilePath, pendingPageIndex)) {
                 clearSavedInk()
             } else if (ink.matchesPage(key.canonicalPath, key.pageIndex)) {
-                if (ink.matches(key.canonicalPath, key.length, key.modified, key.pageIndex, bitmap.width, bitmap.height)) {
+                if (ink.matches(key.canonicalPath, key.length, key.modified, key.pageIndex, bitmap.width, bitmap.height,
+                        geometryId = key.geometryId)) {
                     canvas.drawBitmap(ink.bitmap, null, destination, bitmapPaint)
                 } else {
                     clearSavedInk()

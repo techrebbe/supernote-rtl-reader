@@ -1,7 +1,7 @@
 'use strict';
 // Read-only T006 saved-handwriting orchestration. No writer/save/handoff calls.
 // The native module owns source SHA, .mark snapshots, immutable PNG decoding and
-// token-only bitmap publication. This alpha is deliberately ONLY T004 PAGE 3.
+// token-only bitmap publication. This alpha is limited to two vetted fixtures.
 // Unsupported pages are unavailable, never asserted to contain no annotations.
 
 const FIXTURE_NAME = 'RTL_RAPID_TOOLS_T004_20261001.pdf';
@@ -13,6 +13,25 @@ const MAX_PNG_BYTES = 16 * 1024 * 1024;
 const MISSING_MARK_CODE = 1302;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
+const PROFILES = Object.freeze([
+  Object.freeze({
+    id: 't004-page3-canvas-v1',
+    filePath: `/storage/emulated/0/Document/${FIXTURE_NAME}`,
+    sourceSha256: 'ffb6c3b889ed455841d3c4f50a0813d844109c3c97255b4bbb5e4b949c9592c9',
+    pageIndex: PAGE_INDEX, totalPages: TOTAL_PAGES, needsCanvasWitness: false,
+  }),
+  Object.freeze({
+    id: 't008-page1-stock-portrait-fit-v1',
+    filePath: '/storage/emulated/0/Document/RTL_INK_GEOMETRY_T008_20261002.pdf',
+    sourceSha256: 'bd0fd00b4879cedb1b768a19deb2901a6d50dc7373decc8ef60e445613d83e64',
+    pageIndex: 0, totalPages: 2, needsCanvasWitness: true,
+  }),
+]);
+
+// UI eligibility, not native source/geometry authority. Native verifies bytes.
+function selectSavedInkProfile(filePath, totalPages) {
+  return PROFILES.find(profile => profile.filePath === filePath && profile.totalPages === totalPages) ?? null;
+}
 
 // Ownership outlives React components. Old pending work or failed cleanup must
 // not overlap a remount's renderer call. App cleanup awaits dispose() before a
@@ -35,9 +54,9 @@ function validPluginDir(value) {
 }
 
 function supportedContext(value) {
-  return isRecord(value) && validAbsolutePath(value.filePath) &&
-    value.filePath.endsWith(`/${FIXTURE_NAME}`) && value.pageIndex === PAGE_INDEX &&
-    value.totalPages === TOTAL_PAGES && validPluginDir(value.pluginDir);
+  if (!isRecord(value) || !validPluginDir(value.pluginDir)) return false;
+  const profile = selectSavedInkProfile(value.filePath, value.totalPages);
+  return profile !== null && value.pageIndex === profile.pageIndex;
 }
 
 function sameContext(actual, expected) {
@@ -119,16 +138,32 @@ function createSavedInkController(deps) {
     let cleanupAttempted = false;
     let stage = 'context';
     try {
+      const profile = selectSavedInkProfile(context.filePath, context.totalPages);
       await requireCurrent(context, requestEpoch);
+      const requireCanvas = async () => {
+        if (!profile.needsCanvasWitness) return;
+        stage = 'canvas';
+        if (typeof deps.getPageSize !== 'function') throw fault('canvas_unavailable');
+        const size = await deps.getPageSize(context.filePath, context.pageIndex);
+        await requireCurrent(context, requestEpoch);
+        if (!isRecord(size) || size.success !== true || !isRecord(size.result) ||
+            size.result.width !== WIDTH || size.result.height !== HEIGHT) {
+          throw fault('canvas_mismatch');
+        }
+      };
+      await requireCanvas();
       stage = 'prepare';
       const prepared = await deps.prepare({
+        profileId: profile.id,
         filePath: context.filePath, pageIndex: context.pageIndex,
         width: WIDTH, height: HEIGHT, pluginDir: context.pluginDir,
       });
       // A valid issued token stays cleanup-owned even if other fields are invalid.
       if (isRecord(prepared) && isToken(prepared.token)) token = prepared.token;
       if (!token || !isRecord(prepared) || prepared.sourceVerified !== true ||
-          prepared.filePath !== context.filePath || prepared.pageIndex !== PAGE_INDEX ||
+          prepared.filePath !== context.filePath || prepared.pageIndex !== context.pageIndex ||
+          prepared.profileId !== profile.id || prepared.geometryId !== profile.id ||
+          prepared.sourceSha256 !== profile.sourceSha256 || prepared.pageCount !== context.totalPages ||
           prepared.width !== WIDTH || prepared.height !== HEIGHT ||
           !validOutputPath(prepared.pngPath, token, context.pluginDir)) {
         throw fault('prepare_invalid');
@@ -138,8 +173,9 @@ function createSavedInkController(deps) {
       stage = 'generate';
       // Never timeout and remove an output while the API could still write it.
       // Cancellation suppresses publication; cleanup waits for real settlement.
-      const api = await deps.generateThumbnail(context.filePath, PAGE_INDEX, pngPath, {width: WIDTH, height: HEIGHT});
+      const api = await deps.generateThumbnail(context.filePath, context.pageIndex, pngPath, {width: WIDTH, height: HEIGHT});
       await requireCurrent(context, requestEpoch);
+      await requireCanvas();
       const generated = isRecord(api) && api.success === true && api.result === true;
       const missingMark = isRecord(api) && api.success === false &&
         isRecord(api.error) && api.error.code === MISSING_MARK_CODE;
@@ -148,7 +184,9 @@ function createSavedInkController(deps) {
       const checked = await deps.finish({token, missingMark});
       await requireCurrent(context, requestEpoch);
       if (!isRecord(checked) || checked.token !== token ||
-          checked.filePath !== context.filePath || checked.pageIndex !== PAGE_INDEX ||
+          checked.filePath !== context.filePath || checked.pageIndex !== context.pageIndex ||
+          checked.profileId !== profile.id || checked.geometryId !== profile.id ||
+          checked.sourceSha256 !== profile.sourceSha256 || checked.pageCount !== context.totalPages ||
           checked.sourceUnchanged !== true || checked.markUnchanged !== true) {
         throw fault('finish_invalid');
       }
@@ -239,5 +277,5 @@ function createSavedInkController(deps) {
 
 module.exports = {
   FIXTURE_NAME, PAGE_INDEX, TOTAL_PAGES, WIDTH, HEIGHT, MAX_PNG_BYTES,
-  supportedContext, createSavedInkController,
+  PROFILES, selectSavedInkProfile, supportedContext, createSavedInkController,
 };

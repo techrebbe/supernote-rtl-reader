@@ -48,6 +48,8 @@ async function flush(count = 80) {
 function prepared(token) {
   return {
     token, filePath: FILE, pageIndex: 2, width: 1404, height: 1872,
+    profileId: 't004-page3-canvas-v1', geometryId: 't004-page3-canvas-v1', pageCount: 8,
+    sourceSha256: 'ffb6c3b889ed455841d3c4f50a0813d844109c3c97255b4bbb5e4b949c9592c9',
     sourceVerified: true, pngPath: `${DIR}/saved-ink-cache/${token}/ink.png`,
   };
 }
@@ -175,7 +177,7 @@ test('exact App effect generates original PAGE3 and publishes token only for mat
   assert.equal(app.tokenFor(2, {visible: false}), null);
   assert.equal(app.tokenFor(2, {documentContext: {filePath: '/Document/other.pdf'}}), null);
   assert.equal(app.tokenFor(2, {state: {...app.state, status: 'loading'}}), null);
-  assert.deepEqual(h.calls.find(call => call.name === 'prepare').args, [FILE, 2, 1404, 1872, DIR]);
+  assert.deepEqual(h.calls.find(call => call.name === 'prepare').args, ['t004-page3-canvas-v1', FILE, 2, 1404, 1872, DIR]);
   assert.deepEqual(h.calls.find(call => call.name === 'generate').args, [FILE, 2, prepared(TOKEN).pngPath, {width: 1404, height: 1872}]);
   assert.equal(h.count('discard'), 0);
   assert.equal(await app.cleanup(), true);

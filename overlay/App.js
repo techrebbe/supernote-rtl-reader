@@ -17,7 +17,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import {PluginCommAPI, PluginDocAPI, PluginFileAPI, PluginManager} from 'sn-plugin-lib';
-import {createSavedInkController} from './savedInk';
+import {createSavedInkController, selectSavedInkProfile} from './savedInk';
 import {
   EDIT_BLOCKED_MESSAGES,
   buildEditPayload,
@@ -30,9 +30,6 @@ import {
 
 const {PdfRendererModule, ReaderPreferencesModule} = NativeModules;
 const {SavedInkModule} = NativeModules;
-// First integrated slice deliberately retains T005's proven geometry/identity.
-const SAVED_INK_FIXTURE = '/storage/emulated/0/Document/RTL_RAPID_TOOLS_T004_20261001.pdf';
-const SAVED_INK_PAGE = 2;
 const SAVED_INK_CLEANUP_FAILED_MESSAGE =
   'Saved ink cleanup could not be verified; the reader stayed open. Close and Edit are blocked until cleanup is resolved.';
 const SWIPE_THRESHOLD = 56;
@@ -458,17 +455,20 @@ export default function App() {
   spreadSizingRef.current = spreadSizing;
   pageAreaWidthRef.current = Math.max(1, window.width);
 
-  const savedInkVisible = preferencesReady && documentContext?.filePath === SAVED_INK_FIXTURE &&
-    totalPages === 8 && Number.isInteger(pageIndex) && !editBusy && !readerTransitionLocked() &&
+  const savedInkProfile = selectSavedInkProfile(documentContext?.filePath, totalPages);
+  const savedInkVisible = preferencesReady && savedInkProfile !== null &&
+    (!savedInkProfile.needsCanvasWitness ||
+      (effectiveMode === 'single' && spreadSizing === 'fit' && window.height > window.width)) &&
+    Number.isInteger(pageIndex) && !editBusy && !readerTransitionLocked() &&
     (effectiveMode === 'single'
-      ? pageIndex === SAVED_INK_PAGE
-      : Object.values(getVisualSpread(pageIndex, coverSeparate, totalPages, direction)).includes(SAVED_INK_PAGE));
+      ? pageIndex === savedInkProfile.pageIndex
+      : Object.values(getVisualSpread(pageIndex, coverSeparate, totalPages, direction)).includes(savedInkProfile.pageIndex));
   savedInkContextRef.current = savedInkVisible
-    ? {filePath: documentContext.filePath, pageIndex: SAVED_INK_PAGE, totalPages: 8}
+    ? {filePath: documentContext.filePath, pageIndex: savedInkProfile.pageIndex, totalPages}
     : null;
   const savedInkTokenFor = page =>
     savedInkVisible && savedInkContextRef.current && !readerTransitionLocked() &&
-    savedInk.status === 'ready' && page === SAVED_INK_PAGE &&
+    savedInk.status === 'ready' && page === savedInkContextRef.current.pageIndex &&
     savedInk.filePath === documentContext?.filePath
       ? savedInk.savedInkToken : null;
 
@@ -496,11 +496,12 @@ export default function App() {
       };
       controller = createSavedInkController({
         currentContext,
-        prepare: ({filePath, pageIndex: page, width, height, pluginDir: directory}) =>
-          SavedInkModule.prepare(filePath, page, width, height, directory),
+        prepare: ({profileId, filePath, pageIndex: page, width, height, pluginDir: directory}) =>
+          SavedInkModule.prepare(profileId, filePath, page, width, height, directory),
         finish: ({token, missingMark}) => SavedInkModule.finish(token, missingMark),
         discard: ({token}) => SavedInkModule.discard(token),
         generateThumbnail: (...args) => PluginFileAPI.generateMarkThumbnails(...args),
+        getPageSize: (...args) => PluginFileAPI.getPageSize(...args),
       });
       const context = await currentContext();
       if (cancelled) return;
@@ -508,7 +509,7 @@ export default function App() {
       if (result.reason === 'cleanup_failed') globalThis.RTL_READER_INK_CLEANUP_BLOCKED = true;
       if (cancelled || readerTransitionLocked() || !savedInkContextRef.current) return;
       setSavedInk({...result, filePath: context?.filePath});
-      console.log(`RTL_READER_SAVED_INK status=${result.status} reason=${result.reason ?? 'none'} page=3`);
+      console.log(`RTL_READER_SAVED_INK status=${result.status} reason=${result.reason ?? 'none'} page=${(context?.pageIndex ?? -1) + 1}`);
     }).catch(error => {
       if (!previousWasClean) globalThis.RTL_READER_INK_CLEANUP_BLOCKED = true;
       if (!cancelled) setSavedInk({status: 'error', reason: error?.message ?? 'request_failed'});
@@ -1915,7 +1916,7 @@ export default function App() {
               <Text style={styles.statusSecondary}>{editNotice ?? (
                 savedInkVisible
                   ? `${statusCover} · Ink ${savedInk.status === 'ready' ? 'shown' : savedInk.status} (no text highlights)`
-                  : statusCover
+                  : savedInkProfile ? `${statusCover} · Ink unavailable for this page/view` : statusCover
               )}</Text>
             </View>
             <View style={styles.headerActions}>
@@ -1983,7 +1984,8 @@ export default function App() {
                   {direction.toUpperCase()} · {statusLayout}
                 </Text>
                 <Text style={styles.settingsSummary}>
-                  Saved ink alpha: T004 PAGE 3 only. Text highlights are not shown.
+                  Saved ink alpha: T004 page 3; T008 page 1 in portrait Fit only.
+                  Other pages and native text highlights are unavailable.
                 </Text>
               </View>
               <Pressable

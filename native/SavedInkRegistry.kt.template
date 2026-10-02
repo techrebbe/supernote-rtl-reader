@@ -11,7 +11,7 @@ import kotlin.math.abs
 
 /**
  * Process-local opaque image ownership, not a file/image loader or save witness.
- * T006 intentionally supports only T004 PAGE 3's 1404x1872 transparent ink.
+ * Only the explicit T004 PAGE3 / T008 PAGE1 profiles can publish full-canvas ink.
  * Native text highlights were absent from that API output and are not claimed.
  */
 internal object SavedInkRegistry {
@@ -22,7 +22,7 @@ internal object SavedInkRegistry {
 
     private class Entry(
         val token: String, val bitmap: Bitmap, val source: SourceStamp,
-        val annotation: SourceStamp?, val pageIndex: Int,
+        val annotation: SourceStamp?, val pageIndex: Int, val geometryId: String,
     ) {
         var owner = true
         val leases = HashSet<Lease>()
@@ -41,18 +41,27 @@ internal object SavedInkRegistry {
             try { File(path).canonicalPath == entry.source.canonicalPath } catch (_: Exception) { false }
         }
 
-        fun matches(path: String, length: Long, modified: Long, pageIndex: Int, bitmapWidth: Int, bitmapHeight: Int): Boolean =
+        fun matches(path: String, length: Long, modified: Long, pageIndex: Int, bitmapWidth: Int, bitmapHeight: Int,
+            geometryId: String? = null): Boolean =
             synchronized(lock) {
                 if (released) return@synchronized false
                 val entry = entries[token] ?: return@synchronized false
                 val source = entry.source
                 if (!entry.owner || bitmap.isRecycled || entry.pageIndex != pageIndex ||
                     path != source.canonicalPath || length != source.length || modified != source.modified ||
-                    bitmapWidth <= 0 || bitmapHeight <= 0 ||
-                    // PdfRenderer rounds raster height to one pixel; do not stretch another page shape.
-                    abs(bitmapWidth.toLong() * 1872L - bitmapHeight.toLong() * 1404L) > 1404L) {
+                    bitmapWidth <= 0 || bitmapHeight <= 0) {
                     return@synchronized false
                 }
+                val geometryMatches = when (entry.geometryId) {
+                    // Preserve the established T004 bare-PDF rounding tolerance
+                    // only for that profile, never as T008 background authority.
+                    SavedInkProfiles.T004_ID -> (geometryId == null || geometryId == SavedInkProfiles.T004_ID) &&
+                        abs(bitmapWidth.toLong() * 1872L - bitmapHeight.toLong() * 1404L) <= 1404L
+                    SavedInkProfiles.T008_ID -> geometryId == SavedInkProfiles.T008_ID &&
+                        bitmapWidth == 1404 && bitmapHeight == 1872
+                    else -> false
+                }
+                if (!geometryMatches) return@synchronized false
                 try {
                     liveMatches(source) && entry.annotation?.let(::liveMatches) == true
                 } catch (_: Exception) { false }
@@ -73,14 +82,19 @@ internal object SavedInkRegistry {
     fun isEmpty(): Boolean = synchronized(lock) { entries.isEmpty() }
 
     /** Ownership of bitmap transfers only after success; caller recycles on rejection. */
-    fun publish(token: String, bitmap: Bitmap, source: SourceStamp, annotation: SourceStamp?, pageIndex: Int): String = synchronized(lock) {
+    fun publish(token: String, bitmap: Bitmap, source: SourceStamp, annotation: SourceStamp?, pageIndex: Int,
+        geometryId: String): String = synchronized(lock) {
         require(entries.isEmpty()) { "Previous saved ink is still retained by a view" }
         require(UUID.fromString(token).toString() == token) { "Expected native-issued UUID ink token" }
-        require(!bitmap.isRecycled && !bitmap.isMutable && bitmap.width == 1404 && bitmap.height == 1872 && pageIndex == 2) {
-            "Invalid immutable fixed-fixture ink bitmap"
+        val profile = SavedInkProfiles.profileById(geometryId) ?: error("Unknown native ink geometry")
+        require(source.canonicalPath == File(profile.filePath).canonicalPath && pageIndex == profile.pageIndex &&
+            !bitmap.isRecycled && !bitmap.isMutable && bitmap.width == profile.width && bitmap.height == profile.height) {
+            "Invalid immutable native-profile ink bitmap"
         }
-        require(annotation != null) { "A decoded ink bitmap requires an unchanged mark sidecar" }
-        entries[token] = Entry(token, bitmap, source, annotation, pageIndex)
+        require(annotation != null && annotation.canonicalPath == "${source.canonicalPath}.mark") {
+            "A decoded ink bitmap requires its unchanged native mark sidecar"
+        }
+        entries[token] = Entry(token, bitmap, source, annotation, pageIndex, profile.id)
         token
     }
 

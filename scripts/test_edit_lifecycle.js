@@ -18,6 +18,7 @@ const ROOT = path.resolve(__dirname, '..');
 const APP = fs.readFileSync(path.join(ROOT, 'overlay/App.js'), 'utf8').replace(/\r\n/g, '\n');
 const INDEX = fs.readFileSync(path.join(ROOT, 'overlay/index.js'), 'utf8').replace(/\r\n/g, '\n');
 const er = require(path.join(ROOT, 'overlay/editReturn.js'));
+const {selectSavedInkProfile} = require(path.join(ROOT, 'overlay/savedInk.js'));
 const FILE = '/doc/a.pdf';
 const NATIVE_OPEN_PAGE = 2;
 const READER_PAGE = 10;
@@ -171,6 +172,7 @@ function harness(options = {}) {
     NativeModules: {ReaderPreferencesModule: native, SavedInkModule: options.savedInkModule,
       PdfRendererModule: {renderPage() { throw new Error('Unexpected PDF render'); }}},
     createSavedInkController: options.createSavedInkController,
+    selectSavedInkProfile,
     PluginFileAPI: options.pluginFileAPI,
     PluginManager: {
       getPluginDirPath: options.getPluginDirPath,
@@ -196,7 +198,7 @@ function harness(options = {}) {
     },
     Keyboard: {dismiss() {}},
     PanResponder: {create: config => ({panHandlers: config})},
-    useWindowDimensions: () => ({width: 1400, height: 900}),
+    useWindowDimensions: () => options.window ?? ({width: 1400, height: 900}),
     useState(initial) {
       const name = stateNames[stateCursor++];
       assert.ok(name, 'Unexpected extra state hook');
@@ -343,6 +345,8 @@ const INK_TOKEN = 'f3d09692-3a12-48cb-823b-62041968c761';
 const INK_CONTROLLER = path.join(ROOT, 'overlay/savedInk.js');
 const inkPrepared = () => ({
   token: INK_TOKEN, filePath: INK_FILE, pageIndex: 2, width: 1404, height: 1872,
+  profileId: 't004-page3-canvas-v1', geometryId: 't004-page3-canvas-v1', pageCount: 8,
+  sourceSha256: 'ffb6c3b889ed455841d3c4f50a0813d844109c3c97255b4bbb5e4b949c9592c9',
   sourceVerified: true, pngPath: `${INK_DIR}/saved-ink-cache/${INK_TOKEN}/ink.png`,
 });
 const inkFinished = () => ({
@@ -1200,6 +1204,23 @@ test('initialized Close with missing preference storage remains open without nat
   assert.equal(h.handoffs.length, 0);
   assert.equal(h.closes.length, 0);
   assert.ok(h.state.editNotice.includes('Could not save'));
+});
+
+test('ordinary ink eligibility comes from exact source/page and portrait fit, never a general PDF aspect guess', () => {
+  const file = '/storage/emulated/0/Document/RTL_INK_GEOMETRY_T008_20261002.pdf';
+  const state = {documentContext: {filePath: file}, totalPages: 2, pageIndex: 0,
+    viewMode: 'single', spreadSizing: 'fit', display: {kind: 'single', singlePageIndex: 0}};
+  const h = harness({filePath: file, state, window: {width: 1404, height: 1872}});
+  assert.equal(h.callback.savedInkVisible, true);
+  assert.equal(h.callback.savedInkContextRef.current.pageIndex, 0);
+  for (const patch of [{pageIndex: 1}, {spreadSizing: 'native_fill'}, {totalPages: 8},
+    {documentContext: {filePath: '/doc/personal.pdf'}}]) {
+    const bad = harness({filePath: file, state: {...state, ...patch}, window: {width: 1404, height: 1872}});
+    assert.equal(bad.callback.savedInkVisible, false, JSON.stringify(patch));
+    assert.equal(bad.callback.savedInkContextRef.current, null);
+  }
+  const landscape = harness({filePath: file, state, window: {width: 1872, height: 1404}});
+  assert.equal(landscape.callback.savedInkVisible, false);
 });
 
 (async () => {

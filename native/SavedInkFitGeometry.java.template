@@ -1,0 +1,106 @@
+package __PACKAGE__;
+
+/**
+ * Restricted T008 geometry calculation only; no Android, PDF, file or writer API.
+ *
+ * The caller must separately establish an unrotated PDF with equal zero-origin
+ * MediaBox/CropBox, UserUnit=1, effective MuPDF bounds equal to these inputs, and
+ * the exact 1404x1872 portrait native canvas. This function does not inspect or
+ * establish any of that evidence. Its result is not annotation authority,
+ * background/ink registration evidence, a profile identity, or a save witness.
+ * Only the hash-bound native T008 profile links this experimental calculation.
+ *
+ * Stock evidence: inspection/native-reader/decompiled/SupernoteDocument/sources/
+ * com/supernote/document/document/core/pdf/PDFMupdf.java:223-283; fit is portrait
+ * only. RectI.java:28-32 floors both x bounds and ceils both y bounds (unlike
+ * RectI.transform). Matrix.java:87-96 multiplies the float CTM by the fit factor.
+ * Verified original APK bytecode: classes2.dex loadPage code_off 0x3f40ac,
+ * portrait code units 0x147-0x16d use float divisions, Math.min(FF)F, float
+ * products and truncating float-to-int; centering divides integers by two.
+ * RectI(Rect), classes.dex code_off 0x361174, confirms the asymmetric rounding.
+ * Decompiled fit expressions omit the float casts; do not copy integer division.
+ *
+ * Preserve each binary32 operation below. Directly fitting W/H to the canvas,
+ * using double arithmetic, ceil(x1), or rounding bitmap sizes is not equivalent.
+ * The bitmap rectangle is not a separate x/y stretch transform: use the uniform
+ * ctmScale and separate offsets. Fractional page extent may reach the bitmap clip.
+ */
+public strictfp final class SavedInkFitGeometry {
+    public static final int CANVAS_WIDTH = 1404;
+    public static final int CANVAS_HEIGHT = 1872;
+
+    // Conservative local alpha bound, not a PDF-format or firmware limit.
+    // Every integer accepted here is exactly representable as a float.
+    public static final int MAX_PAGE_POINTS = 16384;
+    public static final float STOCK_SCALE = 160 / 72.0f;
+
+    private SavedInkFitGeometry() {}
+
+    public static final class Geometry {
+        public final int pageWidth;
+        public final int pageHeight;
+        public final int stockScaledWidth;
+        public final int stockScaledHeight;
+        public final int bitmapWidth;
+        public final int bitmapHeight;
+        public final int offsetX;
+        public final int offsetY;
+        public final float fitScale;
+        public final float ctmScale;
+
+        private Geometry(int pageWidth, int pageHeight, int stockScaledWidth,
+                int stockScaledHeight, int bitmapWidth, int bitmapHeight,
+                float fitScale, float ctmScale) {
+            this.pageWidth = pageWidth;
+            this.pageHeight = pageHeight;
+            this.stockScaledWidth = stockScaledWidth;
+            this.stockScaledHeight = stockScaledHeight;
+            this.bitmapWidth = bitmapWidth;
+            this.bitmapHeight = bitmapHeight;
+            this.offsetX = (CANVAS_WIDTH - bitmapWidth) / 2;
+            this.offsetY = (CANVAS_HEIGHT - bitmapHeight) / 2;
+            this.fitScale = fitScale;
+            this.ctmScale = ctmScale;
+        }
+    }
+
+    /**
+     * Accepts effective bounds (0,0,W,H), with bounded integer 0<W<H.
+     * Doubles preserve invalid fractional inputs until validation; conversion to
+     * binary32 occurs only after validation. Unsupported/degenerate inputs fail
+     * closed with IllegalArgumentException, never a partially valid geometry.
+     */
+    public static Geometry calculate(double x0, double y0, double x1, double y1) {
+        if (!Double.isFinite(x0) || !Double.isFinite(y0)
+                || !Double.isFinite(x1) || !Double.isFinite(y1)) {
+            throw new IllegalArgumentException("Bounds must be finite");
+        }
+        if (x0 != 0.0 || y0 != 0.0) {
+            throw new IllegalArgumentException("Only zero-origin bounds are supported");
+        }
+        if (x1 < 1.0 || y1 < 1.0 || x1 > MAX_PAGE_POINTS || y1 > MAX_PAGE_POINTS
+                || x1 != Math.rint(x1) || y1 != Math.rint(y1)) {
+            throw new IllegalArgumentException("Bounds must be positive bounded integers");
+        }
+        if (x1 >= y1) {
+            throw new IllegalArgumentException("Only strictly portrait bounds are supported");
+        }
+        int pageWidth = (int) x1;
+        int pageHeight = (int) y1;
+        int scaledWidth = (int) Math.floor(pageWidth * STOCK_SCALE);
+        int scaledHeight = (int) Math.ceil(pageHeight * STOCK_SCALE);
+        float fitScale = Math.min((float) CANVAS_WIDTH / scaledWidth,
+                (float) CANVAS_HEIGHT / scaledHeight);
+        int bitmapWidth = (int) (scaledWidth * fitScale);
+        int bitmapHeight = (int) (scaledHeight * fitScale);
+        float ctmScale = STOCK_SCALE * fitScale;
+        if (!Float.isFinite(fitScale) || fitScale <= 0.0f
+                || !Float.isFinite(ctmScale) || ctmScale <= 0.0f
+                || bitmapWidth < 1 || bitmapHeight < 1
+                || bitmapWidth > CANVAS_WIDTH || bitmapHeight > CANVAS_HEIGHT) {
+            throw new IllegalArgumentException("Fitted bitmap is empty or outside the canvas");
+        }
+        return new Geometry(pageWidth, pageHeight, scaledWidth, scaledHeight,
+                bitmapWidth, bitmapHeight, fitScale, ctmScale);
+    }
+}

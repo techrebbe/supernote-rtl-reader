@@ -1,0 +1,177 @@
+package __PACKAGE__
+
+import android.graphics.pdf.PdfRenderer
+import android.os.ParcelFileDescriptor
+import android.system.Os
+import android.system.OsConstants
+import android.system.StructStat
+import java.io.File
+import java.io.FileDescriptor
+import java.security.MessageDigest
+
+/**
+ * Two explicit disposable source/page profiles, not a general PDF metadata API.
+ * T008's strict metadata was resolved from the exact SHA-bound generated source:
+ * equal MediaBox/CropBox [0,0,612,792], Rotate=0, UserUnit=1, two pages. Runtime
+ * source SHA and descriptor identity establish those same bytes; Android page
+ * dimensions/count are a further cross-check, never metadata authority alone.
+ *
+ * Background verification knows nothing about annotations, ink tokens, leases,
+ * writers or saves. A profile/fit result is not proof of native ink registration.
+ */
+internal object SavedInkProfiles {
+    const val T004_ID = "t004-page3-canvas-v1"
+    const val T008_ID = "t008-page1-stock-portrait-fit-v1"
+    const val T004_PATH = "/storage/emulated/0/Document/RTL_RAPID_TOOLS_T004_20261001.pdf"
+    const val T008_PATH = "/storage/emulated/0/Document/RTL_INK_GEOMETRY_T008_20261002.pdf"
+    private const val MAX_SOURCE_BYTES = 32L * 1024 * 1024
+
+    data class Box(val x0: Int, val y0: Int, val x1: Int, val y1: Int)
+    data class StrictMetadata(val mediaBox: Box, val cropBox: Box, val rotation: Int, val userUnit: Int)
+    data class Geometry(
+        val canvasWidth: Int, val canvasHeight: Int,
+        val innerWidth: Int, val innerHeight: Int,
+        val offsetX: Int, val offsetY: Int, val ctmScale: Float,
+    )
+    class Profile internal constructor(
+        val id: String, val filePath: String, val sourceSha256: String,
+        val pageIndex: Int, val pageCount: Int, val width: Int, val height: Int,
+        val geometry: Geometry, val metadata: StrictMetadata?,
+    )
+    data class SourceStamp(
+        val length: Long, val modified: Long, val device: Long,
+        val inode: Long, val mtime: Long, val ctime: Long,
+    )
+
+    private val t004 = Profile(
+        T004_ID, T004_PATH, "ffb6c3b889ed455841d3c4f50a0813d844109c3c97255b4bbb5e4b949c9592c9",
+        2, 8, 1404, 1872,
+        // Legacy canvas identity only: T004 retains its original bare-background
+        // 3:4 acceptance and does not acquire a new authoritative PDF transform.
+        Geometry(1404, 1872, 1404, 1872, 0, 0, 1f), null,
+    )
+    private val t008 = SavedInkFitGeometry.calculate(0.0, 0.0, 612.0, 792.0).let { fit ->
+        Profile(
+            T008_ID, T008_PATH, "bd0fd00b4879cedb1b768a19deb2901a6d50dc7373decc8ef60e445613d83e64",
+            0, 2, 1404, 1872,
+            Geometry(1404, 1872, fit.bitmapWidth, fit.bitmapHeight, fit.offsetX, fit.offsetY, fit.ctmScale),
+            StrictMetadata(Box(0, 0, 612, 792), Box(0, 0, 612, 792), 0, 1),
+        )
+    }
+
+    fun profileById(id: String): Profile? = when (id) {
+        T004_ID -> t004
+        T008_ID -> t008
+        else -> null
+    }
+
+    fun requireProfile(id: String, filePath: String, pageIndex: Int): Profile {
+        val profile = profileById(id) ?: error("Unsupported saved-ink geometry profile")
+        require(filePath == profile.filePath && pageIndex == profile.pageIndex) {
+            "Saved-ink source/page does not match its native profile"
+        }
+        return profile
+    }
+
+    /**
+     * Only T008 PAGE1 has a new padded background. Null means the established
+     * default render path, not an assertion that a document has no annotations.
+     * An exact T008 PAGE1 with bad source/metadata throws; never fall back to a
+     * bare PDF bitmap that could later receive full-canvas ink.
+     */
+    fun verifyBackground(filePath: String, pageIndex: Int): VerifiedBackground? {
+        if (filePath != T008_PATH || pageIndex != t008.pageIndex) return null
+        val file = File(t008.filePath)
+        val canonicalPath = file.canonicalPath
+        val stamp = pathStamp(file)
+        val verified = VerifiedBackground(t008, canonicalPath, stamp)
+        val descriptor = Os.open(t008.filePath, OsConstants.O_RDONLY or OsConstants.O_NOFOLLOW, 0)
+        try {
+            verified.validateDescriptor(descriptor)
+            validateMetadata(descriptor, t008)
+            verified.validateDescriptor(descriptor)
+        } finally { Os.close(descriptor) }
+        return verified
+    }
+
+    class VerifiedBackground internal constructor(
+        private val profile: Profile,
+        private val canonicalPath: String,
+        val stamp: SourceStamp,
+    ) {
+        val id: String get() = profile.id
+        val geometry: Geometry get() = profile.geometry
+
+        // pread preserves the renderer's descriptor position on open and reuse.
+        fun validateDescriptor(descriptor: FileDescriptor) {
+            validatePathStamp()
+            require(descriptorMatches(Os.fstat(descriptor), stamp)) { "PDF descriptor identity changed" }
+            require(hashDescriptor(descriptor, stamp.length) == profile.sourceSha256) { "PDF descriptor SHA mismatch" }
+            require(descriptorMatches(Os.fstat(descriptor), stamp)) { "PDF changed while hashing descriptor" }
+            validatePathStamp()
+        }
+
+        fun validatePath() {
+            validatePathStamp()
+            val descriptor = Os.open(profile.filePath, OsConstants.O_RDONLY or OsConstants.O_NOFOLLOW, 0)
+            try { validateDescriptor(descriptor) } finally { Os.close(descriptor) }
+        }
+
+        private fun validatePathStamp() {
+            val file = File(profile.filePath)
+            require(file.canonicalPath == canonicalPath && pathStamp(file) == stamp) {
+                "PDF source path identity changed"
+            }
+        }
+    }
+
+    private fun pathStamp(file: File): SourceStamp {
+        val stat = Os.lstat(file.absolutePath)
+        require(OsConstants.S_ISREG(stat.st_mode) && stat.st_size in 1..MAX_SOURCE_BYTES) {
+            "Expected bounded regular profile PDF"
+        }
+        return SourceStamp(stat.st_size, file.lastModified(), stat.st_dev, stat.st_ino, stat.st_mtime, stat.st_ctime)
+    }
+
+    private fun descriptorMatches(stat: StructStat, stamp: SourceStamp): Boolean =
+        OsConstants.S_ISREG(stat.st_mode) && stat.st_size == stamp.length &&
+            stat.st_dev == stamp.device && stat.st_ino == stamp.inode &&
+            stat.st_mtime == stamp.mtime && stat.st_ctime == stamp.ctime
+
+    private fun hashDescriptor(descriptor: FileDescriptor, length: Long): String {
+        require(length in 1..MAX_SOURCE_BYTES) { "PDF exceeds profile limit" }
+        val hash = MessageDigest.getInstance("SHA-256")
+        val buffer = ByteArray(64 * 1024)
+        var offset = 0L
+        while (offset < length) {
+            val wanted = minOf(buffer.size.toLong(), length - offset).toInt()
+            val count = Os.pread(descriptor, buffer, 0, wanted, offset)
+            require(count in 1..wanted) { "PDF descriptor ended before its snapshot" }
+            hash.update(buffer, 0, count)
+            offset += count
+        }
+        require(Os.pread(descriptor, buffer, 0, 1, length) == 0) { "PDF descriptor grew during read" }
+        return hash.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
+    }
+
+    private fun validateMetadata(descriptor: FileDescriptor, profile: Profile) {
+        val metadata = profile.metadata ?: error("Missing strict profile metadata")
+        require(metadata.mediaBox == metadata.cropBox && metadata.mediaBox.x0 == 0 && metadata.mediaBox.y0 == 0 &&
+            metadata.rotation == 0 && metadata.userUnit == 1) { "Unsupported static profile metadata" }
+        val parcel = ParcelFileDescriptor.dup(descriptor)
+        var renderer: PdfRenderer? = null
+        var page: PdfRenderer.Page? = null
+        try {
+            renderer = PdfRenderer(parcel)
+            require(renderer.pageCount == profile.pageCount) { "Profile PDF page count mismatch" }
+            page = renderer.openPage(profile.pageIndex)
+            require(page.width == metadata.mediaBox.x1 && page.height == metadata.mediaBox.y1) {
+                "Android PDF bounds do not match the vetted profile"
+            }
+        } finally {
+            try { page?.close() } finally {
+                try { renderer?.close() } finally { parcel.close() }
+            }
+        }
+    }
+}

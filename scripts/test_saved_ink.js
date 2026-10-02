@@ -14,6 +14,8 @@ const context = () => ({filePath: FILE, pageIndex: 2, totalPages: 8, pluginDir: 
 const png = token => `${DIR}/saved-ink-cache/${token}/ink.png`;
 const prepared = (token = TOKEN) => ({
   token, filePath: FILE, pageIndex: 2, width: WIDTH, height: HEIGHT,
+  profileId: 't004-page3-canvas-v1', geometryId: 't004-page3-canvas-v1', pageCount: 8,
+  sourceSha256: 'ffb6c3b889ed455841d3c4f50a0813d844109c3c97255b4bbb5e4b949c9592c9',
   sourceVerified: true, pngPath: png(token),
 });
 const finished = (token = TOKEN) => ({
@@ -65,7 +67,7 @@ test('API uses original PAGE3, fixed canvas and token-only ready result', async 
   assert.equal(result.savedInkToken, TOKEN);
   assert.deepEqual(result.handle, {token: TOKEN});
   assert.equal(result.imageUri, undefined, 'native view takes an attested registry token, not a JS image path');
-  assert.deepEqual(h.calls.find(c => c.name === 'prepare').args, [{...context(), width: WIDTH, height: HEIGHT}].map(({totalPages, ...rest}) => rest));
+  assert.deepEqual(h.calls.find(c => c.name === 'prepare').args, [{...context(), profileId: 't004-page3-canvas-v1', width: WIDTH, height: HEIGHT}].map(({totalPages, ...rest}) => rest));
   assert.deepEqual(h.calls.find(c => c.name === 'generateThumbnail').args, [FILE, 2, png(TOKEN), {width: WIDTH, height: HEIGHT}]);
   assert.deepEqual(h.calls.find(c => c.name === 'finish').args, [{token: TOKEN, missingMark: false}]);
   assert.equal(h.count('discard'), 0);
@@ -104,6 +106,8 @@ test('malformed prepare identity/geometry/output rejects before SDK and cleans i
     {filePath: '/Document/other.pdf'}, {pageIndex: 3}, {pageIndex: '2'},
     {width: 1403}, {height: 1871}, {width: '1404'}, {height: NaN},
     {sourceVerified: false}, {sourceVerified: 'true'},
+    {profileId: 't008-page1-stock-portrait-fit-v1'}, {geometryId: 'bare-pdf'},
+    {pageCount: 2}, {pageCount: '8'}, {sourceSha256: 'b'.repeat(64)},
     {pngPath: `/data/user/0/another-plugin/${TOKEN}/ink.png`},
     {pngPath: `${png(TOKEN)}.png`}, {pngPath: png(TOKEN).replace('/saved-ink-cache/', '/saved-ink-cache/../')},
     {pngPath: png(TOKEN).replace(TOKEN, OTHER_TOKEN)}, {pngPath: `/sdcard/${TOKEN}/ink.png`},
@@ -145,7 +149,7 @@ test('requires SDK success AND result true; numeric1302 only is separately attes
 test('missing mark becomes no_page only after native unchanged-source/mark attestation', async () => {
   const h = harness({
     generateThumbnail: async () => ({success: false, error: {code: 1302}}),
-    finish: async () => ({token: TOKEN, filePath: FILE, pageIndex: 2, sourceUnchanged: true, markUnchanged: true, missingMark: true}),
+    finish: async () => ({...prepared(), sourceUnchanged: true, markUnchanged: true, missingMark: true}),
   });
   const result = await h.controller.run(context());
   assert.equal(result.status, 'no_page');
@@ -167,6 +171,7 @@ test('finish validates exact source/token and finite bounded decoded evidence', 
     {token: OTHER_TOKEN}, {savedInkToken: OTHER_TOKEN}, {savedInkToken: null},
     {filePath: '/Document/other.pdf'}, {pageIndex: 3}, {pageIndex: '2'},
     {sourceUnchanged: false}, {markUnchanged: false}, {missingMark: true},
+    {profileId: 'other'}, {geometryId: 'bare-pdf'}, {pageCount: 2}, {sourceSha256: 'b'.repeat(64)},
     {pngPath: `${png(TOKEN)}.other`}, {width: 1403}, {height: '1872'}, {height: Infinity}, {decoded: false},
     {sha256: 'a'.repeat(63)}, {sha256: 'A'.repeat(64)}, {sha256: null},
     {byteLength: 0}, {byteLength: 1.5}, {byteLength: MAX_PNG_BYTES + 1}, {byteLength: '1000'},

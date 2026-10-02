@@ -91,6 +91,8 @@ def main() -> None:
         ("PdfRendererPackage.kt.template", "PdfRendererPackage.kt"),
         ("SavedInkModule.kt.template", "SavedInkModule.kt"),
         ("SavedInkRegistry.kt.template", "SavedInkRegistry.kt"),
+        ("SavedInkProfiles.kt.template", "SavedInkProfiles.kt"),
+        ("SavedInkFitGeometry.java.template", "SavedInkFitGeometry.java"),
     ):
         source = repo_root / "native" / source_name
         rendered = source.read_text(encoding="utf-8").replace("__PACKAGE__", package_name)

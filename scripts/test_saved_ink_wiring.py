@@ -31,8 +31,9 @@ class WiringTests(unittest.TestCase):
         installer = (ROOT / "scripts/install_native.py").read_text(encoding="utf-8")
         package = (ROOT / "native/PdfRendererPackage.kt.template").read_text(encoding="utf-8")
         self.assertIn('cp "$ROOT/overlay/savedInk.js" "$PROJECT/savedInk.js"', build)
-        for name in ("SavedInkModule", "SavedInkRegistry"):
+        for name in ("SavedInkModule", "SavedInkRegistry", "SavedInkProfiles"):
             self.assertIn(f'("{name}.kt.template", "{name}.kt")', installer)
+        self.assertIn('("SavedInkFitGeometry.java.template", "SavedInkFitGeometry.java")', installer)
         self.assertIn("SavedInkModule(reactContext)", package)
 
     def test_background_cache_does_not_acquire_annotation_authority(self):
@@ -48,10 +49,10 @@ class WiringTests(unittest.TestCase):
 
     def test_candidate_identity_and_ci_gates(self):
         config = json.loads((ROOT / "PluginConfig.json").read_text(encoding="utf-8"))
-        self.assertEqual(config["versionName"], "0.4.24-ink-exp2")
-        self.assertEqual(config["versionCode"], "46")
+        self.assertEqual(config["versionName"], "0.4.24-ink-exp3")
+        self.assertEqual(config["versionCode"], "47")
         self.assertEqual(config["pluginID"], "snrtl20260726001")
-        self.assertIn("RTL_READER_OPEN v0.4.24-ink-exp2-native-reader-v2",
+        self.assertIn("RTL_READER_OPEN v0.4.24-ink-exp3-native-reader-v2",
                       (ROOT / "overlay/index.js").read_text(encoding="utf-8"))
         workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
         for gate in ("test_saved_ink.js", "test_saved_ink_app.js", "test_saved_ink_wiring.py"):

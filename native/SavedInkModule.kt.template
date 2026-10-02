@@ -19,16 +19,13 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Experimental T006 saved-ink display only. Not an atomic snapshot or durable-save
+ * Experimental allowlisted saved-ink display only. Not an atomic snapshot or durable-save
  * witness. JS calls the supported native thumbnail API; this worker never does.
- * The T005 alpha/alignment evidence is limited to this exact T004 PAGE 3 fixture.
+ * Existing alignment evidence is T004 PAGE 3 only; T008 PAGE1 needs its own ink gate.
  * Native highlights are not in that PNG. No arbitrary document/PNG URI loader.
  */
 class SavedInkModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
     companion object {
-        private const val FIXTURE = "/storage/emulated/0/Document/RTL_RAPID_TOOLS_T004_20261001.pdf"
-        private const val FIXTURE_SHA256 = "ffb6c3b889ed455841d3c4f50a0813d844109c3c97255b4bbb5e4b949c9592c9"
-        private const val PAGE = 2
         private const val WIDTH = 1404
         private const val HEIGHT = 1872
         private const val MAX_BYTES = 16L * 1024 * 1024
@@ -42,6 +39,7 @@ class SavedInkModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
     private data class Request(
         val token: String, val pdf: File, val mark: File, val directory: File,
         val source: Snapshot, val annotation: Snapshot?,
+        val profile: SavedInkProfiles.Profile, val background: SavedInkProfiles.VerifiedBackground?,
         var finished: Boolean = false, var inkToken: String? = null,
     ) { val png: File get() = File(directory, "ink.png") }
 
@@ -106,15 +104,29 @@ class SavedInkModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
     }
 
     @ReactMethod
-    fun prepare(filePath: String, pageIndex: Int, width: Int, height: Int, pluginDirectory: String, promise: Promise) = task(promise) {
-        require(filePath == FIXTURE && pageIndex == PAGE && width == WIDTH && height == HEIGHT) {
-            "Saved ink experiment supports only disposable T004 PAGE 3 at 1404x1872"
+    fun prepare(profileId: String, filePath: String, pageIndex: Int, width: Int, height: Int, pluginDirectory: String, promise: Promise) = task(promise) {
+        val profile = SavedInkProfiles.requireProfile(profileId, filePath, pageIndex)
+        // For T008, JS supplies these after the real SDK getPageSize settles.
+        // T004 retains its already-vetted fixed-canvas call. Neither can override
+        // the native profile's full annotation canvas.
+        require(width == profile.width && height == profile.height && width == WIDTH && height == HEIGHT) {
+            "SDK annotation canvas does not match the native saved-ink profile"
         }
         require(requests.isEmpty() && SavedInkRegistry.isEmpty()) { "Saved ink is still pending or retained" }
-        val pdf = File(FIXTURE)
+        val pdf = File(profile.filePath)
         val source = digest(pdf, MAX_SOURCE_BYTES)
-        require(source.sha256 == FIXTURE_SHA256) { "Disposable source identity mismatch" }
-        val mark = File("$FIXTURE.mark")
+        require(source.sha256 == profile.sourceSha256) { "Disposable source identity mismatch" }
+        // SHA-bound strict metadata and actual Android page count/dimensions are
+        // checked before any owned request/output is allocated. Legacy T004's
+        // background remains unchanged and gets no new fit authority.
+        val background = SavedInkProfiles.verifyBackground(profile.filePath, profile.pageIndex)
+        background?.let {
+            val stamp = it.stamp
+            require(stamp.length == source.size && stamp.modified == source.modified &&
+                stamp.device == source.device && stamp.inode == source.inode &&
+                stamp.mtime == source.mtime && stamp.ctime == source.ctime) { "Profile source changed during preparation" }
+        }
+        val mark = File("${profile.filePath}.mark")
         val annotation = markSnapshot(mark)
         // Native SDK allowlist uses this path spelling from PluginManager.getPluginDirPath().
         val plugin = File(pluginDirectory)
@@ -128,26 +140,33 @@ class SavedInkModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
         val token = UUID.randomUUID().toString()
         val directory = File(privateRoot, token)
         require(directory.mkdir() && directory.canonicalFile.parentFile == privateRoot.canonicalFile) { "Cannot create owned ink directory" }
-        val request = Request(token, pdf, mark, directory, source, annotation)
+        val request = Request(token, pdf, mark, directory, source, annotation, profile, background)
         requests[token] = request
         require(!closed.get()) { "Module invalidated" }
         promise.resolve(Arguments.createMap().apply {
-            putString("token", token); putString("filePath", FIXTURE); putInt("pageIndex", PAGE)
+            putString("token", token); putString("filePath", profile.filePath); putInt("pageIndex", profile.pageIndex)
+            putString("profileId", profile.id); putString("geometryId", profile.id)
+            putString("sourceSha256", profile.sourceSha256); putInt("pageCount", profile.pageCount)
             putString("pngPath", request.png.absolutePath); putInt("width", WIDTH); putInt("height", HEIGHT)
             putBoolean("sourceVerified", true)
         })
     }
 
-    private fun unchanged(request: Request): Boolean =
-        digest(request.pdf, MAX_SOURCE_BYTES) == request.source && markSnapshot(request.mark) == request.annotation
+    private fun unchanged(request: Request): Boolean {
+        request.background?.validatePath()
+        return digest(request.pdf, MAX_SOURCE_BYTES) == request.source && markSnapshot(request.mark) == request.annotation
+    }
 
     @ReactMethod
     fun finish(token: String, missingMark: Boolean, promise: Promise) = task(promise) {
         val request = requests[token] ?: error("Unknown saved-ink request")
         require(!request.finished) { "Saved-ink request already finished" }
         require(unchanged(request)) { "PDF or annotations changed; reject saved ink" }
+        val profile = request.profile
         val result = Arguments.createMap().apply {
-            putString("token", token); putString("filePath", FIXTURE); putInt("pageIndex", PAGE)
+            putString("token", token); putString("filePath", profile.filePath); putInt("pageIndex", profile.pageIndex)
+            putString("profileId", profile.id); putString("geometryId", profile.id)
+            putString("sourceSha256", profile.sourceSha256); putInt("pageCount", profile.pageCount)
             putString("pngPath", request.png.absolutePath)
             putBoolean("sourceUnchanged", true); putBoolean("markUnchanged", true)
         }
@@ -192,7 +211,7 @@ class SavedInkModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
                 ), SavedInkRegistry.SourceStamp(
                     request.mark.canonicalPath, annotation.size, annotation.modified,
                     annotation.device, annotation.inode, annotation.mtime, annotation.ctime,
-                ), PAGE)
+                ), profile.pageIndex, profile.id)
                 bitmap = null // Registry now owns it; only owner+view reference release may recycle it.
                 request.inkToken = inkToken
                 request.finished = true

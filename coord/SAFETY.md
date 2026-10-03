@@ -1,5 +1,29 @@
 # SAFETY — hardware and workspace rules (all agents)
 
+## Standing continuation rule for this RTL Reader chat
+
+User direction, reaffirmed2026-10-03: do not insert discretionary downtime
+between tests or wait for another routine "please proceed." After a test or
+task finishes, record its outcome and immediately advance to the next safe,
+in-scope task: implementation, focused checks, build, review preparation, or the
+next already-authorized hardware step. Prepare upcoming tests while other gates
+are pending when that work is safe and does not conflict with device ownership.
+
+Pause only for an actual blocker: required physical input, missing authority,
+mandatory review/coordination gate, uncertain annotation/cleanup state, or a
+major/destructive decision. State the exact blocker, what the user needs to do
+(if anything), and which independent work can continue. Continue that independent
+work instead of treating a blocked hardware action as a project-wide pause.
+Completion of one test alone is not a reason to stop active project work.
+
+User clarification2026-10-03: flag a deferrable blocker as soon as it is found,
+record its unblock condition, and move to another safe independent task. Do not
+let a blocked subtask silently stall the rest of the project.
+
+This rule does not waive the hardware approvals/reservations, hard stops,
+protection of originals, independent reviews or explicit user merge decision
+below. Never claim work is running in the background unless it actually is.
+
 ## Hardware-first validation
 
 Once a change has passed basic host validation and at least one independent

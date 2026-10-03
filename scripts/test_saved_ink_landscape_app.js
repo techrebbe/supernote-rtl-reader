@@ -17,6 +17,7 @@ const TOKEN = 'f3d09692-3a12-48cb-823b-62041968c761';
 const NEXT_TOKEN = 'e3d09692-3a12-48cb-823b-62041968c761';
 const SHA = 'bd0fd00b4879cedb1b768a19deb2901a6d50dc7373decc8ef60e445613d83e64';
 const PROFILE_ID = 't008-page1-stock-portrait-fit-v1';
+const PAGE2_PROFILE_ID = 't008-page2-stock-portrait-fit-v1';
 
 function once(marker) {
   const first = SOURCE.indexOf(marker);
@@ -27,13 +28,19 @@ function once(marker) {
 
 const windowCode = SOURCE.slice(once('  const window = useWindowDimensions();'), once('  const [documentContext, setDocumentContext]'));
 const modeCode = SOURCE.slice(once('  const effectiveMode ='), once('  const [nativeSpreadEnabled, setNativeSpreadEnabled]'));
-const spreadCode = SOURCE.slice(once('function normalizePage('), once('function viewModeLabel('));
+const spreadCode = SOURCE.slice(once('function clampPage('), once('function viewModeLabel('));
 const gateStart = once('  const savedInkProfile = selectSavedInkProfile(');
 const effectStart = once('  useEffect(() => {\n    let cancelled = false;');
 const effectEndMarker = '  }, [savedInkVisible, documentContext?.filePath, savedInkPresentationKey]);';
 const effectEnd = once(effectEndMarker) + effectEndMarker.length;
 const gateCode = SOURCE.slice(gateStart, effectStart);
 const effectCode = SOURCE.slice(effectStart, effectEnd);
+const pageSetterCode = SOURCE.slice(once('  const setPageIndex = value => {'), once('  const displayRef ='));
+const invalidateCode = SOURCE.slice(once('  const invalidateSavedInkPresentation = () => {'), once('  const quiesceSavedInk ='));
+const jumpCode = SOURCE.slice(once('  const submitJump = () => {'), once('  const footerLabel ='));
+const goByCode = SOURCE.slice(once('  const goBy = delta => {'), once('  const pageStep ='));
+const PATCH_SOURCE = fs.readFileSync(path.join(ROOT, 'scripts', 'patch_direct_view.py'), 'utf8').replace(/\r\n/g, '\n');
+const generatedJumpCode = PATCH_SOURCE.match(/new_submit_jump = r'''([\s\S]*?)'''/)[1];
 
 function execute(scope, code) {
   const names = Object.keys(scope);
@@ -52,13 +59,13 @@ async function flush(count = 220) {
 }
 
 const png = token => `${DIR}/saved-ink-cache/${token}/ink.png`;
-const prepared = token => ({
-  token, filePath: FILE, pageIndex: 0, pageCount: 2, sourceSha256: SHA,
-  profileId: PROFILE_ID, geometryId: PROFILE_ID, width: 1404, height: 1872,
+const prepared = (token, pageIndex, profileId) => ({
+  token, filePath: FILE, pageIndex, pageCount: 2, sourceSha256: SHA,
+  profileId, geometryId: profileId, width: 1404, height: 1872,
   sourceVerified: true, pngPath: png(token),
 });
-const finished = token => ({
-  ...prepared(token), sourceUnchanged: true, markUnchanged: true, savedInkToken: token,
+const finished = evidence => ({
+  ...evidence, sourceUnchanged: true, markUnchanged: true, savedInkToken: evidence.token,
   decoded: true, sha256: 'a'.repeat(64), byteLength: 1000, alphaMin: 0, alphaMax: 255,
 });
 
@@ -73,7 +80,17 @@ function harness(hooks = {}, options = {}) {
   let window = options.window || {width: 1872, height: 1404};
   let liveFile = FILE;
   let locked = false;
-  let issued = null;
+  const issued = new Map();
+  function preparePage(profileId, filePath, pageIndex, width, height, directory) {
+    assert.equal(filePath, FILE);
+    assert.deepEqual([width, height, directory], [1404, 1872, DIR]);
+    assert.equal(profileId, [PROFILE_ID, PAGE2_PROFILE_ID][pageIndex], 'Independent per-source-page identity');
+    const token = issued.size === 0 ? TOKEN : issued.size === 1 ? NEXT_TOKEN
+      : `a3d09692-3a12-48cb-823b-${String(issued.size).padStart(12, '0')}`;
+    const evidence = prepared(token, pageIndex, profileId);
+    issued.set(token, evidence);
+    return evidence;
+  }
 
   function count(name) { return calls.filter(call => call.name === name).length; }
   function invoke(name, fallback, args) {
@@ -85,11 +102,14 @@ function harness(hooks = {}, options = {}) {
     });
   }
   const native = {
-    prepare: (...args) => invoke('prepare', () => {
-      issued = count('prepare') === 1 ? TOKEN : NEXT_TOKEN;
-      return prepared(issued);
+    prepare: (...args) => invoke('prepare', preparePage, args),
+    prepareSibling: (...args) => invoke('prepareSibling', (parent, ...pageArgs) => {
+      assert.ok(issued.has(parent), 'Sibling requires a preceding exact parent');
+      return preparePage(...pageArgs);
     }, args),
-    finish: (...args) => invoke('finish', token => finished(token), args),
+    validateBatch: (...args) => invoke('validateBatch', (firstToken, secondToken) =>
+      ({firstToken, secondToken, batchUnchanged: true}), args),
+    finish: (...args) => invoke('finish', token => finished(issued.get(token)), args),
     discard: (...args) => invoke('discard', token => ({token, discarded: true}), args),
   };
 
@@ -98,6 +118,10 @@ function harness(hooks = {}, options = {}) {
       savedInkContextRef: {current: null}, savedInkLifecycleRef: {current: null},
       savedInkPresentationEpochRef: {current: 0}, savedInkPresentationKeyRef: {current: null},
       mountedRef: {current: true},
+      pageIndexRef: {current: view.pageIndex ?? 0}, totalPagesRef: {current: view.totalPages ?? 2},
+      filePathRef: {current: view.filePath ?? FILE}, effectiveModeRef: {current: null},
+      directionRef: {current: view.direction ?? 'rtl'}, coverSeparateRef: {current: view.coverSeparate ?? false},
+      interactionTimingRef: {current: null}, lastNavigationDeltaRef: {current: 0},
     };
     const updates = [];
     const instance = {
@@ -110,9 +134,22 @@ function harness(hooks = {}, options = {}) {
           ...instance.view, documentContext: {filePath: instance.view.filePath},
           savedInk: instance.state, savedInkPresentationEpoch: instance.epoch,
           readerTransitionLocked: () => locked,
+          setSavedInk(value) { instance.state = value; updates.push(value); },
+          setSavedInkPresentationEpoch(value) { instance.epoch = value; },
+          setPageIndexRaw(value) { instance.view.pageIndex = value; },
+          console: {log() {}, warn() {}}, Keyboard: {dismiss() {}}, setJumpOpen() {},
         };
         const locals = execute(scope, `${spreadCode}\n${windowCode}\n${modeCode}\n${gateCode}\n` +
           'return {savedInkVisible, savedInkProfile, savedInkPresentationKey, savedInkTokenFor, effectiveMode, getVisualSpread};');
+        Object.assign(refs.pageIndexRef, {current: instance.view.pageIndex});
+        Object.assign(refs.effectiveModeRef, {current: locals.effectiveMode});
+        Object.assign(refs.coverSeparateRef, {current: instance.view.coverSeparate});
+        Object.assign(refs.directionRef, {current: instance.view.direction});
+        Object.assign(refs.totalPagesRef, {current: instance.view.totalPages});
+        Object.assign(refs.filePathRef, {current: instance.view.filePath});
+        instance.setPageIndex = execute(scope,
+          `${spreadCode}\n${pageSetterCode}\n${invalidateCode}\nreturn setPageIndex;`);
+        instance.transitionScope = scope;
         instance.locals = locals;
         const deps = [locals.savedInkVisible, instance.view.filePath, locals.savedInkPresentationKey];
         const changed = !instance.effectDeps || deps.some((value, index) => !Object.is(value, instance.effectDeps[index]));
@@ -143,13 +180,12 @@ function harness(hooks = {}, options = {}) {
             createSavedInkController(deps) {
               const actual = createSavedInkController(deps);
               controllers.push(actual);
-              return {...actual, run(context) {
-                return actual.run(context).then(value => {
+              const observe = method => context => actual[method](context).then(value => {
                   outcomes.push(value);
                   if (hooks.onControllerResult) hooks.onControllerResult(value, api, instance);
                   return value;
                 });
-              }};
+              return {...actual, run: observe('run'), runBatch: observe('runBatch')};
             },
             console: {log() {}, warn() {}},
             useEffect(effect, observed) {
@@ -164,6 +200,20 @@ function harness(hooks = {}, options = {}) {
       },
       tokenFor(page) { return instance.render(false).savedInkTokenFor(page); },
       update(patch, commitEffects = true) { Object.assign(instance.view, patch); return instance.render(commitEffects); },
+      acceptPage(value, commitEffects = true, renderNow = true) {
+        instance.setPageIndex(value);
+        return renderNow ? instance.render(commitEffects) : null;
+      },
+      acceptJump(pageNumber, renderNow = false, generated = false) {
+        execute({...instance.transitionScope, jumpText: String(pageNumber)},
+          `${spreadCode}\n${pageSetterCode}\n${invalidateCode}\n${generated ? generatedJumpCode : jumpCode}\nsubmitJump();`);
+        return renderNow ? instance.render() : null;
+      },
+      acceptGoBy(delta, renderNow = false) {
+        execute({...instance.transitionScope, delta},
+          `${spreadCode}\n${pageSetterCode}\n${invalidateCode}\n${goByCode}\ngoBy(delta);`);
+        return renderNow ? instance.render() : null;
+      },
       quiesce() { return refs.savedInkLifecycleRef.current.quiesce(); },
       unmount() { refs.mountedRef.current = false; instance.cleanup?.(); return shared.RTL_READER_INK_CLEANUP; },
       get ready() { return updates.filter(value => value.status === 'ready'); },
@@ -196,7 +246,7 @@ test('actual T008 eligibility permits only portrait Single or landscape Single/S
     [{width: 1404, height: 1404}, {viewMode: 'single'}, false],
     [{width: 1872, height: 1404}, {viewMode: 'other'}, false],
     [{width: 1872, height: 1404}, {spreadSizing: 'native_fill'}, false],
-    [{width: 1872, height: 1404}, {viewMode: 'single', pageIndex: 1}, false],
+    [{width: 1872, height: 1404}, {viewMode: 'single', pageIndex: 1}, true],
     [{width: 1872, height: 1404}, {filePath: '/Document/personal.pdf'}, false],
     [{width: 1872, height: 1404}, {filePath: `${FILE}.copy`}, false],
     [{width: 1872, height: 1404}, {totalPages: 8}, false],
@@ -206,7 +256,8 @@ test('actual T008 eligibility permits only portrait Single or landscape Single/S
     const h = harness({}, {window});
     const app = h.mount(view, false);
     assert.equal(app.locals.savedInkVisible, expected, JSON.stringify({window, view}));
-    assert.equal(app.refs.savedInkContextRef.current?.pageIndex ?? null, expected ? 0 : null);
+    assert.deepEqual(app.refs.savedInkContextRef.current?.pageIndices ?? null,
+      expected ? (app.locals.effectiveMode === 'single' ? [view.pageIndex ?? 0] : [0, 1]) : null);
     assert.equal(h.calls.length, 0, 'Eligibility inspection itself never extracts ink');
   }
 });
@@ -227,31 +278,40 @@ test('actual legacy T004 PAGE3 eligibility keeps Single/Spread and Fit/native-fi
   }
 });
 
-test('shared spreads keep source PAGE1 identity across anchors, RTL/LTR sides and cover parity', async () => {
+test('shared spreads keep both exact source-page identities across anchors, RTL/LTR sides and cover parity', async () => {
   const h = harness();
   const app = h.mount();
   await flush();
   assert.equal(app.tokenFor(0), TOKEN);
-  assert.equal(app.tokenFor(1), null);
+  assert.equal(app.tokenFor(1), NEXT_TOKEN);
   assert.deepEqual(app.locals.getVisualSpread(0, false, 2, 'rtl'), {left: 1, right: 0});
-  app.update({pageIndex: 1});
+  app.acceptPage(1);
   await flush();
-  assert.equal(app.refs.savedInkContextRef.current.pageIndex, 0, 'Spread anchor PAGE2 must not become ink source PAGE2');
+  assert.deepEqual(app.refs.savedInkContextRef.current.pageIndices, [0, 1], 'Same spread keeps both source pages');
   assert.equal(app.tokenFor(0), TOKEN);
-  assert.equal(app.tokenFor(1), null);
-  assert.equal(h.count('prepare'), 1, 'Same shared spread retains the page-bound extraction');
+  assert.equal(app.tokenFor(1), NEXT_TOKEN);
+  assert.equal(h.count('prepare'), 1, 'Same shared spread retains the page-bound batch');
+  assert.equal(h.count('prepareSibling'), 1);
   app.update({direction: 'ltr'});
   assert.deepEqual(app.locals.getVisualSpread(1, false, 2, 'ltr'), {left: 0, right: 1});
   assert.equal(app.tokenFor(0), TOKEN);
+  assert.equal(app.tokenFor(1), NEXT_TOKEN);
   app.update({pageIndex: 0, coverSeparate: true, direction: 'rtl'});
   assert.deepEqual(app.locals.getVisualSpread(0, true, 2, 'rtl'), {left: null, right: 0});
-  assert.equal(app.tokenFor(0), TOKEN);
+  assert.equal(app.tokenFor(0), null, 'Cover parity changes the exact batch before passive cleanup');
+  await flush();
+  const coverToken = app.tokenFor(0);
+  assert.ok(coverToken && ![TOKEN, NEXT_TOKEN].includes(coverToken));
+  assert.equal(app.tokenFor(1), null);
   app.update({pageIndex: 1});
-  assert.equal(app.locals.savedInkVisible, false, 'Separate-cover PAGE2-only spread is unavailable');
+  assert.equal(app.locals.savedInkVisible, true, 'Separate-cover PAGE2 gets its own source-page batch');
   assert.equal(app.tokenFor(0), null);
   assert.equal(app.tokenFor(1), null);
+  await flush();
+  assert.ok(app.tokenFor(1) && app.tokenFor(1) !== coverToken);
+  assert.equal(app.tokenFor(0), null);
   await h.dispose(app);
-  assert.equal(h.count('discard'), 1);
+  assert.equal(h.count('discard'), 4, 'Both initial handles plus each separate-cover batch drain');
 });
 
 test('actual landscape effect keeps canonical output and exact real pre/post 1404x1872 witnesses', async () => {
@@ -260,10 +320,167 @@ test('actual landscape effect keeps canonical output and exact real pre/post 140
   await flush();
   assert.equal(app.state.status, 'ready');
   assert.equal(app.tokenFor(0), TOKEN);
-  assert.deepEqual(h.calls.filter(call => call.name === 'size').map(call => call.args), [[FILE, 0], [FILE, 0]]);
+  assert.deepEqual(h.calls.filter(call => call.name === 'size').map(call => call.args),
+    [[FILE, 0], [FILE, 0], [FILE, 1], [FILE, 1]]);
   assert.deepEqual(h.calls.find(call => call.name === 'prepare').args, [PROFILE_ID, FILE, 0, 1404, 1872, DIR]);
   assert.deepEqual(h.calls.find(call => call.name === 'generate').args, [FILE, 0, png(TOKEN), {width: 1404, height: 1872}]);
+  assert.deepEqual(h.calls.find(call => call.name === 'prepareSibling').args,
+    [TOKEN, PAGE2_PROFILE_ID, FILE, 1, 1404, 1872, DIR]);
+  assert.deepEqual(h.calls.filter(call => call.name === 'generate')[1].args,
+    [FILE, 1, png(NEXT_TOKEN), {width: 1404, height: 1872}]);
+  assert.deepEqual(h.calls.find(call => call.name === 'validateBatch').args, [TOKEN, NEXT_TOKEN]);
+  assert.equal(app.tokenFor(1), NEXT_TOKEN);
   assert.equal(app.state.presentationKey, app.locals.savedInkPresentationKey);
+  await h.dispose(app);
+});
+
+test('actual Single PAGE1->PAGE2->PAGE1 replaces exact page authority before effects, never relabeling a token', async () => {
+  const h = harness({}, {window: {width: 1404, height: 1872}});
+  const app = h.mount({viewMode: 'single'});
+  await flush();
+  const first = app.tokenFor(0);
+  const cached = app.render(false).savedInkTokenFor;
+  app.acceptPage(1, false);
+  assert.equal(cached(0), null, 'Old accessor loses authority during render, not just after cleanup');
+  assert.equal(app.tokenFor(1), null, 'No PAGE1 token can be relabeled PAGE2');
+  app.render();
+  await flush();
+  assert.equal(app.tokenFor(0), null);
+  assert.equal(app.tokenFor(1), NEXT_TOKEN);
+  app.acceptPage(0);
+  assert.equal(app.tokenFor(0), null);
+  await flush();
+  assert.ok(app.tokenFor(0) && app.tokenFor(0) !== first);
+  assert.equal(app.tokenFor(1), null);
+  assert.deepEqual(h.calls.filter(call => call.name === 'generate').map(call => call.args[1]), [0, 1, 0]);
+  await h.dispose(app);
+  assert.equal(h.count('discard'), 3);
+});
+
+test('accepted PAGE1->PAGE2->PAGE1 before ANY render cannot revive the old SDK request', async () => {
+  const generation = deferred();
+  let generations = 0;
+  const h = harness({generate: () => ++generations === 1 ? generation.promise : {success: true, result: true}});
+  const app = h.mount({viewMode: 'single'});
+  await h.enter('generate');
+  const cached = app.render(false).savedInkTokenFor;
+  app.acceptPage(1, false, false);
+  app.acceptPage(0, false, false);
+  assert.equal(app.epoch, 2, 'Both accepted changes advance a non-reusable fence, even with no intermediate render');
+  assert.equal(cached(0), null);
+  assert.equal(h.count('discard'), 0, 'Cancellation does not remove a still-writing SDK output');
+  app.render();
+  await flush();
+  assert.equal(h.count('prepare'), 1);
+  generation.resolve({success: true, result: true});
+  await flush();
+  assert.equal(h.outcomes[0].reason, 'cancelled');
+  assert.equal(h.count('prepare'), 2);
+  assert.equal(h.count('discard'), 1);
+  assert.equal(app.tokenFor(0), NEXT_TOKEN);
+  assert.equal(app.ready.length, 1, 'Only the fresh post-ABA generation is published');
+  await h.dispose(app);
+});
+
+test('accepted anchor changes within the same spread retain both page handles, but locked navigation is inert', async () => {
+  const h = harness();
+  const app = h.mount();
+  await flush();
+  app.acceptPage(1);
+  app.acceptPage(0);
+  assert.equal(app.epoch, 0);
+  assert.equal(h.count('prepare'), 1);
+  assert.equal(h.count('prepareSibling'), 1);
+  assert.equal(app.tokenFor(0), TOKEN);
+  assert.equal(app.tokenFor(1), NEXT_TOKEN);
+  h.lock();
+  app.acceptPage(1);
+  assert.equal(app.view.pageIndex, 0, 'Transition guard stays ahead of page state/ink invalidation');
+  assert.equal(app.epoch, 0);
+  await h.dispose(app);
+});
+
+test('actual Jump and Next/Previous routes cannot bypass the pre-render page-away/back epoch', async () => {
+  for (const route of ['jump', 'generatedJump', 'goBy']) {
+    const generation = deferred();
+    let generations = 0;
+    const h = harness({generate: () => ++generations === 1 ? generation.promise : {success: true, result: true}});
+    const app = h.mount({viewMode: 'single'});
+    await h.enter('generate');
+    if (route !== 'goBy') { app.acceptJump(2, false, route === 'generatedJump'); app.acceptJump(1, false, route === 'generatedJump'); }
+    else { app.acceptGoBy(1); app.acceptGoBy(-1); }
+    assert.equal(app.view.pageIndex, 0);
+    assert.equal(app.epoch, 2, `${route} invalidates both accepted transitions before rendering`);
+    assert.equal(app.refs.savedInkContextRef.current, null);
+    assert.equal(h.count('discard'), 0);
+    app.render();
+    generation.resolve({success: true, result: true});
+    await flush();
+    assert.equal(h.outcomes[0].reason, 'cancelled');
+    assert.equal(h.count('prepare'), 2);
+    assert.equal(app.ready.length, 1);
+    assert.equal(app.tokenFor(0), NEXT_TOKEN);
+    h.lock();
+    if (route !== 'goBy') app.acceptJump(2, false, route === 'generatedJump');
+    else app.acceptGoBy(1);
+    assert.equal(app.view.pageIndex, 0);
+    assert.equal(app.epoch, 2, 'Locked routes neither change the page nor invalidate its owner');
+    await h.dispose(app);
+  }
+});
+
+test('actual spread never publishes a first-page success if second-page generation or end validation fails', async () => {
+  for (const stage of ['generate', 'validateBatch']) {
+    let generations = 0;
+    const h = harness(stage === 'generate' ? {generate: () => ++generations === 2
+      ? {success: false, error: {code: 500}} : {success: true, result: true}}
+      : {validateBatch: () => { throw Error('mark changed'); }});
+    const app = h.mount();
+    await flush();
+    assert.equal(app.state.status, 'error');
+    assert.equal(app.ready.length, 0);
+    assert.equal(app.tokenFor(0), null);
+    assert.equal(app.tokenFor(1), null);
+    assert.equal(h.count('prepare'), 1);
+    assert.equal(h.count('prepareSibling'), 1);
+    assert.deepEqual(h.calls.filter(call => call.name === 'discard').map(call => call.args[0]).sort(),
+      [TOKEN, NEXT_TOKEN].sort());
+    await h.dispose(app);
+  }
+});
+
+test('actual two-page Close/Edit during second SDK waits settlement and both native drains', async () => {
+  const generation = deferred();
+  const firstDrain = deferred();
+  const secondDrain = deferred();
+  let generations = 0;
+  const h = harness({
+    generate: () => ++generations === 2 ? generation.promise : {success: true, result: true},
+    discard: token => token === NEXT_TOKEN ? secondDrain.promise : firstDrain.promise,
+  });
+  const app = h.mount();
+  await h.enter('generate', 2);
+  assert.equal(app.ready.length, 0, 'First retained page is not a complete spread');
+  h.lock();
+  const cleanup = app.quiesce();
+  let done = false;
+  cleanup.then(() => { done = true; });
+  await flush();
+  assert.equal(done, false);
+  assert.equal(h.count('discard'), 0, 'SDK owns the second output until real settlement');
+  generation.resolve({success: true, result: true});
+  await h.enter('discard');
+  assert.equal(h.calls.find(call => call.name === 'discard').args[0], NEXT_TOKEN);
+  secondDrain.resolve({token: NEXT_TOKEN, discarded: true});
+  await h.enter('discard', 2);
+  assert.equal(done, false, 'First page still holds the whole transition until its drain');
+  firstDrain.resolve({token: TOKEN, discarded: true});
+  assert.equal(await cleanup, true);
+  assert.equal(app.ready.length, 0);
+  assert.equal(app.tokenFor(0), null);
+  assert.equal(app.tokenFor(1), null);
+  assert.equal(h.count('prepare'), 1);
+  assert.equal(h.count('prepareSibling'), 1);
   await h.dispose(app);
 });
 

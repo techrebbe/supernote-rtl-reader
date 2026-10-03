@@ -236,6 +236,11 @@ object SavedInkNativeProfilesTest {
     private fun profiles() {
         val a = SavedInkProfiles.requireProfile(SavedInkProfiles.T004_ID, SavedInkProfiles.T004_PATH, 2)
         val b = SavedInkProfiles.requireProfile(SavedInkProfiles.T008_ID, SavedInkProfiles.T008_PATH, 0)
+        val c = SavedInkProfiles.requireProfile(SavedInkProfiles.T008_PAGE2_ID, SavedInkProfiles.T008_PATH, 1)
+        check(c.id == "t008-page2-stock-portrait-fit-v1" && c.pageIndex == 1, "PAGE2 exact source page")
+        check(c.sourceSha256 == b.sourceSha256 && c.geometry == b.geometry && c.metadata == b.metadata,
+            "PAGE2 shares source metadata, not page identity")
+        fails("PAGE2 profile on PAGE1") { SavedInkProfiles.requireProfile(c.id, c.filePath, 0) }
         check(a.id == "t004-page3-canvas-v1" && b.id == "t008-page1-stock-portrait-fit-v1", "exact ids")
         check(a.pageCount == 8 && b.pageCount == 2, "exact counts")
         check(a.width == 1404 && a.height == 1872 && b.width == 1404 && b.height == 1872, "full canvas")
@@ -256,13 +261,20 @@ object SavedInkNativeProfilesTest {
         fails("path alias spelling") { SavedInkProfiles.requireProfile(b.id, b.filePath.replace("/Document/", "/Document/./"), 0) }
         Os.clear()
         check(SavedInkProfiles.verifyBackground(a.filePath, 2) == null, "T004 background unchanged")
-        check(SavedInkProfiles.verifyBackground(b.filePath, 1) == null, "PAGE2 uses default background")
+        check(SavedInkProfiles.verifyBackground(b.filePath, 2) == null, "out-of-range page uses no profile")
         check(SavedInkProfiles.verifyBackground(b.filePath + ".copy", 0) == null, "other source default background")
         check(Os.openCalls == 0 && Os.statCalls == 0, "unsupported backgrounds do not read sources")
         groups++
     }
 
     private fun background() {
+        reset()
+        val page2 = SavedInkProfiles.verifyBackground(SavedInkProfiles.T008_PATH, 1)
+            ?: throw AssertionError("Missing PAGE2 padded background")
+        check(page2.id == SavedInkProfiles.T008_PAGE2_ID && TestPdf.openedPage == 1,
+            "PAGE2 background retains actual source-page identity")
+        check(page2.geometry.canvasWidth == 1404 && page2.geometry.canvasHeight == 1872 &&
+            page2.geometry.innerHeight == 1817 && page2.geometry.offsetY == 27, "PAGE2 strict padded canvas")
         val node = reset()
         val result = verified()
         check(result.id == SavedInkProfiles.T008_ID, "verified geometry identity")
@@ -446,9 +458,77 @@ object SavedInkNativeProfilesTest {
         groups++
     }
 
+    private fun registrySiblings() {
+        for (firstId in listOf(SavedInkProfiles.T008_ID, SavedInkProfiles.T008_PAGE2_ID)) {
+            val secondId = if (firstId == SavedInkProfiles.T008_ID) SavedInkProfiles.T008_PAGE2_ID else SavedInkProfiles.T008_ID
+            val first = ink(firstId)
+            val firstPage = SavedInkProfiles.profileById(firstId)!!.pageIndex
+            val secondPage = 1 - firstPage
+            val firstLease = SavedInkRegistry.acquire(first.token) ?: error("missing first sibling")
+            val second = Ink(UUID.randomUUID().toString(), Bitmap(1404, 1872), first.source, first.annotation)
+            SavedInkRegistry.publish(second.token, second.bitmap, second.source, second.annotation, secondPage, secondId)
+            val secondLease = SavedInkRegistry.acquire(second.token) ?: error("missing second sibling")
+            check(SavedInkRegistry.ownsExactly(setOf(first.token, second.token)), "exact sibling owner set")
+            check(!SavedInkRegistry.ownsExactly(setOf(first.token)), "omitted sibling cannot confer ownership")
+            check(match(firstLease, first, firstPage, 1404, 1872, firstId), "first sibling still aligned")
+            check(match(secondLease, second, secondPage, 1404, 1872, secondId), "second sibling aligned")
+            check(!match(secondLease, second, firstPage, 1404, 1872, secondId), "sibling wrong page rejected")
+            check(!match(secondLease, second, secondPage, 1404, 1872, firstId), "sibling wrong geometry rejected")
+            val third = Bitmap(1404, 1872)
+            fails("third publication") { SavedInkRegistry.publish(UUID.randomUUID().toString(), third,
+                first.source, first.annotation, firstPage, firstId) }
+            fails("duplicate UUID publication") { SavedInkRegistry.publish(first.token, third,
+                first.source, first.annotation, firstPage, firstId) }
+            check(!third.isRecycled, "rejected third remains caller-owned")
+            third.recycle()
+            SavedInkRegistry.revoke(first.token)
+            check(!SavedInkRegistry.ownsExactly(setOf(first.token, second.token)), "revoked sibling loses set authority")
+            check(!firstLease.matchesPage(first.source.canonicalPath, firstPage), "revocation hides only first")
+            check(match(secondLease, second, secondPage, 1404, 1872, secondId), "other sibling remains drawable")
+            var ack: Boolean? = null
+            SavedInkRegistry.drainRevoked(first.token) { ack = it }
+            check(ack == null, "sibling drain waits main boundary")
+            TestLoop.flush()
+            check(ack == true && first.bitmap.isRecycled && first.bitmap.recycleCount == 1, "first drained once")
+            check(!second.bitmap.isRecycled && !SavedInkRegistry.isEmpty(), "second bitmap survives first drain")
+            check(SavedInkRegistry.ownsExactly(setOf(second.token)), "only remaining sibling owns registry")
+            check(match(secondLease, second, secondPage, 1404, 1872, secondId), "survivor retains exact geometry")
+            firstLease.release()
+            drain(second)
+            secondLease.release()
+            check(first.bitmap.recycleCount == 1 && second.bitmap.recycleCount == 1, "both releases idempotent")
+        }
+        val first = ink(SavedInkProfiles.T008_ID)
+        val lease = SavedInkRegistry.acquire(first.token) ?: error("missing parent")
+        val candidate = Bitmap(1404, 1872)
+        fun rejectSibling(label: String, source: SavedInkRegistry.SourceStamp = first.source,
+            annotation: SavedInkRegistry.SourceStamp = first.annotation) {
+            fails(label) { SavedInkRegistry.publish(UUID.randomUUID().toString(), candidate,
+                source, annotation, 1, SavedInkProfiles.T008_PAGE2_ID) }
+            check(SavedInkRegistry.ownsExactly(setOf(first.token)), "rejected sibling leaves parent intact")
+        }
+        rejectSibling("different annotation snapshot", annotation = first.annotation.copy(inode = 999))
+        rejectSibling("different source snapshot", source = first.source.copy(inode = 999))
+        SavedInkRegistry.revoke(first.token)
+        fails("revoked retained parent forbids sibling") { SavedInkRegistry.publish(UUID.randomUUID().toString(), candidate,
+            first.source, first.annotation, 1, SavedInkProfiles.T008_PAGE2_ID) }
+        check(!candidate.isRecycled, "failed sibling admission does not take bitmap")
+        candidate.recycle(); drain(first); lease.release()
+
+        val legacy = ink(SavedInkProfiles.T004_ID)
+        val foreignBitmap = Bitmap(1404, 1872)
+        val currentSource = legacy.source.copy(canonicalPath = SavedInkProfiles.T008_PATH)
+        val currentMark = legacy.annotation.copy(canonicalPath = SavedInkProfiles.T008_PATH + ".mark")
+        fails("cross-document publication") { SavedInkRegistry.publish(UUID.randomUUID().toString(), foreignBitmap,
+            currentSource, currentMark, 1, SavedInkProfiles.T008_PAGE2_ID) }
+        check(SavedInkRegistry.ownsExactly(setOf(legacy.token)), "legacy remains single-owner")
+        foreignBitmap.recycle(); drain(legacy)
+        groups++
+    }
+
     @JvmStatic fun main(args: Array<String>) {
         fixture = File(args.single()).readBytes()
-        profiles(); background(); backgroundRejections(); registryShapes(); registryOwnership(); registryRejections()
+        profiles(); background(); backgroundRejections(); registryShapes(); registryOwnership(); registryRejections(); registrySiblings()
         println("PASS: $groups groups, $checks runtime checks; actual Profiles/Registry + Module compile; no hardware/ink pass")
     }
 }

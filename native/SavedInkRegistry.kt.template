@@ -11,7 +11,7 @@ import kotlin.math.abs
 
 /**
  * Process-local opaque image ownership, not a file/image loader or save witness.
- * Only the explicit T004 PAGE3 / T008 PAGE1 profiles can publish full-canvas ink.
+ * Only the explicit T004 PAGE3 / T008 PAGE1 and PAGE2 profiles can publish full-canvas ink.
  * Native text highlights were absent from that API output and are not claimed.
  */
 internal object SavedInkRegistry {
@@ -30,7 +30,7 @@ internal object SavedInkRegistry {
 
     private val lock = Any()
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val entries = HashMap<String, Entry>() // At most one, including revoked view leases.
+    private val entries = HashMap<String, Entry>() // At most two T008 pages, including revoked view leases.
 
     internal class Lease internal constructor(private val token: String, val bitmap: Bitmap) {
         private var released = false
@@ -57,7 +57,7 @@ internal object SavedInkRegistry {
                     // only for that profile, never as T008 background authority.
                     SavedInkProfiles.T004_ID -> (geometryId == null || geometryId == SavedInkProfiles.T004_ID) &&
                         abs(bitmapWidth.toLong() * 1872L - bitmapHeight.toLong() * 1404L) <= 1404L
-                    SavedInkProfiles.T008_ID -> geometryId == SavedInkProfiles.T008_ID &&
+                    SavedInkProfiles.T008_ID, SavedInkProfiles.T008_PAGE2_ID -> geometryId == entry.geometryId &&
                         bitmapWidth == 1404 && bitmapHeight == 1872
                     else -> false
                 }
@@ -81,10 +81,13 @@ internal object SavedInkRegistry {
 
     fun isEmpty(): Boolean = synchronized(lock) { entries.isEmpty() }
 
+    fun ownsExactly(tokens: Set<String>): Boolean = synchronized(lock) {
+        entries.keys == tokens && entries.values.all { it.owner && !it.bitmap.isRecycled }
+    }
+
     /** Ownership of bitmap transfers only after success; caller recycles on rejection. */
     fun publish(token: String, bitmap: Bitmap, source: SourceStamp, annotation: SourceStamp?, pageIndex: Int,
         geometryId: String): String = synchronized(lock) {
-        require(entries.isEmpty()) { "Previous saved ink is still retained by a view" }
         require(UUID.fromString(token).toString() == token) { "Expected native-issued UUID ink token" }
         val profile = SavedInkProfiles.profileById(geometryId) ?: error("Unknown native ink geometry")
         require(source.canonicalPath == File(profile.filePath).canonicalPath && pageIndex == profile.pageIndex &&
@@ -93,6 +96,15 @@ internal object SavedInkRegistry {
         }
         require(annotation != null && annotation.canonicalPath == "${source.canonicalPath}.mark") {
             "A decoded ink bitmap requires its unchanged native mark sidecar"
+        }
+        require(!entries.containsKey(token)) { "Duplicate ink token" }
+        if (entries.isNotEmpty()) {
+            require(entries.size == 1 && profile.filePath == SavedInkProfiles.T008_PATH &&
+                entries.values.all { entry -> entry.owner && !entry.bitmap.isRecycled &&
+                    entry.source == source && entry.annotation == annotation && entry.pageIndex != pageIndex &&
+                    entry.geometryId in setOf(SavedInkProfiles.T008_ID, SavedInkProfiles.T008_PAGE2_ID) }) {
+                "Only distinct same-snapshot T008 siblings may coexist"
+            }
         }
         entries[token] = Entry(token, bitmap, source, annotation, pageIndex, profile.id)
         token

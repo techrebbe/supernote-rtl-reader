@@ -979,7 +979,7 @@ def check(repo_root: Path) -> None:
         ),
         (
             app_path,
-            "aac63fc4f2f9d857e3ac34b1deb80364d2d0108668af9746af1ac44482443e2c",
+            "8466b43857e596c670eb3ffb8b194013a49d92ccaa8653bf22c91c9a4d31b270",
             "Native Spread UI authority source",
         ),
         (
@@ -987,27 +987,28 @@ def check(repo_root: Path) -> None:
             "3b6de3826f67e5ead78324cbc6df0a86bc6df6d78c9042598ef4645827c61538",
             "Edit/Return page-authority module",
         ),
-        # T008 scoped independent review: exact disposable profile/geometry and
-        # unchanged T006/code46 cleanup fences. These are read-only display pins;
-        # no legacy writer, save, handoff or Edit-return authority is repinned.
+        # T013 independent integrated confirmation: exact T008 PAGE1/PAGE2
+        # profiles, sequential same-snapshot batch and per-token lease cleanup.
+        # App/generated Jump now use immediate non-reusable presentation fences.
+        # No legacy writer, native save/handoff or editReturn.js is repinned.
         (
             repo_root / "overlay" / "savedInk.js",
-            "0bbe85df2c7c9c1b7d37aaf1bbb74eba8dd3383c8fdd56e8753c9f5fc2428402",
+            "e89609649ac18f55b94f29ffec844bf0275f851a735fd7f65dc9637c54e995d0",
             "saved-ink request and cleanup controller",
         ),
         (
             repo_root / "native" / "SavedInkModule.kt.template",
-            "b9c38d8161534a58e744c1248f00ebcfd9348bc0f4db73cc8978c5bcb0203452",
+            "079decd17cede907a3a6beff78a23f0f3a3067160c85f7c8f81bc5f1efa4463c",
             "saved-ink fixture verification and owned output cleanup",
         ),
         (
             repo_root / "native" / "SavedInkRegistry.kt.template",
-            "b41b5223438e7adef37e70ea12a1b976cedb453d7a47e6e422ee23f9db739844",
+            "4a874f8868e53e0b6796f71126f08fff7f554e96c44e01c25a895023cc189c0e",
             "saved-ink opaque bitmap and UI lease ownership",
         ),
         (
             repo_root / "native" / "SavedInkProfiles.kt.template",
-            "6b78841cb1f47c86a68ccecb0f35f24ef778456468b6f5879c37cb52f4da10ba",
+            "99535781b459a3823ef23c17370e404b758fc1558bd904fe1c2948ad0dd1f98f",
             "hash-bound disposable source and background geometry profiles",
         ),
         (
@@ -1017,17 +1018,17 @@ def check(repo_root: Path) -> None:
         ),
         (
             index_path,
-            "ced663315040a6aa2fd185f16c9e64f1655bbe14e2b94b7b1e34672e878faa09",
+            "bfa9431630e6de428d3096688ae7844176f9417eec99a8bcb913f2b3c4c04feb",
             "Edit/Return activation and close authority",
         ),
         (
             direct_patch_path,
-            "12005c6f1c807cec2abd805f9292cf31583ba4e96e4eb92c9313aa14586be7d8",
+            "4cbb85d3789efa3dd17ab056ee5388e39bd7dc28c159c9dfe87a037d2541d927",
             "direct-render Edit/Return transition guard generation",
         ),
         (
             workflow_path,
-            "ec613a7d8ceba49a7ababa8e252e8f07addb2b532e300b41b963237045f9b1d9",
+            "dc9739b18d2279cbc1ff5fad8e1a207bf3e68b4356cd39df1f4947ec1d90deaa",
             "Native Spread companion-build workflow",
         ),
         (

@@ -399,7 +399,14 @@ export default function App() {
   // that build patch scripts match verbatim stays unchanged.)
   const setPageIndex = value => {
     if (readerTransitionLocked()) return;
-    setPageIndexRaw(value);
+    const previous = pageIndexRef.current;
+    const next = typeof value === 'function' ? value(previous) : value;
+    const visiblePages = page => effectiveModeRef.current === 'single' ? [page]
+      : Object.values(getVisualSpread(page, coverSeparateRef.current, totalPagesRef.current, directionRef.current))
+        .filter(Number.isInteger).sort((a, b) => a - b);
+    if (visiblePages(previous).join(',') !== visiblePages(next).join(',')) invalidateSavedInkPresentation();
+    pageIndexRef.current = next;
+    setPageIndexRaw(next);
   };
   const displayRef = useRef(null);
   const renderingRef = useRef(true);
@@ -411,6 +418,21 @@ export default function App() {
   const savedInkLifecycleRef = useRef(null);
   const savedInkPresentationEpochRef = useRef(0);
   const savedInkPresentationKeyRef = useRef(null);
+
+  const invalidateSavedInkPresentation = () => {
+    if (!selectSavedInkProfile(filePathRef.current ?? documentContext?.filePath,
+      totalPagesRef.current)?.needsCanvasWitness) return;
+    // Accepted transitions fence immediately, including away/back before React
+    // runs either render or passive cleanup. The epoch cannot return to an old
+    // value; existing cleanup still waits for the actual SDK/native drain.
+    savedInkPresentationEpochRef.current += 1;
+    savedInkContextRef.current = null;
+    if (mountedRef.current) {
+      setSavedInk({status: 'unavailable', reason: 'presentation_changed'});
+      setSavedInkPresentationEpoch(savedInkPresentationEpochRef.current);
+    }
+    savedInkLifecycleRef.current?.quiesce();
+  };
 
   const quiesceSavedInk = async () => {
     // Fence publication synchronously, without relying on the next React effect
@@ -460,34 +482,48 @@ export default function App() {
   pageAreaWidthRef.current = Math.max(1, window.width);
 
   const savedInkProfile = selectSavedInkProfile(documentContext?.filePath, totalPages);
+  const savedInkPages = savedInkProfile?.needsCanvasWitness
+    ? (effectiveMode === 'single' ? [pageIndex]
+      : Object.values(getVisualSpread(pageIndex, coverSeparate, totalPages, direction)))
+      .filter(page => Number.isInteger(page) &&
+        selectSavedInkProfile(documentContext?.filePath, totalPages, page) !== null)
+      .sort((a, b) => a - b)
+    : null;
   const savedInkVisible = preferencesReady && savedInkProfile !== null &&
     (!savedInkProfile.needsCanvasWitness ||
       (spreadSizing === 'fit' &&
         ((effectiveMode === 'single' && (window.height > window.width || isLandscape)) ||
           (effectiveMode === 'spread' && isLandscape)))) &&
     Number.isInteger(pageIndex) && !editBusy && !readerTransitionLocked() &&
-    (effectiveMode === 'single'
+    (savedInkPages !== null ? savedInkPages.length > 0 : effectiveMode === 'single'
       ? pageIndex === savedInkProfile.pageIndex
       : Object.values(getVisualSpread(pageIndex, coverSeparate, totalPages, direction)).includes(savedInkProfile.pageIndex));
-  // T008 keeps one source-bound portrait canvas in every vetted Fit view. A
+  // T008 keeps each exact source-page canvas in every vetted Fit view. A
   // presentation key is a cancellation fence, never new geometry authority.
   // T004 retains its original eligibility and lifecycle without this witness.
   const savedInkPresentationKey = savedInkProfile?.needsCanvasWitness
-    ? `${savedInkPresentationEpoch}:${window.width}:${window.height}:${effectiveMode}:${spreadSizing}`
+    ? `${savedInkPresentationEpoch}:${window.width}:${window.height}:${effectiveMode}:${spreadSizing}:${savedInkPages.join(',')}`
     : null;
   savedInkPresentationKeyRef.current = savedInkPresentationKey;
   savedInkContextRef.current = savedInkVisible
-    ? {filePath: documentContext.filePath, pageIndex: savedInkProfile.pageIndex, totalPages}
+    ? {filePath: documentContext.filePath, totalPages,
+      ...(savedInkPages === null ? {pageIndex: savedInkProfile.pageIndex} : {pageIndices: savedInkPages})}
     : null;
-  const savedInkTokenFor = page =>
-    savedInkVisible && savedInkContextRef.current && !readerTransitionLocked() &&
-    savedInk.status === 'ready' && page === savedInkContextRef.current.pageIndex &&
+  const savedInkTokenFor = page => {
+    if (!(savedInkVisible && savedInkContextRef.current && !readerTransitionLocked() &&
+    savedInk.status === 'ready' &&
     (savedInkPresentationKey === null ||
       (savedInk.presentationKey === savedInkPresentationKey &&
         savedInkPresentationKeyRef.current === savedInkPresentationKey &&
         savedInkPresentationEpochRef.current === savedInkPresentationEpoch)) &&
-    savedInk.filePath === documentContext?.filePath
-      ? savedInk.savedInkToken : null;
+    savedInk.filePath === documentContext?.filePath)) return null;
+    if (Array.isArray(savedInkContextRef.current.pageIndices)) {
+      if (!savedInkContextRef.current.pageIndices.includes(page)) return null;
+      const matchingPage = savedInk.pages?.find(result => result.pageIndex === page);
+      return matchingPage?.status === 'ready' ? matchingPage.savedInkToken : null;
+    }
+    return page === savedInkContextRef.current.pageIndex ? savedInk.savedInkToken : null;
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -516,8 +552,11 @@ export default function App() {
       };
       controller = createSavedInkController({
         currentContext,
-        prepare: ({profileId, filePath, pageIndex: page, width, height, pluginDir: directory}) =>
-          SavedInkModule.prepare(profileId, filePath, page, width, height, directory),
+        prepare: ({profileId, filePath, pageIndex: page, width, height, pluginDir: directory, siblingToken}) =>
+          siblingToken === undefined
+            ? SavedInkModule.prepare(profileId, filePath, page, width, height, directory)
+            : SavedInkModule.prepareSibling(siblingToken, profileId, filePath, page, width, height, directory),
+        validateBatch: ({tokens}) => SavedInkModule.validateBatch(tokens[0], tokens[1] ?? ''),
         finish: ({token, missingMark}) => SavedInkModule.finish(token, missingMark),
         discard: ({token}) => SavedInkModule.discard(token),
         generateThumbnail: (...args) => PluginFileAPI.generateMarkThumbnails(...args),
@@ -525,12 +564,13 @@ export default function App() {
       });
       const context = await currentContext();
       if (cancelled || !presentationCurrent()) return;
-      const result = await controller.run(context);
+      const result = await (Array.isArray(context?.pageIndices)
+        ? controller.runBatch(context) : controller.run(context));
       if (result.reason === 'cleanup_failed') globalThis.RTL_READER_INK_CLEANUP_BLOCKED = true;
       if (cancelled || !presentationCurrent() || readerTransitionLocked() || !savedInkContextRef.current) return;
       setSavedInk({...result, filePath: context?.filePath,
         ...(savedInkPresentationKey === null ? {} : {presentationKey: savedInkPresentationKey})});
-      console.log(`RTL_READER_SAVED_INK status=${result.status} reason=${result.reason ?? 'none'} page=${(context?.pageIndex ?? -1) + 1}`);
+      console.log(`RTL_READER_SAVED_INK status=${result.status} reason=${result.reason ?? 'none'} pages=${(context?.pageIndices ?? [context?.pageIndex]).map(page => page + 1).join(',')}`);
     }).catch(error => {
       if (!previousWasClean) globalThis.RTL_READER_INK_CLEANUP_BLOCKED = true;
       if (!cancelled && presentationCurrent()) setSavedInk({status: 'error', reason: error?.message ?? 'request_failed'});
@@ -1425,6 +1465,7 @@ export default function App() {
   const setViewModeValue = next => {
     if (readerTransitionLocked()) return;
     if (!['auto', 'single', 'spread'].includes(next)) return;
+    if (viewModeRef.current !== next) invalidateSavedInkPresentation();
     viewModeRef.current = next;
     setViewMode(next);
     console.log(`RTL_READER_VIEW_MODE ${next}`);
@@ -1451,6 +1492,7 @@ export default function App() {
       return;
     }
     if (!nativeSpreadConfigured) {
+      if (coverSeparateRef.current !== normalized) invalidateSavedInkPresentation();
       coverSeparateRef.current = normalized;
       setCoverSeparate(normalized);
       console.log(`RTL_READER_COVER_SEPARATE ${normalized}`);
@@ -1477,6 +1519,7 @@ export default function App() {
             showNativeSpreadHeaderRef.current,
             spreadSizingRef.current,
           );
+      if (coverSeparateRef.current !== normalized) invalidateSavedInkPresentation();
       coverSeparateRef.current = normalized;
       setCoverSeparate(normalized);
       if (nativeSpreadConfiguredEditable) {
@@ -1528,6 +1571,7 @@ export default function App() {
       return;
     }
     if (!nativeSpreadConfigured) {
+      if (spreadSizingRef.current !== normalizedSizing) invalidateSavedInkPresentation();
       showSpreadDividerRef.current = normalizedDivider;
       showNativeSpreadHeaderRef.current = normalizedHeader;
       spreadSizingRef.current = normalizedSizing;
@@ -1560,6 +1604,7 @@ export default function App() {
             normalizedHeader,
             normalizedSizing,
           );
+      if (spreadSizingRef.current !== normalizedSizing) invalidateSavedInkPresentation();
       showSpreadDividerRef.current = normalizedDivider;
       showNativeSpreadHeaderRef.current = normalizedHeader;
       spreadSizingRef.current = normalizedSizing;
@@ -1809,7 +1854,6 @@ export default function App() {
     const requested = Number.parseInt(jumpText, 10);
     if (!Number.isFinite(requested)) return;
     const target = clampPage(requested - 1, totalPagesRef.current);
-    pageIndexRef.current = target;
     console.log(`RTL_READER_JUMP requested=${requested} target=${target + 1}`);
     setPageIndex(target);
     Keyboard.dismiss();
@@ -2018,7 +2062,7 @@ export default function App() {
                   {direction.toUpperCase()} · {statusLayout}
                 </Text>
                 <Text style={styles.settingsSummary}>
-                  Saved ink alpha: T004 page 3; T008 page 1 in portrait Single or landscape Single/Spread, Fit only.
+                  Saved ink alpha: T004 page 3; T008 pages 1 and 2 in portrait Single or landscape Single/Spread, Fit only.
                   Other pages and native text highlights are unavailable.
                 </Text>
               </View>

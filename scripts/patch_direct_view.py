@@ -258,7 +258,6 @@ def main() -> None:
     const requested = Number.parseInt(jumpText, 10);
     if (!Number.isFinite(requested)) return;
     const target = clampPage(requested - 1, totalPagesRef.current);
-    pageIndexRef.current = target;
     console.log(`RTL_READER_JUMP requested=${requested} target=${target + 1}`);
     setPageIndex(target);
     Keyboard.dismiss();
@@ -275,7 +274,6 @@ def main() -> None:
       interactionTimingRef.current = {pageIndex: target, startedAtMs};
       lastNavigationDeltaRef.current = target - current;
     }
-    pageIndexRef.current = target;
     console.log(`RTL_READER_JUMP requested=${requested} target=${target + 1}`);
     setPageIndex(target);
     Keyboard.dismiss();

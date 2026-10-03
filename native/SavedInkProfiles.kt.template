@@ -22,6 +22,7 @@ import java.security.MessageDigest
 internal object SavedInkProfiles {
     const val T004_ID = "t004-page3-canvas-v1"
     const val T008_ID = "t008-page1-stock-portrait-fit-v1"
+    const val T008_PAGE2_ID = "t008-page2-stock-portrait-fit-v1"
     const val T004_PATH = "/storage/emulated/0/Document/RTL_RAPID_TOOLS_T004_20261001.pdf"
     const val T008_PATH = "/storage/emulated/0/Document/RTL_INK_GEOMETRY_T008_20261002.pdf"
     private const val MAX_SOURCE_BYTES = 32L * 1024 * 1024
@@ -58,10 +59,15 @@ internal object SavedInkProfiles {
             StrictMetadata(Box(0, 0, 612, 792), Box(0, 0, 612, 792), 0, 1),
         )
     }
+    private val t008Page2 = Profile(
+        T008_PAGE2_ID, T008_PATH, t008.sourceSha256, 1, t008.pageCount,
+        t008.width, t008.height, t008.geometry, t008.metadata,
+    )
 
     fun profileById(id: String): Profile? = when (id) {
         T004_ID -> t004
         T008_ID -> t008
+        T008_PAGE2_ID -> t008Page2
         else -> null
     }
 
@@ -74,21 +80,26 @@ internal object SavedInkProfiles {
     }
 
     /**
-     * Only T008 PAGE1 has a new padded background. Null means the established
+     * Only T008 PAGE1/PAGE2 have a padded background. Null means the established
      * default render path, not an assertion that a document has no annotations.
-     * An exact T008 PAGE1 with bad source/metadata throws; never fall back to a
+     * An exact T008 page with bad source/metadata throws; never fall back to a
      * bare PDF bitmap that could later receive full-canvas ink.
      */
     fun verifyBackground(filePath: String, pageIndex: Int): VerifiedBackground? {
-        if (filePath != T008_PATH || pageIndex != t008.pageIndex) return null
-        val file = File(t008.filePath)
+        if (filePath != T008_PATH) return null
+        val profile = when (pageIndex) {
+            t008.pageIndex -> t008
+            t008Page2.pageIndex -> t008Page2
+            else -> return null
+        }
+        val file = File(profile.filePath)
         val canonicalPath = file.canonicalPath
         val stamp = pathStamp(file)
-        val verified = VerifiedBackground(t008, canonicalPath, stamp)
-        val descriptor = Os.open(t008.filePath, OsConstants.O_RDONLY or OsConstants.O_NOFOLLOW, 0)
+        val verified = VerifiedBackground(profile, canonicalPath, stamp)
+        val descriptor = Os.open(profile.filePath, OsConstants.O_RDONLY or OsConstants.O_NOFOLLOW, 0)
         try {
             verified.validateDescriptor(descriptor)
-            validateMetadata(descriptor, t008)
+            validateMetadata(descriptor, profile)
             verified.validateDescriptor(descriptor)
         } finally { Os.close(descriptor) }
         return verified

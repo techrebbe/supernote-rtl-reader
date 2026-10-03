@@ -25,6 +25,10 @@ class WiringTests(unittest.TestCase):
             self.assertNotIn("source={{uri: savedInk", generated)
             self.assertIn("const previousCleanup = globalThis.RTL_READER_INK_CLEANUP", generated)
             self.assertIn("const result = await controller.dispose();", generated)
+            jump = generated[generated.index("const submitJump = () => {"):generated.index("const footerLabel =")]
+            self.assertNotIn("pageIndexRef.current =", jump,
+                             "Generated Jump must not hide the old page from the synchronous cancellation fence")
+            self.assertIn("setPageIndex(target)", jump)
 
     def test_build_registers_and_copies_all_dependencies(self):
         build = (ROOT / "build.sh").read_text(encoding="utf-8")
@@ -49,14 +53,14 @@ class WiringTests(unittest.TestCase):
 
     def test_candidate_identity_and_ci_gates(self):
         config = json.loads((ROOT / "PluginConfig.json").read_text(encoding="utf-8"))
-        self.assertEqual(config["versionName"], "0.4.24-ink-exp4")
-        self.assertEqual(config["versionCode"], "48")
+        self.assertEqual(config["versionName"], "0.4.24-ink-exp5")
+        self.assertEqual(config["versionCode"], "49")
         self.assertEqual(config["pluginID"], "snrtl20260726001")
-        self.assertIn("RTL_READER_OPEN v0.4.24-ink-exp4-native-reader-v2",
+        self.assertIn("RTL_READER_OPEN v0.4.24-ink-exp5-native-reader-v2",
                       (ROOT / "overlay/index.js").read_text(encoding="utf-8"))
         workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
         for gate in ("test_saved_ink.js", "test_saved_ink_app.js",
-                     "test_saved_ink_landscape_app.js", "test_saved_ink_wiring.py"):
+                     "test_saved_ink_landscape_app.js", "test_saved_ink_batch.js", "test_saved_ink_wiring.py"):
             self.assertIn(gate, workflow)
 
     def test_cleanup_acknowledges_exact_main_thread_lease_drain(self):

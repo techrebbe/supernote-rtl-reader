@@ -103,7 +103,7 @@ def main(root: Path) -> None:
     for marker in (
         "if (readerTransitionLocked() && !editWrite && !closeWrite) return;",
         "const close = async () => {\n    if (readerTransitionLocked()) return;",
-        "const setPageIndex = value => {\n    if (readerTransitionLocked()) return;\n    setPageIndexRaw(value);",
+        "const setPageIndex = value => {\n    if (readerTransitionLocked()) return;\n    const previous = pageIndexRef.current;",
         "globalThis.RTL_READER_PREFERENCES_WRITE_CHAIN = write;",
         "readerClosedRef.current = true;",
         "if (!readerTransitionLocked() && filePathRef.current && payload)",

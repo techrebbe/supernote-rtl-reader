@@ -1212,8 +1212,11 @@ test('ordinary ink eligibility comes from exact source/page and vetted Fit views
     viewMode: 'single', spreadSizing: 'fit', display: {kind: 'single', singlePageIndex: 0}};
   const h = harness({filePath: file, state, window: {width: 1404, height: 1872}});
   assert.equal(h.callback.savedInkVisible, true);
-  assert.equal(h.callback.savedInkContextRef.current.pageIndex, 0);
-  for (const patch of [{pageIndex: 1}, {spreadSizing: 'native_fill'}, {totalPages: 8},
+  assert.deepEqual(Array.from(h.callback.savedInkContextRef.current.pageIndices), [0]);
+  const second = harness({filePath: file, state: {...state, pageIndex: 1}, window: {width: 1404, height: 1872}});
+  assert.equal(second.callback.savedInkVisible, true);
+  assert.deepEqual(Array.from(second.callback.savedInkContextRef.current.pageIndices), [1]);
+  for (const patch of [{pageIndex: 2}, {pageIndex: -1}, {spreadSizing: 'native_fill'}, {totalPages: 8},
     {documentContext: {filePath: '/doc/personal.pdf'}}]) {
     const bad = harness({filePath: file, state: {...state, ...patch}, window: {width: 1404, height: 1872}});
     assert.equal(bad.callback.savedInkVisible, false, JSON.stringify(patch));
@@ -1224,7 +1227,7 @@ test('ordinary ink eligibility comes from exact source/page and vetted Fit views
   for (const viewMode of ['auto', 'spread']) {
     const spread = harness({filePath: file, state: {...state, viewMode}, window: {width: 1872, height: 1404}});
     assert.equal(spread.callback.savedInkVisible, true);
-    assert.equal(spread.callback.savedInkContextRef.current.pageIndex, 0);
+    assert.deepEqual(Array.from(spread.callback.savedInkContextRef.current.pageIndices), [0, 1]);
   }
   const portraitSpread = harness({filePath: file, state: {...state, viewMode: 'spread'}, window: {width: 1404, height: 1872}});
   assert.equal(portraitSpread.callback.savedInkVisible, false);

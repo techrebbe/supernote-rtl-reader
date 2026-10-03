@@ -21,7 +21,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * Experimental allowlisted saved-ink display only. Not an atomic snapshot or durable-save
  * witness. JS calls the supported native thumbnail API; this worker never does.
- * Existing alignment evidence is T004 PAGE 3 only; T008 PAGE1 needs its own ink gate.
+ * T004 PAGE3 and T008 PAGE1 alignment are measured; T008 PAGE2/two-page display
+ * still require their own disposable hardware gate.
  * Native highlights are not in that PNG. No arbitrary document/PNG URI loader.
  */
 class SavedInkModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
@@ -45,7 +46,7 @@ class SavedInkModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
 
     private val worker = Executors.newSingleThreadExecutor()
     private val closed = AtomicBoolean(false)
-    private val requests = HashMap<String, Request>() // Worker-owned; at most one retained request/bitmap.
+    private val requests = HashMap<String, Request>() // One SDK flight; at most two vetted same-snapshot pages.
 
     override fun getName(): String = "SavedInkModule"
 
@@ -105,6 +106,17 @@ class SavedInkModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
 
     @ReactMethod
     fun prepare(profileId: String, filePath: String, pageIndex: Int, width: Int, height: Int, pluginDirectory: String, promise: Promise) = task(promise) {
+        prepareOwned(profileId, filePath, pageIndex, width, height, pluginDirectory, null, promise)
+    }
+
+    @ReactMethod
+    fun prepareSibling(parentToken: String, profileId: String, filePath: String, pageIndex: Int,
+        width: Int, height: Int, pluginDirectory: String, promise: Promise) = task(promise) {
+        prepareOwned(profileId, filePath, pageIndex, width, height, pluginDirectory, parentToken, promise)
+    }
+
+    private fun prepareOwned(profileId: String, filePath: String, pageIndex: Int, width: Int, height: Int,
+        pluginDirectory: String, parentToken: String?, promise: Promise) {
         val profile = SavedInkProfiles.requireProfile(profileId, filePath, pageIndex)
         // For T008, JS supplies these after the real SDK getPageSize settles.
         // T004 retains its already-vetted fixed-canvas call. Neither can override
@@ -112,7 +124,20 @@ class SavedInkModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
         require(width == profile.width && height == profile.height && width == WIDTH && height == HEIGHT) {
             "SDK annotation canvas does not match the native saved-ink profile"
         }
-        require(requests.isEmpty() && SavedInkRegistry.isEmpty()) { "Saved ink is still pending or retained" }
+        val parent = if (parentToken == null) {
+            require(requests.isEmpty() && SavedInkRegistry.isEmpty()) { "Saved ink is still pending or retained" }
+            null
+        } else {
+            require(requests.size == 1) { "A sibling requires exactly one retained parent" }
+            val retained = requests[parentToken] ?: error("Unknown sibling parent")
+            require(retained.finished && retained.profile.filePath == SavedInkProfiles.T008_PATH &&
+                profile.filePath == retained.profile.filePath && profile.pageIndex != retained.profile.pageIndex &&
+                SavedInkRegistry.ownsExactly(requests.values.mapNotNull { it.inkToken }.toSet())) {
+                "Sibling parent is unfinished, foreign, duplicate or no longer owned"
+            }
+            require(unchanged(retained)) { "Sibling parent snapshot changed" }
+            retained
+        }
         val pdf = File(profile.filePath)
         val source = digest(pdf, MAX_SOURCE_BYTES)
         require(source.sha256 == profile.sourceSha256) { "Disposable source identity mismatch" }
@@ -128,6 +153,9 @@ class SavedInkModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
         }
         val mark = File("${profile.filePath}.mark")
         val annotation = markSnapshot(mark)
+        require(parent == null || (parent.source == source && parent.annotation == annotation && unchanged(parent))) {
+            "Sibling source/mark does not match its parent"
+        }
         // Native SDK allowlist uses this path spelling from PluginManager.getPluginDirPath().
         val plugin = File(pluginDirectory)
         val expectedPlugin = File(reactApplicationContext.filesDir, "plugins/snrtl20260726001")
@@ -149,6 +177,24 @@ class SavedInkModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
             putString("sourceSha256", profile.sourceSha256); putInt("pageCount", profile.pageCount)
             putString("pngPath", request.png.absolutePath); putInt("width", WIDTH); putInt("height", HEIGHT)
             putBoolean("sourceVerified", true)
+        })
+    }
+
+    @ReactMethod
+    fun validateBatch(firstToken: String, secondToken: String, promise: Promise) = task(promise) {
+        val tokens = if (secondToken.isEmpty()) listOf(firstToken) else listOf(firstToken, secondToken)
+        require(tokens.distinct().size == tokens.size && requests.keys == tokens.toSet()) { "Batch token set mismatch" }
+        val pages = tokens.map { requests[it] ?: error("Unknown batch request") }
+        val first = pages.first()
+        require(pages.all { it.finished && it.profile.filePath == SavedInkProfiles.T008_PATH &&
+            it.source == first.source && it.annotation == first.annotation } &&
+            pages.map { it.profile.pageIndex }.distinct().size == pages.size &&
+            SavedInkRegistry.ownsExactly(pages.mapNotNull { it.inkToken }.toSet())) { "Invalid finished sibling batch" }
+        pages.forEach { require(unchanged(it)) { "Batch source or annotations changed" } }
+        require(!closed.get()) { "Module invalidated" }
+        promise.resolve(Arguments.createMap().apply {
+            putString("firstToken", firstToken); putString("secondToken", secondToken)
+            putBoolean("batchUnchanged", true)
         })
     }
 

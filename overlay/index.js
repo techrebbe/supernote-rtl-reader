@@ -109,7 +109,7 @@ PluginManager.registerButtonListener({
         if (globalThis.RTL_READER_TRANSITION_IN_FLIGHT) return;
         handoffAttemptedThisActivation = false;
         globalThis.RTL_READER_EDIT_HANDOFF_DONE = false;
-        console.log('RTL_READER_OPEN v0.4.24-ink-exp4-native-reader-v2');
+        console.log('RTL_READER_OPEN v0.4.24-ink-exp5-native-reader-v2');
         DeviceEventEmitter.emit(RTL_READER_ACTIVATE_EVENT);
       };
       const transition = globalThis.RTL_READER_TRANSITION_IN_FLIGHT;

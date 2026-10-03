@@ -60,6 +60,7 @@ jobs:
           node scripts/test_saved_ink_app.js
           node scripts/test_saved_ink_landscape_app.js
           node scripts/test_saved_ink_profiles.js
+          node scripts/test_saved_ink_batch.js
           python3 scripts/test_saved_ink_wiring.py
           python3 scripts/test_saved_ink_fit_geometry.py
           python3 scripts/test_saved_ink_renderer.py
@@ -732,7 +733,7 @@ jobs:
       - name: Upload plugin package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: supernote-rtl-reader-v0.4.24-ink-exp4-native-reader-v2
+          name: supernote-rtl-reader-v0.4.24-ink-exp5-native-reader-v2
           path: out/*.snplg
           if-no-files-found: error
           retention-days: 3

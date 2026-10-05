@@ -37,6 +37,7 @@ const gateCode = SOURCE.slice(gateStart, effectStart);
 const effectCode = SOURCE.slice(effectStart, effectEnd);
 const pageSetterCode = SOURCE.slice(once('  const setPageIndex = value => {'), once('  const displayRef ='));
 const invalidateCode = SOURCE.slice(once('  const invalidateSavedInkPresentation = () => {'), once('  const quiesceSavedInk ='));
+const directionCode = SOURCE.slice(once('  const setDirectionValue = async next => {'), once('  const setViewModeValue ='));
 const jumpCode = SOURCE.slice(once('  const submitJump = () => {'), once('  const footerLabel ='));
 const goByCode = SOURCE.slice(once('  const goBy = delta => {'), once('  const pageStep ='));
 const PATCH_SOURCE = fs.readFileSync(path.join(ROOT, 'scripts', 'patch_direct_view.py'), 'utf8').replace(/\r\n/g, '\n');
@@ -214,6 +215,15 @@ function harness(hooks = {}, options = {}) {
           `${spreadCode}\n${pageSetterCode}\n${invalidateCode}\n${goByCode}\ngoBy(delta);`);
         return renderNow ? instance.render() : null;
       },
+      async acceptDirection(next, renderNow = false, overrides = {}) {
+        await execute({...instance.transitionScope, next,
+          nativeSpreadBusyRef: {current: false}, nativeSpreadAuthorityResolved: true,
+          nativeSpreadConfigured: false, setNativeSpreadReadOnly: async () => true,
+          reportNativeSpreadAuthorityLocked() {},
+          setDirection(value) { instance.view.direction = value; }, ...overrides},
+          `${invalidateCode}\n${directionCode}\nreturn setDirectionValue(next);`);
+        return renderNow ? instance.render() : null;
+      },
       quiesce() { return refs.savedInkLifecycleRef.current.quiesce(); },
       unmount() { refs.mountedRef.current = false; instance.cleanup?.(); return shared.RTL_READER_INK_CLEANUP; },
       get ready() { return updates.filter(value => value.status === 'ready'); },
@@ -278,7 +288,7 @@ test('actual legacy T004 PAGE3 eligibility keeps Single/Spread and Fit/native-fi
   }
 });
 
-test('shared spreads keep both exact source-page identities across anchors, RTL/LTR sides and cover parity', async () => {
+test('shared spread anchors keep the batch; direction swaps regenerate exact pages before cover parity', async () => {
   const h = harness();
   const app = h.mount();
   await flush();
@@ -294,8 +304,11 @@ test('shared spreads keep both exact source-page identities across anchors, RTL/
   assert.equal(h.count('prepareSibling'), 1);
   app.update({direction: 'ltr'});
   assert.deepEqual(app.locals.getVisualSpread(1, false, 2, 'ltr'), {left: 0, right: 1});
-  assert.equal(app.tokenFor(0), TOKEN);
-  assert.equal(app.tokenFor(1), NEXT_TOKEN);
+  assert.equal(app.tokenFor(0), null, 'A side swap cannot reuse a ready presentation');
+  assert.equal(app.tokenFor(1), null);
+  await flush();
+  assert.ok(app.tokenFor(0) && app.tokenFor(0) !== TOKEN);
+  assert.ok(app.tokenFor(1) && app.tokenFor(1) !== NEXT_TOKEN);
   app.update({pageIndex: 0, coverSeparate: true, direction: 'rtl'});
   assert.deepEqual(app.locals.getVisualSpread(0, true, 2, 'rtl'), {left: null, right: 0});
   assert.equal(app.tokenFor(0), null, 'Cover parity changes the exact batch before passive cleanup');
@@ -311,7 +324,113 @@ test('shared spreads keep both exact source-page identities across anchors, RTL/
   assert.ok(app.tokenFor(1) && app.tokenFor(1) !== coverToken);
   assert.equal(app.tokenFor(0), null);
   await h.dispose(app);
-  assert.equal(h.count('discard'), 4, 'Both initial handles plus each separate-cover batch drain');
+  assert.equal(h.count('discard'), 6, 'Both initial and swapped handles plus each separate-cover batch drain');
+});
+
+test('accepted direction swap hides both ready handles before ANY render and waits for both drains', async () => {
+  const firstDrain = deferred();
+  const h = harness({discard: token => token === TOKEN ? firstDrain.promise : {token, discarded: true}});
+  const app = h.mount();
+  await flush();
+  const cached = app.render(false).savedInkTokenFor;
+  assert.equal(cached(0), TOKEN);
+  assert.equal(cached(1), NEXT_TOKEN);
+  await app.acceptDirection('ltr');
+  assert.equal(app.epoch, 1);
+  assert.equal(cached(0), null, 'Old page/slot authority is revoked before the next React commit');
+  assert.equal(cached(1), null);
+  app.render();
+  await h.enter('discard');
+  await flush();
+  assert.equal(h.count('prepare'), 1, 'Fresh SDK batch cannot overlap the old native view drain');
+  firstDrain.resolve({token: TOKEN, discarded: true});
+  await flush();
+  assert.equal(h.count('discard'), 2);
+  assert.equal(h.count('prepare'), 2);
+  assert.equal(h.count('prepareSibling'), 2);
+  assert.deepEqual(app.locals.getVisualSpread(0, false, 2, 'ltr'), {left: 0, right: 1});
+  assert.ok(app.tokenFor(0) && app.tokenFor(0) !== TOKEN);
+  assert.ok(app.tokenFor(1) && app.tokenFor(1) !== NEXT_TOKEN);
+  assert.equal(app.ready.length, 2, 'Only the initial and fresh completed batches may publish');
+  await h.dispose(app);
+});
+
+test('accepted RTL->LTR->RTL with pending SDK and no render cannot revive the original request', async () => {
+  const generation = deferred();
+  const drain = deferred();
+  let generations = 0;
+  const h = harness({
+    generate: () => ++generations === 1 ? generation.promise : {success: true, result: true},
+    discard: token => token === TOKEN ? drain.promise : {token, discarded: true},
+  });
+  const app = h.mount();
+  await h.enter('generate');
+  await app.acceptDirection('ltr');
+  await app.acceptDirection('rtl');
+  assert.equal(app.view.direction, 'rtl');
+  assert.equal(app.epoch, 2, 'Both accepted transitions are non-reusable even when their final layout matches');
+  app.render();
+  await flush();
+  assert.equal(h.count('prepare'), 1);
+  assert.equal(h.count('discard'), 0, 'Unsettled SDK still owns the output');
+  generation.resolve({success: true, result: true});
+  await h.enter('discard');
+  await flush();
+  assert.equal(h.count('prepare'), 1, 'Actual native drain is required, not SDK settlement alone');
+  assert.equal(app.ready.length, 0);
+  drain.resolve({token: TOKEN, discarded: true});
+  await flush();
+  assert.equal(h.outcomes[0].reason, 'cancelled');
+  assert.equal(h.count('prepare'), 2);
+  assert.equal(h.count('prepareSibling'), 1, 'Cancelled first batch never proceeds to its second source page');
+  assert.ok(app.tokenFor(0) && app.tokenFor(0) !== TOKEN);
+  assert.ok(app.tokenFor(1) && app.tokenFor(1) !== TOKEN);
+  assert.equal(app.ready.length, 1);
+  await h.dispose(app);
+});
+
+test('same, invalid, blocked and rejected-native direction commands cannot retire a ready batch', async () => {
+  const h = harness();
+  const app = h.mount();
+  await flush();
+  for (const [next, overrides] of [
+    ['rtl', {}], ['invalid', {}], ['ltr', {nativeSpreadBusyRef: {current: true}}],
+    ['ltr', {nativeSpreadAuthorityResolved: false}],
+    ['ltr', {nativeSpreadConfigured: true, setNativeSpreadReadOnly: async () => false}],
+  ]) {
+    await app.acceptDirection(next, false, overrides);
+    assert.equal(app.view.direction, 'rtl');
+    assert.equal(app.epoch, 0);
+    assert.equal(app.tokenFor(0), TOKEN);
+    assert.equal(app.tokenFor(1), NEXT_TOKEN);
+  }
+  h.lock();
+  await app.acceptDirection('ltr');
+  assert.equal(app.view.direction, 'rtl');
+  assert.equal(app.epoch, 0);
+  h.lock(false);
+  assert.equal(h.count('prepare'), 1);
+  assert.equal(h.count('discard'), 0);
+  await h.dispose(app);
+});
+
+test('direction disable completion cannot change page presentation after Edit/Close acquires the transition', async () => {
+  const disabled = deferred();
+  const h = harness();
+  const app = h.mount();
+  await flush();
+  const change = app.acceptDirection('ltr', false, {
+    nativeSpreadConfigured: true, setNativeSpreadReadOnly: () => disabled.promise,
+  });
+  h.lock();
+  disabled.resolve(true);
+  await change;
+  assert.equal(app.view.direction, 'rtl');
+  assert.equal(app.epoch, 0, 'No late direction invalidation can overlap a different transition owner');
+  h.lock(false);
+  assert.equal(app.tokenFor(0), TOKEN);
+  assert.equal(app.tokenFor(1), NEXT_TOKEN);
+  await h.dispose(app);
 });
 
 test('actual landscape effect keeps canonical output and exact real pre/post 1404x1872 witnesses', async () => {

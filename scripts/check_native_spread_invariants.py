@@ -979,7 +979,10 @@ def check(repo_root: Path) -> None:
         ),
         (
             app_path,
-            "8466b43857e596c670eb3ffb8b194013a49d92ccaa8653bf22c91c9a4d31b270",
+            # T013 independent direction-correction review: retire the T008
+            # presentation before a physical slot swap; keep actual SDK/lease
+            # drain, T004 eligibility and native writer/save behavior unchanged.
+            "4186ecf0384582aa1d6be4dc19f29384c2609bbc0898f55c366e771670af6bc6",
             "Native Spread UI authority source",
         ),
         (
@@ -1018,7 +1021,7 @@ def check(repo_root: Path) -> None:
         ),
         (
             index_path,
-            "bfa9431630e6de428d3096688ae7844176f9417eec99a8bcb913f2b3c4c04feb",
+            "3c28d2127083b6c73381ae0ddc496cc7a4e4124e5d0f4176d6e8ede61c90d26c",
             "Edit/Return activation and close authority",
         ),
         (
@@ -1028,7 +1031,7 @@ def check(repo_root: Path) -> None:
         ),
         (
             workflow_path,
-            "dc9739b18d2279cbc1ff5fad8e1a207bf3e68b4356cd39df1f4947ec1d90deaa",
+            "4bdb26199119112e9da37a448dbfe599d06c6475209b442f15743418083f8a5e",
             "Native Spread companion-build workflow",
         ),
         (

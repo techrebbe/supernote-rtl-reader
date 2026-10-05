@@ -502,7 +502,7 @@ export default function App() {
   // presentation key is a cancellation fence, never new geometry authority.
   // T004 retains its original eligibility and lifecycle without this witness.
   const savedInkPresentationKey = savedInkProfile?.needsCanvasWitness
-    ? `${savedInkPresentationEpoch}:${window.width}:${window.height}:${effectiveMode}:${spreadSizing}:${savedInkPages.join(',')}`
+    ? `${savedInkPresentationEpoch}:${window.width}:${window.height}:${effectiveMode}:${spreadSizing}:${direction}:${savedInkPages.join(',')}`
     : null;
   savedInkPresentationKeyRef.current = savedInkPresentationKey;
   savedInkContextRef.current = savedInkVisible
@@ -1457,6 +1457,11 @@ export default function App() {
         return;
       }
     }
+    // Direction swaps the physical page slots even if the sorted source-page
+    // batch is unchanged. Retire that presentation before React/native props
+    // move, and await the existing SDK/lease drain before a fresh batch loads.
+    if (readerTransitionLocked()) return;
+    if (directionRef.current !== next) invalidateSavedInkPresentation();
     directionRef.current = next;
     setDirection(next);
     console.log(`RTL_READER_DIRECTION ${next}`);

@@ -3592,3 +3592,30 @@ snapshots NOT a leak pass or diagnosis. Visible-flash/feel awaits human gate;
 stock half-page geometry comparison still UNKNOWN. Fixture-bound Fit saved ink
 only; no arbitrary-PDF/highlights/Bluetooth/release/merge claim. See exact task
 tasks/T-013C-render-completion.md for phase table, exclusions and identities.
+
+### T014 code52 first injected-key gate — Off PASS, On turn FAIL, cleanup PASS
+
+2026-10-06, exact75520b6f2fe79e1918f0a414a0720f3849d47308,
+0.4.24-keys-exp1/code52. NomadSN078C10015092/Chauvet.E103.2606161001.2393_release,
+fresh reservation6008095354. Independently reviewed source and clean exact-source
+signed package PASS, normal upgrade installed exact APK/bundle. SNPLG SHA256
+8309023610bcfa1b38a803ac46e0d738703f20c235d88263ae6d71e20740ce18;
+APKc3f4e0fe765675b349e736f2be3013b07463a9dd4ec3f5aa5281c30d5744515a;
+compatible signerfac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c.
+
+No new pen. Off/PageDown93 keeps PAGE1 and exact screen: PASS. Explicit Single/
+On/navigation, Done -> Turner Ready with completed PAGE1/ink. On/PageDown93 does
+not advance: FAIL, frame remains identical, no new page/native READY. Hard stop
+before all remaining PageUp/repeat/RTL-LTR arrows/modal/Jump/spread/native-key
+phases: NOTPERFORMED. No actual paired-HID claim. Current dispatch/transport/JS
+rejection boundary UNKNOWN; no per-key arrival logs, deviceId=-1 admitted.
+
+Normal Settings Off/Auto/Done/Close verified stockT008PAGE1/saved line. PDF
+bd0fd00b...e64,13309-byte markcf444663...5724 and installed APK/bundle unchanged;
+owned SDK cache empty, four plugin IDs/28 unrelated preference values retained,
+rotation1/2 unchanged. T008 only saved Off/navigation/Auto/PAGE1 and legitimate
+timestamp change.51 exact non-symlink temporary/staging copies hash-verified,
+removed once/absence verified; all local raw evidence and code51 rollback retained
+in tmp/t014-nomad-20261006. No PDF/mark restore, rescue page/restart, firmware,
+BOOX or raw upload. Code52 remains installed/keys Off. Device release in issue23;
+next source-only boundary diagnosis/review precedes any new bounded retry.

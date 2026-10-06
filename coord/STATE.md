@@ -1,5 +1,24 @@
 # STATE — RTL Reader (updated 2026-10-02 by codex)
 
+## Latest checkpoint — 2026-10-06 T014
+
+Exact75520b6/code52 is normally installed after clean signed build/package/source
+review PASS. First bounded key trial: Off/PageDown PASS; On/Ready/PageDown FAIL,
+PAGE1 unchanged. All remaining key phases NOTPERFORMED. Normal Close to stock
+T008PAGE1/line intact, unchanged PDF/13309-byte mark, empty SDK cache,28 unrelated
+preferences/four plugins/rotation1-2 exact,51 scratch/staging copies hash-verified
+removed/absence verified. Local evidence retained; code52 remains installed with
+per-document keys Off/Auto and code51 rollback retained. Reservation6008095354
+release is posted in issue23. No further hardware under this consumed trial.
+
+Next immediate SOURCE-ONLY work localizes native dispatch -> ordered event -> JS
+guard/navigation boundary; current candidate has no individual key diagnostics,
+so cause UNKNOWN. Do not rescue with global stock key hooks or blind virtual-
+device rejection theories. New reviewed/signed candidate and exclusive reservation
+before any retry. Physical paired turner/pen/human flash waits awake; P2 reverse-
+cache loss remains separate OPEN task. No originals/BOOX/firmware/raw upload,
+PR finalization or merge. Later historical entries below are preserved.
+
 ## Goal
 RTL two-page spread reading of PDFs (Hebrew books) on Supernote Nomad with Supernote's native annotation kept intact. Original PDFs/.mark are never rewritten by RTL Reader.
 

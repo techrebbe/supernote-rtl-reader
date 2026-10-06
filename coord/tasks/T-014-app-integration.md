@@ -1,10 +1,10 @@
 # T014 reader-owned App integration — source candidate
 
-Owned checkout `work/page-turner-bridge`, based on0214110. Candidate identity
-0.4.24-keys-exp1/code52; installed exp7/code51 and released Nomad are unchanged.
-Not a hardware PASS or release. Independent full integration review and scoped
-frozen-pin approval, affected signed exact-source package build, then a fresh
-exclusive issue23 reservation/preflight are mandatory before device access.
+Owned checkout `work/page-turner-bridge`, based on0214110. Exact candidate
+75520b6f2fe79e1918f0a414a0720f3849d47308,0.4.24-keys-exp1/code52 is now normally
+installed. Software/package gates PASS, first injected-key hardware gate FAIL;
+not a Bluetooth or release pass. Code51 rollback retained. No further device
+trial without corrected/reviewed exact candidate and new exclusive reservation.
 
 ## Integrated software result — 2026-10-06
 
@@ -72,7 +72,7 @@ and an actual generated installer/strict-transform assembly test. Native source,
 Edit/Return and saved-ink authorities are unchanged. Only App, build entrypoint,
 runtime marker and workflow frozen digests need reviewed scope updates.
 
-## Earliest safe hardware gate (not yet run)
+## Earliest safe hardware gate (fixed original plan)
 
 Exact signed code52; preserve code51 rollback and existing T008 source/mark hashes.
 Fresh exclusive reservation on SN078C10015092, 10.0.40.1:5555, T008 only.
@@ -92,3 +92,44 @@ foreign document, wrong page, annotation/config change, stale render, device
 conflict or uncertain cleanup => STOP/FAIL or UNKNOWN; no global-hook rescue.
 Actual paired-turner key mapping/hold, physical pen and human flashing/feel are
 separate awake gates. No merge or PR finalization.
+
+## Exact first hardware result — 2026-10-06
+
+Reservation6008095354, NomadSN078C10015092 at10.0.40.1:5555,
+Chauvet.E103.2606161001.2393_release. Clean archive of exact75520b6, normal build,
+compatible signerfac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c.
+SNPLG8309023610bcfa1b38a803ac46e0d738703f20c235d88263ae6d71e20740ce18;
+APKc3f4e0fe765675b349e736f2be3013b07463a9dd4ec3f5aa5281c30d5744515a;
+bundle149d24cd15d741440d11e55161b4fae59b643793190c4839d6c9200d7fbe6c89.
+Normal settings upgrade verified installed config52 and exact APK/bundle. Wrapper
+APK version1 is packaging identity, not plug-in code52. All six native classes
+and packaged JS/runtime markers verified; no user keystore/raw uploads.
+
+T008 existing saved lines only, no new pen. Off/PageDown93 leaves PAGE1 unchanged:
+PASS, before/after frames byte-identical. Single/On/navigation settings then
+Done produce Turner Ready with completed PAGE1 render/ink. First On/PageDown93
+does NOT advance: FAIL. The subsequent image remains byte-identical to On/Ready,
+no new native READY/navigation/page2 event. Hard stop applied before PageUp,
+repeat/arrows/direction/modal/Jump/spread/native-after-Close key phases. Those
+phases are NOTPERFORMED, not failed/passed by inference. Actual HID transport
+unverified. dispatch -> packet -> JS guard failure boundary currently UNKNOWN:
+the candidate lacks per-key arrival/rejection diagnostics. DeviceId=-1 is already
+admitted by native and JS; do not assume virtual-keyboard rejection as cause.
+
+Normal UI cleanup Settings->Off/Auto->Done->Close PASS. Final stock T008PAGE1,
+BoxA line visible, sourcebd0fd00b4879cedb1b768a19deb2901a6d50dc7373decc8ef60e445613d83e64
+and13309-byte markcf4446631eca6644d42c305af46729374369a341f3a1c00892586b266f9e5724
+unchanged. Installed APK/bundle unchanged, owned SDK cache empty files/directories,
+four original plugins and28 unrelated preference values exact; T008 alone retains
+RTL/Auto/Fit/coverOff/PAGE1 and explicit Off/navigation. Normal saved timestamp
+change is not whole-preferences byte equality. Rotation1/2 unchanged. Intermediate
+Launcher/close-transition frame excluded; settled native frame verified. No
+rescue page/rotation/restart loop, LSPosed, companion or firmware change.
+
+51 exact regular/non-symlink remote scratch/staging copies authenticated against
+retained local hashes, removed once and absence verified. Original .mark was
+pulled directly and never deleted/restored; local evidence and rollback retained
+at tmp/t014-nomad-20261006. Code52 stays installed/Off; no safety need inferred
+for rollback. Device release follows in issue23. Next bounded source diagnosis
+must expose the actual missing dispatch/transport/guard boundary before one fresh
+reviewed retry; no speculative global-hook or emulator prerequisite.

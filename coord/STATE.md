@@ -375,3 +375,23 @@ UNKNOWN. No general PDFs/text highlights/Bluetooth/release or merge claim.
 Next autonomous source task is existing T014 reader-owned focus/key bridge,
 separate candidate/review, no global native hook/device changes. Overnight
 follow-up should consume this result, not repeat the build/install/hardware.
+
+## T014 isolated native key-host slice — 2026-10-06
+
+Owned worktree work/page-turner-bridge, branch agent/page-turner-bridge based on
+4c3465a. One unregistered ReaderKeyHost wrapper and pure native contact/activation
+Core implemented. No installer/manager/App/frozen digest change; installedcode51,
+the hardware branch, original documents and released Nomad remain untouched.
+2134 Core assertions,25 actual-Host callback-model assertions,four accepted-defect
+mutation rejections, actual Android35/RN0.79.2 API compile and existing21 JS route
+tests PASS; unchanged native/Edit/v2 gates PASS. First independent review's three
+P2 findings closed (Sink failures, detach ABA,long repeats); second exact-slice
+confirmation CLEAN. Reviewers inspected only; no independent test/hardware claim.
+
+Not a Bluetooth-delivery or package/hardware pass. Next autonomous source work:
+one atomic RN config-request identity and ordered noncoalescing native state/key
+transport, then current JS modal/transition/focus fences and existing logical
+navigation. Preserve Native Reader/OptionB; no global stock hooks. Integrated
+focused tests/review/package/signing and new reservation before injected-key
+hardware. Actual paired-turner physical button/hold mapping remains deferred.
+Do not repeat consumed T013C build/install/device gate. No merge/PR finalization.

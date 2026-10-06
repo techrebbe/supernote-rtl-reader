@@ -1,0 +1,130 @@
+package __PACKAGE__;
+
+import android.graphics.Rect;
+import android.os.Looper;
+import android.os.SystemClock;
+import android.view.KeyEvent;
+import android.view.View;
+import com.facebook.react.uimanager.ThemedReactContext;
+import com.facebook.react.views.view.ReactViewGroup;
+import java.util.UUID;
+
+/** One reader-owned wrapper, never a stock-reader/Activity/global listener.
+ * Isolated T014 source: not registered, copied by installer or shipped yet.
+ */
+public final class ReaderKeyHost extends ReactViewGroup {
+    public interface Sink {
+        void state(ReaderKeyRouteCore.State state);
+        void key(ReaderKeyRouteCore.Packet packet);
+    }
+
+    private final ReaderKeyRouteCore route;
+    private Sink sink;
+    private boolean dropped;
+    private boolean lifecycleAttached;
+    private boolean configuredEnabled;
+
+    public ReaderKeyHost(ThemedReactContext context) {
+        super(context);
+        assertUi();
+        route = new ReaderKeyRouteCore(UUID.randomUUID().toString());
+        setFocusable(true);
+        setFocusableInTouchMode(true);
+        // No automatic focus request and no blocked descendant focus: text
+        // entry, modals and chrome must retain their ordinary focus behavior.
+    }
+
+    private void assertUi() {
+        if (Looper.myLooper() != Looper.getMainLooper()) throw new IllegalStateException("Not Android UI thread");
+    }
+
+    public void configure(String document, int[] keys, boolean enabled, Sink sink) {
+        assertUi();
+        if (dropped) throw new IllegalStateException("Dropped key host");
+        ReaderKeyRouteCore.State state = route.configure(document, keys, enabled && sink != null, SystemClock.uptimeMillis());
+        this.sink = sink;
+        configuredEnabled = enabled && sink != null && keys.length > 0;
+        publish(state);
+        observe();
+    }
+
+    private void publish(ReaderKeyRouteCore.State state) {
+        Sink recipient = sink;
+        if (recipient != null) {
+            try { recipient.state(state); } catch (RuntimeException failure) { drop(); }
+        }
+    }
+
+    private void observe() {
+        assertUi();
+        if (route == null || dropped) return; // Android construction callbacks precede route creation.
+        ReaderKeyRouteCore.State before = route.snapshot();
+        ReaderKeyRouteCore.State after = route.eligibility(lifecycleAttached && isAttachedToWindow(), hasWindowFocus(),
+                isFocused(), isShown(), SystemClock.uptimeMillis());
+        if (before.generation != after.generation) publish(after);
+    }
+
+    /** Explicit caller may request focus only after binding its current UI state.
+     * Never steal focus from another descendant or a text/control view.
+     */
+    public boolean requestReaderKeyFocus() {
+        assertUi();
+        if (dropped || !configuredEnabled || !lifecycleAttached || !isAttachedToWindow() || !hasWindowFocus() || !isShown()) return false;
+        View focused = getRootView().findFocus();
+        if (focused != null && focused != this) return false;
+        return requestFocus();
+    }
+
+    public boolean validate(ReaderKeyRouteCore.State expected) {
+        assertUi(); observe();
+        return !dropped && route.isCurrent(expected);
+    }
+
+    @Override public boolean dispatchKeyEvent(KeyEvent event) {
+        assertUi(); observe();
+        if (event == null || dropped || sink == null || !isFocused()) return super.dispatchKeyEvent(event);
+        ReaderKeyRouteCore.Decision decision = route.dispatch(event.getAction(), event.getKeyCode(),
+                event.getDeviceId(), event.getDownTime(), event.getRepeatCount());
+        if (decision.packet != null) {
+            // These stamps are taken on the native dispatch thread. A future
+            // RN consumer must not substitute current JS IDs at delivery.
+            try { sink.key(decision.packet); } catch (RuntimeException failure) {
+                // Accepted DOWN might already have navigated: consume, revoke,
+                // never fall through or retry a partly delivered operation.
+                drop();
+                return true;
+            }
+        }
+        return decision.consume || super.dispatchKeyEvent(event);
+    }
+
+    @Override protected void onAttachedToWindow() {
+        lifecycleAttached = true;
+        super.onAttachedToWindow(); observe();
+    }
+    @Override protected void onDetachedFromWindow() {
+        // The framework may still report isAttachedToWindow()==true inside
+        // this callback. Fence explicitly BEFORE any outer detach work ends.
+        lifecycleAttached = false;
+        observe(); super.onDetachedFromWindow();
+    }
+    @Override public void onWindowFocusChanged(boolean focused) { super.onWindowFocusChanged(focused); observe(); }
+    @Override protected void onFocusChanged(boolean focused, int direction, Rect rect) { super.onFocusChanged(focused, direction, rect); observe(); }
+    @Override protected void onVisibilityChanged(View changed, int visibility) { super.onVisibilityChanged(changed, visibility); observe(); }
+
+    public void drop() {
+        assertUi();
+        if (dropped) return;
+        ReaderKeyRouteCore.State terminal = route.dispose(SystemClock.uptimeMillis());
+        dropped = true; configuredEnabled = false;
+        Sink old = sink; sink = null;
+        clearFocus();
+        setFocusable(false);
+        if (old != null) {
+            try { old.state(terminal); } catch (RuntimeException ignored) {
+                // Revocation and Sink release already completed. A terminal
+                // notification failure cannot rearm or escape key dispatch.
+            }
+        }
+    }
+}

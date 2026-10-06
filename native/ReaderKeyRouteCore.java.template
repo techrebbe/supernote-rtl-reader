@@ -1,0 +1,173 @@
+package __PACKAGE__;
+
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+/** T014 isolated native routing boundary; not yet installed or registered. */
+public final class ReaderKeyRouteCore {
+    public static final int MAX_CONTACTS = 32;
+    private static final long MAX_SAFE = 9007199254740991L;
+    private final Thread owner = Thread.currentThread();
+    private final String instanceId;
+    private final LinkedHashMap<String, Contact> contacts = new LinkedHashMap<>();
+    private long generation;
+    private long cutover = -1;
+    private long retiredThrough = -1;
+    private String documentId;
+    private int[] keys = new int[0];
+    private boolean enabled, attached, windowFocused, selfFocused, shown, disposed;
+
+    public static final class State {
+        public final String activationId, documentId;
+        public final long generation;
+        public final boolean eligible, disposed;
+        private State(String activation, String document, long epoch, boolean eligible, boolean disposed) {
+            this.activationId = activation; this.documentId = document; this.generation = epoch;
+            this.eligible = eligible; this.disposed = disposed;
+        }
+    }
+
+    public static final class Packet {
+        public final State state;
+        public final int action, keyCode, deviceId, repeatCount;
+        public final long downTime;
+        private Packet(State state, int action, int key, int device, long down, int repeat) {
+            this.state = state; this.action = action; this.keyCode = key;
+            this.deviceId = device; this.downTime = down; this.repeatCount = repeat;
+        }
+    }
+
+    public static final class Decision {
+        public final boolean consume;
+        public final String reason;
+        public final Packet packet;
+        private Decision(boolean consume, String reason, Packet packet) {
+            this.consume = consume; this.reason = reason; this.packet = packet;
+        }
+    }
+
+    private static final class Contact {
+        final long downTime;
+        final boolean accepted;
+        boolean held;
+        Contact(long downTime, boolean accepted) {
+            this.downTime = downTime; this.accepted = accepted; this.held = accepted;
+        }
+    }
+
+    public ReaderKeyRouteCore(String instanceId) {
+        if (instanceId == null || instanceId.isEmpty() || instanceId.length() > 128) {
+            throw new IllegalArgumentException("Missing instance identity");
+        }
+        this.instanceId = instanceId;
+    }
+
+    private void owner() {
+        if (Thread.currentThread() != owner) throw new IllegalStateException("Wrong owner thread");
+    }
+
+    private void checkTime(long uptime) {
+        if (uptime < 0 || uptime > MAX_SAFE || uptime < cutover || generation == MAX_SAFE) {
+            throw new IllegalArgumentException("Invalid/non-monotonic cutover");
+        }
+    }
+
+    private void advance(long uptime) {
+        checkTime(uptime);
+        generation++; cutover = uptime; retiredThrough = -1; contacts.clear();
+    }
+
+    /** Every committed routing configuration gets a fresh native activation. */
+    public State configure(String document, int[] keyCodes, boolean enable, long uptime) {
+        owner();
+        if (disposed) throw new IllegalStateException("Disposed route");
+        if (document == null || document.isEmpty() || document.length() > 4096 ||
+                keyCodes == null || keyCodes.length > 8) throw new IllegalArgumentException("Invalid route");
+        int[] copy = keyCodes.clone();
+        Arrays.sort(copy);
+        for (int index = 0; index < copy.length; index++) {
+            int key = copy[index];
+            if (!(key == 21 || key == 22 || key == 24 || key == 25 || key == 62 || key == 66 || key == 92 || key == 93) ||
+                    (index > 0 && copy[index - 1] == key)) throw new IllegalArgumentException("Unsupported/duplicate key");
+        }
+        // Validation finishes before any existing state changes.
+        advance(uptime); documentId = document; keys = copy; enabled = enable;
+        return snapshot();
+    }
+
+    /** Attachment, window focus, direct view focus and visibility are distinct. */
+    public State eligibility(boolean attached, boolean windowFocused, boolean selfFocused,
+            boolean shown, long uptime) {
+        owner();
+        if (disposed) return snapshot();
+        if (this.attached != attached || this.windowFocused != windowFocused ||
+                this.selfFocused != selfFocused || this.shown != shown) {
+            advance(uptime);
+            this.attached = attached; this.windowFocused = windowFocused;
+            this.selfFocused = selfFocused; this.shown = shown;
+        }
+        return snapshot();
+    }
+
+    public State snapshot() {
+        owner();
+        return new State(instanceId + ":" + generation, documentId, generation,
+                !disposed && enabled && documentId != null && keys.length > 0 &&
+                attached && windowFocused && selfFocused && shown, disposed);
+    }
+
+    public boolean isCurrent(State expected) {
+        owner();
+        State actual = snapshot();
+        return expected != null && expected.eligible && actual.eligible &&
+                expected.activationId.equals(actual.activationId) &&
+                expected.documentId.equals(actual.documentId);
+    }
+
+    public Decision dispatch(int action, int keyCode, int deviceId, long downTime, int repeatCount) {
+        owner();
+        if (disposed) return new Decision(false, "disposed", null);
+        if ((action != 0 && action != 1) || deviceId < -1 || downTime < 0 || downTime > MAX_SAFE ||
+                repeatCount < 0) return new Decision(false, "invalid", null);
+        if (Arrays.binarySearch(keys, keyCode) < 0) return new Decision(false, "unmapped", null);
+        String contactId = deviceId + ":" + keyCode;
+        Contact prior = contacts.get(contactId);
+        if (action == 1) {
+            if (prior == null || !prior.held || prior.downTime != downTime) return new Decision(false, "unowned_up", null);
+            prior.held = false;
+            return new Decision(true, "released", new Packet(snapshot(), action, keyCode, deviceId, downTime, repeatCount));
+        }
+        if (prior != null && downTime <= prior.downTime) {
+            return new Decision(prior.accepted, "duplicate_or_stale", null);
+        }
+        // Android uptime, NOT wall clock or a timeout: contacts begun before
+        // this activation can never become new presses after focus/config ABA.
+        if (downTime <= cutover || downTime <= retiredThrough) return new Decision(false, "old_contact", null);
+        if (prior == null && contacts.size() >= MAX_CONTACTS) {
+            String retire = null;
+            for (Map.Entry<String, Contact> entry : contacts.entrySet()) {
+                if (!entry.getValue().held) { retire = entry.getKey(); break; }
+            }
+            if (retire == null) {
+                retiredThrough = Math.max(retiredThrough, downTime);
+                return new Decision(false, "capacity", null);
+            }
+            retiredThrough = Math.max(retiredThrough, contacts.remove(retire).downTime);
+            if (downTime <= retiredThrough) return new Decision(false, "old_contact", null);
+        }
+        State current = snapshot();
+        boolean accepted = current.eligible && repeatCount == 0;
+        contacts.put(contactId, new Contact(downTime, accepted));
+        if (!accepted) return new Decision(false, "inactive_or_repeat", null);
+        return new Decision(true, "pressed", new Packet(current, action, keyCode, deviceId, downTime, repeatCount));
+    }
+
+    public int contactCount() { owner(); return contacts.size(); }
+
+    public State dispose(long uptime) {
+        owner();
+        if (!disposed) { advance(uptime); disposed = true; enabled = false; keys = new int[0]; }
+        return snapshot();
+    }
+}

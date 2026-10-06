@@ -32,7 +32,7 @@ function validEvent(event) {
     Number.isInteger(event.keyCode) && Number.isInteger(event.deviceId) &&
     event.deviceId >= -1 && event.deviceId <= 2147483647 &&
     Number.isSafeInteger(event.downTime) && event.downTime >= 0 &&
-    Number.isInteger(event.repeatCount) && event.repeatCount >= 0 && event.repeatCount <= 255 &&
+    Number.isInteger(event.repeatCount) && event.repeatCount >= 0 && event.repeatCount <= 2147483647 &&
     (event.action === 0 || event.action === 1);
 }
 

@@ -46,7 +46,7 @@ test('binding authority is copied and rejects malformed or reserved keys', () =>
 test('every malformed event is non-mutating and no unowned repeat or UP turns a page', () => {
   const h = harness();
   for (const patch of [{action: 2}, {action: '0'}, {downTime: NaN}, {downTime: -1}, {downTime: 1.5},
-    {repeatCount: -1}, {repeatCount: 256}, {deviceId: -2}, {deviceId: 0.5},
+    {repeatCount: -1}, {repeatCount: 2147483648}, {deviceId: -2}, {deviceId: 0.5},
     {keyCode: '93'}, {action: 1}, {activationId: 'old-mount'}, {documentId: 'other.pdf'}, {documentId: null}]) {
     assert.equal(h.press(93, patch).handled, false, JSON.stringify(patch));
   }
@@ -55,7 +55,7 @@ test('every malformed event is non-mutating and no unowned repeat or UP turns a 
 
 test('one physical press turns once; held repeats and stale DOWN never queue more turns', () => {
   const h = harness(); h.press(93, {downTime: 10});
-  for (const repeatCount of [0, 1, 2, 255]) assert.equal(h.press(93, {downTime: 10, repeatCount}).handled, true);
+  for (const repeatCount of [0, 1, 2, 255, 256, 512, 2147483647]) assert.equal(h.press(93, {downTime: 10, repeatCount}).handled, true);
   assert.equal(h.press(93, {downTime: 9}).handled, true);
   assert.deepEqual(h.turns, ['next']);
   assert.equal(h.press(93, {action: 1, downTime: 9}).handled, false);

@@ -979,10 +979,11 @@ def check(repo_root: Path) -> None:
         ),
         (
             app_path,
-            # T013 independent direction-correction review: retire the T008
-            # presentation before a physical slot swap; keep actual SDK/lease
-            # drain, T004 eligibility and native writer/save behavior unchanged.
-            "4186ecf0384582aa1d6be4dc19f29384c2609bbc0898f55c366e771670af6bc6",
+            # T014 scoped integration: one reader-owned key wrapper, opt-in
+            # preferences and live UI/render fences. Existing Edit/saved-ink
+            # ownership/native writer/save remain unchanged. This exact pin is
+            # part of the pending independent integrated confirmation review.
+            "8c8515012b4115f859f32b7396e9cb77598528e41f9de565f07793926066a1a8",
             "Native Spread UI authority source",
         ),
         (
@@ -1021,8 +1022,9 @@ def check(repo_root: Path) -> None:
         ),
         (
             index_path,
-            # T013C candidate-only runtime marker exp6 -> exp7; no authority change.
-            "9399b7b6bc55a5b3aecc688766ff1db576cfbf2f47914f22b182ecbb8b270f2e",
+            # T014 keys-exp1 marker and full external-Close JS key fence;
+            # one existing native handoff, no new writer/save/restart path.
+            "c8613c2c992e85a569d4bb71bd02ae9911442bb5e09b0ad38956bb56f2f0cf67",
             "Edit/Return activation and close authority",
         ),
         (
@@ -1036,13 +1038,15 @@ def check(repo_root: Path) -> None:
         ),
         (
             workflow_path,
-            # T013C candidate-only CI artifact label exp6 -> exp7; gates unchanged.
-            "5fda80ffb6f9ba199ba55e67ea47166707284c4e3d93a92ceecde824dd6f986f",
+            # T014 candidate label + actual key Core/Host/bridge and JS/wiring
+            # regression gates; all prior annotation/provenance gates retained.
+            "bbb79f343eb3f1f192c1d0ffcc50a23425fd742bbff6e928b94b90e2e0e73c59",
             "Native Spread companion-build workflow",
         ),
         (
             plugin_build_path,
-            "aecbf1327b52e3e07110bd1864892c272b6f9329f7d102ceeb96f3015268f6d2",
+            # T014 adds only four explicit reader-key JS dependency copies.
+            "efc20c47f020b653040f977226dfe35f61b0eb595f8cfec2aa6fb3f6fb3c1a3c",
             "native plugin build entrypoint",
         ),
         (

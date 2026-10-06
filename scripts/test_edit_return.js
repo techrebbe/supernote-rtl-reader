@@ -57,6 +57,23 @@ test('corrupt JSON behaves like no saved prefs', () => {
   assert.equal(r.source, 'native');
 });
 
+test('page turner is per-document explicit opt-in; malformed profile never claims keys', () => {
+  for (const value of [undefined, false, null, 1, 'true', {}, []]) {
+    assert.equal(decode(prefs({pageTurnerEnabled: value}), ctx(3)).pageTurnerEnabled, false);
+  }
+  for (const profile of ['navigation', 'volume', 'volume_reversed']) {
+    const r = decode(prefs({pageTurnerEnabled: true, pageTurnerProfile: profile}), ctx(3));
+    assert.equal(r.pageTurnerEnabled, true); assert.equal(r.pageTurnerProfile, profile);
+  }
+  for (const profile of [null, false, 24, {}, [], 'anything', 'toString', '__proto__']) {
+    const r = decode(prefs({pageTurnerEnabled: true, pageTurnerProfile: profile}), ctx(3));
+    assert.equal(r.pageTurnerEnabled, false); assert.equal(r.pageTurnerProfile, 'navigation');
+  }
+  const off = er.buildEditPayload({pageTurnerEnabled: false, pageTurnerProfile: 'volume'},
+    {editPage: 3}, 1);
+  assert.equal(off.pageTurnerEnabled, false); assert.equal(off.pageTurnerProfile, 'volume');
+});
+
 test('saved page wins when native page equals the page at last open', () => {
   const r = decode(prefs({lastPageIndex: 30, nativePageIndexAtOpen: 10}), ctx(10));
   assert.equal(r.pageIndex, 30);
@@ -408,6 +425,43 @@ async function runDisplayProducer(source, options = {}) {
   assert.equal(captured.fatalError, null, 'producer must not fail behind the settlement assertions');
   return {...producer, captured, request: environment.nativeRenderRef.current};
 }
+
+test('generated key gate rearms sizing/height changes without inventing a new display generation', async t => {
+  const src = generateNativeAppSource(t);
+  const gateStart = src.indexOf('  const readerKeyGeometry =');
+  const gateEnd = src.indexOf('  const savedInkProfile =', gateStart);
+  assert.ok(gateStart > 0 && gateEnd > gateStart);
+  const refs = {readerKeyPresentationRef: {current: null}, readerKeyUiRef: {current: null},
+    filePathRef: {current: '/doc/a.pdf'}, pageIndexRef: {current: 4}, totalPagesRef: {current: 20},
+    effectiveModeRef: {current: 'spread'}, directionRef: {current: 'rtl'}, coverSeparateRef: {current: true},
+    spreadSizingRef: {current: 'fit'}, renderTokenRef: {current: 0}, readerKeyFenceEpochRef: {current: 0},
+    pageAreaWidthRef: {current: 1872}, displayRef: {current: {}}, renderingRef: {current: true},
+    mountedRef: {current: true}, nativeSpreadBusyRef: {current: false}, nativeRenderRef: {current: {}}};
+  const ui = {preferencesReady: true, settingsOpen: false, jumpOpen: false, nativeEditableConfirmOpen: false,
+    editBusy: false, fatalError: null, nativeSpreadConfigured: false, nativeSpreadEnabled: false,
+    pageTurnerEnabled: true, pageTurnerProfile: 'navigation', pageIndex: 4, effectiveMode: 'spread',
+    direction: 'rtl', coverSeparate: true, spreadSizing: 'fit', window: {width: 1872, height: 1404}};
+  function read() {
+    const scope = {...refs, ...ui, ...loadHelpersFromAppJs(src), listEditTargets: er.listEditTargets,
+      globalThis: {}, documentContext: ctx(4, 20), readerTransitionLocked: () => false};
+    return new Function(...Object.keys(scope), src.slice(gateStart, gateEnd) + '\nreturn getReaderKeyContext();')(...Object.values(scope));
+  }
+  assert.equal(read().blocked, true);
+  const rendered = await runDisplayProducer(src, {...refs, pageIndex: 4, viewMode: 'spread',
+    pageAreaLayout: {width: 1872, height: 1404}, coverSeparate: true});
+  for (const page of [3, 4]) rendered.complete({nativeEvent: {pageIndex: page}}, rendered.request.token);
+  refs.displayRef.current = rendered.captured.display; refs.renderingRef.current = rendered.captured.rendering;
+  assert.equal(read().blocked, false);
+  const token = refs.renderTokenRef.current;
+  for (const sizing of ['native_fill', 'fit']) {
+    ui.spreadSizing = sizing; refs.spreadSizingRef.current = sizing;
+    assert.equal(read().blocked, false, 'Native contentMode changes do not mint a JS display generation');
+    assert.equal(refs.renderTokenRef.current, token);
+  }
+  ui.window = {width: 1800, height: 1000}; // measured page width/mode is unchanged
+  assert.equal(read().blocked, false, 'Window/height update must not wait for a nonexistent foreground request');
+  assert.equal(refs.renderTokenRef.current, token);
+});
 
 test('hardware CoverOff regression: unchanged right page gets a fresh native view identity', async t => {
   const source = generateNativeAppSource(t);

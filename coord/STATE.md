@@ -424,3 +424,31 @@ in build, review only scoped pin changes, full integrated tests/review/package/
 signing then fresh reservation for earliest injected-key disposable gate.
 Actual paired-turner mapping/physical hold and human display gates wait awake.
 No repeat of completed T013C, original/BOOX/raw upload/PR finalization or merge.
+
+## T014 bounded App integration — 2026-10-06
+
+Supersedes the unregistered/unshipped source status above. One reader-owned
+pageArea key host now uses the reviewed atomic native/JS transport and current
+logical handlers. Per-document Off/default and explicit navigation/volume profiles,
+fresh per-mount namespace, non-stealing exact-request focus, synchronous current
+modal/Jump/Edit/Close/render/geometry/document/direction fences and visible
+fail-closed transport state are integrated. Existing layout/touch markers and
+PDF children are retained. No Activity/global stock hook or writer/save/restart
+path; protected native SDK/saved-ink/Edit authorities unchanged.
+
+Candidate0.4.24-keys-exp1/code52. Full source confirmation CLEAN; accepted sizing
+and external-Close P2 findings closed with actual-source red-to-green tests.
+168 JS tests/62 lifecycle checks,2134Core/33Host/49bridge assertions, four defect
+mutants, real Android/RN compile, generated installer/assembly, saved-ink geometry/
+renderer/wiring and native85407core/271mutations/provenance/package/invariant
+gates PASS. Four exact LF source pins independently reviewed, not blind repins.
+Reviewers inspected only; no hardware delivery claim. Local review reports
+tmp/t014-app-review1.md and review2.md remain outside the published source.
+
+Next immediate action: commit/push reviewed explicit source/test/docs, build the
+exact clean signed candidate and compare signer to retained installedcode51.
+Then a new exclusive issue23 reservation/preflight precedes bounded T008 injected
+keys. Installed exp7/code51 and released Nomad6007047362 unchanged; no queued
+hardware or consumed-reservation reuse. Physical paired-turner/pen/human flash
+gates wait awake. P2 reverse-cache loss remains OPEN, snapshots NOT leak proof.
+No originals/BOOX/firmware/raw uploads/PR finalization/merge.

@@ -30,7 +30,7 @@ function harness({mode = 'single', direction = 'rtl', page = 2, total = 8, cover
     directionRef: {current: direction}, readerClosedRef: {current: false},
     editInFlightRef: {current: false}, closeInFlightRef: {current: false},
     globalThis: {RTL_READER_TRANSITION_IN_FLIGHT: null},
-    invalidateSavedInkPresentation() { invalidations++; }, setPageIndexRaw() {}, console: {log() {}},
+    invalidateSavedInkPresentation() { invalidations++; }, fenceReaderKeys() {}, setPageIndexRaw() {}, console: {log() {}},
   };
   const names = Object.keys(scope);
   const route = new Function(...names, geometry + locked + setter + logicalRoute +

@@ -81,8 +81,24 @@ public final class ReaderKeyHostTests {
         check(!host.requestReaderKeyFocus(),"Disabled route cannot request focus");
         host.drop();
     }
+    private static void offReleasesFocus() {
+        Sink sink=new Sink();
+        ReaderKeyHost fresh=new ReaderKeyHost(new ThemedReactContext());
+        check(!fresh.focusable && !fresh.focusableInTouchMode,"Unconfigured host is non-focusable");
+        check(!fresh.requestFocus(),"Unconfigured ordinary framework request cannot focus");
+        ReaderKeyHost host=host(sink);
+        long generation=sink.latest.generation;
+        host.configure("document-one",new int[]{93},false,sink);
+        check(!host.focusable && !host.focusableInTouchMode && !host.focused,"OFF releases focus and cannot capture controls");
+        check(!sink.latest.eligible && sink.latest.generation>generation,"OFF leaves the latest published generation inactive");
+        check(!host.dispatchKeyEvent(new KeyEvent(0,93,++SystemClock.now,0)),"OFF delegates ordinary key");
+        host.configure("document-one",new int[]{93},true,sink);
+        check(host.focusable && !host.focused,"ON does not automatically steal focus");
+        host.drop();
+        check(!host.focusable && !host.focusableInTouchMode,"Drop leaves no focus target");
+    }
     public static void main(String[] args) {
-        callbacksFailClosed(); lifecycleAbaAndFocus();
+        callbacksFailClosed(); lifecycleAbaAndFocus(); offReleasesFocus();
         System.out.println("Reader key Host callback model: PASS "+assertions+" assertions; actual device delivery NOT TESTED");
     }
 }

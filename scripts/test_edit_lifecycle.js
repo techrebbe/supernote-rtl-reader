@@ -19,6 +19,7 @@ const APP = fs.readFileSync(path.join(ROOT, 'overlay/App.js'), 'utf8').replace(/
 const INDEX = fs.readFileSync(path.join(ROOT, 'overlay/index.js'), 'utf8').replace(/\r\n/g, '\n');
 const er = require(path.join(ROOT, 'overlay/editReturn.js'));
 const {selectSavedInkProfile} = require(path.join(ROOT, 'overlay/savedInk.js'));
+const {createReaderKeySession} = require(path.join(ROOT, 'overlay/readerKeySession.js'));
 const FILE = '/doc/a.pdf';
 const NATIVE_OPEN_PAGE = 2;
 const READER_PAGE = 10;
@@ -1233,6 +1234,84 @@ test('ordinary ink eligibility comes from exact source/page and vetted Fit views
   assert.equal(portraitSpread.callback.savedInkVisible, false);
   const square = harness({filePath: file, state, window: {width: 1404, height: 1404}});
   assert.equal(square.callback.savedInkVisible, false);
+});
+
+test('actual key eligibility requires a fresh geometry-bound completed render and live UI', () => {
+  const h = harness({state: {settingsOpen: false, jumpOpen: false, pageTurnerEnabled: true}});
+  assert.equal(h.callback.getReaderKeyContext().blocked, true, 'No fabricated native render generation');
+  h.callback.renderTokenRef.current = 1;
+  h.state.display.renderToken = 1; h.render();
+  assert.equal(h.callback.getReaderKeyContext().blocked, false);
+  for (const patch of [{settingsOpen: true}, {jumpOpen: true}, {nativeEditableConfirmOpen: true},
+    {editBusy: true}, {fatalError: 'failed'}, {nativeSpreadConfigured: true}, {nativeSpreadEnabled: true}, {rendering: true}]) {
+    const before = {...h.state}; Object.assign(h.state, patch); h.render();
+    assert.equal(h.callback.getReaderKeyContext().blocked, true, JSON.stringify(patch));
+    Object.assign(h.state, before); h.render();
+  }
+  h.state.direction = 'ltr';
+  h.state.display.leftPageIndex = READER_PAGE; h.state.display.rightPageIndex = EDIT_PAGE; h.render();
+  assert.equal(h.callback.getReaderKeyContext().blocked, true, 'Old page cannot authorize changed geometry/direction');
+  h.callback.renderTokenRef.current = 2; h.state.display.renderToken = 2; h.render();
+  assert.equal(h.callback.getReaderKeyContext().blocked, false);
+  for (const name of ['RTL_READER_TRANSITION_IN_FLIGHT', 'RTL_READER_INK_EXIT_PENDING', 'RTL_READER_INK_CLEANUP_BLOCKED']) {
+    h.context[name] = true; assert.equal(h.callback.getReaderKeyContext().blocked, true); h.context[name] = null;
+  }
+  h.callback.nativeSpreadBusyRef.current = true; assert.equal(h.callback.getReaderKeyContext().blocked, true);
+});
+
+test('actual menus, page changes, preferences and unmount revoke keys synchronously', async () => {
+  const h = harness({state: {settingsOpen: false, jumpOpen: false, pageTurnerEnabled: true}});
+  h.callback.renderTokenRef.current = 1; h.state.display.renderToken = 1; h.render();
+  let fences = 0, disposals = 0;
+  h.callback.readerKeysRef.current = {fence() { fences++; }, dispose() { disposals++; }};
+  h.callback.openSettings(); assert.equal(fences, 1);
+  assert.equal(h.callback.getReaderKeyContext().blocked, true, 'Pre-render menu fence');
+  h.render(); h.callback.closeSettings(); assert.equal(fences, 2); h.render();
+  h.callback.openJump(); assert.equal(fences, 3);
+  h.render(); h.callback.cancelJump(); assert.equal(fences, 4); h.render();
+  h.callback.setPageTurnerValue(false, 'volume'); assert.equal(fences, 5); h.render();
+  assert.equal(h.callback.latestPreferencesRef.current.pageTurnerEnabled, false);
+  assert.equal(h.callback.latestPreferencesRef.current.pageTurnerProfile, 'volume');
+  await h.callback.savePreferences('debounced');
+  assert.equal(h.persisted.pageTurnerEnabled, false, 'Explicit OFF persisted using the existing queue');
+  h.callback.nextLogicalPage(); assert.equal(fences, 6);
+  assert.equal(h.callback.getReaderKeyContext().blocked, true);
+  h.unmount(); assert.equal(disposals, 1);
+});
+
+test('external Close keeps queued and fresh keys fenced through deferred handoff AND host close', async () => {
+  const handoff = deferred(), close = deferred();
+  const h = harness({indexWrapper: true, indexListener: true, handoffPlans: [handoff.promise], closePlans: [close.promise],
+    state: {settingsOpen: false, jumpOpen: false, pageTurnerEnabled: true}});
+  h.callback.renderTokenRef.current = 1; h.state.display.renderToken = 1; h.render();
+  const specs = [];
+  const owner = createReaderKeySession({namespace: 'd1a05000-0000-4000-8000-000000000001',
+    currentContext: () => h.callback.getReaderKeyContext(),
+    turn: action => action === 'next' ? h.callback.nextLogicalPage() : h.callback.previousLogicalPage(),
+    publishSpec: spec => specs.push(spec), focus() {}, status() {}});
+  h.context.RTL_READER_KEY_OWNER = {fence: () => owner.fence()};
+  owner.synchronize();
+  const packet = (sequence, kind = 'key') => ({schemaVersion: 1, kind, requestId: specs[0].requestId,
+    documentId: FILE, activationId: 'd1a05000-0000-4000-8000-000000000002:1', generation: 1,
+    sequence, eligible: true, disposed: false,
+    ...(kind === 'key' ? {action: 0, keyCode: 93, deviceId: 2, downTime: 100 + sequence, repeatCount: 0} : {})});
+  owner.handle(packet(1, 'state'));
+  const queued = packet(2);
+  const closing = h.closeViaWrapper();
+  await flush(); assert.equal(h.handoffs.length, 1);
+  assert.equal(h.callback.getReaderKeyContext().blocked, true, 'Fence survives completed ink drain');
+  owner.handle(queued); owner.handle(packet(3));
+  h.pressButton(); assert.equal(h.activations.length, 0, 'No replacement reader while native handoff is pending');
+  assert.equal(h.state.pageIndex, READER_PAGE);
+  handoff.resolve({filePath: FILE, pageIndex: READER_PAGE}); await flush();
+  assert.equal(h.closes.length, 1);
+  assert.equal(h.callback.getReaderKeyContext().blocked, true, 'Fence survives pending host close');
+  owner.handle(packet(4)); assert.equal(h.state.pageIndex, READER_PAGE);
+  h.pressButton(); assert.equal(h.activations.length, 0, 'No replacement reader while host close is pending');
+  close.resolve(); await bounded(closing);
+  assert.equal(h.context.RTL_READER_KEY_EXIT_PENDING, null);
+  assert.equal(owner.getState().failed, false);
+  owner.dispose();
 });
 
 (async () => {

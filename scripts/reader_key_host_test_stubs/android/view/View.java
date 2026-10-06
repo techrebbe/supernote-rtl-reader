@@ -5,16 +5,17 @@ public class View {
     public boolean frameworkAttached=true, windowFocused=true, focused=false, shown=true;
     public int delegated;
     public View otherFocus;
+    public boolean focusable, focusableInTouchMode;
     public int getId() { return 42; }
     public boolean isAttachedToWindow() { return frameworkAttached; }
     public boolean hasWindowFocus() { return windowFocused; }
     public boolean isFocused() { return focused; }
     public boolean isShown() { return shown; }
-    public void setFocusable(boolean value) {}
-    public void setFocusableInTouchMode(boolean value) {}
+    public void setFocusable(boolean value) { focusable=value; if (!value && focused) clearFocus(); }
+    public void setFocusableInTouchMode(boolean value) { focusableInTouchMode=value; }
     public View getRootView() { return this; }
     public View findFocus() { return otherFocus != null ? otherFocus : focused ? this : null; }
-    public boolean requestFocus() { focused=true; onFocusChanged(true,0,null); return true; }
+    public boolean requestFocus() { if (!focusable) return false; focused=true; onFocusChanged(true,0,null); return true; }
     public void clearFocus() { focused=false; onFocusChanged(false,0,null); }
     public boolean dispatchKeyEvent(KeyEvent event) { delegated++; return false; }
     protected void onAttachedToWindow() {}

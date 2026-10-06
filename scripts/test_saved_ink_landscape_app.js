@@ -135,6 +135,7 @@ function harness(hooks = {}, options = {}) {
           ...instance.view, documentContext: {filePath: instance.view.filePath},
           savedInk: instance.state, savedInkPresentationEpoch: instance.epoch,
           readerTransitionLocked: () => locked,
+          fenceReaderKeys() {},
           setSavedInk(value) { instance.state = value; updates.push(value); },
           setSavedInkPresentationEpoch(value) { instance.epoch = value; },
           setPageIndexRaw(value) { instance.view.pageIndex = value; },

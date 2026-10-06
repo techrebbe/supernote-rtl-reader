@@ -93,6 +93,12 @@ def main() -> None:
         ("SavedInkRegistry.kt.template", "SavedInkRegistry.kt"),
         ("SavedInkProfiles.kt.template", "SavedInkProfiles.kt"),
         ("SavedInkFitGeometry.java.template", "SavedInkFitGeometry.java"),
+        ("ReaderKeyRouteCore.java.template", "ReaderKeyRouteCore.java"),
+        ("ReaderKeyHost.java.template", "ReaderKeyHost.java"),
+        ("ReaderKeyConfiguration.java.template", "ReaderKeyConfiguration.java"),
+        ("ReaderKeyEvent.java.template", "ReaderKeyEvent.java"),
+        ("ReaderKeyModule.java.template", "ReaderKeyModule.java"),
+        ("ReaderKeyHostManager.java.template", "ReaderKeyHostManager.java"),
     ):
         source = repo_root / "native" / source_name
         rendered = source.read_text(encoding="utf-8").replace("__PACKAGE__", package_name)

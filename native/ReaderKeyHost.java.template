@@ -10,7 +10,6 @@ import com.facebook.react.views.view.ReactViewGroup;
 import java.util.UUID;
 
 /** One reader-owned wrapper, never a stock-reader/Activity/global listener.
- * Isolated T014 source: not registered, copied by installer or shipped yet.
  */
 public final class ReaderKeyHost extends ReactViewGroup {
     public interface Sink {
@@ -28,8 +27,8 @@ public final class ReaderKeyHost extends ReactViewGroup {
         super(context);
         assertUi();
         route = new ReaderKeyRouteCore(UUID.randomUUID().toString());
-        setFocusable(true);
-        setFocusableInTouchMode(true);
+        setFocusable(false);
+        setFocusableInTouchMode(false);
         // No automatic focus request and no blocked descendant focus: text
         // entry, modals and chrome must retain their ordinary focus behavior.
     }
@@ -45,6 +44,12 @@ public final class ReaderKeyHost extends ReactViewGroup {
         this.sink = sink;
         configuredEnabled = enabled && sink != null && keys.length > 0;
         publish(state);
+        if (dropped) return;
+        // Publish the new configuration BEFORE focus callbacks can mint a
+        // later lifecycle generation. OFF must release ordinary control focus.
+        setFocusableInTouchMode(configuredEnabled);
+        setFocusable(configuredEnabled);
+        if (!configuredEnabled) clearFocus();
         observe();
     }
 
@@ -119,6 +124,7 @@ public final class ReaderKeyHost extends ReactViewGroup {
         dropped = true; configuredEnabled = false;
         Sink old = sink; sink = null;
         clearFocus();
+        setFocusableInTouchMode(false);
         setFocusable(false);
         if (old != null) {
             try { old.state(terminal); } catch (RuntimeException ignored) {

@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import {PluginCommAPI, PluginDocAPI, PluginFileAPI, PluginManager} from 'sn-plugin-lib';
 import {createSavedInkController, selectSavedInkProfile} from './savedInk';
+import ReaderKeyView from './ReaderKeyView';
 import {
   EDIT_BLOCKED_MESSAGES,
   buildEditPayload,
@@ -242,6 +243,12 @@ function decodePreferences(raw, context, now = Date.now()) {
   const spreadSizing = saved?.spreadSizing === 'native_fill'
     ? 'native_fill'
     : 'fit';
+  const pageTurnerProfile = ['navigation', 'volume', 'volume_reversed'].includes(saved?.pageTurnerProfile)
+    ? saved.pageTurnerProfile : 'navigation';
+  // Explicit per-document opt-in, never truthy coercion or system-wide keys.
+  const pageTurnerEnabled = saved?.pageTurnerEnabled === true &&
+    (saved?.pageTurnerProfile === undefined ||
+      ['navigation', 'volume', 'volume_reversed'].includes(saved.pageTurnerProfile));
 
   // Page selection (saved RTL page vs native page vs Edit return) lives in
   // ./editReturn so it can be tested on the host.
@@ -255,6 +262,8 @@ function decodePreferences(raw, context, now = Date.now()) {
     showSpreadDivider,
     showNativeSpreadHeader,
     spreadSizing,
+    pageTurnerEnabled,
+    pageTurnerProfile,
     pageIndex,
     source: choice.source,
     editReturnStatus: choice.editReturnStatus,
@@ -299,6 +308,9 @@ export default function App() {
   const [chromeVisible, setChromeVisible] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [jumpOpen, setJumpOpen] = useState(false);
+  const [pageTurnerEnabled, setPageTurnerEnabled] = useState(false);
+  const [pageTurnerProfile, setPageTurnerProfile] = useState('navigation');
+  const [pageTurnerStatus, setPageTurnerStatus] = useState('Off');
   const [jumpText, setJumpText] = useState('');
 
   const effectiveMode =
@@ -362,11 +374,20 @@ export default function App() {
   const transitionTokenRef = useRef(null);
   const editRecoveryRef = useRef(null);
   const preferencesWriteRef = useRef(Promise.resolve());
+  const readerKeysRef = useRef(null);
+  const readerKeyFenceEpochRef = useRef(0);
+  const readerKeyUiRef = useRef(null);
+  const readerKeyPresentationRef = useRef(null);
+  const fenceReaderKeys = () => {
+    readerKeyFenceEpochRef.current += 1;
+    readerKeysRef.current?.fence();
+  };
   const readerTransitionLocked = () =>
     readerClosedRef.current || editInFlightRef.current || closeInFlightRef.current ||
     Boolean(globalThis.RTL_READER_TRANSITION_IN_FLIGHT);
   const beginReaderTransition = () => {
     if (!mountedRef.current || readerTransitionLocked()) return false;
+    fenceReaderKeys();
     const token = {
       allowClose: false,
       recoverAfterUnmount: async () => {
@@ -401,6 +422,7 @@ export default function App() {
     if (readerTransitionLocked()) return;
     const previous = pageIndexRef.current;
     const next = typeof value === 'function' ? value(previous) : value;
+    if (next !== previous) fenceReaderKeys();
     const visiblePages = page => effectiveModeRef.current === 'single' ? [page]
       : Object.values(getVisualSpread(page, coverSeparateRef.current, totalPagesRef.current, directionRef.current))
         .filter(Number.isInteger).sort((a, b) => a - b);
@@ -480,6 +502,45 @@ export default function App() {
   showNativeSpreadHeaderRef.current = showNativeSpreadHeader;
   spreadSizingRef.current = spreadSizing;
   pageAreaWidthRef.current = Math.max(1, window.width);
+
+  // These inputs mint JS foreground display tokens in the generated effect.
+  // Height/contentMode are native presentation changes only: the request ID
+  // still fences them, but must not await a nonexistent new foreground token.
+  const readerKeyGeometry = JSON.stringify([filePathRef.current, pageIndex, effectiveMode,
+    direction, coverSeparate, pageAreaWidthRef.current]);
+  if (readerKeyPresentationRef.current?.geometry !== readerKeyGeometry) {
+    readerKeyPresentationRef.current = {geometry: readerKeyGeometry, afterToken: renderTokenRef.current};
+  }
+  readerKeyUiRef.current = {preferencesReady, settingsOpen, jumpOpen, nativeEditableConfirmOpen,
+    editBusy, fatalError, nativeSpreadConfigured, nativeSpreadEnabled, pageTurnerEnabled,
+    pageTurnerProfile, width: window.width, height: window.height,
+    fenceEpoch: readerKeyFenceEpochRef.current};
+  const getReaderKeyContext = () => {
+    const ui = readerKeyUiRef.current;
+    const file = filePathRef.current ?? documentContext?.filePath;
+    const page = pageIndexRef.current;
+    const mode = effectiveModeRef.current;
+    const settled = listEditTargets({mode, pageIndex: page,
+      expectedVisual: mode === 'spread' && Number.isInteger(page)
+        ? getVisualSpread(page, coverSeparateRef.current, totalPagesRef.current, directionRef.current) : null,
+      display: displayRef.current, rendering: renderingRef.current}).settled;
+    return {documentId: file || 'reader-not-ready', direction: directionRef.current,
+      enabled: ui.pageTurnerEnabled === true, profile: ui.pageTurnerProfile,
+      presentationId: JSON.stringify([file, page, mode, coverSeparateRef.current,
+        spreadSizingRef.current, ui.width, ui.height, displayRef.current?.renderToken,
+        readerKeyFenceEpochRef.current]),
+      blocked: !mountedRef.current || !ui.preferencesReady || !file || !settled ||
+        !Number.isInteger(displayRef.current?.renderToken) ||
+        displayRef.current.renderToken <= readerKeyPresentationRef.current.afterToken ||
+        displayRef.current.renderToken !== renderTokenRef.current ||
+        ui.settingsOpen || ui.jumpOpen || ui.nativeEditableConfirmOpen || ui.editBusy ||
+        Boolean(ui.fatalError) || nativeSpreadBusyRef.current || readerTransitionLocked() ||
+        ui.fenceEpoch !== readerKeyFenceEpochRef.current ||
+        ui.nativeSpreadConfigured || ui.nativeSpreadEnabled ||
+        Boolean(globalThis.RTL_READER_KEY_EXIT_PENDING) ||
+        Boolean(globalThis.RTL_READER_INK_EXIT_PENDING) ||
+        globalThis.RTL_READER_INK_CLEANUP_BLOCKED === true};
+  };
 
   const savedInkProfile = selectSavedInkProfile(documentContext?.filePath, totalPages);
   const savedInkPages = savedInkProfile?.needsCanvasWitness
@@ -661,6 +722,8 @@ export default function App() {
       showSpreadDivider,
       showNativeSpreadHeader,
       spreadSizing,
+      pageTurnerEnabled,
+      pageTurnerProfile,
       lastPageIndex: editReturnRef.current ? editReturnRef.current.editPage : pageIndex,
       nativePageIndexAtOpen: nativePageIndexAtOpenRef.current,
       ...(editReturnRef.current ? {editReturn: editReturnRef.current} : {}),
@@ -891,6 +954,8 @@ export default function App() {
         setShowSpreadDivider(restoredDivider);
         setShowNativeSpreadHeader(restoredHeader);
         setSpreadSizing(restoredSizing);
+        setPageTurnerEnabled(restored.pageTurnerEnabled);
+        setPageTurnerProfile(restored.pageTurnerProfile);
         setPageIndex(restored.pageIndex);
         setTotalPages(context.totalPages);
         setPreferencesReady(true);
@@ -935,6 +1000,7 @@ export default function App() {
     initialize();
     return () => {
       mountedRef.current = false;
+      readerKeysRef.current?.dispose();
       renderTokenRef.current += 1;
       cacheRef.current.clear();
       prefetchingRef.current.clear();
@@ -984,6 +1050,8 @@ export default function App() {
     showSpreadDivider,
     showNativeSpreadHeader,
     spreadSizing,
+    pageTurnerEnabled,
+    pageTurnerProfile,
   ]);
 
   useEffect(() => {
@@ -1349,6 +1417,7 @@ export default function App() {
 
   const openSettings = () => {
     if (readerTransitionLocked()) return;
+    fenceReaderKeys();
     setSettingsOpen(true);
   };
 
@@ -1360,7 +1429,16 @@ export default function App() {
       );
       return;
     }
+    fenceReaderKeys();
     setSettingsOpen(false);
+  };
+
+  const setPageTurnerValue = (enabled, profile = pageTurnerProfile) => {
+    if (readerTransitionLocked() || nativeSpreadBusyRef.current) return;
+    if (typeof enabled !== 'boolean' || !['navigation', 'volume', 'volume_reversed'].includes(profile)) return;
+    fenceReaderKeys();
+    setPageTurnerEnabled(enabled);
+    setPageTurnerProfile(profile);
   };
 
   const goBy = delta => {
@@ -1461,6 +1539,7 @@ export default function App() {
     // batch is unchanged. Retire that presentation before React/native props
     // move, and await the existing SDK/lease drain before a fresh batch loads.
     if (readerTransitionLocked()) return;
+    fenceReaderKeys();
     if (directionRef.current !== next) invalidateSavedInkPresentation();
     directionRef.current = next;
     setDirection(next);
@@ -1470,6 +1549,7 @@ export default function App() {
   const setViewModeValue = next => {
     if (readerTransitionLocked()) return;
     if (!['auto', 'single', 'spread'].includes(next)) return;
+    fenceReaderKeys();
     if (viewModeRef.current !== next) invalidateSavedInkPresentation();
     viewModeRef.current = next;
     setViewMode(next);
@@ -1845,11 +1925,13 @@ export default function App() {
 
   const openJump = () => {
     if (readerTransitionLocked()) return;
+    fenceReaderKeys();
     setJumpText(Number.isInteger(pageIndex) ? String(pageIndex + 1) : '');
     setJumpOpen(true);
   };
 
   const cancelJump = () => {
+    fenceReaderKeys();
     Keyboard.dismiss();
     setJumpOpen(false);
   };
@@ -1905,8 +1987,17 @@ export default function App() {
     <SafeAreaView style={styles.root}>
       <StatusBar hidden />
 
-      <View
+      <ReaderKeyView
         style={styles.pageArea}
+        controllerRef={readerKeysRef}
+        context={JSON.stringify(getReaderKeyContext())}
+        currentContext={getReaderKeyContext}
+        turn={action => action === 'next' ? nextLogicalPage() : previousLogicalPage()}
+        onStatus={value => {
+          if (!mountedRef.current) return;
+          setPageTurnerStatus(value);
+          console.log(`RTL_READER_PAGE_TURNER ${value}`);
+        }}
         onLayout={event => {
           pageAreaWidthRef.current = Math.max(1, event.nativeEvent.layout.width);
           pageAreaLeftRef.current = event.nativeEvent.layout.x ?? 0;
@@ -1951,7 +2042,7 @@ export default function App() {
         ) : (
           <View style={styles.center} />
         )}
-      </View>
+      </ReaderKeyView>
 
       {rendering && (
         <View pointerEvents="none" style={styles.renderBadge}>
@@ -1994,7 +2085,7 @@ export default function App() {
           <View style={styles.header}>
             <View style={styles.statusBlock}>
               <Text style={styles.statusPrimary}>
-                {direction.toUpperCase()} · {statusLayout}
+                {direction.toUpperCase()} · {statusLayout}{pageTurnerEnabled ? ` · Turner: ${pageTurnerStatus}` : ''}
               </Text>
               <Text style={styles.statusSecondary}>{editNotice ?? (
                 savedInkVisible
@@ -2136,6 +2227,27 @@ export default function App() {
               Auto uses Single in portrait and Spread in landscape.
             </Text>
 
+            <Text style={styles.settingLabel}>Bluetooth page turner (this PDF)</Text>
+            <View style={styles.segmentRow}>
+              <SegmentedButton active={!pageTurnerEnabled} label="Off"
+                onPress={() => setPageTurnerValue(false)} style={styles.segmentHalf} />
+              <SegmentedButton active={pageTurnerEnabled} label="On"
+                onPress={() => setPageTurnerValue(true)} style={styles.segmentHalfLast} />
+            </View>
+            <View style={styles.segmentRow}>
+              <SegmentedButton active={pageTurnerProfile === 'navigation'} label="Arrows / Page keys"
+                onPress={() => setPageTurnerValue(pageTurnerEnabled, 'navigation')} style={styles.segmentThird} />
+              <SegmentedButton active={pageTurnerProfile === 'volume'} label="Volume + next"
+                onPress={() => setPageTurnerValue(pageTurnerEnabled, 'volume')} style={styles.segmentThird} />
+              <SegmentedButton active={pageTurnerProfile === 'volume_reversed'} label="Volume − next"
+                onPress={() => setPageTurnerValue(pageTurnerEnabled, 'volume_reversed')} style={styles.segmentThirdLast} />
+            </View>
+            <Text style={styles.settingHint}>
+              {pageTurnerStatus}. Keys work only in the focused, settled RTL reader;
+              menus and stock editing keep their normal controls. Pair the turner
+              in device settings. Arrow keys follow reading direction; Page keys
+              are logical Previous/Next. Volume keys are captured only if selected.
+            </Text>
             <Text style={styles.settingLabel}>Treat Cover Page Separately</Text>
             <View style={styles.segmentRow}>
               <SegmentedButton

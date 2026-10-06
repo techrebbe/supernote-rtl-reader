@@ -12,11 +12,13 @@ class PdfRendererPackage : ReactPackage {
         PdfRendererModule(reactContext),
         ReaderPreferencesModule(reactContext),
         SavedInkModule(reactContext),
+        ReaderKeyModule(reactContext),
     )
 
     override fun createViewManagers(
         reactContext: ReactApplicationContext,
     ): List<ViewManager<*, *>> = listOf(
         PdfPageViewManager(),
+        ReaderKeyHostManager(),
     )
 }

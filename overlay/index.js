@@ -21,6 +21,14 @@ PluginManager.closePluginView = async (...args) => {
   if (transition && transition.allowClose !== true) {
     throw new Error('Reader hand-off or recovery is still in progress.');
   }
+  if (globalThis.RTL_READER_KEY_EXIT_PENDING) {
+    throw new Error('Reader close is already in progress.');
+  }
+  const keyOwner = globalThis.RTL_READER_KEY_OWNER ?? null;
+  const keyExitPending = {};
+  globalThis.RTL_READER_KEY_EXIT_PENDING = keyExitPending;
+  try {
+    keyOwner?.fence(); // Synchronous retirement, including queued pre-Close keys.
   // Last-resort gate for callers outside App's Close/Edit callbacks. Never
   // hand off/restart the native reader or close the host while the SDK can
   // still write its owned PNG, or while native bitmap leases remain undrained.
@@ -73,7 +81,17 @@ PluginManager.closePluginView = async (...args) => {
     }
   }
 
-  return originalClosePluginView(...args);
+    if (globalThis.RTL_READER_KEY_OWNER && globalThis.RTL_READER_KEY_OWNER !== keyOwner) {
+      throw new Error('Reader key owner changed during close.');
+    }
+    // Await host Close: never release this independent key fence after only
+    // the SDK drain or native handoff has finished.
+    return await originalClosePluginView(...args);
+  } finally {
+    if (globalThis.RTL_READER_KEY_EXIT_PENDING === keyExitPending) {
+      globalThis.RTL_READER_KEY_EXIT_PENDING = null;
+    }
+  }
 };
 
 function ReaderRoot() {
@@ -107,11 +125,16 @@ PluginManager.registerButtonListener({
     if (event?.id === RTL_READER_BUTTON_ID) {
       const activate = () => {
         if (globalThis.RTL_READER_TRANSITION_IN_FLIGHT) return;
+        if (globalThis.RTL_READER_KEY_EXIT_PENDING) return;
         handoffAttemptedThisActivation = false;
         globalThis.RTL_READER_EDIT_HANDOFF_DONE = false;
-        console.log('RTL_READER_OPEN v0.4.24-ink-exp7-native-reader-v2');
+        console.log('RTL_READER_OPEN v0.4.24-keys-exp1-native-reader-v2');
         DeviceEventEmitter.emit(RTL_READER_ACTIVATE_EVENT);
       };
+      if (globalThis.RTL_READER_KEY_EXIT_PENDING) {
+        console.log('RTL_READER_ACTIVATION_BLOCKED reason=close_in_flight');
+        return;
+      }
       const transition = globalThis.RTL_READER_TRANSITION_IN_FLIGHT;
       if (transition) {
         console.log('RTL_READER_ACTIVATION_BLOCKED reason=transition_in_flight');

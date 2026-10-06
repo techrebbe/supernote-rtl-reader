@@ -2,6 +2,20 @@
 
 ## Latest checkpoint — 2026-10-06 T014
 
+T014B exact dce6529/code53 diagnostic COMPLETE. Normal clean build/signature/
+installed payload PASS. ONE PageDown93 on settled T008PAGE1/Single/On/Ready:
+functional FAIL, page unchanged. Host5 generation13/sequence12 eligible=true,
+observation23/128 before key; no native dispatch/emit or JS key observation.
+Missing observation is BEFORE Host dispatch; upstream cause UNKNOWN, not proof
+of Activity interception. No extra keys or rescue. Normal Off/Auto/Done/Close
+PASS: exact native PAGE1 screen, unchanged PDF/13309-byte mark/installed payload,
+empty cache, four plugins/28 unrelated prefs/rotation1-2 preserved.47 exact
+hash-backed scratch/staging copies removed/absence verified; local evidence
+tmp/t014b-nomad-20261006 retained. Reservation6008584245 consumed, release in
+issue23 follows this evidence commit. No pending device command. Source-only
+focused Android key-delivery boundary inspection next; physical paired input
+waits awake. Earlier statuses below are historical, not current installation.
+
 T014B bounded observation-only code53/keys-exp2 source candidate has independent
 read-only review CLEAN and focused source/Android/RN/native mutation/assembly/
 package gates PASS; supplementary observation-isolation regressions being rerun.

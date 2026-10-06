@@ -1,5 +1,41 @@
 # T014B — localize Ready-but-no-turn, not a speculative routing fix
 
+## Completed exact-candidate trial — 2026-10-06
+
+Exact dce6529ed73e3f54b51ded7e5fe44624ed4b3141/code53/keys-exp2. Normal pinned
+clean archive build/package/provenance/compiled diagnostics/signature PASS;
+installed APK and bundle exact. SNPLG1bcb209df5283caeb032152d6eb676d88a77566a8100d47be7fc1f08ed7a5622,
+APK67a0e2f8df9cd582aa688e1bb533d3eb2de825f9c4d5a640cd0666d8d752496d,
+bundle9cd1c5ccc8a122f106079158fba604ec367662da3238c72362cce3be8f77aa03.
+Signerfac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c
+matches retained code52/code51. Sole NomadSN078C10015092/Chauvet.E103.2606161001.2393_release,
+reservation6008584245, disposable T008 only. No pen or personal documents.
+
+ReadyPAGE1/Single/On/navigation, Editp1 enabled/nativeREADY1. WindowPluginHost,
+nativeHost5 observation23/128, configured enabled/generation13/sequence12 eligible
+true; diagnostic stream established, battery25%. Exactly one injected PageDown93:
+functional FAIL, stays1of2; after capture6.763seconds. No new Host dispatch,
+emit attempt or JS key observation. Screen byte-identical before/after. Missing
+observation is before Host dispatch; upstream cause UNKNOWN. Neither Activity
+interception nor device-1 rejection is proven. All further keys NOTPERFORMED.
+
+Result recorded before cleanup. Normal Off/Auto/Done/Close PASS. Close first
+capture caught transient home; subsequent read-only settled capture shows exact
+nativePAGE1/saved line, byte-identical preflight screen. No rescue restart/input.
+PDFbd0fd00b4879cedb1b768a19deb2901a6d50dc7373decc8ef60e445613d83e64,
+13309-byte markcf4446631eca6644d42c305af46729374369a341f3a1c00892586b266f9e5724,
+installed payload unchanged; owned cache empty, four plugins/28 unrelated prefs/
+rotation1-2 exact.47 exact retained-hash regular/non-symlink scratch/staging
+copies removed once/absence verified; raw local evidence preserved only at
+tmp/t014b-nomad-20261006. Candidate remains installed Off, rollback retained.
+
+Setup deviation: generic Android Settings launch opened AOSP Settings, no
+controls/settings altered, normal Back then correct Supernote Settings. Its
+capture is excluded from reader/key acceptance. Reservation consumed; release
+follows documentation commit. No queued hardware/merge. Next narrow source-only
+delivery-boundary inspection; never rescue with global Activity/stock key hooks.
+The software preparation/plan below is historical, not another authorized trial.
+
 Observed code52/75520b6 first On/PageDown failure is preserved in REGRESSION.md.
 Normal Close/Off/Auto/integrity/scratch cleanup PASS, release6008340115. No
 annotation corruption, key delivery or root cause is inferred from the screenshot.

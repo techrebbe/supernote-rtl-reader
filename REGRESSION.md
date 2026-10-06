@@ -1,5 +1,27 @@
 # RTL Reader hardware regression
 
+## T014B code53 one-key localization — functional FAIL, cleanup PASS
+
+Exact dce6529ed73e3f54b51ded7e5fe44624ed4b3141,0.4.24-keys-exp2/code53,
+clean build/signature/installed payload verified. NomadSN078C10015092,
+Chauvet.E103.2606161001.2393_release, reservation6008584245, disposable T008.
+SettledPAGE1/Single/On/navigation/TurnerReady/nativeREADY1. Host5 eligible
+generation13/sequence12, observation23/128. Exactly one PageDown93: remainsPAGE1,
+screen byte-identical, no nativeREADY2, Host dispatch/emit or JS-key observation.
+Functional FAIL; before-Host observation boundary localized, actual upstream
+cause UNKNOWN. No global-interception/device-rejection theory claimed, no extra
+key/profile/rotation/page rescue. Bounded after-capture6.763seconds.
+
+Normal Off/Auto/Done/Close PASS: settled nativePAGE1 screen byte-identical
+preflight, unchanged PDF/13309-byte mark and code53 payload, empty SDK cache,
+four plugins/28 unrelated preference values/rotation1-2 retained.47 exact
+regular/non-symlink scratch/staging copies hash-verified against local evidence,
+removed once/absence verified. Local evidence tmp/t014b-nomad-20261006 only.
+Initial unintended AOSP Settings launch touched no setting and was exited by
+normal Back; its capture excluded. All remaining keys NOTPERFORMED. No pen,
+originals/BOOX/firmware/raw upload/PR finalization/merge. Reservation consumed;
+release follows evidence commit. Source-only focused delivery-boundary work next.
+
 Device baseline: Supernote Nomad running firmware fingerprint
 `Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys`
 with SupernoteDocument `1.02.446`.

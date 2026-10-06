@@ -812,7 +812,10 @@ class PdfPageView(
         committedSignature = null
         pendingRenderedEvent = null
         clearSavedInk()
-        replaceBitmap(null, null, cachePrevious = false)
+        // Permanent RN drops retire this view, not the source-bound background.
+        // Transfer only the pure PDF bitmap to the existing bounded LRU under
+        // its original render key; ink stays separate and is released above.
+        replaceBitmap(null, null)
     }
 
     private fun clearSavedInk() {

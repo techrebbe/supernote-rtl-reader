@@ -120,6 +120,27 @@ class RendererTests(unittest.TestCase):
         self.assertIn("if (generation != renderGeneration.get())", self.view)
         self.assertIn("if (pending.generation == renderGeneration.get())", self.view)
 
+    def test_permanent_drop_returns_background_but_retires_ink_and_callbacks(self):
+        drop = self.section("    fun dispose() {", "    private fun clearSavedInk() {")
+        for marker in ("renderGeneration.incrementAndGet()", "committedSignature = null",
+                       "pendingRenderedEvent = null", "clearSavedInk()", "replaceBitmap(null, null)"):
+            self.assertIn(marker, drop)
+        self.assertLess(drop.index("clearSavedInk()"), drop.index("replaceBitmap(null, null)"))
+        self.assertNotIn("cachePrevious = false", drop)
+        invalid = self.section("        if (filePath.isNullOrBlank()", "        foregroundExecutor.execute {")
+        self.assertIn("replaceBitmap(null, null, cachePrevious = false)", invalid)
+
+    def test_background_transfer_retires_view_before_cache_publication(self):
+        transfer = self.section("    private fun replaceBitmap(", "    private fun emitRenderedAfterDraw(")
+        self.assertLess(transfer.index("pageBitmap = next"), transfer.index("returnVisibleBitmap("))
+        self.assertLess(transfer.index("pageBitmapMetadata = nextMetadata"), transfer.index("returnVisibleBitmap("))
+        self.assertIn("previous !== next", transfer)
+        self.assertIn("previousMetadata.key", transfer)
+        cache = self.section("    private fun takeCached(", "    fun returnVisibleBitmap(")
+        self.assertIn("bitmapCache.remove(key)", cache)
+        self.assertIn("while (bitmapCache.size > CACHE_LIMIT)", cache)
+        self.assertIn("private const val CACHE_LIMIT = 4", self.view)
+
     def test_overlay_uses_same_destination_clip_and_exact_geometry_id(self):
         draw = self.view[self.view.index("override fun onDraw(canvas: Canvas)"):]
         self.assertEqual(draw.count("canvas.clipRect("), 1)

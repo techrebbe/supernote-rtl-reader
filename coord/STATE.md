@@ -2,6 +2,18 @@
 
 ## Latest checkpoint — 2026-10-06 T014
 
+T015 concrete reverse-cache correction SOURCE gate: permanent PdfPageView drop
+now transfers only its pure PDF background to the existing original-key four-
+entry LRU while retiring callbacks/releasing ink.43 actual Kotlin ownership
+checks/five compiled mutants,10 renderer checks,172 JS+62 lifecycle/native
+invariants/wiring/provenance/package checks/native85407 core assertions PASS;
+full native mutations in progress. Independent read-only scoped review CLEAN,
+version-only pins separately verified. Candidate cache-exp1/code54, not yet
+built/installed. Next exact commit/build/signature, then fresh issue23 reservation
+for ONE disposable T008 Next/Previous cache-hit trial. Nomad released6008859801;
+no device process/key trial active. Paired physical key gate remains awake-only.
+No complete-memory-cleanup/leak claim, merge or PR finalization.
+
 T014C keyboard-source comparison COMPLETE on exact installed dce6529/code53,
 reviewed planadeb53b. ONE explicit keyboard PageDown93, same default display:
 functional FAIL, PAGE1/screen unchanged. Host699 generation13/sequence12 eligible,

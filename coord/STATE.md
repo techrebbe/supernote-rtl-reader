@@ -2,6 +2,16 @@
 
 ## Latest checkpoint — 2026-10-06 T014
 
+T015 executable01df18b/cache-exp1/code54 SOURCE/review/full tests/clean signed
+build/package/source/signer gates PASS; all271 mutations completed. First reserved
+read-only hardware preflight6009083775 STOPPED/NOTPERFORMED: Nomad current window
+is launcher, not expected disposable native T008PAGE1; battery20% notcharging,
+rotation1/2. No staging/install/settings/page/input/capture/file read/change or
+SDK output, no device process. Candidate UNINSTALLED; prior code53 is last verified
+installation. No cleanup mutation needed; release follows evidence commit. New
+document-ready setup/reservation needed, no consumed retry or human ping asleep.
+Continue useful source-only next-batch preparation; no merge/PR finalization.
+
 T015 concrete reverse-cache correction SOURCE gate: permanent PdfPageView drop
 now transfers only its pure PDF background to the existing original-key four-
 entry LRU while retiring callbacks/releasing ink.43 actual Kotlin ownership

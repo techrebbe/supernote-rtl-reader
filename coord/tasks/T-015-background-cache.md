@@ -1,7 +1,9 @@
 # T015 — return dropped PDF backgrounds to the existing cache
 
-Status2026-10-06: source correction independently reviewed CLEAN, focused tests
-PASS. Full native mutation run is in progress; no build/install/hardware pass yet.
+Status2026-10-06: source/tests/independent review/exact signed build PASS. First
+hardware preflight STOPPED/NOTPERFORMED: launcher, not expected native T008PAGE1.
+Reservation6009083775 consumed; release follows evidence update. No installation,
+settings/pages/input/capture or file mutation; do not reuse this reservation.
 Parent cbb63b7; isolated from the parked T014 injected-key delivery question.
 Candidate0.4.24-cache-exp1/code54, unchanged key routing and native annotations.
 
@@ -56,6 +58,30 @@ Initial harness-framing syntax error and host runner's ordinary unittest stderr
 handling were corrected without production/test weakening; compiled original
 then failed the specific drop assertion, corrected source passes. No hardware,
 memory-leak or physical-turner conclusion follows from these checks.
+
+### Completed package and first preflight
+
+All271 native mutations subsequently PASS. Exact clean-archive normal build
+01df18b8421fc440f8e83979b6e2de686237c7fb completed exit0/75 Gradle tasks;
+archive/source/package/native DEX/bundle-marker verification PASS. Compatible
+single v2/v3 signerfac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c
+matches retained code53/52/51. Candidate remains uninstalled:
+
+- SNPLGf1cba5a6d195a48d3ceadd521c6827e700205ea917d246fc05892098351d7749
+- APKd08ae3be25d54305aafb274959632de7372a8afc70f6f572d81160a5b2fc819d
+- bundle1b7b17f13710ff86ce040302f11f483646ad38367c1b5c3287256898ea01b0c3
+- Retained tmp/t015-01df18b-build1/out and tmp/t015-code54-build.log.
+
+Read-only preflight on reservedSN078C10015092/expected firmware found battery20%,
+not charging, rotation1/2, current focus com.ratta.supernote.launcher rather than
+native T008PAGE1. Cause UNKNOWN; no document/data-loss or other-workflow inference.
+Hard stop before staging/install/settings/input/capture or file read/change.
+Source/.mark/prefs/cache/payload not newly verified; prior hashes remain historical.
+No remote scratch/SDK output or background process was created. No cleanup
+mutation needed. NOTPERFORMED, not a cache failure/PASS. Local preflight summary
+tmp/t015-nomad-20261006/preflight-result.md; last verified installation is code53.
+Unblock: new explicit document-ready setup/fresh reservation/exact preflight;
+no ad-hoc retry/rescue under consumed6009083775 or physical requests while asleep.
 
 Run existing native/Edit/v2/mutation/cross-layer/wiring/provenance/package gates,
 independently review the source/ownership/test diff, and build an exact clean

@@ -8,6 +8,27 @@ the launcher was foreground. Do not reinterpret that as cache failure or reuse i
 The user explicitly authorized document/page/rotation control while asleep;
 no physical request is needed if an exact normal-library route can be established.
 
+## Completed preflight — NOTPERFORMED / low-battery modal
+
+Fresh reservation6009148072 consumed/released in issue23. Preflight exact serial/
+firmware/rotation1-2/source/13309-byte mark/installed code53 APK+bundle/four plugins/
+empty SDK cache/29 preferences PASS. Battery20% not charging. UI capture shows
+launcher-owned "Low Battery! Only 20% battery left." modal rather than a normal
+Document control. STOP before any UI tap, file opening, package staging/install,
+page/pen/settings operation. No alert dismissal/ad-hoc retry. Underlying document
+is unverified; do not infer loss/human use. Code54 remains ready and UNINSTALLED.
+
+Only owned temporary preferences copy/XML/PNG were created. Initial root-only
+copy could not be pulled; regular/non-symlink copy SHA matched live prefs before
+changing THAT COPY to readable mode. Live configuration permissions unchanged.
+Three exact retained-hash scratch copies removed/absence verified; local evidence
+and backup retained. Postflight source/mark/installed payload/live prefs exact,
+current modal untouched, no SDK output/observer/device process. Live preference
+SHA38b38663e246e45077261787691ad821972aac6eb1c37632bc83fdc4f79b2eb5.
+Evidence tmp/t015-nomad-20261006; no raw upload. Unblock: charge, establish fresh
+disposable-document-ready state/reservation, then existing cache gate. No further
+hardware polling/physical request while sleeping. The plan below is historical.
+
 ## Defined question / authority
 
 Can normal Supernote UI open the existing hash-checked disposable T008 from its

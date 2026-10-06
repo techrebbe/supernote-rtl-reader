@@ -2,6 +2,19 @@
 
 ## Latest checkpoint — 2026-10-06 T014
 
+T015R normal-library setup plan independently CLEAN at a3bdedf; new reserved
+preflight6009148072 STOPPED/NOTPERFORMED: launcher-owned low-battery20% modal,
+not an available Document control. No UI input/open/install/settings/pages/pen.
+Exact source/13309-byte mark/code53 payload/four plugins/29prefs/empty SDK cache/
+rotation1-2 PASS; three owned hash-backed scratch copies removed/absence verified,
+postflight source/mark/payload/live prefs exact, modal untouched. Code54/01df18b
+candidate ready UNINSTALLED. Device released in issue23; no process active.
+Unblock charging/document-ready baseline and fresh reservation. No more overnight
+battery/window polls or physical requests; prepare compact awake cache/HID/feel
+batch. Source/code/review/build gates done, not a hardware cache/HID/leak pass.
+Release6009195997; compact prepared sequence in tasks/NEXT-HARDWARE-BATCH.md.
+No further immediately useful source modeling/rebuild needed for these gates.
+
 T015 executable01df18b/cache-exp1/code54 SOURCE/review/full tests/clean signed
 build/package/source/signer gates PASS; all271 mutations completed. First reserved
 read-only hardware preflight6009083775 STOPPED/NOTPERFORMED: Nomad current window

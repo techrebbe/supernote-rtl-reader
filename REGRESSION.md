@@ -1,5 +1,24 @@
 # RTL Reader hardware regression
 
+## T014C keyboard-source PageDown — FAIL, integrity cleanup PASS
+
+Reviewed planadeb53b, exact installed dce6529/keys-exp2/code53 unchanged. Sole
+NomadSN078C10015092/Chauvet.E103.2606161001.2393_release, disposable T008,
+reservation6008795814. PAGE1/Single/On/navigation/TurnerReady/nativeREADY1,
+Host699 eligible generation13/sequence12 observation23/128. Actual InputDispatcher
+focusDisplay0/plugin window canReceiveKeys/unfrozen/no filter. ONE explicit
+keyboard-source PageDown93/default display: remainsPAGE1, screen byte-identical,
+no Host dispatch/emit/JS-key/nativeREADY2, after-capture6.449seconds. Functional
+FAIL, upstream UNKNOWN; explicit source did not fix trial. No additional keys.
+
+Normal Off/Auto/Done/Close, unchanged source/13309-byte mark/installed payload,
+exact nativePAGE1/saved line, empty cache, four plugins/28 other prefs/rotation1-2
+PASS.26 exact hash-backed regular/non-symlink scratch copies removed/absence
+verified, local evidence tmp/t014c-nomad-20261006 only. Help-option error/root
+permission toast retained/excluded from acceptance; no state change. Injected
+trials parked, physical paired input waits awake; independent P2 cache work next.
+No pen, originals/BOOX/firmware/global hook/raw upload/PR finalization/merge.
+
 ## T014B code53 one-key localization — functional FAIL, cleanup PASS
 
 Exact dce6529ed73e3f54b51ded7e5fe44624ed4b3141,0.4.24-keys-exp2/code53,

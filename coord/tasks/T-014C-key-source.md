@@ -1,5 +1,40 @@
 # T014C — distinguish injected source from reader delivery
 
+## Completed hardware result — 2026-10-06
+
+Planadeb53b independently reviewed CLEAN/noP0/P1/P2; reviewer verified cited
+upstream Android11 semantics, not firmware/device. Exact installed dce6529/
+0.4.24-keys-exp2/code53; no rebuild/install. NomadSN078C10015092 at10.0.40.1:5555,
+Chauvet.E103.2606161001.2393_release, reservation6008795814, disposable T008 only.
+Preflight PDF/13309-byte mark/installed APK/bundle/empty cache exact, battery23%.
+Actual input usage advertises keyboard source; `--help` also reports unknown
+command before usage, read-only/no state change. Help's default claim alone is
+not firmware-source verification. Root-permission toast excluded from geometry.
+
+SettledPAGE1/Single/On/navigation/Ready/Editp1/nativeREADY1. Host699 observation23/
+128, eligible generation13/sequence12. Actual InputDispatcher enabled/unfrozen/
+no filter, FocusedDisplay0 and focused visible PluginHost window canReceiveKeys.
+Stock Document is focused APPLICATION but not input WINDOW: expected service
+overlay, no conflicting input owner. Exactly one keyboard-source PageDown93:
+functional FAIL, stillPAGE1; after-capture6.449seconds, screen byte-identical.
+No native dispatch/emit/JS-key/nativeREADY2. Source change did not resolve trial;
+upstream cause UNKNOWN. No physical HID/Activity interception/default-display/
+device-1 rejection proof. All additional keys NOTPERFORMED.
+
+Result recorded before cleanup. Normal Off/Auto/Done/Close PASS, first capture
+transient home then read-only settled nativePAGE1/saved line exactly matches
+previous clean baseline. No rescue. PDF/mark and code53 payload unchanged,
+own cache empty, four plugins/28 unrelated preferences/rotation1-2 exact.26
+fresh regular/non-symlink scratch copies hash-verified against local retention,
+removed once/absence verified; local tmp/t014c-nomad-20261006 evidence only.
+No install/staging package. Reservation consumed; release follows this evidence.
+
+Injected-key trials parked rather than further speculative probes. Next useful
+comparison is actual paired-turner input while user awake, fresh bounded plan/
+reservation; meanwhile independent reverse-cache source work continues. No new
+reader/global key hook, pen, original, BOOX, firmware, raw upload or merge.
+The following source rationale/trial plan is historical, not another trial.
+
 ## Concrete source evidence, not a presumed firmware fix
 
 T014B code53 result remains functional FAIL/upstream cause UNKNOWN, released

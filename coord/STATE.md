@@ -2,6 +2,18 @@
 
 ## Latest checkpoint — 2026-10-06 T014
 
+T014C keyboard-source comparison COMPLETE on exact installed dce6529/code53,
+reviewed planadeb53b. ONE explicit keyboard PageDown93, same default display:
+functional FAIL, PAGE1/screen unchanged. Host699 generation13/sequence12 eligible,
+observation23/128; actual InputDispatcher focusedDisplay0/plugin window focus/
+canReceiveKeys/unfrozen/no filter established; still no Host/emit/JS-key arrival.
+Source hypothesis did not fix trial; upstream cause UNKNOWN. Normal Off/Auto/
+Close/integrity/cache/prefs/26-copy cleanup PASS, nativePAGE1/saved line exact;
+reservation6008795814 consumed, issue23 release follows evidence commit. No
+pending device process. Injected-key line parked, physical paired-input waits
+awake; no speculative extra-key/global-hook loop. Continue independent P2
+reverse-cache work source-only, preserving candidate/package/annotation gates.
+
 T014B exact dce6529/code53 diagnostic COMPLETE. Normal clean build/signature/
 installed payload PASS. ONE PageDown93 on settled T008PAGE1/Single/On/Ready:
 functional FAIL, page unchanged. Host5 generation13/sequence12 eligible=true,

@@ -1,0 +1,50 @@
+package __PACKAGE__;
+
+import java.util.Arrays;
+import java.util.UUID;
+
+/** Complete immutable RN transaction. A request namespace is minted natively
+ * for each JS owner; the positive counter is never reused by that owner.
+ */
+public final class ReaderKeyConfiguration {
+    public static final long MAX_SAFE = 9007199254740991L;
+    public final String requestId, namespace, documentId;
+    public final long counter;
+    public final boolean enabled;
+    private final int[] keys;
+
+    public ReaderKeyConfiguration(String request, String document, int[] keyCodes, boolean enable) {
+        if (request == null || request.length() > 64) throw new IllegalArgumentException("Invalid request");
+        int separator = request.lastIndexOf(':');
+        if (separator != 36) throw new IllegalArgumentException("Missing native request namespace");
+        String scope = request.substring(0, separator);
+        if (!UUID.fromString(scope).toString().equals(scope)) throw new IllegalArgumentException("Noncanonical namespace");
+        String digits = request.substring(separator + 1);
+        if (!digits.matches("[1-9][0-9]{0,15}")) throw new IllegalArgumentException("Invalid request counter");
+        long number = Long.parseLong(digits);
+        if (number > MAX_SAFE || document == null || document.isEmpty() || document.length() > 4096 ||
+                keyCodes == null || keyCodes.length > 8) throw new IllegalArgumentException("Invalid configuration");
+        int[] copy = keyCodes.clone();
+        Arrays.sort(copy);
+        for (int index = 0; index < copy.length; index++) {
+            int key = copy[index];
+            if (!(key == 21 || key == 22 || key == 24 || key == 25 || key == 62 || key == 66 || key == 92 || key == 93) ||
+                    (index > 0 && copy[index - 1] == key)) throw new IllegalArgumentException("Unsupported/duplicate key");
+        }
+        requestId = request; namespace = scope; counter = number; documentId = document; enabled = enable; keys = copy;
+    }
+
+    public int[] keyCodes() { return keys.clone(); }
+
+    public boolean same(ReaderKeyConfiguration other) {
+        return other != null && requestId.equals(other.requestId) && documentId.equals(other.documentId) &&
+                enabled == other.enabled && Arrays.equals(keys, other.keys);
+    }
+
+    /** Identical prop replay is harmless; changing content under an old request
+     * or switching namespaces on the same native view is not.
+     */
+    public boolean succeeds(ReaderKeyConfiguration previous) {
+        return previous == null || namespace.equals(previous.namespace) && counter > previous.counter;
+    }
+}

@@ -5,6 +5,7 @@ public class View {
     public boolean frameworkAttached=true, windowFocused=true, focused=false, shown=true;
     public int delegated;
     public View otherFocus;
+    public int getId() { return 42; }
     public boolean isAttachedToWindow() { return frameworkAttached; }
     public boolean hasWindowFocus() { return windowFocused; }
     public boolean isFocused() { return focused; }

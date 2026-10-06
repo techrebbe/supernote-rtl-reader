@@ -1,0 +1,143 @@
+package __PACKAGE__;
+
+import com.facebook.react.bridge.ReadableArray;
+import com.facebook.react.bridge.ReadableMap;
+import com.facebook.react.bridge.ReadableMapKeySetIterator;
+import com.facebook.react.bridge.ReadableType;
+import com.facebook.react.uimanager.ThemedReactContext;
+import com.facebook.react.uimanager.UIManagerHelper;
+import com.facebook.react.uimanager.annotations.ReactProp;
+import com.facebook.react.uimanager.events.EventDispatcher;
+import com.facebook.react.views.view.ReactViewGroup;
+import com.facebook.react.views.view.ReactViewManager;
+import java.util.HashMap;
+import java.util.IdentityHashMap;
+import java.util.Map;
+
+/** Unregistered T014 bridge slice. Keeps ordinary React View child/style/touch
+ * behavior, but keys belong to exactly one directly focused ReaderKeyHost.
+ */
+public final class ReaderKeyHostManager extends ReactViewManager {
+    private static final int REQUEST_FOCUS = 100;
+    private final Map<ReactViewGroup, Binding> bindings = new IdentityHashMap<>();
+
+    private static final class Binding {
+        ReaderKeyConfiguration pending, applied;
+        boolean changed;
+        long sequence;
+    }
+
+    @Override public String getName() { return "ReaderKeyHost"; }
+
+    @Override public ReactViewGroup createViewInstance(ThemedReactContext context) {
+        ReaderKeyHost host = new ReaderKeyHost(context);
+        bindings.put(host, new Binding());
+        return host;
+    }
+
+    private static ReaderKeyConfiguration parse(ReadableMap value) {
+        if (value == null) throw new IllegalArgumentException("Missing route");
+        int fields = 0;
+        ReadableMapKeySetIterator iterator = value.keySetIterator();
+        while (iterator.hasNextKey()) {
+            String key = iterator.nextKey(); fields++;
+            if (!(key.equals("requestId") || key.equals("documentId") || key.equals("enabled") || key.equals("keyCodes"))) {
+                throw new IllegalArgumentException("Unknown route field");
+            }
+        }
+        if (fields != 4 || value.getType("requestId") != ReadableType.String ||
+                value.getType("documentId") != ReadableType.String || value.getType("enabled") != ReadableType.Boolean ||
+                value.getType("keyCodes") != ReadableType.Array) throw new IllegalArgumentException("Invalid route types");
+        ReadableArray array = value.getArray("keyCodes");
+        if (array == null || array.size() > 8) throw new IllegalArgumentException("Invalid key array");
+        int[] keys = new int[array.size()];
+        for (int index = 0; index < keys.length; index++) {
+            if (array.getType(index) != ReadableType.Number) throw new IllegalArgumentException("Invalid key type");
+            double key = array.getDouble(index);
+            if (!Double.isFinite(key) || key != Math.rint(key) || key < 0 || key > Integer.MAX_VALUE) {
+                throw new IllegalArgumentException("Invalid key number");
+            }
+            keys[index] = (int)key;
+        }
+        return new ReaderKeyConfiguration(value.getString("requestId"), value.getString("documentId"), keys, value.getBoolean("enabled"));
+    }
+
+    @ReactProp(name = "routeSpec")
+    public void setRouteSpec(ReactViewGroup view, ReadableMap value) {
+        Binding binding = bindings.get(view);
+        if (binding == null) return;
+        try {
+            binding.pending = parse(value);
+            binding.changed = true;
+        } catch (RuntimeException failure) {
+            binding.pending = null; binding.changed = false;
+            ((ReaderKeyHost)view).drop(); // Never retain old routing after malformed new props.
+        }
+    }
+
+    private void emit(ReaderKeyHost host, Binding binding, ReaderKeyConfiguration config,
+            ReaderKeyRouteCore.State state, ReaderKeyRouteCore.Packet packet) {
+        EventDispatcher dispatcher = UIManagerHelper.getEventDispatcherForReactTag(
+                UIManagerHelper.getReactContext(host), host.getId());
+        if (dispatcher == null || binding.sequence == ReaderKeyConfiguration.MAX_SAFE) {
+            throw new IllegalStateException("Key transport unavailable");
+        }
+        dispatcher.dispatchEvent(new ReaderKeyEvent(UIManagerHelper.getSurfaceId(host), host.getId(),
+                config.requestId, ++binding.sequence, state, packet));
+    }
+
+    @Override protected void onAfterUpdateTransaction(ReactViewGroup view) {
+        super.onAfterUpdateTransaction(view);
+        Binding binding = bindings.get(view);
+        if (binding == null || !binding.changed) return;
+        binding.changed = false;
+        ReaderKeyConfiguration config = binding.pending;
+        binding.pending = null;
+        ReaderKeyHost host = (ReaderKeyHost)view;
+        if (config == null || config.same(binding.applied)) return;
+        if (!config.succeeds(binding.applied)) { host.drop(); return; }
+        binding.applied = config;
+        try {
+            host.configure(config.documentId, config.keyCodes(), config.enabled, new ReaderKeyHost.Sink() {
+                public void state(ReaderKeyRouteCore.State state) { emit(host, binding, config, state, null); }
+                public void key(ReaderKeyRouteCore.Packet packet) { emit(host, binding, config, packet.state, packet); }
+            });
+        } catch (RuntimeException failure) { host.drop(); }
+    }
+
+    @Override public Map<String, Integer> getCommandsMap() {
+        Map<String, Integer> commands = new HashMap<>();
+        Map<String, Integer> stock = super.getCommandsMap();
+        if (stock != null) commands.putAll(stock);
+        commands.put("requestReaderKeyFocus", REQUEST_FOCUS);
+        return commands;
+    }
+
+    private void focus(ReactViewGroup view, ReadableArray args) {
+        Binding binding = bindings.get(view);
+        if (binding == null || binding.applied == null || args == null || args.size() != 1 ||
+                args.getType(0) != ReadableType.String || !binding.applied.requestId.equals(args.getString(0))) return;
+        ((ReaderKeyHost)view).requestReaderKeyFocus(); // Exact config; never steals another control's focus.
+    }
+
+    @Override public void receiveCommand(ReactViewGroup view, int command, ReadableArray args) {
+        if (command == REQUEST_FOCUS) focus(view, args); else super.receiveCommand(view, command, args);
+    }
+    @Override public void receiveCommand(ReactViewGroup view, String command, ReadableArray args) {
+        if ("requestReaderKeyFocus".equals(command)) focus(view, args); else super.receiveCommand(view, command, args);
+    }
+
+    @Override public Map<String, Object> getExportedCustomDirectEventTypeConstants() {
+        Map<String, Object> events = new HashMap<>();
+        Map<String, Object> stock = super.getExportedCustomDirectEventTypeConstants();
+        if (stock != null) events.putAll(stock);
+        Map<String, String> registration = new HashMap<>(); registration.put("registrationName", "onReaderKey");
+        events.put("topReaderKey", registration);
+        return events;
+    }
+
+    @Override public void onDropViewInstance(ReactViewGroup view) {
+        try { ((ReaderKeyHost)view).drop(); }
+        finally { bindings.remove(view); super.onDropViewInstance(view); }
+    }
+}

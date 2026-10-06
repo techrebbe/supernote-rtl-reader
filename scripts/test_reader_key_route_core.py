@@ -36,13 +36,19 @@ def main() -> None:
         subprocess.run([java, "-cp", str(build), "t014.ReaderKeyRouteCoreTests"], check=True, timeout=60)
         host = build / "ReaderKeyHost.java"
         host.write_text((root / "native/ReaderKeyHost.java.template").read_text(encoding="utf-8").replace("__PACKAGE__", "t014"), encoding="utf-8")
+        bridge = []
+        for name in ("ReaderKeyConfiguration", "ReaderKeyEvent", "ReaderKeyHostManager"):
+            destination = build / f"{name}.java"
+            destination.write_text((root / f"native/{name}.java.template").read_text(encoding="utf-8").replace("__PACKAGE__", "t014"), encoding="utf-8")
+            bridge.append(str(destination))
         model = build / "model"
         model.mkdir()
         stubs = sorted((root / "scripts/reader_key_host_test_stubs").rglob("*.java"))
-        if len(stubs) != 7:
+        if len(stubs) != 18:
             raise SystemExit("test_reader_key_route_core: unexpected callback model inventory")
-        subprocess.run([javac, "-encoding", "UTF-8", "-d", str(model), str(core), str(host), str(root / "scripts/ReaderKeyHostTests.java"), *(str(item) for item in stubs)], check=True, timeout=60)
+        subprocess.run([javac, "-encoding", "UTF-8", "-d", str(model), str(core), str(host), *bridge, str(root / "scripts/ReaderKeyHostTests.java"), str(root / "scripts/ReaderKeyBridgeTests.java"), *(str(item) for item in stubs)], check=True, timeout=60)
         subprocess.run([java, "-cp", str(model), "t014.ReaderKeyHostTests"], check=True, timeout=60)
+        subprocess.run([java, "-cp", str(model), "t014.ReaderKeyBridgeTests"], check=True, timeout=60)
         if args.mutations:
             core_text = core.read_text(encoding="utf-8")
             host_text = host.read_text(encoding="utf-8")
@@ -74,8 +80,10 @@ def main() -> None:
             paths = [Path(item).resolve() for item in args.android_classpath.split(os.pathsep)]
             if not paths or any(not item.is_file() or item.suffix != ".jar" for item in paths):
                 raise SystemExit("test_reader_key_route_core: explicit Android classpath must contain existing jars only")
-            subprocess.run([javac, "-encoding", "UTF-8", "-cp", os.pathsep.join(str(item) for item in paths), "-d", str(build), str(core), str(host)], check=True, timeout=60)
-            print("Reader key Host: actual Android/RN API compile PASS; device delivery NOT TESTED")
+            module = build / "ReaderKeyModule.java"
+            module.write_text((root / "native/ReaderKeyModule.java.template").read_text(encoding="utf-8").replace("__PACKAGE__", "t014"), encoding="utf-8")
+            subprocess.run([javac, "-encoding", "UTF-8", "-cp", os.pathsep.join(str(item) for item in paths), "-d", str(build), str(core), str(host), *bridge, str(module)], check=True, timeout=60)
+            print("Reader key Host/atomic RN bridge: actual Android/RN API compile PASS; device delivery NOT TESTED")
 
 
 if __name__ == "__main__":

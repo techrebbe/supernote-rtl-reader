@@ -1,0 +1,42 @@
+package __PACKAGE__;
+
+import com.facebook.react.bridge.Arguments;
+import com.facebook.react.bridge.WritableMap;
+import com.facebook.react.uimanager.events.Event;
+
+/** One UI-thread ordered stream for BOTH lifecycle state and key packets.
+ * Data is frozen before enqueue. Never reconstruct stamps when JS receives it.
+ */
+public final class ReaderKeyEvent extends Event<ReaderKeyEvent> {
+    private final WritableMap data;
+
+    public ReaderKeyEvent(int surface, int tag, String request, long sequence,
+            ReaderKeyRouteCore.State state, ReaderKeyRouteCore.Packet packet) {
+        super(surface, tag);
+        if (sequence < 1 || sequence > ReaderKeyConfiguration.MAX_SAFE || state == null ||
+                state.documentId == null || (packet != null && packet.state != state)) {
+            throw new IllegalArgumentException("Invalid key envelope");
+        }
+        data = Arguments.createMap();
+        data.putInt("schemaVersion", 1);
+        data.putString("kind", packet == null ? "state" : "key");
+        data.putString("requestId", request);
+        data.putDouble("sequence", sequence);
+        data.putString("activationId", state.activationId);
+        data.putString("documentId", state.documentId);
+        data.putDouble("generation", state.generation);
+        data.putBoolean("eligible", state.eligible);
+        data.putBoolean("disposed", state.disposed);
+        if (packet != null) {
+            data.putInt("action", packet.action);
+            data.putInt("keyCode", packet.keyCode);
+            data.putInt("deviceId", packet.deviceId);
+            data.putDouble("downTime", packet.downTime);
+            data.putInt("repeatCount", packet.repeatCount);
+        }
+    }
+
+    @Override public String getEventName() { return "topReaderKey"; }
+    @Override public boolean canCoalesce() { return false; }
+    @Override protected WritableMap getEventData() { return data; }
+}

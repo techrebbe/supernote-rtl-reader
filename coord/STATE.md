@@ -395,3 +395,32 @@ navigation. Preserve Native Reader/OptionB; no global stock hooks. Integrated
 focused tests/review/package/signing and new reservation before injected-key
 hardware. Actual paired-turner physical button/hold mapping remains deferred.
 Do not repeat consumed T013C build/install/device gate. No merge/PR finalization.
+
+## T014 atomic key transport slice — 2026-10-06
+
+The next concrete native/JS transport is now implemented in the owned
+work/page-turner-bridge checkout, independently correction-confirmed CLEAN.
+Atomic strict routeSpec/request namespace+counter, config-bound focus commands,
+single sequenced noncoalescing state/key events, immutable dispatch-time native
+stamps and exact JS stale/malformed/replay/gap/instance rejection. Current UI
+context and reentrant config/state/revocation checks precede logical navigation;
+no delayed turn/retry/global Activity or native-reader hook.
+
+Actual Core2134/Host25/bridge49 model assertions, four prior accepted-defect
+mutants,32 JS/controller/current-App route/transport tests and actual Android35/
+RN0.79.2 compile PASS. Native/Edit/v2/cross-layer source gates unchanged/PASS.
+Dependency annotation/deprecation warnings retained; sandbox SDK/PyYAML access
+limits resolved by approved host-only escalation, not bypass or weakened checks.
+Independent source review found one reentrant-context P2; red->green actual-source
+regression covers fence/dispose/reconfigure/native state for key AND focus.
+Confirmation CLEAN; reviewers inspected only, no independent runtime claim.
+
+Still unregistered/unshipped: no package, installer/App/frozen pin, device,
+saved-ink/writer/save/handoff or installed exp7/code51 change. Nomad remains
+released6007047362. Next concrete safe work is one App pageArea wrapper,
+per-document explicit opt-in/off/key profiles, current modal/Edit/Close/render/
+geometry guards and exact config-bound non-stealing focus. Include all sources
+in build, review only scoped pin changes, full integrated tests/review/package/
+signing then fresh reservation for earliest injected-key disposable gate.
+Actual paired-turner mapping/physical hold and human display gates wait awake.
+No repeat of completed T013C, original/BOOX/raw upload/PR finalization or merge.

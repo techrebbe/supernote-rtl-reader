@@ -59,6 +59,11 @@ and state/key delivery ordering before wiring; current classes alone do not prov
 cross-runtime queue revocation. Persist opt-in per-document configuration using
 existing preference machinery, preserving explicit disabled settings.
 
+Update2026-10-06: that isolated transport step is now implemented/tested and
+independently confirmed CLEAN; see T-014-key-transport.md for its exact contract
+and evidence. It is still NOT registered/copied/imported/shipped. Next is the
+bounded App/preferences/focus integration, followed by the full integrated gate.
+
 After focused integrated tests, one independent exact-head review, package build/
 signer and fresh reservation, first bounded injected-key disposable test establishes
 real focus/delivery. Then human paired-turner button/hold evidence identifies its

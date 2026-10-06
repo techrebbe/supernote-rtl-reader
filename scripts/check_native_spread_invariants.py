@@ -1022,9 +1022,9 @@ def check(repo_root: Path) -> None:
         ),
         (
             index_path,
-            # T014 keys-exp1 marker and full external-Close JS key fence;
-            # one existing native handoff, no new writer/save/restart path.
-            "c8613c2c992e85a569d4bb71bd02ae9911442bb5e09b0ad38956bb56f2f0cf67",
+            # T014 keys-exp2 changes only the candidate marker from exp1;
+            # full external-Close fence/handoff and native authorities unchanged.
+            "f0be9499e74dfef349eb8c076b08496ec85b6c8e6ec57552fd23b1740fc32bf3",
             "Edit/Return activation and close authority",
         ),
         (
@@ -1038,9 +1038,9 @@ def check(repo_root: Path) -> None:
         ),
         (
             workflow_path,
-            # T014 candidate label + actual key Core/Host/bridge and JS/wiring
-            # regression gates; all prior annotation/provenance gates retained.
-            "bbb79f343eb3f1f192c1d0ffcc50a23425fd742bbff6e928b94b90e2e0e73c59",
+            # T014 exp2 candidate label only; all actual-key, annotation and
+            # provenance regression gates retained from exp1.
+            "f96da09060e6873f5a8734cd90830c736b5eacdd171212edea74f85340620f5c",
             "Native Spread companion-build workflow",
         ),
         (

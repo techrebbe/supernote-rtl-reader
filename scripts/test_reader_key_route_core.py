@@ -44,7 +44,7 @@ def main() -> None:
         model = build / "model"
         model.mkdir()
         stubs = sorted((root / "scripts/reader_key_host_test_stubs").rglob("*.java"))
-        if len(stubs) != 18:
+        if len(stubs) != 19:
             raise SystemExit("test_reader_key_route_core: unexpected callback model inventory")
         subprocess.run([javac, "-encoding", "UTF-8", "-d", str(model), str(core), str(host), *bridge, str(root / "scripts/ReaderKeyHostTests.java"), str(root / "scripts/ReaderKeyBridgeTests.java"), *(str(item) for item in stubs)], check=True, timeout=60)
         subprocess.run([java, "-cp", str(model), "t014.ReaderKeyHostTests"], check=True, timeout=60)

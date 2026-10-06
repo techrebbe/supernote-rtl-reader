@@ -3,6 +3,7 @@ package __PACKAGE__;
 import android.graphics.Rect;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
 import com.facebook.react.uimanager.ThemedReactContext;
@@ -22,6 +23,17 @@ public final class ReaderKeyHost extends ReactViewGroup {
     private boolean dropped;
     private boolean lifecycleAttached;
     private boolean configuredEnabled;
+    private int diagnostics;
+    private static final int MAX_DIAGNOSTICS = 128;
+
+    // Disposable routing diagnostics only. No document path, annotation or
+    // mutable routing authority; failure/saturation never changes dispatch.
+    void diagnostic(String detail) {
+        if (diagnostics >= MAX_DIAGNOSTICS) return;
+        diagnostics++;
+        try { Log.i("RTL_READER_PAGE_KEY_NATIVE", "host=" + getId() + " observation=" + diagnostics + " " + detail); }
+        catch (RuntimeException ignored) { /* Observation cannot revoke or reroute a contact. */ }
+    }
 
     public ReaderKeyHost(ThemedReactContext context) {
         super(context);
@@ -43,6 +55,7 @@ public final class ReaderKeyHost extends ReactViewGroup {
         ReaderKeyRouteCore.State state = route.configure(document, keys, enabled && sink != null, SystemClock.uptimeMillis());
         this.sink = sink;
         configuredEnabled = enabled && sink != null && keys.length > 0;
+        diagnostic("configured generation=" + state.generation + " enabled=" + configuredEnabled);
         publish(state);
         if (dropped) return;
         // Publish the new configuration BEFORE focus callbacks can mint a
@@ -87,9 +100,21 @@ public final class ReaderKeyHost extends ReactViewGroup {
 
     @Override public boolean dispatchKeyEvent(KeyEvent event) {
         assertUi(); observe();
-        if (event == null || dropped || sink == null || !isFocused()) return super.dispatchKeyEvent(event);
+        if (event == null) return super.dispatchKeyEvent(event);
+        int key = event.getKeyCode();
+        boolean pagingKey = key == 21 || key == 22 || key == 24 || key == 25 ||
+                key == 62 || key == 66 || key == 92 || key == 93;
+        if (dropped || sink == null || !isFocused()) {
+            if (pagingKey) diagnostic("dispatch key=" + key + " action=" + event.getAction() +
+                    " device=" + event.getDeviceId() + " result=bypass focused=" + isFocused() + " dropped=" + dropped);
+            return super.dispatchKeyEvent(event);
+        }
         ReaderKeyRouteCore.Decision decision = route.dispatch(event.getAction(), event.getKeyCode(),
                 event.getDeviceId(), event.getDownTime(), event.getRepeatCount());
+        if (pagingKey) diagnostic("dispatch key=" + key + " action=" + event.getAction() +
+                " device=" + event.getDeviceId() + " downTime=" + event.getDownTime() +
+                " repeat=" + event.getRepeatCount() + " result=" + decision.reason +
+                " consumed=" + decision.consume + " packet=" + (decision.packet != null));
         if (decision.packet != null) {
             // These stamps are taken on the native dispatch thread. A future
             // RN consumer must not substitute current JS IDs at delivery.

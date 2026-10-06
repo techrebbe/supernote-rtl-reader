@@ -1,4 +1,5 @@
 package t014;
+import android.util.Log;
 
 import android.os.SystemClock;
 import android.view.KeyEvent;
@@ -130,8 +131,29 @@ public final class ReaderKeyBridgeTests {
             check(rejected,"Request namespace/counter invalid case rejected");
         }
     }
+    private static void diagnosticQueueIsolation() {
+        for (boolean failure : new boolean[]{true,false}) {
+            Log.lines.clear(); Log.fail=failure;
+            ReaderKeyHostManager manager=new ReaderKeyHostManager(); ReaderKeyHost host=host(manager);
+            manager.setRouteSpec(host,spec(1,"one",true,93)); manager.onAfterUpdateTransaction(host);
+            manager.receiveCommand(host,100,new ArrayValue(NAMESPACE+":1"));
+            if (!failure) for(int index=0;index<200;index++) host.diagnostic("saturation-test");
+            long down=++SystemClock.now;
+            check(host.dispatchKeyEvent(new KeyEvent(0,93,-1,down,0)),"Logger cannot change DOWN consumption");
+            check(host.dispatchKeyEvent(new KeyEvent(1,93,-1,down,0)),"Logger cannot change UP consumption");
+            check(queue.size()==4 && host.isFocused(),"Logger throw/saturation cannot drop configuration or key envelopes");
+            for(int index=0;index<queue.size();index++) {
+                check(((Number)data(index).get("sequence")).longValue()==index+1,"Logger cannot allocate/skip stream sequence");
+                check(data(index).get("requestId").equals(NAMESPACE+":1"),"Logger cannot relabel frozen configuration");
+            }
+            check(data(2).get("kind").equals("key") && ((Number)data(2).get("deviceId")).intValue()==-1,"Actual virtual-device key stamp retained");
+            check(failure ? Log.lines.isEmpty() : Log.lines.size()==128,"Observation remains bounded/independent of successful queue");
+            manager.onDropViewInstance(host);
+            Log.fail=false;
+        }
+    }
     public static void main(String[] args) {
-        atomicConfigAndFrozenStream(); malformedAndReplay(); defensiveConfig();
+        atomicConfigAndFrozenStream(); malformedAndReplay(); defensiveConfig(); diagnosticQueueIsolation();
         System.out.println("Reader key atomic RN bridge model: PASS "+assertions+" assertions; actual RN/device delivery NOT TESTED");
     }
 }

@@ -17,7 +17,7 @@ const INSTANCE = 'd1a05000-0000-4000-8000-000000000002';
 const flush = () => new Promise(setImmediate);
 
 function harness(namespace = Promise.resolve(NS)) {
-  const state = [], refs = [], effects = [], layoutEffects = [], commands = [], statuses = [], turns = [], layouts = [];
+  const state = [], refs = [], effects = [], layoutEffects = [], commands = [], statuses = [], turns = [], layouts = [], diagnostics = [];
   let stateIndex = 0, refIndex = 0, effectIndex = 0, layoutIndex = 0, dirty = false;
   let calls = 0, result;
   const context = {documentId: '/disposable.pdf', presentationId: 'single:1:ready:1',
@@ -29,6 +29,7 @@ function harness(namespace = Promise.resolve(NS)) {
     old?.cleanup?.(); list[index] = {fn, deps, pending: true};
   }
   const scope = {
+    console: {log: value => diagnostics.push(value)},
     createReaderKeySession,
     NativeModules: {ReaderKeyModule: {createRequestNamespace() { calls++; return namespace; }}},
     findNodeHandle: v => v === 'native-view' ? 42 : null,
@@ -55,7 +56,7 @@ function harness(namespace = Promise.resolve(NS)) {
   }
   function settle() { let count = 0; while (dirty) { assert.ok(++count < 8, 'No reconfiguration render loop'); render(); } }
   render();
-  return {context, controllerRef, commands, statuses, turns, layouts, render, settle,
+  return {context, controllerRef, commands, statuses, turns, layouts, diagnostics, scope, render, settle,
     get result() { return result; }, get calls() { return calls; },
     layout(width = 1872, height = 1404) { result.handleLayout({nativeEvent: {layout: {width, height}}}); settle(); },
     event(patch = {}) { result.onReaderKey({nativeEvent: {schemaVersion: 1, kind: 'state',
@@ -101,4 +102,52 @@ test('namespace/bridge failure is observable and does not capture keys', async (
   await flush(); h.settle();
   assert.equal(h.result.routeSpec, null); assert.match(h.statuses.at(-1), /Unavailable/);
   assert.deepEqual(h.commands, []); h.unmount();
+});
+
+test('actual wrapper reports native key/JS decision without restamping or logging document data', async () => {
+  const h = harness(); await flush(); h.settle(); h.layout(); h.event({eligible: true});
+  const key = {kind: 'key', eligible: true, action: 0, keyCode: 93, deviceId: -1,
+    downTime: 100, repeatCount: 0, sequence: 2};
+  h.event(key); assert.deepEqual(h.turns, ['next']);
+  assert.match(h.diagnostics[0], /sequence=2 generation=1 key=93 action=0 result=turned handled=true/);
+  assert.ok(!h.diagnostics[0].includes(h.context.documentId));
+  h.controllerRef.current.fence(); h.event({...key, sequence: 3});
+  assert.match(h.diagnostics.at(-1), /result=ui_fenced handled=false/);
+  assert.deepEqual(h.turns, ['next']); h.unmount();
+});
+
+test('diagnostic failure and saturation cannot block, retry or unbound key delivery', async () => {
+  const h = harness(); await flush(); h.settle(); h.layout(); h.event({eligible: true});
+  h.scope.console.log = () => { throw new Error('logger unavailable'); };
+  h.event({kind: 'key', eligible: true, action: 0, keyCode: 93, deviceId: -1,
+    downTime: 100, repeatCount: 0, sequence: 2});
+  assert.deepEqual(h.turns, ['next']);
+  h.scope.console.log = value => h.diagnostics.push(value);
+  for (let sequence = 3; sequence < 250; sequence++) h.event({kind: 'key', eligible: true,
+    action: 0, keyCode: 93, deviceId: -1, downTime: 100 + sequence, repeatCount: 0, sequence});
+  assert.equal(h.diagnostics.length, 127);
+  assert.equal(h.turns.length, 248);
+  assert.ok(h.turns.every(action => action === 'next'));
+  assert.equal(h.result.ownerRef.current.getState().failed, false); h.unmount();
+});
+
+test('strict packet rejection remains fail-closed even when observation fails', async () => {
+  for (const patch of [{schemaVersion: '1'}, {extra: '/private-content'},
+    {keyCode: 'private-content'}, {sequence: NaN}]) {
+    const h = harness(); await flush(); h.settle(); h.layout(); h.event({eligible: true});
+    h.scope.console.log = () => { throw new Error('logger unavailable'); };
+    h.event({kind: 'key', eligible: true, action: 0, keyCode: 93, deviceId: -1,
+      downTime: 100, repeatCount: 0, sequence: 2, ...patch});
+    assert.deepEqual(h.turns, []);
+    assert.equal(h.result.ownerRef.current.getState().failed, true); h.unmount();
+  }
+});
+
+test('stale packet observations retain original stamps and cannot imply delivery authority', async () => {
+  const h = harness(); await flush(); h.settle(); h.layout(); h.event({eligible: true});
+  h.event({kind: 'key', requestId: 'stale-request', eligible: true, action: 0,
+    keyCode: 93, deviceId: -1, downTime: 100, repeatCount: 0, sequence: 2, generation: 17});
+  assert.match(h.diagnostics.at(-1), /generation=17.*result=stale_request/);
+  assert.deepEqual(h.turns, []);
+  assert.equal(h.result.ownerRef.current.getState().failed, false); h.unmount();
 });

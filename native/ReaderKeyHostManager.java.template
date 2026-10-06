@@ -82,8 +82,11 @@ public final class ReaderKeyHostManager extends ReactViewManager {
         if (dispatcher == null || binding.sequence == ReaderKeyConfiguration.MAX_SAFE) {
             throw new IllegalStateException("Key transport unavailable");
         }
-        dispatcher.dispatchEvent(new ReaderKeyEvent(UIManagerHelper.getSurfaceId(host), host.getId(),
-                config.requestId, ++binding.sequence, state, packet));
+        ReaderKeyEvent event = new ReaderKeyEvent(UIManagerHelper.getSurfaceId(host), host.getId(),
+                config.requestId, ++binding.sequence, state, packet);
+        host.diagnostic("emit sequence=" + binding.sequence + " generation=" + state.generation +
+                " kind=" + (packet == null ? "state" : "key") + " eligible=" + state.eligible);
+        dispatcher.dispatchEvent(event);
     }
 
     @Override protected void onAfterUpdateTransaction(ReactViewGroup view) {

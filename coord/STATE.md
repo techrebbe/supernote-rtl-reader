@@ -2,6 +2,16 @@
 
 ## Latest checkpoint — 2026-10-06 T014
 
+T014B bounded observation-only code53/keys-exp2 source candidate has independent
+read-only review CLEAN and focused source/Android/RN/native mutation/assembly/
+package gates PASS; supplementary observation-isolation regressions being rerun.
+Supplementary rerun completed PASS:2134Core/48Host/75bridge assertions and45JS
+tests, four accepted-defect mutation rejections. No production change after review.
+Production route/core/App/transport/annotation authorities unchanged. Next exact
+commit/clean signed build and fresh reservation precede ONE PageDown diagnostic,
+not a claim of fixing the code52 failure. See tasks/T-014-key-diagnostic.md.
+Installedcode52 remains keysOff, released6008340115; no device operation active.
+
 Exact75520b6/code52 is normally installed after clean signed build/package/source
 review PASS. First bounded key trial: Off/PageDown PASS; On/Ready/PageDown FAIL,
 PAGE1 unchanged. All remaining key phases NOTPERFORMED. Normal Close to stock

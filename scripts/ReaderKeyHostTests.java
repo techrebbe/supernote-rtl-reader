@@ -1,5 +1,6 @@
 package t014;
 import android.os.SystemClock;
+import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
 import com.facebook.react.uimanager.ThemedReactContext;
@@ -97,8 +98,35 @@ public final class ReaderKeyHostTests {
         host.drop();
         check(!host.focusable && !host.focusableInTouchMode,"Drop leaves no focus target");
     }
+    private static void diagnosticBoundary() {
+        Log.lines.clear();
+        Sink sink=new Sink(); ReaderKeyHost host=host(sink);
+        long down=++SystemClock.now;
+        check(host.dispatchKeyEvent(new KeyEvent(0,93,-1,down,0)),"ADB virtual keyboard accepted by actual Host");
+        check(Log.lines.stream().anyMatch(line -> line.contains("device=-1") && line.contains("result=pressed") && line.contains("packet=true")),"Native arrival/decision witnessed");
+        check(sink.keys==1,"Diagnostics do not add delivery");
+        check(host.dispatchKeyEvent(new KeyEvent(1,93,-1,down,0)),"Exact virtual-keyboard UP handled");
+        int count=Log.lines.size();
+        host.dispatchKeyEvent(new KeyEvent(0,29,-1,++SystemClock.now,0));
+        check(Log.lines.size()==count,"Unrelated text keys are not logged");
+        Log.fail=true;
+        check(host.dispatchKeyEvent(new KeyEvent(0,93,-1,++SystemClock.now,0)),"Logger failure cannot block dispatch");
+        check(sink.keys==3 && sink.latest.eligible,"Logger failure cannot revoke authority");
+        Log.fail=false;
+        for(int index=0;index<200;index++) host.dispatchKeyEvent(new KeyEvent(0,93,-1,++SystemClock.now,0));
+        check(sink.keys==203,"Observation saturation does not stop fresh contacts");
+        check(Log.lines.size()<=128,"Native diagnostics bounded per Host");
+        host.clearFocus(); count=Log.lines.size();
+        check(!host.dispatchKeyEvent(new KeyEvent(0,93,-1,++SystemClock.now,0)),"Saturated diagnostics do not change focus bypass");
+        check(Log.lines.size()==count,"Saturation stays bounded");
+        host.drop();
+        Log.lines.clear(); sink=new Sink(); host=host(sink); host.clearFocus();
+        check(!host.dispatchKeyEvent(new KeyEvent(0,93,-1,++SystemClock.now,0)),"Unfocused candidate bypasses");
+        check(Log.lines.stream().anyMatch(line -> line.contains("result=bypass focused=false")),"Unfocused native boundary distinguishable");
+        host.drop();
+    }
     public static void main(String[] args) {
-        callbacksFailClosed(); lifecycleAbaAndFocus(); offReleasesFocus();
+        callbacksFailClosed(); lifecycleAbaAndFocus(); offReleasesFocus(); diagnosticBoundary();
         System.out.println("Reader key Host callback model: PASS "+assertions+" assertions; actual device delivery NOT TESTED");
     }
 }

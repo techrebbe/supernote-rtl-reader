@@ -10,6 +10,7 @@ export default function ReaderKeyView({controllerRef, context, currentContext, t
   const ownerRef = useRef(null);
   const latest = useRef(null);
   const boundsRef = useRef(null);
+  const diagnosticsRef = useRef(0);
   const [layoutEpoch, setLayoutEpoch] = useState(0);
   const [ownerEpoch, setOwnerEpoch] = useState(0);
   const [routeSpec, setRouteSpec] = useState(null);
@@ -64,7 +65,20 @@ export default function ReaderKeyView({controllerRef, context, currentContext, t
 
   useLayoutEffect(() => { ownerRef.current?.synchronize(); }, [context, layoutEpoch, ownerEpoch]);
 
-  const onReaderKey = event => ownerRef.current?.handle(event.nativeEvent);
+  const onReaderKey = event => {
+    const packet = event.nativeEvent;
+    const result = ownerRef.current?.handle(packet);
+    // Native packets retain their original stamps. Log only bounded numeric
+    // metadata and our fixed decision reason, never document paths or content.
+    if (packet?.kind === 'key' && diagnosticsRef.current < 128) {
+      diagnosticsRef.current++;
+      const number = value => Number.isSafeInteger(value) ? value : 'invalid';
+      try {
+        console.log(`RTL_READER_PAGE_KEY_JS observation=${diagnosticsRef.current} sequence=${number(packet.sequence)} generation=${number(packet.generation)} key=${number(packet.keyCode)} action=${number(packet.action)} result=${result?.reason ?? 'owner_unavailable'} handled=${result?.handled === true}`);
+      } catch (_) { /* Diagnostics are not routing authority or a retry. */ }
+    }
+    return result;
+  };
   const handleLayout = event => {
     const {width, height} = event.nativeEvent.layout;
     const next = Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0

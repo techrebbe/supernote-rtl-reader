@@ -348,3 +348,30 @@ loops. Physical pen/visible-flash acceptance deferred until awake. Overnight
 heartbeat continue-rtl-reader-overnight active, skips concurrent work; safe
 independent T014 preparation may continue if hardware is blocked. No raw upload,
 other worktree changes, firmware/originals/BOOX or PR finalization.
+
+## T013C exact overnight hardware result — 2026-10-06
+
+Supersedes earlier build-running/code50-installed status. Exact clean source
+f834e2d59812b1c786c52327cb2ee896e561ced8, exp7/code51 now normally installed,
+signature/payload/hash verified. SNPLG1192f6f7...bcc9, APK0cdab5ef...f701,
+bundle230a58d5...0bfe. All12 predefined no-pen presentation generations PASS:
+coverOn/Next/Previous/CoverOff (old stuck-render now READY6), Single1/2/1,
+Auto/portrait/landscape. Exact fresh native completion/SDK output, enabledEdit,
+no stale Rendering, correct blank/no-cross-page ink, <=0.253523px registration.
+Historical code49 direction/code50 readiness failures retained, not relabeled.
+
+NormalClose/nativeT008PAGE1 saved BoxA line, unchanged source/13309-byte mark,
+empty owned SDK cache, original four plugins/28unrelated prefs and rotation1/2
+restoration PASS.92local-backed regular/non-symlink scratch/staging copies
+hash-verified/removed once/absence verified. Raw evidence retained locally at
+tmp/t013c-nomad-20261006; final config17807c59...8006/prefse5a3db55...64e7f.
+Reservation6006541260 released via issue23 comment6007047362. No queued hardware.
+
+Open: P2 reverse-cache loss confirmed (reverse rerasterization); measured
+interaction84–135ms/native22–166ms does not close visible-flash acceptance.
+Memory snapshots226380->258027->256523KB PSS, views14->40->40 are NOT leak proof.
+Human visible-flash/physical-input gates deferred; stock half-page comparison
+UNKNOWN. No general PDFs/text highlights/Bluetooth/release or merge claim.
+Next autonomous source task is existing T014 reader-owned focus/key bridge,
+separate candidate/review, no global native hook/device changes. Overnight
+follow-up should consume this result, not repeat the build/install/hardware.

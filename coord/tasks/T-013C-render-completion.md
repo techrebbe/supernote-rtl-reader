@@ -1,9 +1,10 @@
 # T013C — generation-bound display completion after CoverOff
 
-Status: CORRECTION COMMITTED, EXACT CLEAN BUILD RUNNING; NOT INSTALLED. User
-authorized safe project work while sleeping on2026-10-06; fresh exclusive
-reservation and exact package verification remain required. T013B stopped on installed
-1842e157/code50 at phase5; preserve that failure and all preceding passes.
+Status: EXACT CODE51 BOUNDED HARDWARE/CLOSE/CLEANUP PASS; human performance
+acceptance and P2 reverse-cache concern remain open. Reservation6006541260
+released6007047362. User authorized safe project work while sleeping on2026-10-06.
+T013B stopped on1842e157/code50 at phase5; preserve that historical failure.
+Earlier preparation/build notes below are historical, superseded by the result.
 
 ## Concrete observed defect
 
@@ -120,3 +121,63 @@ before deciding whether remount cost is acceptable or requires a separately
 reviewed native presentation-token/cache-preserving mechanism. Do not add a
 native lifecycle rewrite merely to suppress an unmeasured timing concern.
 The current saved-ink/Close safety authority remains unchanged and fail-closed.
+
+## Exact T013C hardware result — 2026-10-06
+
+Pushed sourcef834e2d59812b1c786c52327cb2ee896e561ced8 clean-built in
+tmp/t013c-f834e2d-build1; normal native plug-in upgrade installed exp7/code51.
+Outer SNPLG1192f6f729ab116c157f53c8ec2aea58819af8e2c58fc7d35c79c830ba40bcc9,
+APK0cdab5ef00322976c3b3ed6d79f610937c7eee3a975b516295944b471bf2f701,
+bundle230a58d56bc3206acc34f921a8fe0e52d43545e83f6abb97e22f93305a7c0bfe.
+Signerfac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c,
+v2/v3 verified compatible. Installed payload matched exactly. Nomad
+SN078C10015092 at10.0.40.1:5555, Chauvet.E103.2606161001.2393_release.
+
+| Native generation | Settled presentation | Result |
+| --- | --- | --- |
+| 1 | portrait Auto/Single PAGE1 | PASS |
+| 2 | landscape Auto, PAGE2 left/PAGE1 right | PASS |
+| 3 | CoverOn blank left/PAGE1 right | PASS |
+| 4 | Next blank left/PAGE2 right | PASS |
+| 5 | Previous blank left/PAGE1 right | PASS |
+| 6 | CoverOff PAGE2 left/PAGE1 right (old stuck-render reproduction) | PASS |
+| 7 | landscape Single PAGE1 | PASS |
+| 8 | Next Single PAGE2 | PASS |
+| 9 | Previous Single PAGE1 | PASS |
+| 10 | Auto landscape PAGE2 left/PAGE1 right | PASS |
+| 11 | rotation to portrait Single PAGE1 | PASS |
+| 12 | rotation to landscape PAGE2 left/PAGE1 right | PASS |
+
+Each actual READY token/pages and page-specific SDK batch settled, Edit enabled;
+retained SDK outputs match PAGE1 6f9fecfe...ecd82/PAGE2 01ca74c6...f0f8.
+All12 retained settled frames rerun offline: uniform Fit registration<=1pixel,
+maximum0.253523px; blank halves and other-page ink absence PASS. No new pen.
+Sourcebd0fd00b...e64 and13309-byte markcf444663...5724 unchanged throughout.
+
+NormalClose once PASS, native T008PAGE1 existing BoxA line visible. Handoff
+restarted stock Document1908 through its existing normal route, not a rescue.
+Owned SDK cache empty files AND directories; four original plug-ins/28 unrelated
+prefs exact. Only T008 retains RTL/Auto/Fit/coverOff/PAGE1. Captured rotation1/2
+restored; final config17807c59...8006 and prefs e5a3db55...64e7f retained.
+92 exact regular/non-symlink scratch/staging copies hash-verified, removed once,
+absence verified; local PDFs/mark/screenshots/logs remain under
+tmp/t013c-nomad-20261006. Final-postflight-pass.json and complete
+all-pixel-measurements-pass.json retained locally. No raw evidence uploaded.
+Reservation release: issue23 comment6007047362.
+
+Scope/exclusions: initial portrait-ready capture preceded actual readiness;
+original cover-return capture has a transient root-permission toast across its
+blank half. Both excluded, not masked/repinned. Clean read-only recapture of the
+same READY5 frame passed without page/settings changes. One host PageOrder
+argument lacked quotes and failed before verification; corrected exact current
+stage verification passed. Earlier historical-stage/current-token and optional
+interactionMs parser rejections were host harness errors, not hardware passes.
+
+P2 reverse-cache concern CONFIRMED, NOT CLOSED: cover return and Single reverse
+rerasterized (cacheHit=false). Observed interaction84–135ms; displayed native work
+22–166ms. These timings do not establish visible e-ink flashing acceptance.
+PluginHost PSS226380KB before ->258027KB after transitions ->256523KB immediately
+afterClose; views14 ->40 ->40. Snapshot timing/application caches/GC were not
+controlled: NOT a memory-leak PASS or diagnosis. Human flash/feel remains deferred.
+Stock half-page geometry comparison remains UNKNOWN; no rescue turn/restart.
+No general-PDF/native-highlight/Bluetooth or release/merge acceptance implied.

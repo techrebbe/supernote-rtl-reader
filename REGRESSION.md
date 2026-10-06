@@ -3562,3 +3562,33 @@ and28unrelated preferences exact. Owned cache empty;49explicit local-backed
 scratch copies hash-verified/removed once and absence verified. Local evidence
 retained. Stock half-page geometry remains UNKNOWN; no rescue/pen/force-stop.
 Release recorded separately in issue23. No full-batch PASS; phases6-8 not run.
+
+### T013C code51 completion retry — bounded presentation and cleanup PASS
+
+2026-10-06, NomadSN078C10015092/Chauvet.E103.2606161001.2393_release;
+exact clean sourcef834e2d59812b1c786c52327cb2ee896e561ced8,
+0.4.24-ink-exp7/code51, compatible signer/package verified before normal upgrade.
+SNPLG1192f6f729ab116c157f53c8ec2aea58819af8e2c58fc7d35c79c830ba40bcc9,
+APK0cdab5ef00322976c3b3ed6d79f610937c7eee3a975b516295944b471bf2f701.
+Reservation6006541260, release6007047362. No new pen input, existing T008 lines.
+
+Actual native READY1..12 and exact fresh page-bound SDK images PASS for all fixed
+portrait/paired/coverOn/Next/Previous/coverOff/Single1-2-1/Auto/rotation phases.
+Old CoverOff persistent-Rendering failure now settles atREADY6, both Edit
+controls enabled. All12 retained settled frames measured independently against
+canonical real SDK images: registration max0.253523px, blank halves/no cross-page
+ink PASS. Startup/permission-toast contaminated frames excluded, clean read-only
+recapture used; no rescue page/rotation/restart after a hardware failure.
+
+NormalClose/nativeT008PAGE1 with saved BoxA line, unchanged source/13309-byte mark,
+owned SDK cache empty files AND directories, four original plugins/28unrelated
+prefs exact; T008 only remains RTL/Auto/Fit/coverOff/PAGE1. Rotation1/2 restored.
+92exact temporary/staging regular non-symlink copies hash-verified/removed once,
+absence verified; raw local evidence tmp/t013c-nomad-20261006 preserved, no upload.
+
+P2 reverse-cache loss CONFIRMED/OPEN (reverse rerasterization), measured
+interaction84–135ms/native22–166ms. PSS226380->258027->256523KB/views14->40->40
+snapshots NOT a leak pass or diagnosis. Visible-flash/feel awaits human gate;
+stock half-page geometry comparison still UNKNOWN. Fixture-bound Fit saved ink
+only; no arbitrary-PDF/highlights/Bluetooth/release/merge claim. See exact task
+tasks/T-013C-render-completion.md for phase table, exclusions and identities.

@@ -1021,17 +1021,23 @@ def check(repo_root: Path) -> None:
         ),
         (
             index_path,
-            "3c28d2127083b6c73381ae0ddc496cc7a4e4124e5d0f4176d6e8ede61c90d26c",
+            # T013C candidate-only runtime marker exp6 -> exp7; no authority change.
+            "9399b7b6bc55a5b3aecc688766ff1db576cfbf2f47914f22b182ecbb8b270f2e",
             "Edit/Return activation and close authority",
         ),
         (
             direct_patch_path,
-            "4cbb85d3789efa3dd17ab056ee5388e39bd7dc28c159c9dfe87a037d2541d927",
+            # T013C independent narrow review: each display generation mounts
+            # fresh keyed views and fences completion/error callbacks. No native
+            # writer/save/handoff/controller pin changes. Reverse-cache P2 stays
+            # a measured-performance gate before release; no hardware pass yet.
+            "214e52180633cacbb0f11b9cdf17ac317a1ef5e3cc163489ac8160a7649d8b33",
             "direct-render Edit/Return transition guard generation",
         ),
         (
             workflow_path,
-            "4bdb26199119112e9da37a448dbfe599d06c6475209b442f15743418083f8a5e",
+            # T013C candidate-only CI artifact label exp6 -> exp7; gates unchanged.
+            "5fda80ffb6f9ba199ba55e67ea47166707284c4e3d93a92ceecde824dd6f986f",
             "Native Spread companion-build workflow",
         ),
         (

@@ -101,6 +101,7 @@ def main() -> None:
       };
       setDisplay({
         kind: 'single',
+        renderToken: token,
         singlePageIndex: pageIndex,
         prefetchPageIndexes,
         requestStartedAtMs,
@@ -144,6 +145,7 @@ def main() -> None:
     };
     setDisplay({
       kind: 'spread',
+      renderToken: token,
       leftPageIndex: visual.left,
       rightPageIndex: visual.right,
       prefetchPageIndexes,
@@ -168,7 +170,10 @@ def main() -> None:
     window.width,
   ]);
 
-  const handleNativeRendered = event => {
+  const handleNativeRendered = (event, requestToken) => {
+    // Completion belongs to this mounted presentation, not merely its page.
+    // A reused page/late event cannot settle a newer cover/layout/rotation epoch.
+    if (requestToken !== nativeRenderRef.current.token) return;
     const nativeEvent = event?.nativeEvent;
     const renderedPage = nativeEvent?.pageIndex;
     if (!Number.isInteger(renderedPage)) return;
@@ -208,7 +213,8 @@ def main() -> None:
     }
   };
 
-  const handleNativeError = event => {
+  const handleNativeError = (event, requestToken) => {
+    if (requestToken !== nativeRenderRef.current.token) return;
     const nativeEvent = event?.nativeEvent;
     const failedPage = nativeEvent?.pageIndex;
     const pending = nativeRenderRef.current;
@@ -326,6 +332,7 @@ def main() -> None:
             <View style={styles.spreadPage}>
               {Number.isInteger(display.leftPageIndex) ? (
                 <NativePdfPageView
+                  key={`left:${display.renderToken}`}
                   filePath={documentContext?.filePath ?? ''}
                   pageIndex={display.leftPageIndex}
                   savedInkToken={savedInkTokenFor(display.leftPageIndex)}
@@ -333,8 +340,8 @@ def main() -> None:
                   contentMode={spreadSizing}
                   prefetchPageIndexes={display.prefetchPageIndexes ?? []}
                   requestStartedAtMs={display.requestStartedAtMs ?? 0}
-                  onPdfRendered={handleNativeRendered}
-                  onPdfError={handleNativeError}
+                  onPdfRendered={event => handleNativeRendered(event, display.renderToken)}
+                  onPdfError={event => handleNativeError(event, display.renderToken)}
                   style={styles.pageImage}
                 />
               ) : (
@@ -345,6 +352,7 @@ def main() -> None:
             <View style={styles.spreadPage}>
               {Number.isInteger(display.rightPageIndex) ? (
                 <NativePdfPageView
+                  key={`right:${display.renderToken}`}
                   filePath={documentContext?.filePath ?? ''}
                   pageIndex={display.rightPageIndex}
                   savedInkToken={savedInkTokenFor(display.rightPageIndex)}
@@ -352,8 +360,8 @@ def main() -> None:
                   contentMode={spreadSizing}
                   prefetchPageIndexes={display.prefetchPageIndexes ?? []}
                   requestStartedAtMs={display.requestStartedAtMs ?? 0}
-                  onPdfRendered={handleNativeRendered}
-                  onPdfError={handleNativeError}
+                  onPdfRendered={event => handleNativeRendered(event, display.renderToken)}
+                  onPdfError={event => handleNativeError(event, display.renderToken)}
                   style={styles.pageImage}
                 />
               ) : (
@@ -363,6 +371,7 @@ def main() -> None:
           </View>
         ) : Number.isInteger(display.singlePageIndex) ? (
           <NativePdfPageView
+            key={`single:${display.renderToken}`}
             filePath={documentContext?.filePath ?? ''}
             pageIndex={display.singlePageIndex}
             savedInkToken={savedInkTokenFor(display.singlePageIndex)}
@@ -370,8 +379,8 @@ def main() -> None:
             contentMode="fit"
             prefetchPageIndexes={display.prefetchPageIndexes ?? []}
             requestStartedAtMs={display.requestStartedAtMs ?? 0}
-            onPdfRendered={handleNativeRendered}
-            onPdfError={handleNativeError}
+            onPdfRendered={event => handleNativeRendered(event, display.renderToken)}
+            onPdfError={event => handleNativeError(event, display.renderToken)}
             style={styles.pageImage}
           />
         ) : (

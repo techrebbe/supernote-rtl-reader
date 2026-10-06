@@ -398,7 +398,7 @@ async function runDisplayProducer(source, options = {}) {
   const producer = new Function(
     ...Object.keys(environment),
     `${modeSource}\n${src.slice(start, end)}\n` +
-      'return {effectiveMode, complete: typeof handleNativeRendered === "function" ? handleNativeRendered : null};',
+      'return {effectiveMode, complete: typeof handleNativeRendered === "function" ? handleNativeRendered : null, fail: typeof handleNativeError === "function" ? handleNativeError : null};',
   )(...Object.values(environment));
   assert.equal(effects.length, 1, 'execute only the shipped foreground render effect');
   effects[0]();
@@ -406,8 +406,66 @@ async function runDisplayProducer(source, options = {}) {
   // it. Let its real promise continuation settle before inspecting the result.
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(captured.fatalError, null, 'producer must not fail behind the settlement assertions');
-  return {...producer, captured};
+  return {...producer, captured, request: environment.nativeRenderRef.current};
 }
+
+test('hardware CoverOff regression: unchanged right page gets a fresh native view identity', async t => {
+  const source = generateNativeAppSource(t);
+  const slots = [...source.matchAll(/<NativePdfPageView\b([\s\S]*?)\/>/g)];
+  assert.equal(slots.length, 3, 'actual generated left/right/single native slots');
+  const keys = slots.map(slot => {
+    const expression = slot[1].match(/\bkey=\{(`[^`]+`)\}/);
+    assert.ok(expression, 'every actual native slot requires a generation-bound React key');
+    assert.equal((slot[1].match(/onPdfRendered=\{event => handleNativeRendered\(event, display\.renderToken\)\}/g) || []).length, 1);
+    assert.equal((slot[1].match(/onPdfError=\{event => handleNativeError\(event, display\.renderToken\)\}/g) || []).length, 1);
+    return new Function('display', `return ${expression[1]};`);
+  });
+  const shared = {renderTokenRef: {current: 0}, nativeRenderRef: {current: {}}};
+  const config = {...shared, pageIndex: 0, totalPagesRef: {current: 2}, viewMode: 'spread',
+    isLandscape: true, pageAreaLayout: {width: 1872, height: 1404},
+    lastNavigationDeltaRef: {current: -1}};
+  const cover = await runDisplayProducer(source, {...config, coverSeparate: true});
+  cover.complete({nativeEvent: {pageIndex: 0}}, cover.request.token);
+  assert.equal(cover.captured.rendering, false);
+  const paired = await runDisplayProducer(source, {...config, coverSeparate: false});
+  assert.equal(cover.captured.display.rightPageIndex, 0);
+  assert.equal(paired.captured.display.rightPageIndex, 0, 'same native source page in same right slot');
+  assert.deepEqual(cover.captured.display.prefetchPageIndexes, paired.captured.display.prefetchPageIndexes,
+    'observed PAGE1 native render props can remain unchanged after cover Previous');
+  assert.equal(paired.captured.rendering, true);
+  assert.notEqual(keys[1](cover.captured.display), keys[1](paired.captured.display),
+    'React must mount a fresh native view rather than wait for unchanged-view callback');
+  assert.equal(new Set(keys.map(key => key(paired.captured.display))).size, 3, 'slot identities distinct');
+  paired.complete({nativeEvent: {pageIndex: 1}}, paired.request.token);
+  assert.equal(paired.captured.rendering, true, 'new PAGE2 alone cannot declare both pages ready');
+  paired.complete({nativeEvent: {pageIndex: 0}}, paired.request.token);
+  assert.equal(paired.captured.rendering, false, 'both fresh native draws actually complete');
+});
+
+test('native completion/error authority rejects old same-page generations and ABA', async t => {
+  const source = generateNativeAppSource(t);
+  const shared = {renderTokenRef: {current: 0}, nativeRenderRef: {current: {}}};
+  const config = {...shared, pageIndex: 0, totalPagesRef: {current: 2}, viewMode: 'spread',
+    isLandscape: true, pageAreaLayout: {width: 1872, height: 1404}};
+  const first = await runDisplayProducer(source, {...config, coverSeparate: false});
+  const second = await runDisplayProducer(source, {...config, coverSeparate: true});
+  const third = await runDisplayProducer(source, {...config, coverSeparate: false});
+  assert.ok(first.request.token < second.request.token && second.request.token < third.request.token);
+  for (const stale of [first.request.token, second.request.token, undefined, null, NaN, '3']) {
+    third.complete({nativeEvent: {pageIndex: 0}}, stale);
+    third.fail({nativeEvent: {pageIndex: 0, message: 'stale error'}}, stale);
+    assert.equal(third.request.loaded.size, 0, 'same-page stale event cannot mark current presentation drawn');
+    assert.equal(third.captured.rendering, true);
+    assert.equal(third.captured.fatalError, null);
+  }
+  first.complete({nativeEvent: {pageIndex: 0}}, first.request.token);
+  assert.equal(third.request.loaded.size, 0, 'retired callback cannot mutate current request');
+  third.complete({nativeEvent: {pageIndex: 1}}, third.request.token);
+  third.complete({nativeEvent: {pageIndex: 1}}, third.request.token);
+  assert.equal(third.captured.rendering, true, 'duplicate is not a second page');
+  third.complete({nativeEvent: {pageIndex: 0}}, third.request.token);
+  assert.equal(third.captured.rendering, false);
+});
 
 test('Edit settlement accepts actual legacy and generated portrait/Single displays', async t => {
   const sources = [
@@ -428,9 +486,9 @@ test('Edit settlement accepts actual legacy and generated portrait/Single displa
         if (native) {
           assert.equal(args.rendering, true);
           assert.equal(er.listEditTargets(args).settled, false, 'native completion is still in flight');
-          state.complete({nativeEvent: {pageIndex: 3, pageCount: 20}});
+          state.complete({nativeEvent: {pageIndex: 3, pageCount: 20}}, state.request.token);
           assert.equal(state.captured.rendering, true, 'unrelated completion cannot settle this page');
-          state.complete({nativeEvent: {pageIndex: 4, pageCount: 20}});
+          state.complete({nativeEvent: {pageIndex: 4, pageCount: 20}}, state.request.token);
         }
         args.rendering = state.captured.rendering;
         assert.equal(args.rendering, false, 'actual producer completed the requested page');
@@ -450,7 +508,7 @@ test('Edit settlement accepts actual legacy and generated portrait/Single displa
         const expected = [visual.left, visual.right].filter(Number.isInteger);
         for (const page of expected) {
           assert.equal(er.listEditTargets({...args, rendering: state.captured.rendering}).settled, false);
-          state.complete({nativeEvent: {pageIndex: page, pageCount: 20}});
+          state.complete({nativeEvent: {pageIndex: page, pageCount: 20}}, state.request.token);
         }
       }
       args.rendering = state.captured.rendering;

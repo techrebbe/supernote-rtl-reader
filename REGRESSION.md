@@ -2986,7 +2986,7 @@ silently dropped from the derived PDF. The complete 173-test generator suite
 and both repository invariant suites pass. These generator-only corrections do
 not change the hardware-tested companion APK or runtime path.
 
-## v0.4.24-edit-exp2 - OFFLINE CANDIDATE; HARDWARE PENDING
+## v0.4.24-edit-exp2 - SOFTWARE CANDIDATE AND BOUNDED HARDWARE EVIDENCE
 
 This focused correction is based on Claude's exact Edit/Return head
 `904ee54a8b26d05dd6faa2eb37ffd1a909e35d90`, without changing that branch.
@@ -3011,11 +3011,327 @@ reviewed App/helper/workflow changes and extended to protect index.js and the
 direct-render guard generator. Native writer, annotation format, native renderer,
 companion APK, and packaging/signing implementation remain unchanged.
 
-No Nomad installation or hardware pass is claimed. The next gate is a disposable
-PDF: Edit from settled portrait/Single and each spread half, exact stock page,
-native writing/save, then RTL return after page changes and rotation. The existing
-stock restart route still requires hardware observation; immediate bridge success
-does not prove the target activity has completed loading.
+The offline evidence above preceded installation. On 2026-09-30 the exact
+software commit `66ac1d56546db1102d3a50ae0c021d57653d6c35` was installed through
+the normal plug-in manager with explicit approval and issue #23 reservation.
+Later documentation commits are not the tested binary identity. Device:
+Nomad `SN078C10015092`, fingerprint
+`Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20260616.100032:user/release-keys`;
+stock Document `1.02.446`/102446; unchanged companion `0.0.140`/140.
+
+Candidate SHA-256 evidence:
+
+- Installable `.snplg`: `c5954a12429a89ba502310f9cac79f270da83eb1ec0e3ac36d4989173d0fbf0a`.
+- Installed native APK: `b8e9943fb8249805023757a1ff7ed6add59d555686d336db95687b48f18a56cf`.
+- Installed JS bundle: `4cafd84c61a37c3bb741f2692be74039e7a3cc3c4deef2a531084344ce586894`.
+
+Bounded T-002 used only the new eight-page
+`RTL_EDIT_RETURN_T002_20260930.pdf`. Settled portrait Edit p.3 opened the exact
+stock page (A PASS). The user's single BOX A stroke survived native page turns,
+graceful close/reopen, the Edit restart and final stock inspection at the same
+visible position and size. A fresh uninterrupted return, with the incoming
+pending record captured before launch, resumed native/reader page 3 (B PASS).
+An older return was interrupted by ADB loss and later external document use;
+its saved-page-2/native-page-3 observation remains UNKNOWN, not explained or
+retroactively passed by the fresh check.
+
+Landscape spread PAGE 5 left / PAGE 4 right: both Edit buttons opened their
+correct actual stock page and returned with focused native/reader 4 and 5
+respectively (C PASS). Two separate fresh native anchors at page 1 verified
+stock-page precedence: Edit 3 then stock 4 returned to RTL page 4; Edit 5 then
+stock 1 plus rotation returned to Blank / 1, not page 5 (D1/D2 PASS). Each
+pending Edit record was captured before return and the logs reported
+`source=edit-return`, `status=applied`, the correct native/reader pages and
+completed native rendering. These are actual completed page-load observations,
+not just immediate handoff acknowledgements. No new pen input in C/D.
+
+Closeout restored rotation settings `accelerometer_rotation=1`, `user_rotation=2`
+and left a usable stock reader on PAGE 3 with its saved stroke intact. Source PDF
+SHA-256 remained `7a83ca018777bc734a80a629184fe271d9a13c5a2ae42b269fce7eaf514faf36`;
+native `.pdf.mark` remained 7,473 bytes, SHA-256
+`323af5df6785a9b438aaad17e5c6d42adf5c6146ab78d76dc96486e52dee206d`.
+Visual stroke checks supplement these hashes; hashes alone are not persistence
+proof. Exp2 remains installed; no rollback needed/performed. Firmware, LSPosed,
+companion and other plug-in installations/configurations were not changed.
+No personal PDF/.mark or BOOX was selected for testing. Local chronology and
+raw evidence are retained in the project workspace's `tmp/t002-nomad-20260930/`,
+outside this repository; no PDFs, annotation files or captures are uploaded.
+
+**Scope limit:** saved-stroke Edit/Return and page identity only, not a release.
+Native `.mark` ink is NOT_RENDERED in the RTL reading view; it was not lost.
+Unsaved pen/eraser/lasso/highlight state across the existing stock-reader restart
+is still untested and a real-document/release blocker (T-001 E3). No merge or
+release authorization, and no expansion into E3, is implied by these passes.
+
+## 2026-10-01 — T-003 one no-manual-save fresh-stroke route
+
+Unchanged exact executable `66ac1d5`, installed `0.4.24-edit-exp2`/44. With
+separate user approval and issue #23 reservation 5922413859, one hooked stroke
+was drawn on native PAGE3 of new `RTL_FRESH_INK_T003_20261001.pdf`. Ordinary
+plug-in opening and ONE Edit p.3 restart retained it at the correct page/geometry
+in fresh stock PID17400 (previous31783). The before/after BOX A ink-region pixels
+match exactly; whole screenshots differ only in the native Undo toolbar icon.
+Pending record matched the fixture/zero-based page2. Source unchanged; new
+7,815-byte mark SHA256 `e9cf4873de35e72b8f2d155ba911fbcfa5b5e34317ce56e8653ee3e4e4e5672f`.
+
+**Narrow PASS, not unsaved-at-kill validation.** Native pen-up05:15:12.187;
+saveTrails:true/page3 at05:17:01.505; RTL activation05:17:01.521; Edit request
+05:18:16.588; kill05:18:17.494. Pen-up to activation109.334s / to kill185.307s;
+READY to Edit71.641s. These delays did not meet the intended immediate/readiness-
+only execution; no rapid-transition or durable-save guarantee is claimed.
+Stock reported saving before activation, then hasTrails:false. Full E3 remains
+open, and native .mark visibility in RTL remains a separate missing capability.
+
+Independent read-only timing/outcome review supports the limited result.
+Rotation1/2 restored, T-002 source/mark and installed APK/bundle unchanged,
+task-owned host logger stopped; stock left usable on PAGE3. No install/rollback,
+personal-document/BOOX operation, extra trial, merge or release. Raw captures,
+full preferences and annotation file stay local under project
+`tmp/t003-nomad-20261001/`. See `coord/tasks/T-003.md` for exact scope.
+
+## 2026-10-01 - T-004 rapid/tool gate incomplete
+
+Unchanged installed66ac1d5/0.4.24-edit-exp2/44, user-approved disposable batch,
+issue23 reservation5923586203. Host-only driver received independent review and
+10purepredicate testsPASS. Initial read-only focus preflight stopped before
+arming; corrected top-level window-focus query, original stop preserved.
+
+Corrected pen-only observer armed1790823274.285, expired300s later at
+1790823574.284 with NO tap/RTL/Edit/restart action. User's later pen-up at
+1790825274.344 was1700.060s after expiry. NativePAGE3/PID17400 and visible
+ordinary stroke remained, source unchanged; no transition outcome exists.
+**UNKNOWN/notperformed, not ink-retention failure or rapid PASS.** Eraser,
+lasso and highlight checks did not begin. Full E3 remains unresolved.
+
+Late stroke/local native mark snapshot preserved; no attempt to erase it or
+rescue the result. Rotation1/2 restored; no background test, installation,
+production change, personal file/BOOX action, merge or release. Resume requires
+a ready-now handshake and a declared baseline before arming, not further
+speculative host/emulator work. See `coord/tasks/T-004.md`.
+
+Resumed trial03 under reservation5924235721 preserved the existing stroke and
+added one new ordinary hook. Native pen-up1790825980.580 -> exact RTL activation
+1790825992.924 =12.344s; save-attempt log preceded activation29ms, exact
+OPENEDnative3/reader3 and READYpages3 observed. Host stopped before Edit because
+PluginHost's foreground overlay title contains the package only. No Edit tap,
+restart or new native retention observation: **UNKNOWN/incomplete**, not PASS
+or ink-loss evidence. NativePID17400 remains; both baseline strokes preserved.
+Only host focus parser corrected;12predicate tests and independent narrow
+review PASS. Rotation1/2 restored, observer stopped, known RTL page3 left open;
+no ad-hoc Edit cleanup. New trial requires user decision and exact preflight.
+
+User approved fresh trial04 with corrected host driver. Normal Edit3 setup
+returned exact nativePAGE3/PID26935 with both prior strokes visible. This setup
+is not a rapid retention result. Pen observer armed300s; user requested
+disconnect before drawing. Owned host session stopped, no surviving driver or
+log collector; events onlyARMED/no pen or automatic transition. Rotation1/2
+restored, nativePAGE3/source unchanged, safe unplug confirmed. Trial04
+NOTPERFORMED/user-stop, not rapidPASS or annotation failure. No later tools run.
+
+Subsequent trial05 completed the bounded rapid PEN route: exact nativePAGE3,
+PID26935->30122, pendingEditzero-based2. Native pen-up->activation11.817s;
+pen-up->kill18.602s; hostsettledUI->Editexecute1.282s, measured bounds met.
+Both prior lines are independently pixel-identical after reopening. New upper
+hook was absent from Android pre-capture (wet/direct layer) but visible after;
+user explicitly confirmed its original position/size/shape. **Narrow PASS**
+combines prior-ink pixel evidence with explicitly labelled HUMAN new-geometry
+witness, not new-stroke pixelidentity. Native save-attempt preceded activation;
+durable/unsaved-at-kill safety and fullE3 remain unproven. Later tool gates remain
+separate. Candidate unchanged; no installation/production change.
+
+ERASER01 followed the recorded PEN pass with separate reviewed semantic gate:
+one humancontact,4svisualsettle,59blackpixelsremoved/2826retained in upperline,
+all unrelated pagepixels unchanged BEFOREhandoff. NormalRTL/Edit3 reopened
+exact stockPAGE3/PID30122->31495. Completed-erasure -> reopened-page image
+pixels across(0,100,1404,1772) match EXACTLY, including the gap/otherlines/BOXB.
+Penup->activation15.965s/kill22.836s, hostsettled->Editexecute1.337s. Narrow
+ERASER persistence PASS; no unsaved-at-kill/durability/fullE3 claim. Native tool
+selection resets from eraser to0.6pen after restart; no tool/Undo-stack retention
+guarantee. No production/build/install change. Lasso/highlight remain separate.
+
+LASSO01: bounded committed-result PASS, independently reviewed. Human selection
+and move were separate from explicit PEN blank-tap commit/dismiss; initial finger
+tap did not dismiss. Frame/menu-free committed reference, prehandoff and fresh
+stock reopen documentRGBAy100..1772 exactly match. Moved upper fragments/erased
+gap and both prior strokes/BOXB intact. Native31495->1185/exactPAGE3/pending2-of8;
+normal four controls/Editonce, route25.625s, settledUI->Edit1.281s. Tool resets to
+0.6pen; no tool/Undo-stack promise. Manual commit latency not captured, not rapid
+commit/dirty-at-kill/durability/fullE3 proof. Final text highlight remains pending.
+
+HIGHLIGHT01: bounded committed-result PASS, independently reviewed. Human
+applied native Highlight after text selection; menu absent/aligned sentencegray.
+Appliedreference/before/after full documentRGBAy100..1772 exactly equal; all ink
+unchanged from LASSO, only newdocumentchange highlightx236..813,y1254..1296.
+Exactcandidate/nativePAGE3/pending2of8/native1185->5212, fixed4controls/Editonce,
+route25.469s/settledEdit1.279s. Manualapply latency notcaptured; no saveTrails:true
+inthisroute, neither presence nor absence is durable-save proof. All four bounded
+tools complete; no fullE3/durability/personal-document release claim.
+
+Verified batchcloseout: rotation1/2 restored/read back, final nativePAGE3/PID5212
+all ink/highlight intact, source/installed candidate unchanged; consistent
+119233byte disposable mark snapshot local, owned observers absent. Reservation
+released in issue23 comment5929290902; safe to unplug/no further hardware step.
+No production change/build/install/commit/push/merge or original/BOOX action.
+
+## 2026-10-01 - T-005 saved-native-ink PNG diagnostic
+
+Isolated local source c4a95e5d06cd3ec29ceb82a493fb6e98fb6ebc62;
+RTL Ink Probe0.0.1-ink-probe/code1, snrtlinkprobe20261001. Focused23JS/11Python,
+existing gates, exact-source independent review, Metro/Kotlin/Gradle build and
+strict payload/signature verifier PASS. SNPLG SHA256
+20eca47e72d85db1fecd1f2999ef70d7267ae782f1a9c35f18f6c1af4ce3d3b5.
+Installed production66ac1d5/0.4.24-edit-exp2/code44 remains unchanged.
+
+Fresh reservation5934678778, exact NomadSN078C10015092/nativePID5212/disposable
+T004 PAGE3 portrait1404x1872. Earlier disconnected/setup-mismatch attempts
+remain NOTPERFORMED, not retrospectively PASS. Normal separate diagnostic
+installation; exactly ONE native request original pageIndex2 at
+UTC2026-10-01T15:43:47.3200824Z. Result preview/none, RGBA1404x1872/17098bytes,
+PNG SHA256586ed5ec318e17da13a75d131ff91d5ffafed1576ff63bc5ab0d97dfd012eb50.
+
+Bounded saved-ink extraction/transparency/alignment PASS: three ink rows,
+erased upper gap, moved fragments, hooks and thick endpoint preserved.
+Independent alpha>=128 vs stockRGB<128 mask6532pixels exact/zeroXOR/IoU1.0;
+background transparent. Native BOXB text highlight NOT INCLUDED by this PNG;
+separate display-path requirement, not ink loss. No general rotation/zoom,
+production overlay, atomic snapshot or durable-save claim.
+
+PDF SHA256ffb6c3b889ed455841d3c4f50a0813d844109c3c97255b4bbb5e4b949c9592c9
+and mark SHA256a4dda9e71a4191ffc6371592fc47709a9124c596684b990ecd07d510a6f81ef5
+unchanged before/after. Normal Return explicitly cleaned owned PNG/directory;
+cache empty verified, normal Remove deleted only diagnostic/private directory.
+Staged probe package and named scratch removed; local evidence/artifact retained.
+Final nativePAGE3/PID5212/production APK/bundle unchanged and whole screenshot
+pixel-identical to preflight, including ink/highlight. No physical pen, page,
+rotation, Edit/restart/kill, personal-document/BOOX, push/merge/release action.
+Reservation released/no queued device work; safe unplug. See `coord/tasks/T-005.md`
+and `coord/handoffs/T-005-handoff.md`. Save-safe endpoint remains design only.
+
+## 2026-10-01 - T-006 saved-ink display software gate
+
+Exact local implementation981c74141e184ba8e90b92c0bbcfd8298a2fd335,
+0.4.24-ink-exp1/code45. Controller24/App20/wiring6, Edit38/lifecycle37,
+Java85,407 assertions,271mutations plus10interleaving/recovery gates,
+native/Edit/v2/cross-layer/provenance/packaging checks PASS. Independent scoped
+review found no critical/high blocker after cleanup-lease race and stickyfailure
+corrections. Read-only ink is separate from PDF bitmap/cache, tied to exact T004
+PAGE3 geometry/source, and shares native background destination/clip. Arbitrary
+PDFs/text highlights and save-safe endpoint remain unsupported/unimplemented.
+
+Exact-commit clean source archive, lockedtemplate/dependencies, Metro/Kotlin/
+Gradle/customAPK/strictpackage/signature/payload verification PASS. Two initial
+JAVA_HOME setup failures preserved; final actual JDK17.0.12 verified first.
+SNPLG SHA25621d4e7ed40cb4c0171867e31226f7acc41b70f281268df5aa3298670fb73051e;
+nativeAPK SHA256b4f0df66933346d4e9ee8aa7d3bd8c23f0b9e5a46f3339a91541c2d6810d9c09;
+bundle SHA256e409ddc289a73dba24f004fbb6bc2317a1de575d20fa8be774a98c74542fd619.
+Normal pluginIDsnrtl20260726001, namespacecom.supernotertlreader; template signer
+fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c retained.
+
+**Hardware NOTPERFORMED/pending authorization**, not display/alignment PASS.
+Installedexp2/code44 and Nomad were not touched. No install/issue reservation,
+push/merge/PR advancement or new SDK request occurred. SourcePDF/.mark originals
+and prior T002-T005 evidence remain preserved. Next is one disposable composition,
+rotation/page-away-back/reopen gate, not another speculative emulator cycle.
+Artifact/evidence location and exact rollback/stop criteria: `coord/tasks/T-006.md`.
+
+## 2026-10-01 - T-006 fixture saved-ink DISPLAY hardware PASS
+
+Exact981c741/code45 installed via normal Supernote UI with explicit approval;
+installed APK/bundle equal reviewed build. FirmwareChauvet.E103.2606161001.2393_release,
+serialSN078C10015092, reservation5937822106. Earlier PAGE2 preflight remains
+NOTPERFORMED/setup mismatch. Corrected starting state is nativePAGE3/8/PID5212.
+
+Portrait rows/gap/hooks align; independent inkROI IoU0.992192, no misplaced
+extra pixels (half-alpha threshold edges account for difference). Landscape
+pairedRTL PAGE4left/PAGE3right preserves alignment; leftROI0/right2806px,
+geometry edges<=2px of actual Fit destination. AwayPAGE6|5 bothROIs0/cacheempty;
+return fresh request yields identical spread screenshotSHA256
+7df3c0d611b540953885e2cac7daca3234207cdde5e36b5b33270f258e692ff3.
+Portraitreturn equals firstportraitSHA256
+0ff77e29afff393f734c554c54d7422a606c2b066313baf5994db6f71dce943b.
+Display PASS ONLY exactT004PAGE3; native text highlights absent/unsupported,
+not a general annotation/geometry/persistence or complete release PASS.
+
+Close/reopen NOTPERFORMED because existingClose always restarts stock, forbidden
+in this task; do not assume current-page fastpath or AndroidBack cleanup.
+FinalnormalNextPAGE4 naturally drains owned ink/cache. PDF/mark baseline hashes
+unchanged, PID5212 never restarted, rotation1/2 restored, no pending SDK/test.
+Named scratch/staging removed; raw evidence/rollback retained locally. Candidate
+remains installed; no rollback/push/PR/merge. Device released/safe unplug.
+See coord/tasks/T-006.md and coord/handoffs/T-006-handoff.md for exact scope.
+
+## 2026-10-01 - T-006 separately approved settled Close/reopen PASS
+
+Exact981c741/code45, reservation5938943171, same Nomad/firmware/saved-onlyT004.
+Explicit user approval for existingrestart; prior omission remains historical.
+SettledPAGE3/ready/PNG586ed5ec... -> ONE Close19:29:32UTC -> verifiedconfig3,
+native5212->6472 confirmed/directstart -> correctPAGE3/threeinkrows/gap/hooks/
+highlight byte+pixelidenticalT005native SHA256
+49f0658e956742ca918a80835d8dd0296e7e232cc4f860e73b601d19ec33708d.
+Ownedcacheempty BEFORE ONE RTLreopen, freshUUID5336fec4.../PNG586ed5ec...,
+exactversion/native3reader3/ready. ReopenedRTL byte+pixelidenticalbefore SHA256
+0ff77e29afff393f734c554c54d7422a606c2b066313baf5994db6f71dce943b.
+Independent narrow source/evidence review PASS; no secondrestart/newpen.
+FinalNextPAGE4 naturally drains cache/emptyverified, PDF/markSHA unchanged,
+native6472/rotation1/2 retained,13ownedscratchremoved/localcopiesretained.
+Candidate installed/rollbacknotneeded, device released/safeunplug/noqueuedwork.
+BoundedfixtureT006 COMPLETE, NOT generalPDF/RTLhighlight/fullE3/dirty-save/
+pendinggenerationClose/productrelease. ExistingClose does not directly await
+globalinkcleanup; readybeforeClose is required. No code/install/push/PR/merge.
+Detailed T006task/handoff and localtmp/t006-close-reopen-20261001/ preserved.
+
+## 2026-10-01 - T-007 unattended saved-ink display batch PASS
+
+Exact installed981c741/code45, reservation5939948868 released5940253811;
+NomadSN078C10015092/Chauvet.E103.2606161001.2393_release, disposableT004only.
+Settledspread, cleanaway/freshreturn, focusedPAGE3portrait/bothlandscapes and
+two repeatedspreadcycles PASS, normalpageREADY53-91ms. Independentimage review:
+portrait exactlymatchesT006, spreadink2806pixels/bbox1247,591..1518,753,
+blankneighbors, returnframespixelidentical; no shift/loss/ghostink.
+Pendingrotation observed: request182886048 start23:38:07.506, actualconfig07.633,
+nativecallback07.653/pluginrotation07.898, SDKsuccess08.092, cleanPAGE4after,
+freshPAGE3recoveryexact. Rapidpageaway did NOT overlap SDK: NOTEXERCISED for
+pendingcancellation, not a racePASS. No pen/Close/Edit/stockrestart/install.
+FinalnormalNext/settingrestore1/2 gives portraitPAGE5/cacheempty/nativePID6472;
+source/mark/payload hashes unchanged. Only28namedcapture scratch removed, all
+localcopies retained in projecttmp/t007-nomad-20261001. No queueddevicework.
+Pendingexit sourcefix remains local/uninstalled. No generalPDF/highlight/
+dirtysave/durablepersistence/release claim; no merge/push/PR advancement.
+
+## 2026-10-02 - T010 ordinary-PDF reading and T009 code46 exit gates
+
+T010 original reservation5940880374 interrupted by user-confirmed battery loss;
+fresh5946734713 completed/released5946842260. Disposable T008 sourcebd0fd00...:
+stock1-2-1 and centered RTLportrait1/2, AutoSpread2left/1right, focused portrait
+return PASS. PAGE1stock and PAGE2RTL returns respectively byte-identical. Independent
+stockfit/reading review PASS within1pixel; lowerportraitfiducials overlap RTLfooter,
+so no uncropped native-canvas or ordinary-ink equivalence is claimed.
+
+T004 native mark shrank119233->59277bytes at prior normaldocument-switch time,
+consistent with native close-defrag. Both snapshots preserved. Untouched stock
+PAGE3 afterbattery matches all earlier page-body pixels exactly (3hooks/gap/
+lassoposition/nativehighlight); only75toolbarindicatorpixels differ. Captured
+PAGE3preservation PASS, not compaction-mechanism/unseen-page durability proof.
+
+T009 reservation5946861222, exact sourcee8f9c7d31a532b65290da470ef492a7baa36c751,
+0.4.24-ink-exp2/code46 installed via normalAddPlugin with unchangedfac61745...signer.
+SNPLG248d12e251943c086a99138cd1da0f987a9446f6040acbc1198c6ab7d8b588ac;
+APK85223fcb154c5059541b27a9f941641b0f10fe75ad3c26b2eae98f214e7ff3e3;
+bundle012b9ce8b0d8aaca2976f172afb73b752cf7c6e000dcfbd10ee04129091651f0.
+Settled Close/reopen PASS: expectednative13195->15108, correctstockPAGE3/ink/
+highlight/cacheempty, freshRTLnative3reader3/SDK33761355. RapidPAGE4->3/Close/reopen
+preservation PASS, expected15108->15772; finalfreshSDK91633939/ready10:05:37.463.
+Native before/after close frames SHA49f0658e... identical; initial/reopened/final
+RTL savedink PNG SHA0ff77e29... identical. Independent exact-evidence review PASS.
+Rapidpending condition NOTEXERCISED: SDK151096784 success10:02:46.180 precedes
+afterPrevdeviceclock46.426 and Closepreferences46.998/handoff47.033. No retries,
+delayhooks or synthetic failure. Native clean=true is source-awaited but not
+independentlytimestamped in logs; no invented cleanup-order event/racePASS.
+Sources/currentT004marka36bbbd4... unchanged, T008markabsent, ownedcacheempty,
+native15772/finalRTL PAGE4/8, rotation1/2 restored,27unrelatedprefs unchanged.
+Only72exactownedremoteXML/PNG and hashverified stagingcopy removed; localcopies,
+config/rollback retained. No pen, originals/BOOX, firmware/LSPosed or merge.
+No fresh-ink/dirty-save/generalPDF/RTL-text-highlight/productrelease claim.
 
 ## Failure capture
 
@@ -3032,3 +3348,217 @@ adb logcat -v raw -d | Select-String RTL_READER
 ```
 
 For a visual/layout failure, note portrait/landscape, RTL/LTR, Auto/Single/Spread, Cover On/Off, and the PDF page numbers visible on screen.
+
+## T008 code47 ordinary-page saved-ink registration — 2026-10-02
+
+Exact independently reviewed source be24db05ff2d130c7861341e06e9a82daccea9d4,
+0.4.24-ink-exp3/code47, clean-archive build/package PASS; normal approved install
+verified exact APK883f34a1.../bundleff017c96.../config. NomadSN078C10015092,
+exclusive issue23 reservation5948176839, nativePID20983. Disposable source
+RTL_INK_GEOMETRY_T008_20261002.pdf PAGE1 portrait,1404x1872 native frame, one
+human0.6pen line inside blank BoxA; no original-document or synthetic-pen use.
+
+Captured portrait Fit registration PASS independently: native/RTL/SDK-white
+composite exactly identical over ink ROI; all1420supportpixels/1252darkcore and
+158column centerlines match, displacement0px/thickness unchanged. Background
+topfiducials max0.04048px and eight A/Bedge centers0.03219px, below1nativepixel.
+Full native-page visibility, margin strokes, text highlights, durability and
+arbitrary-PDF support are not established by this image.
+
+Full sequence STOPPED/UNKNOWN: native mark1940/df1027ab...->7318/33ea9a36...
+beforeSDK, entire initial file preserved as exact prefix. Appended final TOTALPATH
+matches one trail/87samples/penType16/width900 and native bounds, samePAGEID;
+four close-writes occur at normal plugin activation BEFORE SDK252279539.
+Consistent with final native first-stroke flush, not corruption evidence. Initial
+hash stability was not sufficient persisted-stroke authority. Both snapshots/logs
+kept; no exemption or uninterrupted PASS. Planned roundtrip/landscape did not run.
+
+Cleanup-only NextPAGE2/cacheempty, rotation1/2 restored, nativePID stable,
+source/T004mark/currentT008mark/installedpayload unchanged;27unrelatedprefs equal.
+Exactly46owned remote capture files and verified staging package removed, all
+local evidence/packages retained. Device released/no queued runner, safe unplug.
+Next gate: fresh approved/reserved normal-native-reopen baseline on existing
+stroke, then remaining page/rotation checks; no new pen/build/emulator required.
+See coord/tasks/T-008.md and coord/handoffs/T-008-handoff.md.
+
+### T008B fresh saved-baseline continuation — PASS, 2026-10-02
+
+Explicit separate approval/reservation5951713480, same code47/be24db0; no new
+build/install/pen. One normal Close/reopen20983->1555 establishes saved native
+PAGE1 baseline, exact body/line matches prior reference; finalized7318byte
+mark33ea9a36... unchanged. Initial RTL, normal PAGE2-away/PAGE1-back and portrait
+rotation return each have zero saved-line ROI pixel differences, zero displacement
+across158centerlines; returned RTL frames fully match initial portrait frame.
+Fresh SDK210001372/74300217 settle before captures. Independent evidence review
+PASS. LandscapeAutoSpread correct2left1right, explicit ink-unavailable/cacheempty,
+no stale stroke; this verifies rejection of unsupported view, not landscape ink.
+
+Final PAGE2/cacheempty/PID1555, rotation1/2 restored, source/T008mark/T004mark/
+payload unchanged;28unrelated prefs unchanged. Exactly28named remote b-* capture
+files removed only after local-copy hash verification; evidence retained. Released,
+safe unplug, no queued runner/sourcepush/PR/merge. First T008 remains UNKNOWN,
+not retrospectively PASS. No arbitraryPDF/marginink/highlight/durability claim.
+
+### T011 landscape fixed-canvas extraction — PASS, 2026-10-02
+
+Exact diagnostic source d740a8e7d761b6895df480849210bd0d732468d7,
+RTL Ink Probe 0.0.2-landscape-probe/code2, isolated plugin snrtlinkprobe20261001.
+Corrected-path SNPLG SHA256
+5f94373bc4fbebf4fdeead6691d48a9c8480d4296b718596121bdafa472e5407;
+APK8c01b6b1.../bundle3e8f6aeb.../pinned signerfac61745... verified.
+Build replay limits and initial rejected archive remain explicit in T-011.md;
+this was not a clean-archive or unmodified Windows replay build.
+
+Initial reservation5952835352 NOTPERFORMED/device-not-found, no mutation.
+Fresh reservation5952960763 on NomadSN078C10015092 completed one request on
+finalized T008 PAGE1; landscape UI1872x1404, pre/post real getPageSize both
+1404x1872. Thumbnail69247563 successfully settled16:17:07.990 before preview.
+PNG15316bytes SHA256
+6f9fecfec17f750c372141da7089b1835a0b57753e8da10e0c8c761cd7becd82
+is byte-identical to portrait SDK reference. Decoded RGBA/white composition
+equal, bounds[275,649,435,755),1471supportpixels, zero displacement/opacity
+difference. Independent local evidence review PASS. No new pen/save mutation.
+
+Normal diagnostic Return awaited token cleanup; diagnostic alone removed,
+production code47 unchanged/cacheempty. Sourcebd0fd00b.../T008mark33ea9a36.../
+T004marka36bbbd4.../production payload/config unchanged. Rotation1/2 restored,
+final nativePAGE1/PID6593/body pixels unchanged; toolbar-only difference noted.
+53exact owned remote captures/staging files hash-matched retained local copies,
+removed and absence verified. Four original plugins retained. Release5953419533,
+safe disconnect, no queued hardware. Raw evidence local tmp/t011-nomad-20261002.
+
+This proves only the pinned fixture's landscape extraction alignment, not
+production spread display, arbitrary PDF geometry, highlights or durability.
+Next: focused App presentation fence/landscape Fit candidate and separately
+approved production display gate. Original T008 UNKNOWN remains unchanged.
+
+### T012B production landscape Fit saved-ink display — PASS, 2026-10-02
+
+Exact source c52ba715bdd463d7f460b25c1605af2f6693c82d,
+RTL Reader0.4.24-ink-exp4/code48. Normal clean-archive build and independent
+source/package review PASS. SNPLGd3b2525a...1e6e6f/APK09ee6ef9...09e1e/
+bundle3d41ce0e...2f31 verified against the normally installed payloads;
+upgrade-compatible signerfac61745... unchanged.
+
+First T012 preflight5954510880 remained UNKNOWN: native portrait retained a
+landscape crop, no install/extraction. Exact rollback preserved. Fresh explicit
+native PAGE1->2->1 refresh approval/reservation5954671272 restored the finalized
+existing line, native baseline byte-identical to T008B/T011. Code48 upgrade then
+completed the predefined portraitFit/AutoLandscapeSpread/landscapeSingle1->2->1/
+portraitReturn/normalClose sequence without new pen or file mutation.
+
+Independent saved-line registration max residual0.02055displaypixel in correct
+PAGE1 right spread slot,0.01042pixel in landscapeSingle; background edges
+within0.04856pixel. PAGE2 remained clean/ink-unavailable. Returned PAGE1 landscape
+and portrait frames byte-identical to their respective initial frames. Fresh
+actual SDK success and ready, strict real pre/post1404x1872 canvas, observed.
+Settled normalClose stockPAGE1 PNG9caf2946...d50f is byte/pixel-identical to refreshed
+native baseline; transient Files XML excluded. Normal existing handoff restart
+6593->15664, not dirty-at-kill evidence. Owned saved-ink-cache empty.
+
+Sourcebd0fd00b.../finalized7318byteT008mark33ea9a36.../T004marka36bbbd4... unchanged,
+28 unrelated prefs equal, four original plugins retained. Disposable T008 alone
+left Single/PAGE1; captured rotation controls1/2 restored. Exactly63owned remote
+captures/staging hash-matched local copies, removed and read-only absence verified
+after correcting a shell parsing error; no deletion repeated. Local raw evidence
+tmp/t012-nomad-20261002 retained. Issue23 released, no queued hardware/no merge.
+Fixture-only Fit display PASS does not enable arbitrary PDFs, native highlights,
+Native-fill, margin ink, durability or pending-race claims. First T008 and T012
+UNKNOWN outcomes remain preserved.
+
+### T013 two-page saved-ink preview — partial PASS, direction-swap FAIL, 2026-10-05
+
+NomadSN078C10015092/Chauvet.E103.2606161001.2393_release, exact source
+0e5ef9abc2dce43bb79e06edc468426f78dae6c5, RTL Reader0.4.24-ink-exp5/code49.
+Normal upgrade actualAPK75f3ddca...c6ef/bundlef826cdeb...5f0e verified; retained
+SNPLGb69f93ce...d869 and compatible rollback/signing preserved. T014's later
+6b1a860 source-only groundwork is not in this package.
+
+One human native PAGE2 line plus old PAGE1 line saved/reopened normally before
+preview; final mark13309bytes SHA256cf444663...5724 and original source
+bd0fd00b...e64 retained. PortraitSingle1/2/1 displays each own ink; return frame
+byte-identical. AutoRTLspread PAGE2left/PAGE1right displays both, real page-bound
+SDK batch PNGs byte-match Single outputs. Independent display registration
+residuals0px portrait,0.01163px PAGE1right,0.13662px PAGE2left (within1pixel).
+
+Another workflow's DayWeave foreground caused a hard stop. User confirmed and
+paused it; fresh exclusive reservation6002365818/preflight passed. Normal reader
+launcher restored the original RTL frame byte-identically. LTR then swapped
+source pages but BOTH ink layers vanished despite "Ink shown". Later settled
+capture identical, native READY token5/pages1,2 logged, source/mark and retained
+PNGs unchanged. Missing-ink pixel check rejects. LTR display FAIL, not loading
+delay or annotation-loss proof; remaining cover/layout/rotation tests NOTPERFORMED.
+
+NormalClose drained owned cache; source/final mark unchanged. Stock retained its
+native landscape half-page mode after rotation, so final native full-page geometry
+comparison UNKNOWN (next tap showed PAGE1 lower half, not PAGE2). NormalBack
+returned to the prior DayWeave task. No further rescue/pen/package changes.
+Rotation1/2 restored, four original plugins and28unrelated preferences unchanged;
+only disposable T008's tested preferences changed.94explicit remote scratch/
+staging files hash-verified against retained local copies, removed and absence
+verified. Raw evidence stays local tmp/t013-nomad-20261005. No full T013 PASS,
+general-PDF/highlight/durability claim, raw upload, PR finalization or merge.
+Next bounded source task fixes/reproduces the observed direction-transition gap;
+fresh exact reviewed candidate required before resuming layout hardware checks.
+
+### T013 code50 direction-only retry — PASS, 2026-10-06
+
+Exact candidate1842e157044c1f4950b2a3acc0221b7355b1b0f4,
+RTL Reader0.4.24-ink-exp6/code50. NomadSN078C10015092,
+Chauvet.E103.2606161001.2393_release. Normal clean checkout build, scoped
+independent reviews and relevant source/package/provenance checks PASS. Normal
+upgrade installed exactAPK3af19c5c...6147/bundleb9cd54ec...56f4; retained SNPLG
+c8196cdd...b5ea, compatible signerfac61745...b9c, code49 rollback preserved.
+
+No new pen: T008 existing PAGE1/PAGE2 lines. Auto/Fit/coverOff settled
+RTL PAGE2left/PAGE1right -> LTR PAGE1left/PAGE2right -> RTL PAGE2left/PAGE1right
+displays both correct lines throughout. Each phase generates two new real SDK
+tokens; all six images equal their exact page-specific Single reference hashes.
+Actual native READY3/pages2,1;4/pages1,2;5/pages2,1. Registration max-axis residual
+PAGE1<=0.01163px/PAGE2<=0.13662px in all phases; within1displaypixel. LTR two
+settled frames byte-identical1038b423...b4ca; initial/returnRTL frame identical
+db8f1e4f...3427. Later root-permission toast capture excluded from byte-equality.
+The historical code49 LTR failure above is closed by this narrow retry, not erased.
+
+NormalClose fully drains owned SDK cache and completes the existing stock
+handoff18379->24482 once. Settled T008PAGE1 with saved line visible. Stock still
+retains half-page presentation; final native full-page geometry UNKNOWN, no
+rescue loop. Sourcebd0fd00b...e64 and13309-byte markcf444663...5724 unchanged.
+Four plugin IDs retained;28unrelated preferences identical; T008 alone retains
+RTL/Auto/Fit/coverOff/PAGE1. Rotation1/2 restored.72explicit owned remote temporary
+copies hash-verified, removed once and absence verified, all local evidence kept
+tmp/t013-code50-20261006. No pen/mark restore/companion/firmware change or raw upload.
+Device released in issue23 comment6003825333; no queued hardware operation.
+Host selector rejects were before input, reconciled against actual focused
+PluginHost overlay/native DocumentActivity; production source was not altered.
+
+Deferred cover/layout/rotation remains NOTPERFORMED in this retry. No full T013,
+arbitrary-PDF/highlight/durability/Bluetooth pass, source push, PR finalization or
+merge. Next gate reuses this exact candidate only under new scope/reservation.
+
+### T013B code50 cover/layout batch — partial PASS, CoverOff settlement FAIL
+
+2026-10-06, NomadSN078C10015092/Chauvet.E103.2606161001.2393_release,
+exact1842e157044c1f4950b2a3acc0221b7355b1b0f4,0.4.24-ink-exp6/code50.
+Fresh approved reservation6005290839; no installation/new pen/original mutation.
+Phases1-4 PASS: portraitAuto/Fit/RTL/coverOff PAGE1, landscape PAGE2left/PAGE1right,
+CoverOn BLANKleft/PAGE1right, Next BLANKleft/PAGE2right, Previous returns cover.
+Actual native READY1-5 and page-bound SDK outputs; all retained images byte-match
+the respective Single references. Ink registration <=0.13662px; blank halves and
+opposite-page ink regions clean.
+
+Phase5 FAIL to settle: CoverOff returns both visible pages/lines but Rendering
+never completes, Edit remains disabled, no READY6. PAGE2 emits actual native
+DISPLAY; unchanged retained PAGE1 has no new render callback. SDK batch is ready
+and both exact PNG hashes retained. T008 PDF/13309-byte mark remain unchanged.
+No annotation-loss claim. Loading badge obscures divider, so complete-frame
+registration witness rejects; not evidence of ink displacement. Early host
+measurement before capture completion returned FileNotFoundError, excluded.
+Phases6-8 NOTPERFORMED; no rescue/page/rotation/restart after hard stop.
+Raw local evidence tmp/t013b-nomad-20261006 retained. Normal-Close cleanup was
+separately approved and completed: stockT008PAGE1/2/saved line visible, original
+rotation1/2 restored, source/mark/code50 config/APK/bundle unchanged, four plug-ins
+and28unrelated preferences exact. Owned cache empty;49explicit local-backed
+scratch copies hash-verified/removed once and absence verified. Local evidence
+retained. Stock half-page geometry remains UNKNOWN; no rescue/pen/force-stop.
+Release recorded separately in issue23. No full-batch PASS; phases6-8 not run.

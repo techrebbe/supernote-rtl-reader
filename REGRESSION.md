@@ -1,5 +1,45 @@
 # RTL Reader hardware regression
 
+## T016C actual watch forward — FAIL, upstream UNKNOWN, cleanup PASS
+
+2026-10-08, unchanged reviewed executable01df18b8421fc440f8e83979b6e2de686237c7fb,
+0.4.24-cache-exp1/code54, NomadSN078C10015092/pinned Chauvet firmware,
+reservation6065090358. Same independently CLEAN bounded physical-input plan;
+no rebuild/install. User confirmed Galaxy Watch8 Classic Keyboard as intended
+input, actual external device14 with keyboard/mouse/consumer-control interfaces.
+Fresh100%-charge/nativeT008PAGE1/BoxA-line/exact source/13309-byte mark/payload/
+29preferences/fourplugins/rotation1-2/empty owned-cache preflight PASS.
+
+Normal portrait More/Plugins launch, Single/On/navigation/Done. Exact document/
+nativePage1/readerPage1, nativeREADYtoken1, Editp1 enabled/TurnerReady, current
+PluginHost window and InputDispatcher focusdisplay0. Host787 observation23/128,
+enabled/generation13/sequence12/eligibletrue before requested ONE actual forward
+press/release; user replied done. FinalPAGE1, no logical navigation/PAGE2:
+functional FAIL. No native paging-key dispatch, key-kind emit or JS key packet in
+the bounded activation logs; diagnostic budget not exhausted (latest33/128).
+Upstream cause UNKNOWN: observation covers21/22/24/25/62/66/92/93 only, not all
+possible watch codes. Absence does not prove no HID event or Activity interception.
+
+Confounder retained: portrait->landscape20:12:03 during the waiting interval;
+fresh PAGE1 READYtoken2 and Hostgen19/seq18/eligibletrue restored20:12:04.126.
+Exact physical-press timestamp unknown; initial generation13/stable-orientation
+authority at the press is unverified. No backward/hold/repeat/profile cycle or
+injection followed. Result recorded before normal Off/Auto/Done/Close; existing
+handoff reopened exact nativeT008PAGE1. Source/13309-byte mark/code54 hashes,
+fourplugins/28unrelated preferences/restored target semantics/rotation1-2 exact,
+SDK cache naturally empty. Final native landscape crop is not full-page/BoxA
+geometry acceptance or annotation-loss evidence. Prior T015 timestamp exception
+remains separate; fresh T016C unrelated-pref equality PASS.
+
+32 exact hash-backed regular/nonsymlink owned remote captures removed once,
+absence verified, local evidence tmp/t016-bluetooth-c-20261008 retained only.
+RELEASED6065290190; no pending device/observer/SDK/install process. Earlier T016
+notification-shade preflight6064546833 and T016B rotating-menu setup6065008496
+stopped before any physical key request, cleaned/released6064585418/6065090358;
+not Bluetooth delivery failures. No originals/BOOX/firmware/raw upload/merge.
+Next: identify actual watch app/control and bounded watch-only HID evidence;
+do not guess profiles or add a global key hook. Timer remains PAUSED.
+
 ## T015 code54 reverse-background cache — PASS, metadata exception retained
 
 2026-10-08, reviewed/clean-built executable

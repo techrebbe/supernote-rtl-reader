@@ -1,5 +1,14 @@
 # Next useful hardware batch — no speculative test loop
 
+Latest2026-10-08: T016C actual watch forward functionalFAIL (PAGE1 unchanged),
+no observed native paging-key/JS arrival, upstreamUNKNOWN/limited diagnostic
+coverage. Rotation during wait confounds press-generation/orientation authority.
+No backward/repeat/profilecycle. Normal Off/Auto/Close/data/config/cache/32owned
+scratch cleanup PASS, RELEASED6065290190; installedcode54 unchanged. Next narrow
+question is actual watch app/control/HID command, not another guessed profile or
+injected key. User app/control question pending; see T-016-watch-input.md. Timer
+still PAUSED. Section2 below is prior preparation, not permission for extra presses.
+
 Current2026-10-08: section1's code54 cache gate is COMPLETE/PASS on exact01df18b,
 now installed/payload-verified. Final normal Close automatically reopened native
 T008PAGE1, line/page content/source/mark intact, Auto/keysOff restored, SDK cache

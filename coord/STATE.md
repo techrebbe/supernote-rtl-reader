@@ -1,5 +1,28 @@
 # STATE — RTL Reader (updated 2026-10-08 by codex)
 
+## Latest checkpoint — 2026-10-08 T016C
+
+Exact installed01df18b/code54 unchanged. Actual external Galaxy Watch8 Classic
+Keyboard confirmed by user; fresh disposableT008PAGE1/source/13309-byte mark/
+payload/preferences/plugins/cache/battery preflight PASS. Normal portrait RTL
+launch; Single/On/navigation, nativeREADYtoken1/TurnerReady/Edit1, PluginHost
+current window/input focus, Host787 enabled/gen13/seq12/eligibletrue/obs23of128.
+ONE actual forward press requested/userdone: functionalFAIL, staysPAGE1; no
+native observed paging-key/keyemit/JS arrival, upstreamUNKNOWN. Diagnostic code
+coverage is limited, not evidence of no HID or Activity interception. Rotation
+occurred during wait; fresh PAGE1READY2/gen19/seq18/eligibletrue afterwards,
+physical-press time/generation/orientation unverified. No additional keys.
+
+Normal Off/Auto/Done/Close, nativeT008PAGE1, source/mark/code54/fourplugins/
+28unrelatedprefs/targetsemantics/rotation1-2 exact, SDK cache empty;32exact owned
+hash-backed scratch copies removed/absence verified; raw local retained only.
+Reservation6065090358 RELEASED6065290190; no device/review/test process active.
+Earlier shade/menu setup hard stops were NOTPERFORMED, not HID failures.
+Next concrete unblock: actual watch app/control identity (question sent), then
+separate bounded watch-only input observation before any mapping/route change.
+No broad/globalhook/injectedkey/firmware/modeling loop. Timer remains PAUSED.
+T015 cache PASS and timestamp exception remain as recorded below; no merge.
+
 ## Latest checkpoint — 2026-10-08 T015
 
 Exact reviewed executable01df18b8421fc440f8e83979b6e2de686237c7fb,

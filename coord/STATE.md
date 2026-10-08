@@ -1,4 +1,33 @@
-# STATE — RTL Reader (updated 2026-10-02 by codex)
+# STATE — RTL Reader (updated 2026-10-08 by codex)
+
+## Latest checkpoint — 2026-10-08 T015
+
+Exact reviewed executable01df18b8421fc440f8e83979b6e2de686237c7fb,
+0.4.24-cache-exp1/code54 now normally installed and payload-verified. Disposable
+T008 Single/keysOff, ONE Next2/Previous1: cache gate PASS. PAGE1 permanent drop
+logged VISIBLE_CACHED; reverse cacheHit=true/renderMs0, portrait geometry unchanged,
+fresh READY1/2/3. Before/return PAGE1 screenshots byte-identical; saved line intact.
+Native interaction80/83ms is not human flash/feel or a general performance pass.
+
+Normal Auto/Off/Close completed: immediate capture caught transient HOME during
+the existing delayed handoff, then stock native T008PAGE1 automatically reopened
+19290->32285 without rescue input. Native page content/saved line pixel-identical.
+PDF/13309-byte mark/code54 payload, all semantic preferences, four plugins and
+rotation1/2 preserved; owned SDK cache naturally empty. Strict unrelated-pref
+byte equality FAIL: ONE unrelated updatedAt changed, no semantic field changed;
+new timestamp predates preflight, caller/cause UNKNOWN. Preserve that exception,
+not a full clean-T015 or general annotation/leak claim. Source-only attribution
+finds document-keyed commit and deferred unmount writes, not proven causation.
+
+Reservation6062119680 consumed/RELEASED6062992211.46 hash-backed owned remote
+capture copies and one unique staged package removed once, absence verified;
+local evidence/backups/rollback retained, no raw upload. Final nativePAGE1,
+code54/Auto/keysOff, no pending device/SDK work. Prior setup6061475307 and
+preflight6061395148 were separately stopped/released; no consumed retry.
+Next physical gate is the actual paired Bluetooth turner under a fresh bounded
+reservation, not more injected keys. User availability question sent. Automation
+remains PAUSED at the user's request; immediate work did not restart its timer.
+Earlier checkpoint statuses below are historical, not current installation.
 
 ## Latest checkpoint — 2026-10-06 T014
 

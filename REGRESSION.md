@@ -1,5 +1,45 @@
 # RTL Reader hardware regression
 
+## T015 code54 reverse-background cache — PASS, metadata exception retained
+
+2026-10-08, reviewed/clean-built executable
+01df18b8421fc440f8e83979b6e2de686237c7fb,0.4.24-cache-exp1/code54,
+NomadSN078C10015092/Chauvet.E103.2606161001.2393_release,
+reservation6062119680.100% charging, exact disposable nativeT008PAGE1/source/
+13309-byte mark/code53/prefs/plugins/rotation1-2/empty cache preflight PASS.
+Normal Settings/Apps/Plugins upgrade; installed APK/bundle exact candidate hashes.
+Compatible signer and code53/52/51 rollback retained, no manual payload replacement.
+
+Single/keysOff, ONE logical Next1->2 then Previous2->1. PAGE1 drop logs
+VISIBLE_CACHED. Reverse PAGE1 cacheHit=true/renderMs0/nativeMs25,
+geometryId=t008-page1-stock-portrait-fit-v1; fresh READY tokens1/2/3.
+Forward/reverse native interaction80/83ms, not human-visible flash/feel evidence.
+PAGE1 before/return PNG byte-identical SHA256
+7e1f6e17703326e4c0750d68b57bc0f1f726f3044edaa3b0c5fe9896f4d95d8c.
+The unchanged exact source, geometry and viewport constrain this original-key
+cache reuse; no altered-key/other-PDF or complete-memory-cleanup conclusion.
+
+Normal Auto/Off/Close: first immediate capture caught HOME during the existing
+delayed stock handoff; no rescue/page/reopen command issued. Existing scheduled
+restart19290->32285 automatically reopened exact nativeT008PAGE1. Native page
+content y100..1771 and Box A/saved line pixel-identical before/after; full-screen
+differences confined to toolbar y79..93. PDF/mark/code54 hashes, mark size, four
+plugins, rotation and all semantic settings preserved; SDK cache naturally empty.
+
+Strict unrelated-preference byte equality FAIL, not waived: one unrelated entry's
+updatedAt changed1791433604187->1791469598545, with no page/config/other field
+change. New timestamp predates preflight; precise writer/cause UNKNOWN. App has
+deferred unmount saves and native save commits only its supplied document key,
+but source inspection does not attribute this observed exception. No restoration
+of another document's metadata or additional hardware trial attempted. Cache
+acceptance PASS is separate from this incomplete strict metadata postflight.
+
+46 regular/nonsymlink hash-backed capture copies and one unique staged package
+removed once; absence verified. Local evidence tmp/t015-cache-20261008 retained,
+not uploaded. RELEASED6062992211, final code54/Auto/Off/nativePAGE1, no queued
+device/SDK work. No pen, Bluetooth/injected key, cover/rotation loop, original PDF,
+BOOX, firmware, merge or PR finalization. Paired physical-turner gate remains next.
+
 ## T014C keyboard-source PageDown — FAIL, integrity cleanup PASS
 
 Reviewed planadeb53b, exact installed dce6529/keys-exp2/code53 unchanged. Sole

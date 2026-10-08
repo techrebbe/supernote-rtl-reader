@@ -1,5 +1,29 @@
 # T015 — return dropped PDF backgrounds to the existing cache
 
+## Current result — 2026-10-08
+
+Exact01df18b8421fc440f8e83979b6e2de686237c7fb/code54 normally installed and
+payload-verified after fresh ready T008PAGE1 preflight. ONE Single/keysOff Next2/
+Previous1 cache gate PASS: permanent PAGE1 drop VISIBLE_CACHED; reverse matching
+portrait geometry/cacheHit=true/renderMs0; fresh READY1/2/3 and byte-identical
+PAGE1/saved line. Native80/83ms is not human feel/general performance/leak proof.
+Original source/13309-byte mark unchanged; normal Auto/Off/Close eventually
+reopened exact stockPAGE1 through its existing delayed restart (no rescue input).
+Native page content/line pixel-identical, owned SDK cache naturally empty.
+
+Strict metadata postflight remains an explicit exception: ONE unrelated updatedAt
+changed, all semantic settings unchanged; new value predates preflight. Cause
+UNKNOWN; source-only inspection of document-keyed native commits/deferred old
+activation unmount writes is suggestive, not attribution. Do not silently waive
+the exception, claim full clean T015, restore unrelated metadata, or repeat the
+passed cache gate to chase it. No production correction justified by this alone.
+
+Reservation6062119680 consumed/released6062992211.46 exact hash-backed remote
+captures and one staged package removed/absence verified; local backups/evidence/
+rollback retained. Final code54/Auto/keysOff/nativePAGE1, no active device work.
+Earlier stopped preflights below remain historical NOTPERFORMED. Actual paired
+Bluetooth input is the next separate physical gate; injected-key line stays parked.
+
 Status2026-10-06: source/tests/independent review/exact signed build PASS. First
 hardware preflight STOPPED/NOTPERFORMED: launcher, not expected native T008PAGE1.
 Reservation6009083775 consumed; release follows evidence update. No installation,

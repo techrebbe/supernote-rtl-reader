@@ -1,5 +1,15 @@
 # Next useful hardware batch — no speculative test loop
 
+Current2026-10-08: section1's code54 cache gate is COMPLETE/PASS on exact01df18b,
+now installed/payload-verified. Final normal Close automatically reopened native
+T008PAGE1, line/page content/source/mark intact, Auto/keysOff restored, SDK cache
+empty. STRICT unrelated-preference byte check has a retained timestamp-only
+exception (cause UNKNOWN); semantic settings preserved, not a full clean claim.
+46 owned captures plus staged package removed/absence verified. Released6062992211;
+no pending device work. Do not repeat build/install/cache round trip. Section2's
+actual paired-input gate is next and requires awake physical presses/fresh
+reservation. Timer remains paused; below is the original preparation history.
+
 Prepared2026-10-06; no execution/authorization claim for these later gates.
 Nomad released6009195997, low-battery20% modal untouched. No process running.
 Charge/document-ready baseline is the immediate physical unblock. Do not wake

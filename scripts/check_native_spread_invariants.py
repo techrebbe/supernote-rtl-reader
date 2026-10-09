@@ -1022,9 +1022,9 @@ def check(repo_root: Path) -> None:
         ),
         (
             index_path,
-            # T015 cache-exp1 changes only the candidate marker from keys-exp2;
+            # T016G keys-exp3 changes only the candidate marker from cache-exp1;
             # external-Close/key fence/handoff and native authorities unchanged.
-            "10686e33a8e4d3bbf7a2dc8a14c1901812bf9fa296878492bac2a3f5d0f6a44a",
+            "74d05aa7c30183ae6252e3f5693b38df2602a37009e1b04e0efb243e98e51e41",
             "Edit/Return activation and close authority",
         ),
         (
@@ -1038,9 +1038,9 @@ def check(repo_root: Path) -> None:
         ),
         (
             workflow_path,
-            # T015 candidate label only; all actual-key, annotation and
-            # provenance regression gates retained from keys-exp2.
-            "4f5c589b5a4aa8db28a7d86067b7d895749dad4ffc8d2947164026a88d3c3f69",
+            # T016G candidate label plus in-memory vertical omission/reversal
+            # tests. Existing actual-key/annotation/provenance gates retained.
+            "d6cd2493a420231547abccb88e239bd038bbfdb3daf6ca3e1c96ae1b56efcf90",
             "Native Spread companion-build workflow",
         ),
         (

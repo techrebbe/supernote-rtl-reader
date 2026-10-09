@@ -125,8 +125,25 @@ public final class ReaderKeyHostTests {
         check(Log.lines.stream().anyMatch(line -> line.contains("result=bypass focused=false")),"Unfocused native boundary distinguishable");
         host.drop();
     }
+    private static void verticalDiagnostics() {
+        Log.lines.clear();
+        Sink sink=new Sink(); ReaderKeyHost host=host(sink);
+        host.configure("vertical",new int[]{19,20},true,sink);
+        for(int key:new int[]{19,20}) {
+            long down=++SystemClock.now;
+            check(host.dispatchKeyEvent(new KeyEvent(0,key,3,down,0)),"Configured vertical key is accepted");
+            check(Log.lines.stream().anyMatch(line -> line.contains("dispatch key="+key+" action=0") &&
+                    line.contains("result=pressed") && line.contains("packet=true")),"Vertical Android dispatch is observable");
+            check(host.dispatchKeyEvent(new KeyEvent(1,key,3,down,0)),"Vertical UP closes contact");
+        }
+        host.clearFocus();
+        check(!host.dispatchKeyEvent(new KeyEvent(0,20,3,++SystemClock.now,0)),"Unfocused vertical input delegates");
+        check(Log.lines.stream().anyMatch(line -> line.contains("dispatch key=20") && line.contains("result=bypass focused=false")),
+                "Vertical bypass is distinguishable from absent upstream input");
+        host.drop();
+    }
     public static void main(String[] args) {
-        callbacksFailClosed(); lifecycleAbaAndFocus(); offReleasesFocus(); diagnosticBoundary();
+        callbacksFailClosed(); lifecycleAbaAndFocus(); offReleasesFocus(); diagnosticBoundary(); verticalDiagnostics();
         System.out.println("Reader key Host callback model: PASS "+assertions+" assertions; actual device delivery NOT TESTED");
     }
 }

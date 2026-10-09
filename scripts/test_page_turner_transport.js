@@ -151,7 +151,7 @@ test('opt-in bindings, defensive copies, namespace/counter and terminal disposal
   assert.deepEqual(h.turns, ['next']);
   assert.deepEqual(h.spec.keyCodes, [24, 25]); assert.equal(Object.isFrozen(h.spec), true);
   assert.equal(Object.isFrozen(h.spec.keyCodes), true);
-  assert.throws(() => h.configure({20: 'next'}));
+  assert.throws(() => h.configure({23: 'next'})); // DPAD_CENTER remains unmapped/reserved.
   assert.equal(h.transport.getState().faulted, false, 'Failed context validation does not mutate the old route');
   h.transport.dispose(); assert.equal(h.key().reason, 'transport_unavailable');
   assert.equal(h.transport.focusRequest(), null); assert.throws(() => h.configure());

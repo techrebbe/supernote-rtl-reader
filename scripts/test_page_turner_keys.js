@@ -24,6 +24,43 @@ test('logical page keys are direction-independent; physical arrows follow readin
   }
 });
 
+test('vertical arrows are logical previous/next in either reading direction', () => {
+  for (const direction of ['rtl', 'ltr']) {
+    const h = harness(); h.context.direction = direction;
+    for (const keyCode of [19, 20]) {
+      const downTime = keyCode;
+      assert.equal(h.press(keyCode, {downTime}).handled, true);
+      for (const repeatCount of [0, 1, 256, 2147483647]) {
+        assert.equal(h.press(keyCode, {downTime, repeatCount}).handled, true);
+      }
+      assert.equal(h.press(keyCode, {downTime, action: 1}).handled, true);
+      assert.equal(h.press(keyCode, {downTime, action: 1}).handled, false);
+    }
+    assert.deepEqual(h.turns, ['previous', 'next']);
+    assert.equal(h.controller.getState().held, 0);
+  }
+});
+
+test('vertical contacts retain opt-in, focus/modal guards and rejected-contact history', () => {
+  for (const keyCode of [19, 20]) for (const patch of [{enabled: false}, {focused: false}, {blocked: true}]) {
+    const h = harness(); Object.assign(h.context, patch);
+    assert.equal(h.press(keyCode, {downTime: 10}).handled, false);
+    Object.assign(h.context, {enabled: true, focused: true, blocked: false});
+    assert.equal(h.press(keyCode, {downTime: 10}).handled, false);
+    assert.equal(h.press(keyCode, {downTime: 10, action: 1}).handled, false);
+    assert.deepEqual(h.turns, []);
+    assert.equal(h.press(keyCode, {downTime: 11}).handled, true);
+    assert.deepEqual(h.turns, [keyCode === 19 ? 'previous' : 'next']);
+    h.context.activationId = 'new-mount';
+    assert.equal(h.press(keyCode, {activationId: 'mount-1', downTime: 12}).handled, false);
+    h.controller.dispose();
+    assert.equal(h.press(keyCode, {downTime: 13}).handled, false);
+  }
+  const volume = harness({24: 'next', 25: 'previous'});
+  for (const keyCode of [19, 20]) assert.equal(volume.press(keyCode).handled, false);
+  assert.deepEqual(volume.turns, []);
+});
+
 test('volume, space and enter retain ordinary behavior unless explicitly mapped', () => {
   const h = harness();
   for (const key of [24, 25, 62, 66, 4, 26]) assert.equal(h.press(key).handled, false);
@@ -41,6 +78,9 @@ test('binding authority is copied and rejects malformed or reserved keys', () =>
   for (const bindings of [null, [], {4: 'next'}, {26: 'next'}, {'093': 'next'}, {93: 'swipe'}, {'x': 'next'}]) {
     assert.throws(() => harness(bindings), TypeError);
   }
+  const eight = {19: 'previous', 20: 'next', 21: 'left', 22: 'right', 24: 'next', 25: 'previous', 92: 'previous', 93: 'next'};
+  assert.doesNotThrow(() => harness(eight));
+  assert.throws(() => harness({...eight, 62: 'next'}), TypeError, 'Native eight-key transaction limit is retained');
 });
 
 test('every malformed event is non-mutating and no unowned repeat or UP turns a page', () => {

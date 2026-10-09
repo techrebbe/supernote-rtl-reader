@@ -4,13 +4,17 @@
 // AND document ID; change activation before any routing-eligibility transition.
 // This controller calls the existing logical navigation operation synchronously;
 // it never queues a turn for later or owns page/annotation state.
-const DEFAULT_BINDINGS = Object.freeze({21: 'left', 22: 'right', 92: 'previous', 93: 'next'});
-const ALLOWED_KEYS = new Set([21, 22, 24, 25, 62, 66, 92, 93]);
+// Vertical arrows are logical: Up = Previous, Down = Next, in RTL and LTR.
+// Android DPAD codes are not Linux/HID scan codes; do not translate raw input here.
+const DEFAULT_BINDINGS = Object.freeze({19: 'previous', 20: 'next', 21: 'left', 22: 'right', 92: 'previous', 93: 'next'});
+const ALLOWED_KEYS = new Set([19, 20, 21, 22, 24, 25, 62, 66, 92, 93]);
 const ACTIONS = new Set(['left', 'right', 'next', 'previous']);
 const MAX_RECORDS = 32;
 
 function bindingsCopy(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('Invalid key bindings');
+  // Keep the existing native atomic configuration's eight-key bound.
+  if (Object.keys(value).length > 8) throw new TypeError('Too many page-turner bindings');
   const copied = Object.create(null);
   for (const [key, action] of Object.entries(value)) {
     if (!/^[1-9][0-9]*$/.test(key) || !ALLOWED_KEYS.has(Number(key)) || !ACTIONS.has(action)) {

@@ -59,6 +59,21 @@ test('actual App route uses Single/Spread logical steps and physical RTL/LTR dir
   }
 });
 
+test('vertical arrows use the actual Single/Spread logical route, boundaries and ink epochs', () => {
+  for (const mode of ['single', 'spread']) for (const direction of ['rtl', 'ltr']) {
+    const h = harness({mode, direction});
+    h.press(20); assert.equal(h.page, mode === 'single' ? 3 : 4);
+    h.press(19); assert.equal(h.page, 2);
+    assert.equal(h.invalidations, 2);
+    for (const cover of [false, true]) {
+      const first = harness({mode, direction, cover, page: 0}); first.press(19);
+      assert.equal(first.page, 0); assert.equal(first.invalidations, 0);
+      const last = harness({mode, direction, cover, page: 7}); last.press(20);
+      assert.equal(last.page, 7); assert.equal(last.invalidations, 0);
+    }
+  }
+});
+
 test('actual App clamps first/last page without new saved-ink invalidation', () => {
   for (const mode of ['single', 'spread']) for (const cover of [false, true]) {
     const first = harness({mode, cover, page: 0}); first.press(92);
@@ -69,16 +84,16 @@ test('actual App clamps first/last page without new saved-ink invalidation', () 
 });
 
 test('actual Edit/Close/closed/global transition fences reject keys without a later replay', () => {
-  for (const name of ['editInFlightRef', 'closeInFlightRef', 'readerClosedRef', 'global']) {
+  for (const keyCode of [19, 20, 93]) for (const name of ['editInFlightRef', 'closeInFlightRef', 'readerClosedRef', 'global']) {
     const h = harness();
     if (name === 'global') h.scope.globalThis.RTL_READER_TRANSITION_IN_FLIGHT = {};
     else h.scope[name].current = true;
-    const event = h.packet(93, 10);
+    const event = h.packet(keyCode, 10);
     assert.equal(h.controller.handle(event).handled, false); assert.equal(h.page, 2);
     if (name === 'global') h.scope.globalThis.RTL_READER_TRANSITION_IN_FLIGHT = null;
     else h.scope[name].current = false;
     assert.equal(h.controller.handle(event).handled, false); assert.equal(h.page, 2);
-    h.controller.handle(h.packet(93, 11)); assert.equal(h.page, 3);
+    h.controller.handle(h.packet(keyCode, 11)); assert.equal(h.page, keyCode === 19 ? 1 : 3);
     assert.equal(h.invalidations, 1);
   }
 });

@@ -102,7 +102,7 @@ public final class ReaderKeyHost extends ReactViewGroup {
         assertUi(); observe();
         if (event == null) return super.dispatchKeyEvent(event);
         int key = event.getKeyCode();
-        boolean pagingKey = key == 21 || key == 22 || key == 24 || key == 25 ||
+        boolean pagingKey = key == 19 || key == 20 || key == 21 || key == 22 || key == 24 || key == 25 ||
                 key == 62 || key == 66 || key == 92 || key == 93;
         if (dropped || sink == null || !isFocused()) {
             if (pagingKey) diagnostic("dispatch key=" + key + " action=" + event.getAction() +

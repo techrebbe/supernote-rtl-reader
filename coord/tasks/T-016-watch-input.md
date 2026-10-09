@@ -1,5 +1,23 @@
 # T016 — actual paired watch input
 
+## Latest2026-10-09 — T016F-E input-arrival PASS
+
+User requested native-reader input registration only and performed a confirmed
+Next/Back series during actual READY. Three exact watch interfaces observed;
+78 keyboard EV_KEY transitions =20 KEY_UP/19 KEY_DOWN complete press/release
+pairs, no repeats/unmatched contacts. Mouse/consumer no events. This is Linux
+HID arrival, not Android mapping, button-label direction or RTL navigation.
+Deadline/owned observer retirement/sysfs postflight clean; no reader/document/
+config/package changes by monitor, raw local only. Reservation6079400773 released
+6079451520. PriorD user did not press; do not call it a Bluetooth failure.
+T016C FAIL/upstream UNKNOWN below remains historical evidence.
+
+User authorizes source work while away. T016G implements logical Up/Down support
+and diagnostics across existing native/JS profile/guards; candidate code55,
+uninstalled, separate review/build and future fresh disposable hardware gate.
+See T-016G-vertical-arrows.md. Do not repeat raw capture or inject input to fill
+the physical-input dependency. Timer remains PAUSED.
+
 ## Recorded result
 
 2026-10-08 T016C at unchanged01df18b/code54: ONE forward press/userdone,

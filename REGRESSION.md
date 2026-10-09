@@ -1,5 +1,35 @@
 # RTL Reader hardware regression
 
+## T016F-E native-reader watch observation — input-arrival PASS only
+
+2026-10-09, NomadSN078C10015092/Chauvet.E103.2606161001.2393_release,
+unchanged last-verified01df18b/code54; reservation6079400773/release6079451520.
+User explicitly requested observation in the stock native reader, then confirmed
+a Next/Back series during the announced READY window. Three exact fresh watch
+interfaces (Keyboard/Mouse/Consumer Control) passed sysfs/metadata and owned
+process-incarnation/open-FD checks. Keyboard emitted78 EV_KEY transitions:
+20 Linux KEY_UP and19 KEY_DOWN complete DOWN/UP pairs; zero repeat, unmatched
+UP or remaining held contact. Other two interfaces emitted no event lines.
+This proves HID input arrival, NOT Nomad Android mapping, button-label direction,
+RTL page turning or annotation persistence. Prior D had no physical presses;
+T016C functional FAIL/upstream UNKNOWN remains recorded below.
+
+Host80-second independent deadline ended local recording; target90-second
+timeouts/owned child traps and terminal retirement checks completed. Session13294
+exit0, terminal STOPPED/DEADLINE, no failure/cleanupErrors, all owned observers
+retired and sysfs postflight PASS. Local STOP was added after userdone but deadline
+won; no USER_STOP claim. No PC-side target PID signal or reader restart.
+No PDF/mark/screen read or UI/page/config/rotation/pairing/install/injected-input/
+hook/remote-scratch action by this monitor; user's physical navigation untouched.
+Raw evidence local only at tmp/t016f-watch-live-e-20261009, no raw upload.
+Device released; no capture remains. Timer PAUSED.
+
+Concrete software gap: vertical Android DPAD19/20 excluded from native validators,
+diagnostics and JS navigation. T016G prepares bounded support using existing
+logical handlers/guards; it does not infer actual firmware mapping from Linux
+names or retroactively establish the cause of prior failures. No new hardware
+under this consumed reservation; see coord/tasks/T-016G-vertical-arrows.md.
+
 ## T016C actual watch forward — FAIL, upstream UNKNOWN, cleanup PASS
 
 2026-10-08, unchanged reviewed executable01df18b8421fc440f8e83979b6e2de686237c7fb,

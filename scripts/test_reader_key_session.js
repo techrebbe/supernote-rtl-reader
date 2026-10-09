@@ -30,12 +30,32 @@ test('explicit profiles never claim volume by default; disabled/UI-blocked canno
     const h = harness(patch); h.state({eligible: false}); h.session.requestFocus();
     assert.equal(h.specs[0].enabled, false); assert.deepEqual(h.focus, []); assert.deepEqual(h.turns, []);
   }
-  const nav = harness(); assert.deepEqual(nav.specs[0].keyCodes, [21, 22, 92, 93]);
+  const nav = harness(); assert.deepEqual(nav.specs[0].keyCodes, [19, 20, 21, 22, 92, 93]);
   for (const profile of ['volume', 'volume_reversed']) {
     const h = harness({profile}); h.state(); h.key({keyCode: 24});
     assert.deepEqual(h.specs[0].keyCodes, [24, 25]);
     assert.deepEqual(h.turns, [profile === 'volume' ? 'next' : 'previous']);
   }
+});
+
+test('navigation transports vertical arrows; volume profiles and disabled owners do not route them', () => {
+  for (const direction of ['rtl', 'ltr']) {
+    const h = harness({direction}); h.state();
+    h.key({keyCode: 19}); h.key({keyCode: 20});
+    assert.deepEqual(h.turns, ['previous', 'next']);
+  }
+  for (const patch of [{profile: 'volume'}, {profile: 'volume_reversed'}, {enabled: false}, {blocked: true}]) {
+    const h = harness(patch); h.state({eligible: h.specs[0].enabled});
+    h.key({keyCode: 19, eligible: h.specs[0].enabled});
+    h.key({keyCode: 20, eligible: h.specs[0].enabled});
+    assert.deepEqual(h.turns, []);
+  }
+  const h = harness(); h.state();
+  const oldVertical = h.envelope('key', {keyCode: 20});
+  h.context.profile = 'volume'; h.session.fence(); h.session.synchronize();
+  assert.equal(h.session.handle(oldVertical).handled, false);
+  h.state(); h.key({keyCode: 20});
+  assert.deepEqual(h.turns, []);
 });
 
 test('focus command binds exact current request and never restamps a delayed state', () => {

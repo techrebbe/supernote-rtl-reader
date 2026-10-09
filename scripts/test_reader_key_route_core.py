@@ -52,6 +52,8 @@ def main() -> None:
         if args.mutations:
             core_text = core.read_text(encoding="utf-8")
             host_text = host.read_text(encoding="utf-8")
+            configuration = build / "ReaderKeyConfiguration.java"
+            configuration_text = configuration.read_text(encoding="utf-8")
             mutations = [
                 ("state-sink-escapes", "host", "try { recipient.state(state); } catch (RuntimeException failure) { drop(); }", "recipient.state(state);", "t014.ReaderKeyHostTests"),
                 ("detach-attachment-aba", "host", "lifecycleAttached = false;", "lifecycleAttached = true;", "t014.ReaderKeyHostTests"),
@@ -60,20 +62,27 @@ def main() -> None:
                 // Revocation and Sink release already completed. A terminal
                 // notification failure cannot rearm or escape key dispatch.
             }""", "old.state(terminal);", "t014.ReaderKeyHostTests"),
+                ("vertical-core-missing", "core", "key == 19 || key == 20 || ", "", "t014.ReaderKeyRouteCoreTests"),
+                ("vertical-config-missing", "configuration", "key == 19 || key == 20 || ", "", "t014.ReaderKeyBridgeTests"),
+                ("vertical-diagnostic-missing", "host", "key == 19 || key == 20 || ", "", "t014.ReaderKeyHostTests"),
             ]
             for name, target, old, new, suite in mutations:
-                originals = {"core": core_text, "host": host_text}
+                originals = {"core": core_text, "host": host_text, "configuration": configuration_text}
                 if originals[target].count(old) != 1:
                     raise SystemExit(f"test_reader_key_route_core: ambiguous mutation {name}")
                 mutant = build / name
                 mutant.mkdir()
                 mutated_core = mutant / "ReaderKeyRouteCore.java"
                 mutated_host = mutant / "ReaderKeyHost.java"
+                mutated_configuration = mutant / "ReaderKeyConfiguration.java"
                 mutated_core.write_text(core_text.replace(old, new) if target == "core" else core_text, encoding="utf-8")
                 mutated_host.write_text(host_text.replace(old, new) if target == "host" else host_text, encoding="utf-8")
-                subprocess.run([javac, "-encoding", "UTF-8", "-d", str(mutant), str(mutated_core), str(mutated_host), str(tests), str(root / "scripts/ReaderKeyHostTests.java"), *(str(item) for item in stubs)], check=True, timeout=60)
+                mutated_configuration.write_text(configuration_text.replace(old, new) if target == "configuration" else configuration_text, encoding="utf-8")
+                mutant_bridge = [str(mutated_configuration) if item == str(configuration) else item for item in bridge]
+                subprocess.run([javac, "-encoding", "UTF-8", "-d", str(mutant), str(mutated_core), str(mutated_host), *mutant_bridge, str(tests), str(root / "scripts/ReaderKeyHostTests.java"), str(root / "scripts/ReaderKeyBridgeTests.java"), *(str(item) for item in stubs)], check=True, timeout=60)
                 result = subprocess.run([java, "-cp", str(mutant), suite], capture_output=True, text=True, timeout=60)
-                if result.returncode == 0 or "AssertionError" not in result.stderr and "state failure" not in result.stderr:
+                missing_vertical_key = name == "vertical-core-missing" and "Unsupported/duplicate key" in result.stderr
+                if result.returncode == 0 or not missing_vertical_key and "AssertionError" not in result.stderr and "state failure" not in result.stderr:
                     raise SystemExit(f"test_reader_key_route_core: mutation not rejected by expected regression {name}: {result.stderr}")
                 print(f"Reader key accepted-defect mutation: REJECTED {name}")
         if args.android_classpath:

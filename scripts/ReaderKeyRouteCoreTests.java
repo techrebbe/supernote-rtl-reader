@@ -97,6 +97,37 @@ public final class ReaderKeyRouteCoreTests {
         core.configure("document", new int[]{24}, true, 30);
         check(core.dispatch(0, 24, -1, 31, 0).packet != null, "Opt-in volume/synthetic device can be scoped");
     }
+    private static void verticalContacts() {
+        ReaderKeyRouteCore core = new ReaderKeyRouteCore("vertical");
+        core.configure("document-one", new int[]{19,20,21,22,92,93}, true, 10);
+        core.eligibility(true,true,true,true,11);
+        for (int key : new int[]{19,20}) {
+            long down = 100 + key;
+            ReaderKeyRouteCore.Decision press = core.dispatch(0,key,3,down,0);
+            check(press.consume && press.packet != null && press.packet.keyCode == key,
+                    "Vertical DOWN keeps its exact dispatch-time Android key");
+            for (int repeat : new int[]{0,1,256,Integer.MAX_VALUE}) {
+                ReaderKeyRouteCore.Decision held = core.dispatch(0,key,3,down,repeat);
+                check(held.consume && held.packet == null,"Vertical hold cannot duplicate navigation");
+            }
+            check(core.dispatch(1,key,3,down,0).consume,"Vertical exact UP releases contact");
+            check(!core.dispatch(1,key,3,down,0).consume,"Vertical duplicate UP is not owned");
+        }
+        core.configure("document-one",new int[]{24,25},true,200);
+        check(!core.dispatch(0,19,3,201,0).consume && !core.dispatch(0,20,3,202,0).consume,
+                "Volume-only configuration leaves vertical arrows ordinary");
+        core.configure("document-one",new int[]{19,20},false,210);
+        check(!core.dispatch(0,20,3,211,0).consume,"Explicit OFF does not claim vertical arrows");
+        core.configure("document-one",new int[]{19,20},true,220);
+        check(core.dispatch(0,20,3,211,0).packet == null,"OFF/ON ABA cannot replay old vertical input");
+        core.eligibility(true,true,false,true,230);
+        check(!core.dispatch(0,19,3,231,0).consume,"Vertical input cannot claim another control's focus");
+        core.eligibility(true,true,true,true,240);
+        check(core.dispatch(0,19,3,231,0).packet == null,"Focus recovery rejects pre-write contact");
+        check(core.dispatch(0,19,3,241,0).packet != null,"Fresh post-focus vertical input accepted");
+        core.dispose(250);
+        check(!core.dispatch(0,20,3,251,0).consume,"Dropped owner never owns vertical input");
+    }
     private static void boundedHistory() {
         ReaderKeyRouteCore core = armed();
         for (int id = 0; id < 32; id++) {
@@ -136,7 +167,7 @@ public final class ReaderKeyRouteCoreTests {
         rejects(() -> core.configure("other", new int[]{93}, true, 22), "Disposed host cannot rearm");
     }
     public static void main(String[] args) throws Exception {
-        contactLifecycle(); epochsAndFocus(); malformed(); boundedHistory(); threadAndDispose();
+        contactLifecycle(); epochsAndFocus(); malformed(); verticalContacts(); boundedHistory(); threadAndDispose();
         System.out.println("Reader key route Core: PASS " + assertions + " assertions");
     }
 }

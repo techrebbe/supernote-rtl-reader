@@ -1,4 +1,32 @@
-# STATE — RTL Reader (updated 2026-10-08 by codex)
+# STATE — RTL Reader (updated 2026-10-09 by codex)
+
+## Latest checkpoint — 2026-10-09 T016F-E / T016G
+
+Native-reader-only watch capture COMPLETE: confirmed physical series registered
+78 keyboard transitions =20 Linux KEY_UP/19 KEY_DOWN complete pairs, no repeats/
+unmatched contacts. Mouse/consumer no events. Exact fresh watch identities and
+owned open-FD/process witnesses PASS; independent host deadline, target timeout/
+retirement and sysfs postflight PASS. Released6079451520 from6079400773; no device
+process. No reader/document/config/package change or raw upload. Last verified
+installed01df18b/code54 unchanged. This is input arrival, NOT Android mapping or
+RTL navigation; prior D had no presses and T016C functional FAIL stays recorded.
+
+User now away; concrete T016G source work adds Up19 Previous/Down20 Next to the
+existing opt-in navigation profile/native validators/bounded diagnostics. No
+global stock hook, new focus listener, native writer/save/restart or annotation
+path. Volume profiles, explicit Off and eight-key atomic bound preserved. New
+actual-source tests fail on old code and pass on corrected routing.229 JS tests,
+2155 Core/57 Host/93 bridge assertions, seven native/four JS key mutations,
+actual Android35/RN0.79.2 compile, native85407Core/all271mutations, native/Edit/v2/
+cross-layer/assembly/package/provenance/renderer checks PASS. Optional geometry
+fixture four cases and pinned-template scanner one case skipped for unavailable
+optional inputs, not passed. Independent input-only exact-source review CLEAN;
+normal reviewer shell setup failed, so no independent execution/digest claim.
+Clean exact signed build remains pending. Candidate
+0.4.24-keys-exp3/code55 UNINSTALLED. Earliest fresh disposable gate in
+tasks/T-016G-vertical-arrows.md awaits reviewed package and physical watch input.
+No Nomad access while user away in this source task. Timer remains PAUSED;
+no merge or PR finalization. Older checkpoints below are historical.
 
 ## Latest checkpoint — 2026-10-08 T016C
 

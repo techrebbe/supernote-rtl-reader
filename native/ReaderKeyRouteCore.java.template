@@ -88,7 +88,7 @@ public final class ReaderKeyRouteCore {
         Arrays.sort(copy);
         for (int index = 0; index < copy.length; index++) {
             int key = copy[index];
-            if (!(key == 21 || key == 22 || key == 24 || key == 25 || key == 62 || key == 66 || key == 92 || key == 93) ||
+            if (!(key == 19 || key == 20 || key == 21 || key == 22 || key == 24 || key == 25 || key == 62 || key == 66 || key == 92 || key == 93) ||
                     (index > 0 && copy[index - 1] == key)) throw new IllegalArgumentException("Unsupported/duplicate key");
         }
         // Validation finishes before any existing state changes.

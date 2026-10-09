@@ -108,7 +108,7 @@ public final class ReaderKeyBridgeTests {
                 case 6: invalid.put("requestId",NAMESPACE+":1"); break;
                 case 7: invalid.put("requestId","d1a05000-0000-4000-8000-000000000003:2"); break;
                 case 8: invalid.remove("documentId"); break;
-                case 9: invalid.put("keyCodes",new ArrayValue(20)); break;
+                case 9: invalid.put("keyCodes",new ArrayValue(23)); break;
             }
             manager.setRouteSpec(host,invalid); manager.onAfterUpdateTransaction(host);
             check(data(queue.size()-1).get("disposed").equals(true),"Invalid/reused request terminally revokes old routing variant"+variant);
@@ -152,8 +152,39 @@ public final class ReaderKeyBridgeTests {
             Log.fail=false;
         }
     }
+    private static void verticalTransaction() {
+        ReaderKeyHostManager manager=new ReaderKeyHostManager(); ReaderKeyHost host=host(manager);
+        manager.setRouteSpec(host,spec(1,"vertical",true,19,20,21,22,92,93));
+        manager.onAfterUpdateTransaction(host);
+        manager.receiveCommand(host,100,new ArrayValue(NAMESPACE+":1"));
+        check(host.isFocused(),"Six-key navigation configuration survives strict parser/config/Core");
+        int before=queue.size();
+        for(int key:new int[]{19,20}) {
+            long down=++SystemClock.now;
+            check(host.dispatchKeyEvent(new KeyEvent(0,key,3,down,0)),"Vertical DOWN owned through actual Host");
+            Map<String,Object> payload=data(queue.size()-1);
+            check(payload.get("requestId").equals(NAMESPACE+":1") &&
+                    ((Number)payload.get("keyCode")).intValue()==key && payload.get("documentId").equals("vertical"),
+                    "Vertical event retains exact request/document/key identity");
+            int afterDown=queue.size();
+            host.dispatchKeyEvent(new KeyEvent(0,key,3,down,256));
+            check(queue.size()==afterDown,"Held vertical input cannot add a queue event");
+            check(host.dispatchKeyEvent(new KeyEvent(1,key,3,down,0)),"Vertical exact UP owned through Host");
+        }
+        check(queue.size()==before+4,"Only two DOWN/UP pairs are emitted");
+        for(int index=0;index<queue.size();index++) {
+            check(((Number)data(index).get("sequence")).longValue()==index+1 && !queue.get(index).canCoalesce(),
+                    "Vertical events share the existing ordered noncoalescing transport");
+        }
+        manager.setRouteSpec(host,spec(2,"vertical",true,24,25)); manager.onAfterUpdateTransaction(host);
+        check(!host.dispatchKeyEvent(new KeyEvent(0,20,3,++SystemClock.now,0)),"Volume profile does not consume vertical arrow");
+        manager.setRouteSpec(host,spec(3,"vertical",false,19,20)); manager.onAfterUpdateTransaction(host);
+        check(!host.isFocused() && !host.dispatchKeyEvent(new KeyEvent(0,19,3,++SystemClock.now,0)),
+                "OFF releases focus and vertical keys");
+        manager.onDropViewInstance(host);
+    }
     public static void main(String[] args) {
-        atomicConfigAndFrozenStream(); malformedAndReplay(); defensiveConfig(); diagnosticQueueIsolation();
+        atomicConfigAndFrozenStream(); malformedAndReplay(); defensiveConfig(); diagnosticQueueIsolation(); verticalTransaction();
         System.out.println("Reader key atomic RN bridge model: PASS "+assertions+" assertions; actual RN/device delivery NOT TESTED");
     }
 }

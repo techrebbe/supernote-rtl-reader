@@ -1,5 +1,43 @@
 # RTL Reader hardware regression
 
+## T016G-B code55 actual forward — FAIL, upstream UNKNOWN, cleanup PASS
+
+2026-10-09, exact executablebb9dbf635f76aef7ef92a60b64015888d6918981,
+0.4.24-keys-exp3/code55, NomadSN078C10015092/pinned Chauvet firmware.
+User-approved normal same-ID plug-in upgrade; installed APK/bundle/config exact,
+code54 signer-compatible rollback retained. Reservation6080478212 released
+6080870486. Fresh battery100%/portrait/nativeT008PAGE1/exact source/13309-byte
+mark/preferences/plugins/rotation/cache preflight PASS. No personal document.
+
+Normal RTL launch, Single/On/navigation. Exact source/nativePage1/readerPage1,
+settled READY/Edit1/TurnerReady; Host5 generation13/sequence12/eligibletrue,
+diagnostics23/128 before press. Actual PluginHost input window focused/visible/
+canReceiveKeys on display0, watch interfaces present. User confirmed ONE forward
+press/release. PAGE1 unchanged, screenshot SHA256 before/after identical:
+b956a43403dbfc35e6ac3005b768e9c1e7faea67cfa4c1043cd23dfdedcd4c73.
+No native paging-key dispatch/keyemit, JS-key or PAGE2 request observed.
+Functional FAIL; upstream Android delivery remains UNKNOWN. No concurrent raw
+HID capture, so this does not prove the key code, no HID event or interception.
+Orientation stayed portrait; no prior T016C rotation confound asserted here.
+Back/hold/repeat/profile cycle/additional injection NOTPERFORMED after failure.
+
+Normal Off/Auto/Done/Close returned stock T008PAGE1 without rescue input.
+Initial/final native screenshots byte-identical, SHA256
+9caf2946376593cf14118185da97ff7cd95f39e51df6ca864a8f99fda785d50f.
+Source/13309-byte mark/code55 APK/bundle exact,28 unrelated preference values/
+types byte-exact, target semantics/field inventory restored (target updatedAt
+may advance), four plugins/rotation1-2 preserved, SDK cache naturally empty.
+46 exact regular/nonsymlink/hash-backed remote captures plus one uniquely staged
+installer removed once; absence verified, local evidence/rollback retained.
+Local tmp/t016g-watch-b-20261009 only; no raw upload, observer, merge or timer
+resume. Code55 remains installed with Auto/keysOff; Nomad released.
+
+Reuse T016F-E native-reader Linux Up/Down evidence, already applied to code55's
+mapping; do not repeat identification or guess another profile. Bounded retained
+source inspection found ordinary container/RN superclass key dispatch and direct
+Host-focus eligibility, not a proven upstream cause or justified global hook.
+Next source question is concrete delivery before Host, not more key-map tests.
+
 ## T016G first ready attempt — setup NOTPERFORMED, cleanup PASS
 
 2026-10-09, unchanged installed01df18b/code54. User approved code55 installation

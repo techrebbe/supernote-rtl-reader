@@ -1,5 +1,43 @@
 # STATE — RTL Reader (updated 2026-10-09 by codex)
 
+## Current checkpoint — T016G-B forward FAIL, cleanup PASS / RELEASED
+
+Exact reviewed/clean-builtbb9dbf635f76aef7ef92a60b64015888d6918981,
+0.4.24-keys-exp3/code55 now normally installed and payload/config verified.
+Fresh reservation6080478212 consumed/RELEASED6080870486. Strict preflight PASS;
+portrait T008PAGE1/READY/Edit1/TurnerReady, Host5 eligiblegen13/seq12/obs23of128,
+PluginHost focused visible canReceiveKeys window and exact watch interfaces.
+User confirms ONE forward press. Functional FAIL: PAGE1 unchanged, before/after
+PNG byte-identical; no paging-key dispatch/native-keyemit/JS-key/PAGE2 render.
+Actual Android mapping/upstream delivery UNKNOWN, not proof of interception or
+no HID arrival. Back and all follow-on presses NOTPERFORMED; no rotation/pen.
+
+Normal Off/Auto/Done/Close returned stock native T008PAGE1 with initial/final
+native PNG byte-identical. PDF/13309-byte mark/code55 payload exact;28 unrelated
+preferences byte-exact, target semantic fields restored, four plugins/rotation1-2
+unchanged, SDK cache naturally empty.46 exact regular/nonsymlink/hash-backed
+owned remote captures and one staged installer removed once/absence verified;
+local tmp/t016g-watch-b-20261009 evidence and code54 rollback retained. No raw
+upload or active device/test/build/review process. Device free/safe to disconnect.
+
+User asks to reuse native-reader watch capture: accepted, no repeated button
+identification. Earlier Linux Up/Down already informed code55; mapping alone
+cannot explain missing Host arrival. Bounded SOURCE-ONLY check of retained
+PluginContainer/PluginApp/PluginHostService/RN ReactRootView found a service-owned
+type2002 container, no container key override, and RN observation followed by
+ordinary superclass dispatch. Actual code55 Host eligibility requires direct
+view focus as well as attachment/window focus/visibility; do not weaken it or
+add a speculative focus steal/global Activity/stock-reader hook. Retained vendor
+source is not fresh runtime interception evidence. Stock onKeyDown independently
+recognizes20 Next/19 Previous, corroborating code55's mapping; stock Bluetooth
+presence refreshes onResume, not a proven cause of today's missing delivery.
+RN onHWKeyEvent lacks original contact/request stamps and must not replace our
+guarded transport or turn recorded raw inputs into synthetic live presses.
+No concrete upstream fix
+established; future concrete route fix requires review/exact package and one
+bounded RTL confirmation, not a full identification retest. Timer PAUSED;
+no merge/finalization. Checkpoints below are historical, not current installation.
+
 ## Latest checkpoint — T016G ready attempt, setup STOPPED
 
 User explicitly approved normal code55 upgrade and the fixed watch trial.

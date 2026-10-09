@@ -1,5 +1,22 @@
 # Next useful hardware batch — no speculative test loop
 
+Current2026-10-09 T016G-B: exactbb9dbf6/code55 normally installed/payload verified.
+ONE watch forward in fixed portrait/settled eligible T008PAGE1 functional FAIL:
+PAGE1/PNG unchanged, no observed native paging-key/JS arrival; upstream UNKNOWN.
+Back/all additional keys not performed. Normal Off/Auto/Close, stockPAGE1/line,
+exact source/mark/payload/preferences/plugins/rotation/cache and owned scratch/
+stage cleanup PASS. RELEASED6080870486 from6080478212, no active process; safe to
+disconnect. Code55 Auto/keysOff and code54 rollback retained. Timer PAUSED.
+
+User requests reuse of prior native-reader inputs: do not repeat identification.
+Mappings are already applied. Bounded retained-source delivery check found ordinary
+container/RN superclass dispatch and strict directly focused Host eligibility,
+not a concrete upstream cause or justified fix. No extra guessed profile,
+injection, global Activity/stock hook or hardware probe authorized by this result.
+Next gate only after a concrete reviewed route correction: exact candidate/
+fresh reservation/preflight and one short RTL confirmation using known buttons,
+not the full native capture/test sequence. The plans below are historical.
+
 Latest2026-10-09: T016F-E Linux watch input-arrival PASS (20Up/19Down pairs),
 not Android mapping/RTL navigation. All owned observers retired; RELEASED6079451520.
 T016G source candidate keys-exp3/code55 covers vertical DPAD19/20 in native/JS

@@ -1,5 +1,25 @@
 # T016 — actual paired watch input
 
+## Current2026-10-09 — code55 T016G-B functional FAIL, cleanup PASS
+
+Reuse prior native-reader Linux Up/Down capture; no repeated identification.
+Exactbb9dbf6/keys-exp3/code55 normally installed, payload/config verified under
+user approval and reservation6080478212. Stable portrait T008PAGE1/READY/Edit1/
+TurnerReady, current directly focused eligibleHost5gen13/seq12/obs23of128,
+PluginHost input focus and watch interfaces. ONE user-confirmed forward press
+did not turn: PAGE1/screenshots unchanged, no native paging-key/JS-key dispatch.
+Functional FAIL, Android delivery/upstream UNKNOWN; Back and all follow-ons not
+performed. Earlier HID-arrival PASS is not retroactively changed or a routing pass.
+
+Normal Off/Auto/Close, nativePAGE1 screenshot exactly restored, source/13309-byte
+mark/code55/28unrelatedprefs/targetsemantics/fourplugins/rotation/cache PASS.
+46 hash-backed exact owned remote captures and one staged installer removed/
+absence verified. Local raw retained only. RELEASED6080870486; code55 Auto/Off,
+no process. Bounded source-only container/RN-root/Host check found no consuming
+handler justifying a fix; no global hook or further device probe. Next uncertainty
+is pre-Host delivery, not button identification. Timer PAUSED; no merge.
+Below checkpoints/plans are historical.
+
 ## Latest2026-10-09 — T016F-E input-arrival PASS
 
 User requested native-reader input registration only and performed a confirmed

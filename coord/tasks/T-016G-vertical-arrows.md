@@ -1,5 +1,70 @@
 # T016G — vertical-arrow support, earliest hardware gate
 
+## Current hardware result — T016G-B2026-10-09
+
+User-approved normal upgrade completed on exactbb9dbf6/code55; installed native
+APK/bundle/config exact, retained code54 signer-compatible rollback verified.
+Reservation6080478212 RELEASED6080870486. Fresh strict preflight PASS, portrait
+T008PAGE1 with existing saved line; normal RTL Single/On/navigation settled
+READY/Edit1/TurnerReady. Host5 currentgen13/seq12/eligibletrue/obs23of128; actual
+PluginHost focused canReceiveKeys input window and watch interfaces present.
+User confirms ONE forward press: functional FAIL, staysPAGE1, before/after PNG
+byte-identical, no paging-key dispatch/keyemit/JS-key/PAGE2 render. Actual Android
+code and upstream delivery remain UNKNOWN; no HID/interception inference.
+Back and all additional keys NOTPERFORMED, fixed portrait maintained.
+
+Normal Off/Auto/Done/Close PASS; native initial/final PAGE1 screenshots exactly
+match. PDF/13309-byte mark/code55 payload,28 unrelated preferences, target semantic
+fields/fourplugins/rotation1-2 preserved, SDK cache empty.46 exact owned remote
+captures plus one staged installer hash-verified/removed once/absence verified;
+local tmp/t016g-watch-b-20261009 and rollback retained. Device released, no active
+process. Source/review/build gates below remain valid; no unchanged rerun or CI
+claim. Code55 is now installed, contrary to historical uninstalled checkpoints.
+
+User requests reuse of earlier native-reader buttons: accepted. Up/Down capture
+already informed this implementation; do not repeat identification. Mapping is
+not delivery: missing Host dispatch prevents claiming RTL support. Minimum next
+step is bounded source-only delivery inspection using retained inputs, not another
+guessed key/profile or global Activity/stock-reader hook. A later concrete fix
+needs review/exact package and one fresh bounded RTL confirmation. Timer PAUSED;
+no merge/finalization.
+
+### Bounded source-only delivery check
+
+Actual ReaderKeyHost.observe/snapshot uses attachment, window focus, direct self
+focus and visibility; eligible=true is not merely a presenter/window claim.
+dispatchKeyEvent diagnostics observe supported paging keys before Core rejection,
+and the observation budget was not exhausted. No packet reached that boundary.
+Retained vendor PluginContainer is a FrameLayout with a visibility callback only;
+PluginApp.showPluginView attaches its RN root to it; PluginHostService.initView/
+initWindowManager use a service-owned type2002 window. Retained RN ReactRootView
+dispatchKeyEvent invokes its hardware-input observer, then super in both branches.
+No concrete pre-Host consuming handler or plug-in key endpoint was found in that
+bounded source set. Retained/decompiled vendor code is not fresh runtime authority
+for the installed dispatch path. Do not assert firmware interception, weaken
+guards, steal focus, or add a global hook from this negative result. No production
+change or further hardware capture was made by this check.
+
+Retained stock DocumentActivity.onKeyDown independently recognizes93/20/22 as
+Next and92/19/21 as Previous after bluetoothDeviceExists/hasLoaded checks;
+onResume refreshes the Bluetooth-presence snapshot. This corroborates reuse of
+the Up19/Down20 mapping and is consistent with the user's native reopen report,
+not proof of today's missing delivery. Our route does not use that stock boolean
+or native Activity hook. Retained RN hardware helper emits onHWKeyEvent before
+ordinary superclass dispatch, but its event fields omit original deviceId,
+downTime, repeatCount and our native request/generation stamps. Do not replace
+the guarded transport with this less-authoritative JS event or replay saved raw
+contacts as live presses. Those would not establish exact current ownership.
+
+Source references (read-only retained inspection, not uploaded vendor code):
+PluginContainer.java class; PluginHostService.java:initWindowManager/initView;
+PluginApp.java:showPluginView; ReactRootView.java:dispatchKeyEvent;
+ReactAndroidHWInputDeviceHelper.java:handleKeyEvent/dispatchEvent;
+SupernoteDocument DocumentActivity.java:onKeyDown/onResume. Production references:
+native/ReaderKeyHost.java.template:observe/dispatchKeyEvent/requestReaderKeyFocus;
+native/ReaderKeyRouteCore.java.template:snapshot;
+overlay/pageTurnerKeys.js:DEFAULT_BINDINGS. No blind source repin or new build.
+
 ## Evidence and scope
 
 T016F-E (2026-10-09, issue23 reservation6079400773/release6079451520)

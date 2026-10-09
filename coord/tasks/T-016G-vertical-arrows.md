@@ -58,12 +58,52 @@ PASS. Actual Android35/RN0.79.2 compile PASS (retained dependency/deprecation
 warnings). Native85407Core/all271mutations, native/Edit/v2/cross-layer invariants,
 actual generated key/saved-ink assembly, packaging/provenance, saved-ink524math/
 171runtime/seven module-fence/10renderer checks PASS. Geometry fixture four
-optional cases and pinned-template scanner one case SKIPPED, not claimed passed.
+symbolic-link subcases SKIPPED because host link creation is not permitted;
+they are not passed. Pinned-template packager scanner now8/8PASS with the exact
+normal build's authenticated template, closing the previous scanner skip.
 229 JS covers existing Edit lifecycle, saved-ink batch and actual App route.
 App/Edit/Preferences/ink/render/installer/build source unchanged. Independent
 input-only source review CLEAN (no P0/P1/P2), after normal read-only review shell
 failed setup. Reviewer executed no tests and computed no hashes; host verifies
-exact pins/assembly separately. Clean exact-commit signed build still pending.
+exact pins/assembly separately. Clean exact-commit signed build completed below.
+
+### Exact clean candidate — 2026-10-09
+
+Executable/source commit: `bb9dbf635f76aef7ef92a60b64015888d6918981`.
+Built once from a fresh exact `git archive`, not the mutable implementation
+checkout. Normal unmodified `build.sh` exit0; Android Gradle75/75tasks executed.
+Build warnings retained (upstream resources, SDK/CMake metadata, deprecations,
+existing SavedInkModule nullable receiver and strictfp), not rewritten as errors.
+
+Local output root: `tmp/t016g-bb9dbf6-build1/out/` in the project workspace.
+
+- `SupernoteRtlReader.snplg`:7414230bytes; SHA256
+  `1fc3693a8a1119334ad03d09d75671bfedb3940c53adfaaf648e7d4ff4d0df47`.
+- `build-provenance/app.npk`:7296999bytes; SHA256
+  `c0a47966e21e0f0d07d985068e3969785f52d6024983fc0ee06eaf8012a52b49`.
+- `build-provenance/SupernoteRtlReader.bundle`:1151551bytes; SHA256
+  `9211fa88db9aec740ca9bd043b45dc356373fc4369eba693125ab8fff55e8df8`.
+- Exact source archive `tmp/t016g-bb9dbf6-source.zip`:1493205bytes; SHA256
+  `cd434243a7139e9c9793e3a2fe61534ff7d0715f11334a30104c0ed7aceb044c`.
+
+Strict package verifier PASS against exact archived source plus independently
+named build bundle/APK. Packaged plug-inID `snrtl20260726001`, version
+`0.4.24-keys-exp3`, code55; marker exactly
+`RTL_READER_OPEN v0.4.24-keys-exp3-native-reader-v2`. Embedded native APK package
+`com.supernotertlreader`, template version1.0/code1 (NOT plug-in code55), minSDK27,
+targetSDK35, arm64-v8a. Built DEX contains the six expected key Host/Core/config/
+manager/Module/PdfRendererPackage class definitions; bundle contains the exact
+Up19/Down20 logical bindings and retained horizontal/Page bindings. This checks
+payload inclusion, not runtime delivery or independent hardware behavior.
+
+APK v2/v3 signature verified. Signer certificate SHA256
+`fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c`
+exactly matches the retained code54/01df18b APK, verified locally without ADB.
+Known-good code54 rollback retained. Source commit is pushed; no GitHub CI run
+for this branch was available at this checkpoint. Local checks are not CI.
+No package installation, device access or raw artifact upload. No active build,
+test, review or device process. Later documentation HEADs do not change this
+executable identity. Timer remains PAUSED; no PR finalization or merge.
 
 User is away. Physical watch presses are deferred; no unattended injection or
 device mutation is part of this source task. Do not use the released reservation.

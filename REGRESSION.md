@@ -1,5 +1,25 @@
 # RTL Reader hardware regression
 
+## T016G software/package checkpoint — hardware NOT EXECUTED
+
+2026-10-09, exact clean executablebb9dbf635f76aef7ef92a60b64015888d6918981,
+0.4.24-keys-exp3/code55. Reviewed bounded vertical Up19/Down20 logical navigation
+support now passes229JS,2155Core/57Host/93bridge assertions, seven native/fourJS
+mutants, actual Android/RN compile, native85407Core/all271mutations and existing
+native/Edit/ink/assembly/package/provenance checks. Independent input-only
+source review CLEAN; reviewer did not execute tests/compute hashes. Geometry
+four symlink subcases skipped for host permission, pinned scanner8/8PASS.
+
+Normal exact-archive signed build exit0/75tasks. Source/config/runtime marker,
+bundle/APK provenance, DEX key classes and code54 signer compatibility verified.
+SNPLG SHA2561fc3693a8a1119334ad03d09d75671bfedb3940c53adfaaf648e7d4ff4d0df47.
+Full artifact/certificate identity and fixed one Down/one Up disposable gate in
+coord/tasks/T-016G-vertical-arrows.md. Code55 UNINSTALLED; code54/01df18b and
+released6079451520 Nomad unchanged. No device access while user away, no actual
+Android mapping/RTL Bluetooth PASS inferred, no original/raw upload or merge.
+Await explicit upgrade scope/new exclusive reservation/physical watch input;
+not another speculative host cycle. No process active. Timer PAUSED.
+
 ## T016F-E native-reader watch observation — input-arrival PASS only
 
 2026-10-09, NomadSN078C10015092/Chauvet.E103.2606161001.2393_release,

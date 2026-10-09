@@ -18,13 +18,20 @@ path. Volume profiles, explicit Off and eight-key atomic bound preserved. New
 actual-source tests fail on old code and pass on corrected routing.229 JS tests,
 2155 Core/57 Host/93 bridge assertions, seven native/four JS key mutations,
 actual Android35/RN0.79.2 compile, native85407Core/all271mutations, native/Edit/v2/
-cross-layer/assembly/package/provenance/renderer checks PASS. Optional geometry
-fixture four cases and pinned-template scanner one case skipped for unavailable
-optional inputs, not passed. Independent input-only exact-source review CLEAN;
+cross-layer/assembly/package/provenance/renderer checks PASS. Geometry fixture
+four symbolic-link subcases SKIPPED because this host cannot create the required
+links, not passed. Pinned-template packager scanner now8/8PASS with the normal
+build's authenticated template. Independent input-only exact-source review CLEAN;
 normal reviewer shell setup failed, so no independent execution/digest claim.
-Clean exact signed build remains pending. Candidate
-0.4.24-keys-exp3/code55 UNINSTALLED. Earliest fresh disposable gate in
-tasks/T-016G-vertical-arrows.md awaits reviewed package and physical watch input.
+Exact clean-sourcebb9dbf635f76aef7ef92a60b64015888d6918981 normal signed build
+exit0/75tasks; source-matched package/config/bundle/APK/DEX/marker gates PASS.
+Candidate0.4.24-keys-exp3/code55 UNINSTALLED. SNPLG SHA256
+1fc3693a8a1119334ad03d09d75671bfedb3940c53adfaaf648e7d4ff4d0df47;
+native packagecom.supernotertlreader/template1.0-code1, signer exactly matches
+retained installedcode54. Full hashes/certificate in tasks/T-016G-vertical-arrows.md.
+No build/review/test/device process active; no GitHub CI result claimed.
+Earliest fresh disposable gate awaits normal-upgrade task approval, exclusive
+reservation and physical watch presses when user returns, not another host loop.
 No Nomad access while user away in this source task. Timer remains PAUSED;
 no merge or PR finalization. Older checkpoints below are historical.
 

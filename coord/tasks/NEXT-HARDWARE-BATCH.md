@@ -3,8 +3,9 @@
 Latest2026-10-09: T016F-E Linux watch input-arrival PASS (20Up/19Down pairs),
 not Android mapping/RTL navigation. All owned observers retired; RELEASED6079451520.
 T016G source candidate keys-exp3/code55 covers vertical DPAD19/20 in native/JS
-validators/navigation and bounded diagnostics. Installedcode54 untouched. After
-focused/full gates, independent review and exact signed build, earliest gate is
+validators/navigation and bounded diagnostics. Installedcode54 untouched.
+Focused/full gates, independent input-only source review and exact clean signed
+bb9dbf6 build/package/code54-signer checks COMPLETE. Earliest hardware gate is
 the fixed one Down/one Up disposable T008 trial in T-016G-vertical-arrows.md.
 Physical input waits for user; no unattended injection, profile cycle or raw
 capture repeat. Current software work is not package-install authorization;

@@ -13,8 +13,10 @@ config/package changes by monitor, raw local only. Reservation6079400773 release
 T016C FAIL/upstream UNKNOWN below remains historical evidence.
 
 User authorizes source work while away. T016G implements logical Up/Down support
-and diagnostics across existing native/JS profile/guards; candidate code55,
-uninstalled, separate review/build and future fresh disposable hardware gate.
+and diagnostics across existing native/JS profile/guards; exactbb9dbf6 candidate
+code55 source/review/full gates/clean signed build/package/signer PASS,
+UNINSTALLED. Future fresh disposable hardware gate needs normal-upgrade scope,
+exclusive reservation and physical watch presses; no process remains active.
 See T-016G-vertical-arrows.md. Do not repeat raw capture or inject input to fill
 the physical-input dependency. Timer remains PAUSED.
 

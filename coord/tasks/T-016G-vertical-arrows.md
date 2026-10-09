@@ -105,6 +105,24 @@ No package installation, device access or raw artifact upload. No active build,
 test, review or device process. Later documentation HEADs do not change this
 executable identity. Timer remains PAUSED; no PR finalization or merge.
 
+### First user-ready attempt — setup stopped
+
+User returned and explicitly approved the normal code55 upgrade and bounded
+watch trial. Reservation6080347973 released6080400065: exact serial/firmware/
+battery100%/code54/source/13309-byte mark/29preferences/fourplugins/rotation1-2/
+empty owned cache baseline PASS. Native UI lacks exact T008 title witness,
+so hard stop before package staging/install, screenshot, UI/page/config/reader/
+rotation/pen/key action. NOTPERFORMED, not a Bluetooth functional failure.
+Only generated XML retained locally/hash-verified/removed once; absence and
+strict postflight files/payload/preferences/plugins/rotation/cache PASS.
+Local tmp/t016g-watch-20261009 preserved; no device process, code55 uninstalled.
+Required setup: user closes current book normally and opens disposable T008
+PAGE1 without drawing, then signals test-ready. Same approved scope remains;
+new namespace/reservation/exact preflight before resume. No unchanged software
+gate repetition or use of consumed reservation.
+
+### Initial source-only limitation (historical)
+
 User is away. Physical watch presses are deferred; no unattended injection or
 device mutation is part of this source task. Do not use the released reservation.
 After independent review and exact signed package verification, obtain approval

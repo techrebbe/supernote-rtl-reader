@@ -1,5 +1,21 @@
 # STATE — RTL Reader (updated 2026-10-09 by codex)
 
+## Latest checkpoint — T016G ready attempt, setup STOPPED
+
+User explicitly approved normal code55 upgrade and the fixed watch trial.
+Reservation6080347973 consumed/RELEASED6080400065. Strict read-only baseline
+PASS: exact serial/firmware, battery100%, code54/source/13309-byte mark,
+29preferences/fourplugins/rotation1-2 and empty owned cache. Native UI does not
+contain exact T008 title authority; hard stop before staging/install/screenshot/
+UI/page/settings/reader/pen/key actions. Watch gate NOTPERFORMED, not FAIL.
+Single generated XML hash-backed/removed/absence verified; postflight exact
+files/payload/preferences/plugins/rotation/cache/scratch PASS. Local evidence
+tmp/t016g-watch-20261009 only; no observer/device process. Code55 UNINSTALLED,
+code54 unchanged. User asked to close current book normally and open disposable
+RTL_INK_GEOMETRY_T008_20261002.pdf/PAGE1, no drawing, then signal test-ready.
+Approved scope retained, new exclusive reservation/exact preflight required;
+do not repeat completed software gates. Timer PAUSED; no merge/finalization.
+
 ## Latest checkpoint — 2026-10-09 T016F-E / T016G
 
 Native-reader-only watch capture COMPLETE: confirmed physical series registered

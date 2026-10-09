@@ -1,5 +1,19 @@
 # RTL Reader hardware regression
 
+## T016G first ready attempt — setup NOTPERFORMED, cleanup PASS
+
+2026-10-09, unchanged installed01df18b/code54. User approved code55 installation
+and fixed watch trial; reservation6080347973 released6080400065. Strict baseline
+serial/firmware/battery100%/disposable source/13309-byte mark/code54 payload/
+29preferences/fourplugins/rotation1-2/empty cache PASS. Native UI lacks exact
+T008 title witness; stopped before package staging/install/screenshot/UI/page/
+config/rotation/reader/pen/key action. This is setup NOTPERFORMED, not watch FAIL.
+Only generated UI XML backed up/hash-verified/removed once; absence and exact
+files/payload/preferences/plugins/rotation/cache postflight PASS. Raw local
+tmp/t016g-watch-20261009 only. Candidatebb9dbf6/code55 uninstalled, no process.
+Await native disposable T008PAGE1/test-ready, then fresh reservation/preflight
+under same approved scope. No repeated software gates, merge or timer resume.
+
 ## T016G software/package checkpoint — hardware NOT EXECUTED
 
 2026-10-09, exact clean executablebb9dbf635f76aef7ef92a60b64015888d6918981,

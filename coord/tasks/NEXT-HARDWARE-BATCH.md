@@ -1,5 +1,20 @@
 # Next useful hardware batch — no speculative test loop
 
+Current2026-10-13: upgraded unrooted3.30.45 rejects existing RTL package before
+view activation. T017 launch FAIL; remaining reading/Edit/Return/ink/Bluetooth
+gates NOTPERFORMED. Exact files/ink preserved,34 owned captures removed, device
+RELEASED6143161919 and separate-chat coordination complete. No root needed for
+the next package fix: public host requires real SDK version reporting0.1.62+
+(max0.3.1); retained code55 SDK0.1.43 does not report.0.1.65 candidate contains
+that handshake and retains the announced legacy-coordinate band. Verify actual
+API compatibility and a reviewed signed exact package, not metadata spoofing,
+blind latest-SDK/coordinate migration or root/module revival. New install needs
+its explicit scope/fresh reservation. Then earliest gate: T008 normal open,
+settled reading/ink, one page turn, exact-page Edit/Return without new pen, normal
+Close/integrity/owned cleanup. Hardware-dependent tests take precedence over more
+speculative modeling after software safety gates. No root/timer resume/merge.
+See T-017-unrooted-firmware-compatibility.md. Below is previous-firmware history.
+
 Current2026-10-09 T016G-B: exactbb9dbf6/code55 normally installed/payload verified.
 ONE watch forward in fixed portrait/settled eligible T008PAGE1 functional FAIL:
 PAGE1/PNG unchanged, no observed native paging-key/JS arrival; upstream UNKNOWN.

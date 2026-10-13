@@ -1,5 +1,48 @@
 # RTL Reader hardware regression
 
+## T017 — unrooted3.30.45 launch FAIL; SDK handshake cause identified
+
+2026-10-13, user-approved compatibility checks, NomadSN078C10015092,
+Chauvet.E103.2610091001.2545_release; fingerprint
+Supernote/Supernote/Supernote:11/RQ2A.210505.003/eng.supern.20261009.165748:user/release-keys.
+PluginHost1.00.2610090/code1002610090 and Document1.02.511/code102511 both shared
+UID1000; ADB shell2000, no root command/relabel/run-as/module restoration. New
+public system APK identities and test source/13309-byte mark verified. Original
+documents not opened/read/modified. UI version0.4.24-keys-exp3 enabled; private
+payload checksums unavailable, so do not assert a fresh installed exact commit.
+
+First preflight deferred on other-app ownership/released6142717023. Fresh
+6142772888: user confirms availability, then guarded tap catches a concurrent
+separate-chat launch before input. Explicitly authorized chat coordination
+confirmed release/no active device test before resume. Native T008 footer hidden
+in two read-only XML captures: no screenshots or input after failed identity
+witness. User exposed footer; exact title/PAGE1/BoxA line/BoxB blank verified.
+
+Normal native More/Plugins/RTL Reader attempt: host dialog Unable to Open Plugin,
+incompatible with current system version, update plugin. Functional launch FAIL;
+no RTL-view/native-render/Edit/Return/SDK-ink/Bluetooth phase performed. Filtered
+PluginApp log at13:00:06.555 shows isPluginAvailableVersion libVersion:0.1.60.
+Source inspection corrects that field's meaning: it is the constructor default,
+not proof of installed dependency0.1.60. New reportSdkVersion sets availability
+true only for0.1.62 through0.3.1 inclusive; old retained code55 lock0.1.43/bundle
+has no reportSdkVersion call. Published0.1.65 SDK init contains the actual report
+call. Proper dependency/handshake update needed; root restoration not a fix.
+No version spoof, source/firmware pin weakening or coordinate-contract change.
+
+Dialog OK dismissed normally, nativeT008PAGE1 screenshot before/after identical;
+source/mark/both public APK hashes preserved.34 exact regular/nonsymlink/hash-
+backed owned remote capture copies removed once, absence verified; local raw,
+public APK/SDK archive and retained packages preserved, not uploaded. Private
+preferences/cache could not be inspected without app-owned evidence; not a full
+private-state cleanup or annotation export/geometry PASS. No reader-side SDK
+generation or normal handoff/restart was started. Released6143161919; other chat
+notified, no active device process. Local tmp/t017b-unrooted-20261013 only.
+
+Focused host checks: native/Edit/v2 invariants PASS;6 saved-ink wiring,2 actual
+key assembly,42 Edit/Return,62 lifecycle callbacks PASS. Initial host-temp
+PermissionError corrected by workspace-local temp, no test/source weakening.
+No firmware downgrade/root restoration/installation/new pen/key/merge/timer resume.
+
 ## T016G-B code55 actual forward — FAIL, upstream UNKNOWN, cleanup PASS
 
 2026-10-09, exact executablebb9dbf635f76aef7ef92a60b64015888d6918981,

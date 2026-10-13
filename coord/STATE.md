@@ -1,4 +1,41 @@
-# STATE — RTL Reader (updated 2026-10-09 by codex)
+# STATE — RTL Reader (updated 2026-10-13 by codex)
+
+## Current checkpoint — T017 unrooted firmware compatibility BLOCKED at launch
+
+User-approved3.30.45 checks used ordinary ADB only, no root/restoration. Exact
+Nomad firmware nowChauvet.E103.2610091001.2545_release/Android11; PluginHost
+1002610090 and Document102511 retain shared system UID1000. Fresh source/13309-
+byte mark exact, existing nativePAGE1 ink intact. Actual Settings: RTL Reader
+enabled0.4.24-keys-exp3; private payload/preferences/cache inaccessible to shell,
+not bypassed. Fresh installed checksum/source-head identity remains UNVERIFIED.
+
+Concurrent separate-chat device launch caught before a tap. User-authorized
+coordination obtained exclusive release before continuation. Hidden native footer
+needed one user exposure; no screenshot/input while document authority missing.
+Normal T008/More/Plugins launch then rejected by PluginHost as incompatible,
+before reader-view activation. Root-free reading/Edit/Return/RTL ink/Bluetooth
+phases NOTPERFORMED. No install, pen, rotation, handoff/restart or original file.
+
+Verified source cause: exact new public PluginHost APK's reportSdkVersion accepts
+0.1.62..0.3.1. Constructor defaults libVersion0.1.60 and availability=false;
+the logged0.1.60 is NOT proof of the installed SDK version. Retained exact code55
+bundle/lock uses0.1.43 and lacks reportSdkVersion. Published integrity-verified
+0.1.65 SDK init performs the real handshake and stays within the announced
+legacy-coordinate compatibility band. This identifies a concrete proper SDK
+update candidate, not permission to spoof metadata/bypass the host, claim a
+hardware fix, migrate frozen coordinates or reactivate the old rooted module.
+
+Dialog dismissed; final nativeT008PAGE1 screenshot byte-identical to baseline.
+PDF/mark/both public system APK hashes exact;34 hash-backed owned remote capture
+copies removed/absence verified, all local evidence retained. RELEASED6143161919
+from6142772888; earlier read-only preflight6142673172 released6142717023. No
+device observer/SDK work. Separate chat notified of release. Native/Edit/v2
+invariants,6 saved-ink wiring,2 key wiring,42 Edit/Return and62 lifecycle tests
+PASS; host temporary-directory permission error resolved without source edits.
+Next is a focused supported-SDK package update, review/exact signed build and
+separately approved normal upgrade before resuming disposable gates. No production
+change made in this compatibility-check task. Timer PAUSED; no merge/finalization.
+See tasks/T-017-unrooted-firmware-compatibility.md; checkpoints below historical.
 
 ## Current checkpoint — T016G-B forward FAIL, cleanup PASS / RELEASED
 

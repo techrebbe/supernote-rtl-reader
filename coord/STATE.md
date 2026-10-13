@@ -1,6 +1,26 @@
 # STATE — RTL Reader (updated 2026-10-13 by codex)
 
-## Current checkpoint — hardware NOTPERFORMED; Nomad connection required
+## Current checkpoint — Wi-Fi verified; hardware NOTPERFORMED pending charge
+
+Under user-confirmed USB connection/explicit Wi-Fi request, ordinary TCP5555
+setup PASS: owned10.0.40.24:5555 returns exact SN078C10015092, new firmware and
+UID2000. No root. Wi-Fi remains enabled as requested; old10.0.40.9 is obsolete.
+Fresh preflight confirms four public T008 PDF/13309-byte mark/system APK hashes,
+then stops at28% USB-powered/status2 charging, below35% minimum. No owner/footer/
+rotation capture, backup, UI, package stage/install, page or SDK trial occurred.
+Empty tmp/t017s4-nomad-20261013 retained; no baseline/postflight proof claimed.
+No remote captures/stage were created, so no deletion is needed or performed.
+
+RELEASED6152534287 from6152360130; DayWeave notified. Code59 remains UNINSTALLED,
+exact executable bede43534a977b8cbc39b0216a8d2a55a2e3db15 and all completed
+test/review/build/signing gates unchanged. Code58 is last verified installed,
+not a fresh private-payload proof. No device/build/review process active.
+Exact unblock: user "charged" signal at>=35%, disposable native T008PAGE1/footer
+ready/free, then NEW reservation/full preflight/fresh evidence namespace. No
+repeat charge/window polls or filler rebuild/review while blocked. Timer PAUSED,
+no root/originals/merge; Wi-Fi transport setup is not a reader compatibility pass.
+
+## Historical checkpoint — hardware NOTPERFORMED; Nomad connection required
 
 Follow-up: user explicitly asks Wi-Fi ADB setup. Fresh6152201950 briefly sees
 USB SN078C10015092 in inventory, then it vanishes before FIRST shell serial read.

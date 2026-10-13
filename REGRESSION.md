@@ -1,5 +1,25 @@
 # RTL Reader hardware regression
 
+## 2026-10-13 — Wi-Fi ADB setup PASS; code59 test NOTPERFORMED pending charge
+
+User-authorized standard USB-to-TCP5555 setup under fresh6152360130 verified
+SN078C10015092/Chauvet.E103.2610091001.2545_release/ordinary UID2000 over
+10.0.40.24:5555, no root. Wi-Fi ADB remains enabled as explicitly requested.
+Fresh test preflight verified four public T008 PDF/13309-byte mark/system APK
+hashes, then stopped at28% USB-powered/status2 charging, below35% minimum.
+No owner/footer/rotation capture, backups, UI/input, package stage/install,
+page/pen or SDK observation. Empty tmp/t017s4-nomad-20261013 retained; no full
+baseline/postflight or new annotation-safety/reader compatibility pass claimed.
+No remote captures/stage created and no deletion required/performed.
+
+Exact reviewed/signed bede43534a977b8cbc39b0216a8d2a55a2e3db15/sdk-exp4/code59
+remains UNINSTALLED; tests/review/build/package unchanged. Code58 is last verified
+installed, not fresh private-payload proof. RELEASED6152534287 from6152360130;
+DayWeave notified, no active process. Await user "charged" at>=35% with disposable
+native T008PAGE1/footer ready/free, then fresh reservation/full preflight and
+evidence namespace. No repeated battery/window polls, root, personal-document
+action, firmware/contract changes, raw upload, timer resume or merge.
+
 ## 2026-10-13 — T017S3 PAGE2 SDK error1207; restored native PAGE1 exact
 
 Exact reviewed/signed cd06b9062e2ec51bf517fd39c979473d8f52078c,

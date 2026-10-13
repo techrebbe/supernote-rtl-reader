@@ -1,5 +1,16 @@
 # Next useful hardware batch — no speculative test loop
 
+Latest2026-10-13: candidate59 exact bede43534a977b8cbc39b0216a8d2a55a2e3db15
+fully tested/reviewed CLEAN/clean-built/signed, UNINSTALLED. User-requested Wi-Fi
+ADB works at10.0.40.24:5555, exact Nomad serial/firmware/UID2000 verified without
+root. Test preflight's four public hashes PASS, then stops at28% charging/<35%.
+No UI/capture/backup/stage/install/page/SDK trial. RELEASED6152534287 from6152360130,
+DayWeave notified; no active device process. Await user "charged" with disposable
+native T008PAGE1/footer ready/free, then NEW reservation/full preflight/fresh
+t017s4b namespace. Do not rerun successful Wi-Fi setup or failed evidence folder,
+reuse consumed reservations, poll charge/window repeatedly, or rebuild/review
+the unchanged candidate. Wi-Fi remains enabled as explicitly requested.
+
 Current2026-10-13: real SDK0.1.65/READ/shared supported page navigation are
 implemented and reviewed. Installed sdk-exp3/code58 on unrooted3.30.45: T008
 PAGE1 background/ink and normal SAME-PAGE Close PASS. PAGE2 background READY,
@@ -17,7 +28,7 @@ Next bounded candidate sdk-exp4/code59 adds one supported getMarkPages read
 after NO_PAGE per saved-ink effect, using its current-file/presentation/cancel
 fences and real-settlement Close cleanup. It preserves the original failed
 canvas response and all raster/ink gates; it logs only bounded numeric indices
-and states indexBase=unverified. Source tests/review/build pending, UNINSTALLED.
+and states indexBase=unverified. Source tests/review/build COMPLETE, UNINSTALLED.
 Earliest hardware: fresh exclusive issue23 reservation/preflight, normal exact
 upgrade on disposable T008 only, PAGE1 baseline, one Next/PAGE2 enumeration;
 stop on known canvas error, restore PAGE1/normal Close/integrity/owned cleanup.

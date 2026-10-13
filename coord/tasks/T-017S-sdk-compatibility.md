@@ -1,6 +1,24 @@
 # T017S — supported SDK upgrade on unrooted 3.30.45
 
-## Hardware attempt — NOTPERFORMED before any target action
+## Current transport result — Wi-Fi PASS; code59 test NOTPERFORMED due charge
+
+Fresh6152360130 under user "USB connected"/explicit Wi-Fi request completed
+standard unrooted TCP5555 setup.10.0.40.24:5555 verified exact serial/firmware/
+UID2000; left enabled as requested, not a credential/network scan or root route.
+Root-free test preflight confirmed all four public hashes, then stopped at28%
+USB-powered/status2 charging, below35%. No owner/footer/rotation capture, backup,
+screen input, stage/install, page/pen or SDK observation. Empty failed local
+tmp/t017s4-nomad-20261013 retained; no baseline/postflight or annotation-safety
+pass claimed. No remote capture/stage created; nothing deleted.59 UNINSTALLED.
+
+RELEASED6152534287 from6152360130 and DayWeave notified; no active process/hold.
+User asked to charge>=35%/leave T008PAGE1 and reply "charged"; wall charger may
+now replace USB. Next attempt needs fresh exclusive reservation/full ordinary
+preflight and t017s4b evidence namespace, never reuse consumed reservation or
+failed directory. Candidate/gates/package unchanged; no repeated battery/window
+polls, speculative offline loop, root, timer resume or merge while blocked.
+
+## Historical hardware attempts — NOTPERFORMED before any target action
 
 Second transport attempt under fresh6152201950/user Wi-Fi request: USB exact
 serial appears briefly, then disappears before first identity shell query.

@@ -1,6 +1,61 @@
 # T017S — supported SDK upgrade on unrooted 3.30.45
 
-## Latest hardware / bounded next diagnostic
+## Latest result — code58 diagnostic completed and safely released
+
+Exact cd06b9062e2ec51bf517fd39c979473d8f52078c,0.4.24-sdk-exp3/code58,
+normal clean archive build exit0/75tasks, source/package/signature verification
+PASS. SNPLG7420599bytes SHA256
+4ca339ffcceedc11c882b0a922c5c58dae4f461102e888c947839a16c9c45578;
+embedded APK7301095bytes SHA256
+82d969d1d60e4c95265bc4c038dc0dbf1358081b734e5542bed4048f9e5d1dfa;
+bundle1163405bytes SHA256
+386f87ca5bbf6d2c95f4dd790e08142403aa7eea811e2436856b821a165af1d5.
+Androidcom.supernotertlreader1.0/code1/min27/target35; plugin58 identity separate.
+Single verified v2/v3 certificate SHA256
+fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c,
+same57/56 upgrade signer.228Node+66lifecycle,85407Core/all271mutations and
+required gates PASS; independent correction-diff review no actionable findings.
+
+Fresh root-free reservation6147381768/exact preflight/43% charge, normal library
+to disposable T008 only, normal same-ID upgrade/version/runtime verified. PAGE1
+SDK canvas success1404x1872/background/ink READY. ONE Next: PAGE2 background and
+selection READY; getPageSize status=error/code1207/no valid dimensions. Existing
+controller stops before thumbnail allocation; no relaxation/retry/new pen/Edit.
+Restoration Prev returns PAGE1/inkREADY; normal SAME-PAGE Close sdk-verified.
+Native pretrial/final PNG byte-identical, source/13309-byte mark/system APK hashes
+and rotation exact.51 owned hash-backed regular/nonsymlink remote captures and
+staged installer removed once/absence verified, local evidence/packages retained.
+RELEASED6147851609; DayWeave notified. Private hashes/cache/prefs unverified;
+no root/stock restart/original-document access/raw upload/merge. Timer PAUSED.
+
+## Bounded source finding / next authority gate
+
+Read-only audit of the exact retained public PluginHost APK
+f60ce4830c09c5d1ff2453e02b74fa0f7d1d098484b04380fc4517f0007d2aad:
+PluginAPIError.<clinit> assigns1207 to NO_PAGE, distinct from1209 PAGE_ERROR.
+HostCommImpl.getPageSize checks supported API/READ/encryption, then forwards
+the unchanged path/index in ClientRequest to the document client. Host code
+does NOT establish why the document client returned NO_PAGE or empty-ink meaning.
+Local exact bytecode evidence retained, never uploaded/vendor source repinned.
+
+The [official getMarkPages contract](https://docs.supernote.com/en/api-reference/supernote-plugin/plugin-file-api/get-mark-pages)
+provides successful mark-page index enumeration for DOC. Pinned0.1.65 wrapper
+validates filePath and forwards the call unchanged. Documentation does not
+explicitly state index base or snapshot-generation binding; no device response
+has been collected. Treat this as a candidate supported classification source,
+not a hardware pass or absence proof based on error1207 alone.
+
+Next source change must have an explicit non-raster missing-page path bound to
+the exact fixture/source and unchanged native mark snapshot. Validate successful
+array shape/range/uniqueness/page semantics; marked pages still require the exact
+SDK canvas and decoded raster gates. Missing/malformed/API-error/stale/changed
+enumeration must fail closed, including rotation/ABA/unmount/batch cleanup.
+Do not repurpose current prepare's canvas authority without a reviewed contract.
+Earliest hardware is one read-only enumerator validation after reviewed exact
+package/fresh exclusive reservation; different-page Edit follows only once its
+reading prerequisite is established. No speculative emulator cycle required.
+
+## Historical hardware / bounded diagnostic preparation
 
 Code57 exact13d87c6 installed normally; session-only READ + PAGE1 render/ink PASS.
 PAGE2 background PASS but ink canvas_mismatch before output allocation, actual

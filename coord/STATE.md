@@ -1,6 +1,41 @@
 # STATE — RTL Reader (updated 2026-10-13 by codex)
 
-## Current checkpoint — code57 reading restored; PAGE2 diagnostic gate pending
+## Current checkpoint — code58 PAGE2 SDK NO_PAGE isolated; device released
+
+Exact executable cd06b9062e2ec51bf517fd39c979473d8f52078c, sdk-exp3/code58,
+real SDK0.1.65, independently reviewed CLEAN and normal exact clean archive
+built exit0/75tasks.228Node+66lifecycle,85407Core/all271mutations, required
+invariants/wiring/provenance/packaging PASS. SNPLG SHA256
+4ca339ffcceedc11c882b0a922c5c58dae4f461102e888c947839a16c9c45578;
+same single v2/v3 upgrade signer fac61745...1033b9c. Normally installed/enabled,
+exact runtime marker observed; private installed/cache/prefs hashes UNVERIFIED.
+
+One root-free T008 PAGE1-to-PAGE2 diagnostic on3.30.45: PAGE1 SDK canvas
+success1404x1872/background/ink READY. PAGE2 background READY, but getPageSize
+returns error1207 with no valid dimensions, before thumbnail allocation. Exact
+public PluginHost APK's PluginAPIError enum maps1207 to NO_PAGE, distinct from
+1209 PAGE_ERROR; getPageSize forwards the unmodified path/index to the document
+client. This is NOT proof that PAGE2 has no ink. No fallback or canvas relaxation.
+Official getMarkPages documents successful mark-page index enumeration; its
+actual response, zero-based semantics and snapshot binding remain UNVERIFIED.
+
+Restoration PAGE1/inkREADY and normal SAME-PAGE SDK Close PASS; different-page
+Edit/Return NOTPERFORMED after failure. Native pretrial/final PNG byte-identical,
+public PDF/13309-byte mark/system APK hashes/rotation exact.51 verified owned
+remote capture/staged-installer files removed once/absence verified, locals
+retained. RELEASED6147851609 from6147381768; DayWeave notified. No active device,
+build or review process. Installed58 left ON; no root/originals/merge, timer PAUSED.
+
+Next bounded source task: specify/test supported missing-mark-page classification
+using successful validated enumeration and native source/mark snapshot fences,
+not error1207, screenshots, two matching unfenced reads, guessed geometry or a
+new native writer witness. Keep raster canvas checks mandatory for marked pages;
+reject malformed/error/changed responses. Current native prepare requires canvas
+before allocating a request, so empty-page handling needs an explicit non-raster
+authority path, not a silent bypass. Independent review/exact package/reservation
+before any next device step. Retain all earlier checkpoints as historical.
+
+## Historical checkpoint — code57 reading restored; PAGE2 diagnostic gate pending
 
 Code57/source13d87c6 normal same-ID install and session-only READ PASS on unrooted
 3.30.45; exact T008PAGE1 background and saved line READY/aligned. PAGE2 background

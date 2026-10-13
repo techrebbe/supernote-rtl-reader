@@ -1,5 +1,41 @@
 # RTL Reader hardware regression
 
+## 2026-10-13 — T017S3 PAGE2 SDK error1207; restored native PAGE1 exact
+
+Exact reviewed/signed cd06b9062e2ec51bf517fd39c979473d8f52078c,
+sdk-exp3/code58/SDK0.1.65 on unrooted SN078C10015092,
+Chauvet.E103.2610091001.2545_release. Normal exact clean archive build exit0/
+75tasks,228Node+66lifecycle,85407Core/all271mutations/required gates PASS.
+SNPLG SHA2564ca339ffcceedc11c882b0a922c5c58dae4f461102e888c947839a16c9c45578,
+same single v2/v3 signer fac61745...1033b9c. Normally installed/enabled/exact
+runtime marker; private installed/cache/prefs checksums UNVERIFIED, no bypass.
+
+Fresh exclusive reservation6147381768 after DayWeave release; public hashes/
+43% battery/backup, normal library to exact disposable T008/native filename and
+PAGE1 before native controls. PAGE1 SDK canvas success1404x1872, background and
+saved line READY. One logical Next to PAGE2: background/2of2 READY, but SDK
+getPageSize status=error/code1207/invalid dimensions; saved-ink canvas check
+fails before thumbnail allocation. No retry/normalization/new pen/Edit/rotation/
+Bluetooth. This isolates an API rejection, not an actual size mismatch or proof
+of empty ink. Different-page Edit/Return remains NOTPERFORMED.
+
+Restoration only: observed Prev -> PAGE1 canvas/background/ink READY. Normal
+Close logs HANDOFF_PREPARED page1 navigation=sdk-verified, no private CONFIG/
+stock restart. Native post-install/pretrial and final PNG byte-identical SHA256
+bdd581436453900bdf4495575d7f0d765f2d0bacfd2ccb6d10c1a5feb80061cd.
+Public PDF/13309-byte mark/both system APK hashes/rotation exact.51 explicit
+regular/nonsymlink/hash-backed remote captures/staged installer removed once,
+absence verified; local raw evidence/backups/packages retained. RELEASED6147851609
+from6147381768, DayWeave notified; no active device/build process, timer PAUSED.
+No original PDF/root/firmware/contract change/raw upload/merge/finalization.
+
+Subsequent source-only exact public PluginHost audit maps1207 to NO_PAGE and
+1209 to PAGE_ERROR, and confirms unchanged argument forwarding to the document
+client. This does not prove the missing page is an annotation page. Official
+getMarkPages is a supported candidate for successful mark-page enumeration;
+actual index/snapshot authority remains unverified. Preserve canvas safety,
+snapshot/cleanup gates and frozen coordinate contracts; no guessed fallback.
+
 ## 2026-10-13 — T017S2 unrooted READ/PAGE1 PASS; PAGE2 canvas FAIL; SDK Close PASS
 
 Exact reviewed/signed code57/13d87c650d75bbd70f4ff90f6eabb6b6e475e9b7,

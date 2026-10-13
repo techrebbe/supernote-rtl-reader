@@ -55,6 +55,14 @@ Earliest hardware is one read-only enumerator validation after reviewed exact
 package/fresh exclusive reservation; different-page Edit follows only once its
 reading prerequisite is established. No speculative emulator cycle required.
 
+Regression-only follow-up against21e88ac: actual observed NO_PAGE1207 now has a
+deterministic T008 PAGE2 test preserving canvas_mismatch, exact zero-based page1
+and no prepare/thumbnail/finish/discard/unfenced-enumeration call.28 focused
+observer/profile/batch tests PASS; independent test-only review no actionable
+findings,10 observer tests plus in-memory idempotent disposal/post-disposal block/
+replacement-owner assertions PASS. Production source and exact code58 package
+unchanged. No new hardware/absence proof inferred from these checks.
+
 ## Historical hardware / bounded diagnostic preparation
 
 Code57 exact13d87c6 installed normally; session-only READ + PAGE1 render/ink PASS.

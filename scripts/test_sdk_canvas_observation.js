@@ -69,3 +69,24 @@ test('App uses the real observer and build ships it', () => {
   const build = fs.readFileSync(path.join(root, 'build.sh'), 'utf8');
   assert.ok(build.includes('cp "$ROOT/overlay/sdkCanvasObservation.js" "$PROJECT/sdkCanvasObservation.js"'));
 });
+
+test('observed T008 PAGE2 NO_PAGE1207 is not guessed to mean empty ink or a usable canvas', async () => {
+  const profile = PROFILES[2];
+  const context = {filePath: profile.filePath, pageIndex: profile.pageIndex, totalPages: 2,
+    pluginDir: '/data/user/0/com.ratta.supernote.pluginhost/files/plugins/snrtl20260726001'};
+  const response = {success: false, result: null, error: {code: 1207, message: 'NO_PAGE'}};
+  const samples = [], calls = [];
+  const forbidden = name => () => {calls.push(name); throw new Error(`Unexpected ${name}`);};
+  const controller = createSavedInkController({currentContext: async () => ({...context}),
+    getPageSize: (file, page) => observeSdkCanvas(async (...args) => {
+      calls.push(args); return response;
+    }, file, page, sample => samples.push(sample)),
+    // An available API name is not a validated, snapshot-bound absence witness.
+    getMarkPages: forbidden('unfenced mark enumeration'),
+    prepare: forbidden('prepare'), finish: forbidden('finish'),
+    discard: forbidden('discard'), generateThumbnail: forbidden('thumbnail')});
+  assert.deepEqual(await controller.run(context), {status: 'error', reason: 'canvas_mismatch'});
+  assert.deepEqual(calls, [[profile.filePath, 1]]);
+  assert.deepEqual(samples, [{pageIndex: 1, status: 'error', width: 'invalid', height: 'invalid', code: 1207}]);
+  assert.deepEqual(await controller.dispose(), {status: 'disposed'});
+});

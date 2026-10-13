@@ -35,6 +35,13 @@ before allocating a request, so empty-page handling needs an explicit non-raster
 authority path, not a silent bypass. Independent review/exact package/reservation
 before any next device step. Retain all earlier checkpoints as historical.
 
+Postflight regression-only checkpoint: exact observed PAGE2 NO_PAGE1207 is now
+covered in actual observer/controller tests, including zero-based page1/no
+allocation/no thumbnail/no unfenced enumeration/no empty-ink inference/disposal.
+28 focused tests PASS. Independent test-only review against21e88ac no actionable
+findings,10 observer tests plus disposal/idempotence/replacement-owner assertions
+PASS. No production/bundle/native/package change or additional hardware claim.
+
 ## Historical checkpoint — code57 reading restored; PAGE2 diagnostic gate pending
 
 Code57/source13d87c6 normal same-ID install and session-only READ PASS on unrooted

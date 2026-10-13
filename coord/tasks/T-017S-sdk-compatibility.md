@@ -30,7 +30,24 @@ not production fixes.6ink+2key wiring, packaging/provenance and four invariant
 gates PASS.85407JavaCore/all271mutations PASS. First independent review found one
 P2 diagnostic double-read of an SDK code getter. Captured once/validated once in
 both diagnostics, changing-getter regression red-to-green.34 observer+25 actual
-effect cases PASS; correction review/exact build pending. No device access.
+effect cases PASS. Independent correction review CLEAN; previous P2 reproduced
+red-to-green and all four source/pin pairs match, no new high/critical issue.
+Owner final248 Node+66 lifecycle and actual SDK forwarding/validation PASS.
+No device access.
+
+Exact executable bede43534a977b8cbc39b0216a8d2a55a2e3db15 clean/pushed and normal
+clean archive built exit0/75tasks. SNPLG7421003bytes SHA256
+13f4b76a8013169ffb17d961931d137ef8ccf14c7ee1edcd1dabea987b204c13;
+APK7301095bytes8e89238e0680be78ca52d3c45c2311947dd8f12689e08e5f3f60260c63fb8771;
+bundle1165426bytesfae397012e09fa97f5fa7cb56d9bc5851ac7575e7b787078cb7a38c108a747cf;
+source ZIP20143b50f07b86415d653713c49131ca945c6b05d5e1df2bb3caa0b9fcb1fd60.
+Single v2/v3 signerfac61745...1033b9c matches58. Normal package verifier and
+packaged runtime/mark-list/READ/SDK-handoff markers PASS. Effective SDK0.1.65
+SRI unchanged, React19/RN0.79.2 unchanged. Native source and SDK graph unchanged;
+the newly built package includes the authored JS diagnostic/versioning. Code59
+UNINSTALLED; installed58 retained.
+No active build/review/device process. Disposable PAGE1/exclusive user setup
+signal pending, no new reservation/access yet. No user documents operated.
 
 Earliest safe hardware: exact reviewed/signed package, fresh exclusive issue23
 reservation and ordinary root-free preflight, publicly backed-up disposable

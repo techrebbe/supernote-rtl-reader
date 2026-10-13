@@ -1,6 +1,33 @@
 # STATE — RTL Reader (updated 2026-10-13 by codex)
 
-## Current source work — bounded mark-page diagnostic; Bluetooth user report PASS
+## Current checkpoint — code59 reviewed/signed ready; disposable setup pending
+
+Exact executable bede43534a977b8cbc39b0216a8d2a55a2e3db15 clean/pushed,
+sdk-exp4/code59, real pinned SDK0.1.65 unchanged. Independent correction review
+CLEAN/no new high/critical issues after the one P2 logging getter fix;34 observer
+tests, three new actual App cases and four scoped source/pin pairs confirmed.
+Owner248 Node+66 lifecycle, actual pinned SDK init/read/mark-page forwarding/
+invalid-path validation,6ink+2key wiring, four invariants,85407Core/all271mutations,
+provenance/packaging PASS. Host setup failures retained; no production bypass.
+
+Normal exact clean archive build exit0/75tasks; package/source/bundle/SDK graph/
+APK/signature verification PASS. SNPLG7421003bytes SHA256
+13f4b76a8013169ffb17d961931d137ef8ccf14c7ee1edcd1dabea987b204c13.
+Single v2/v3 signer fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c,
+same58 upgrade identity. Androidcom.supernotertlreader1.0/code1/min27/target35;
+plugin59 identity separate. No build/review/device process remains active.
+
+Candidate59 UNINSTALLED; prior58 untouched. No new Nomad access/reservation.
+User requested normal close of current document/exact native T008PAGE1/footer
+and exclusive availability; reply pending. Do not automatically operate a
+personal document. DayWeave hold request sent, its current work is backend-only;
+fresh coordination/preflight required before access. Local preflight/UI/stage/
+cleanup scripts prepared/syntax-checked, not run. No root/timer resume/merge.
+Bluetooth user-reported hidden-controls PASS retained. Earliest gate remains one
+read-only mark-list observation with failed canvas gate preserved, then restore/
+normal Close/verified owned cleanup/release. No speculative offline loop.
+
+## Historical source work — bounded mark-page diagnostic; Bluetooth user report PASS
 
 User confirms Bluetooth page turns work in RTL Reader with Settings toolbar
 hidden on the current firmware. USER-REPORTED evidence, not instrumented

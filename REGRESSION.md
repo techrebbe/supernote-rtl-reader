@@ -1,5 +1,43 @@
 # RTL Reader hardware regression
 
+## 2026-10-13 — T017S2 unrooted READ/PAGE1 PASS; PAGE2 canvas FAIL; SDK Close PASS
+
+Exact reviewed/signed code57/13d87c650d75bbd70f4ff90f6eabb6b6e475e9b7,
+SDK0.1.65 on SN078C10015092/Chauvet.E103.2610091001.2545_release.
+DayWeave release confirmed; metadata saw stock Calendar, no controls/capture there.
+Public source/13309-byte mark/system APK/49% charge baseline and backup exact;
+normal exported library selected only T008, native filename/PAGE1 authority.
+Normal same-ID upgrade sdk-exp2/enabledON/exact new runtime marker confirmed.
+Actual READ dialog: Allow This Time Only selected, auto-dismissed without OK;
+no permanent/other grant. T008PAGE1 background READY token1/geometry profile1,
+SDK ink READY, line aligned/BoxB blank. Chrome initially hidden; one normal
+source-defined center tap showed controls, no page/pen change. Trial1 PASS.
+
+Logical Next displayed exact PAGE2 reference/2of2, READY token2/geometry profile2,
+but SDK ink canvas_mismatch before output allocation. Trial2 FAIL; actual API
+response absent from existing diagnostic, do not infer no ink or dimensions.
+No further experimental action/Edit/Return/rotation/Bluetooth/new pen. Restoration
+Prev only: PAGE1/READY token3/ink READY; RTL restored PNG byte-identical to before
+Next. Normal Close drained application-owned SDK/bitmap work and logged
+HANDOFF_PREPARED page1 navigation=sdk-verified, no private CONFIG/stock restart.
+This proves SAME-PAGE Close only; different-page Edit/Return remains unverified.
+
+Terminal nativeT008PAGE1; post-upgrade/pre-trial and final PNG byte-identical
+bdd581436453900bdf4495575d7f0d765f2d0bacfd2ccb6d10c1a5feb80061cd.
+Earlier setup frame retained separately, floating Home chrome differed; no
+initial-frame equality claim. PDF/mark/system APK hashes and rotation exact.
+59 explicit regular/non-symlink/hash-backed owned remote capture/installer files
+removed once/absence verified; local backups/logs/frames/packages retained.
+Private installed/cache/prefs checksums UNVERIFIED, not bypassed; completed Close
+is app-owned cleanup acknowledgment, not private disk checksum proof.
+Reservation6146004806 RELEASED6146721875; separate chat notified. Timer PAUSED,
+no root/firmware/contract changes, merge/finalization or raw artifact upload.
+
+Next source-only sdk-exp3/code58 adds numeric SDK response observation without
+changing API calls/results, retrying, weakening canvas validation or logging
+paths/messages/tokens. Review/build pending; candidate uninstalled. PAGE2 size
+failure remains open until concrete SDK response evidence; no guessed fallback.
+
 ## 2026-10-13 — T017S real SDK upgrade / root-free firmware guard result
 
 Reviewed/pushed f86d07de047fe9ea8bcc1cc227596c5b045b6c67, SDK0.1.65,

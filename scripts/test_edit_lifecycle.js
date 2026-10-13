@@ -20,6 +20,7 @@ const INDEX = fs.readFileSync(path.join(ROOT, 'overlay/index.js'), 'utf8').repla
 const er = require(path.join(ROOT, 'overlay/editReturn.js'));
 const {ensureFileReadAccess} = require(path.join(ROOT, 'overlay/fileReadAccess.js'));
 const {handoffSavedPage} = require(path.join(ROOT, 'overlay/sdkPageHandoff.js'));
+const {observeSdkCanvas} = require(path.join(ROOT, 'overlay/sdkCanvasObservation.js'));
 const {selectSavedInkProfile} = require(path.join(ROOT, 'overlay/savedInk.js'));
 const {createReaderKeySession} = require(path.join(ROOT, 'overlay/readerKeySession.js'));
 const FILE = '/doc/a.pdf';
@@ -178,6 +179,7 @@ function harness(options = {}) {
     ...er,
     ensureFileReadAccess,
     handoffSavedPage,
+    observeSdkCanvas,
     globalThis: globals,
     NativeModules: {ReaderPreferencesModule: native, SavedInkModule: options.savedInkModule,
       PdfRendererModule: {renderPage() { throw new Error('Unexpected PDF render'); }}},

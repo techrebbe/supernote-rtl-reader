@@ -10,6 +10,7 @@ const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
 const CONTROLLER = path.join(ROOT, 'overlay', 'savedInk.js');
+const {observeSdkCanvas} = require('../overlay/sdkCanvasObservation');
 const SOURCE = fs.readFileSync(path.join(ROOT, 'overlay', 'App.js'), 'utf8').replace(/\r\n/g, '\n');
 const FILE = '/storage/emulated/0/Document/RTL_INK_GEOMETRY_T008_20261002.pdf';
 const DIR = '/data/user/0/com.ratta.supernote.pluginhost/files/plugins/snrtl20260726001';
@@ -158,6 +159,7 @@ function harness(hooks = {}, options = {}) {
         if (commitEffects && changed) {
           instance.cleanup?.(); // React cleans prior passive effect before replacement.
           const effectScope = {
+            observeSdkCanvas,
             ...scope, ...locals, globalThis: shared, SavedInkModule: native,
             setSavedInk(value) { instance.state = value; updates.push(value); },
             setSavedInkPresentationEpoch(value) { instance.epoch = value; },

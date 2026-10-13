@@ -1,5 +1,42 @@
 # T017S — supported SDK upgrade on unrooted 3.30.45
 
+## Latest hardware / bounded next diagnostic
+
+Code57 exact13d87c6 installed normally; session-only READ + PAGE1 render/ink PASS.
+PAGE2 background PASS but ink canvas_mismatch before output allocation, actual
+SDK response currently hidden by aggregate diagnostic. Stopped Edit/Return;
+PAGE1 restoration and SAME-PAGE supported SDK Close PASS, no private CONFIG or
+stock restart. SDK permits NOTE/DOC paths and zero-based pages per official
+getPageSize/jumpToPage documentation, but that does not prove returned size here.
+No guess, aspect inference, dimension repin, API upgrade beyond0.1.65 or fallback.
+Source/mark/APKs/rotation exact, native trial/RTL restoration PNGs byte-identical.
+59 owned scratch/installer files removed/absence verified, raw evidence retained.
+RELEASED6146721875 from6146004806, DayWeave notified, no active hardware here.
+
+sdk-exp3/code58 adds only observeSdkCanvas around the existing call. Emits page,
+strict success/error/invalid/threw status, finite width/height and numeric SDK
+error code. No path, arbitrary error message, token, content or full response.
+Returns/rethrows the SAME SDK object/error, no retry, callback failure suppressed;
+the existing controller still rejects missing/wrong canvas before allocation.
+Native/SDK graph/permissions/handoff/geometry/representation unchanged. Review/
+exact build pending; do not install until they pass and fresh reservation.
+
+Earliest gate: ordinary exact upgrade on disposable T008 after exclusive release/
+preflight, grant session READ if prompted, record PAGE1 response, one PAGE2
+response only; stop on its canvas failure, restore PAGE1 and normal Close/verified
+owned cleanup/release. No new pen/Edit/rotation or further ad-hoc query. This
+answers a concrete observed API question, not another architecture probe.
+
+Source gate for58:228 Node+66 lifecycle, native/Edit/v2/cross-layer invariants,
+6ink+2key wiring,85407Core/all271mutations, provenance/packaging PASS. Independent
+complete uncommitted diff review againstba1fde1: no actionable findings;
+138JS/3invariants/5read-only wiring/3in-memory packaging and whitespace PASS,
+all22 pins match. Reviewer could not verify the full PyYAML/write-dependent gates,
+build or hardware; owner ran required source gates. Native/SDK graph/handoff/
+controller/geometry/representation unchanged. Two current-App test harnesses
+needed the real new observer dependency, not a mock bypass; corrected suites PASS.
+Exact clean build next, code58 UNINSTALLED. Device released, no root/merge.
+
 User2026-10-13 explicitly requests SDK0.1.65 update, compatible reviewed signed
 package, then resumed disposable tests without root. No merge/finalization.
 

@@ -9,6 +9,7 @@ const path = require('node:path');
 
 const APP = path.join(__dirname, '..', 'overlay', 'App.js');
 const CONTROLLER = path.join(__dirname, '..', 'overlay', 'savedInk.js');
+const {observeSdkCanvas} = require('../overlay/sdkCanvasObservation');
 const FILE = '/storage/emulated/0/Document/RTL_RAPID_TOOLS_T004_20261001.pdf';
 const DIR = '/data/user/0/com.ratta.supernote.pluginhost/files/plugins/snrtl20260726001';
 const TOKEN = 'f3d09692-3a12-48cb-823b-62041968c761';
@@ -121,6 +122,7 @@ function harness(hooks = {}) {
         controllers.push(controller);
         return controller;
       },
+      observeSdkCanvas,
       async requireResult(promise, label) {
         const response = await promise;
         if (response?.success !== true) throw Error(`${label} unavailable`);

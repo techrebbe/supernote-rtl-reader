@@ -21,6 +21,7 @@ import {PluginCommAPI, PluginDocAPI, PluginFileAPI, PluginManager} from 'sn-plug
 import {createSavedInkController, selectSavedInkProfile} from './savedInk';
 import {ensureFileReadAccess} from './fileReadAccess';
 import {handoffSavedPage} from './sdkPageHandoff';
+import {observeSdkCanvas} from './sdkCanvasObservation';
 import ReaderKeyView from './ReaderKeyView';
 import {
   EDIT_BLOCKED_MESSAGES,
@@ -624,7 +625,10 @@ export default function App() {
         finish: ({token, missingMark}) => SavedInkModule.finish(token, missingMark),
         discard: ({token}) => SavedInkModule.discard(token),
         generateThumbnail: (...args) => PluginFileAPI.generateMarkThumbnails(...args),
-        getPageSize: (...args) => PluginFileAPI.getPageSize(...args),
+        getPageSize: (file, page) => observeSdkCanvas(
+          (...args) => PluginFileAPI.getPageSize(...args), file, page,
+          sample => console.log(`RTL_READER_SDK_CANVAS page=${sample.pageIndex + 1} status=${sample.status} width=${sample.width} height=${sample.height} code=${sample.code}`),
+        ),
       });
       const context = await currentContext();
       if (cancelled || !presentationCurrent()) return;

@@ -1,5 +1,34 @@
 # STATE — RTL Reader (updated 2026-10-13 by codex)
 
+## Current checkpoint — code57 reading restored; PAGE2 diagnostic gate pending
+
+Code57/source13d87c6 normal same-ID install and session-only READ PASS on unrooted
+3.30.45; exact T008PAGE1 background and saved line READY/aligned. PAGE2 background
+and UI selection PASS but SDK ink canvas_mismatch before allocation: stopped
+Edit/Return/rotation/Bluetooth. Restoration PAGE1 and normal Close successfully
+verified SAME-PAGE supported SDK handoff without private CONFIG/restart. Native
+pre/final trial PNG and RTL pre-Next/restored PNG byte-identical; public PDF/mark/
+APKs/rotation exact.59 owned remote capture/installer files removed/absence verified,
+all local evidence retained. RELEASED6146721875 from6146004806, other chat notified.
+No current device process; private hashes/cache/prefs unverified/no bypass.
+
+Continue source-only sdk-exp3/code58 numeric canvas response observer. Existing
+diagnostic conflates API failure/malformed/dimension mismatch; root cause unknown.
+Observer must preserve return/rejection identity and exact API args, emit only
+numeric status/size/error code, never arbitrary paths/messages/content/tokens,
+and retain existing fail-closed canvas checks.9 observer+66 lifecycle tests PASS;
+independent review/exact build pending, code58 uninstalled. SDK0.1.65/handshake/
+page handoff/native/save/writer/representation contracts unchanged. Earliest next
+hardware is one scoped read-only PAGE2 size-response capture after normal upgrade,
+review/package/signing and fresh exclusive reservation/preflight. No pen/Edit
+until the failure is understood; originals untouched, timer PAUSED, no merge.
+Earlier checkpoints below historical.
+
+Source58 gate completed:228Node+66lifecycle, required invariants/wiring,
+85407Core/all271mutations/provenance/packaging PASS. Independent review no
+actionable findings,138JS/3invariants/5read-only wiring/3in-memory packaging,
+all22 pins match. Exact clean signed build next. No hardware/58-install claim.
+
 ## Current checkpoint — reviewed/signed SDK navigation candidate ready; device held
 
 Exact executable13d87c650d75bbd70f4ff90f6eabb6b6e475e9b7 is pushed, independently

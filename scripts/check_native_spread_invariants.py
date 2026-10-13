@@ -984,7 +984,8 @@ def check(repo_root: Path) -> None:
             # T017S2 adds checked READ permission before initial context/native
             # loading plus shared supported SDK handoff; Edit/key/ink/save
             # ownership stays fenced. No private CONFIG/restart on this live path.
-            "d2c709490658f2131e11ff52bfa6d1c952e9958feb7ff4f68006c4329d145fbf",
+            # T017S3 observes numeric SDK canvas metadata only; no gate relaxation.
+            "1fe0732ee3a89b7db6f7c6ad8db04cc464d8bc210f042caa985178dca4663629",
             "Native Spread UI authority source",
         ),
         (
@@ -1002,6 +1003,11 @@ def check(repo_root: Path) -> None:
             repo_root / "overlay" / "sdkPageHandoff.js",
             "df47e354f13810574619fe87e48a0045735a804f6e2b0bf69846e36dbf4a3e89",
             "shared supported SDK page handoff",
+        ),
+        (
+            repo_root / "overlay" / "sdkCanvasObservation.js",
+            "9c545d4efab29e2d2c9937892d791e685bafa619bf2ac1e57c557209842502d9",
+            "diagnostic-only SDK canvas response observation",
         ),
         # T013 independent integrated confirmation: exact T008 PAGE1/PAGE2
         # profiles, sequential same-snapshot batch and per-token lease cleanup.
@@ -1035,7 +1041,8 @@ def check(repo_root: Path) -> None:
         (
             index_path,
             # T017S2 candidate marker plus shared Close SDK navigation.
-            "6064754b1573b70f8c38694796a2215634314cabcc553b18fe6edbd6bc4cfa35",
+            # T017S3 runtime identity only; supported handoff unchanged.
+            "3bf682dfbc8a2571870dd766d018c37ce220c2000a52fc1af14f6425fd018b7b",
             "Edit/Return activation and close authority",
         ),
         (
@@ -1050,13 +1057,15 @@ def check(repo_root: Path) -> None:
         (
             workflow_path,
             # T017S2 candidate label plus READ and SDK handoff tests.
-            "338a960a4ec33614703b4ebec250a67f548699ee0de6aad286972ab09c35ba83",
+            # T017S3 includes the numeric-observation suite and candidate label.
+            "6bd44d58d7db49aa0aa71c74f645d0a41de8763eb27cfb3a1fbe06ebf63e784c",
             "Native Spread companion-build workflow",
         ),
         (
             plugin_build_path,
             # T017S2 ships READ and shared SDK handoff dependencies.
-            "df961412551f20c84984aa9c1b6d18a3e538b9d99c48fb7a6e7d978e5a403219",
+            # T017S3 copies the observer; SDK graph/native assembly unchanged.
+            "b8cd23618be87b2a01790bdeb69b40d0c185ff85a7315ed9ee2b9c441ee73c7e",
             "native plugin build entrypoint",
         ),
         (

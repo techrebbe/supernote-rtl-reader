@@ -14,6 +14,18 @@ The plugin bootstrap is intentionally fail-closed.
 - The encoded lock is committed instead of regenerated during CI. Updating the
   template or any dependency requires an explicit provenance update and review.
 
+The materializer now derives one explicit override from that authenticated base:
+`sn-plugin-lib` is pinned exactly to `0.1.65` with its published SHA-512 SRI
+`sha512-jMQhpOHyzi3AxyxO7kc4OwXYQKgQ7tQXSFYH1l5W4po4w2GXEBfg2mrD8x0otv2jbwjYwvUZ+VZLe0RJZCQWyA==`.
+Only the package/root dependency requirement and SDK version/resolved/integrity
+record change; all other records, React19 and RN0.79.2 are unchanged. The base
+lock/hash remains historical authority, not the installed SDK version. No npm
+resolution or mutable range is used. `npm ci` checks tarball integrity; the normal
+build executes the actual SDK init/reader/thumbnail validators with mocked native
+endpoints and retains the effective package/lock/SDK metadata with its artifacts.
+This SDK implements the real version report and remains in the vendor's legacy
+EMR-coordinate band. No metadata spoof or frozen coordinate-contract migration.
+
 No signing key or signing-key encoding belongs in this directory. Stable APK
 signing material is supplied only as an environment-scoped GitHub Actions
 secret. The protected release job has no repository checkout or repository

@@ -1024,7 +1024,7 @@ def check(repo_root: Path) -> None:
             index_path,
             # T016G keys-exp3 changes only the candidate marker from cache-exp1;
             # external-Close/key fence/handoff and native authorities unchanged.
-            "74d05aa7c30183ae6252e3f5693b38df2602a37009e1b04e0efb243e98e51e41",
+        "6bc4a67440b05e82a2115357d61dd30b4b5ca3982f713d827d3937c7e57b899e",
             "Edit/Return activation and close authority",
         ),
         (
@@ -1040,13 +1040,13 @@ def check(repo_root: Path) -> None:
             workflow_path,
             # T016G candidate label plus in-memory vertical omission/reversal
             # tests. Existing actual-key/annotation/provenance gates retained.
-            "d6cd2493a420231547abccb88e239bd038bbfdb3daf6ca3e1c96ae1b56efcf90",
+        "2897f22b81c2200963668e74c17ecf6e6f60e4450107beb4bc3c6e9098c3b72b",
             "Native Spread companion-build workflow",
         ),
         (
             plugin_build_path,
             # T014 adds only four explicit reader-key JS dependency copies.
-            "efc20c47f020b653040f977226dfe35f61b0eb595f8cfec2aa6fb3f6fb3c1a3c",
+        "1a24e8ccf6bf4515ad383050840d6c0f90027bd7791a9246cd5a58b7a8c94b31",
             "native plugin build entrypoint",
         ),
         (

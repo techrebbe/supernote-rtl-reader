@@ -135,7 +135,7 @@ def main() -> None:
     )
     require(
         plugin_config,
-        ['"versionCode": "55"', '"versionName": "0.4.24-keys-exp3"'],
+        ['"versionCode": "56"', '"versionName": "0.4.24-sdk-exp1"'],
         "plugin version",
     )
     require(
@@ -161,7 +161,7 @@ def main() -> None:
         not in root_build
     ):
         fail("plugin build does not execute the exclusive v2 invariant gate")
-    if "RTL_READER_OPEN v0.4.24-keys-exp3-native-reader-v2" not in index:
+    if "RTL_READER_OPEN v0.4.24-sdk-exp1-native-reader-v2" not in index:
         fail("runtime marker does not identify the v2 plugin build")
     require(
         guidance,
@@ -2707,6 +2707,7 @@ def main() -> None:
             "npm pack --ignore-scripts --silent",
             "scripts/materialize_plugin_template.py",
             "npm ci --ignore-scripts --no-audit --no-fund",
+            'node "$ROOT/scripts/test_plugin_sdk_runtime.js" "$PROJECT/node_modules/sn-plugin-lib"',
             'EXPECTED_BUNDLE="$PROJECT/build/generated/SupernoteRtlReader.bundle"',
             'EXPECTED_NATIVE_APK="$PROJECT/build/generated/app.npk"',
             'PROVENANCE_OUTPUT="$ROOT/out/build-provenance"',
@@ -2724,6 +2725,9 @@ def main() -> None:
             "34dceadedd77d2c77c83521fee838dc60f3893b948a9070bf38271184268636f",
             "sha512-n7wY9y43DYJUNGdFEjFu+i8bU9C3TX9UG1yWjYbkcn3zWBUNSFuEC5LQ5FmK",
             "33ea436d56b68d332949db0689f4b0c2bfd6f227e78e904b7706360ebc161022",
+            'PLUGIN_SDK_VERSION = "0.1.65"',
+            "sha512-jMQhpOHyzi3AxyxO7kc4OwXYQKgQ7tQXSFYH1l5W4po4w2GXEBfg2mrD8x0otv2j",
+            "apply_sdk_pin(package_json, lock_bytes)",
             "member.issym() or member.islnk() or member.isdev()",
             "lacks SHA-512 integrity",
         ],
@@ -3435,7 +3439,7 @@ def main() -> None:
             "python3 scripts/test_build_provenance.py .",
             "out/build-provenance/SupernoteRtlReader.bundle",
             "out/build-provenance/app.npk",
-            "supernote-rtl-reader-v0.4.24-keys-exp3-native-reader-v2",
+            "supernote-rtl-reader-v0.4.24-sdk-exp1-native-reader-v2",
             "native-spread-upgrade-artifact:",
             "github.event_name == 'workflow_dispatch'",
             "github.actor == github.repository_owner",

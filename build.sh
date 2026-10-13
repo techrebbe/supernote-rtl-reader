@@ -47,6 +47,7 @@ fi
 pushd "$PROJECT" >/dev/null
 npm ci --ignore-scripts --no-audit --no-fund
 popd >/dev/null
+node "$ROOT/scripts/test_plugin_sdk_runtime.js" "$PROJECT/node_modules/sn-plugin-lib"
 
 cp "$ROOT/overlay/App.js" "$PROJECT/App.js"
 cp "$ROOT/overlay/index.js" "$PROJECT/index.js"
@@ -123,6 +124,9 @@ rm -rf "$PROVENANCE_OUTPUT"
 mkdir -p "$PROVENANCE_OUTPUT"
 cp "$EXPECTED_BUNDLE" "$PROVENANCE_OUTPUT/SupernoteRtlReader.bundle"
 cp "$EXPECTED_NATIVE_APK" "$PROVENANCE_OUTPUT/app.npk"
+cp "$PROJECT/package.json" "$PROVENANCE_OUTPUT/package.json"
+cp "$PROJECT/package-lock.json" "$PROVENANCE_OUTPUT/package-lock.json"
+cp "$PROJECT/node_modules/sn-plugin-lib/package.json" "$PROVENANCE_OUTPUT/sdk-package.json"
 
 echo "Built Supernote RTL Reader plugin:"
 ls -lh "$ROOT/out"/*.snplg

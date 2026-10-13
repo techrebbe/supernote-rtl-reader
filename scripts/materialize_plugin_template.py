@@ -35,6 +35,15 @@ EXPECTED_TEMPLATE_SRI = (
 EXPECTED_LOCK_SHA256 = (
     "33ea436d56b68d332949db0689f4b0c2bfd6f227e78e904b7706360ebc161022"
 )
+# Keep the authenticated upstream graph intact, then make this sole reviewed
+# dependency override. 0.1.65 implements reportSdkVersion and retains legacy
+# EMR coordinates; do not select a mutable range or a newer coordinate contract.
+PLUGIN_SDK_VERSION = "0.1.65"
+PLUGIN_SDK_RESOLVED = "https://registry.npmjs.org/sn-plugin-lib/-/sn-plugin-lib-0.1.65.tgz"
+PLUGIN_SDK_SRI = (
+    "sha512-jMQhpOHyzi3AxyxO7kc4OwXYQKgQ7tQXSFYH1l5W4po4w2GXEBfg2mrD8x0otv2j"
+    "bwjYwvUZ+VZLe0RJZCQWyA=="
+)
 PROJECT_NAME = "SupernoteRtlReader"
 PACKAGE_NAME = "com.supernotertlreader"
 
@@ -133,6 +142,26 @@ def read_and_validate_lock(lock_path: Path, package_json: bytes) -> bytes:
     return lock_bytes
 
 
+def apply_sdk_pin(package_json: bytes, lock_bytes: bytes) -> tuple[bytes, bytes]:
+    """Derive the install graph from the authenticated base, not npm resolution."""
+    if hashlib.sha256(lock_bytes).hexdigest() != EXPECTED_LOCK_SHA256:
+        fail("SDK override requires the exact authenticated base dependency graph")
+    package = json.loads(package_json)
+    lock = json.loads(lock_bytes)
+    root = lock["packages"][""]
+    for field in ("name", "version", "dependencies", "devDependencies", "engines"):
+        if root.get(field) != package.get(field):
+            fail(f"SDK override package {field!r} differs from authenticated base")
+    package["dependencies"]["sn-plugin-lib"] = PLUGIN_SDK_VERSION
+    root["dependencies"]["sn-plugin-lib"] = PLUGIN_SDK_VERSION
+    record = lock["packages"]["node_modules/sn-plugin-lib"]
+    record["version"] = PLUGIN_SDK_VERSION
+    record["resolved"] = PLUGIN_SDK_RESOLVED
+    record["integrity"] = PLUGIN_SDK_SRI
+    return tuple((json.dumps(value, indent=2) + "\n").encode("utf-8")
+                 for value in (package, lock))
+
+
 def materialize(tarball: Path, lock_path: Path, destination: Path) -> None:
     verify_template(tarball)
     if destination.exists():
@@ -194,6 +223,8 @@ def materialize(tarball: Path, lock_path: Path, destination: Path) -> None:
         shutil.rmtree(destination, ignore_errors=True)
         fail("materialized template lacks package.json")
     lock_bytes = read_and_validate_lock(lock_path, package_json)
+    package_json, lock_bytes = apply_sdk_pin(package_json, lock_bytes)
+    (destination / "package.json").write_bytes(package_json)
     (destination / "package-lock.json").write_bytes(lock_bytes)
 
 

@@ -16,6 +16,7 @@ from pathlib import Path
 
 from materialize_plugin_template import (
     EXPECTED_LOCK_SHA256,
+    apply_sdk_pin,
     read_and_validate_lock,
     verify_template,
 )
@@ -75,6 +76,29 @@ def test_locked_dependencies(repo_root: Path, temp_root: Path) -> None:
     if packages["node_modules/sn-plugin-lib"]["version"] != "0.1.43":
         fail("Supernote plugin library is not locked to the reviewed version")
 
+    pinned_package, pinned_lock = apply_sdk_pin(package_json, lock_bytes)
+    updated = json.loads(pinned_lock)
+    wanted = json.loads(lock_bytes)
+    wanted["packages"][""]["dependencies"]["sn-plugin-lib"] = "0.1.65"
+    wanted["packages"]["node_modules/sn-plugin-lib"].update({
+        "version": "0.1.65",
+        "resolved": "https://registry.npmjs.org/sn-plugin-lib/-/sn-plugin-lib-0.1.65.tgz",
+        "integrity": "sha512-jMQhpOHyzi3AxyxO7kc4OwXYQKgQ7tQXSFYH1l5W4po4w2GXEBfg2mrD8x0otv2jbwjYwvUZ+VZLe0RJZCQWyA==",
+    })
+    if updated != wanted:
+        fail("SDK override changed something outside its reviewed dependency record")
+    expected_package = json.loads(package_json)
+    expected_package["dependencies"]["sn-plugin-lib"] = "0.1.65"
+    if json.loads(pinned_package) != expected_package:
+        fail("SDK override changed unrelated package metadata")
+    if apply_sdk_pin(package_json, lock_bytes) != (pinned_package, pinned_lock):
+        fail("SDK override is not deterministic")
+    expect_failure(lambda: apply_sdk_pin(pinned_package, pinned_lock), "already updated graph")
+    wrong_package = json.loads(package_json)
+    wrong_package["dependencies"]["react-native"] = "0.80.0"
+    expect_failure(lambda: apply_sdk_pin(json.dumps(wrong_package).encode(), lock_bytes),
+                   "package differs from authenticated graph")
+
     mutated = bytearray(lock_bytes)
     mutated[-2] ^= 1
     mutated_input = temp_root / "mutated-lock.gz.b64"
@@ -86,6 +110,7 @@ def test_locked_dependencies(repo_root: Path, temp_root: Path) -> None:
         lambda: read_and_validate_lock(mutated_input, package_json),
         "mutated package lock",
     )
+    expect_failure(lambda: apply_sdk_pin(package_json, bytes(mutated)), "SDK mutated base")
 
 
 def make_zip(path: Path, order: list[str], timestamp: tuple[int, ...]) -> None:

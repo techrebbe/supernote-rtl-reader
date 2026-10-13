@@ -53,10 +53,10 @@ class WiringTests(unittest.TestCase):
 
     def test_candidate_identity_and_ci_gates(self):
         config = json.loads((ROOT / "PluginConfig.json").read_text(encoding="utf-8"))
-        self.assertEqual(config["versionName"], "0.4.24-keys-exp3")
-        self.assertEqual(config["versionCode"], "55")
+        self.assertEqual(config["versionName"], "0.4.24-sdk-exp1")
+        self.assertEqual(config["versionCode"], "56")
         self.assertEqual(config["pluginID"], "snrtl20260726001")
-        self.assertIn("RTL_READER_OPEN v0.4.24-keys-exp3-native-reader-v2",
+        self.assertIn("RTL_READER_OPEN v0.4.24-sdk-exp1-native-reader-v2",
                       (ROOT / "overlay/index.js").read_text(encoding="utf-8"))
         workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
         for gate in ("test_saved_ink.js", "test_saved_ink_app.js",

@@ -1,6 +1,26 @@
 # STATE — RTL Reader (updated 2026-10-13 by codex)
 
-## Current checkpoint — code59 reviewed/signed ready; disposable setup pending
+## Current checkpoint — hardware NOTPERFORMED; Nomad connection required
+
+User confirms disposable native T008PAGE1 ready/free and RTL Bluetooth works
+with controls hidden. Fresh reservation6152106352, but root-free preflight
+fails at FIRST serial request: known10.0.40.9:5555 transport absent. One known
+endpoint reconnect times out10060; only unrelated emulator5580 visible, NOT used.
+No target shell/capture/UI/file/install/page/pen/rotation/SDK probe succeeded,
+no local baseline directory created, no cleanup deletion or device-state change.
+RELEASED6152155135 from6152106352; DayWeave notified. No active process here.
+
+Exact reviewed/signed bede43534a977b8cbc39b0216a8d2a55a2e3db15/sdk-exp4/code59
+UNINSTALLED, retained and ready.58 remains the LAST verified installed version,
+not a fresh device/payload proof. All useful candidate source/check/build/review/
+signature/preparation work complete. Exact unblock: USB reconnect to this PC/
+unlock/debugging approval, OR current Nomad Wi-Fi ADB endpoint. User async question
+sent; keep disposable PAGE1/footer. A fresh reservation/full preflight is required;
+do not reuse consumed reservation, operate emulator, scan addresses or restore
+root. No further meaningful candidate test is possible while transport is absent.
+Timer PAUSED/no merge, all original data/branches/evidence/packages preserved.
+
+## Historical checkpoint — code59 reviewed/signed ready; disposable setup pending
 
 Exact executable bede43534a977b8cbc39b0216a8d2a55a2e3db15 clean/pushed,
 sdk-exp4/code59, real pinned SDK0.1.65 unchanged. Independent correction review

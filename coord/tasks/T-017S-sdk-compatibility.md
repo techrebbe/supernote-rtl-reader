@@ -1,5 +1,18 @@
 # T017S — supported SDK upgrade on unrooted 3.30.45
 
+## Hardware attempt — NOTPERFORMED before any target action
+
+User confirmed T008 native PAGE1/footer/free; DayWeave also confirmed release.
+Fresh6152106352 root-free preflight fails at FIRST getprop serial request: old
+10.0.40.9:5555 absent. One known-endpoint reconnect times out10060, only unrelated
+emulator5580 visible and NOT used. No successful Nomad shell/capture/UI/file/
+install/page/rotation/SDK query, no baseline directory or deletion. Code59 stays
+UNINSTALLED and package unchanged;58 is last verified state only. Consumed
+reservation RELEASED6152155135/DayWeave notified, no active process. USB reconnect/debugging
+approval or current owned Wi-Fi endpoint is the exact unblock; user question sent.
+Fresh reservation and complete exact preflight required after reconnect, no root,
+emulator substitution, address scan or repeated unavailable-state polls.
+
 ## Current candidate — sdk-exp4/code59 bounded mark-list observation
 
 User requests continuation, and reports Bluetooth page turns working in RTL

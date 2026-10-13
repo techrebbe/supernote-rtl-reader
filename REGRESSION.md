@@ -32,9 +32,19 @@ shared verified SDK page navigation for Edit/Close, native own-preference/public
 PDF-version preparation/revalidation, and no private CONFIG/restart on that path.
 READ checks accept explicit session1/permanent2.219 Node+66 actual lifecycle,
 required invariants,85407JavaCore/all271mutations,6ink+2key wiring, provenance/
-packaging checks PASS. Independent review/exact build/hardware still pending;
-no code57 package installed and no additional device access. DayWeave currently
-owns a separate session; RTL must obtain its release/fresh reservation first.
+packaging checks PASS. Independent full correction review no actionable findings,
+44permission/handoff+66lifecycle+31 runnable Edit tests/all8 affected pins match;
+reviewer Python/temp-generated/build/hardware unavailable, owner gates passed.
+Exact executable13d87c650d75bbd70f4ff90f6eabb6b6e475e9b7 pushed and clean-archive
+normally built exit0/75tasks. SNPLG7420132bytes SHA256
+902da525baf0dc60ac72b39ad0c5ecc626f23506f40b156707c22a38b62c9ffa,
+same prior certificate fac61745...1033b9c / single v2-v3 signer. Effective SDK
+graph and packaged READ/runtime/shared handoff markers verified. Initial sandbox
+Bash startup failed before execution; original failed attempt retained and fresh
+approved normal build succeeded. No root, raw upload, package installation or
+additional device access. DayWeave currently owns a separate session; RTL must
+obtain its verified release/fresh reservation first. Source checkpoint6145915540.
+Code57 reading/SDK jump/Edit/Return on3.30.45 remain hardware UNVERIFIED.
 
 ## T017 — unrooted3.30.45 launch FAIL; SDK handshake cause identified
 

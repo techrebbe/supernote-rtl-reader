@@ -107,3 +107,17 @@ all8 affected/new source pins independently match. Reviewer could not run Python
 generated temp-source tests, build or hardware; our generated-source suite passed.
 Runtime permission enforcement, jump/getter timing and source-stat behavior remain
 hardware questions, not proven by the host models. Exact clean signed build next.
+
+Exact source13d87c650d75bbd70f4ff90f6eabb6b6e475e9b7 clean/pushed and normal
+clean-archive build exit0/75tasks, APK/native code compiled. Package7420132bytes
+SHA256902da525baf0dc60ac72b39ad0c5ecc626f23506f40b156707c22a38b62c9ffa;
+APK7301095bytes622ff17e0891acf83a0961fa70d43e9ab622ced5d4f55415e6f89770f71f0e82;
+bundle1162294bytesa7ee76f5a2405a0b151258fd0e0e6f6188709b1399423a5295f970e819621ea2.
+Source ZIP16b935977c5f9abbdcfcb821d41180fd6851d214269d4be35ffe118af7ff7f02;
+single signerfac61745...1033b9c/v2-v3 verifies, upgrade identity unchanged.
+Androidcom.supernotertlreader1.0/code1/min27/target35; plugin57 distinct.
+Effective SDK0.1.65 exactSRI + packaged new markers verified, normal verifier PASS.
+Build1 sandbox could not start Bash; preserve that attempt, approved build2 passed.
+Candidate57 uninstalled. No hardware until DayWeave's actual current reservation
+is safely released, new issue23 reservation and exact root-free T008 preflight.
+Software update6145915540; no currently running process here. Timer PAUSED.

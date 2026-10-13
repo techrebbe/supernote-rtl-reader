@@ -1,5 +1,28 @@
 # STATE — RTL Reader (updated 2026-10-13 by codex)
 
+## Current checkpoint — reviewed/signed SDK navigation candidate ready; device held
+
+Exact executable13d87c650d75bbd70f4ff90f6eabb6b6e475e9b7 is pushed, independently
+reviewed with no actionable findings and clean-archive normally built exit0/
+75tasks.0.4.24-sdk-exp2/code57, real SDK0.1.65; same verified upgrade signer.
+SNPLG7420132bytes SHA256
+902da525baf0dc60ac72b39ad0c5ecc626f23506f40b156707c22a38b62c9ffa.
+Effective graph, packaged READ/runtime/SDK handoff markers, APK/signature and
+normal source-package verifier PASS.219Node+66lifecycle,85407Core/all271mutations,
+required invariants/wiring/provenance/packaging PASS. Own-preference/public-source
+prepared validation + supported SDK navigation replace the live private CONFIG/
+restart route. No frozen representation change or root restoration.
+
+Code57 UNINSTALLED, last RTL trial installed56. DayWeave has an active separate
+device reservation, now investigating its own fixture outcome. Explicit user-
+authorized coordination requested cleanup/release; do not seize its device or
+reuse consumed RTL reservations. No ADB access or build/review process here.
+Earliest next gate: verified exclusive release, fresh issue23 reservation and
+T008PAGE1 preflight, normal same-ID upgrade/session READ, then settled reading/
+saved ink before exact page/Edit/Return/Close tests. Physical action not currently
+required. Software checkpoint6145915540; timer PAUSED, no merge/finalization.
+All packages/raw evidence/backups/branches retained; prior checkpoints historical.
+
 ## Current checkpoint — supported SDK installed; new permissions block reading/Edit
 
 Exact SDK0.1.65 candidate f86d07de047fe9ea8bcc1cc227596c5b045b6c67/code56 is

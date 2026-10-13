@@ -1,5 +1,41 @@
 # RTL Reader hardware regression
 
+## 2026-10-13 — T017S real SDK upgrade / root-free firmware guard result
+
+Reviewed/pushed f86d07de047fe9ea8bcc1cc227596c5b045b6c67, SDK0.1.65,
+sdk-exp1/code56. Normal clean-archive signed build exit0/75tasks, artifact/
+bundle/APK/DEX/provenance/signing gates PASS. Prior exact signer unchanged.
+Required invariants, SDK actual JS/validators,177Node+62lifecycle,6ink+2key wiring,
+85407JavaCore/all271mutations PASS; independent read-only review no actionable
+finding/matching pins+42savedInk tests, no independent Python/build/hardware claim.
+
+Unrooted SN078C10015092/Chauvet.E103.2610091001.2545_release. Normal same-ID
+upgrade success/isUpgrade=true, visible sdk-exp1/enabledON. Former incompatible
+SDK gate PASS: reader view opens. Render FAIL on T008PAGE1 due PluginSecurityManager
+sdcard_no_read / missing READ. Saved ink errors at canvas prerequisite, no
+thumbnail allocation. Normal Close reveals additional hard incompatibility:
+other app private document_internal_cache/config access forbidden. Handoff skipped,
+no private bypass/root/restoration/rescue restart/new pen/page/rotation/Edit test.
+
+Native T008PAGE1 restored, before/final PNG byte-identical. PDF and13309-byte mark,
+both public system APKs and rotation exact.43 regular/nonsymlink/hash-backed owned
+remote captures/staged installer removed/absence verified, local backup/evidence/
+package retained. Owned waiting Launcher MAIN client/shell observer retired without
+app force-stop; normal file-browser entry worked after settling. Reservation
+6144539606 RELEASED6144976891. Installed private hashes/preferences/cache UNVERIFIED
+under shell permission boundary, not bypassed. Timer PAUSED/no merge.
+
+Next correction uses official `uses-permissions` READ-only declaration and public
+has/request/recheck; it does not grant native private CONFIG access. Supported
+User approved the SDK Edit/Return replacement. sdk-exp2/code57 source now uses
+shared verified SDK page navigation for Edit/Close, native own-preference/public
+PDF-version preparation/revalidation, and no private CONFIG/restart on that path.
+READ checks accept explicit session1/permanent2.219 Node+66 actual lifecycle,
+required invariants,85407JavaCore/all271mutations,6ink+2key wiring, provenance/
+packaging checks PASS. Independent review/exact build/hardware still pending;
+no code57 package installed and no additional device access. DayWeave currently
+owns a separate session; RTL must obtain its release/fresh reservation first.
+
 ## T017 — unrooted3.30.45 launch FAIL; SDK handshake cause identified
 
 2026-10-13, user-approved compatibility checks, NomadSN078C10015092,

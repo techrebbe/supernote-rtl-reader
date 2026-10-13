@@ -586,7 +586,7 @@ test('Edit settlement accepts actual legacy and generated portrait/Single displa
 
 test('Handoff result must name the requested document and page and not be a skip (finding 2)', () => {
   const filePath = '/doc/a.pdf';
-  const result = {filePath, pageIndex: 31, uid: 1000};
+  const result = {filePath, pageIndex: 31, navigation: 'sdk-verified'};
   assert.deepEqual(er.evaluateHandoff(result, 31, filePath), {ok: true, reason: 'ok'});
   assert.equal(er.evaluateHandoff({annotationRecovery: true, uid: 1000}, 31, filePath).reason, 'recovery_skipped');
   assert.equal(er.evaluateHandoff({...result, pageIndex: 30}, 31, filePath).reason, 'page_mismatch');
@@ -598,6 +598,7 @@ test('Handoff result must name the requested document and page and not be a skip
   }
   assert.equal(er.evaluateHandoff(null, 31, filePath).reason, 'no_result');
   assert.equal(er.evaluateHandoff(undefined, 31, filePath).reason, 'no_result');
+  assert.equal(er.evaluateHandoff({...result, navigation: undefined}, 31, filePath).reason, 'unverified_navigation');
 });
 
 test('Rotation between Edit and return cannot change the resume page; pairing always contains it', () => {

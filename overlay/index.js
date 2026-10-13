@@ -2,7 +2,8 @@ import React, {useEffect, useState} from 'react';
 import {AppRegistry, DeviceEventEmitter, Image, NativeModules} from 'react-native';
 import App from './App';
 import {name as appName} from './app.json';
-import {PluginManager} from 'sn-plugin-lib';
+import {PluginCommAPI, PluginDocAPI, PluginManager} from 'sn-plugin-lib';
+import {handoffSavedPage} from './sdkPageHandoff';
 
 const {ReaderPreferencesModule} = NativeModules;
 const RTL_READER_BUTTON_ID = 100;
@@ -64,14 +65,16 @@ PluginManager.closePluginView = async (...args) => {
   if (!handoffAttemptedThisActivation) {
     handoffAttemptedThisActivation = true;
     try {
-      if (!ReaderPreferencesModule?.handoffLastSavedPage) {
-        throw new Error('Native handoff method is not registered.');
-      }
-      const result = await ReaderPreferencesModule.handoffLastSavedPage();
+      const result = await handoffSavedPage({
+        preferences: ReaderPreferencesModule, comm: PluginCommAPI, doc: PluginDocAPI,
+        isCurrent: () => globalThis.RTL_READER_TRANSITION_IN_FLIGHT === transition &&
+          globalThis.RTL_READER_INK_LIFECYCLE === inkLifecycle &&
+          (globalThis.RTL_READER_KEY_OWNER ?? null) === keyOwner,
+      });
       console.log(
         `RTL_READER_HANDOFF_PREPARED page=${
           Number.isInteger(result?.pageIndex) ? result.pageIndex + 1 : 'unknown'
-        } uid=${result?.uid ?? 'unknown'} config=${result?.configPath ?? 'unknown'}`,
+        } navigation=${result.navigation}`,
       );
     } catch (error) {
       console.warn(
@@ -128,7 +131,7 @@ PluginManager.registerButtonListener({
         if (globalThis.RTL_READER_KEY_EXIT_PENDING) return;
         handoffAttemptedThisActivation = false;
         globalThis.RTL_READER_EDIT_HANDOFF_DONE = false;
-    console.log('RTL_READER_OPEN v0.4.24-sdk-exp1-native-reader-v2');
+    console.log('RTL_READER_OPEN v0.4.24-sdk-exp2-native-reader-v2');
         DeviceEventEmitter.emit(RTL_READER_ACTIVATE_EVENT);
       };
       if (globalThis.RTL_READER_KEY_EXIT_PENDING) {

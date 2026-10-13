@@ -66,7 +66,18 @@ async function main() {
     ['getPageSize', '/disposable.pdf', 0],
     ['generateMarkThumbnails', '/disposable.pdf.mark', 0, '/owned.png', size],
   ]);
+  await manager.hasPermission('plugin.permission.FILE:READ');
+  await manager.requestPermission('plugin.permission.FILE:READ');
+  assert.deepEqual(calls.slice(-2), [
+    ['hasPermission', 'plugin.permission.FILE:READ'],
+    ['requestPermission', 'plugin.permission.FILE:READ', null],
+  ]);
   const count = calls.length;
+  await comm.jumpToPage(1);
+  assert.deepEqual(calls.pop(), ['jumpToPage', 1]);
+  for (const page of [-1, 1.5, '1', null, NaN]) {
+    assert.equal((await comm.jumpToPage(page)).success, false);
+  }
   for (const args of [
     ['/disposable.pdf.mark', -1, '/owned.png', size],
     ['/disposable.pdf.mark', 0, '/owned.jpg', size],

@@ -82,7 +82,7 @@ def main(root: Path) -> None:
         "editAvailability({", "buildEditPayload(", "editInFlightRef.current = true;",
         "await savePreferences('edit', payload)",
         "evaluateHandoff(",
-        "await ReaderPreferencesModule.handoffLastSavedPage()", "globalThis.RTL_READER_EDIT_HANDOFF_DONE = true",
+        "await handoffSavedPage({", "globalThis.RTL_READER_EDIT_HANDOFF_DONE = true",
         "PluginManager.closePluginView()",
     )]
     require(all(i >= 0 for i in order) and order == sorted(order), "editPage steps out of order")
@@ -94,7 +94,7 @@ def main(root: Path) -> None:
             "rollback must restore memory and disk state")
     for forbidden in ("NativeModules", "kill", "startActivity"):
         require(forbidden not in edit, f"editPage must not add another restart path, found {forbidden!r}")
-    require(edit.count("handoffLastSavedPage") == 2, "editPage must call handoffLastSavedPage exactly once")
+    require(edit.count("handoffSavedPage({") == 1, "Edit must use the shared supported SDK route exactly once")
     require(
         app.count("const editPage = async page =>") == 1 and app.count("editPage(") == 1,
         "editPage must be declared once and called only from the Edit buttons",
@@ -145,7 +145,14 @@ def main(root: Path) -> None:
     # 5. No new kill site; the single existing handoff path stays intact.
     kills = kotlin.count("Os.kill(")
     require(kills == EXPECTED_OS_KILL_SITES, f"Os.kill sites changed: {kills} != {EXPECTED_OS_KILL_SITES}")
-    require(index.count("ReaderPreferencesModule.handoffLastSavedPage()") == 1, "index.js handoff call changed")
+    require(index.count("handoffSavedPage({") == 1, "Close must use the shared supported SDK route exactly once")
+    live = between(kotlin, "fun handoffLastSavedPage(promise: Promise)",
+                   "private fun findMatchingConfig(", "supported SDK preparation")
+    for forbidden in ("findMatchingConfig(", "readConfigMap(", "writeBytesSynced(",
+                      "scheduleDocumentRestart(", "Os.kill("):
+        require(forbidden not in live, f"SDK handoff cannot access private state/restart: {forbidden}")
+    require("validatePreparedPageHandoff" in live and "preparedPageHandoff === prepared" in live,
+            "SDK handoff must revalidate its exact prepared source/preferences request")
     require("handoffAttemptedThisActivation" in index, "index.js once-per-activation guard missing")
 
     # 6. CI runs the tests and this invariant.

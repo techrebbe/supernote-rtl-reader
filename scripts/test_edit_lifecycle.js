@@ -18,6 +18,8 @@ const ROOT = path.resolve(__dirname, '..');
 const APP = fs.readFileSync(path.join(ROOT, 'overlay/App.js'), 'utf8').replace(/\r\n/g, '\n');
 const INDEX = fs.readFileSync(path.join(ROOT, 'overlay/index.js'), 'utf8').replace(/\r\n/g, '\n');
 const er = require(path.join(ROOT, 'overlay/editReturn.js'));
+const {ensureFileReadAccess} = require(path.join(ROOT, 'overlay/fileReadAccess.js'));
+const {handoffSavedPage} = require(path.join(ROOT, 'overlay/sdkPageHandoff.js'));
 const {selectSavedInkProfile} = require(path.join(ROOT, 'overlay/savedInk.js'));
 const {createReaderKeySession} = require(path.join(ROOT, 'overlay/readerKeySession.js'));
 const FILE = '/doc/a.pdf';
@@ -117,6 +119,9 @@ function harness(options = {}) {
   const savePlans = [...(options.savePlans || [])];
   const handoffPlans = [...(options.handoffPlans || [])];
   const closePlans = [...(options.closePlans || [])];
+  const jumpPlans = [...(options.jumpPlans || [])];
+  const jumps = [];
+  let nativePage = NATIVE_OPEN_PAGE;
   const globals = options.globals || {};
   const store = options.store || new Map();
   let stateCursor = 0;
@@ -145,8 +150,10 @@ function harness(options = {}) {
     handoffLastSavedPage() {
       trace.push('handoff');
       handoffs.push({persisted: copy(store.get(file))});
-      return executePlan(handoffPlans.shift(), {filePath: file, pageIndex: EDIT_PAGE});
+      return executePlan(handoffPlans.shift(), {filePath: file, pageIndex: store.get(file)?.lastPageIndex ?? EDIT_PAGE})
+        .then(target => target && {...target, requestId: 'prepared-test-request'});
     },
+    validatePreparedPageHandoff: options.validatePreparedPageHandoff ?? (() => Promise.resolve(true)),
     load(filePath) {
       const payload = copy(store.get(filePath));
       loads.push({filePath, payload});
@@ -169,6 +176,8 @@ function harness(options = {}) {
   };
   const context = vm.createContext({
     ...er,
+    ensureFileReadAccess,
+    handoffSavedPage,
     globalThis: globals,
     NativeModules: {ReaderPreferencesModule: native, SavedInkModule: options.savedInkModule,
       PdfRendererModule: {renderPage() { throw new Error('Unexpected PDF render'); }}},
@@ -176,6 +185,8 @@ function harness(options = {}) {
     selectSavedInkProfile,
     PluginFileAPI: options.pluginFileAPI,
     PluginManager: {
+      hasPermission: options.hasPermission ?? (() => Promise.resolve(1)),
+      requestPermission: options.requestPermission ?? (() => { throw new Error('Unexpected read request'); }),
       getPluginDirPath: options.getPluginDirPath,
       closePluginView() {
         trace.push('close');
@@ -186,9 +197,17 @@ function harness(options = {}) {
     },
     PluginCommAPI: {
       getCurrentFilePath: () => Promise.resolve({success: true, result: file}),
-      getCurrentPageNum: () => Promise.resolve({success: true, result: NATIVE_OPEN_PAGE}),
+      getCurrentPageNum: () => Promise.resolve({success: true, result: nativePage}),
+      jumpToPage(page) {
+        jumps.push(page);
+        return executePlan(jumpPlans.shift(), {success: true, result: true}).then(response => {
+          if (response?.success && response.result === true) nativePage = page;
+          return response;
+        });
+      },
     },
-    PluginDocAPI: {getCurrentTotalPages: () => Promise.resolve({success: true, result: 40})},
+    PluginDocAPI: {getCurrentTotalPages: () => Promise.resolve({success: true,
+      result: state.documentContext?.totalPages ?? 40})},
     DeviceEventEmitter: {emit: (...args) => activations.push(args)},
     BackHandler: {
       addEventListener(name, handler) {
@@ -252,6 +271,7 @@ function harness(options = {}) {
     baseline,
     saves,
     handoffs,
+    jumps,
     closes,
     hostHides,
     nativeChanges,
@@ -862,20 +882,41 @@ test('unmount while prior preference writes drain cannot start Edit handoff or c
   assert.deepEqual(h.persisted, h.baseline);
 });
 
-test('unmount during successful native handoff preserves the accepted Edit record without issuing plugin close', async () => {
+test('unmount after SDK jump dispatch preserves a verified Edit record without issuing plugin close', async () => {
   const handingOff = deferred();
-  const h = harness({handoffPlans: [handingOff.promise]});
+  const h = harness({jumpPlans: [handingOff.promise]});
   const edit = h.callback.editPage(EDIT_PAGE);
   await flush();
   assert.equal(h.handoffs.length, 1);
   h.unmount();
   assert.equal(h.saves.length, 1, 'unmount must not enqueue a stale ordinary payload');
-  handingOff.resolve({filePath: FILE, pageIndex: EDIT_PAGE});
+  assert.deepEqual(h.jumps, [EDIT_PAGE]);
+  handingOff.resolve({success: true, result: true});
   await bounded(edit);
   assert.equal(h.handoffs.length, 1);
   assert.equal(h.closes.length, 0, 'an unmounted callback cannot close a different/new plugin view');
   assert.equal(h.persisted.lastPageIndex, EDIT_PAGE);
   assert.equal(h.persisted.editReturn.editPage, EDIT_PAGE);
+});
+
+test('unmount during read-only preparation cancels the SDK jump and restores prior preferences', async () => {
+  const preparing = deferred();
+  const h = harness({handoffPlans: [preparing.promise]});
+  const edit = h.callback.editPage(EDIT_PAGE);
+  await flush(); h.unmount();
+  preparing.resolve({filePath: FILE, pageIndex: EDIT_PAGE});
+  await bounded(edit);
+  assert.deepEqual(h.jumps, []);
+  assert.deepEqual(h.persisted, h.baseline);
+  assert.equal(h.closes.length, 0);
+});
+
+test('rejected supported SDK jump rolls back Edit and never closes the reader', async () => {
+  const h = harness({jumpPlans: [{success: true, result: false}]});
+  await bounded(h.callback.editPage(EDIT_PAGE));
+  assert.deepEqual(h.jumps, [EDIT_PAGE]);
+  assert.deepEqual(h.persisted, h.baseline);
+  assert.equal(h.closes.length, 0);
 });
 
 test('unmount during failed native handoff queues the exact prior preference rollback', async () => {
@@ -1181,6 +1222,36 @@ test('never-ready fatal Close skips preferences and stale-document handoff but s
   assert.equal(h.saves.length, 0);
   assert.equal(h.handoffs.length, 0);
   assert.equal(h.closes.length, 1);
+});
+
+test('actual initialize denied file READ cannot load preferences or expose a render; fatal Close stays safe', async () => {
+  const h = harness({indexWrapper: true, state: {...UNINITIALIZED_STATE},
+    hasPermission: async () => 0, requestPermission: async () => -1});
+  await bounded(h.callback.initialize());
+  assert.equal(h.loads.length, 0);
+  assert.equal(h.state.documentContext, null);
+  assert.equal(h.state.preferencesReady, false);
+  assert.match(h.state.fatalError, /not granted/);
+  await bounded(h.callback.close());
+  assert.equal(h.saves.length, 0);
+  assert.equal(h.handoffs.length, 0);
+  assert.equal(h.closes.length, 1);
+});
+
+test('actual initialize unmount during permission query cannot request or load another document', async () => {
+  const permission = deferred();
+  let requests = 0;
+  const h = harness({state: {...UNINITIALIZED_STATE}, hasPermission: () => permission.promise,
+    requestPermission: async () => {requests++; return 1;}});
+  const opening = h.callback.initialize();
+  await flush();
+  h.unmount();
+  permission.resolve(0);
+  await bounded(opening);
+  assert.equal(requests, 0);
+  assert.equal(h.loads.length, 0);
+  assert.equal(h.saves.length, 0);
+  assert.equal(h.state.preferencesReady, false);
 });
 
 test('never-ready fatal Close retry still cannot hand off a stale previous document', async () => {

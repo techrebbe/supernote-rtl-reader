@@ -52,6 +52,8 @@ node "$ROOT/scripts/test_plugin_sdk_runtime.js" "$PROJECT/node_modules/sn-plugin
 cp "$ROOT/overlay/App.js" "$PROJECT/App.js"
 cp "$ROOT/overlay/index.js" "$PROJECT/index.js"
 cp "$ROOT/overlay/editReturn.js" "$PROJECT/editReturn.js"
+cp "$ROOT/overlay/fileReadAccess.js" "$PROJECT/fileReadAccess.js"
+cp "$ROOT/overlay/sdkPageHandoff.js" "$PROJECT/sdkPageHandoff.js"
 cp "$ROOT/overlay/savedInk.js" "$PROJECT/savedInk.js"
 cp "$ROOT/overlay/ReaderKeyView.js" "$PROJECT/ReaderKeyView.js"
 cp "$ROOT/overlay/pageTurnerKeys.js" "$PROJECT/pageTurnerKeys.js"

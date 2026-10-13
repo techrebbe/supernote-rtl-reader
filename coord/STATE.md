@@ -1,5 +1,37 @@
 # STATE — RTL Reader (updated 2026-10-13 by codex)
 
+## Current checkpoint — supported SDK installed; new permissions block reading/Edit
+
+Exact SDK0.1.65 candidate f86d07de047fe9ea8bcc1cc227596c5b045b6c67/code56 is
+reviewed/pushed/clean-built/signed and normally upgraded on unrooted3.30.45.
+SDK compatibility rejection FIXED, not a complete reader compatibility PASS.
+Actual T008PAGE1 render fails undeclared FILE:READ; normal Close separately finds
+native private CONFIG access forbidden. Saved-ink canvas prerequisite fails before
+thumbnail generation. No page/rotation/new pen/Edit attempt. Source/13309-byte
+mark/publicAPKs/rotation exact; native screenshots byte-identical.43 verified
+owned capture/installer copies removed/absence verified; local evidence/backups
+retained. RELEASED6144976891 from6144539606, other chat notified, no device process.
+Private installed bytes/cache/preferences remain inaccessible/unverified, no
+root/bypass. Old packages retained but not claimed functional on new firmware.
+
+Source continuation prepares sdk-exp2/code57 with documented least-privilege
+READ declaration and per-entry check/request/recheck before any document/render
+load; denied/cancelled/malformed/expired/unmounted requests fail closed. Review/
+exact build/hardware pending. User approved supported SDK navigation: Edit and
+Close now share a zero-based jump with exact document/count/page checks and a
+native prepared-request fence over our saved preferences/public PDF version.
+Recovery still blocks it; no private CONFIG write or stock restart on this path.
+READ accepts numeric session1/permanent2, never malformed truthy results. Existing
+Edit rollback, close-retry, key and saved-ink cleanup fences remain; review pending.
+The complete correction diff is now independently reviewed: no actionable
+findings, all8 affected/new pins independently match.219Node+66lifecycle,
+85407Core/all271mutations and required invariants/wiring/provenance/packaging PASS.
+Exact clean signed build next; code57/hardware compatibility not yet claimed.
+Official permission documentation explicitly prohibits other app private paths
+even after FILE grants. Do not restore root or repin old native firmware/module.
+See tasks/T-017S-sdk-compatibility.md. Installed56 unchanged during source work;
+timer PAUSED, no merge/finalization. Prior checkpoint below historical.
+
 ## Current checkpoint — T017 unrooted firmware compatibility BLOCKED at launch
 
 User-approved3.30.45 checks used ordinary ADB only, no root/restoration. Exact

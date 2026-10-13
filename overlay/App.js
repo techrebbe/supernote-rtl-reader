@@ -19,6 +19,8 @@ import {
 } from 'react-native';
 import {PluginCommAPI, PluginDocAPI, PluginFileAPI, PluginManager} from 'sn-plugin-lib';
 import {createSavedInkController, selectSavedInkProfile} from './savedInk';
+import {ensureFileReadAccess} from './fileReadAccess';
+import {handoffSavedPage} from './sdkPageHandoff';
 import ReaderKeyView from './ReaderKeyView';
 import {
   EDIT_BLOCKED_MESSAGES,
@@ -144,7 +146,8 @@ async function requireResult(promise, label) {
   return response.result;
 }
 
-async function getDocumentContext() {
+async function getDocumentContext(isCurrent) {
+  await ensureFileReadAccess(PluginManager, isCurrent);
   const filePath = await requireResult(
     PluginCommAPI.getCurrentFilePath(),
     'getCurrentFilePath',
@@ -867,7 +870,7 @@ export default function App() {
           throw new Error('Native reader preferences storage is not registered.');
         }
 
-        const context = await getDocumentContext();
+        const context = await getDocumentContext(() => mountedRef.current);
         if (!context.filePath?.toLowerCase().endsWith('.pdf')) {
           throw new Error('RTL Reader v0.1.0 currently supports PDF documents only.');
         }
@@ -1349,11 +1352,13 @@ export default function App() {
 
     let handoff;
     try {
-      if (!ReaderPreferencesModule?.handoffLastSavedPage) {
-        throw new Error('Native handoff method is not registered.');
-      }
       handoff = evaluateHandoff(
-        await ReaderPreferencesModule.handoffLastSavedPage(),
+        await handoffSavedPage({
+          preferences: ReaderPreferencesModule, comm: PluginCommAPI, doc: PluginDocAPI,
+          isCurrent: () => mountedRef.current &&
+            globalThis.RTL_READER_TRANSITION_IN_FLIGHT === transitionTokenRef.current,
+          expected: {filePath: record.filePath, pageIndex: page, totalPages: record.totalPages},
+        }),
         page,
         record.filePath,
       );

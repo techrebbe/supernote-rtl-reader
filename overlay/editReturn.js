@@ -4,8 +4,8 @@
 // (scripts/test_edit_return.js). App.js owns rendering and native calls.
 //
 // Model: "Edit page N" saves lastPageIndex=N plus an editReturn record, then
-// takes the ordinary Close path. The existing handoffLastSavedPage() writes N
-// into Supernote's native config and restarts the stock reader on N. When the
+// takes the ordinary Close path. sdkPageHandoff prepares our saved target and
+// verifies a supported SDK jump to N without private config or restart. When the
 // user relaunches RTL Reader, a valid editReturn makes the page the stock
 // reader is showing authoritative, so RTL follows what the user last saw.
 
@@ -148,10 +148,8 @@ function editAvailability({
   return {allowed: true, reason: 'ok'};
 }
 
-// Did the native handoff open the requested page? Resolution alone is not
-// success: the native side resolves {annotationRecovery:true} when it skipped
-// the handoff. The restart itself is delayed and unacknowledged, so "ok" means
-// "config rewritten and restart scheduled", nothing more.
+// Preparation or SDK setter success alone is not completion. The shared route
+// must confirm the SDK's current document/page/count and our native source fence.
 function evaluateHandoff(result, editPage, filePath) {
   if (!result || typeof result !== 'object') return {ok: false, reason: 'no_result'};
   if (result.annotationRecovery === true) return {ok: false, reason: 'recovery_skipped'};
@@ -159,6 +157,7 @@ function evaluateHandoff(result, editPage, filePath) {
     return {ok: false, reason: 'document_mismatch'};
   }
   if (result.pageIndex !== editPage) return {ok: false, reason: 'page_mismatch'};
+  if (result.navigation !== 'sdk-verified') return {ok: false, reason: 'unverified_navigation'};
   return {ok: true, reason: 'ok'};
 }
 

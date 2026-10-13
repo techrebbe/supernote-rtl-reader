@@ -954,7 +954,9 @@ def check(repo_root: Path) -> None:
     frozen_source_digests = (
         (
             plugin_path,
-            "09f9a1df1f77b167a11ccd3df4f0a1f62d6138ed2925304a15e1fd602512f906",
+            # T017S2 replaces only live Close/Edit handoff with read-only public
+            # source/preferences preparation and validation for supported SDK jump.
+            "ca1bd485a90eb8b78d990bdbd17066ea897f4aa7c6e3922a3a12e5407147dea9",
             "ReaderPreferencesModule.kt.template",
         ),
         (
@@ -979,17 +981,27 @@ def check(repo_root: Path) -> None:
         ),
         (
             app_path,
-            # T014 scoped integration: one reader-owned key wrapper, opt-in
-            # preferences and live UI/render fences. Existing Edit/saved-ink
-            # ownership/native writer/save remain unchanged. This exact pin is
-            # part of the pending independent integrated confirmation review.
-            "8c8515012b4115f859f32b7396e9cb77598528e41f9de565f07793926066a1a8",
+            # T017S2 adds checked READ permission before initial context/native
+            # loading plus shared supported SDK handoff; Edit/key/ink/save
+            # ownership stays fenced. No private CONFIG/restart on this live path.
+            "d2c709490658f2131e11ff52bfa6d1c952e9958feb7ff4f68006c4329d145fbf",
             "Native Spread UI authority source",
         ),
         (
+            repo_root / "overlay" / "fileReadAccess.js",
+            "a0c26934c6b326c4e2c437ee160d1fb845a389e39a01487052d94df3168a9db1",
+            "public SDK READ permission admission",
+        ),
+        (
             edit_return_path,
-            "3b6de3826f67e5ead78324cbc6df0a86bc6df6d78c9042598ef4645827c61538",
+            # Require verified SDK navigation, not native preparation alone.
+            "a5cf1bf2c4484113d5539942997efb0f9740d6b501f92711975a4e06e982bea8",
             "Edit/Return page-authority module",
+        ),
+        (
+            repo_root / "overlay" / "sdkPageHandoff.js",
+            "df47e354f13810574619fe87e48a0045735a804f6e2b0bf69846e36dbf4a3e89",
+            "shared supported SDK page handoff",
         ),
         # T013 independent integrated confirmation: exact T008 PAGE1/PAGE2
         # profiles, sequential same-snapshot batch and per-token lease cleanup.
@@ -1022,9 +1034,8 @@ def check(repo_root: Path) -> None:
         ),
         (
             index_path,
-            # T016G keys-exp3 changes only the candidate marker from cache-exp1;
-            # external-Close/key fence/handoff and native authorities unchanged.
-        "6bc4a67440b05e82a2115357d61dd30b4b5ca3982f713d827d3937c7e57b899e",
+            # T017S2 candidate marker plus shared Close SDK navigation.
+            "6064754b1573b70f8c38694796a2215634314cabcc553b18fe6edbd6bc4cfa35",
             "Edit/Return activation and close authority",
         ),
         (
@@ -1038,15 +1049,14 @@ def check(repo_root: Path) -> None:
         ),
         (
             workflow_path,
-            # T016G candidate label plus in-memory vertical omission/reversal
-            # tests. Existing actual-key/annotation/provenance gates retained.
-        "2897f22b81c2200963668e74c17ecf6e6f60e4450107beb4bc3c6e9098c3b72b",
+            # T017S2 candidate label plus READ and SDK handoff tests.
+            "338a960a4ec33614703b4ebec250a67f548699ee0de6aad286972ab09c35ba83",
             "Native Spread companion-build workflow",
         ),
         (
             plugin_build_path,
-            # T014 adds only four explicit reader-key JS dependency copies.
-        "1a24e8ccf6bf4515ad383050840d6c0f90027bd7791a9246cd5a58b7a8c94b31",
+            # T017S2 ships READ and shared SDK handoff dependencies.
+            "df961412551f20c84984aa9c1b6d18a3e538b9d99c48fb7a6e7d978e5a403219",
             "native plugin build entrypoint",
         ),
         (

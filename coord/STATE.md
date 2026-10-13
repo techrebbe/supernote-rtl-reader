@@ -2,6 +2,14 @@
 
 ## Current checkpoint — hardware NOTPERFORMED; Nomad connection required
 
+Follow-up: user explicitly asks Wi-Fi ADB setup. Fresh6152201950 briefly sees
+USB SN078C10015092 in inventory, then it vanishes before FIRST shell serial read.
+One changed-state inventory confirms absence; emulator5580 NOT used. No tcpip
+command/address read/settings change/target command succeeded, no Wi-Fi record/
+baseline created. RELEASED6152278006 from6152201950; user must keep USB connected until
+verified Wi-Fi setup completes, not unplug at the first inventory appearance.
+New async question sent; no active process or repeated unavailable-state polls.
+
 User confirms disposable native T008PAGE1 ready/free and RTL Bluetooth works
 with controls hidden. Fresh reservation6152106352, but root-free preflight
 fails at FIRST serial request: known10.0.40.9:5555 transport absent. One known

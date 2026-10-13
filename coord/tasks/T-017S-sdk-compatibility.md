@@ -2,6 +2,13 @@
 
 ## Hardware attempt — NOTPERFORMED before any target action
 
+Second transport attempt under fresh6152201950/user Wi-Fi request: USB exact
+serial appears briefly, then disappears before first identity shell query.
+No tcpip5555/address/settings/UI/file/package/probe command reached the Nomad;
+emulator5580 not used. RELEASED6152278006 and user asked to keep USB connected until
+ordinary UID2000/private-address/serial/firmware Wi-Fi verification. Candidate
+and all offline gates unchanged; no new test is possible before stable transport.
+
 User confirmed T008 native PAGE1/footer/free; DayWeave also confirmed release.
 Fresh6152106352 root-free preflight fails at FIRST getprop serial request: old
 10.0.40.9:5555 absent. One known-endpoint reconnect times out10060, only unrelated

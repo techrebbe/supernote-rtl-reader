@@ -1,6 +1,24 @@
 # STATE — RTL Reader (updated 2026-10-13 by codex)
 
-## Current checkpoint — code58 PAGE2 SDK NO_PAGE isolated; device released
+## Current source work — bounded mark-page diagnostic; Bluetooth user report PASS
+
+User confirms Bluetooth page turns work in RTL Reader with Settings toolbar
+hidden on the current firmware. USER-REPORTED evidence, not instrumented
+exact-document/key-count/direction/stress proof. Preserve it; do not restart
+native button identification or repeat the old code55 mapping experiments.
+
+sdk-exp4/code59 source adds one supported getMarkPages read after NO_PAGE1207
+per saved-ink effect, with existing current-file/presentation/cancellation fences
+before/after dispatch. Close/Edit waits its actual settlement. Only bounded raw
+numeric indices/error code are logged, indexBase=unverified; the SAME canvas
+failure response and raster/native/absence gates remain unchanged. No fallback,
+writer/save/coordinate/SDK-graph changes. Three actual-effect new cases plus
+observer suite PASS; full required gates/independent review/exact build pending.
+Candidate59 UNINSTALLED, device released, no device access while preparing source.
+Earliest hardware remains one T008 PAGE2 read-only list observation under a fresh
+exclusive issue23 reservation after package/signature checks. Timer PAUSED.
+
+## Historical checkpoint — code58 PAGE2 SDK NO_PAGE isolated; device released
 
 Exact executable cd06b9062e2ec51bf517fd39c979473d8f52078c, sdk-exp3/code58,
 real SDK0.1.65, independently reviewed CLEAN and normal exact clean archive

@@ -174,6 +174,7 @@ function harness(hooks = {}, options = {}) {
             PluginCommAPI: {getCurrentFilePath: (...args) => invoke('file', () => ({success: true, result: liveFile}), args)},
             PluginFileAPI: {
               getPageSize: (...args) => invoke('size', () => ({success: true, result: {width: 1404, height: 1872}}), args),
+              getMarkPages: (...args) => invoke('markPages', () => ({success: true, result: [0]}), args),
               generateMarkThumbnails: (...args) => invoke('generate', () => ({success: true, result: true}), args),
             },
             async requireResult(promise, label) {
@@ -787,5 +788,50 @@ test('actual lifecycle quiescence fences T008 Close/Edit publication and waits f
   await flush();
   assert.equal(h.count('prepare'), 1, 'Locked Close/Edit never starts a rotation replacement');
   assert.equal(h.count('generate'), 1);
+  await h.dispose(app);
+});
+
+test('actual PAGE2 effect observes mark indices once but keeps the original canvas error and allocates nothing', async () => {
+  const h = harness({size: () => ({success: false, error: {code: 1207}})},
+    {window: {width: 1404, height: 1872}});
+  const app = h.mount({viewMode: 'single', pageIndex: 1});
+  await flush();
+  assert.deepEqual(h.calls.filter(call => call.name === 'markPages').map(call => call.args), [[FILE]]);
+  assert.equal(app.state.reason, 'canvas_mismatch');
+  for (const name of ['prepare', 'prepareSibling', 'generate', 'finish', 'discard']) assert.equal(h.count(name), 0);
+  assert.equal(app.ready.length, 0);
+  await h.dispose(app);
+});
+test('actual Close/Edit quiescence waits pending read-only enumeration without allocation or late publication', async () => {
+  const query = deferred();
+  const h = harness({size: () => ({success: false, error: {code: 1207}}), markPages: () => query.promise},
+    {window: {width: 1404, height: 1872}});
+  const app = h.mount({viewMode: 'single', pageIndex: 1});
+  await h.enter('markPages');
+  h.lock();
+  let settled = false;
+  const cleanup = app.quiesce().then(value => {settled = true; return value;});
+  await flush();
+  assert.equal(settled, false);
+  assert.equal(h.count('prepare'), 0);
+  query.resolve({success: true, result: [0]});
+  assert.equal(await cleanup, true);
+  assert.equal(h.outcomes[0].reason, 'cancelled');
+  assert.equal(app.ready.length, 0);
+  assert.equal(h.count('markPages'), 1);
+  await h.dispose(app);
+});
+test('actual document replacement while enumeration is pending cannot publish that old page or infer absence', async () => {
+  const query = deferred();
+  const h = harness({size: () => ({success: false, error: {code: 1207}}), markPages: () => query.promise},
+    {window: {width: 1404, height: 1872}});
+  const app = h.mount({viewMode: 'single', pageIndex: 1});
+  await h.enter('markPages');
+  h.changeFile('/Document/other.pdf');
+  query.resolve({success: true, result: [0]});
+  await flush();
+  assert.equal(app.state.reason, 'context_changed');
+  assert.equal(app.ready.length, 0);
+  assert.equal(h.count('prepare'), 0);
   await h.dispose(app);
 });

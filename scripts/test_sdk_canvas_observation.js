@@ -90,3 +90,126 @@ test('observed T008 PAGE2 NO_PAGE1207 is not guessed to mean empty ink or a usab
   assert.deepEqual(samples, [{pageIndex: 1, status: 'error', width: 'invalid', height: 'invalid', code: 1207}]);
   assert.deepEqual(await controller.dispose(), {status: 'disposed'});
 });
+
+const noPage = () => ({success: false, result: null, error: {code: 1207, message: 'secret path'}});
+function diagnostic(response, overrides = {}) {
+  const calls = [], samples = [];
+  const options = {attempted: false, totalPages: 2, isCurrent: async () => true,
+    getMarkPages: async (...args) => {calls.push(args); return response;},
+    observe: sample => samples.push(sample), ...overrides};
+  return {options, calls, samples};
+}
+for (const indices of [[], [0], [1], [2], [0, 1], [1, 2]]) {
+  test(`bounded raw enumeration ${JSON.stringify(indices)} remains diagnostic with index base unverified`, async () => {
+    const h = diagnostic({success: true, result: indices, extra: '/private/secret'});
+    const original = noPage();
+    assert.strictEqual(await observeSdkCanvas(async () => original, '/disposable.pdf', 1, () => {}, h.options), original);
+    assert.deepEqual(h.calls, [['/disposable.pdf']]);
+    assert.deepEqual(h.samples, [{pageIndex: 1, indexBase: 'unverified', status: 'success', indices, code: 'unknown'}]);
+    assert.ok(!JSON.stringify(h.samples).includes('secret'));
+  });
+}
+for (const result of [[0, 0], [0, 1, 2], ['0'], [NaN], [-1], [3], [null], {}, null]) {
+  test(`malformed mark list ${JSON.stringify(result)} cannot leak arbitrary values or authorize missing ink`, async () => {
+    const h = diagnostic({success: true, result});
+    const original = noPage();
+    assert.strictEqual(await observeSdkCanvas(async () => original, '/disposable.pdf', 1, () => {}, h.options), original);
+    assert.equal(h.samples[0].status, 'invalid');
+    assert.equal(h.samples[0].indices, 'unavailable');
+  });
+}
+test('one diagnostic is consumed before awaits and cannot retry on a second canvas failure', async () => {
+  const h = diagnostic({success: false, error: {code: 1503, message: 'sensitive'}});
+  const response = noPage();
+  await Promise.all([0, 1].map(() => observeSdkCanvas(async () => response, '/disposable.pdf', 1, () => {}, h.options)));
+  assert.deepEqual(h.calls, [['/disposable.pdf']]);
+  assert.deepEqual(h.samples, [{pageIndex: 1, indexBase: 'unverified', status: 'error', indices: 'unavailable', code: 1503}]);
+});
+test('valid canvases and other SDK errors never dispatch mark enumeration', async () => {
+  for (const response of [{success: true, result: {width: 1404, height: 1872}},
+    {success: false, error: {code: 1302}}, null]) {
+    const h = diagnostic({success: true, result: [0]});
+    assert.strictEqual(await observeSdkCanvas(async () => response, '/disposable.pdf', 1, () => {}, h.options), response);
+    assert.equal(h.options.attempted, false);
+    assert.equal(h.calls.length, 0);
+  }
+});
+test('retirement before dispatch consumes the diagnostic without an SDK call', async () => {
+  const h = diagnostic({success: true, result: [0]}, {isCurrent: async () => false});
+  const response = noPage();
+  assert.strictEqual(await observeSdkCanvas(async () => response, '/disposable.pdf', 1, () => {}, h.options), response);
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.samples[0].status, 'stale');
+});
+test('retirement while enumeration is pending suppresses its indices and waits real settlement', async () => {
+  let settle, entered; const pending = new Promise(resolve => {settle = resolve;});
+  const started = new Promise(resolve => {entered = resolve;});
+  let current = true, completed = false;
+  const h = diagnostic(null, {isCurrent: async () => current,
+    getMarkPages: async () => {entered(); return pending;}});
+  const response = noPage();
+  const run = observeSdkCanvas(async () => response, '/disposable.pdf', 1, () => {}, h.options)
+    .then(value => {completed = true; return value;});
+  await started; current = false; await Promise.resolve();
+  assert.equal(completed, false);
+  settle({success: true, result: [0]});
+  assert.strictEqual(await run, response);
+  assert.deepEqual(h.samples, [{pageIndex: 1, indexBase: 'unverified', status: 'stale', indices: 'unavailable', code: 'unknown'}]);
+});
+test('SDK/query/fence/observer failures cannot replace the original canvas failure', async () => {
+  for (const overrides of [
+    {getMarkPages: async () => {throw new Error('private secret');}},
+    {isCurrent: async () => {throw new Error('fence failed');}},
+    {observe: () => {throw new Error('logger failed');}},
+  ]) {
+    const h = diagnostic({success: true, result: [0]}, overrides), response = noPage();
+    assert.strictEqual(await observeSdkCanvas(async () => response, '/disposable.pdf', 1, () => {}, h.options), response);
+  }
+});
+test('array entries are copied once before validation; a changing getter cannot leak a later value', async () => {
+  let reads = 0;
+  const array = [];
+  Object.defineProperty(array, 0, {get: () => ++reads === 1 ? 0 : '/private/secret'});
+  const h = diagnostic({success: true, result: array}), response = noPage();
+  assert.strictEqual(await observeSdkCanvas(async () => response, '/disposable.pdf', 1, () => {}, h.options), response);
+  assert.equal(reads, 1);
+  assert.deepEqual(h.samples[0].indices, [0]);
+});
+test('real controller keeps NO_PAGE fail-closed even after successful enumeration', async () => {
+  const profile = PROFILES[2];
+  const context = {filePath: profile.filePath, pageIndex: 1, totalPages: 2,
+    pluginDir: '/data/user/0/com.ratta.supernote.pluginhost/files/plugins/snrtl20260726001'};
+  const h = diagnostic({success: true, result: [0]});
+  const forbidden = () => {throw new Error('No allocation, thumbnail, finish or discard permitted');};
+  const controller = createSavedInkController({currentContext: async () => ({...context}),
+    getPageSize: (file, page) => observeSdkCanvas(async () => noPage(), file, page, () => {}, h.options),
+    prepare: forbidden, finish: forbidden, generateThumbnail: forbidden, discard: forbidden});
+  assert.deepEqual(await controller.run(context), {status: 'error', reason: 'canvas_mismatch'});
+  assert.deepEqual(h.samples[0].indices, [0]);
+  assert.deepEqual(await controller.dispose(), {status: 'disposed'});
+});
+test('actual App diagnostic uses the existing cancellation/presentation/current-file context', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../overlay/App.js'), 'utf8');
+  assert.ok(app.includes('const markPagesDiagnostic = {attempted: false, totalPages: 2};'));
+  assert.ok(app.includes('getMarkPages: file => PluginFileAPI.getMarkPages(file)'));
+  assert.ok(app.includes('const live = await currentContext();'));
+  assert.ok(app.includes('RTL_READER_SDK_MARK_PAGES page='));
+  assert.ok(app.includes('          markPagesDiagnostic,'));
+});
+
+test('changing SDK error-code getters cannot leak a later path or message into either diagnostic', async () => {
+  const canvasSamples = [];
+  let canvasReads = 0;
+  const canvasResponse = {success: false, error: {get code() {return ++canvasReads === 1 ? 1503 : '/private/secret';}}};
+  assert.strictEqual(await observeSdkCanvas(async () => canvasResponse, '/disposable.pdf', 1,
+    sample => canvasSamples.push(sample)), canvasResponse);
+  assert.equal(canvasReads, 1);
+  assert.equal(canvasSamples[0].code, 1503);
+  let markReads = 0;
+  const h = diagnostic({success: false, error: {get code() {return ++markReads === 1 ? 1503 : '/private/secret';}}});
+  const original = noPage();
+  assert.strictEqual(await observeSdkCanvas(async () => original, '/disposable.pdf', 1, () => {}, h.options), original);
+  assert.equal(markReads, 1);
+  assert.equal(h.samples[0].code, 1503);
+  assert.ok(!JSON.stringify([...canvasSamples, ...h.samples]).includes('secret'));
+});

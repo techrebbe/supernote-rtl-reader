@@ -131,7 +131,7 @@ PluginManager.registerButtonListener({
         if (globalThis.RTL_READER_KEY_EXIT_PENDING) return;
         handoffAttemptedThisActivation = false;
         globalThis.RTL_READER_EDIT_HANDOFF_DONE = false;
-    console.log('RTL_READER_OPEN v0.4.24-sdk-exp3-native-reader-v2');
+    console.log('RTL_READER_OPEN v0.4.24-sdk-exp4-native-reader-v2');
         DeviceEventEmitter.emit(RTL_READER_ACTIVATE_EVENT);
       };
       if (globalThis.RTL_READER_KEY_EXIT_PENDING) {

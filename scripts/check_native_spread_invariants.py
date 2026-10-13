@@ -985,7 +985,8 @@ def check(repo_root: Path) -> None:
             # loading plus shared supported SDK handoff; Edit/key/ink/save
             # ownership stays fenced. No private CONFIG/restart on this live path.
             # T017S3 observes numeric SDK canvas metadata only; no gate relaxation.
-            "1fe0732ee3a89b7db6f7c6ad8db04cc464d8bc210f042caa985178dca4663629",
+            # T017S4 adds a fenced bounded read-only mark-list diagnostic only.
+            "49d5bbfca9ced38d29e52f12f0df82a6315539d6d9e029b02651b1a9ed9f5976",
             "Native Spread UI authority source",
         ),
         (
@@ -1006,7 +1007,7 @@ def check(repo_root: Path) -> None:
         ),
         (
             repo_root / "overlay" / "sdkCanvasObservation.js",
-            "9c545d4efab29e2d2c9937892d791e685bafa619bf2ac1e57c557209842502d9",
+            "1f4f9bf87cb20251c2c4b651fb242b8cc1203e14d225f558067da11ec32b77fd",
             "diagnostic-only SDK canvas response observation",
         ),
         # T013 independent integrated confirmation: exact T008 PAGE1/PAGE2
@@ -1042,7 +1043,8 @@ def check(repo_root: Path) -> None:
             index_path,
             # T017S2 candidate marker plus shared Close SDK navigation.
             # T017S3 runtime identity only; supported handoff unchanged.
-            "3bf682dfbc8a2571870dd766d018c37ce220c2000a52fc1af14f6425fd018b7b",
+            # T017S4 runtime identity only; no SDK handoff change.
+            "e3cf06fec67151319075213c7e506a9d13eb2544006b89f0d58e42ed5b3b1081",
             "Edit/Return activation and close authority",
         ),
         (
@@ -1058,7 +1060,8 @@ def check(repo_root: Path) -> None:
             workflow_path,
             # T017S2 candidate label plus READ and SDK handoff tests.
             # T017S3 includes the numeric-observation suite and candidate label.
-            "6bd44d58d7db49aa0aa71c74f645d0a41de8763eb27cfb3a1fbe06ebf63e784c",
+            # T017S4 changes candidate label only; existing suite includes new cases.
+            "aba5fd9b8823edcec1f1d793ebe2cb048a43af8a52862c348cd99e0a440b9a40",
             "Native Spread companion-build workflow",
         ),
         (

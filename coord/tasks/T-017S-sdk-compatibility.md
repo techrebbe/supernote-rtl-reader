@@ -1,5 +1,57 @@
 # T017S — supported SDK upgrade on unrooted 3.30.45
 
+## Current candidate — sdk-exp4/code59 bounded mark-list observation
+
+User requests continuation, and reports Bluetooth page turns working in RTL
+Reader with Settings chrome hidden. USER-REPORTED current-firmware functional
+evidence; exact document/key sequence/profile are not independently captured.
+No need to repeat native button identification. Broader regression remains.
+
+One optional supported getMarkPages read is added only after original canvas
+NO_PAGE1207, once per saved-ink effect. Current-file, exact two-page context and
+presentation/cancellation fences are checked before and after the query. It
+does not allocate an ink request/output, parse/write a mark file, navigate or
+infer no ink. The SAME original canvas response still reaches savedInk.js and
+fails canvas_mismatch. Close/Edit cleanup waits real SDK settlement; stale
+responses expose no indices. Numeric bounded index lists remain indexBase=
+unverified, including possible0/1-based boundary values. No file paths, arbitrary
+messages, tokens or content in new logs. No SDK/native/handoff/coordinate change.
+
+Four scoped canonical-LF pin changes: App diagnostic injection, observer code,
+index runtime59 marker, workflow59 artifact label. Build already copies this
+helper; its assembly digest is unchanged. Version expectations are updated to
+0.4.24-sdk-exp4/code59. SavedInkModule/controller/profile/bitmap authority and
+frozen representation contract stay pinned unchanged. Candidate UNINSTALLED.
+
+Focused actual-effect/callback tests PASS; complete247 Node+66 lifecycle checks
+PASS after correcting only host environment setup (PYTHON_BIN/temp directory).
+Initial missing-Python/generated-temp failures retained as host setup errors,
+not production fixes.6ink+2key wiring, packaging/provenance and four invariant
+gates PASS.85407JavaCore/all271mutations PASS. First independent review found one
+P2 diagnostic double-read of an SDK code getter. Captured once/validated once in
+both diagnostics, changing-getter regression red-to-green.34 observer+25 actual
+effect cases PASS; correction review/exact build pending. No device access.
+
+Earliest safe hardware: exact reviewed/signed package, fresh exclusive issue23
+reservation and ordinary root-free preflight, publicly backed-up disposable
+T008/native PAGE1 filename/footer authority before input. Normal same-ID code59
+upgrade, version/runtime verification. PAGE1 canvas/ink baseline must still PASS.
+ONE logical Next to PAGE2 collects one mark-list diagnostic. Expected observation
+is successful raw indices[0] matching the existing PAGE1 ink and PAGE2 reference;
+this tests enumeration/index semantics, NOT a complete no-ink/canvas authority.
+Known PAGE2 canvas failure must remain unchanged. Record PASS for enumeration
+only if that response/one-call/context/integrity evidence is established; any
+other response is FAIL/UNKNOWN with no classification or additional query.
+
+After that one response, restoration only: Prev PAGE1, normal Close/shared SDK
+handoff, public source/mark/APK/rotation integrity, verified owned capture/staged
+installer cleanup and release. No new pen/Edit/rotation/Bluetooth/extra API probe,
+personal/original-document action, root/private CONFIG, stock rescue restart or
+merge. Stock reader is the untouched fallback; retain code58 package and all
+local evidence, but do not claim private configuration backup/downgrade authority.
+If user opened a personal document, stop for its normal user close and exact
+disposable starting state rather than operating it. Timer remains PAUSED.
+
 ## Latest result — code58 diagnostic completed and safely released
 
 Exact cd06b9062e2ec51bf517fd39c979473d8f52078c,0.4.24-sdk-exp3/code58,

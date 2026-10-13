@@ -15,9 +15,11 @@ assert.deepEqual(pkg.dependencies ?? {}, {});
 assert.deepEqual(pkg.peerDependencies, {react: '*', 'react-native': '*'});
 const calls = [];
 const subscriptions = [];
+// Synthetic boundary data only: this asserts SDK forwarding, not real index semantics.
+const markPageResponse = {success: true, result: [0]};
 const native = new Proxy({}, {get: (_, name) => (...args) => {
   calls.push([name, ...args]);
-  return Promise.resolve({success: true, result: name});
+  return Promise.resolve(name === 'getMarkPages' ? markPageResponse : {success: true, result: name});
 }});
 const cache = new Map();
 function load(file) {
@@ -66,6 +68,14 @@ async function main() {
     ['getPageSize', '/disposable.pdf', 0],
     ['generateMarkThumbnails', '/disposable.pdf.mark', 0, '/owned.png', size],
   ]);
+  assert.strictEqual(await file.getMarkPages('/disposable.pdf'), markPageResponse,
+    'SDK must preserve the native enumeration response, not normalize its indices');
+  assert.deepEqual(calls.pop(), ['getMarkPages', '/disposable.pdf']);
+  const beforeInvalidEnumeration = calls.length;
+  for (const filePath of ['', null, false, 1]) {
+    assert.equal((await file.getMarkPages(filePath)).success, false);
+  }
+  assert.equal(calls.length, beforeInvalidEnumeration, 'invalid enumeration paths cannot reach native APIs');
   await manager.hasPermission('plugin.permission.FILE:READ');
   await manager.requestPermission('plugin.permission.FILE:READ');
   assert.deepEqual(calls.slice(-2), [
@@ -85,6 +95,6 @@ async function main() {
   ]) assert.equal((await file.generateMarkThumbnails(...args)).success, false);
   assert.equal((await file.getPageSize('/disposable.pdf', -1)).success, false);
   assert.equal(calls.length, count, 'invalid requests must not reach native APIs');
-  console.log('Pinned SDK 0.1.65 actual init/read/thumbnail/validation checks: PASS');
+  console.log('Pinned SDK 0.1.65 actual init/read/thumbnail/mark-page/validation checks: PASS');
 }
 main().catch(error => {console.error(error); process.exitCode = 1;});

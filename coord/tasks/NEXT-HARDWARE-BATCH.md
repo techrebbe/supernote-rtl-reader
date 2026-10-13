@@ -1,5 +1,31 @@
 # Next useful hardware batch — no speculative test loop
 
+Current2026-10-13: real SDK0.1.65/READ/shared supported page navigation are
+implemented and reviewed. Installed sdk-exp3/code58 on unrooted3.30.45: T008
+PAGE1 background/ink and normal SAME-PAGE Close PASS. PAGE2 background READY,
+but getPageSize returns NO_PAGE1207 before thumbnail allocation; different-page
+Edit/Return still NOTPERFORMED. Restored native PAGE1/files/rotation exact,
+51 owned temporary files removed, RELEASED6147851609. No current hardware hold.
+
+User now reports Bluetooth page turning WORKS in RTL Reader's separate view
+with the Settings toolbar hidden. This is USER-REPORTED current-firmware
+functional evidence, not an instrumented exact-document/key-count/direction/
+stress result. Do not repeat native button identification or treat historical
+code55 upstream failure as the current observed functional result.
+
+Next bounded candidate sdk-exp4/code59 adds one supported getMarkPages read
+after NO_PAGE per saved-ink effect, using its current-file/presentation/cancel
+fences and real-settlement Close cleanup. It preserves the original failed
+canvas response and all raster/ink gates; it logs only bounded numeric indices
+and states indexBase=unverified. Source tests/review/build pending, UNINSTALLED.
+Earliest hardware: fresh exclusive issue23 reservation/preflight, normal exact
+upgrade on disposable T008 only, PAGE1 baseline, one Next/PAGE2 enumeration;
+stop on known canvas error, restore PAGE1/normal Close/integrity/owned cleanup.
+No new pen or guessed no-ink fallback. Timer PAUSED/no root/merge. Previous
+checkpoints below are historical, not new installation or device authority.
+
+## Historical firmware-upgrade launch checkpoint
+
 Current2026-10-13: upgraded unrooted3.30.45 rejects existing RTL package before
 view activation. T017 launch FAIL; remaining reading/Edit/Return/ink/Bluetooth
 gates NOTPERFORMED. Exact files/ink preserved,34 owned captures removed, device

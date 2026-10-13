@@ -595,6 +595,7 @@ export default function App() {
     let controller = null;
     let previousWasClean = false;
     let cleanupPromise = null;
+    const markPagesDiagnostic = {attempted: false, totalPages: 2};
     const presentationCurrent = () => savedInkPresentationKey === null ||
       (savedInkPresentationKeyRef.current === savedInkPresentationKey &&
         savedInkPresentationEpochRef.current === savedInkPresentationEpoch);
@@ -615,6 +616,15 @@ export default function App() {
         if (cancelled || !presentationCurrent() || readerTransitionLocked() || !savedInkContextRef.current) return null;
         return {...savedInkContextRef.current, filePath, pluginDir};
       };
+      Object.assign(markPagesDiagnostic, {
+        getMarkPages: file => PluginFileAPI.getMarkPages(file),
+        isCurrent: async (file, page) => {
+          const live = await currentContext();
+          return live?.filePath === file && live.totalPages === 2 &&
+            (Array.isArray(live.pageIndices) ? live.pageIndices.includes(page) : live.pageIndex === page);
+        },
+        observe: sample => console.log(`RTL_READER_SDK_MARK_PAGES page=${sample.pageIndex + 1} status=${sample.status} indices=${Array.isArray(sample.indices) ? sample.indices.join(',') || 'none' : sample.indices} code=${sample.code} indexBase=${sample.indexBase}`),
+      });
       controller = createSavedInkController({
         currentContext,
         prepare: ({profileId, filePath, pageIndex: page, width, height, pluginDir: directory, siblingToken}) =>
@@ -628,6 +638,7 @@ export default function App() {
         getPageSize: (file, page) => observeSdkCanvas(
           (...args) => PluginFileAPI.getPageSize(...args), file, page,
           sample => console.log(`RTL_READER_SDK_CANVAS page=${sample.pageIndex + 1} status=${sample.status} width=${sample.width} height=${sample.height} code=${sample.code}`),
+          markPagesDiagnostic,
         ),
       });
       const context = await currentContext();

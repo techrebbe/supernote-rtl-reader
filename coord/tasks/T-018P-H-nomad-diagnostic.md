@@ -100,3 +100,15 @@ meaning, fail on unsupported allocation, not silent downsampling. Observed
 no emitted exception trace, not a complete native-runtime/memory proof. New
 exp2/code2 requires exact-source review/clean build/verification and separate
 fresh package approval/reservation before device use. No retry on consumed trial.
+
+Exp2 exactsource97de72f now narrow-review CLEAN (both defects CLOSED/no new
+P0/P1/P2). Owner7focused/30actualJava/two mutants,7Windows/four invariants PASS;
+reviewer3read-only checks+syntax/version/source permission gates PASS. Two fresh
+clean archive builds identicalAPK8eaaa7b9…cd69615, 0.1.1-pdfium-exp2/code2,
+complete source/payload/signer/Unicode checks PASS. New runtime NOTRUN; do not
+claim native/total-memory/leak proof. Exact exp2 install/retest/remove approval
+asked asynchronously, pending; needs NEW exclusive reservation/exact preflight.
+Same predefined phases, record each, stop immediately on renderSTOP/mismatch;
+do not skip or redefine the previously failed namedXYZ question to report PASS.
+No further current device action, no changed original input or pen/stock-reader
+operation. Exact candidate/evidence local; timers remain PAUSED.

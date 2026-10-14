@@ -81,3 +81,55 @@ build/review/device observer running; host ADB daemon restarted, not a test work
 Five follow-up evidence notes remain LOCAL: combined commit/push rejected before
 execution as a new public payload. Separate exact five-file summary-result
 publishing approval question sent; preserve local updates, no egress bypass.
+
+## Exp1 actual hardware and exp2 exact-source correction2026-10-14
+
+USB trial reservation6172548164: exact unrooted Nomad3.30.45/API30/77% charging,
+safe Inbox FileManager, diagnostic absent. Exp1 installed APK byte-identical/
+signer verified. PAGE1/known English+Hebrew render PASS, directPAGE2/crop90 PASS,
+Link-back PAGE1 byte-identical59232480…e7385c. NamedXYZ1.25 renderSTOP FAIL;
+hardstop, no Fit retry or later phases. Normal own Close/exact path+hash/removal/
+absence/public reader hashes/rotation PASS. RELEASED6172821405; no originals/
+mark/stock restart/root/firmware/pen. Raw local only. No overall hardware PASS.
+
+Observed300dpi arithmetic, matching actual multiplication order, gives1913x2475
+and4734675pixels >old4M. This is source replay, not an emitted exception trace.
+Actual exp1 DEX contains wrong mojibake READY marker, correctUTF8 marker absent;
+matches captured cosmetic controls, not PDF text corruption. First new arithmetic
+test initially reordered floating-point operations and rounded1912 not1913;
+corrected test order to actual app's density*96/72 thenzoom. Production XYZ
+semantics unchanged. Earlier failure retained, not concealed as runtime proof.
+
+Exact exp2 executable/source **97de72f63269c0d3e5af30005bb3b9b6e64b81fd**,
+basef2f947f. New native/Java6M ceiling +half max Javaheap accounting for new
+pixel array/bitmap, retained prior bitmap,2MiB reserve; finite/axis/overflow
+refusal. Specific budget STOP, previous bitmap inert, no unbounded rendering or
+silent downsampling. This is diagnostic arithmetic, NOT total/native-memory/leak
+proof. Future production high zoom needs viewport/tile rendering, not cap growth.
+Explicit javacUTF8, complete source receipt includes helper, actual DEX Unicode
+READY/minus required. Same package/signer, zero permissions/immutable fixture.
+
+Owner7 focused tests PASS in checkout AND exact clean archive; actual Java16
+interaction+14budget assertions PASS; old4M and removedheap-check mutants both
+compiled and rejected. Actual WindowsAPI7 and four unchanged invariants PASS.
+Independent narrow read-only correction review tmp/t018p-exp2-review1.md:
+both defects CLOSED at source, no concrete P0/P1/P2/source blocker for later
+approved disposable-only retest. Reviewer reran3 source/in-memory tests PASS,
+syntax/version/lock/signer/zero-permission source checks/diff whitespace PASS;
+Java/build/hardware evidence supplied, NOT independently rerun. Exp2 Android
+runtime UNKNOWN; a genuinely smaller max heap may still correctly STOP.
+
+Normal exact clean-archive ARM32/64+Android35 JavaDEX+package/signature build PASS
+twice, identical **RTL-PDFium-Probe-exp2.apk**, SHA256
+**8eaaa7b9439db4a0b11da61a6b3b36b8e58da325c0f821bd4881fa452cd69615**,
+13592889bytes, **com.techrebbe.rtl.pdfiumprobe/0.1.1-pdfium-exp2/code2**, min23/
+target35, ARM32/64/zero permissions, own single signer a5a855…807c67. Exact
+source/payload/engine/notices/fixture/identity/Unicode markers PASS; old mojibake
+marker absent in actual exp2 DEX. Local tmp/t018p-97de72f-build2 candidate,
+build1/receipts/archive retained. NOT installed, NOT production reader upgrade.
+
+New exact exp2 retest approval and16-file correction/evidence public publication
+questions are sent, both pending. No retry/install/push under old approvals or
+consumed reservation. Device released/no observer, timers PAUSED/ink PARKED,
+no merge/PR advancement. Safe next action is those approvals then fresh exclusive
+reservation/exact preflight and bounded same fixture retest, not more emulation.

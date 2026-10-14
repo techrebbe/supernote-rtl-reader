@@ -10,9 +10,18 @@ No device observer or queued action; current reader/originals untouched. Continu
 bounded OFFLINE exp2/code2 source correction: observed300dpi1.25 needs4734675
 pixels, use finite6M+heap/old-bitmap accounting without changing XYZ semantics;
 explicitUTF-8 compile+DEX marker checks for cosmetic control mojibake. Exact new
-source review/build pending; exp2 UNINSTALLED. Existing failed candidate/evidence
-preserved. Remote34b1288, local evidencef2f947f + owned correction work; publishing
-five evidence-note updates remains pending user response, no egress workaround.
+source97de72f independently CLEAN/no P0/P1/P2, both observed defects CLOSED at
+source. Owner7 focused/30actualJava assertions/two compiled mutants +7actual
+WindowsAPI/four unchanged invariants PASS. Reviewer3source/in-memory tests +
+syntax/version/permission source checks PASS; no build/hardware rerun by reviewer.
+Two clean exact-source builds identical exp2APK8eaaa7b9…cd69615/13592889bytes,
+full source/payload/signer/Unicode markers PASS. 0.1.1-pdfium-exp2/code2, separate
+same diagnostic signer, no permissions/original input. Exp2 UNINSTALLED/runtime
+UNKNOWN. Failed exp1/package/evidence preserved. Remote34b1288, localsource97de72f
+plus evidence;16-file correction+summary publication and exact exp2 install/
+bounded retest/removal approvals pending. No egress/consumed-reservation bypass.
+No process/observer running here. Next gate is those approvals/fresh reservation,
+not more unchanged offline modeling/build/review/emulator loops.
 
 User approved T018P native PDFium prototype; task T-018P-pdfium-prototype.md
 names exact allowed paths/earliest safe gate. Production/current reader untouched.

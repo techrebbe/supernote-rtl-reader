@@ -64,3 +64,16 @@ No bypass/target access/install; hardware NOTPERFORMED, connection blocked,
 reservation RELEASED6172235090. Await USB/debugging reconnect/current Wi-Fi,
 then NEW reservation/exact preflight. No unchanged speculative emulator checks.
 Original PDFs/marks/installedRTL/current production source unchanged, device free.
+
+Subsequent USB trial6172548164/sourcee87d1c4: rendering/directPAGE2/crop90/back
+PASS; namedXYZ1.25 renderSTOP FAIL, later phases NOTPERFORMED, cleanup/public
+postflight PASS/released6172821405. Exact source-only exp2 correction97de72f
+preserves XYZ meaning with finite6M+heap/old-bitmap accounting, explicitUTF8.
+Independent narrow review CLEAN/both observed defects CLOSED at source;
+owner7focused/30actualJava/two compiled mutants +7Windows/four invariants PASS,
+reviewer3read-only source/in-memory +source syntax/identity checks PASS.
+Two clean exact-source exp2APK builds byte-identical8eaaa7b9…cd69615, complete
+package/source/signer/Unicode marker checks PASS; UNINSTALLED, runtime UNKNOWN.
+Details coord/reviews/T-018P-codex.md. New exact package retest and16 authored-file
+correction/summary public approval questions pending. No additional device use,
+push or merge under previous approval; no filler offline prerequisites.

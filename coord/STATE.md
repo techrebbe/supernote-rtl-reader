@@ -11,8 +11,18 @@ new writer. Reuse generated disposable fixture and existing navigation lessons.
 Actual pinned Windows public API7 tests/all4 renders PASS; Android ARM32/64 native
 and actual Java/DEX/package compile PASS, separate permission-free diagnostic
 UNINSTALLED. Six independent P2 findings batch-corrected, five focused regressions
-and16 actual-Java helper assertions PASS. Correction review and exact clean-head
-reproducible package still pending; Android runtime/performance UNVERIFIED.
+and16 actual-Java helper assertions PASS. Correction review CLOSED all6/no new
+P0/P1/P2; clean-archive sourcee87d1c4 built twice, byte-identical APKc96222a7…da7742,
+full source/payload/signature checks PASS. Separate packagecom.techrebbe.rtl.pdfiumprobe
+0.1.0-pdfium-exp1/code1, NOT production upgrade. Review/exact evidence
+coord/reviews/T-018P-codex.md. Android runtime/performance UNVERIFIED;
+asynchronous diagnostic approval pending, no build/review/device process running.
+Publishing exact new public-source payload was auto-review REJECTED before any
+command executed; do not retry/bypass without fresh exact-payload user approval.
+Reviewed executable e87d1c4 and documentation checkpoint retained locally;
+remote remains71f1ebf. Separate async approval asks22 authored files/public
+techrebbe/supernote-rtl-reader branch and summarized issue23 update, no raw/binary
+or personal material. Local milestone complete; next real gate is user approval.
 T018P-H defines smallest bounded next device question, NOT AUTHORIZED/NOT RUN.
 Saved ink PARKED/timers PAUSED/no merge. Previous decision requirement fulfilled.
 

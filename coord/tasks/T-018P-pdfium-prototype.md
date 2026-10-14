@@ -39,7 +39,7 @@ required semantics unavailable, major license/boundary decision needed or user
 data could be exposed. Continue another concrete safe part if a subtask blocks;
 no filler hardening. Saved ink PARKED, timers PAUSED, no merge/PR finalization.
 
-## Source checkpoint2026-10-14 (correction review pending)
+## Source checkpoint2026-10-14 (correction review CLEAN)
 
 Pinned hosted publisher provenance authenticated for Windows/ARM32/ARM64.
 Actual Windows API7 tests/all4 renders PASS, exact original direct/named/null-XYZ
@@ -54,6 +54,8 @@ fresh archive-derived headers, complete package/source/executable receipt, share
 process FIFO across Activity open/close, final UP displacement, generated/missing
 box text separators without cropped source text, and crop/bitmap hit bounds.
 Focused5 tests/actualJava16 assertions PASS. Reviewer runtime/hardware NOTRUN.
-Next correction confirmation then exact committed clean-archive build/rebuild
-and local hashes. T018P-H is prepared NOT AUTHORIZED; no speculative emulator.
+Correction confirmation CLOSED all6/no new P0/P1/P2 at exacte87d1c4. Two fresh
+clean-archive APKs byte-identical c96222a7…da7742, complete source/payload/signature
+PASS. Detailed evidence coord/reviews/T-018P-codex.md. T018P-H is prepared,
+asynchronous approval pending, NOT AUTHORIZED; no speculative emulator.
 Original PDFs/marks/installedRTL/current production source unchanged, device free.

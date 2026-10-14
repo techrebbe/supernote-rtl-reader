@@ -1,5 +1,24 @@
 # RTL Reader hardware regression
 
+## 2026-10-14 — T018P software gate PASS; hardware NOTRUN
+
+Isolated authored source e87d1c4aa62abe34200505d68ca1c51d27e1181d, production
+reader untouched. Authenticated PDFium157.0.8100.0/noV8/noXFA, actual Windows API7
+tests/all4 renders PASS, focused5+actualJava16 assertions PASS, unchanged4
+invariants PASS. Independent initial sixP2 batch-corrected; confirmation all6
+CLOSED/no new P0/P1/P2/source-safe for smallest disposable trial, runtime NOTRUN
+by reviewer. Real ARM32/64 and Java/DEX builds, package/provenance/signature PASS.
+Two clean exact-source APK builds byte-identical SHA256
+c96222a71701a619d4627bb2d6093a47779271655dcb66c58dcd8270b4da7742.
+Separate com.techrebbe.rtl.pdfiumprobe/0.1.0-pdfium-exp1/code1/zero permissions;
+NOT production reader upgrade. Full signer/source evidence coord/reviews/T-018P-codex.md.
+
+No Nomad/device/emulator/install/original PDF/.mark/root/firmware/timer operation.
+Existing generated embedded fixture unchanged. Android runtime/visual experience/
+Hebrew logical copy/RTL/BT integration UNVERIFIED, saved ink PARKED. Fresh explicit
+T018P-H install/trial/owned-removal approval pending; exclusive issue23 reservation
+and exact preflight required. Prior T018C reservation remains released.
+
 ## 2026-10-14 — T018C Wi-Fi PASS; interactive WebView version prerequisite FAIL
 
 Approved/free USB Nomad SN078C10015092, firmware

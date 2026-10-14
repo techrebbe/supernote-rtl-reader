@@ -85,7 +85,7 @@ def patch_app(text):
         "      pdfSourceSha256: pdfium.owner?.sourceSha256,\n"
         "      lastPageIndex: editReturnRef.current ? editReturnRef.current.editPage : pageIndex,", 'source preferences')
     marker = '    const token = ++renderTokenRef.current;'
-    text = once(text, marker, '''    if (!pdfium.owner) return;
+    text = once(text, marker, '''    if (!pdfium.owner || pdfium.isRetired() || readerTransitionLocked()) return;
     const preview = effectiveMode === 'single' ? [pageIndex] :
       getVisualSpread(pageIndex, coverSeparate, totalPagesRef.current, direction);
     const scene = JSON.stringify([pdfium.owner.sessionId,preview,effectiveMode,direction,

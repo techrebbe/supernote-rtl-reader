@@ -13,6 +13,13 @@ notices check. Fresh exact build and independent correction review pending;
 no device/install/shipping claim. Evidence in reviews/T-018I-codex.md. Continue
 immediately through review/build; ink PARKED/timers PAUSED/no merge.
 
+7586b3f correction review closed4/5 and ABI correction; one concrete retired-
+session layout recovery P2 accepted/corrected with actual foreground regressions.
+Both7586b3f clean signed builds PASS; superseded/uninstalled.128 retained SDK/
+Bluetooth tests plus2155Core/57Host/93bridge/seven mutants PASS. Final corrected
+exact build and narrow confirmation next; publication31-file approval requested,
+new installation authority/reservation still required. No device process here.
+
 User2026-10-14 approved integrating the tested engine while retaining portrait,
 RTL spreads, Bluetooth and supported Edit/Return. Owned baseline969a471; scoped
 source/build/review work in tasks/T-018I-pdfium-integration.md. No new device use,

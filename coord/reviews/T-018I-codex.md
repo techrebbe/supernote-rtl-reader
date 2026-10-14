@@ -70,6 +70,16 @@ Corrected normal package/reproducibility and independent confirmation pending.
 PluginHost loading remains device-dependent; runtime verifies actual resolved
 API provider bytes, not just similarly named archive contents. No hardware pass.
 
+Correction review7586b3f independently CLOSED findings1/2/4/5 and exact ARM64
+policy, finding3 PARTIAL: a layout change could clear retired-session fatal state.
+Accepted P2 corrected with an explicit foreground retirement/transition guard;
+actual generated rollback+foreground callbacks now test two changed heights and
+an in-flight Close against unintended token/display/error reset. Latest exact
+confirmation/build pending. Both normal7586b3f builds PASS all75tasks/full payload/
+signer gates, retained as superseded source artifacts, not installed. Additional
+retained navigation/READ/SDK/Bluetooth128 tests, key wiring2tests, actual core2155/
+Host57/bridge93 assertions and seven accepted-defect mutants PASS.
+
 Alpha limits: finite original input min(64MiB, maxJavaHeap/8), <=10000
 pages, bounded per-page metadata and raster; explicit refusal, not silent
 downsampling. Full-page moderate zoom only; high zoom tiler/performance/leak proof

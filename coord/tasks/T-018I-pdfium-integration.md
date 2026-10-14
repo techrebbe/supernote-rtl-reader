@@ -23,7 +23,8 @@ preferences/READ and SDK Edit/Return. Native page owns touches; no parent respon
 also intercepts selection/link/pan. No conversion/required sidecar/root/WebView
 update/stock writer/global key hook/new restart route. Keep former source/evidence.
 
-Offline gates: real current pinned ARM32/64 JNI+RN compile, generated App/source
+Offline gates: real current pinned production ARM64 JNI+RN compile (the SDK
+compactor retains ARM64 only; diagnostic ARM32 evidence stays preserved), generated App/source
 boundary tests (portrait/pairs/cover/rotation/key/modal/Edit/Close), actual helper
 tests for cancellation/replacement/pan/selection/geometry/memory, required native
 core+mutations+invariants, exact independent review and reproducible verified

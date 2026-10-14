@@ -15,7 +15,7 @@ public final class PdfiumPageViewManager extends SimpleViewManager<PdfiumPageVie
     @Override public void onDropViewInstance(PdfiumPageView view){view.dispose();super.onDropViewInstance(view);}
     @Override public Map<String,Integer> getCommandsMap(){return MapBuilder.of("copySelection",1);}
     @Override public void receiveCommand(PdfiumPageView view,int command,ReadableArray args){
-        if(command==1 && args!=null && args.size()==1)view.copySelection(args.getString(0));
+        if(command==1 && args!=null && args.size()==2)view.copySelection(args.getString(0),(long)args.getDouble(1));
     }
     @Override public void receiveCommand(PdfiumPageView view,String command,ReadableArray args){
         if("copySelection".equals(command))receiveCommand(view,1,args);

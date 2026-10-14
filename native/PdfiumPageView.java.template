@@ -44,7 +44,8 @@ public final class PdfiumPageView extends View {
                 next.optString("contentMode").equals(request.optString("contentMode"))){
                 JSONObject before=new JSONObject(request.toString()),after=new JSONObject(next.toString());
                 before.remove("inputBlocked");after.remove("inputBlocked");
-                if(before.toString().equals(after.toString())){request=next;spec=pending;pressed=false;return;}
+                before.remove("inputEpoch");after.remove("inputEpoch");
+                if(before.toString().equals(after.toString())){request=next;spec=pending;pressed=false;start=end=-1;selected="";invalidate();return;}
             }
         }catch(Exception ignored){/* Full request validation below. */}
         spec=pending;ready=false;pressed=false;start=end=-1;selected="";++revision;
@@ -54,7 +55,8 @@ public final class PdfiumPageView extends View {
             String id=request.getString("sessionId"),stamp=request.getString("requestId");
             int page=request.getInt("pageIndex");
             if(id.length()>16 || !id.matches("[1-9][0-9]*") || stamp.length()>1024 || stamp.isEmpty() ||
-                page<0 || page>=10000 || !request.has("blocked") ||
+                page<0 || page>=10000 || !request.has("blocked") || !request.has("inputBlocked") ||
+                request.getLong("inputEpoch")<0 || request.getLong("inputEpoch")>9007199254740991L ||
                 !java.util.Arrays.asList("read","text","pan").contains(request.getString("mode")))
                 throw new IllegalArgumentException("Invalid viewport identity");
             if(request.getBoolean("blocked")){invalidate();return;}
@@ -80,10 +82,9 @@ public final class PdfiumPageView extends View {
                 PdfiumSession session=PdfiumSession.require(owner);
                 if(!current(ticket,owner,stamp))return;
                 int page=command.getInt("pageIndex");double[] size=PdfiumReaderCore.size(session.token,page);
-                double fit=Math.min((viewW-24)/size[0],(viewH-24)/size[1]);
-                if(command.optString("contentMode").equals("native_fill"))fit=Math.max(viewW/size[0],viewH/size[1]);
-                double scale=fit;
                 JSONObject pose=command.optJSONObject("pose");double[] anchor=null;
+                double scale=PdfiumViewport.baseScale(viewW,viewH,size[0],size[1],command.optString("contentMode"),
+                    pose==null?null:pose.optString("kind"));
                 if(pose!=null){
                     String kind=pose.getString("kind");
                     if(kind.equals("scale"))scale=pose.getDouble("scale");
@@ -129,13 +130,14 @@ public final class PdfiumPageView extends View {
     private WritableMap packet(String kind){
         WritableMap event=Arguments.createMap();event.putString("kind",kind);
         if(request!=null){event.putString("sessionId",request.optString("sessionId"));
-            event.putString("requestId",request.optString("requestId"));event.putInt("pageIndex",request.optInt("pageIndex",-1));}
+            event.putString("requestId",request.optString("requestId"));event.putInt("pageIndex",request.optInt("pageIndex",-1));
+            event.putDouble("inputEpoch",request.optLong("inputEpoch",-1));}
         return event;
     }
     private void dispatch(Runnable action){UiThreadUtil.runOnUiThread(action);}
-    void copySelection(String stamp){
+    void copySelection(String stamp,long inputEpoch){
         if(disposed || !ready || request==null || request.optBoolean("blocked",true) || request.optBoolean("inputBlocked",true) ||
-            !stamp.equals(request.optString("requestId")) || selected.isEmpty())return;
+            !stamp.equals(request.optString("requestId")) || inputEpoch!=request.optLong("inputEpoch",-1) || selected.isEmpty())return;
         try{
             PdfiumSession.require(request.getString("sessionId"));
             ClipboardManager clipboard=(ClipboardManager)getContext().getSystemService(Context.CLIPBOARD_SERVICE);
@@ -211,26 +213,32 @@ public final class PdfiumPageView extends View {
     }
     private void follow(JSONObject action)throws Exception{
         final String owner=request.getString("sessionId"),stamp=request.getString("requestId");final long ticket=revision;
+        final long inputEpoch=request.getLong("inputEpoch");
         final JSONObject metadata=model;final float originX=-x,originY=-y;
         PdfiumSession.QUEUE.execute(()->{
             try{
                 PdfiumSession session=PdfiumSession.require(owner);
                 double[] point=PdfiumReaderCore.point(session.token,metadata.getInt("pageIndex"),metadata.getInt("renderWidth"),metadata.getInt("renderHeight"),originX,originY,true);
                 double scale=metadata.getInt("renderWidth")/metadata.getDouble("width");
-                dispatch(()->{if(!current(ticket,owner,stamp)||!ready||!session.current())return;
+                dispatch(()->{if(!current(ticket,owner,stamp)||!ready||!session.current() ||
+                    inputEpoch!=request.optLong("inputEpoch",-1) || request.optBoolean("inputBlocked",true))return;
                     WritableMap result=packet("link");result.putString("action",action.toString());result.putDouble("fromScale",scale);result.putDouble("fromLeft",point[0]);result.putDouble("fromTop",point[1]);emit(result);});
-            }catch(Exception|LinkageError error){dispatch(()->fail(ticket,"Link context rejected"));}
+            }catch(Exception|LinkageError error){dispatch(()->{if(request!=null &&
+                inputEpoch==request.optLong("inputEpoch",-1))fail(ticket,"Link context rejected");});}
         });
     }
     private void sendAnchor()throws Exception{
         final String owner=request.getString("sessionId"),stamp=request.getString("requestId");final long ticket=revision;
+        final long inputEpoch=request.getLong("inputEpoch");
         final JSONObject metadata=model;final float originX=-x,originY=-y;
         PdfiumSession.QUEUE.execute(()->{try{
             PdfiumSession session=PdfiumSession.require(owner);
             double[] point=PdfiumReaderCore.point(session.token,metadata.getInt("pageIndex"),metadata.getInt("renderWidth"),metadata.getInt("renderHeight"),originX,originY,true);
             double scale=metadata.getInt("renderWidth")/metadata.getDouble("width");
-            dispatch(()->{if(!current(ticket,owner,stamp)||!ready||!session.current())return;
+            dispatch(()->{if(!current(ticket,owner,stamp)||!ready||!session.current() ||
+                inputEpoch!=request.optLong("inputEpoch",-1) || request.optBoolean("inputBlocked",true))return;
                 WritableMap result=packet("viewport");result.putDouble("scale",scale);result.putDouble("fromLeft",point[0]);result.putDouble("fromTop",point[1]);emit(result);});
-        }catch(Exception|LinkageError error){dispatch(()->fail(ticket,"Pan context rejected"));}});
+        }catch(Exception|LinkageError error){dispatch(()->{if(request!=null &&
+            inputEpoch==request.optLong("inputEpoch",-1))fail(ticket,"Pan context rejected");});}});
     }
 }

@@ -46,6 +46,7 @@ class Integration(unittest.TestCase):
             self.assertIn('const nextLogicalPage = () => goBy(pageStep());',app)
             self.assertIn('const previousLogicalPage = () => goBy(-pageStep());',app)
             self.assertIn('turn={action => action',app)
+            subprocess.run(['node',str(ROOT/'scripts/test_pdfium_generated_callbacks.js'),str(Path(temp)/'App.js')],check=True)
             self.assertIn('await pdfium.close(true);',app)
             self.assertLess(app.index("await savePreferences('edit', payload);"),app.index('await pdfium.close(true);'))
             self.assertLess(app.index('await pdfium.close(true);'),app.index('        await handoffSavedPage({'))
@@ -65,6 +66,7 @@ class Integration(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='pdfium-ledger-') as temp:
             root=Path(temp)
             (root/'PdfiumRasterLedger.java').write_text((ROOT/'native/PdfiumRasterLedger.java.template').read_text().replace('__PACKAGE__','test'),encoding='utf-8')
+            (root/'PdfiumViewport.java').write_text((ROOT/'native/PdfiumViewport.java.template').read_text().replace('__PACKAGE__','test'),encoding='utf-8')
             (root/'LedgerTest.java').write_text('''package test;
 public class LedgerTest {
 static void ok(boolean b){if(!b)throw new AssertionError();}
@@ -77,10 +79,16 @@ b.release();b.release();ok(ledger.used()==12000000);
 a.installed();ok(ledger.used()==12000000);a.release();ok(ledger.used()==0);
 refused=false;try{ledger.reserve(6000001,0);}catch(IllegalArgumentException e){refused=true;}ok(refused);
 refused=false;try{ledger.reserve(5000000,20000000);}catch(IllegalStateException e){refused=true;}ok(refused);
-System.out.println("8 actual shared-raster assertions PASS");}}
+ok(PdfiumViewport.baseScale(600,800,600,800,"native_fill",null)==1);
+ok(PdfiumViewport.baseScale(600,800,600,800,"native_fill","Fit")==.96);
+ok(PdfiumViewport.baseScale(600,800,600,800,"fit","Fit")==.96);
+ok(PdfiumViewport.baseScale(900,600,600,800,"native_fill","Fit")==.72);
+ok(PdfiumViewport.baseScale(900,600,600,800,"native_fill",null)==1.5);
+refused=false;try{PdfiumViewport.baseScale(20,600,600,800,"fit","Fit");}catch(IllegalArgumentException e){refused=true;}ok(refused);
+System.out.println("14 actual shared-raster/Fit assertions PASS");}}
 ''',encoding='utf-8')
             subprocess.run([str(home/('javac'+suffix)),'-encoding','UTF-8','-d',temp,
-                str(root/'PdfiumRasterLedger.java'),str(root/'LedgerTest.java')],check=True)
+                str(root/'PdfiumRasterLedger.java'),str(root/'PdfiumViewport.java'),str(root/'LedgerTest.java')],check=True)
             subprocess.run([str(home/('java'+suffix)),'-cp',temp,'test.LedgerTest'],check=True)
 
 

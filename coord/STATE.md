@@ -2,15 +2,16 @@
 
 ## Current phase — approved PDFium integration (T018I)
 
-Source implementation now wired through generated App/native assembly as
-0.4.25-pdfium-exp1/code60. Focused16 JS+3 Python/actualJava8 assertions, retained
-probe7/actualJava30+two mutants, actual generated JSX and ARM32/64 JNI/Android35/
-RN0.79.2 API compile PASS; existing core85407/all271mutations and final invariants
-PASS, plus4 real production-payload omission/drift tests. Explicit JDK17 used
-after cancelling a stale Oracle launcher. Independent review and
-normal exact clean-archive signed package gates pending; no device/installation
-or shipping claim. Exact evidence in reviews/T-018I-codex.md. Continue source
-review/build immediately; no routine approval/PM wait, ink PARKED/timers PAUSED.
+Source integration0.4.25-pdfium-exp1/code60. First independent reviewff77c90
+found oneP1/fourP2; accepted defects corrected in one batch with actual effect/
+callback/input-epoch/Fit regressions.19 focused JS+3 generated/Java14 assertions,
+five real payload tests and rerun invariants PASS. Retained core85407/all271
+mutations/probe boundary evidence unchanged. First normal exact build compiled
+75tasks/signer PASS but final verifier rejected removed ARM32 payload. Production
+build/receipt now explicitly match SDK ARM64-only compaction, no skipped engine/
+notices check. Fresh exact build and independent correction review pending;
+no device/install/shipping claim. Evidence in reviews/T-018I-codex.md. Continue
+immediately through review/build; ink PARKED/timers PAUSED/no merge.
 
 User2026-10-14 approved integrating the tested engine while retaining portrait,
 RTL spreads, Bluetooth and supported Edit/Return. Owned baseline969a471; scoped

@@ -39,11 +39,36 @@ rerun using explicit tested JDK17 PATH. No source check was loosened for that
 environment problem. Compiler-generated tracked bytecode restored to exact
 clean-start baseline; PYTHONDONTWRITEBYTECODE prevents repeat side effects.
 
-Independent exact-source review NOTRUN yet. Normal clean-archive production
-package/reproducibility/signer verification NOTRUN yet. Host helper compilation
-is not a packaged-device pass. PluginHost native-library loading remains a
-device-dependent gate; runtime verifies the resolved PDFium API provider bytes
-(extracted or APK/NPk-mapped), not just similarly named archive contents.
+Independent read-only source review of969a471..ff77c90 found oneP1/fourP2,
+therefore ff77c90 NOT hardware-ready. Exact review local tmp/t018i-review1.md.
+Corrections, awaiting independent confirmation:
+
+- Binding cleanup follows pixel request identity, not input-only serialization,
+  and checks the actual component ref before removing a replacement binding.
+- Same-spread focus keeps the settled key geometry and PDF selection; the key
+  transport still fences a changed logical focus. A different pair fences both.
+- Failed SDK Edit after PDFium drain restores preferences, then displays an
+  explicit retired-reader error requiring Close/reopen; no inert usable surface
+  or unsafe reopen/stock restart. Failed preference rollback stays locked.
+- Synchronous input epochs fence modal/settings/transition contacts independently
+  of raster settlement. Native queued link/pan work captures, never restamps,
+  its input epoch; JS rejects pre-fence delayed input. Copy carries its epoch.
+- Explicit Fit overrides Fill. Fit and recovery carry actual Fit poses.
+
+New actual component/effect-order and delayed-input regressions pass:19 focused
+JS tests,3 generated callbacks/Java tests with14 actual shared-raster/Fit
+assertions, and5 real compiled payload omission/drift tests. Original canonical
+invariants/native/v2/cross-layer/Edit/packaging-failure gates rerun PASS.
+
+Normal exact clean-archive ff77c90 build compiled all75 tasks and verified the
+compatible signerfac61745...033b9c, but FAILED final payload verification: the
+SDK plug-in compactor retains ARM64 only, removing its ARM32 libraries. No failed
+package installed. Corrected production builder/policy/receipt now include the
+exact ARM64 shipped payload, with rejection of missing/extra ABIs. Pinned vendor
+and full21-license inventory checks unchanged; no verifier omission exception.
+Corrected normal package/reproducibility and independent confirmation pending.
+PluginHost loading remains device-dependent; runtime verifies actual resolved
+API provider bytes, not just similarly named archive contents. No hardware pass.
 
 Alpha limits: finite original input min(64MiB, maxJavaHeap/8), <=10000
 pages, bounded per-page metadata and raster; explicit refusal, not silent

@@ -55,8 +55,23 @@ def patch_app(text):
       } else { setPageIndex(event.pageIndex); setChromeVisible(value => !value); }
     },
   });
+  pdfiumInputFenceRef.current = pdfium.fenceInput;
+  pdfium.syncInput(rendering || settingsOpen || jumpOpen || editBusy || pdfium.modal);
 
   const getReaderKeyContext = () => {''', 'controller seam')
+    text = once(text, '  const fenceReaderKeys = () => {',
+        '  const pdfiumInputFenceRef = useRef(null);\n  const fenceReaderKeys = (fencePdf = true) => {\n'
+        '    if (fencePdf) pdfiumInputFenceRef.current?.();', 'synchronous input epoch')
+    text = once(text, '    if (next !== previous) fenceReaderKeys();\n', '', 'page fence placement')
+    text = once(text, "    if (visiblePages(previous).join(',') !== visiblePages(next).join(',')) invalidateSavedInkPresentation();",
+        "    const pairChanged = visiblePages(previous).join(',') !== visiblePages(next).join(',');\n"
+        '    if (next !== previous) fenceReaderKeys(pairChanged);\n'
+        '    if (pairChanged) invalidateSavedInkPresentation();', 'same-pair input ownership')
+    text = once(text, '  const readerKeyGeometry = JSON.stringify([filePathRef.current, pageIndex, effectiveMode,',
+        "  const readerKeyPageGeometry = effectiveMode === 'single' ? pageIndex :\n"
+        '    getVisualSpread(pageIndex, coverSeparate, totalPagesRef.current, direction);\n'
+        '  const readerKeyGeometry = JSON.stringify([filePathRef.current, readerKeyPageGeometry, effectiveMode,',
+        'same-pair key settlement')
     text = once(text, "blocked: !mountedRef.current || !ui.preferencesReady || !file || !settled ||",
         "blocked: pdfium.modalRef.current || !pdfium.owner || !mountedRef.current || !ui.preferencesReady || !file || !settled ||", 'key fence')
     text = once(text,
@@ -97,6 +112,12 @@ def patch_app(text):
     text = once(text, "      console.warn('RTL_READER_PREFS_EDIT_SAVE_FAILED', error);",
         "      console.warn('RTL_READER_PREFS_EDIT_SAVE_FAILED', error);\n"
         "      if (error?.code === 'PDFIUM_SOURCE') setFatalError(error.message);", 'replacement failure')
+    text = once(text, "        setEditNotice(failure === 'ink_cleanup_failed'",
+        "        if (pdfium.isRetired()) {\n"
+        "          setFatalError('Edit did not complete. Close and reopen RTL Reader before reading again.');\n"
+        "          setRendering(false);\n"
+        "        }\n"
+        "        setEditNotice(failure === 'ink_cleanup_failed'", 'retired Edit failure')
     text = once(text, '        {...panResponderRef.current.panHandlers}>',
         '        >', 'exclusive touch')
     if text.count('<View style={styles.blankPage} />') != 2:
@@ -140,7 +161,7 @@ def patch_app(text):
         '      <InteractivePdfBookmarks reader={pdfium} />','docked footer/bookmarks')
     text=once(text,'          <Text style={styles.errorText}>{fatalError}</Text>',
         '          <Text style={styles.errorText}>{fatalError}</Text>\n'
-        '          {pdfium.owner && !pdfium.sourceInvalid.current && <Pressable onPress={pdfium.recoverFit} style={styles.panelButton}>\n'
+        '          {pdfium.owner && !pdfium.isRetired() && !pdfium.sourceInvalid.current && <Pressable onPress={pdfium.recoverFit} style={styles.panelButton}>\n'
         '            <Text style={styles.panelButtonText}>Try Fit</Text>\n'
         '          </Pressable>}', 'explicit safe presentation recovery')
     return text

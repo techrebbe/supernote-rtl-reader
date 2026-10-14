@@ -13,7 +13,8 @@ def verify(native, root, classes):
     if not policy.is_file():return  # Generic non-PDFium package fixtures/old releases.
     declared=json.loads(policy.read_text(encoding='utf-8'))
     if declared.get('role')!='read-only-original-pdf' or declared.get('wrapper')!='librtlpdfiumreader.so' or \
-        declared.get('v8') is not False or declared.get('xfa') is not False or declared.get('savesPdfOrAnnotations') is not False:
+        declared.get('v8') is not False or declared.get('xfa') is not False or declared.get('savesPdfOrAnnotations') is not False or \
+        declared.get('packagedAbis')!=['arm64-v8a']:
         raise ValueError('Unsupported production PDFium policy')
     lock=json.loads((root/'probes/pdfium-native/pdfium.lock.json').read_text(encoding='utf-8'))
     if declared.get('publisher')!=lock['publisher'] or declared.get('tag')!=lock['tag']:
@@ -29,7 +30,11 @@ def verify(native, root, classes):
     if not isinstance(payload,dict):raise ValueError('Missing complete PDFium payload receipt')
     actual={name for name in native.namelist() if name.startswith('assets/pdfium/') and
         name!='assets/pdfium/build-receipt.json'}
-    for abi,vendor,bits,machine in [('armeabi-v7a','android-arm',1,40),('arm64-v8a','android-arm64',2,183)]:
+    expected_libs={'lib/arm64-v8a/'+name for name in ('libpdfium.so','librtlpdfiumreader.so')}
+    actual_libs={name for name in native.namelist() if name.startswith('lib/') and
+                 name.rsplit('/',1)[-1] in ('libpdfium.so','librtlpdfiumreader.so')}
+    if actual_libs!=expected_libs:raise ValueError('PDFium packaged ABI inventory mismatch')
+    for abi,vendor,bits,machine in [('arm64-v8a','android-arm64',2,183)]:
         for name in ('libpdfium.so','librtlpdfiumreader.so'):
             path=f'lib/{abi}/{name}';actual.add(path)
             data=native.read(path)

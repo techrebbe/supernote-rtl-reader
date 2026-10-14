@@ -33,10 +33,10 @@ function harness(module={},global={},overrides={}) {
   render();
   return {render,get reader(){return reader;},calls,setScene:n=>{scene=n;},setPage:n=>{page=n;},
     async unmount(){for(const effect of effects)effect.cleanup?.();await global.RTL_PDFIUM_SESSION_CHAIN;},
-    spec:(n=0)=>api.requestSpec({owner:opened,token:scene,page:n,slot:'single',mode:'read',blocked:false,width:600,height:800}),
+    spec:(n=0)=>({...api.requestSpec({owner:opened,token:scene,page:n,slot:'single',mode:'read',blocked:false,width:600,height:800}),inputEpoch:reader.inputEpoch.current}),
     bind(spec){reader.bind(spec.pageIndex,{current:{}},spec);},
     packet(spec,extra,onRendered=()=>calls.push('rendered'),onError=()=>calls.push('error')){
-      reader.packet({nativeEvent:{sessionId:spec.sessionId,requestId:spec.requestId,pageIndex:spec.pageIndex,...extra}},spec,onRendered,onError);
+      reader.packet({nativeEvent:{sessionId:spec.sessionId,requestId:spec.requestId,pageIndex:spec.pageIndex,inputEpoch:spec.inputEpoch,...extra}},spec,onRendered,onError);
     }};
 }
 test('actual hook opens exact owner, registers global drain, closes once',async()=>{
@@ -99,4 +99,42 @@ test('Fit recovery fences and starts rendering before clearing error; cannot rec
   await h.reader.open(context);h.render();h.reader.recoverFit();
   assert.deepEqual(h.calls,['fence','start-render','clear-error']);
   await assert.rejects(h.reader.close(true));h.reader.recoverFit();assert.equal(h.calls.length,3);await h.unmount();
+});
+
+test('bookmark open/dismiss rejects pre-modal delayed input without blocking current pixels',async()=>{
+  const h=harness();await h.reader.open(context);h.render();const old=h.spec();h.bind(old);
+  h.reader.showBookmarks();h.render();h.reader.hideBookmarks();h.render();const current=h.spec();h.bind(current);
+  const before=h.calls.length;
+  for(const kind of ['gesture','selection','link','viewport','copy'])h.packet(old,{kind,text:'stale',action:'{}'});
+  assert.equal(h.calls.length,before);assert.equal(h.render().selection,null);
+  h.packet(old,{kind:'rendered',scale:1});assert.equal(h.calls.at(-1),'rendered');
+  h.packet(current,{kind:'selection',text:'current'});assert.equal(h.render().selection.text,'current');await h.unmount();
+});
+
+test('input-only render does not run old binding cleanup; replacement component cannot remove new ref',async()=>{
+  const h=harness();await h.reader.open(context);h.render();
+  // Execute the actual page component's pre-JSX hooks with React dependency and
+  // cleanup order: render first, previous passive cleanup second, new setup last.
+  const page=source.slice(source.indexOf('export function InteractivePdfPage'),source.indexOf('  return <NativePage'))
+    .replace('export function InteractivePdfPage','function InteractivePdfPage')+'return null;}';
+  const refs=[],states=[{width:600,height:800}],effects=[];let ri,si,ei;
+  const sandbox={requestSpec:api.requestSpec,useRef:init=>refs[ri++]??(refs[ri-1]={current:init}),
+    useState:()=>[states[si++],()=>{}],useEffect:(setup,deps)=>{const i=ei++;
+      const previous=effects[i];if(!previous||deps.some((x,n)=>!Object.is(x,previous.deps[n])))
+        effects[i]={setup,deps,previous};}};
+  vm.createContext(sandbox);vm.runInContext(page,sandbox);
+  function render(inputBlocked){ri=si=ei=0;sandbox.props={reader:h.reader,page:0,slot:'single',token:1,blocked:false,inputBlocked,contentMode:'fit'};
+    vm.runInContext('InteractivePdfPage(props)',sandbox);
+    for(const effect of effects)if(effect.setup){effect.previous?.cleanup?.();effect.cleanup=effect.setup();delete effect.setup;}}
+  render(true);render(false);const spec=h.spec();h.packet(spec,{kind:'selection',text:'live'});
+  assert.equal(h.render().selection.text,'live');h.reader.copy();assert.ok(h.calls.some(x=>Array.isArray(x)&&x[0]==='command'));
+  for(const effect of effects)effect.cleanup?.();const before=h.calls.length;h.packet(spec,{kind:'gesture'});assert.equal(h.calls.length,before);
+  const a={current:{}},b={current:{}};h.reader.bind(0,a,spec);h.reader.bind(0,b,spec);h.reader.unbind(0,a,spec);
+  h.packet(spec,{kind:'selection',text:'replacement'});assert.equal(h.render().selection.text,'replacement');await h.unmount();
+});
+
+test('Fit tools carry explicit Fit pose and retired Edit owner refuses all reading',async()=>{
+  const h=harness();await h.reader.open(context);h.render();h.reader.fit();assert.equal(h.reader.poses.current.get(0).kind,'Fit');
+  await h.reader.close(true);assert.equal(h.reader.isRetired(),true);const spec=h.spec();h.bind(spec);
+  const before=h.calls.length;h.packet(spec,{kind:'selection',text:'dead'});h.reader.recoverFit();assert.equal(h.calls.length,before);await h.unmount();
 });

@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import sys
 
-JAVA = ('PdfiumReaderCore','PdfiumRasterLedger','PdfiumSession','PdfiumReaderModule',
+JAVA = ('PdfiumReaderCore','PdfiumRasterLedger','PdfiumViewport','PdfiumSession','PdfiumReaderModule',
         'PdfiumPageView','PdfiumPageViewManager')
 
 
@@ -52,8 +52,9 @@ def build(project, root, engine, sdk):
     payload={}
     exports={f'Java_com_supernotertlreader_PdfiumReaderCore_{name}' for name in
              ('open','close','count','outline','size','point','model','render','libraryPath')}
-    for abi,target,vendor in (('armeabi-v7a','armv7a-linux-androideabi23','android-arm'),
-                             ('arm64-v8a','aarch64-linux-android23','android-arm64')):
+    # Supernote's production plug-in packager retains arm64-v8a only. Compile
+    # and receipt precisely that shipped ABI; never receipt a removed payload.
+    for abi,target,vendor in (('arm64-v8a','aarch64-linux-android23','android-arm64'),):
         destination=native/abi;destination.mkdir(parents=True,exist_ok=True)
         wrapper=destination/'librtlpdfiumreader.so';dep=authenticated/vendor
         command=[str(compiler),'--target='+target,'-std=c++17','-O2','-fPIC','-shared',

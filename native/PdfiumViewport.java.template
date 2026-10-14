@@ -1,0 +1,13 @@
+package __PACKAGE__;
+
+/** Explicit PDF Fit semantics override a persisted reading Fill preference. */
+final class PdfiumViewport {
+    static double baseScale(int width,int height,double pageWidth,double pageHeight,String contentMode,String poseKind) {
+        if(width<=24 || height<=24 || !Double.isFinite(pageWidth) || !Double.isFinite(pageHeight) ||
+            pageWidth<=0 || pageHeight<=0)throw new IllegalArgumentException("Invalid page viewport");
+        double fit=Math.min((width-24)/pageWidth,(height-24)/pageHeight);
+        return "native_fill".equals(contentMode) && !"Fit".equals(poseKind)
+            ? Math.max(width/pageWidth,height/pageHeight):fit;
+    }
+    private PdfiumViewport(){}
+}

@@ -13,6 +13,7 @@ function serializeOperation(action) {
 export function useInteractivePdf(callbacks) {
   const live=useRef(true),closing=useRef(false),owned=useRef(null),closePromise=useRef(null);
   const sourceInvalid=useRef(false);
+  const inputEpoch=useRef(0),inputBlockedRef=useRef(null);
   const latest=useRef(callbacks);latest.current=callbacks;
   const views=useRef(new Map()),poses=useRef(new Map()),scales=useRef(new Map()),anchors=useRef(new Map());
   const [owner,setOwner]=useState(null),[revision,setRevision]=useState(0);
@@ -48,9 +49,12 @@ export function useInteractivePdf(callbacks) {
     return closePromise.current;
   }
   useEffect(()=>()=>{live.current=false;close(false).catch(()=>{});},[]);
-  function setModalValue(value) {latest.current.fence();modalRef.current=value;setModal(value);}
+  function fenceInput(){++inputEpoch.current;setSelection(null);}
+  function syncInput(blocked){if(inputBlockedRef.current!==blocked){fenceInput();inputBlockedRef.current=blocked;}}
+  function setModalValue(value) {fenceInput();latest.current.fence();modalRef.current=value;setModal(value);}
   function bind(page,ref,spec) {views.current.set(page,{ref,spec});}
-  function unbind(page,spec) {if(views.current.get(page)?.spec.requestId===spec.requestId)views.current.delete(page);}
+  function unbind(page,ref,spec) {const value=views.current.get(page);
+    if(value?.ref===ref && value.spec.requestId===spec.requestId)views.current.delete(page);}
   function follow(action,from,packet=null) {
     if(!current() || (packet && (!packetMatches(packet,views.current.get(packet.pageIndex)?.spec)||
       !latest.current.admit(views.current.get(packet.pageIndex)?.spec))))return;
@@ -69,12 +73,14 @@ export function useInteractivePdf(callbacks) {
   function packet(event,expected,onRendered,onError) {
     const value=event.nativeEvent;
     if(!current()||!latest.current.admit(expected)||!packetMatches(value,expected)||!packetMatches(value,views.current.get(expected.pageIndex)?.spec))return;
-    if(!['rendered','error'].includes(value.kind) && expected.inputBlocked)return;
+    if(!['rendered','error'].includes(value.kind) && (expected.inputBlocked || modalRef.current ||
+      !latest.current.canInteract() || value.inputEpoch!==inputEpoch.current ||
+      value.inputEpoch!==views.current.get(expected.pageIndex)?.spec.inputEpoch))return;
     if(value.kind==='rendered'){scales.current.set(value.pageIndex,value.scale);
       anchors.current.set(value.pageIndex,{scale:value.scale,left:value.fromLeft,top:value.fromTop});onRendered(event);}
     else if(value.kind==='error'){onError(event);}
     else if(value.kind==='link'){try{follow(JSON.parse(value.action),{scale:value.fromScale,left:value.fromLeft,top:value.fromTop},value);}catch(_){setNotice('Invalid PDF link');}}
-    else if(value.kind==='selection') {if(typeof value.text==='string'&&value.text.length<=40000){setSelection({page:value.pageIndex,stamp:value.requestId,text:value.text});setFocused(value.pageIndex);latest.current.navigate(value.pageIndex);}}
+    else if(value.kind==='selection') {if(typeof value.text==='string'&&value.text.length<=40000){setSelection({page:value.pageIndex,stamp:value.requestId,inputEpoch:value.inputEpoch,text:value.text});setFocused(value.pageIndex);latest.current.navigate(value.pageIndex);}}
     else if(value.kind==='copy')setNotice(value.verified===true?'Copied text (verified)':'Clipboard could not be verified');
     else if(value.kind==='viewport')anchors.current.set(value.pageIndex,{scale:value.scale,left:value.fromLeft,top:value.fromTop});
     else if(value.kind==='gesture')latest.current.gesture({...value,slot:expected.slot});
@@ -83,19 +89,20 @@ export function useInteractivePdf(callbacks) {
   function focusPage(){return latest.current.page();} // Existing original-page state is authoritative.
   function zoom(factor) {mutate(()=>{const page=focusPage(),scale=scales.current.get(page);
     if(Number.isFinite(scale)&&scale>0)poses.current.set(page,{kind:'scale',scale:scale*factor});setMode('pan');});}
-  function fit() {mutate(()=>{poses.current.clear();setMode('read');setNotice('');});}
+  function fit() {mutate(()=>{poses.current.clear();poses.current.set(focusPage(),{kind:'Fit'});setMode('read');setNotice('');});}
   function recoverFit() {
     if(!live.current||closing.current||!owned.current||sourceInvalid.current||modalRef.current||!latest.current.canRecover())return;
-    latest.current.fence();latest.current.startRender();poses.current.clear();
+    latest.current.fence();latest.current.startRender();poses.current.clear();poses.current.set(focusPage(),{kind:'Fit'});
     setMode('read');setSelection(null);setNotice('');setRevision(x=>x+1);latest.current.clearError();
   }
   function back() {mutate(()=>{const item=history.current.pop();if(item){poses.current.set(item.page,item.pose);setFocused(item.page);latest.current.navigate(item.page);}});}
   function copy() {
     if(!current()||modalRef.current||!latest.current.canInteract()||!selection)return;
     const target=views.current.get(selection.page);
-    if(!target||!latest.current.admit(target.spec)||target.spec.requestId!==selection.stamp)return;
+    if(!target||!latest.current.admit(target.spec)||target.spec.requestId!==selection.stamp ||
+      selection.inputEpoch!==inputEpoch.current || target.spec.inputEpoch!==selection.inputEpoch)return;
     const tag=findNodeHandle(target.ref.current),command=UIManager.getViewManagerConfig('PdfiumPageView')?.Commands?.copySelection;
-    if(tag!=null&&command!=null)UIManager.dispatchViewManagerCommand(tag,command,[selection.stamp]);
+    if(tag!=null&&command!=null)UIManager.dispatchViewManagerCommand(tag,command,[selection.stamp,selection.inputEpoch]);
   }
   function showBookmarks() {
     if(!current()||modalRef.current||!latest.current.canInteract())return;
@@ -106,7 +113,8 @@ export function useInteractivePdf(callbacks) {
   useEffect(()=>{globalThis.RTL_PDFIUM_OWNER=publicOwner;return()=>{
     if(globalThis.RTL_PDFIUM_OWNER===publicOwner)globalThis.RTL_PDFIUM_OWNER=null;
   };},[]);
-  return {owner,revision,mode,selection,notice,bookmarks,modal,modalRef,sourceInvalid,open,close,bind,unbind,packet,
+  return {owner,revision,mode,selection,notice,bookmarks,modal,modalRef,sourceInvalid,inputEpoch,fenceInput,syncInput,
+    isRetired:()=>closing.current,open,close,bind,unbind,packet,
     poses,changeMode,zoom,fit,recoverFit,back,copy,showBookmarks,history,
     hideBookmarks:()=>{setBookmarks(null);setModalValue(false);},
     chooseBookmark:action=>{setBookmarks(null);setModalValue(false);const page=focusPage();
@@ -118,12 +126,12 @@ export function InteractivePdfPage({reader,page,slot,token,width,height,blocked,
   const ref=useRef(null);
   const [layout,setLayout]=useState(null);
   const spec=layout?{...requestSpec({owner:reader.owner,token,page,slot,mode:reader.mode,blocked,
-    pose:reader.poses.current.get(page)??null,width:layout.width,height:layout.height,contentMode}),inputBlocked}:null;
+    pose:reader.poses.current.get(page)??null,width:layout.width,height:layout.height,contentMode}),inputBlocked,inputEpoch:reader.inputEpoch.current}:null;
   const serialized=JSON.stringify(spec);
   // Bind in render so delayed packets are rejected against the newest desired
   // spec immediately, not only after the native property commit.
   if(spec)reader.bind(page,ref,spec);
-  useEffect(()=>()=>{if(spec)reader.unbind(page,spec);},[page,serialized]);
+  useEffect(()=>()=>{if(spec)reader.unbind(page,ref,spec);},[page,spec?.requestId]);
   return <NativePage ref={ref} style={style} requestSpec={serialized}
     onLayout={event=>{const value=event.nativeEvent.layout;
       if(value.width>0&&value.height>0)setLayout(previous=>previous?.width===value.width&&previous?.height===value.height?previous:{width:value.width,height:value.height});}}

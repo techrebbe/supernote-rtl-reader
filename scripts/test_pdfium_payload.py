@@ -26,12 +26,18 @@ class Payload(unittest.TestCase):
         with zipfile.ZipFile(io.BytesIO(buffer.getvalue())) as archive:verify(archive,ROOT,self.classes)
     def test_real_complete_payload(self):self.check(self.items)
     def test_missing_or_replaced_engine_and_wrapper_rejected(self):
-        for name in ('lib/arm64-v8a/libpdfium.so','lib/armeabi-v7a/librtlpdfiumreader.so'):
+        for name in ('lib/arm64-v8a/libpdfium.so','lib/arm64-v8a/librtlpdfiumreader.so'):
             for remove in (True,False):
                 changed=dict(self.items)
                 if remove:del changed[name]
                 else:changed[name]=b'wrong binary'
                 with self.assertRaises((ValueError,KeyError)):self.check(changed)
+    def test_packager_abi_inventory_is_exact(self):
+        # The real SDK compacted APK retains ARM64, not the probe's ARM32 ABI.
+        self.assertNotIn('lib/armeabi-v7a/libpdfium.so',self.items)
+        changed=dict(self.items)
+        changed['lib/armeabi-v7a/libpdfium.so']=changed['lib/arm64-v8a/libpdfium.so']
+        with self.assertRaisesRegex(ValueError,'ABI inventory'):self.check(changed)
     def test_rewritten_receipt_cannot_hide_omitted_notice(self):
         changed=dict(self.items);name='assets/pdfium/LICENSE';del changed[name]
         receipt=json.loads(changed['assets/pdfium/build-receipt.json'])

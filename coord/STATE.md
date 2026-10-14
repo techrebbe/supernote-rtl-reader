@@ -2,6 +2,18 @@
 
 ## Current phase — approved isolated PDFium prototype
 
+Current hardware checkpoint: T018P-H exp1/sourcee87d1c4 installed exact own package
+under new6172548164 after USB ready; engine/PAGE1/directPAGE2/crop90/byte-identical
+back PASS, namedXYZ1.25 renderSTOP FAIL. Hardstop, later phases NOTPERFORMED.
+Own Close/uninstall/absence/public reader/rotation postflight PASS, RELEASED6172821405.
+No device observer or queued action; current reader/originals untouched. Continue
+bounded OFFLINE exp2/code2 source correction: observed300dpi1.25 needs4734675
+pixels, use finite6M+heap/old-bitmap accounting without changing XYZ semantics;
+explicitUTF-8 compile+DEX marker checks for cosmetic control mojibake. Exact new
+source review/build pending; exp2 UNINSTALLED. Existing failed candidate/evidence
+preserved. Remote34b1288, local evidencef2f947f + owned correction work; publishing
+five evidence-note updates remains pending user response, no egress workaround.
+
 User approved T018P native PDFium prototype; task T-018P-pdfium-prototype.md
 names exact allowed paths/earliest safe gate. Production/current reader untouched.
 Pin publisher bblanchon/pdfium-binaries chromium/8100 immutable2026-10-12 release,

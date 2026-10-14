@@ -35,7 +35,13 @@ prevent stale ownership/close and destroyed-Activity reopen races. Generation
 fences bind bitmap/text/links/page/dimensions; native rendering and hit rectangles
 use PDFium's same page-to-device transform, crop clipping and bitmap bounds.
 Generated/missing-box separators survive copy; cropped source text is excluded.
-Four-million pixels/20k characters/1000 links/outlines and depth32 cap work.
+Six-million pixels/20k characters/1000 links/outlines and depth32 cap work.
+The diagnostic now also checks new Java pixels + retained old bitmap +2MiB
+metadata reserve against half the process max heap. XYZ scale/anchors stay
+unchanged. This is conservative arithmetic, not measured total-memory/leak proof;
+the six-million native ceiling bounds transient copies (up to96MB at16B/pixel,
+excluding old bitmap/engine). Future production integration needs viewport/tile
+rendering for broader zoom ranges, not repeated increases to this full-page cap.
 
 ## Evidence and unverified behavior
 
@@ -52,7 +58,17 @@ with five focused regression tests and **16 actual-Java helper assertions**.
 Correction review/exact clean-head package evidence is recorded in T018P,
 not inferred from this README.
 
-Android runtime, visual comfort/performance, RTL dual-page integration, real
+First exp1 Nomad trial at e87d1c4: actual engine launch/PAGE1 rendering/direct
+link toPAGE2/crop90/byte-identical Link-back PASS. NamedXYZ1.25 hit STOP: at
+observed300dpi,1913x2475=4734675 pixels exceeds the prior4M limit. Defined hard
+stop honored; bookmark/same-page/selection/zoom/pan/rotation phases NOTPERFORMED.
+Normal own Close/diagnostic-only uninstall/absence and public reader/rotation
+postflight PASS; reservation6172548164 released6172821405. Source-authored UI
+punctuation mojibake observed. Exp2 corrects finite budget and pins javac UTF-8;
+focused observed-case/invalid-geometry/heap tests, two actual Java defect mutants
+and final DEX Unicode markers guard these corrections. New runtime unverified.
+
+Exp2 Android runtime, visual comfort/performance, RTL dual-page integration, real
 Bluetooth and logical Hebrew copy order remain **UNVERIFIED**. The existing
 fixture has visually shaped Hebrew, so it cannot establish general logical copy
 fidelity. This diagnostic is single-page with button zoom/pan (no pinch).
@@ -60,7 +76,7 @@ Link back restores original page in Fit, not prior pan/zoom. Reopening starts
 PAGE1. Final product integration must reuse existing original-document READ,
 per-document preferences, RTL pairing/cover, key transport and SDK Edit/Return.
 
-Package `com.techrebbe.rtl.pdfiumprobe`, `0.1.0-pdfium-exp1`, code1, min23/target35,
+Package `com.techrebbe.rtl.pdfiumprobe`, `0.1.1-pdfium-exp2`, code2, min23/target35,
 ARM32/64, separate label RTL PDFium Probe. Exact diagnostic debug certificate
 `a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67`;
 **not** production plug-in certificate `fac617…3b9c`. No keys are shipped/uploaded.
@@ -88,6 +104,8 @@ The local receipt binds executed build inputs/output; it is not an independent
 attestation that an arbitrary APK was compiled from source. Two fresh exact-head
 reproducible builds plus signer verification are required for the install
 candidate. Preserve receipts/build evidence locally, not in repository assets.
+Exp1 failed hardware source/package/evidence remain intact; never overwrite them
+or imply exp2 passed the exp1 gate. Any exp2 install needs new explicit approval.
 
 No device command exists in the build. Earliest hardware gate is the bounded
 T018P-H plan, fresh explicit approval, issue23 exclusive reservation and exact

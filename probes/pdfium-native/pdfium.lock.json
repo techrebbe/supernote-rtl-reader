@@ -12,6 +12,8 @@
   "xfa": false,
   "productionDependency": false,
   "diagnosticPackage": "com.techrebbe.rtl.pdfiumprobe",
+  "diagnosticVersionName": "0.1.1-pdfium-exp2",
+  "diagnosticVersionCode": 2,
   "diagnosticSignerSha256": "a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67",
   "extractedBinaries": {
     "win-x64/bin/pdfium.dll": "ae913f407e8d3f5cdbf08a9869564d647b13e132e01eb376c0a5a33b7a227a45",

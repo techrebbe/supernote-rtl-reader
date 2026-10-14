@@ -74,3 +74,29 @@ no diagnostic cleanup needed. Hardware NOTPERFORMED, not engine FAIL. Reservatio
 NEW reservation required for resume. No build/review/device observer left active;
 ordinary host ADB daemon is not an observer. Software gates complete, no filler
 rebuild/emulation. Exact candidate/evidence preserved; timers not resumed.
+
+## USB resume2026-10-14 — bounded trial, FAIL/cleanup PASS
+
+Fresh reservation6172548164 after user's USB-connected response. Exact serial/
+fw3.30.45/API30/ARM64+32/ordinaryUID2000/77% charging/safe Inbox FileManager,
+diagnostic absent PASS. Same candidatee87d1c4/exp1/code1/c96222a7…da7742 installed;
+public installed APK byte-identical and exact signer verified before own launch.
+Own PAGE1 render/English+Hebrew PASS; direct link->PAGE2/CropBox/intrinsic90deg
+PASS, Link-back PAGE1 byte-identical59232480…e7385c. NamedXYZ1.25 FAIL: visible
+render STOP with inert previous bitmap. Hardstop; no Fit retry or later phases.
+Bookmark/same-page/selection/zoom/pan/rotation NOTPERFORMED, no general glyph/
+hidden-link/physical flash/feel/Bluetooth claims. Cosmetic control mojibake noted.
+
+Cleanup PASS: normal own Close -> prior Inbox, exact diagnostic path/hash checked,
+own uninstall Success/absence verified, public PluginHostf60ce483…d2aad and
+Documentdd77ff2c…6f986 hashes/serial/fw/UID/rotation1,2 unchanged. No original
+PDF/.mark/privatepath/stock restart/root/firmware/pen or remote scratch files.
+RELEASED6172821405. Raw shots/own APK/local outcomes preserved only in tmp.
+
+Continue bounded offline correction: explicitUTF-8 compilation and finite6M
+diagnostic ceiling plus half-max-heap/new+old bitmap accounting; preserve XYZ
+meaning, fail on unsupported allocation, not silent downsampling. Observed
+300dpi/612x792/XYZ1.25 arithmetic replay1913x2475=4734675 explains old4M stop;
+no emitted exception trace, not a complete native-runtime/memory proof. New
+exp2/code2 requires exact-source review/clean build/verification and separate
+fresh package approval/reservation before device use. No retry on consumed trial.

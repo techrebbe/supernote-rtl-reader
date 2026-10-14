@@ -15,7 +15,7 @@
 #include <vector>
 
 namespace {
-constexpr int kPixels=4000000, kChars=20000, kItems=1000;
+constexpr int kPixels=6000000, kChars=20000, kItems=1000;
 std::mutex mutex;
 std::vector<unsigned char> bytes;
 FPDF_DOCUMENT document=nullptr;

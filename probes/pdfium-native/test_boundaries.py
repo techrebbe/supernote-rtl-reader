@@ -16,6 +16,34 @@ SOURCE=Path(__file__).parent
 
 
 class ReviewedBoundaries(unittest.TestCase):
+    def test_observed_budget_regression_and_heap_guard_mutants(self):
+        java=Path(os.environ['JAVA_HOME'])/'bin'
+        source=(SOURCE/'RenderBudget.java').read_text()
+        mutants=[source.replace('MAX_PIXELS=6000000','MAX_PIXELS=4000000'),
+                 source.replace('if(pixels>MAX_PIXELS || oldBitmapBytes>maxHeap/2\n                ||pixels*8+MODEL_RESERVE>maxHeap/2-oldBitmapBytes)', 'if(pixels>MAX_PIXELS)')]
+        for mutant in mutants:
+            self.assertNotEqual(mutant,source)
+            with tempfile.TemporaryDirectory(prefix='pdfium-budget-mutant-') as out:
+                path=Path(out)/'RenderBudget.java'
+                path.write_text(mutant,encoding='utf-8') # generated mechanical test variant only
+                subprocess.run([str(java/'javac.exe'),'-encoding','UTF-8','-d',out,str(path),str(SOURCE/'RenderBudgetTest.java')],check=True)
+                result=subprocess.run([str(java/'java.exe'),'-cp',out,'com.techrebbe.rtl.pdfiumprobe.RenderBudgetTest'],capture_output=True,text=True,timeout=15)
+                self.assertNotEqual(result.returncode,0,'Defect mutant survived')
+
+    def test_observed_nomad_xyz_budget_and_utf8_build(self):
+        java=Path(os.environ['JAVA_HOME'])/'bin'
+        with tempfile.TemporaryDirectory(prefix='pdfium-budget-') as output:
+            subprocess.run([str(java/'javac.exe'),'-encoding','UTF-8','-d',output,*[str(SOURCE/n) for n in ('RenderBudget.java','RenderBudgetTest.java')]],check=True)
+            result=subprocess.run([str(java/'java.exe'),'-cp',output,'com.techrebbe.rtl.pdfiumprobe.RenderBudgetTest'],capture_output=True,text=True,timeout=15)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertIn('14 assertions PASS',result.stdout)
+        activity=(SOURCE/'ProbeActivity.java').read_text()
+        self.assertIn('RenderBudget.dimensions(size[0],size[1],scale,maxHeap,oldBitmapBytes)',activity)
+        self.assertIn('error instanceof RenderBudget.Exceeded',activity)
+        self.assertIn('constexpr int kPixels=6000000',(SOURCE/'native_core.cpp').read_text())
+        self.assertIn('static final int MAX_PIXELS=6000000',(SOURCE/'RenderBudget.java').read_text())
+        self.assertIn('javac.exe\') -encoding UTF-8',(SOURCE/'build_probe.ps1').read_text())
+
     def test_actual_java_interaction_and_process_fifo(self):
         java=Path(os.environ['JAVA_HOME'])/'bin'
         with tempfile.TemporaryDirectory(prefix='pdfium-jdk-') as output:

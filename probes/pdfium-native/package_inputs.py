@@ -7,7 +7,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 SOURCES=('AndroidManifest.xml','NativeCore.java','ProbeActivity.java','Interaction.java',
-         'EngineQueue.java','native_core.cpp','build_probe.ps1','pdfium.lock.json',
+         'EngineQueue.java','RenderBudget.java','native_core.cpp','build_probe.ps1','pdfium.lock.json',
          'package_inputs.py','verify_package.py','host_probe.py','fetch_engine.ps1')
 
 

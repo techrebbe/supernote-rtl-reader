@@ -52,14 +52,14 @@ def verify(apk,engine,aapt,receipt_path,expected_commit):
             if notice.is_file() and package.read('notices/licenses/'+notice.name)!=notice.read_bytes():
                 raise ValueError('Missing linked native notice')
         dex=package.read('classes.dex')
-        for marker in [b'Lcom/techrebbe/rtl/pdfiumprobe/ProbeActivity;',b'Lcom/techrebbe/rtl/pdfiumprobe/NativeCore;',b'Lcom/techrebbe/rtl/pdfiumprobe/EngineQueue;',b'Lcom/techrebbe/rtl/pdfiumprobe/Interaction;',FIXTURE_SHA.encode()]:
+        for marker in [b'Lcom/techrebbe/rtl/pdfiumprobe/ProbeActivity;',b'Lcom/techrebbe/rtl/pdfiumprobe/NativeCore;',b'Lcom/techrebbe/rtl/pdfiumprobe/EngineQueue;',b'Lcom/techrebbe/rtl/pdfiumprobe/Interaction;',b'Lcom/techrebbe/rtl/pdfiumprobe/RenderBudget;',FIXTURE_SHA.encode(),b'READY \xc2\xb7 source page ',b'\xe2\x88\x92']:
             if marker not in dex:
                 raise ValueError('Required executable/fixture marker absent')
         for forbidden in [b'Landroid/webkit/WebView;',b'Lcom/supernote/',b'android.permission.WRITE',b'Runtime.exec']:
             if forbidden in dex:
                 raise ValueError('Unexpected browser/device/writer boundary')
     badging=subprocess.run([str(aapt),'dump','badging',str(apk)],check=True,capture_output=True,text=True).stdout
-    if "package: name='com.techrebbe.rtl.pdfiumprobe' versionCode='1' versionName='0.1.0-pdfium-exp1'" not in badging:
+    if f"package: name='{lock['diagnosticPackage']}' versionCode='{lock['diagnosticVersionCode']}' versionName='{lock['diagnosticVersionName']}'" not in badging:
         raise ValueError('Diagnostic package identity mismatch')
     if 'uses-permission:' in badging or 'uses-permission-sdk-' in badging:
         raise ValueError('Diagnostic must have zero Android permissions')

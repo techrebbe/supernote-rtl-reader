@@ -1,4 +1,4 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.techrebbe.rtl.pdfiumprobe" android:versionCode="1" android:versionName="0.1.0-pdfium-exp1">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.techrebbe.rtl.pdfiumprobe" android:versionCode="2" android:versionName="0.1.1-pdfium-exp2">
   <uses-sdk android:minSdkVersion="23" android:targetSdkVersion="35" />
   <!-- Embedded disposable fixture only. No storage, network or system permission. -->
   <application android:label="RTL PDFium Probe" android:allowBackup="false" android:debuggable="false" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:extractNativeLibs="true">

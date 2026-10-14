@@ -83,6 +83,8 @@ public final class ProbeActivity extends Activity {
         if(closed || session<=0 || surface.getWidth()<=0 || surface.getHeight()<=0)return;
         final long ticket=++generation,owner=session;final int index=page,viewW=surface.getWidth(),viewH=surface.getHeight();final double requestedScale=absoluteScale;
         final JSONObject prior=surface.model;final double priorX=-surface.x,priorY=-surface.y;
+        final long oldBitmapBytes=surface.bitmap==null?0:surface.bitmap.getAllocationByteCount();
+        final long maxHeap=Runtime.getRuntime().maxMemory();
         final double pdfToPixel=getResources().getDisplayMetrics().density*96.0/72.0;
         busy=true;surface.ready=false;surface.cancelContact();surface.clearSelection();status.setText("Rendering original page "+(index+1)+" · generation "+ticket);controls();
         EngineQueue.execute(()->{
@@ -99,8 +101,8 @@ public final class ProbeActivity extends Activity {
                     anchor=new double[]{destination.isNull("left")?location[0]:destination.getDouble("left"),destination.isNull("top")?location[1]:destination.getDouble("top")};
                 }
                 if(!Double.isFinite(scale)||scale<=0)throw new IllegalStateException("Invalid scale");
-                int w=Math.max(1,(int)Math.round(size[0]*scale)),h=Math.max(1,(int)Math.round(size[1]*scale));
-                if((long)w*h>4000000)throw new IllegalStateException("Zoom budget");
+                int[] dimensions=RenderBudget.dimensions(size[0],size[1],scale,maxHeap,oldBitmapBytes);
+                int w=dimensions[0],h=dimensions[1];
                 JSONObject model=new JSONObject(NativeCore.model(owner,index,w,h));
                 if(model.getLong("session")!=owner || model.getInt("pageIndex")!=index || model.getInt("renderWidth")!=w || model.getInt("renderHeight")!=h)throw new IllegalStateException("Native model identity mismatch");
                 if(closed || ticket!=generation || session!=owner)return;
@@ -117,7 +119,7 @@ public final class ProbeActivity extends Activity {
                         status.setText("READY · source page "+(index+1)+" / "+count+" · PDFium157.0.8100.0 · disposable only");controls();
                     }catch(Exception error){done.recycle();failure("Native model rejected");}
                 });
-            }catch(Exception|LinkageError error){if(bitmap!=null)bitmap.recycle();runOnUiThread(()->{if(!closed && ticket==generation && session==owner)failure("Rendering failed (use Fit or Close)");});}
+            }catch(Exception|LinkageError error){if(bitmap!=null)bitmap.recycle();final String reason=error instanceof RenderBudget.Exceeded?"Requested zoom exceeds the bounded bitmap budget (use Fit or Close)":"Rendering failed (use Fit or Close)";runOnUiThread(()->{if(!closed && ticket==generation && session==owner)failure(reason);});}
         });
     }
     private void follow(JSONObject action){

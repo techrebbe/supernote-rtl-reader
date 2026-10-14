@@ -1,5 +1,27 @@
 # RTL Reader hardware regression
 
+## 2026-10-14 — T018P-H exp1 direct link PASS / namedXYZ FAIL / cleanup PASS
+
+Reservation6172548164, exact reviewed sourcee87d1c4/0.1.0-pdfium-exp1/code1,
+separate diagnosticAPKc96222a7…da7742. USB SN078C10015092/3.30.45/API30/UID2000/
+ARM64+32/77% charging/safe Inbox FileManager. Installed public APK/hash/signer
+exact, no RTL Reader replacement. Native PDFium PAGE1 pixels/known English+Hebrew
+PASS; direct link->originalPAGE2/CropBox90deg PASS; Link-back PAGE1 byte-identical
+SHA59232480bf80915024a264df392327ddb8dd6dcf4486453e562290fc8be7385c.
+NamedPAGE3XYZ1.25 produced visible rendering STOP: FAIL. Hard stop applied,
+no Fit/retry, later bookmark/same-page/text/zoom/pan/rotation NOTPERFORMED.
+Source-derived replay at300dpi gives1913x2475=4734675 pixels > prior4M cap;
+not an emitted exception trace. Control punctuation mojibake also observed.
+
+Normal own Close/expected path/hash/diagnostic-only uninstall/absence PASS,
+prior Inbox restored. Public PluginHost f60ce483…d2aad and Documentdd77ff2c…6f986
+hashes/serial/fw/ordinaryUID/rotation accelerometer1,user_rotation2 unchanged.
+No originals/mark/privatepath/stock restart/root/firmware/pen or remote scratch.
+RELEASED6172821405. Raw evidence retained locally, no upload. Native engine can
+run here; no overall interactive/RTL/BT/Hebrew copy/performance PASS inferred.
+Continue bounded source budget/encoding correction, preserve failed candidate;
+new exp2 requires exact review/build/package approval/reservation. Timers PAUSED.
+
 ## 2026-10-14 — T018P-H approved, connection blocked / NOTPERFORMED
 
 User explicitly approved22 reviewed authored files/issue23 summary and separate

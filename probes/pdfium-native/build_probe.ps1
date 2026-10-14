@@ -51,12 +51,12 @@ foreach($abi in @(@{name='armeabi-v7a';target='armv7a-linux-androideabi23';vendo
     Copy-Item -LiteralPath (Join-Path $vendor 'lib/libpdfium.so') -Destination (Join-Path $target 'libpdfium.so')
 }
 $env:JAVA_HOME=$JavaHome;$env:PATH=(Join-Path $JavaHome 'bin')+';'+$env:PATH
-& (Join-Path $JavaHome 'bin\javac.exe') -source 8 -target 8 -Xlint:all -classpath $platform -d $classes (Join-Path $source 'NativeCore.java') (Join-Path $source 'ProbeActivity.java') (Join-Path $source 'Interaction.java') (Join-Path $source 'EngineQueue.java')
+& (Join-Path $JavaHome 'bin\javac.exe') -encoding UTF-8 -source 8 -target 8 -Xlint:all -classpath $platform -d $classes (Join-Path $source 'NativeCore.java') (Join-Path $source 'ProbeActivity.java') (Join-Path $source 'Interaction.java') (Join-Path $source 'EngineQueue.java') (Join-Path $source 'RenderBudget.java')
 if($LASTEXITCODE -ne 0){throw 'Java compile failed'}
 $compiled=@(Get-ChildItem -LiteralPath $classes -Filter '*.class' -Recurse | ForEach-Object FullName)
 & (Join-Path $tools 'd8.bat') --lib $platform --min-api 23 --output $dex $compiled
 if($LASTEXITCODE -ne 0){throw 'DEX compile failed'}
-$unsigned=Join-Path $out 'probe-unsigned.apk';$aligned=Join-Path $out 'probe-aligned.apk';$apk=Join-Path $out 'RTL-PDFium-Probe-exp1.apk'
+$unsigned=Join-Path $out 'probe-unsigned.apk';$aligned=Join-Path $out 'probe-aligned.apk';$apk=Join-Path $out 'RTL-PDFium-Probe-exp2.apk'
 & (Join-Path $tools 'aapt2.exe') link -o $unsigned --manifest (Join-Path $source 'AndroidManifest.xml') -I $platform -A $assets
 if($LASTEXITCODE -ne 0){throw 'Android package link failed'}
 & (Join-Path $JavaHome 'bin\jar.exe') uf $unsigned -C $out lib -C $out notices -C $dex classes.dex

@@ -1,5 +1,21 @@
 # STATE — RTL Reader (updated 2026-10-14 by codex)
 
+## Current phase — approved isolated PDFium prototype
+
+User approved T018P native PDFium prototype; task T-018P-pdfium-prototype.md
+names exact allowed paths/earliest safe gate. Production/current reader untouched.
+Pin publisher bblanchon/pdfium-binaries chromium/8100 immutable2026-10-12 release,
+Androidarm/arm64+Windows; authenticate exact hashes/attestation before execution.
+Source-only: no Nomad access/install, root, browser update, original PDF/mark or
+new writer. Reuse generated disposable fixture and existing navigation lessons.
+Actual pinned Windows public API7 tests/all4 renders PASS; Android ARM32/64 native
+and actual Java/DEX/package compile PASS, separate permission-free diagnostic
+UNINSTALLED. Six independent P2 findings batch-corrected, five focused regressions
+and16 actual-Java helper assertions PASS. Correction review and exact clean-head
+reproducible package still pending; Android runtime/performance UNVERIFIED.
+T018P-H defines smallest bounded next device question, NOT AUTHORIZED/NOT RUN.
+Saved ink PARKED/timers PAUSED/no merge. Previous decision requirement fulfilled.
+
 ## Current checkpoint — Wi-Fi PASS; interactive WebView prerequisite FAIL
 
 T018C approved/free USB session reservation6161740390, source6ca9a185.
@@ -18,7 +34,7 @@ Only Wi-Fi enabled as requested. Local metadata retained; RELEASED6161799646.
 Source-only comparison COMPLETE: tasks/T-018D-engine-decision.md recommends
 assessing bundled PDFium without shared system changes; native ABI/build and
 selection fidelity unverified, MuPDF license/system-WebView alternatives explicit.
-User engine-path decision required before implementation or browser update.
+User approved isolated T018P prototype; browser update remains unauthorized.
 No silent old-engine downgrade or
 system WebView replacement, no ink investigation. T-018C has exact evidence.
 Timers paused; no merge/finalization. Prior desktop proof preserved/unshipped.

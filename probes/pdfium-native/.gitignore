@@ -1,0 +1,7 @@
+vendor/
+generated/
+output/
+tmp/
+build/
+.gradle/
+__pycache__/

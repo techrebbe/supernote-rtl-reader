@@ -1,0 +1,27 @@
+{
+  "publisher": "bblanchon/pdfium-binaries",
+  "upstream": "https://pdfium.googlesource.com/pdfium/",
+  "publisherIsUpstream": false,
+  "tag": "chromium/8100",
+  "releaseId": 410971140,
+  "publisherCommit": "5b4d6b2ede1c1b0e17f5dc7b996c42d68d534ca8",
+  "signerWorkflow": "bblanchon/pdfium-binaries/.github/workflows/build-all.yml",
+  "publishedAt": "2026-10-12T20:25:13Z",
+  "immutableRelease": true,
+  "v8": false,
+  "xfa": false,
+  "productionDependency": false,
+  "diagnosticPackage": "com.techrebbe.rtl.pdfiumprobe",
+  "diagnosticSignerSha256": "a5a8551131de84d41660a3cf22d224f320f7a2f05a380282f76f6fe731807c67",
+  "extractedBinaries": {
+    "win-x64/bin/pdfium.dll": "ae913f407e8d3f5cdbf08a9869564d647b13e132e01eb376c0a5a33b7a227a45",
+    "android-arm/lib/libpdfium.so": "b763c1240904dd55b9b3fb40addc720d3d4540a0619665c9384cf6a5a0ea5f0f",
+    "android-arm64/lib/libpdfium.so": "e6b7257b3905152dab64c79f7a4a570693e11ccb740e92e4d3b89c28df6fcbbb"
+  },
+  "assets": {
+    "pdfium-win-x64.tgz": {"sha256": "51621bcc1d9be9ea448f4b84b0516862b928e3968d3fca899af1a6d6e2848d6d", "size": 3875218},
+    "pdfium-android-arm.tgz": {"sha256": "876a8c44bb8d10b19ce816af11f1c527f101c4f714ef5670d885457b451846bb", "size": 2857233},
+    "pdfium-android-arm64.tgz": {"sha256": "e9bab2929443d3d881166af9ec1d191c76ecdd37effb07a58743a7d7b507e149", "size": 3437225},
+    "pdfium-attestation.json": {"sha256": "2a1895a363aa7006e406190f93bd6b036c5f52bdf09d4664f93e4e5632fd1fcf", "size": 18408}
+  }
+}

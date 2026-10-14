@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "role": "read-only-original-pdf",
+  "dependencyLock": "probes/pdfium-native/pdfium.lock.json",
+  "publisher": "bblanchon/pdfium-binaries",
+  "tag": "chromium/8100",
+  "v8": false,
+  "xfa": false,
+  "wrapper": "librtlpdfiumreader.so",
+  "package": "com.supernotertlreader",
+  "input": "immutable-bounded-snapshot",
+  "savesPdfOrAnnotations": false,
+  "noticeInventorySha256": "6228ca217028fc3db30f7ec55d97a7865b86e4920e569801a13e4d341e0639c0",
+  "noticeCount": 21
+}

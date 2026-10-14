@@ -1044,7 +1044,9 @@ def check(repo_root: Path) -> None:
             # T017S2 candidate marker plus shared Close SDK navigation.
             # T017S3 runtime identity only; supported handoff unchanged.
             # T017S4 runtime identity only; no SDK handoff change.
-            "e3cf06fec67151319075213c7e506a9d13eb2544006b89f0d58e42ed5b3b1081",
+            # T018I changes only the canonical runtime marker to the code60
+            # PDFium alpha; generated read-only drain is reviewed separately.
+            "448e250b0a998c174604ec09bffea74f15b37b08129cb6a289aae2a2164f64cd",
             "Edit/Return activation and close authority",
         ),
         (
@@ -1061,14 +1063,18 @@ def check(repo_root: Path) -> None:
             # T017S2 candidate label plus READ and SDK handoff tests.
             # T017S3 includes the numeric-observation suite and candidate label.
             # T017S4 changes candidate label only; existing suite includes new cases.
-            "aba5fd9b8823edcec1f1d793ebe2cb048a43af8a52862c348cd99e0a440b9a40",
+            # T018I candidate artifact label and pinned NDK for the plugin job;
+            # companion source, signing and verification steps are unchanged.
+            "5082beb793573d66ee32c6d0b1a55d7a5201db3fc49acad28a93b2b89112e4ea",
             "Native Spread companion-build workflow",
         ),
         (
             plugin_build_path,
             # T017S2 ships READ and shared SDK handoff dependencies.
             # T017S3 copies the observer; SDK graph/native assembly unchanged.
-            "b8cd23618be87b2a01790bdeb69b40d0c185ff85a7315ed9ee2b9c441ee73c7e",
+            # T018I adds read-only PDFium UI/native assembly and exact public
+            # dependency fetch; existing SDK graph/signing/legacy paths retained.
+            "62ccf6dda0d9ab5f7132d3e0375465d8fef6e18ba479a7ee8ab08aa941e31dcf",
             "native plugin build entrypoint",
         ),
         (
@@ -1078,7 +1084,9 @@ def check(repo_root: Path) -> None:
         ),
         (
             package_verifier_path,
-            "4d44688a876ebac736b6d80eaf40b97c181e3b6c2379da81fa8b1564585c7df0",
+            # T018I adds mandatory full PDFium class/source/payload receipt
+            # checks; original package/DEX/signer/tool failures remain enforced.
+            "c659893cf65a96db0f324623eaf1fe3d1144fa7ad7446174bbb3c2401f3540e6",
             "finished native plugin package verifier",
         ),
         (

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_ROOT="$(mktemp -d)"
@@ -60,6 +61,8 @@ cp "$ROOT/overlay/ReaderKeyView.js" "$PROJECT/ReaderKeyView.js"
 cp "$ROOT/overlay/pageTurnerKeys.js" "$PROJECT/pageTurnerKeys.js"
 cp "$ROOT/overlay/pageTurnerTransport.js" "$PROJECT/pageTurnerTransport.js"
 cp "$ROOT/overlay/readerKeySession.js" "$PROJECT/readerKeySession.js"
+cp "$ROOT/overlay/interactivePdf.js" "$PROJECT/interactivePdf.js"
+cp "$ROOT/overlay/InteractivePdfReader.js" "$PROJECT/InteractivePdfReader.js"
 cp "$ROOT/overlay/app.json" "$PROJECT/app.json"
 cp "$ROOT/PluginConfig.json" "$PROJECT/PluginConfig.json"
 
@@ -85,6 +88,20 @@ PY
 "${PYTHON_CMD[@]}" "$ROOT/scripts/install_native.py" "$PROJECT" "$ROOT"
 "${PYTHON_CMD[@]}" "$ROOT/scripts/patch_transient_detach.py" "$PROJECT"
 "${PYTHON_CMD[@]}" "$ROOT/scripts/patch_initial_layout.py" "$PROJECT/App.js"
+"${PYTHON_CMD[@]}" "$ROOT/scripts/patch_pdfium_reader.py" "$PROJECT/App.js" "$PROJECT/index.js"
+if [[ -z "${RTL_PDFIUM_ENGINE_ROOT:-}" ]]; then
+  # Public, exactly pinned binaries/provenance only. No browser/system update.
+  PDFIUM_ENGINE_ROOT="$WORK_ROOT/pdfium-engine"
+  if command -v pwsh >/dev/null 2>&1; then PDFIUM_PS=(pwsh -NoProfile -File)
+  elif command -v powershell.exe >/dev/null 2>&1; then PDFIUM_PS=(powershell.exe -NoProfile -File)
+  else echo "PowerShell or an authenticated RTL_PDFIUM_ENGINE_ROOT is required." >&2; exit 1; fi
+  "${PDFIUM_PS[@]}" "$ROOT/probes/pdfium-native/fetch_engine.ps1" \
+    -OutputDirectory "$PDFIUM_ENGINE_ROOT" -GitHubCli "$(command -v gh)"
+  if command -v cygpath >/dev/null 2>&1; then
+    export RTL_PDFIUM_ENGINE_ROOT="$(cygpath -w "$PDFIUM_ENGINE_ROOT")"
+  else export RTL_PDFIUM_ENGINE_ROOT="$PDFIUM_ENGINE_ROOT"; fi
+fi
+"${PYTHON_CMD[@]}" "$ROOT/scripts/build_pdfium_reader.py" "$PROJECT" "$ROOT"
 "${PYTHON_CMD[@]}" "$ROOT/scripts/patch_plugin_packager.py" "$PROJECT/buildPlugin.sh"
 
 mkdir -p "$PROJECT/assets"

@@ -135,7 +135,8 @@ def main() -> None:
     )
     require(
         plugin_config,
-        ['"versionCode": "59"', '"versionName": "0.4.24-sdk-exp4"'],
+        # T018I names the new read-only PDFium alpha, not a writer/contract change.
+        ['"versionCode": "60"', '"versionName": "0.4.25-pdfium-exp1"'],
         "plugin version",
     )
     require(
@@ -161,7 +162,7 @@ def main() -> None:
         not in root_build
     ):
         fail("plugin build does not execute the exclusive v2 invariant gate")
-    if "RTL_READER_OPEN v0.4.24-sdk-exp4-native-reader-v2" not in index:
+    if "RTL_READER_OPEN v0.4.25-pdfium-exp1-native-reader-v2" not in index:
         fail("runtime marker does not identify the v2 plugin build")
     require(
         guidance,
@@ -3440,7 +3441,7 @@ def main() -> None:
             "python3 scripts/test_build_provenance.py .",
             "out/build-provenance/SupernoteRtlReader.bundle",
             "out/build-provenance/app.npk",
-            "supernote-rtl-reader-v0.4.24-sdk-exp4-native-reader-v2",
+            "supernote-rtl-reader-v0.4.25-pdfium-exp1-native-reader-v2",
             "native-spread-upgrade-artifact:",
             "github.event_name == 'workflow_dispatch'",
             "github.actor == github.repository_owner",
@@ -3493,7 +3494,16 @@ def main() -> None:
             "Native Reader v2 CI does not run the cross-layer handshake, "
             "lifecycle, packaging, and trace safety invariants"
         )
-    if "ndk;" in workflow or "-AndroidNdk" in workflow:
+    # T018I needs one pinned compiler for its read-only PDFium plugin, NOT the
+    # retired companion hook. Remove only that exact step in the plugin job;
+    # any other NDK provisioning/legacy AndroidNdk argument remains forbidden.
+    pdfium_ndk = ("      - name: Install pinned PDFium compiler NDK\n"
+                  "        run: sdkmanager 'ndk;27.0.12077973'\n")
+    plugin_job = workflow.split("\n  build:", 1)[-1]
+    if plugin_job.count(pdfium_ndk) != 1 or workflow.count(pdfium_ndk) != 1:
+        fail("read-only PDFium compiler step must exist exactly once in the plugin job")
+    without_pdfium_ndk = workflow.replace(pdfium_ndk, "", 1)
+    if "ndk;" in without_pdfium_ndk or "-AndroidNdk" in workflow:
         fail("release CI still provisions the retired legacy native hook toolchain")
     stable_job = workflow[workflow.find("native-spread-upgrade-artifact:"):]
     stable_job = stable_job.split("\n  virtual-spread-tests:", 1)[0]

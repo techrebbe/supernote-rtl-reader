@@ -1,0 +1,15 @@
+package __PACKAGE__;
+
+final class PdfiumReaderCore {
+    static { System.loadLibrary("pdfium"); System.loadLibrary("rtlpdfiumreader"); }
+    static native long open(byte[] immutableSource);
+    static native String libraryPath();
+    static native int count(long session);
+    static native String outline(long session);
+    static native double[] size(long session, int page);
+    static native double[] point(long session, int page, int w, int h, double x, double y, boolean inverse);
+    static native String model(long session, int page, int w, int h);
+    static native int[] render(long session, int page, int w, int h);
+    static native void close(long session);
+    private PdfiumReaderCore() {}
+}

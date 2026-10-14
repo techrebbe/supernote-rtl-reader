@@ -452,6 +452,19 @@ def verify(
             ):
                 fail("embedded app.npk does not match the independently named build output")
             native_apk_validator(native_apk)
+            if source_config.get('pluginKey') == 'SupernoteRtlReader':
+                if not (repo_root / 'provenance/pdfium-reader.json').is_file():
+                    fail('Required PDFium production policy is missing')
+                from verify_pdfium_reader import verify as verify_pdfium
+                try:
+                    with zipfile.ZipFile(io.BytesIO(native_apk)) as embedded:
+                        classes = set()
+                        for name in embedded.namelist():
+                            if re.fullmatch(r'classes(?:[2-9]|[1-9][0-9]+)?\.dex', name):
+                                classes.update(verify_dex(embedded.read(name), name))
+                        verify_pdfium(embedded, repo_root, classes)
+                except (ValueError, KeyError, json.JSONDecodeError) as error:
+                    fail('PDFium production payload rejected: ' + str(error))
     except zipfile.BadZipFile as error:
         fail(f"plugin package is not a valid ZIP archive: {error}")
 

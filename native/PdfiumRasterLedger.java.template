@@ -1,0 +1,42 @@
+package __PACKAGE__;
+
+/** Shared across both visible views and retired generations, not a leak proof. */
+final class PdfiumRasterLedger {
+    private long used;
+    private final long limit;
+    PdfiumRasterLedger(long maxHeap) {
+        if (maxHeap <= 0) throw new IllegalArgumentException("Invalid heap authority");
+        limit = maxHeap / 2;
+    }
+    synchronized Lease reserve(long pixels, long sourceBytes) {
+        if (pixels <= 0 || pixels > 6000000 || sourceBytes < 0 || sourceBytes > 64L*1024*1024)
+            throw new IllegalArgumentException("Invalid raster authority");
+        long charge = pixels*8 + 2L*1024*1024;
+        // Source is native-owned after open; count it conservatively alongside
+        // every retained/pending Java bitmap. Engine native allocations still
+        // have the independently enforced 6M raster cap, not a total-memory proof.
+        if (charge > limit - sourceBytes - used)
+            throw new IllegalStateException("Zoom exceeds the shared raster budget; use Fit");
+        used += charge;
+        return new Lease(this, charge, pixels*4);
+    }
+    synchronized long used() { return used; }
+    static final class Lease {
+        private final PdfiumRasterLedger ledger;
+        private long charge;
+        private final long retained;
+        private boolean installed;
+        Lease(PdfiumRasterLedger owner, long bytes, long bitmap) {
+            ledger=owner; charge=bytes; retained=bitmap;
+        }
+        void installed() {
+            synchronized(ledger) {
+                if (charge==0 || installed) return;
+                ledger.used -= charge-retained; charge=retained; installed=true;
+            }
+        }
+        void release() {
+            synchronized(ledger) { ledger.used -= charge; charge=0; }
+        }
+    }
+}

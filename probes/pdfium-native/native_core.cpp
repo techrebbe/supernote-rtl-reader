@@ -8,6 +8,7 @@
 #include <cctype>
 #include <cstdint>
 #include <mutex>
+#include <locale>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -45,7 +46,7 @@ struct Bitmap {
 };
 void close(){
   if(document)FPDF_CloseDocument(document);
-  document=nullptr;pageCount=0;currentSession=0;bytes.clear();
+  document=nullptr;pageCount=0;currentSession=0;std::vector<unsigned char>().swap(bytes);
   if(initialized)FPDF_DestroyLibrary();initialized=false;
 }
 void exception(JNIEnv* env,const char* message){
@@ -53,7 +54,7 @@ void exception(JNIEnv* env,const char* message){
 }
 std::string number(double value){
   require(std::isfinite(value) && std::abs(value)<=1000000,"Native numeric bound");
-  std::ostringstream out;out.precision(12);out<<value;return out.str();
+  std::ostringstream out;out.imbue(std::locale::classic());out.precision(12);out<<value;return out.str();
 }
 std::string unicode(uint32_t value){
   require(value<=0x10ffff,"Invalid Unicode value");
@@ -139,10 +140,21 @@ extern "C" JNIEXPORT jlong JNICALL Java_com_techrebbe_rtl_pdfiumprobe_NativeCore
   if(document || initialized){exception(env,"Document already open");return 0;}
   try{
     require(input,"Missing fixture bytes");require(nextSession<INT64_MAX,"Session generation exhausted");auto len=env->GetArrayLength(input);
-    require(len>0 && len<1000000,"Only bounded embedded fixture bytes allowed");bytes.resize(len);
+#ifdef RTL_PDFIUM_READER
+    require(len>0 && len<=64*1024*1024,"Original PDF exceeds the bounded reader input");
+#else
+    require(len>0 && len<1000000,"Only bounded embedded fixture bytes allowed");
+#endif
+    bytes.resize(len);
     env->GetByteArrayRegion(input,0,len,reinterpret_cast<jbyte*>(bytes.data()));if(env->ExceptionCheck()){bytes.clear();return 0;}
     FPDF_InitLibrary();initialized=true;document=FPDF_LoadMemDocument64(bytes.data(),bytes.size(),nullptr);
-    require(document,"Fixture load failed");pageCount=FPDF_GetPageCount(document);require(pageCount==4,"Expected exact four-page disposable fixture");currentSession=++nextSession;return currentSession;
+    require(document,"PDF load failed");pageCount=FPDF_GetPageCount(document);
+#ifdef RTL_PDFIUM_READER
+    require(pageCount>0 && pageCount<=10000,"Original page-count bound");
+#else
+    require(pageCount==4,"Expected exact four-page disposable fixture");
+#endif
+    currentSession=++nextSession;return currentSession;
   }catch(const std::exception& error){close();exception(env,error.what());return 0;}
 }
 extern "C" JNIEXPORT void JNICALL Java_com_techrebbe_rtl_pdfiumprobe_NativeCore_close(JNIEnv*,jclass,jlong token){std::lock_guard<std::mutex> guard(mutex);if(token>0 && static_cast<uint64_t>(token)==currentSession)close();}

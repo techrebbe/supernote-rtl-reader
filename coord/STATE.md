@@ -1,6 +1,24 @@
 # STATE — RTL Reader (updated 2026-10-14 by codex)
 
-## Current phase — PDFium device proof complete; integration proposal next
+## Current phase — approved PDFium integration (T018I)
+
+Source implementation now wired through generated App/native assembly as
+0.4.25-pdfium-exp1/code60. Focused16 JS+3 Python/actualJava8 assertions, retained
+probe7/actualJava30+two mutants, actual generated JSX and ARM32/64 JNI/Android35/
+RN0.79.2 API compile PASS; existing core85407/all271mutations and final invariants
+PASS, plus4 real production-payload omission/drift tests. Explicit JDK17 used
+after cancelling a stale Oracle launcher. Independent review and
+normal exact clean-archive signed package gates pending; no device/installation
+or shipping claim. Exact evidence in reviews/T-018I-codex.md. Continue source
+review/build immediately; no routine approval/PM wait, ink PARKED/timers PAUSED.
+
+User2026-10-14 approved integrating the tested engine while retaining portrait,
+RTL spreads, Bluetooth and supported Edit/Return. Owned baseline969a471; scoped
+source/build/review work in tasks/T-018I-pdfium-integration.md. No new device use,
+install authority, timer resume, parked-ink work or merge. Implement/review the
+smallest real integrated boundary, then request exact-package disposable gate.
+
+## Completed checkpoint — isolated PDFium device proof
 
 Exact exp2 executable 97de72f/code2/APK 8eaaa7b9…cd69615 installed/tested/removed
 under user approval and fresh reservation6173328047. User-requested Wi-Fi-first

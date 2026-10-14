@@ -1,0 +1,120 @@
+package __PACKAGE__;
+
+import android.system.Os;
+import android.system.OsConstants;
+import android.system.StructStat;
+import java.io.File;
+import java.io.FileDescriptor;
+import java.io.FileInputStream;
+import java.security.MessageDigest;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/** One process FIFO and exact owner; closing an old mount cannot close a new one. */
+final class PdfiumSession {
+    static final ExecutorService QUEUE=Executors.newSingleThreadExecutor();
+    static final PdfiumRasterLedger RASTERS=new PdfiumRasterLedger(Runtime.getRuntime().maxMemory());
+    private static volatile PdfiumSession active;
+    final long token, inputBytes;
+    final String id, path, canonicalPath, sha256;
+    final int pageCount;
+    private volatile boolean closed;
+    private PdfiumSession(long value, String original, String canonical, String digest, int pages, long bytes) {
+        token=value; id=Long.toString(value); path=original; canonicalPath=canonical;
+        sha256=digest; pageCount=pages; inputBytes=bytes;
+    }
+    static PdfiumSession require(String id) {
+        PdfiumSession value=active;
+        if (value==null || value.closed || !value.id.equals(id))
+            throw new IllegalStateException("Closed or stale PDF session");
+        return value;
+    }
+    boolean current() { return !closed && active==this; }
+    // QUEUE only. Caller has already obtained supported SDK READ and exact path.
+    static PdfiumSession open(String path, int expectedPages) throws Exception {
+        if (active!=null) throw new IllegalStateException("Previous PDF session has not drained");
+        verifyEngine();
+        Snapshot snapshot=read(path);
+        long token=0;
+        try {
+            token=PdfiumReaderCore.open(snapshot.bytes);
+            if (token<=0 || token>9007199254740991L) throw new IllegalStateException("Session identity bound");
+            int pages=PdfiumReaderCore.count(token);
+            if (pages!=expectedPages) throw new IllegalStateException("SDK/PDF page-count mismatch");
+            PdfiumSession value=new PdfiumSession(token,path,snapshot.canonical,snapshot.sha,pages,snapshot.bytes.length);
+            active=value; return value;
+        } catch(Exception|LinkageError error) { if(token>0)PdfiumReaderCore.close(token); throw error; }
+    }
+    // Close admission synchronously, native drain on the common FIFO.
+    void fence() { closed=true; }
+    void verifySource() throws Exception {
+        Snapshot observed=read(path);
+        if(!canonicalPath.equals(observed.canonical) || !sha256.equals(observed.sha))
+            throw new IllegalStateException("Original PDF was replaced; close and reopen before editing");
+    }
+    void close() {
+        closed=true;
+        if(active==this) { PdfiumReaderCore.close(token); active=null; }
+    }
+    private static final class Snapshot {
+        final byte[] bytes; final String sha,canonical;
+        Snapshot(byte[] data,String hash,String name){bytes=data;sha=hash;canonical=name;}
+    }
+    private static boolean same(StructStat a,StructStat b) {
+        return a.st_dev==b.st_dev && a.st_ino==b.st_ino && a.st_size==b.st_size &&
+            a.st_mtime==b.st_mtime && a.st_ctime==b.st_ctime;
+    }
+    private static void verifyEngine() throws Exception {
+        String path=PdfiumReaderCore.libraryPath();
+        if(path==null || !path.startsWith("/"))throw new IllegalStateException("PDFium provider cannot be verified");
+        MessageDigest hash=MessageDigest.getInstance("SHA-256");
+        int embedded=path.indexOf("!/");
+        if(embedded>=0){
+            String apk=path.substring(0,embedded),entry=path.substring(embedded+2);
+            if(!(apk.endsWith(".apk")||apk.endsWith(".npk")) ||
+                !(entry.equals("lib/arm64-v8a/libpdfium.so")||entry.equals("lib/armeabi-v7a/libpdfium.so")))
+                throw new IllegalStateException("Unknown embedded PDFium provider");
+            try(java.util.zip.ZipFile archive=new java.util.zip.ZipFile(apk)){
+                java.util.zip.ZipEntry file=archive.getEntry(entry);
+                if(file==null||file.getSize()<=0||file.getSize()>20000000)throw new IllegalStateException("Engine entry bound");
+                try(java.io.InputStream stream=archive.getInputStream(file)){hashEngine(stream,hash);}
+            }
+        }else{
+            if(!path.endsWith(".so"))throw new IllegalStateException("Unknown PDFium provider");
+            try(FileInputStream stream=new FileInputStream(path)){hashEngine(stream,hash);}
+        }
+        StringBuilder hex=new StringBuilder(64);
+        for(byte b:hash.digest())hex.append(String.format(java.util.Locale.ROOT,"%02x",b&255));
+        if(!hex.toString().equals("b763c1240904dd55b9b3fb40addc720d3d4540a0619665c9384cf6a5a0ea5f0f") &&
+            !hex.toString().equals("e6b7257b3905152dab64c79f7a4a570693e11ccb740e92e4d3b89c28df6fcbbb"))
+            throw new IllegalStateException("Resolved PDFium provider is not the pinned engine");
+    }
+    private static void hashEngine(java.io.InputStream stream,MessageDigest hash)throws Exception{
+        byte[] block=new byte[8192];int n;long size=0;
+        while((n=stream.read(block))!=-1){size+=n;if(size>20000000)throw new IllegalStateException("Engine byte bound");hash.update(block,0,n);}
+        if(size==0)throw new IllegalStateException("Empty engine provider");
+    }
+    private static Snapshot read(String path) throws Exception {
+        if(path==null || !path.startsWith("/") || !path.toLowerCase(java.util.Locale.ROOT).endsWith(".pdf"))
+            throw new IllegalArgumentException("Only an authorized original PDF path is accepted");
+        String canonical=new File(path).getCanonicalPath();
+        FileDescriptor descriptor=Os.open(canonical,OsConstants.O_RDONLY|OsConstants.O_CLOEXEC|OsConstants.O_NOFOLLOW,0);
+        // FileInputStream owns the descriptor exactly once, including failures.
+        try(FileInputStream input=new FileInputStream(descriptor)) {
+            StructStat before=Os.fstat(descriptor);
+            long limit=Math.min(64L*1024*1024,Runtime.getRuntime().maxMemory()/8);
+            if(!OsConstants.S_ISREG(before.st_mode) || before.st_size<=0 || before.st_size>limit)
+                throw new IllegalArgumentException("PDF exceeds the bounded input budget or is not a regular file");
+            byte[] bytes=new byte[(int)before.st_size]; int offset=0;
+            while(offset<bytes.length) { int n=input.read(bytes,offset,bytes.length-offset);
+                if(n<=0)throw new IllegalStateException("PDF changed during read");offset+=n; }
+            if(input.read()!=-1 || !same(before,Os.fstat(descriptor)) ||
+                !same(before,Os.stat(canonical)) || !canonical.equals(new File(path).getCanonicalPath()))
+                throw new IllegalStateException("PDF identity changed during read");
+            byte[] digest=MessageDigest.getInstance("SHA-256").digest(bytes);
+            StringBuilder hex=new StringBuilder(64);
+            for(byte b:digest)hex.append(String.format(java.util.Locale.ROOT,"%02x",b&255));
+            return new Snapshot(bytes,hex.toString(),canonical);
+        }
+    }
+}

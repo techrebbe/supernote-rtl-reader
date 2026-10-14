@@ -1,0 +1,236 @@
+package __PACKAGE__;
+
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.view.MotionEvent;
+import android.view.View;
+import android.os.SystemClock;
+import com.facebook.react.bridge.Arguments;
+import com.facebook.react.bridge.WritableMap;
+import com.facebook.react.uimanager.ThemedReactContext;
+import com.facebook.react.uimanager.events.RCTEventEmitter;
+import com.facebook.react.bridge.UiThreadUtil;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+/** Read-only view. Its one frame owns pixels, crop model and touch transform. */
+public final class PdfiumPageView extends View {
+    String pending;
+    private String spec;
+    private JSONObject request;
+    private volatile long revision;
+    private volatile boolean disposed;
+    private boolean ready,pressed,dragged;
+    private Bitmap bitmap;
+    private JSONObject model;
+    private PdfiumRasterLedger.Lease lease;
+    private float x,y,lastX,lastY,downX,downY;
+    private int start=-1,end=-1;
+    private String selected="";
+    private final Paint paint=new Paint();
+    public PdfiumPageView(ThemedReactContext context){super(context);setFocusable(false);}
+    void commit(){
+        if(disposed || java.util.Objects.equals(pending,spec))return;
+        if(pending==null || pending.equals("null")){spec=pending;request=null;++revision;ready=false;pressed=false;return;}
+        // An input fence does not change pixels/model authority. Do not rerender
+        // or restamp a delayed packet when only the live input flag changes.
+        try{JSONObject next=new JSONObject(pending);
+            if(request!=null && next.optString("requestId").equals(request.optString("requestId")) &&
+                next.optString("contentMode").equals(request.optString("contentMode"))){
+                JSONObject before=new JSONObject(request.toString()),after=new JSONObject(next.toString());
+                before.remove("inputBlocked");after.remove("inputBlocked");
+                if(before.toString().equals(after.toString())){request=next;spec=pending;pressed=false;return;}
+            }
+        }catch(Exception ignored){/* Full request validation below. */}
+        spec=pending;ready=false;pressed=false;start=end=-1;selected="";++revision;
+        try{
+            if(spec==null || spec.length()>16384)throw new IllegalArgumentException("Missing bounded viewport request");
+            request=new JSONObject(spec);
+            String id=request.getString("sessionId"),stamp=request.getString("requestId");
+            int page=request.getInt("pageIndex");
+            if(id.length()>16 || !id.matches("[1-9][0-9]*") || stamp.length()>1024 || stamp.isEmpty() ||
+                page<0 || page>=10000 || !request.has("blocked") ||
+                !java.util.Arrays.asList("read","text","pan").contains(request.getString("mode")))
+                throw new IllegalArgumentException("Invalid viewport identity");
+            if(request.getBoolean("blocked")){invalidate();return;}
+            schedule();
+        }catch(Exception error){fail(revision,"Viewport request rejected");}
+    }
+    private boolean current(long ticket,String owner,String stamp){
+        return !disposed && revision==ticket && request!=null &&
+            owner.equals(request.optString("sessionId")) && stamp.equals(request.optString("requestId"));
+    }
+    private void schedule(){
+        if(disposed || request==null || request.optBoolean("blocked",true) || getWidth()<=0 || getHeight()<=0)return;
+        final JSONObject command=request;final long ticket=++revision,started=SystemClock.elapsedRealtime();
+        final String owner=command.optString("sessionId"),stamp=command.optString("requestId");
+        final int viewW=getWidth(),viewH=getHeight();
+        double viewportDensity=getResources().getDisplayMetrics().density;
+        if(Math.abs(viewW-Math.round(command.optDouble("width")*viewportDensity))>1 ||
+            Math.abs(viewH-Math.round(command.optDouble("height")*viewportDensity))>1)return;
+        ready=false;pressed=false;start=end=-1;
+        PdfiumSession.QUEUE.execute(()->{
+            Bitmap image=null;PdfiumRasterLedger.Lease allocation=null;
+            try{
+                PdfiumSession session=PdfiumSession.require(owner);
+                if(!current(ticket,owner,stamp))return;
+                int page=command.getInt("pageIndex");double[] size=PdfiumReaderCore.size(session.token,page);
+                double fit=Math.min((viewW-24)/size[0],(viewH-24)/size[1]);
+                if(command.optString("contentMode").equals("native_fill"))fit=Math.max(viewW/size[0],viewH/size[1]);
+                double scale=fit;
+                JSONObject pose=command.optJSONObject("pose");double[] anchor=null;
+                if(pose!=null){
+                    String kind=pose.getString("kind");
+                    if(kind.equals("scale"))scale=pose.getDouble("scale");
+                    else if(kind.equals("XYZ")){
+                        double z=pose.isNull("zoom")?0:pose.getDouble("zoom");
+                        double density=getResources().getDisplayMetrics().density*96.0/72.0;
+                        scale=z>0?z*density:pose.getDouble("fromScale");
+                        anchor=new double[]{pose.isNull("left")?pose.getDouble("fromLeft"):pose.getDouble("left"),
+                            pose.isNull("top")?pose.getDouble("fromTop"):pose.getDouble("top")};
+                    }else if(!kind.equals("Fit"))throw new IllegalArgumentException("Unsupported viewport pose");
+                }
+                int[] dimensions=RenderBudget.dimensions(size[0],size[1],scale,Runtime.getRuntime().maxMemory(),0);
+                int w=dimensions[0],h=dimensions[1];allocation=PdfiumSession.RASTERS.reserve((long)w*h,session.inputBytes);
+                JSONObject metadata=new JSONObject(PdfiumReaderCore.model(session.token,page,w,h));
+                if(metadata.getLong("session")!=session.token || metadata.getInt("pageIndex")!=page ||
+                    metadata.getInt("renderWidth")!=w || metadata.getInt("renderHeight")!=h)
+                    throw new IllegalStateException("Pixel/model identity mismatch");
+                if(!current(ticket,owner,stamp) || !session.current()){allocation.release();return;}
+                int[] pixels=PdfiumReaderCore.render(session.token,page,w,h);
+                if(pixels.length!=(long)w*h)throw new IllegalStateException("Pixel length mismatch");
+                image=Bitmap.createBitmap(pixels,w,h,Bitmap.Config.ARGB_8888);
+                final double[] mapped=anchor==null?null:PdfiumReaderCore.point(session.token,page,w,h,anchor[0],anchor[1],false);
+                final double[] sourceOrigin=PdfiumReaderCore.point(session.token,page,w,h,
+                    mapped==null?-(viewW-w)/2.0:mapped[0],mapped==null?-(viewH-h)/2.0:mapped[1],true);
+                final Bitmap done=image;final PdfiumRasterLedger.Lease owned=allocation;
+                dispatch(()->{
+                    if(!current(ticket,owner,stamp) || !session.current()){done.recycle();owned.release();return;}
+                    releaseFrame();bitmap=done;lease=owned;owned.installed();model=metadata;
+                    x=(viewW-w)/2f;y=(viewH-h)/2f;
+                    if(mapped!=null){x=-(float)mapped[0];y=-(float)mapped[1];}
+                    ready=true;invalidate();
+                    WritableMap event=packet("rendered");event.putString("filePath",session.path);
+                    event.putInt("pageCount",session.pageCount);event.putDouble("scale",w/size[0]);
+                    event.putDouble("fromLeft",sourceOrigin[0]);event.putDouble("fromTop",sourceOrigin[1]);
+                    event.putDouble("interactionMs",SystemClock.elapsedRealtime()-started);emit(event);
+                });
+            }catch(Exception|LinkageError error){
+                if(image!=null)image.recycle();if(allocation!=null)allocation.release();
+                dispatch(()->fail(ticket,"PDF page/zoom rejected: "+error.getMessage()));
+            }
+        });
+    }
+    private WritableMap packet(String kind){
+        WritableMap event=Arguments.createMap();event.putString("kind",kind);
+        if(request!=null){event.putString("sessionId",request.optString("sessionId"));
+            event.putString("requestId",request.optString("requestId"));event.putInt("pageIndex",request.optInt("pageIndex",-1));}
+        return event;
+    }
+    private void dispatch(Runnable action){UiThreadUtil.runOnUiThread(action);}
+    void copySelection(String stamp){
+        if(disposed || !ready || request==null || request.optBoolean("blocked",true) || request.optBoolean("inputBlocked",true) ||
+            !stamp.equals(request.optString("requestId")) || selected.isEmpty())return;
+        try{
+            PdfiumSession.require(request.getString("sessionId"));
+            ClipboardManager clipboard=(ClipboardManager)getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+            String label="RTL PDF "+request.getString("sessionId")+" "+stamp;
+            clipboard.setPrimaryClip(ClipData.newPlainText(label,selected));
+            ClipData observed=clipboard.getPrimaryClip();
+            boolean match=observed!=null && observed.getItemCount()==1 &&
+                label.contentEquals(observed.getDescription().getLabel()) &&
+                selected.contentEquals(observed.getItemAt(0).getText());
+            WritableMap result=packet("copy");result.putBoolean("verified",match);emit(result);
+        }catch(Exception error){fail(revision,"Could not copy selected PDF text");}
+    }
+    private void emit(WritableMap event){
+        if(!disposed && getId()!=NO_ID)((ThemedReactContext)getContext()).getJSModule(RCTEventEmitter.class).receiveEvent(getId(),"topPdfiumEvent",event);
+    }
+    private void fail(long ticket,String message){
+        if(disposed || revision!=ticket)return;ready=false;pressed=false;start=end=-1;selected="";
+        WritableMap event=packet("error");event.putString("message",message);emit(event);invalidate();
+    }
+    private void releaseFrame(){if(bitmap!=null){bitmap.recycle();bitmap=null;}if(lease!=null){lease.release();lease=null;}model=null;}
+    void dispose(){disposed=true;++revision;ready=false;pressed=false;releaseFrame();}
+    @Override protected void onSizeChanged(int w,int h,int oldW,int oldH){super.onSizeChanged(w,h,oldW,oldH);++revision;ready=false;pressed=false;}
+    @Override protected void onDetachedFromWindow(){++revision;ready=false;pressed=false;super.onDetachedFromWindow();}
+    @Override protected void onAttachedToWindow(){super.onAttachedToWindow();if(!disposed)schedule();}
+    @Override protected void onDraw(Canvas canvas){
+        canvas.drawColor(Color.LTGRAY);if(bitmap==null)return;
+        paint.setColor(Color.BLACK);canvas.drawBitmap(bitmap,x,y,paint);
+        if(start<0 || end<0 || model==null)return;
+        int clip=canvas.save();canvas.clipRect(x,y,x+bitmap.getWidth(),y+bitmap.getHeight());paint.setColor(0x604060e0);
+        try{JSONArray chars=model.getJSONArray("chars");for(int i=Math.min(start,end);i<=Math.max(start,end);i++){
+            JSONArray r=chars.getJSONObject(i).getJSONArray("rect");canvas.drawRect((float)r.getDouble(0)+x,(float)r.getDouble(1)+y,(float)r.getDouble(2)+x,(float)r.getDouble(3)+y,paint);
+        }}catch(Exception error){fail(revision,"PDF selection model rejected");}finally{canvas.restoreToCount(clip);}
+    }
+    private int charAt(float px,float py)throws Exception{
+        if(!Interaction.inside(px,py,bitmap.getWidth(),bitmap.getHeight()))return -1;
+        JSONArray chars=model.getJSONArray("chars");for(int i=0;i<chars.length();i++){
+            JSONArray r=chars.getJSONObject(i).getJSONArray("rect");if(px>=r.getDouble(0)&&px<=r.getDouble(2)&&py>=r.getDouble(1)&&py<=r.getDouble(3))return i;
+        }return -1;
+    }
+    @Override public boolean onTouchEvent(MotionEvent event){
+        if(disposed || !ready || request==null || request.optBoolean("blocked",true) || request.optBoolean("inputBlocked",true) || model==null || bitmap==null || event.getPointerCount()!=1){pressed=false;return true;}
+        try{PdfiumSession.require(request.getString("sessionId"));}catch(Exception error){ready=false;pressed=false;return true;}
+        float px=event.getX()-x,py=event.getY()-y;String mode=request.optString("mode");
+        try{
+            if(event.getActionMasked()==MotionEvent.ACTION_DOWN){pressed=true;dragged=false;downX=lastX=event.getX();downY=lastY=event.getY();
+                if(mode.equals("text")){start=end=charAt(px,py);invalidate();}return true;}
+            if(!pressed)return true;
+            if(event.getActionMasked()==MotionEvent.ACTION_MOVE){dragged=Interaction.dragged(dragged,downX,downY,event.getX(),event.getY());
+                if(mode.equals("text") && start>=0){int hit=charAt(px,py);if(hit>=0)end=hit;invalidate();}
+                else if(mode.equals("pan")){x+=event.getX()-lastX;y+=event.getY()-lastY;lastX=event.getX();lastY=event.getY();invalidate();}return true;}
+            if(event.getActionMasked()==MotionEvent.ACTION_UP){
+                dragged=Interaction.dragged(dragged,downX,downY,event.getX(),event.getY());
+                if(mode.equals("text") && start>=0 && end>=0){
+                    JSONArray chars=model.getJSONArray("chars");int[] starts=new int[chars.length()],ends=new int[chars.length()];String[] gaps=new String[chars.length()];
+                    for(int i=0;i<chars.length();i++){JSONObject ch=chars.getJSONObject(i);starts[i]=ch.getInt("textStart");ends[i]=ch.getInt("textEnd");gaps[i]=ch.getString("gapBefore");}
+                    selected=Interaction.copy(model.getString("text"),starts,ends,gaps,Math.min(start,end),Math.max(start,end));
+                    WritableMap result=packet("selection");result.putString("text",selected);emit(result);
+                }else if(mode.equals("pan")){sendAnchor();}
+                else if(mode.equals("read")){
+                    boolean link=false;
+                    if(!dragged && Interaction.inside(px,py,bitmap.getWidth(),bitmap.getHeight())){
+                        JSONArray links=model.getJSONArray("links");for(int i=0;i<links.length();i++){
+                            JSONObject item=links.getJSONObject(i);JSONArray r=item.getJSONArray("rect");
+                            if(px>=r.getDouble(0)&&px<=r.getDouble(2)&&py>=r.getDouble(1)&&py<=r.getDouble(3)){follow(item.getJSONObject("action"));link=true;break;}
+                        }
+                    }
+                    if(!link){WritableMap result=packet("gesture");result.putDouble("dx",event.getX()-downX);result.putDouble("dy",event.getY()-downY);result.putDouble("fraction",event.getX()/Math.max(1,getWidth()));emit(result);}
+                }
+                pressed=false;return true;
+            }
+            if(event.getActionMasked()==MotionEvent.ACTION_CANCEL){pressed=false;start=end=-1;invalidate();return true;}
+        }catch(Exception error){fail(revision,"PDF hit-test model rejected");}return true;
+    }
+    private void follow(JSONObject action)throws Exception{
+        final String owner=request.getString("sessionId"),stamp=request.getString("requestId");final long ticket=revision;
+        final JSONObject metadata=model;final float originX=-x,originY=-y;
+        PdfiumSession.QUEUE.execute(()->{
+            try{
+                PdfiumSession session=PdfiumSession.require(owner);
+                double[] point=PdfiumReaderCore.point(session.token,metadata.getInt("pageIndex"),metadata.getInt("renderWidth"),metadata.getInt("renderHeight"),originX,originY,true);
+                double scale=metadata.getInt("renderWidth")/metadata.getDouble("width");
+                dispatch(()->{if(!current(ticket,owner,stamp)||!ready||!session.current())return;
+                    WritableMap result=packet("link");result.putString("action",action.toString());result.putDouble("fromScale",scale);result.putDouble("fromLeft",point[0]);result.putDouble("fromTop",point[1]);emit(result);});
+            }catch(Exception|LinkageError error){dispatch(()->fail(ticket,"Link context rejected"));}
+        });
+    }
+    private void sendAnchor()throws Exception{
+        final String owner=request.getString("sessionId"),stamp=request.getString("requestId");final long ticket=revision;
+        final JSONObject metadata=model;final float originX=-x,originY=-y;
+        PdfiumSession.QUEUE.execute(()->{try{
+            PdfiumSession session=PdfiumSession.require(owner);
+            double[] point=PdfiumReaderCore.point(session.token,metadata.getInt("pageIndex"),metadata.getInt("renderWidth"),metadata.getInt("renderHeight"),originX,originY,true);
+            double scale=metadata.getInt("renderWidth")/metadata.getDouble("width");
+            dispatch(()->{if(!current(ticket,owner,stamp)||!ready||!session.current())return;
+                WritableMap result=packet("viewport");result.putDouble("scale",scale);result.putDouble("fromLeft",point[0]);result.putDouble("fromTop",point[1]);emit(result);});
+        }catch(Exception|LinkageError error){dispatch(()->fail(ticket,"Pan context rejected"));}});
+    }
+}

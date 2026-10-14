@@ -1,5 +1,19 @@
 # RTL Reader hardware regression
 
+## 2026-10-14 — T018P-H approved, connection blocked / NOTPERFORMED
+
+User explicitly approved22 reviewed authored files/issue23 summary and separate
+diagnostic install/test/removal. Push34b1288 remote verified, executablee87d1c4
+and byte-identical candidatec96222a7…da7742 unchanged. New reservation6172168409
+preceded host ADB inventory: daemon restarted locally, ZERO devices. Planned
+saved Wi-Fi reconnection/read-only preflight auto-review REJECTED before execution
+as stale/unverified; no retry/alternate endpoint/scan/bypass. Current target
+serial/fw/power/window/package not observed. No install/UI/PDF/.mark/rotation/root,
+no remote temp file or diagnostic cleanup. Hardware NOTPERFORMED, not engine FAIL.
+RELEASED6172235090; user asked USB/debugging reconnect or current Wi-Fi address,
+then NEW reservation/exact preflight. Software tests/review/package all retained,
+no filler rebuild/emulator prerequisite. Timers PAUSED/ink PARKED/no merge.
+
 ## 2026-10-14 — T018P software gate PASS; hardware NOTRUN
 
 Isolated authored source e87d1c4aa62abe34200505d68ca1c51d27e1181d, production

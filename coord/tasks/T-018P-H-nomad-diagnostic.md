@@ -1,9 +1,10 @@
 # T018P-H — proposed embedded-fixture interactive engine gate
 
-Status PREPARED / NOT AUTHORIZED / NOT RUN. Timers stay PAUSED; saved ink PARKED.
-No installation/device access under the source-only T018P approval. Obtain fresh
-explicit user approval for separate diagnostic install/launch/UI/Close/uninstall
-and an exclusive issue23 reservation before preflight; old reservation consumed.
+Status AUTHORIZED2026-10-14 / NOTPERFORMED (connection block). Timers PAUSED;
+saved ink PARKED. User explicitly approved separate diagnostic install/test/remove
+and publishing22 reviewed authored files/issue23 summary. Source-only prior
+approval alone was insufficient; latest explicit approval is recorded below.
+Fresh exclusive issue23 reservation is required before each resumed preflight.
 Candidate must be exact reviewed commit, two reproducible clean-archive builds,
 complete source/payload/signature receipt and focused tests. No current-reader
 upgrade or downgrade, no SDK/native-reader navigation, root, firmware or pen.
@@ -54,3 +55,22 @@ stock Document task, touch native marks or substitute a personal document.
 
 Success authorizes an integration proposal, not production release. Reuse
 portrait/RTL layouts/Bluetooth/Edit-Return; do not duplicate those systems here.
+
+## Approved attempt2026-10-14 — connection blocked
+
+Reviewed sourcee87d1c4/reproducible APKc96222a7…da7742 unchanged. User explicitly
+approved both pending scopes; verified source push34b1288 completed. Reservation
+6172168409 posted after newest paginated issue23 read found prior release/no
+active conflict. Host adb inventory restarted its local daemon, ZERO devices.
+Reconnection/preflight command to saved10.0.40.9:5555 auto-review REJECTED before
+execution as stale/unverified. Reviewer mentions10.0.40.1; current address of
+neither endpoint verified by this session. Do not retry/contact another address
+until current USB/user-provided authority, no scan or rejected-action workaround.
+
+No target connection/shell or identity/power/window/package check; no install,
+screen/input/page/rotation/root/original or .mark access. No device temp files;
+no diagnostic cleanup needed. Hardware NOTPERFORMED, not engine FAIL. Reservation
+6172168409 RELEASED6172235090; USB/debugging reconnect/current Wi-Fi question sent.
+NEW reservation required for resume. No build/review/device observer left active;
+ordinary host ADB daemon is not an observer. Software gates complete, no filler
+rebuild/emulation. Exact candidate/evidence preserved; timers not resumed.

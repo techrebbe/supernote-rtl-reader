@@ -6,8 +6,9 @@ User approved T018P native PDFium prototype; task T-018P-pdfium-prototype.md
 names exact allowed paths/earliest safe gate. Production/current reader untouched.
 Pin publisher bblanchon/pdfium-binaries chromium/8100 immutable2026-10-12 release,
 Androidarm/arm64+Windows; authenticate exact hashes/attestation before execution.
-Source-only: no Nomad access/install, root, browser update, original PDF/mark or
-new writer. Reuse generated disposable fixture and existing navigation lessons.
+No root, browser update, original PDF/mark or new writer. Reuse generated
+disposable fixture and existing navigation lessons. User2026-10-14 explicitly
+approved22-file public source/issue23 publication AND diagnostic install/test/remove.
 Actual pinned Windows public API7 tests/all4 renders PASS; Android ARM32/64 native
 and actual Java/DEX/package compile PASS, separate permission-free diagnostic
 UNINSTALLED. Six independent P2 findings batch-corrected, five focused regressions
@@ -16,14 +17,20 @@ P0/P1/P2; clean-archive sourcee87d1c4 built twice, byte-identical APKc96222a7…
 full source/payload/signature checks PASS. Separate packagecom.techrebbe.rtl.pdfiumprobe
 0.1.0-pdfium-exp1/code1, NOT production upgrade. Review/exact evidence
 coord/reviews/T-018P-codex.md. Android runtime/performance UNVERIFIED;
-asynchronous diagnostic approval pending, no build/review/device process running.
-Publishing exact new public-source payload was auto-review REJECTED before any
-command executed; do not retry/bypass without fresh exact-payload user approval.
-Reviewed executable e87d1c4 and documentation checkpoint retained locally;
-remote remains71f1ebf. Separate async approval asks22 authored files/public
-techrebbe/supernote-rtl-reader branch and summarized issue23 update, no raw/binary
-or personal material. Local milestone complete; next real gate is user approval.
-T018P-H defines smallest bounded next device question, NOT AUTHORIZED/NOT RUN.
+Public source push remote34b1288 verified; user exact approval satisfied earlier
+publishing rejection. Reservation6172168409 issued after newest issue23 read.
+Host ADB inventory ZERO devices (local daemon restarted). Saved-WiFi reconnect
+and preflight auto-review REJECTED before execution as stale/unverified; no retry,
+alternate address/scan/bypass or target action. T018P-H NOTPERFORMED, connection
+blocked, NOT engine FAIL. RELEASED6172235090; explicit USB/debugging reconnect
+or current Wi-Fi endpoint request sent. Then NEW reservation/exact preflight,
+no consumed reservation reuse or unchanged build/emulator prerequisite.
+No install/target shell/UI/PDF/mark/rotation or remote scratch file; no cleanup
+needed. No build/review/device observer running. Candidate/source/evidence retained.
+Five subsequent evidence-note publication updates auto-review REJECTED before
+combined command execution as a new public payload. Preserve notes locally;
+no bypass/retry without approval. Exact five-file summarized-result approval
+question sent; remote still34b1288, posted release6172235090 remains authoritative.
 Saved ink PARKED/timers PAUSED/no merge. Previous decision requirement fulfilled.
 
 ## Current checkpoint — Wi-Fi PASS; interactive WebView prerequisite FAIL

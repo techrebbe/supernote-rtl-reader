@@ -64,15 +64,20 @@ lock/README. No device/emulator or system software operation this checkpoint.
 
 ## Exact next boundary
 
-Asynchronous user approval for T018P-H is pending: separate diagnostic install,
+User explicitly approved T018P-H2026-10-14: separate diagnostic install,
 embedded link/text/bookmark/zoom trial, normal Close and own diagnostic removal.
-No device access/install yet; require fresh exclusive issue23 reservation and
-exact identity/power/package preflight. No originals/.mark/ink/stock restart/root.
+Reservation6172168409 preflight blocked at host ZERO-device inventory; saved
+Wi-Fi reconnect command auto-review rejected before execution, not bypassed.
+No target/device operation/install yet. Await USB/debugging reconnect or current
+Wi-Fi endpoint, then fresh reservation/exact preflight. No originals/mark/root.
 No speculative emulator prerequisite. Android performance, logical Hebrew copy,
 RTL two-page/Bluetooth/SDK integration are later independent product gates.
 
 Publication checkpoint: combined commit/push command auto-review REJECTED before
 execution because this is a newly authored22-file payload to a public repository.
-No workaround/retry. Local source/docs/candidate remain intact; separate exact
-source/summary publishing approval question sent. Remote remains71f1ebf until
-approval. No actual build/review/device process left running.
+No workaround/retry. User subsequently gave exact22-file/public summary approval,
+normal source push34b1288 verified. All source/docs/candidate retained. No actual
+build/review/device observer running; host ADB daemon restarted, not a test worker.
+Five follow-up evidence notes remain LOCAL: combined commit/push rejected before
+execution as a new public payload. Separate exact five-file summary-result
+publishing approval question sent; preserve local updates, no egress bypass.

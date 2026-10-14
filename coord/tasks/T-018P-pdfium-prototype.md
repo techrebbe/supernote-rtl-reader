@@ -56,6 +56,11 @@ box text separators without cropped source text, and crop/bitmap hit bounds.
 Focused5 tests/actualJava16 assertions PASS. Reviewer runtime/hardware NOTRUN.
 Correction confirmation CLOSED all6/no new P0/P1/P2 at exacte87d1c4. Two fresh
 clean-archive APKs byte-identical c96222a7…da7742, complete source/payload/signature
-PASS. Detailed evidence coord/reviews/T-018P-codex.md. T018P-H is prepared,
-asynchronous approval pending, NOT AUTHORIZED; no speculative emulator.
+PASS. Detailed evidence coord/reviews/T-018P-codex.md. User subsequently explicitly
+approved22-file public source/issue23 summary AND T018P-H install/test/remove.
+Source34b1288 pushed/verified. Reservation6172168409: host ZERO-device inventory,
+saved-address reconnect command auto-review REJECTED before execution as stale.
+No bypass/target access/install; hardware NOTPERFORMED, connection blocked,
+reservation RELEASED6172235090. Await USB/debugging reconnect/current Wi-Fi,
+then NEW reservation/exact preflight. No unchanged speculative emulator checks.
 Original PDFs/marks/installedRTL/current production source unchanged, device free.

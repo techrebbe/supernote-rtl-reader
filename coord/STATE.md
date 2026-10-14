@@ -1,5 +1,28 @@
 # STATE — RTL Reader (updated 2026-10-14 by codex)
 
+## Current checkpoint — Wi-Fi PASS; interactive WebView prerequisite FAIL
+
+T018C approved/free USB session reservation6161740390, source6ca9a185.
+Verified exact Nomad/unrooted3.30.45/API30/UID2000/93% charging and observed
+wlan0 address10.0.40.9. User-requested standard TCP5555 setup and independent
+same-device Wi-Fi verification PASS. USB may disconnect. No root/scan/credentials.
+
+Read-only service current/preferred valid enabled com.google.android.webview
+109.0.5414.117/code541411703/target33, relro2/2/not-dirty. PDF.js6.4.299 current
+official legacy Chrome125 floor -> proposed browser version prerequisite FAIL.
+No functional PDF test; existing reader is not declared broken. No install,
+document/.mark access, UI/input/rotation, browser/firmware/private-path change.
+Exact serial/firmware/UID/provider postflight unchanged; zero remote temp files.
+Only Wi-Fi enabled as requested. Local metadata retained; RELEASED6161799646.
+
+Source-only comparison COMPLETE: tasks/T-018D-engine-decision.md recommends
+assessing bundled PDFium without shared system changes; native ABI/build and
+selection fidelity unverified, MuPDF license/system-WebView alternatives explicit.
+User engine-path decision required before implementation or browser update.
+No silent old-engine downgrade or
+system WebView replacement, no ink investigation. T-018C has exact evidence.
+Timers paused; no merge/finalization. Prior desktop proof preserved/unshipped.
+
 ## Current checkpoint — desktop interactive PDF proof; saved ink parked
 
 T018 isolated source at probes/interactive-pdf, not imported/registered/packaged.

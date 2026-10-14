@@ -1,5 +1,29 @@
 # RTL Reader hardware regression
 
+## 2026-10-14 — T018C Wi-Fi PASS; interactive WebView version prerequisite FAIL
+
+Approved/free USB Nomad SN078C10015092, firmware
+Chauvet.E103.2610091001.2545_release (3.30.45), Android11/API30/UID2000,
+93% USB-charging; source6ca9a185055ab63801ecd09a65c2178b3b24a8a0.
+Fresh reservation6161740390. Standard requested TCP5555 setup to observed
+wlan0 address10.0.40.9 and independent same serial/firmware/API/UID: Wi-Fi PASS.
+No root; Wi-Fi left enabled as requested; USB may disconnect.
+
+Read-only service current/preferred valid/enabled com.google.android.webview
+109.0.5414.117/code541411703/target33, relro2/2/not dirty. Proposed PDF.js6.4.299
+documented legacy Chrome125 floor unmet: version prerequisite FAIL, functional
+interactive-PDF trial NOTPERFORMED. Installed reader/Bluetooth/ink not retested.
+[Official support floor](https://github.com/mozilla/pdf.js/wiki/Frequently-Asked-Questions).
+
+Exact serial/firmware/UID/provider postflight unchanged. No document/.mark access,
+screen capture/input/page/rotation, install, private path, WebView/firmware/root/
+BOOX/merge/timer change. Zero remote temp files/no deletion needed. Local metadata
+root tmp/t018c-nomad-20261014-metadata.json SHA256
+982cba350cca124eedc1f736cfeec3029f8d3eb57949d754490ddda9bc58244d.
+Only Wi-Fi setup changed connectivity; no compatibility-test mutation. Next
+source comparison: maintained engine versus authorized browser update; ink PARKED.
+See coord/tasks/T-018C-webview-capability.md; release recorded in issue23.
+
 ## 2026-10-14 — T017S4 code59 mark list returns both pages; restored and released
 
 Exact reviewed/signed bede43534a977b8cbc39b0216a8d2a55a2e3db15,

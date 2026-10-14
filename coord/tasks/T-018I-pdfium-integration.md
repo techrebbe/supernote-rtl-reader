@@ -1,5 +1,25 @@
 # T018I — user-approved PDFium reader integration
 
+2026-10-15: exact sourcea102cb9/code60 software/build/review checkpoint COMPLETE;
+details coord/reviews/T-018I-codex.md. UNINSTALLED/UNPUSHED, no active process.
+31-file reviewed publication and exact build1 disposable portrait install/test
+approvals requested and pending. No hardware authority inferred from source.
+
+H1 prepared: unchanged generated4page interactive-original-fixture-v2.pdf,
+sourceSHA7cf9de8fa7ed91f7746ac44f62aa63e0641f757f330cf7d83efec7584b213905,
+new disposable Document copy only. Fresh issue23 reservation/serial/fw/free-safe
+UI/power/original+annotation/package/config preflight; exact reviewed build1
+SHA256dd8756df524cf3b02a410f25bde6516ded40772660e430b3d0c6244b85056003
+normal upgrade, READ/open PAGE1, one direct link/Back, named/outline equivalence,
+aligned known-English selection/verified own clipboard, modest zoom/Pan/Fit,
+normal Close/integrity/owned cleanup/release. Inspect and record each result
+BEFORE advancing. Stop for wrong source/page/owner/epoch, model or unsafe action,
+crash/STOP, integrity drift, competing workflow, power or uncertain cleanup.
+No new pen/input identification/ink test. Use fresh authorized connection; last
+Wi-Fi10.0.40.9:5555 and released6173894752 are historical, not reservation authority.
+Separate RTL/rotation/Bluetooth and supported exact-page Edit gates follow after
+H1 evidence under their defined approvals, not speculative emulator prerequisites.
+
 User2026-10-14 explicitly requests integration of the tested engine while
 preserving portrait, RTL landscape, Bluetooth and supported Edit/Return.
 Owner codex, owned agent/page-turner-bridge, baseline969a471. Source/build/review

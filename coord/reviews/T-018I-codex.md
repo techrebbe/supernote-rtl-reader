@@ -1,5 +1,58 @@
 # T018I — integrated reader review/build evidence
 
+## Current exact checkpoint — 2026-10-15
+
+Executable sourcea102cb9490af5fbdecff9a7e5c73f2965fa6779b on
+agent/page-turner-bridge; baseline969a471. All original five review findings and
+accepted transition-release follow-up CLOSED through independent correction
+reviews at7586b3f/1c7a533/a102cb9. Final read-only confirmation found no new
+critical/high/medium in its narrow correction scope. Reviewer additionally
+executed actual generated effect/rollback cases in single/spread and Auto rotation
+both ways, retirement/Close layout failures, and two negative controls. Owner
+19focusedJS/3generated+Java14 assertions/five payload tamper tests, retained
+128navigation/SDK/Bluetooth tests, key wiring2/Core2155/Host57/bridge93/seven
+accepted mutants PASS. Earlier native core85407/all271mutations and probe7/
+actualJava30/two mutants preserved; no canonical writer/ink source changed.
+Final native/v2/cross-layer/Edit/packaging checks PASS. No device evidence added.
+
+Normal exact clean-archive a102cb9 build1 and build2 each exit0/all75tasks,
+source/Metro/DEX/classes/registration/ABI/pinned engine/complete21notice receipt
+and mandatory package verification PASS. SDK0.1.65, min27/target35, native package
+com.supernotertlreader/Android1.0/code1; plug-in IDsnrtl20260726001/code60/
+0.4.25-pdfium-exp1 and markerRTL_READER_OPEN v0.4.25-pdfium-exp1-native-reader-v2.
+Both embedded APKs AND retained code59 reverified v2/v3 signatures with identical
+certificatefac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c.
+
+Select build1, local tmp/t018i-a102cb9-build1/out/SupernoteRtlReader.snplg,
+11155364bytes, SHA256
+dd8756df524cf3b02a410f25bde6516ded40772660e430b3d0c6244b85056003.
+Embedded app.npkSHA256
+540758a16f06dc798e5145fffb2ea4edf2cc8fe0234b1d34173da1a85bb68d23;
+MetroSHA256ca174e53ed9163010e7e4360c81eeae5c26b05233482131911f6402d00b2335a.
+Build2 SNPLGSHA256
+016055f1287b6fb57622e2d668101d864dbe16d63d9760c3c3ee8f0a5395d335.
+
+Reproducibility qualification: NOT byte-identical SNPLG/APK outputs. Actual
+uncompressed outer4/native620-entry comparison matched all reader DEX, JS,
+PDFium/wrapper, source receipt and license entries. Only original SDK-generated
+libnative-lib.so's .debug_info/.debug_line/.debug_str/.note.gnu.build-id/.symtab
+and META-INF signature records differ; every runtime section matches. Exact
+temporary SDK build directories are present in debug provenance. Both complete
+artifacts/signatures verified individually; no runtime/source drift, package
+verification bypass, re-signing after validation, or byte-determinism assertion.
+
+Retained code59 rollback sourcebede435 at tmp/t017s4-bede435-build1/out/
+SupernoteRtlReader.snplgSHA256
+13f4b76a8013169ffb17d961931d137ef8ccf14c7ee1edcd1dabea987b204c13.
+All candidates/source/logs/reviews preserved locally; no new upload/install,
+Nomad control, root/firmware/stock writer/annotation/PDF mutation or merge.
+31-file reviewed source+summarized issue23 publication approval pending. Exact
+code60 bounded portrait installation/test approval separately requested. Fresh
+reservation/preflight mandatory. Software eligible for H1, not release/product
+complete or proof of device rendering/Bluetooth/rotation/Edit/Return.
+
+## Historical implementation and correction checkpoints
+
 Candidate 0.4.25-pdfium-exp1/code60, original plug-in ID/package/SDK0.1.65/
 production signer unchanged. Source work only; no Nomad access/install or user
 PDF/.mark operation, timer resume, PR finalization or merge.

@@ -1,6 +1,28 @@
-# STATE — RTL Reader (updated 2026-10-14 by codex)
+# STATE — RTL Reader (updated 2026-10-15 by codex)
 
 ## Current phase — approved PDFium integration (T018I)
+
+Exact executablea102cb9490af5fbdecff9a7e5c73f2965fa6779b,
+0.4.25-pdfium-exp1/code60, locally committed, UNINSTALLED/UNPUSHED.
+All accepted integration review findings CLOSED; final independent exact-source
+confirmation found no new critical/high/medium within the correction. Normal
+clean-archive build1 AND build2 PASS75tasks/full source+DEX+ARM64+notices+signer.
+Retained code59 and both candidates have the same verified production signer.
+Candidate for first approved disposable gate: build1 SNPLG
+dd8756df524cf3b02a410f25bde6516ded40772660e430b3d0c6244b85056003.
+Reader DEX/JS/engine/wrapper/receipt/notices and upstream SDK runtime sections
+repeatable; archive/APK bytes NOT identical due SDK debug/build-ID/symbol and
+signature/ZIP metadata. No byte-determinism claim. Detailed exact evidence in
+reviews/T-018I-codex.md; source preserves portrait/RTL/Bluetooth/SDK Edit routes,
+integrated hardware behavior NOT yet proven.
+
+Real blockers: new explicit code60 installation/disposable-test approval and
+fresh exclusive issue23 reservation/preflight; 31-file source/summary publication
+approval also requested and pending. Do not install/access/push/post based on
+an earlier diagnostic approval, reuse consumed reservations, or resume timers.
+No build/review/device observer left running. Ink PARKED, timers PAUSED, no merge.
+
+Historical source checkpoints below, not current blockers or package authority:
 
 Source integration0.4.25-pdfium-exp1/code60. First independent reviewff77c90
 found oneP1/fourP2; accepted defects corrected in one batch with actual effect/

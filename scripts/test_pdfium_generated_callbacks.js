@@ -52,6 +52,25 @@ vm.runInContext(rollback+'\nglobalThis.runRollback=rollback;',s);
   assert.equal(s.pdfiumSceneRef.current,'before');
   s.pdfium.isRetired=()=>false;s.readerTransitionLocked=()=>true;
   vm.runInContext('(function(){'+foreground+'})()',s);assert.deepEqual(renderCalls,[]);
+  assert.equal(s.pdfiumSceneRef.current,null);
+  // Execute the actual effect AND dependency tuple across React renders. A
+  // pre-retirement Edit failure must rearm on unlock, including Auto rotation.
+  const effectStart=app.lastIndexOf('  useEffect(() => {',app.indexOf('    if (!pdfium.owner'));
+  const effectEnd=app.indexOf('\n\n  const handleNativeRendered',effectStart);
+  assert.ok(effectStart>=0&&effectEnd>effectStart);
+  const effect=app.slice(effectStart,effectEnd);let deps;
+  Object.assign(s,{preferencesReady:true,documentContext:{filePath:'/test.pdf'},pageAreaReady:true,
+    effectiveMode:'single',editBusy:false,pageAreaLayout:{height:700},
+    useEffect:(fn,next)=>{if(!deps||next.some((x,i)=>!Object.is(x,deps[i]))){deps=next;fn();}}});
+  s.readerTransitionLocked=()=>s.editBusy;
+  vm.runInContext(effect,s);assert.ok(renderCalls.some(x=>x[0]==='display'&&x[1].kind==='single'));
+  s.editBusy=true;vm.runInContext(effect,s);assert.equal(s.pdfiumSceneRef.current,null);
+  s.effectiveMode='spread';s.pageAreaLayout.height=500;vm.runInContext(effect,s);
+  renderCalls.length=0;s.editBusy=false;vm.runInContext(effect,s);
+  assert.ok(renderCalls.some(x=>x[0]==='display'&&x[1].kind==='spread'));
+  s.editBusy=true;vm.runInContext(effect,s);renderCalls.length=0;
+  s.editBusy=false;vm.runInContext(effect,s);
+  assert.ok(renderCalls.some(x=>x[0]==='display'&&x[1].kind==='spread'));
   s.readerTransitionLocked=()=>false;s.pdfium.isRetired=()=>true;
   repair.length=0;s.editInFlightRef.current=true;s.savePreferences=async()=>{throw Error('disk repair failed');};
   await s.runRollback('handoff_failed');assert.equal(s.editInFlightRef.current,true);

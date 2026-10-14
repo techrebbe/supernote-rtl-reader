@@ -80,6 +80,13 @@ signer gates, retained as superseded source artifacts, not installed. Additional
 retained navigation/READ/SDK/Bluetooth128 tests, key wiring2tests, actual core2155/
 Host57/bridge93 assertions and seven accepted-defect mutants PASS.
 
+Final narrow review1c7a533 CLOSED original finding3, identified new transition-
+unlock P2: a live session's rotation skipped while Edit was in flight did not
+rerun on pre-retirement failure. Accepted correction uses existing editBusy
+effect dependency and invalidates the paused scene, without reviving retired
+owners. Actual whole generated effect/dependencies now exercises unlock with
+AND without rotation. Latest exact confirmation pending; no hardware activity.
+
 Alpha limits: finite original input min(64MiB, maxJavaHeap/8), <=10000
 pages, bounded per-page metadata and raster; explicit refusal, not silent
 downsampling. Full-page moderate zoom only; high zoom tiler/performance/leak proof

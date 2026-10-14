@@ -85,7 +85,8 @@ def patch_app(text):
         "      pdfSourceSha256: pdfium.owner?.sourceSha256,\n"
         "      lastPageIndex: editReturnRef.current ? editReturnRef.current.editPage : pageIndex,", 'source preferences')
     marker = '    const token = ++renderTokenRef.current;'
-    text = once(text, marker, '''    if (!pdfium.owner || pdfium.isRetired() || readerTransitionLocked()) return;
+    text = once(text, marker, '''    if (!pdfium.owner || pdfium.isRetired()) return;
+    if (readerTransitionLocked()) { pdfiumSceneRef.current = null; return; }
     const preview = effectiveMode === 'single' ? [pageIndex] :
       getVisualSpread(pageIndex, coverSeparate, totalPagesRef.current, direction);
     const scene = JSON.stringify([pdfium.owner.sessionId,preview,effectiveMode,direction,
@@ -95,7 +96,7 @@ def patch_app(text):
     const token = ++renderTokenRef.current;''', 'scene admission')
     # This dependency tuple belongs to the generated foreground scene only.
     text = once(text, '    measuredPageWidth,\n  ]);\n\n  const handleNativeRendered',
-        '    measuredPageWidth,\n    pageAreaLayout.height,\n    spreadSizing,\n    pdfium.owner,\n    pdfium.revision,\n  ]);\n\n  const handleNativeRendered', 'scene deps')
+        '    measuredPageWidth,\n    pageAreaLayout.height,\n    spreadSizing,\n    pdfium.owner,\n    pdfium.revision,\n    editBusy,\n  ]);\n\n  const handleNativeRendered', 'scene deps')
     text = once(text, '    const finishClose = async () => {', '''    try {
       await pdfium.close(!pdfium.sourceInvalid.current);
       if (pdfium.sourceInvalid.current) transitionTokenRef.current.skipHandoff = true;

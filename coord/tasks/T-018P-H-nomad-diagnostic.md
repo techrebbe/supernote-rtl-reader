@@ -1,5 +1,50 @@
 # T018P-H — proposed embedded-fixture interactive engine gate
 
+## 2026-10-14 — exp2 bounded hardware result and release
+
+User exact correction/summary publication and install/test/remove approvals
+received; source pushed/verified at 5fe6e85, executable unchanged:
+97de72f63269c0d3e5af30005bb3b9b6e64b81fd. Separate permission-free
+com.techrebbe.rtl.pdfiumprobe/0.1.1-pdfium-exp2/code2, approved/installed APK SHA256
+8eaaa7b9439db4a0b11da61a6b3b36b8e58da325c0f821bd4881fa452cd69615,
+own certificate a5a855…807c67, unchanged embedded disposable fixture only.
+
+Reservation 6173328047; fresh USB serial SN078C10015092, firmware
+Chauvet.E103.2610091001.2545_release (3.30.45), API30/ordinary UID2000,
+87% charging/safe Inbox/diagnostic absent. Requested Wi-Fi-first setup to freshly
+observed 10.0.40.9:5555 independently verified; user told USB may unplug BEFORE
+installation. Entire diagnostic trial/cleanup Wi-Fi only; installed identity exact.
+
+PASS: PAGE1/UTF8 controls; direct PAGE2/crop90/back; formerly failing named
+PAGE3 XYZ1.25; ordered/hierarchical Unicode bookmarks and Chapter3 result
+byte-identical to named destination 9273c290…7738bf; same-page lower-anchor/NULLzoom
+with retained fitted glyph scale; English selection aligned/word separators
+intact; zoom/pan/Fit; one landscape/portrait round trip retained source PAGE1.
+No STOP/crash. Numeric zoom/anchor inferred from source+geometry, not emitted
+telemetry. App Copy ran without error, clipboard readback UNKNOWN (no probe
+endpoint/personal clipboard read). General hidden-crop selection/Hebrew logical
+copying, real-PDF variety, high-zoom memory/leak, physical feel and integrated
+RTL/Bluetooth/Edit-Return remain unverified or out of scope.
+
+Qualification: initial whole-PNG back comparison failed solely on Close-button
+shading; decoded PDF body pixel-identical. Tool composition incorrectly advanced
+to the planned named phase before inspecting the failed assertion and briefly
+wrote a false whole-screen equality claim, explicitly corrected. No STOP/wrong
+page/model or unlabelled retry. Later phases inspected before advancing.
+
+Cleanup PASS: own normal Close to prior Inbox/no own Activity; cached PID before
+uninstall is not a leak proof. Exact own installed path/hash rechecked, own
+uninstall Success/package+PID absent. Public PluginHost f60ce483…d2aad/Document
+dd77ff2c…6f986 hashes, serial/fw/UID and rotation1,2 unchanged. Wi-Fi5555 remains
+enabled as requested. No original PDF/.mark/private path/stock restart/root/
+firmware/pen/installed RTL change or remote scratch. Raw local evidence retained,
+no upload. RELEASED 6173894752. No active build/review/device observer.
+
+This is an owner-observed bounded engine proof, not reviewer-run hardware or
+full product/release PASS. Viable for an integration proposal only. Saved ink
+PARKED, timers PAUSED, no merge/PR finalization or speculative emulator prerequisite.
+Prior connection/exp1/approval-pending records below are historical, not current.
+
 Status AUTHORIZED2026-10-14 / NOTPERFORMED (connection block). Timers PAUSED;
 saved ink PARKED. User explicitly approved separate diagnostic install/test/remove
 and publishing22 reviewed authored files/issue23 summary. Source-only prior

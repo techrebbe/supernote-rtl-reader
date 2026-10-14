@@ -1,6 +1,27 @@
 # STATE — RTL Reader (updated 2026-10-14 by codex)
 
-## Current phase — approved isolated PDFium prototype
+## Current phase — PDFium device proof complete; integration proposal next
+
+Exact exp2 executable 97de72f/code2/APK 8eaaa7b9…cd69615 installed/tested/removed
+under user approval and fresh reservation6173328047. User-requested Wi-Fi-first
+setup independently verified from current USB identity/address; all diagnostic
+actions then Wi-Fi only. Nomad SN078C10015092/unrooted3.30.45/API30.
+Bounded render/direct/crop90/back/namedXYZ1.25/Unicode outline equivalence/
+same-page NULLzoom/English selection/zoom/pan/Fit/one-page rotation PASS.
+Clipboard action without error, readback UNKNOWN; numeric destination values
+source+geometry inference. General crop/Hebrew copying/real PDFs/memory/leak/
+physical feel/production RTL-Bluetooth-Edit integration are not proven.
+
+Normal Close/exact-identity own uninstall/absence/public reader hashes/rotation
+postflight PASS. Originals/current reader untouched, raw local only. Wi-Fi
+10.0.40.9:5555 intentionally enabled; RELEASED6173894752. Source publication
+verified5fe6e85; approved summarized results in REGRESSION and same T018P notes.
+No active build/review/device observer, timers PAUSED/ink PARKED/no merge.
+Next bounded integration proposal in T018P reuses existing READ/document/
+preferences, logical portrait/RTL/cover/Bluetooth and supported SDK Edit-Return.
+No production deployment authorized by this diagnostic or new writer/save path.
+
+## Historical checkpoint — exp1 failure and exp2 prepared
 
 Current hardware checkpoint: T018P-H exp1/sourcee87d1c4 installed exact own package
 under new6172548164 after USB ready; engine/PAGE1/directPAGE2/crop90/byte-identical

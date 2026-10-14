@@ -1,0 +1,20 @@
+:root {font-family:system-ui,sans-serif;color:#111;background:#eee} * {box-sizing:border-box}
+body {margin:0;height:100vh;display:flex;flex-direction:column} button,select {font:inherit;border:1px solid #555;background:white;color:black;border-radius:3px;padding:9px 12px}
+button:disabled {opacity:.45} button:focus-visible {outline:3px solid #245fcc} label {white-space:nowrap;font-size:13px}
+header {display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px;background:white;border-bottom:1px solid #555;flex:none}
+header strong {margin-right:auto} #status {padding:7px 12px;background:white;min-height:32px;font-size:13px;border-bottom:1px solid #bbb}
+#status[data-error=true] {color:#922;background:#fff4f4} main {display:flex;min-height:0;flex:1}
+aside {width:255px;overflow:auto;flex:none;background:white;border-right:1px solid #666;padding:14px}
+aside[hidden] {display:none} aside ul {list-style:none;margin:0;padding-left:13px} aside>ul {padding-left:0}
+aside button {display:block;width:100%;text-align:start;border:0;border-bottom:1px solid #ddd;padding:12px 5px}
+#stage {overflow:auto;min-width:0;flex:1;outline:none;overscroll-behavior:contain}
+#pages {display:flex;gap:16px;align-items:center;justify-content:center;width:max-content;min-width:100%;min-height:100%;padding:12px}
+.pageShell {position:relative;background:white;flex:none;box-shadow:0 2px 6px #999;border:1px solid #bbb}
+.pageShell[data-focused=true] {outline:2px solid #333} .pageShell canvas {display:block}
+.pageShell .textLayer {z-index:2;inset:0} .linkLayer {position:absolute;inset:0;z-index:3;pointer-events:none}
+.pdfLink {position:absolute;border:0;background:transparent;border-radius:0;padding:0;pointer-events:auto;color:transparent;cursor:pointer}
+.pdfLink:hover,.pdfLink:focus-visible {outline:2px solid #226acc;background:#226acc16}
+.pdfLink.unsupported {outline:1px dashed #777;cursor:not-allowed}.selecting .linkLayer {pointer-events:none}.selecting .pdfLink {pointer-events:none}
+footer {display:flex;align-items:center;justify-content:center;gap:12px;padding:8px;background:white;border-top:1px solid #555;flex:none;font-size:13px}
+#selection {margin-left:auto;max-width:45%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:800px) {header strong {width:100%} header {gap:5px} button,select {padding:7px 8px} #selection {max-width:25%}}

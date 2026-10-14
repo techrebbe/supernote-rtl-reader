@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RTL interactive original PDF proof</title>
+<link rel="stylesheet" href="/pdfjs/legacy/web/pdf_viewer.css"><link rel="stylesheet" href="/viewer.css"></head>
+<body><header><strong>RTL original PDF · offline proof</strong>
+<button id="bookmarks" type="button">Bookmarks</button><button id="back" type="button">Link back</button>
+<button id="zoom-out" type="button" aria-label="Zoom out">−</button><button id="fit" type="button">Fit page</button>
+<button id="zoom-in" type="button" aria-label="Zoom in">+</button>
+<label>Layout <select id="layout"><option value="auto">Auto</option><option value="single">Single</option><option value="spread">Spread</option></select></label>
+<label>Direction <select id="direction"><option value="rtl">RTL</option><option value="ltr">LTR</option></select></label>
+<label><input id="keys" type="checkbox">Keyboard simulation</label></header>
+<div id="status" role="status" aria-live="polite">Loading disposable original PDF…</div>
+<main><aside id="outline" hidden aria-label="Original PDF bookmarks"></aside>
+<div id="stage" tabindex="0" aria-label="Interactive original PDF pages"><div id="pages"></div></div></main>
+<footer><button id="previous" type="button">Previous</button><span id="position">Original page —</span><button id="next" type="button">Next</button>
+<span id="selection">Embedded text selection available</span></footer>
+<script type="module" src="/viewer.mjs"></script></body></html>

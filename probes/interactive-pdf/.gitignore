@@ -1,0 +1,6 @@
+vendor/
+generated/
+node_modules/
+output/
+tmp/
+.playwright-cli/

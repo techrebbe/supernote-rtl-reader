@@ -1,5 +1,26 @@
 # STATE — RTL Reader (updated 2026-10-14 by codex)
 
+## Current checkpoint — desktop interactive PDF proof; saved ink parked
+
+T018 isolated source at probes/interactive-pdf, not imported/registered/packaged.
+Desktop direct/named links/history, embedded English pointer selection,
+hierarchical/Unicode bookmarks, source rerender zoom+hit testing, canonical RTL
+pairing/active-page rotation retention and opt-in local key simulation observed.
+PDF.js6.4.299 integrity pinned; concrete bootstrap/geometry/cleanup defects fixed
+with focused regressions. Independent source confirmation CLEAN/no critical-high;
+two P2 sources corrected. Owner88Node+5Python and four unchanged invariants PASS.
+Reviewer11Node+six no-write fixture checks PASS; independent filesystem tests
+NOTRUN (owner executed). Review evidence: reviews/T-018-codex.md. No product,
+Nomad, physical Bluetooth, saved-ink, or logical Hebrew copy-order PASS implied.
+Original PDFs/.mark and installed code59 untouched; no device access/reservation.
+
+Next: preserve the isolated source, then tasks/T-018C-webview-capability.md:
+separately approved/reserved READ-ONLY Nomad WebView capability check before
+choosing a compatible engine/integrating it into production. Documented legacy
+Chrome125 floor; actual embedded browser UNVERIFIED. No silent browser upgrade,
+old unsafe engine shortcut, root, package installation, merge or timer resume.
+User may disconnect Nomad during desktop work; explicitly request it when needed.
+
 ## Current priority — interactive original PDF reading; saved ink parked
 
 User2026-10-14 prioritizes links, selectable text, bookmarks and zoom BEFORE

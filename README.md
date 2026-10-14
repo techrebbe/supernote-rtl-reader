@@ -2,9 +2,32 @@
 
 A Supernote plugin focused on right-to-left PDF reading and landscape two-page spreads, designed especially for Hebrew books.
 
-## Native Reader v2 candidate
+## Current priority: interactive original-PDF reading
 
-The current development branch contains RTL Reader v0.4.23 with rooted Native
+The current direction is an unrooted, dedicated RTL reading view that opens the
+original PDF without conversion. Links, selectable embedded text, PDF bookmarks
+and zoom come before saved-ink display. Portrait full-page reading, RTL landscape
+spreads and Bluetooth page turning must be preserved. Existing navigation and
+supported SDK Edit/Return remain the foundation: native writing is a separate
+handoff to Supernote's untouched reader, not a custom live writer in the spread.
+
+These interactive capabilities are the next milestone, not a claim that they
+already work. The present raster-page view needs a focused interactive adapter.
+Text selection applies where the PDF contains text; OCR of scanned pages is not
+part of this milestone. Saved-ink work is parked with its implementation and
+evidence preserved; it must not block the reading milestone. Original PDFs and
+native annotations remain unchanged. See [the bounded task](coord/tasks/T-018.md)
+and [current coordination state](coord/STATE.md).
+
+The installed experimental SDK0.1.65 build runs without restoring root on Nomad
+3.30.45. PAGE1 reading and same-page SDK Close are verified; different-page Edit/
+Return and the new interactive features still need bounded validation. The older
+rooted architecture and firmware-specific evidence below are historical, not
+requirements to reactivate it or permission to use private native configuration.
+
+## Historical Native Reader v2 candidate
+
+The earlier Native Reader v2 development used RTL Reader v0.4.23 with rooted Native
 Reader v2 companion v0.0.140. Its focused recovery/acknowledgement gate is
 hardware validated on the Nomad, but it is not the merged stable release and
 must not be shipped yet. Nomad testing of v0.4.21 proved
@@ -879,7 +902,13 @@ The reader has been validated on a Supernote Nomad running the plugin beta firmw
 
 **Root is not required for the reading path or the native-reader page handoff on the tested Nomad firmware.**
 
-## Native-reader handoff
+## Historical native-reader handoff
+
+The following describes the earlier firmware route. On current3.30.45, the live
+path instead uses the supported SDK page-navigation helper with document/page/
+saved-state validation. It does not write private native CONFIG or restart the
+stock reader. Reuse that supported path for the interactive milestone; do not
+reactivate the historical route described below.
 
 Hardware investigation established that:
 

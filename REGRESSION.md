@@ -1,5 +1,48 @@
 # RTL Reader hardware regression
 
+## 2026-10-14 — T017S4 code59 mark list returns both pages; restored and released
+
+Exact reviewed/signed bede43534a977b8cbc39b0216a8d2a55a2e3db15,
+sdk-exp4/code59/SDK0.1.65 on unrooted SN078C10015092,
+Chauvet.E103.2610091001.2545_release. Normal upgrade/version enabledON/exact
+runtime marker verified. Package SHA256
+13f4b76a8013169ffb17d961931d137ef8ccf14c7ee1edcd1dabea987b204c13,
+single v2/v3 signerfac61745...1033b9c unchanged. Private installed/prefs/cache
+hashes UNVERIFIED, not bypassed. No root restoration or coordinate migration.
+
+Two preflights stopped before UI/backup at released DayWeave then a launcher
+sync notification. One read-only launcher XML identified App Data Sync Completed;
+no screenshot/dismissal, one verified remote XML removed, local retained. User
+restored native T008PAGE1/footer; fresh t017s4d99% preflight/backup PASS. Failed
+t017s4b/t017s4c empty directories retained, no guard relaxed or baseline overwritten.
+
+PAGE1 canvas1404x1872/background/saved line READY. One operator Next displayed
+PAGE2 reference/2of2; canvas error1207 NO_PAGE persists before output allocation.
+getMarkPages returns successful raw indices[0,1], NOT expected[0]. Thus absence,
+index base, snapshot and usable canvas authority remain unproved; no fallback.
+Logs also contain an intermediate pages1,2 then1 saved-ink context before Next,
+with two mark-list observations across effects. Cause UNKNOWN; no commanded
+rotation, second Next or manual extra SDK query. Strict single-observation gate
+NOT ESTABLISHED; expectation FAIL/context-confounded, not full compatibility PASS.
+No further experiment, Edit/new pen/rotation/Bluetooth attempt.
+
+Restoration PrevPAGE1/inkREADY, normal Close HANDOFF_PREPARED page1 navigation=
+sdk-verified. RTL baseline/restored PNG byte-identical SHA256
+6b97cbf33f2e60962619d539c2380b719f9a471ef8554a8b876901b10a8e74fc;
+native pretrial/final PNG byte-identical SHA256
+bdd581436453900bdf4495575d7f0d765f2d0bacfd2ccb6d10c1a5feb80061cd.
+Public PDF/13309-byte mark/both system APK hashes/rotation exact.43 regular,
+nonsymlink/hash-backed owned captures/installer removed once/absence verified;
+all local raw/backups/packages retained. A small log window expired during
+restoration; bounded owned-process terminal collection recovered Close evidence
+without another SDK/UI experiment. RELEASED6160004267 from6159724225; DayWeave
+notified, no active process, installed59 ON/native T008PAGE1. Wi-Fi stays enabled.
+
+User then prioritizes interactive original-PDF viewing. Saved-ink work is PARKED,
+including follow-up diagnostics/source investigation; preserve this unresolved
+result, not an empty-page inference. No originals/BOOX/firmware change/raw upload,
+timer resume/PR finalization/merge. New priority/earliest gate: coord/tasks/T-018.md.
+
 ## 2026-10-13 — Wi-Fi ADB setup PASS; code59 test NOTPERFORMED pending charge
 
 User-authorized standard USB-to-TCP5555 setup under fresh6152360130 verified

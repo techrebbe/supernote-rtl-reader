@@ -1,6 +1,35 @@
-# STATE — RTL Reader (updated 2026-10-13 by codex)
+# STATE — RTL Reader (updated 2026-10-14 by codex)
 
-## Current checkpoint — Wi-Fi verified; hardware NOTPERFORMED pending charge
+## Current priority — interactive original PDF reading; saved ink parked
+
+User2026-10-14 prioritizes links, selectable text, bookmarks and zoom BEFORE
+saved-ink display. Preserve portrait reading, RTL landscape spreads, Bluetooth
+navigation and existing navigation/Edit/Return machinery. Originals and native
+annotations remain unchanged; no conversion or replacement writing engine.
+Owner codex, owned branch agent/page-turner-bridge; see tasks/T-018.md for the
+bounded next milestone and earliest safe hardware gate. No interactive feature
+implementation/build/hardware PASS is claimed by this priorities update.
+
+T017S4 bounded test COMPLETE/released6160004267 from6159724225. Exact executable
+bede43534a977b8cbc39b0216a8d2a55a2e3db15/sdk-exp4/code59/SDK0.1.65 normally
+installed/enabled/runtime verified on unrooted3.30.45. PAGE1 background/ink and
+SAME-PAGE SDK Close PASS; PAGE2 canvas NO_PAGE1207 persists, raw mark indices[0,1]
+not expected[0]. Intermediate pages1,2 then1 context logged before operator Next;
+two mark-list observations, cause UNKNOWN/strict single-observation gate unproven.
+No empty-ink inference/fallback; different-page Edit NOTPERFORMED. Saved-ink
+diagnosis, source research, fixes, builds and further probes are now PARKED,
+not prerequisites for interactive reading. Preserve all implementation/evidence.
+
+Restored native T008PAGE1/line and RTL/native before-after frames byte-identical;
+public PDF/13309-byte mark/system APK hashes/rotation exact.43 hash-backed owned
+captures/installer removed/absence verified, plus one earlier owned notification
+XML. Local backups/raw/packages and failed preflight directories retained.
+Nomad released/DayWeave notified; no active device/build/review process. Wi-Fi
+10.0.40.24:5555 enabled as requested. Private payload/prefs/cache hashes unverified,
+no bypass. No physical action needed for offline T018 planning. Timer PAUSED;
+no root, original/BOOX/firmware changes, raw uploads, PR finalization or merge.
+
+## Historical checkpoint — Wi-Fi verified; hardware NOTPERFORMED pending charge
 
 Under user-confirmed USB connection/explicit Wi-Fi request, ordinary TCP5555
 setup PASS: owned10.0.40.24:5555 returns exact SN078C10015092, new firmware and

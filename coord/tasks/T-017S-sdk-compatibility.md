@@ -1,5 +1,26 @@
 # T017S — supported SDK upgrade on unrooted 3.30.45
 
+## Current status — saved ink parked after completed code59 device test
+
+User2026-10-14 redirects work to interactive original-PDF links/text/bookmarks/
+zoom. The permission/SDK navigation/Edit/Return foundation remains reusable;
+the saved-ink canvas/mark-list investigation is PARKED, not an active prerequisite.
+No further saved-ink research, test-only expansion, package fix or device probe.
+Retain all prior source, packages, raw evidence and inconclusive results.
+
+Exact bede43534a977b8cbc39b0216a8d2a55a2e3db15/sdk-exp4/code59 installed normally,
+visible enabledON/runtime verified. Fresh99% root-free T008 preflight/backup;
+PAGE1 ink/background PASS. PAGE2 canvas NO_PAGE1207 persists; getMarkPages raw[0,1]
+contradicts expected[0], not a no-ink/canvas witness. Intermediate pages1,2 then1
+context before operator Next yielded two diagnostic observations; cause UNKNOWN,
+strict single-observation gate not established. No additional experiment/Edit.
+Restored PAGE1/inkREADY; normal SAME-PAGE Close sdk-verified. RTL/native frames
+byte-identical, public files/13309-byte mark/rotation exact.43 owned captures/
+installer removed/absence verified plus earlier one notification XML; all locals
+retained. RELEASED6160004267 from6159724225; DayWeave notified. No active process,
+root/private bypass/merge/timer resume. Different-page Edit remains unverified.
+See REGRESSION.md and T-018.md. All following checkpoints are historical.
+
 ## Current transport result — Wi-Fi PASS; code59 test NOTPERFORMED due charge
 
 Fresh6152360130 under user "USB connected"/explicit Wi-Fi request completed

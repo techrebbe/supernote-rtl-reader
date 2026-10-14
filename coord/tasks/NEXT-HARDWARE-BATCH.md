@@ -1,5 +1,24 @@
 # Next useful hardware batch — no speculative test loop
 
+## Current queue — interactive original PDF reading
+
+User2026-10-14: links, selectable text, bookmarks and zoom take priority over
+saved-ink display. Preserve portrait, RTL landscape spreads and Bluetooth;
+reuse navigation/Edit/Return. T017S4 is finished and released6160004267, exact
+code59 installed. PAGE2 ink remains blocked/inconclusive, now PARKED. Do not run
+another mark-list/canvas probe, ink package, pen test or speculative ink-modeling
+loop. All prior queues below are historical, not current authorization.
+
+Next milestone is T-018.md: a focused interactive original-PDF adapter proof,
+not another writer/ink architecture. No next device action is queued today.
+Earliest safe gate after basic host checks, independent exact-source review and
+verified compatible package: read-only disposable text/link/outline fixture in
+portrait; correct link destination, selectable embedded text, outline navigation
+and zoom with original/mark integrity. Record each result before continuing.
+Then verify RTL landscape/rotation and existing Bluetooth/Edit/Return separately;
+saved-ink display is not a gate. Fresh approval/reservation/preflight required,
+no personal PDFs/root/merge; timers remain PAUSED.
+
 Latest2026-10-13: candidate59 exact bede43534a977b8cbc39b0216a8d2a55a2e3db15
 fully tested/reviewed CLEAN/clean-built/signed, UNINSTALLED. User-requested Wi-Fi
 ADB works at10.0.40.24:5555, exact Nomad serial/firmware/UID2000 verified without

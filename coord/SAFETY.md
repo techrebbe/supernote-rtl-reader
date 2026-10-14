@@ -1,5 +1,20 @@
 # SAFETY — hardware and workspace rules (all agents)
 
+## Current product priority
+
+User direction2026-10-14: prioritize interactive original-PDF viewing (links,
+selectable text, bookmarks and zoom), preserving portrait, RTL landscape spreads
+and Bluetooth. Saved-ink display work is PARKED after the bounded T017S4 test's
+verified restoration/cleanup/release. Retain its source, branches and evidence;
+do not keep diagnosing, fixing or probing ink as a prerequisite for reading.
+Reuse existing navigation and supported SDK Edit/Return where appropriate.
+
+This changes the order of work, not annotation-integrity requirements. Do not
+alter original PDFs or native annotations, infer that hidden ink was erased,
+restore root, silently change frozen contracts, or activate the old rooted writer
+integration. Future interactive-reader tests need the same approval, exact build,
+independent review, disposable data, exclusive reservation and cleanup rules.
+
 ## Standing continuation rule for this RTL Reader chat
 
 User direction, reaffirmed2026-10-03: do not insert discretionary downtime

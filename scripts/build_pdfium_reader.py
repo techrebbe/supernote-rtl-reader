@@ -9,8 +9,9 @@ import shutil
 import subprocess
 import sys
 from pdfium_elf import verify_wrapper
+from pdfium_provider import generate as provider_header
 
-JAVA = ('PdfiumReaderCore','PdfiumRasterLedger','PdfiumViewport','PdfiumSession','PdfiumReaderModule',
+JAVA = ('PdfiumReaderCore','PdfiumRasterLedger','PdfiumViewport','PdfiumEngine','PdfiumSession','PdfiumReaderModule',
         'PdfiumPageView','PdfiumPageViewManager')
 
 
@@ -22,6 +23,7 @@ def source_inputs(root):
         root/'scripts/build_pdfium_reader.py',root/'scripts/patch_pdfium_reader.py',
         root/'scripts/verify_pdfium_reader.py',root/'provenance/pdfium-reader.json',
         root/'scripts/pdfium_elf.py',
+        root/'scripts/pdfium_provider.py',root/'native/pdfium_provider.h',
         root/'overlay/interactivePdf.js',root/'overlay/InteractivePdfReader.js']
 
 
@@ -63,19 +65,22 @@ def build(project, root, engine, sdk):
         raise ValueError('Pre-existing PDFium payload rejected')
     payload={}
     exports={f'Java_com_supernotertlreader_PdfiumReaderCore_{name}' for name in
-             ('open','close','count','outline','size','point','model','render','libraryPath')}
+             ('open','close','count','outline','size','point','model','render','libraryPath','candidatePath','bindEngine')}
     # Supernote's production plug-in packager retains arm64-v8a only. Compile
     # and receipt precisely that shipped ABI; never receipt a removed payload.
     for abi,target,vendor in (('arm64-v8a','aarch64-linux-android23','android-arm64'),):
         destination=native/abi;destination.mkdir(parents=True,exist_ok=True)
         wrapper=destination/'librtlpdfiumreader.so';dep=authenticated/vendor
+        (work/'pdfium_provider_generated.h').write_text(provider_header(
+            (source/'native_core.cpp').read_text(encoding='utf-8'),(dep/'lib/libpdfium.so').read_bytes(),
+            lock['extractedBinaries'][vendor+'/lib/libpdfium.so']),encoding='utf-8')
         command=[str(compiler),'--target='+target,'-std=c++17','-O2','-fPIC','-shared',
             '-nostdlib++','-fvisibility=hidden','-Wall','-Wextra','-Werror',
-            '-I'+str(dep/'include'),str(root/'native/pdfium_reader_core.cpp'),
+            '-I'+str(dep/'include'),'-I'+str(work),str(root/'native/pdfium_reader_core.cpp'),
             # Resolve the wrapper's C++/unwind/compiler runtime BEFORE the
             # engine DSO can satisfy it through incidental weak exports.
             '-Wl,--undefined=__emutls_get_address','-Wl,--start-group',*runtime,'-Wl,--end-group',
-            '-L'+str(dep/'lib'),'-lpdfium','-ldl','-lm','-Wl,--no-undefined',
+            '-ldl','-lm','-Wl,--no-undefined',
             '-Wl,--exclude-libs,ALL','-Wl,-soname,librtlpdfiumreader.so',
             '-o',str(wrapper)]
         subprocess.run(command,check=True)

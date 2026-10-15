@@ -15,7 +15,9 @@ def verify(native, root, classes):
     declared=json.loads(policy.read_text(encoding='utf-8'))
     if declared.get('role')!='read-only-original-pdf' or declared.get('wrapper')!='librtlpdfiumreader.so' or \
         declared.get('v8') is not False or declared.get('xfa') is not False or declared.get('savesPdfOrAnnotations') is not False or \
-        declared.get('packagedAbis')!=['arm64-v8a']:
+        declared.get('packagedAbis')!=['arm64-v8a'] or \
+        declared.get('providerBinding')!='authenticated-unlinked-fd-explicit-handle' or \
+        declared.get('internalFpdfRelocations')!='pinned-image-only':
         raise ValueError('Unsupported production PDFium policy')
     lock=json.loads((root/'probes/pdfium-native/pdfium.lock.json').read_text(encoding='utf-8'))
     if declared.get('publisher')!=lock['publisher'] or declared.get('tag')!=lock['tag']:

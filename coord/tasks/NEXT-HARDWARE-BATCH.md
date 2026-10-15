@@ -1,5 +1,17 @@
 # Next useful hardware batch — no speculative test loop
 
+## Code62 source checkpoint — no new device authority
+
+2026-10-15: exp3/code62 authenticated explicit-provider correction independently
+CLEAN; actual native/provider/Java/ELF/payload and retained regressions PASS.
+Reviewed pins applied, exact clean signed package next. Once exact package/source/
+certificate are recorded, request NEW exact-package disposable H1 approval and
+fresh issue23 reservation/preflight. Nomad stays RELEASED6186265230; no hardware
+probe/installation authorized by this offline result. Existing H1 expected results,
+hard stops, normal Close/integrity/owned cleanup remain. No new pen/ink/root,
+original documents, timer resume, PR finalization or merge. Full evidence/limits
+../reviews/T-018I-loader-correction.md; code61 failure below remains authoritative.
+
 ## Current queue — interactive original PDF reading
 
 CURRENT2026-10-15: exact code61 H1 executed: upgrade/runtime marker PASS, engine

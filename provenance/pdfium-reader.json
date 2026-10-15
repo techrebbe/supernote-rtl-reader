@@ -10,6 +10,8 @@
   "package": "com.supernotertlreader",
   "packagedAbis": ["arm64-v8a"],
   "input": "immutable-bounded-snapshot",
+  "providerBinding": "authenticated-unlinked-fd-explicit-handle",
+  "internalFpdfRelocations": "pinned-image-only",
   "savesPdfOrAnnotations": false,
   "noticeInventorySha256": "6228ca217028fc3db30f7ec55d97a7865b86e4920e569801a13e4d341e0639c0",
   "noticeCount": 21

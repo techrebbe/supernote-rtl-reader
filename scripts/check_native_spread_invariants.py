@@ -1063,7 +1063,8 @@ def check(repo_root: Path) -> None:
             # PDFium alpha; generated read-only drain is reviewed separately.
             # T018I exp2 independent narrow review: marker exp1 -> exp2 ONLY.
             # Exact reverse replacement reproduces the prior frozen source.
-            "76f1365dcc7bf2331c1653c5ef3efe9e62f01542a03d3fba787147dcc1030940",
+            # T018I exp3 independently reviewed marker exp2 -> exp3 ONLY.
+            "5a84de83d93c042d46509abb7c9962809a106e42695037d24e60e4b2473279df",
             "Edit/Return activation and close authority",
         ),
         (
@@ -1086,7 +1087,9 @@ def check(repo_root: Path) -> None:
             # identity ONLY; no companion, signing, permission or native gate edit.
             # CI follow-up review adds ONLY three explicit platform-tools inputs;
             # pinned actions, subsequent SDK dependencies and signing unchanged.
-            "4bbcffbc706b0be912c9c46884ffc5cdd80be4a685bf486ef29a77509df7dc64",
+            # T018I exp3 independent review: provider tests and artifact label
+            # only; no action, SDK, signing, companion or permission change.
+            "741f832bc6fd82e47c4fa3706c4154f6aa9005dde430dd9895eb0ab0e2c8feec",
             "Native Spread companion-build workflow",
         ),
         (

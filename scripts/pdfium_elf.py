@@ -2,8 +2,8 @@
 import struct
 
 JNI_EXPORTS = {f'Java_com_supernotertlreader_PdfiumReaderCore_{name}' for name in
-               ('open', 'close', 'count', 'outline', 'size', 'point', 'model', 'render', 'libraryPath')}
-NEEDED = {'libpdfium.so', 'libdl.so', 'libm.so', 'libc.so'}
+               ('open', 'close', 'count', 'outline', 'size', 'point', 'model', 'render', 'libraryPath', 'candidatePath', 'bindEngine')}
+NEEDED = {'libdl.so', 'libm.so', 'libc.so'}
 
 
 def verify_wrapper(data):
@@ -62,7 +62,9 @@ def verify_wrapper(data):
         elif info >> 4 in (1, 2, 10) and visibility & 3 in (0, 3):
             exported.add(name)
     if exported != JNI_EXPORTS:
-        raise ValueError('PDFium wrapper exports must be exactly the nine JNI entry points')
+        raise ValueError('PDFium wrapper exports must be exactly the eleven JNI entry points')
+    if any(name.startswith('FPDF') for name in imports):
+        raise ValueError('PDFium wrapper must not import default-scope FPDF APIs')
     # --no-undefined alone accepted the failed code60 binary: libpdfium's weak
     # exports satisfied compiler/C++ symbols at link time. Keep that runtime
     # local, rather than relying on the host loader's symbol scope or ABI.

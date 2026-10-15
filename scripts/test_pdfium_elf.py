@@ -41,8 +41,13 @@ def fixture(exports=None, imports=(), needed=None, soname='librtlpdfiumreader.so
 
 
 class Boundary(unittest.TestCase):
-    def test_jni_only_with_platform_c_and_pdfium_imports(self):
-        verify_wrapper(fixture(imports=('FPDF_InitLibrary', 'malloc', '__cxa_atexit', '__cxa_finalize')))
+    def test_jni_only_with_public_loader_and_platform_c_imports(self):
+        verify_wrapper(fixture(imports=('android_dlopen_ext', 'dlsym', 'malloc', '__cxa_atexit', '__cxa_finalize')))
+
+    def test_default_scope_pdfium_imports_rejected(self):
+        for name in ('FPDF_InitLibrary','FPDFText_LoadPage','FPDF_CloseDocument'):
+            with self.assertRaisesRegex(ValueError,'default-scope FPDF'):
+                verify_wrapper(fixture(imports=(name,)))
 
     def test_foreign_runtime_imports_rejected(self):
         for name in ('__emutls_get_address', '_Znwm', '_ZdlPv', '_Unwind_Resume',
@@ -52,12 +57,12 @@ class Boundary(unittest.TestCase):
 
     def test_extra_export_and_missing_jni_rejected(self):
         for exports in (JNI_EXPORTS | {'__emutls_get_address'}, JNI_EXPORTS - {min(JNI_EXPORTS)}):
-            with self.assertRaisesRegex(ValueError, 'nine JNI'):
+            with self.assertRaisesRegex(ValueError, 'eleven JNI'):
                 verify_wrapper(fixture(exports=exports))
 
     def test_shared_cxx_missing_extra_duplicate_dependencies_rejected(self):
-        for needed in (sorted(NEEDED | {'libc++_shared.so'}), sorted(NEEDED - {'libpdfium.so'}),
-                       sorted(NEEDED) + ['libpdfium.so']):
+        for needed in (sorted(NEEDED | {'libc++_shared.so'}), sorted(NEEDED - {'libdl.so'}),
+                       sorted(NEEDED) + ['libdl.so'],sorted(NEEDED|{'libpdfium.so'})):
             with self.assertRaisesRegex(ValueError, 'shared-dependency'):
                 verify_wrapper(fixture(needed=needed))
 

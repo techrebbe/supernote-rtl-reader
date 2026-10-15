@@ -1,5 +1,14 @@
 # T018I — user-approved PDFium reader integration
 
+CURRENT2026-10-15: narrow exp3/code62 provider correction independently CLEAN;
+actual ARM64 compile, actual-engine/Java authentication, exported/internal binding
+inventory and focused retained suites PASS. Engine hash/bytes NOT repinned.
+Reviewed marker/test-only pins applied; exact clean signed build next. Detailed
+checks/limits ../reviews/T-018I-loader-correction.md. New source publication and
+exact-package H1 approvals/reservation/preflight remain gates. No Nomad access,
+speculative emulator loop, saved-ink work, timer resume, PR finalization or merge.
+Current code61 failure/release below is not superseded by offline success.
+
 CURRENT2026-10-15: code61 installed/ON/exact runtime marker verified under fresh
 6186104046. Native disposable PAGE1 setup PASS, then engine initialization FAIL:
 resolved PDFium provider is not pinned engine. No render/interaction PASS; later

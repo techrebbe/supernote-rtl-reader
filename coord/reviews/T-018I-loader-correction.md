@@ -1,5 +1,64 @@
 # T018I loader correction — independent source-only review
 
+## Exp3 authenticated explicit-provider correction — 2026-10-15
+
+Independent narrow review of the18-file correction against1357b87412468e9170a8c07670fe75d6335500b3
+is CLEAN/noP0/P1/P2. Reviewer read source and ran offline checks only; no source,
+Git metadata, device or publication changes. Candidate0.4.25-pdfium-exp3/code62,
+runtime RTL_READER_OPEN v0.4.25-pdfium-exp3-native-reader-v2. Not yet a full
+signed package or actual PluginHost loading PASS. Code61 hardware failure below
+remains authoritative; exact runtime path/hash and interposition cause unproven.
+
+The unchanged pinned engine is authenticated before any PDF source is opened.
+Java derives its sibling from the wrapper's local image, bounds/authenticates
+physical or exact embedded ARM64 bytes, creates an owned temporary inode,
+unlinks it BEFORE writing, closes the writer and rehashes through a read-only
+descriptor. Native admits only an unlinked, read-only, regular, exact-size FD.
+Explicit public android_dlopen_ext FD loading plus typed handle lookup replaces
+generic System.loadLibrary(pdfium), wrapper DT_NEEDED(pdfium) and direct FPDF
+imports. All39 actual core calls are table-routed; their image and all7 internal
+FPDF relocation targets must agree before provider publication/FPDF_InitLibrary.
+FORCE_LOAD is cache avoidance, not an isolation claim. Provider errors include
+origin/hash or actual/expected image details instead of weakening authentication.
+
+Existing serial document/session fencing, renderer, navigation, Bluetooth,
+supported SDK Edit/Return and saved-ink behavioral source remain intact. Engine
+SHA256e6b7257b3905152dab64c79f7a4a570693e11ccb740e92e4d3b89c28df6fcbbb,
+ABI, provenance lock, notices and production signing configuration unchanged.
+Receipt inventory includes the new Java/provider generator/header; package gate
+requires11 exact JNI exports, no default FPDF imports and only dl/m/c dependencies.
+
+Independent checks: fresh actual ARM64 compile PASS;8 provider tests including
+real engine and9 Java authentication assertions/five shared Java classes against
+Android35;9 ELF tests with real old/current binaries;5 real payload tests;
+3 generated integration/Java14/actual callbacks;13 lifecycle JS;6 wiring and
+native/v2 invariants PASS. Full LLVM relocation output including4431 packed
+ANDROID_RELA entries independently confirms the seven-slot witness is complete
+for this exact engine. Generator is NOT a general packed-relocation decoder.
+Explicit-handle root-first lookup checked against primary Android11 linker code:
+https://raw.githubusercontent.com/aosp-mirror/platform_bionic/android-11.0.0_r1/linker/linker.cpp
+
+Owner independently passed8 provider/Java9,9 ELF,5 real payload,3 integration/
+Java14,19 interactive+lifecycle JS,6 wiring,85407 Core assertions, all271 v2
+mutations, native/v2/Edit, provenance and packaging gates. Reviewer approved
+ONLY these two normalized frozen source updates; all other pins unchanged:
+
+- index marker-only:5a84de83d93c042d46509abb7c9962809a106e42695037d24e60e4b2473279df.
+- workflow focused test commands/artifact label only:
+  741f832bc6fd82e47c4fa3706c4154f6aa9005dde430dd9895eb0ab0e2c8feec.
+
+Android/PluginHost FD loading, unlink/namespace permissions and runtime admission
+remain UNVERIFIED. The read-only unlinked snapshot is not OS-sealed against
+malicious same-process code; this is a trusted-loader model. One private mapping
+is retained per loaded wrapper until process teardown, not a leak-proof claim.
+An interrupted pre-unlink setup can leave an empty owned file, not engine bytes.
+No broader crash-recovery or namespace isolation guarantee is asserted.
+
+Next: apply reviewed pins, rerun source gates and build exact clean signed source,
+record package/source/signature identity. New scoped publication and exact-package
+hardware approval/fresh exclusive reservation/preflight required. No further
+device probe, timer resume, ink work, PR finalization or merge inferred.
+
 ## Subsequent exact-package hardware result
 
 User-approved code61 normal upgrade/exact exp2 runtime marker PASS on unrooted

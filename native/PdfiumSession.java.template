@@ -31,9 +31,9 @@ final class PdfiumSession {
     }
     boolean current() { return !closed && active==this; }
     // QUEUE only. Caller has already obtained supported SDK READ and exact path.
-    static PdfiumSession open(String path, int expectedPages) throws Exception {
+    static PdfiumSession open(String path, int expectedPages, File engineCache) throws Exception {
         if (active!=null) throw new IllegalStateException("Previous PDF session has not drained");
-        verifyEngine();
+        PdfiumEngine.ensure(engineCache);
         Snapshot snapshot=read(path);
         long token=0;
         try {
@@ -63,36 +63,6 @@ final class PdfiumSession {
     private static boolean same(StructStat a,StructStat b) {
         return a.st_dev==b.st_dev && a.st_ino==b.st_ino && a.st_size==b.st_size &&
             a.st_mtime==b.st_mtime && a.st_ctime==b.st_ctime;
-    }
-    private static void verifyEngine() throws Exception {
-        String path=PdfiumReaderCore.libraryPath();
-        if(path==null || !path.startsWith("/"))throw new IllegalStateException("PDFium provider cannot be verified");
-        MessageDigest hash=MessageDigest.getInstance("SHA-256");
-        int embedded=path.indexOf("!/");
-        if(embedded>=0){
-            String apk=path.substring(0,embedded),entry=path.substring(embedded+2);
-            if(!(apk.endsWith(".apk")||apk.endsWith(".npk")) ||
-                !(entry.equals("lib/arm64-v8a/libpdfium.so")||entry.equals("lib/armeabi-v7a/libpdfium.so")))
-                throw new IllegalStateException("Unknown embedded PDFium provider");
-            try(java.util.zip.ZipFile archive=new java.util.zip.ZipFile(apk)){
-                java.util.zip.ZipEntry file=archive.getEntry(entry);
-                if(file==null||file.getSize()<=0||file.getSize()>20000000)throw new IllegalStateException("Engine entry bound");
-                try(java.io.InputStream stream=archive.getInputStream(file)){hashEngine(stream,hash);}
-            }
-        }else{
-            if(!path.endsWith(".so"))throw new IllegalStateException("Unknown PDFium provider");
-            try(FileInputStream stream=new FileInputStream(path)){hashEngine(stream,hash);}
-        }
-        StringBuilder hex=new StringBuilder(64);
-        for(byte b:hash.digest())hex.append(String.format(java.util.Locale.ROOT,"%02x",b&255));
-        if(!hex.toString().equals("b763c1240904dd55b9b3fb40addc720d3d4540a0619665c9384cf6a5a0ea5f0f") &&
-            !hex.toString().equals("e6b7257b3905152dab64c79f7a4a570693e11ccb740e92e4d3b89c28df6fcbbb"))
-            throw new IllegalStateException("Resolved PDFium provider is not the pinned engine");
-    }
-    private static void hashEngine(java.io.InputStream stream,MessageDigest hash)throws Exception{
-        byte[] block=new byte[8192];int n;long size=0;
-        while((n=stream.read(block))!=-1){size+=n;if(size>20000000)throw new IllegalStateException("Engine byte bound");hash.update(block,0,n);}
-        if(size==0)throw new IllegalStateException("Empty engine provider");
     }
     private static Snapshot read(String path) throws Exception {
         if(path==null || !path.startsWith("/") || !path.toLowerCase(java.util.Locale.ROOT).endsWith(".pdf"))

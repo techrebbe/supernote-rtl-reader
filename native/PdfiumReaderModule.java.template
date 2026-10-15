@@ -19,7 +19,7 @@ public final class PdfiumReaderModule extends ReactContextBaseJavaModule {
         PdfiumSession.QUEUE.execute(()->{
             try{
                 if(invalid || owned!=null)throw new IllegalStateException("Reader session already open or retired");
-                PdfiumSession value=PdfiumSession.open(path,(int)expectedPageCount);
+                PdfiumSession value=PdfiumSession.open(path,(int)expectedPageCount,getReactApplicationContext().getCacheDir());
                 owned=value;
                 if(invalid){value.close();owned=null;throw new IllegalStateException("Reader retired during open");}
                 WritableMap result=Arguments.createMap();result.putString("sessionId",value.id);

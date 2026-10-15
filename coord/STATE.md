@@ -2,6 +2,18 @@
 
 ## Current phase — approved PDFium integration (T018I)
 
+CURRENT2026-10-15: exp3/code62 explicit authenticated-provider correction now
+independently CLEAN/noP0/P1/P2; fresh actual ARM64 compile/8provider+Java9/9ELF/
+5payload/3integration+Java14/13lifecycle/6wiring/native-v2 gates PASS. Owner also
+19interactive+lifecycle/85407Core/all271mutations/Edit/provenance/packaging PASS.
+Only independently reviewed index-marker/workflow-test pins applied; engine bytes
+and authentication unchanged. Full7-slot internal relocation inventory confirmed
+against actual plain+4431packed entries. Details reviews/T-018I-loader-correction.md.
+Exact clean signed build next, NOT a corrected hardware PASS. Android FD loading/
+namespace/unlink behavior remains a later approved disposable H1 gate. Source
+unpublished, no new install/device use; code61 installed/ON and Nomad RELEASED.
+Ink PARKED/timers PAUSED/no PR finalization or merge. Earlier checkpoints historical.
+
 CURRENT2026-10-15: approved code61 H1 ran under6186104046. Normal same-ID upgrade
 and exact exp2 runtime marker PASS; first engine activation FAIL at resolved
 provider authentication before rendering. Links/text/bookmarks/zoom NOTPERFORMED.

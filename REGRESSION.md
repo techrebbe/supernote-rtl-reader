@@ -1,5 +1,20 @@
 # RTL Reader hardware regression
 
+## 2026-10-15 — code62 source correction reviewed (no new hardware)
+
+Following the code61 provider-authentication failure, exp3/code62 source-only
+correction independently CLEAN/noP0/P1/P2. Authenticated unlinked read-only engine
+FD, explicit typed39-API handle and complete7-slot internal FPDF witness replace
+generic engine loading/default imports, without changing engine bytes/pin.
+Actual ARM64 compile/8provider+Java9/9ELF/5payload/3integration+Java14/19JS/
+6wiring/85407Core/all271mutations/native-v2-Edit/provenance/packaging PASS.
+Reviewed index/workflow-only pins applied; full exact signed build still pending.
+Details coord/reviews/T-018I-loader-correction.md. Actual Android FD/namespace/
+unlink behavior remains UNVERIFIED, no corrected reading/interaction PASS.
+No device action after RELEASED6186265230; code61 remains installed/ON.
+New exact candidate approval/reservation/preflight required, ink PARKED/timers
+PAUSED/no PR finalization or merge. Prior hardware failures remain unchanged.
+
 ## 2026-10-15 — T018I-H1 code61 provider authentication FAIL / cleanup PASS
 
 User exact package/H1 approval and fresh Plugins-ready signal; reservation

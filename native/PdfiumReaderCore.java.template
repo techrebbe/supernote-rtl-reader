@@ -1,7 +1,9 @@
 package __PACKAGE__;
 
 final class PdfiumReaderCore {
-    static { System.loadLibrary("pdfium"); System.loadLibrary("rtlpdfiumreader"); }
+    static { System.loadLibrary("rtlpdfiumreader"); }
+    static native String candidatePath();
+    static native void bindEngine(int authenticatedFd, String loadLabel, String sha256);
     static native long open(byte[] immutableSource);
     static native String libraryPath();
     static native int count(long session);

@@ -2,6 +2,17 @@
 
 ## Code62 source checkpoint — no new device authority
 
+CURRENT: publication66822bb verified; hostedCI38702924784 SUCCESS/all5 applicable
+jobs including actual packaged provider8/Java9. Code62 UNINSTALLED. Latest setup
+6187552036 stopped before picker/install because Settings returned to native;
+same disposable PAGE2 without agent page command. Files/absent mark/public hashes
+intact, rotation1/2 restored,16 captures+1 stage removed/absence verified,
+RELEASED6187696610. Earlier null-focus/manual-switch attempts also consumed.
+Next needs user DIRECT Settings Apps Plugins ready/free/untouched/no Bluetooth
+buttons, then NEW settings-specific preflight/reservation, normal approved exact62
+upgrade and portrait H1. Do not reuse helpers/reservations or public-launcher
+loop/repeat completed source/CI/build gates. No active process or ink/timer/merge.
+
 Exact-package code62 H1 retry and24-file reviewed publication/notes/summary are
 now APPROVED by user. Run fresh reservation/free-connected exact preflight before
 normal upgrade and the existing bounded portrait H1. Prior approval-pending text

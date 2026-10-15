@@ -2,6 +2,30 @@
 
 ## Exp3 authenticated explicit-provider correction — 2026-10-15
 
+Approved publication remote-verified66822bbb1b24bddd0cac2a85b4ec3a1a801ebbec;
+summarized issue23 comment6187398071. HostedCI38702924784 exact66822bb SUCCESS:
+trace-helper53s, VirtualSpread70s, invariants121s, unsigned v2 assembly117s and
+normal plug-in build/verification PASS;3 release-only jobs skipped by existing
+conditions. Linux build75tasks PASS, source/payload verification and actual
+packaged-engine provider8/Java9 no skips PASS. Prebuild's two no-fixture skips
+were followed by this full postbuild suite. CI artifact does NOT replace the
+approved locally signed package. A local gh watch exited on a transient network
+read; separate authenticated run/job/log reads verified final SUCCESS.
+
+Hardware remains NOTPERFORMED/UNINSTALLED: first null-focus preflight stopped
+without writes/released6187434755; next setup user-confirmed manual switch,6
+owned captures cleaned/released in6187552036. Final reservation6187552036 passed
+exact preflight, normal Settings route/installed61 ON and exact staged62 hash,
+but returned to native before package-picker input. Cause of second return not
+established. Terminal same disposable PAGE2 without an agent page command;
+no ad-hoc reset or PAGE1 restoration claim. PDF/absent mark/public packages
+unchanged, original auto1/rotation2 restored,16 owned retained/hash-verified
+captures+1 staged installer removed/absence verified. RELEASED6187696610.
+Raw local tmp/t018ih1-exp3c-6187552036-20261015 retained; no raw public upload.
+No process remains. Await direct user Plugins-ready/free/untouched confirmation,
+then fresh settings-specific reservation/preflight for already-approved code62.
+No repeated source build/modeling prerequisite or extra hardware probe inferred.
+
 User now APPROVED publication of the24 reviewed files/build-result notes in these
 same five notes/issue23 summary, and exact code62 H1 retry. Prior pending-approval
 text below is historical. Exact reviewed executable/package unchanged; fresh

@@ -1,5 +1,39 @@
 # RTL Reader hardware regression
 
+## 2026-10-15 — code62 published/CI PASS; setup stops, H1 NOTPERFORMED
+
+User24-file publication/notes/issue23 and exact package retry approvals received.
+Published/remote66822bbb1b24bddd0cac2a85b4ec3a1a801ebbec; exact executabled3e7142/
+exp3/code62/SNPLG3fac0a9a...a8167f3 unchanged. HostedCI38702924784 at66822bb
+SUCCESS/all5 applicable jobs;3 release-only skipped. Actual Linux clean normal
+build75tasks/package/source/ELF/engine/notices/provider8+Java9 no skips PASS.
+No substitution of its artifact for the approved local package.
+
+Reservation6187398071 stopped at null current focus before screenshots/writes;
+postflight source/absent mark/public packages intact, no scratch, released6187434755.
+User woke device/free. Reservation6187481337: native PAGE1/exact preflight PASS;
+normal public Settings launch showed installed61 ON, then switched back before
+setup tap. User confirmed manual switching. No stage/install, exact native PAGE1/
+byte-identical image/files/rotation PASS,6 owned captures cleaned; released in
+6187552036 with fresh user free/untouched confirmation and new reservation.
+
+Reservation6187552036: exact preflight/native PAGE1 initially landscape PASS;
+temporary portrait setup documented for H1. Normal resolved Settings Apps Plugins
+and code61 ON baseline PASS; exact new code62 stage and rollback hashes PASS.
+Before next package-picker tap owner returned to native; guard blocked input.
+Cause of SECOND return unknown. Terminal footer was same disposable PAGE2,
+not PAGE1, without any agent page command; no ad-hoc page reset/expected-page
+restoration claim. No picker/install/RTL engine action or pen. Code62 UNINSTALLED.
+
+Original rotation preferences auto1/user2 restored, PDF hash/absent mark/public
+reader hashes unchanged. Exactly16 owned nonlink/hash-verified/local-backed
+captures+1 staged installer removed and absence verified. Local raw evidence
+tmp/t018ih1-exp3c-6187552036-20261015 retained, open disposable PAGE2 preserved.
+RELEASED6187696610, no device observer/CI watcher/build process. Installed61
+unchanged. Requested direct user Settings Apps Plugins/free/untouched (including
+Bluetooth buttons), then NEW settings-specific preflight/reservation for the
+already-approved exact62 trial. No original/root/ink/timer/merge, no hardware PASS.
+
 ## 2026-10-15 — code62 source correction reviewed (no new hardware)
 
 User24-file source/notes/summary publication and exact-code62 H1 retry approvals

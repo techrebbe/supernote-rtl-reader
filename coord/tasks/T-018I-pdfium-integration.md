@@ -1,5 +1,17 @@
 # T018I — user-approved PDFium reader integration
 
+CURRENT2026-10-15: approved source/notes published/remote66822bb; hostedCI38702924784
+at exact66822bb SUCCESS/all5 applicable jobs, postbuild actual provider8/Java9
+no skips PASS. No replacement artifact; locald3e7142/code62 package unchanged,
+UNINSTALLED. Setup-only reservations6187398071/6187481337/6187552036 consumed;
+last returned to native before picker input, terminal same disposable PAGE2
+without agent page command. No ad-hoc reset or page-restoration PASS. Source/
+absent mark/public packages unchanged, rotation1/2 restored,16 captures+1 stage
+removed/absence verified, local evidence retained, RELEASED6187696610. Need user
+directly open Settings Apps Plugins/free/untouched, then NEW settings-specific
+reservation/preflight for the received exact code62 H1 approval. No active process,
+more offline prerequisite, ink/timer/root/original access/merge.
+
 CURRENT2026-10-15:24-file correction/notes/issue23 publication and exact code62
 bounded H1 retry approvals RECEIVED. Executabled3e7142/SNPLG3fac0a9a...a8167f3
 unchanged. Publish approved source, then new exclusive reservation/free-connected

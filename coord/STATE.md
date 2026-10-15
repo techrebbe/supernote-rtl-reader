@@ -2,6 +2,22 @@
 
 ## Current phase — approved PDFium integration (T018I)
 
+CURRENT2026-10-15: approved24-file publication remote-verified66822bbb1b24bddd0cac2a85b4ec3a1a801ebbec,
+summarized/reserved issue23 comment6187398071. HostedCI38702924784 exact66822bb
+SUCCESS:5 applicable jobs PASS,3 release-only skipped by existing conditions;
+actual packaged-engine provider8/Java9 no skips PASS on Linux. Local exactd3e7142/
+code62/SNPLG3fac0a9a...a8167f3 unchanged, still UNINSTALLED/runtime UNKNOWN.
+Three setup attempts stopped BEFORE installation:6187398071 null focus/no writes;
+6187481337 user-confirmed manual Settings-to-reader switch/6 captures cleaned;
+6187552036 second Settings return/cause unknown,17 owned capture-stage files
+cleaned. Final same disposable native PAGE2, not PAGE1; no agent page command or
+ad-hoc reset. PDF/absent mark/public packages unchanged, original rotation1/2
+restored. RELEASED6187696610; local evidence retained. User asked to open Settings
+Apps Plugins directly/leave device+Bluetooth untouched, then NEW reservation/
+settings-specific exact preflight for already-approved normal code62 upgrade/H1.
+No active build/review/test/device/CI-watch process. Ink PARKED/timers PAUSED.
+No further unchanged offline prerequisite, original access/root/merge.
+
 CURRENT2026-10-15: user APPROVED24-file reviewed correction/build-result notes/
 issue23 publication AND exact code62 disposable H1 retry. Exact executabled3e7142/
 SNPLG3fac0a9a...a8167f3 unchanged. Publication proceeds; new exclusive reservation

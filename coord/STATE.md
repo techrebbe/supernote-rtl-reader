@@ -1,6 +1,33 @@
 # STATE — RTL Reader (updated 2026-10-15 by codex)
 
-## Current blocker: approved code66 retry NOTPERFORMED — transport unavailable
+## Latest: code66 H4R3 first large-copy page PASS; next bounded H5 awaits approval
+
+User Connected unblocked transport; NEW6199667735 exact approved c40127d/exp7/
+code66/SNPLGd326cfb7...5f297aa normal same-ID install/version ON/runtime marker
+PASS. Unrooted3.30.45/API30/shell2000/98percent/source+copy+original annotation/
+public/prefs preflight PASS. ONE COPY A activation now visibly renders correct
+PAGE1/663/portrait Auto->Single/full chrome/Close, runtime OPENED+READY/no init,
+model/FATAL/cleanup failure. Previous size+outline opening blockers cleared for
+this copy only; no navigation/spread/interaction/second-file/release claim.
+
+Normal Close whole native COPY A PNG identical, SDK-verified page1 handoff;
+starting synthetic nativePAGE1 also whole initial/final PNG identical. Both
+originals/existing annotation/copies/synthetic+absent mark/public intact; prefs
+1/2 unchanged/no settings writes.38 owned regular/nonlink/hash/local-backed
+captures+1stage removed/absence verified, raw/copies/65/64 rollback retained.
+RELEASED6199911331, installed66 ON, no active local build/test/review/device
+process, safe disconnect. HostedCI38782801578 at831d42f SUCCESS/all5 applicable
+jobs,3 conditional release jobs skipped. No new executable/build/review cycle.
+
+Next smallest H5 SAME66/COPY A portrait Next/Previous and landscape RTL spread/
+one Next/Previous, then portrait/original prefs/normal Close/integrity/cleanup;
+asynchronous task-approval question SENT/PENDING and NEW reservation required.
+Do not extend consumed6199667735, activate original/second copy, or infer links,
+selection/zoom/Bluetooth/Edit acceptance. No other known concrete offline
+prerequisite; record evidence/prepare bounded steps while authority pending.
+Private data/raw/fingerprints local; ink PARKED/timers PAUSED/no root/firmware/merge.
+
+## Historical H4R2: approved code66 retry NOTPERFORMED — transport unavailable
 
 User APPROVED exact c40127d/exp7/code66/package d326cfb7...5f297aa retry. Published
 same5build-result notes remote831d42feeb4cd5b06de941386601d60eb1237a53; branch-only

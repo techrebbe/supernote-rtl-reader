@@ -1,6 +1,26 @@
 # T018I — user-approved PDFium reader integration
 
-CURRENT: exact66 retry APPROVED, but fresh6198902361 availability query failed
+CURRENT H4R3 PASS: user Connected, NEW6199667735 exact approved c40127d/exp7/
+code66/package d326cfb7...5f297aa normal same-ID manager install/ON+runtime marker.
+Unrooted3.30.45/API30/shell2000/98percent/preflight originals/native annotation/
+copies/public/prefs PASS. ONE retained COPY A activation now visibly renders
+PAGE1/663 in portrait Auto->Single with full chrome/Close; OPENED+READY/no init,
+model/FATAL/cleanup failure. No second activation/navigation/spread/interaction/
+second-file acceptance inferred. Normal Close native COPY A whole PNG identical,
+SDK-verified page1 handoff; restored syntheticPAGE1 whole initial/final PNG also
+identical. All originals/native annotation/copies/public/synthetic+absent mark
+intact, prefs1/2 unchanged/no settings writes.38 owned hash/nonlink/local-backed
+captures+1stage removed/absence; raw/copies/rollback retained. RELEASED6199911331,
+installed66 ON/no active local process. HostedCI38782801578 at831d42f SUCCESS/all5
+applicable jobs,3 conditional skips. No executable change/new offline cycle.
+
+Next proposed H5 SAME installed66/COPY A portrait Next/Previous and landscape
+RTL spread/one Next/Previous, then original prefs/portrait/Close/integrity/cleanup.
+Task approval SENT/PENDING, NEW reservation/preflight before use; no reuse of
+consumed H4R3 or silent scope extension. Links/bookmarks/zoom/real Bluetooth/Edit
+and second copy remain later bounded gates. Ink PARKED/timers PAUSED/no merge.
+
+HISTORICAL H4R2: exact66 retry APPROVED, but fresh6198902361 availability query failed
 before any UI/stage/install/file action; transport inventory empty. NOTPERFORMED,
 RELEASED6198931650,65 retained/66 UNINSTALLED/no observer. Reconnect/free+awake or
 current Wi-Fi address is exact unblock; SAME approved package then NEW reservation/

@@ -1,6 +1,39 @@
 # Next useful hardware batch — no speculative test loop
 
-## Immediate unblock: reconnect for SAME approved code66
+## Next H5: representative-copy page navigation and landscape RTL — approval pending
+
+H4R3 NEW6199667735 exact approved c40127d/exp7/code66/package d326cfb7...5f297aa
+normal same-ID install/ON+runtime and ONE retained COPY A first render PASS:
+correct PAGE1/663/portrait Auto->Single/full chrome/Close, OPENED+READY/no init/
+model/FATAL. Normal Close native COPY A and restored starting syntheticPAGE1
+each whole-scene PNG identical. Originals/native annotation/copies/public intact,
+prefs1/2 unchanged;38 captures+1stage exact cleanup PASS. RELEASED6199911331,
+installed66 ON/no local process. HostedCI38782801578 at831d42f SUCCESS/all5
+applicable jobs,3 conditional release skips. Do not repeat build/review/install
+or completed H4R3. Existing65/64 rollback/raw/private copies retained.
+
+Task approval requested; after APPROVAL only, NEW exclusive reservation/exact
+target/power/current syntheticPAGE1/source+annotation+copy/public/prefs preflight.
+SAME installed66, no package action. Open ONLY retained disposable COPY A PAGE1
+through ordinary library, ONE activation. Portrait single Next->PAGE2, Prev->PAGE1;
+then software landscape presentation with original rotation preferences retained
+for restoration. Expect PAGE1 right/PAGE2 left (paired cover), chrome within
+screen. ONE logical Next->PAGE3 right/PAGE4 left, Prev->PAGE1 right/PAGE2 left.
+Use existing logical controls, not guessed physical swipe/Bluetooth profiles.
+PASS requires correct original-page identities/count/content, visible whole
+viewports/chrome, READY for each transition and no init/model/source/cleanup error.
+Stop wrong source/page, blank/escaped paint, stale controls, owner/dialog change,
+uncertain ink/cleanup or disconnect; no ad-hoc extension/rescue/re-activation.
+
+Return portrait, restore exact original rotation preferences, normal Close/
+native COPY A PAGE1, ordinary starting syntheticPAGE1, verify originals/native
+annotation/copies/public/preferences, exact owned scratch cleanup/absence/release.
+No originals/second copy, install/pen/link/bookmark/zoom/Edit/paired Bluetooth/
+root/firmware/other-plugin/timer/merge action. Gate is representative-file reading
+navigation/spread only, not full release or annotation acceptance. No speculative
+emulator prerequisite. Current authority stops at completed H4R3 until H5 approved.
+
+## Historical unblock: reconnect for SAME approved code66
 
 Fresh6198902361 stopped on first readonly serial-not-found/empty ADB inventory;
 NOTPERFORMED before capture/input/stage/install/files, RELEASED6198931650. No cleanup

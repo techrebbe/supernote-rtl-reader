@@ -1,6 +1,25 @@
 # T018I loader correction — independent source-only review
 
-## Code66 hardware gate pending transport, not another source review
+## Code66 bounded hardware evidence — H4R3 PASS; no new source review needed
+
+NEW6199667735 exact approved c40127d/exp7/code66/package d326cfb7...5f297aa normal
+same-ID install/ON+runtime PASS on unrooted3.30.45/API30/shell2000/98percent.
+ONE retained disposable COPY A activation opens/visibly renders correct PAGE1/663
+in portrait Auto->Single/full chrome/Close. Current-marker OPENED+READY, no init/
+model/FATAL/cleanup error. Prior size+outline blockers no longer stop opening
+this copy; not proof of whole-book/interactions/second-file/release acceptance.
+Normal Close native COPY A whole PNG identical/SDK-verified page1 handoff;
+restored syntheticPAGE1 whole initial/final PNG identical. Originals/existing
+annotation/copies/public/prefs intact;38 owned hash/nonlink/local-backed captures
++1stage removed/absence verified, private raw/copies/rollback retained. RELEASED
+6199911331, installed66 ON/no local process. HostedCI38782801578 at831d42f SUCCESS/
+all5 applicable jobs,3 conditional release skips. Source/signing below unchanged.
+Host-only resolver/timestamp/tail diagnostic guards corrected without broader
+device action or repeat activation; failed private receipts retained. Next H5
+same-installed navigation/spread task approval PENDING/new reservation, not an
+extra speculative build/review/emulator loop. No root/firmware/ink/timer/merge.
+
+## Historical code66 hardware gate pending transport, not another source review
 
 Exact c40127d/exp7/code66 package retry APPROVED. Fresh6198902361 only serial
 availability failed/device absent, no input/stage/install/files; NOTPERFORMED/

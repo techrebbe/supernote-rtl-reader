@@ -1,5 +1,42 @@
 # RTL Reader hardware regression
 
+## 2026-10-15 — code66 H4R3 large-copy admission/first-page render PASS
+
+Fresh6199667735 after user Connected; exact approved executable
+c40127def19d515823890fdab57a256d36684530/0.4.25-pdfium-exp7/code66/SDK0.1.65,
+SNPLGd326cfb7597925f1db2fbdf7f959ede2cb7fea2fd8dd86bad6415ee745f297aa.
+Normal same-ID manager install/versionexp7 ON and unique runtime marker PASS.
+Unrooted3.30.45/API30/shell2000/98percent/source+copy+original annotation/public/
+rotation preflight PASS. ONE retained disposable COPY A activation now opens
+correct PAGE1/663 and visibly renders its first page in portrait Auto->Single,
+with full chrome/Close. OPENED and NATIVE_VIEW_READY recorded, no initialization,
+model, FATAL or cleanup failure in current-activation scoped log. Former size
+and unresolved-outline blockers no longer prevent this copy opening; not a full
+book/interaction/release acceptance claim. No second activation/pages/landscape/
+links/bookmarks/zoom/Bluetooth/Edit/pen; second copy NOTPERFORMED.
+
+Normal observed Close returned entire native COPY A PNG byte-identical;
+SDK-verified page1 handoff logged. Starting synthetic nativePAGE1 restored,
+also whole initial/final PNG byte-identical. Both originals/existing annotation
+sidecar/copies/synthetic+absent mark/public hashes intact, rotation prefs1/2
+unchanged/no settings writes.38 recorded regular/nonlink/hash/local-backed
+capture scratch files plus ONE staged installer removed/absence verified;
+raw/copies/65/64 rollback retained locally. RELEASED6199911331; installed66 ON,
+no active local build/test/review/device process, safe disconnect. Private source
+names/paths/fingerprints/content/captures remain local. Private evidence:
+tmp/t018ih4r3-exp7-6199667735-20261015.
+
+Host-only normal-launcher metadata comparison and adb timestamp splitting/tail
+age guards prevented actions/read claims; corrected public-component parsing
+and scoped log reads without repeat activation or broader device action. Failed
+receipts retained, final log includes Open/Ready/normal Close. HostedCI38782801578
+at831d42feeb4cd5b06de941386601d60eb1237a53 SUCCESS/all5 applicable jobs;3 conditional
+release jobs skipped. No executable change or extra source review/build needed.
+Next proposed H5 SAME installed66/COPY A: portrait Next/Previous, landscape RTL
+spread/one Next/Previous, then portrait/original prefs/Close/integrity/cleanup.
+Task approval requested, NEW reservation required; H4R3 consumed, no extension.
+Ink PARKED/timers PAUSED/no originals/root/firmware/PR finalization/merge.
+
 ## 2026-10-15 — approved code66 H4R2 NOTPERFORMED, missing ADB transport
 
 Exact c40127d/exp7/code66/package d326cfb7597925f1db2fbdf7f959ede2cb7fea2fd8dd86bad6415ee745f297aa

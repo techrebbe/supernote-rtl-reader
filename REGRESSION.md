@@ -28,8 +28,17 @@ reference throws globally. Minimal offline fix leaves it unsupported/non-navigab
 without guessing a page or dropping valid children; actual-method regression28/
 3compiled mutants including fatal-baseline red->green PASS, ARM64/payload5/
 integration4 PASS. Independent review + final identity/CI/pin assembly CLEAN;
-native/v2/Edit/crosslayer/wiring6 PASS. Exp7/code66 UNBUILT/UNINSTALLED,
-no source upload/hardware authority inferred. Need exact candidate gates then
+native/v2/Edit/crosslayer/wiring6 PASS. User approved13-file upload, remote
+c40127def19d515823890fdab57a256d36684530 verified. Exact clean-archive exp7/code66
+normal build exit0/75tasks, complete package/source/DEX/ELF/engine/notices/bundle/
+APK-provenance and same65/64 v2/v3 signing PASS. SNPLG11143507bytes/SHA256
+d326cfb7597925f1db2fbdf7f959ede2cb7fea2fd8dd86bad6415ee745f297aa;
+local tmp/t018i-exp7-c40127d-build1/candidate-identity.json. Exact-archive new
+destination28/3mutants, streaming87+51/3mutants; postbuild provider11/no skips,
+core85407/all271mutations/provenance/packaging/wiring6/JS101/ELF9/payload5/
+integration4 PASS. Source23 CRLF->LF exactly matches reviewed aggregate, no
+byte-identical rebuild claim. Code66 UNINSTALLED, installed65 unchanged; exact66
+retry approval RECEIVED, no active process. Need NEW reservation/preflight for
 fresh approved one-copy render check, not unchanged code65 repetition or broad
 emulation. Ink PARKED/timers PAUSED/no merge. H4 size failure retained separately.
 

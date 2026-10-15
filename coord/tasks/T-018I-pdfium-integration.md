@@ -10,8 +10,15 @@ RELEASED6198589292,65 ON/no process. Published19-file correction+notes remotea02
 Next bounded source correction preserves unsupported destinations as non-navigable
 instead of document-fatal, no guessed pages/hidden valid children. Native28assert/
 3mutants red->green/ARM64/payload5/integration4 PASS, independent final review CLEAN;
-exp7/code66 UNBUILT/UNINSTALLED/new source publication not approved. Earliest
-hardware after exact candidate gates/approval/new reservation: retained COPY A
+User approved13-file publication remote-verifiedc40127def19d515823890fdab57a256d36684530.
+Exact clean-archive exp7/code66 normal build exit0/75tasks/complete package-source-
+DEX-ELF-engine-notices-provenance and same65/64 v2/v3 signing PASS. Package
+d326cfb7597925f1db2fbdf7f959ede2cb7fea2fd8dd86bad6415ee745f297aa;
+exact-archive28destination+87JNI+51Session/6compiled mutants, postbuild provider11/
+no skips and core85407/all271mutations/native-v2-Edit-crosslayer/provenance/
+packaging/JS101 PASS. Code66 UNINSTALLED, installed65 retained; exact-package
+retry approval RECEIVED, no active process. Earliest
+hardware after NEW reservation/preflight: retained COPY A
 admission/render/Close ONLY. No originals/pen/root/firmware/ink/timer/merge work.
 
 LATEST H4 FAIL6197397865: user-selected distinct byte-identical representative

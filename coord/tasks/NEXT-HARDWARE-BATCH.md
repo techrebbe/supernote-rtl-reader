@@ -12,9 +12,13 @@ published. Consumed reservation is not authority for another activation.
 Next source-only correction: retain unresolved destinations as unsupported,
 never guess a page or hide valid children. Native28assertions/3mutants/fatal
 baseline red->green and ARM64/payload5/integration4/native-v2-Edit-crosslayer PASS;
-independent source/final assembly review CLEAN, exp7/code66 unbuilt/uninstalled.
-Once exact signed
-package pass, request scoped upload/install authority then NEW reservation for
+independent source/final assembly review CLEAN. Exactc40127def19d515823890fdab57a256d36684530/
+exp7/code66 normal clean-archive build exit0/75tasks/package+compatible v2/v3
+signing PASS; source13-file publication approved/remote verified. SNPLG
+d326cfb7597925f1db2fbdf7f959ede2cb7fea2fd8dd86bad6415ee745f297aa.
+Core85407/all271mutations/full gates + exact-archive regressions/postbuild
+provider11/no skips PASS. Code66 UNINSTALLED, installed65 retained, no active
+process. Exact-package install/retry user APPROVED; NEW reservation/preflight for
 ONE retained COPY A admission/render and normal Close/integrity, no speculative
 emulator prerequisite. Page/landscape/links/bookmarks/zoom follow only after pass
 under their own bounded scope. Ink PARKED/timers PAUSED/no PR finalization/merge.

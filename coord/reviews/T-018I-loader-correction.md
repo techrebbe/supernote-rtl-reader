@@ -19,7 +19,27 @@ destination test29bad5e4ee5d8bfeb388f251e4c2d04f7cbe0daadafb334bc80e94371f3e7246
 Reviewer independently28asserts/3mutants and JS23 PASS; no personal data access.
 Index9f482372...6c6283b marker-only/workflow9a98a760...1e95c6 adds actual suite and
 artifact version only, strict unchanged source receipt/gates. Exp7/code66
-UNBUILT/UNINSTALLED. Source/
+exact sourcec40127def19d515823890fdab57a256d36684530 clean-archive build exit0/75tasks,
+complete source/DEX/ELF/engine/notices/bundle/provenance + same65/64 v2/v3 signer
+PASS;13-file publication user-approved/remote verified. Code66 UNINSTALLED,
+exact-package retry user APPROVED, installed65 retained/no active process.
+
+- SNPLG11143507bytes/SHA256
+  d326cfb7597925f1db2fbdf7f959ede2cb7fea2fd8dd86bad6415ee745f297aa.
+- app.npk11026295bytes/SHA256
+  960ed8a6c7d5b0a165b5dd5e47581394b3dfa9152e428476416ede0ce72a88b5.
+- Metro1180739bytes/SHA256
+  c79a618ed50d5db13f6056185eb94fd3fc39ba49a73cae262c3e705328a1a1ff.
+- Certificate unchanged
+  fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c.
+- Archivee41265862024292495e398c183fd1f118a1aabfb93112c19c488e12c02b8ad74;
+  raw23-source receipt6aeb126ae6a70c0efb9641f33f5d9bee847a6e419e63af93811932cd21d0299a
+  normalizes ONLY CRLF->LF toe15beeff...b75fa80, ALL23 byte comparisons exact.
+- Exact-archive destination28/3mutants/fatal-baseline red->green and streaming
+  JNI87+Session51/3mutants PASS; postbuild actual-APK provider11/no skips;
+  core85407/all271mutations/JS101/wiring6/integration4/payload5/ELF9/native-v2-
+  Edit-crosslayer/provenance/packaging PASS. No hardware-fix or reproducible-
+  bytes claim; no personal material uploaded. Source/
 receipt/gates remain fail-closed. No new total-memory/PDF parser/hardware claim.
 
 ## Exp6 streaming-input review — focused, offline; not a new engine-loader design

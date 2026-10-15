@@ -1,5 +1,15 @@
 # T018I — user-approved PDFium reader integration
 
+CURRENT2026-10-15: exactd3e7142/code62 installed/ON/runtime marker verified under
+6188176283. Normal native disposable PAGE1 setup PASS; first engine FAIL at
+deleted cache-FD executable mapping Permission denied, no render or interactions.
+Normal Close exact native PAGE1/identical image/PDF+absent mark/public packages/
+rotation PASS,35 owned scratch-stage files removed/absence verified, local evidence
+retained, RELEASED6188589341. Code62 remains installed. Next OFFLINE narrow
+installed-engine loading assessment; no policy/root change, blind hash repin,
+new probe or parked ink work. Full evidence REGRESSION.md. New correction/review/
+exact signed package/explicit approval/fresh reservation required for future H1.
+
 CURRENT2026-10-15: approved source/notes published/remote66822bb; hostedCI38702924784
 at exact66822bb SUCCESS/all5 applicable jobs, postbuild actual provider8/Java9
 no skips PASS. No replacement artifact; locald3e7142/code62 package unchanged,

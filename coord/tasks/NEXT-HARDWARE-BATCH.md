@@ -2,6 +2,16 @@
 
 ## Code62 source checkpoint — no new device authority
 
+LATEST: code62 installed normally under6188176283; exact version/ON/runtime marker
+PASS. First engine mapping FAIL (deleted private cache-FD executable segment1,
+Permission denied); all interactions NOTPERFORMED. Normal Close/native PAGE1/
+identical pixels/files/rotation and35 owned-file cleanup PASS, RELEASED6188589341.
+No more hardware authorized by this failed trial. Continue OFFLINE narrow
+installed-engine loading correction; keep hash/binding checks/device policy.
+New reviewed exact signed candidate/explicit approval/fresh reservation comes
+before later H1. Do not repeat installed62 or unchanged modeling, root/ink/timer/
+original/merge work. Full result REGRESSION.md; earlier uninstalled text historical.
+
 CURRENT: publication66822bb verified; hostedCI38702924784 SUCCESS/all5 applicable
 jobs including actual packaged provider8/Java9. Code62 UNINSTALLED. Latest setup
 6187552036 stopped before picker/install because Settings returned to native;

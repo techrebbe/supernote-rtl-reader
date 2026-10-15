@@ -2,6 +2,18 @@
 
 ## Exp3 authenticated explicit-provider correction — 2026-10-15
 
+Actual exact code62 H1 now performed under6188176283: normal upgrade/settings ON/
+exact exp3 runtime marker PASS, first engine cache-FD executable mapping FAIL:
+deleted private snapshot segment1 Permission denied. No render/interaction PASS,
+no alternate load probe or policy/root change. This is the Android FD/permission
+uncertainty explicitly left open by source review. Normal Close/native PAGE1/
+byte-identical image/PDF+absent mark/public packages/rotation and35 owned-file
+cleanup PASS, RELEASED6188589341; raw local, code62 remains installed/ON. Full
+summary REGRESSION.md. New bounded source-only assessment is installed-engine
+loading without executable-cache generation and without weakening hash/typed API/
+internal relocation checks; new exact corrected package/review/approval before
+another hardware gate. Precise OS denial mechanism not established by the error.
+
 Approved publication remote-verified66822bbb1b24bddd0cac2a85b4ec3a1a801ebbec;
 summarized issue23 comment6187398071. HostedCI38702924784 exact66822bb SUCCESS:
 trace-helper53s, VirtualSpread70s, invariants121s, unsigned v2 assembly117s and

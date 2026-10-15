@@ -1,5 +1,43 @@
 # RTL Reader hardware regression
 
+## 2026-10-15 — T018I-H1 code62 installed; cache-FD mapping FAIL / cleanup PASS
+
+Fresh user Plugins-ready confirmation/reservation6188176283. Exact metadata/
+unrooted3.30.45/API30/ordinary shell/100percent charging/public packages/source/
+absent mark preflight PASS. Approved executabled3e7142ceabc03d2e434cb9797a53abf63787173,
+exp3/code62/SDK0.1.65/SNPLGSHA256
+3fac0a9a67476b20ec2df47419e9d3a73b9c9f71305894d68798e9bf1a8167f3.
+Normal same-ID picker upgrade PASS, exact Settings0.4.25-pdfium-exp3/ON verified.
+Select Plugin Package normally changes owner to Inbox SelectFileActivity in the
+Settings task; observed/verified transition, not another unexplained native return.
+
+Public library route selected only retained disposable; normal page selector's
+PAGE1 PREVIEW was committed via its thumbnail. Actual native PAGE1/1of4/portrait/
+source pixels verified before RTL. One host automatic-permission-review timeout
+occurred BEFORE a page-selector command started; explicitly allowed single retry
+refreshed stale screen evidence and passed. No reader failure inferred from it.
+
+Exact current RTL_READER_OPEN v0.4.25-pdfium-exp3-native-reader-v2 and scoped
+INIT_FAILED agree with visible first-engine error: private PDFium FD loader could
+not map executable segment1 of its deleted app-cache snapshot, Permission denied.
+FAIL before render/FPDF_InitLibrary; loader was reached after snapshot/FD admission.
+Exact OS policy mechanism NOT proven by this error. No retry, policy/permission
+change, root or alternate load probe. Links/text/bookmarks/zoom NOTPERFORMED.
+
+Normal Close PASS to exact native PAGE1; native baseline/terminal PNG byte-identical.
+PDF SHA7cf9de8f...b213905 unchanged, .pdf.mark absent, public reader hashes and
+original auto1/user2 rotation unchanged (no rotation writes in this trial).
+Exactly35 owned nonlink/hash-verified/local-backed captures+staged-installer files
+removed/absence verified; local raw tmp/t018ih1-exp3d-6188176283-20261015 and rollback
+retained. Open disposable PAGE1 intentionally retained; code62 installed/ON, no
+uninstall or inferred rollback. RELEASED6188589341; safe disconnected, no observer.
+
+Next bounded work OFFLINE: supported installed-engine loading, not executable
+cache generation, policy/root changes, blind repinning or another device probe.
+Existing typed-handle/internal-relocation authentication remains required. New
+executable needs focused checks/review/exact signed package and fresh approval/
+reservation. Ink PARKED/timers PAUSED/no originals/pen/other-plugin/firmware/merge.
+
 ## 2026-10-15 — code62 published/CI PASS; setup stops, H1 NOTPERFORMED
 
 User24-file publication/notes/issue23 and exact package retry approvals received.

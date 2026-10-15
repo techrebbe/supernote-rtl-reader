@@ -2,6 +2,19 @@
 
 ## Current phase — approved PDFium integration (T018I)
 
+CURRENT2026-10-15: code62 normal upgrade/exact version ON/runtime marker PASS
+under6188176283 after user directly opened Plugins. First engine activation FAIL:
+Android cannot map executable segment1 of deleted private cache snapshot,
+Permission denied. No page rendered; all H1 interactions NOTPERFORMED. Normal
+Close native PAGE1/byte-identical screenshots/PDF+absent mark/public packages/
+rotation unchanged PASS;35 owned files cleaned/absence verified, raw retained,
+RELEASED6188589341. Code62 remains installed/ON, Nomad safe disconnected.
+Full result REGRESSION.md. Continue narrow OFFLINE supported installed-engine
+loading assessment with unchanged hash/typed-handle/relocation checks. No device
+policy/root change or extra probe; new reviewed exact package/approval/reservation
+needed afterward. Prior setup/UNINSTALLED checkpoints below are historical.
+Ink PARKED/timers PAUSED/no PR finalization or merge.
+
 CURRENT2026-10-15: approved24-file publication remote-verified66822bbb1b24bddd0cac2a85b4ec3a1a801ebbec,
 summarized/reserved issue23 comment6187398071. HostedCI38702924784 exact66822bb
 SUCCESS:5 applicable jobs PASS,3 release-only skipped by existing conditions;

@@ -2,6 +2,22 @@
 
 ## Exp4 installed-library correction — offline checkpoint 2026-10-15
 
+HARDWARE FOLLOW-UP PASS: approved exactf0adcd4/code63 ran under6193796307,
+unrooted3.30.45/API30. Normal public Settings launch/observed manager upgrade/
+exact versionON; installed-library engine activation/render READY PASS. Direct
+PAGE2 and named/outline PAGE3, exact Back/Fit, English selection/verified own Copy,
+modest zoom/Pan and one normal Close/reopen/final drain PASS. Native/RTL PAGE1
+restorations byte-identical. Source unchanged/mark absent/public packages/rotation
+unchanged,64 local-backed/hash-verified captures+1 stage cleaned/absence verified.
+RELEASED6194297880; raw local, code63 ON. Full result REGRESSION.md. First host
+postflight log-count check incorrectly required both activation markers in one
+bounded final log tail; first marker was already retained in initial PID-scoped
+capture. Reconciled existing local captures; no device test/activation repeated.
+This functional lifecycle pass is NOT an actual-unmapping/SDK immutability proof.
+Production concurrent-update/lifetime assumption and remaining feature gates
+remain open. No source update/rebuild needed; H2 landscape/rotation is next after
+fresh approval/reservation. Source publication separately pending, no push/merge.
+
 HARDWARE APPROVAL RECEIVED for exact code63; no new review/build needed. Setup
 reservation6193636912 metadata exact target/firmware/API30/ordinary shell/power
 PASS, but DayWeave current owner stopped the trial before ANY UI input/capture/

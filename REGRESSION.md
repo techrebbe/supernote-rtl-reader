@@ -1,5 +1,57 @@
 # RTL Reader hardware regression
 
+## 2026-10-15 — code63 portrait H1 PASS; normal Close/reopen and cleanup PASS
+
+User exact-package install/test approval and request for agent-opened Settings.
+Fresh reservation6193796307. Exact target/Chauvet.E103.2610091001.2545_release
+(3.30.45)/API30/ordinary UID2000/97percent/public-package/source+absent mark/
+rotation preflight PASS. One normal publicly resolved Settings launch from
+DayWeave succeeded; no forced closure/private activity. Observed Apps/Plugins
+baseline15installed/10enabled/RTL exp3 ON, unique staged exact code63 filename/
+sole selected radio/normal Install PASS. Exact version0.4.25-pdfium-exp4/ON verified.
+Sourcef0adcd4220fed957c8972e28890c12c76fb76ffa, SDK0.1.65, SNPLGSHA256
+2c6aa7498fa7ecd9559220133036c4e167c8e559f47184209c92e145ddd3dbf5.
+Ordinary library opened only retained disposable; native PAGE1/1of4 pixels verified.
+
+Observed results:
+
+- Exact exp4 runtime marker/original render READY PASS. Initial reported87ms
+  view interaction is not total startup time or a performance benchmark.
+- Direct PAGE1 link→source PAGE2 with PDF crop/rotation PASS; normal link-history
+  Back restores byte-identical baseline PAGE1 PNG.
+- Named destination→PAGE3/XYZ zoom PASS. Original hierarchical outline retains
+  Part one/Chapter three/Hebrew title/Appendix; Chapter three bookmark destination
+  byte-identical to named-link PAGE3. Back restores baseline PAGE1.
+- Finger-selected English sentence visually aligns with source glyphs. Copy
+  enabled; visible Copied text (verified) follows app's exact label/text readback
+  of its own just-written clipboard. No unrelated clipboard read/restore claim.
+- One+1.25zoom/one small Pan remain on PAGE1; Fit restores byte-identical baseline.
+- Normal Close returns exact native PAGE1/byte-identical native baseline. Source/
+  absent mark verified before ONE predeclared same-document reopen; reopen renders
+  byte-identical RTL PAGE1. Second normal Close again restores native baseline.
+
+Initial host postflight expected both open markers in its bounded final log tail;
+first had aged out but was already retained in initial PID-scoped capture.
+Reconciled these existing logs; no hardware activation/test retry. Both exact
+markers retained and no observed loader/model/cleanup error. Actual unmapping or
+current SDK concurrent native-file update safety is NOT established by this pass.
+
+Postflight PDF SHA7cf9de8fa7ed91f7746ac44f62aa63e0641f757f330cf7d83efec7584b213905
+unchanged, .pdf.mark absent, public reader hashes and original auto1/user2 rotation
+unchanged. Exactly64 owned nonlink/hash-verified/local-backed XML/PNG captures+
+1 staged installer removed/absence verified. Local raw evidence retained at
+tmp/t018ih1-exp4-6193796307-20261015, rollback retained. Code63 remains installed/
+ON, disposable native PAGE1 intentionally retained. RELEASED6194297880, no process,
+safe disconnected. No pen/original/private writer/root/firmware/other-plugin or
+rotation-setting changes. Source publication remains separately pending.
+
+This is bounded PORTRAIT evidence, not release readiness. Landscape/rotation,
+physical Bluetooth, supported Edit/Return, Hebrew extraction fidelity, remaining
+link classes and concurrent-SDK-update lifetime safety need later gates. Next
+H2 same-package landscape/rotation plan prepared; fresh approval/reservation
+before hardware. No loader rewrite/unchanged build or modeling prerequisite.
+Ink PARKED/timers PAUSED/no PR finalization or merge.
+
 ## 2026-10-15 — code63 approved; setup-only stop, H1 NOTPERFORMED
 
 User exact-package install/test approval/free confirmation received. New issue23

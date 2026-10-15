@@ -2,6 +2,21 @@
 
 ## Exp4/code63 offline correction checkpoint — not a hardware pass
 
+LATEST HARDWARE RESULT: code63 PORTRAIT H1 PASS under6193796307; normal public
+Settings launch/observed Apps/Plugins/same-ID install/versionexp4 ON PASS. Exact
+sourcef0adcd4220fed957c8972e28890c12c76fb76ffa/package2c6aa749...dd3dbf5 unchanged.
+Original render READY, direct PAGE2/link Back, named PAGE3/outline equivalence,
+aligned English selection/own verified clipboard, modest zoom/Pan/exact Fit PASS.
+Normal Close/reopen/final Close restored byte-identical RTL/native PAGE1 images.
+PDF unchanged/mark absent/public packages/rotation1/2 unchanged;64 captures+1 stage
+removed/nonlink/hash/local-backup/absence verified, local raw evidence retained.
+RELEASED6194297880; safe disconnected, installed63 ON, no process. Details
+REGRESSION.md. Next bounded same-package landscape/rotation H2 needs new approval
+and fresh reservation; physical Bluetooth/Edit/Hebrew fidelity/other link classes
+remain untested here. No extra unchanged offline prerequisite or more loader work.
+25-file source plus same5notes/issue summary publication separately pending; no
+push/merge/timer resume. Ink PARKED. Earlier uninstalled/approval text historical.
+
 LATEST: user explicitly APPROVED exact code63 installation/disposable H1 and
 confirmed Nomad free. Reservation6193636912 metadata passed exact target/
 unrooted3.30.45/API30/ordinary shell/98percent, observed Wi-Fi transport. Current

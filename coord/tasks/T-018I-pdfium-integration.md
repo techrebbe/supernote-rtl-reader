@@ -1,5 +1,16 @@
 # T018I — user-approved PDFium reader integration
 
+LATEST code63 H1 hardware PASS6193796307; normal agent-opened public Settings/
+same-ID install/version ON and original PDF interaction phases passed. Direct/
+named/bookmark navigation, English selection+own verified Copy, zoom/Pan/Fit and
+Close/reopen supported by exact local evidence; no all-features/release claim.
+PDF/absent mark/public packages/rotation intact,65 owned files cleaned/absence
+verified/local evidence retained. RELEASED6194297880, code63 ON, safe disconnected.
+REGRESSION.md is current hardware authority. Next same-package H2 landscape/
+rotation plan in NEXT-HARDWARE-BATCH.md needs new approval/reservation, not a new
+build or repeated H1. Physical Bluetooth/Edit/other link classes/Hebrew fidelity
+remain later gates. Source publication pending separately; no push/merge/timers.
+
 LATEST: exact code63 install/test approved. Setup6193636912 exact metadata PASS
 but DayWeave focused; stopped BEFORE input/capture/staging/installation or file/
 settings/page changes, no remote scratch. RELEASED6193674815, H1 NOTPERFORMED.

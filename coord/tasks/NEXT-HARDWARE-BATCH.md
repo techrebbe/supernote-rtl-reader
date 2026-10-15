@@ -1,5 +1,37 @@
 # Next useful hardware batch — no speculative test loop
 
+## Latest: code63 portrait H1 PASS — next H2 landscape/rotation, not another build
+
+Exactf0adcd4/code63 installed/ON; original render/links/named-outline/English
+selection+verified Copy/zoom-Pan-Fit/normal Close/reopen PASS. Source/absent mark/
+public packages/rotation preserved;65 owned files cleaned/absence verified, raw
+local retained. RELEASED6194297880, safe disconnected. Do not repeat H1/build/
+source review or consumed6193796307; no device process.
+
+Prepare ONE separately approved same-package H2 on retained disposable T018IH1:
+
+1. New exclusive reservation/exact preflight, native PAGE1/unchanged source+mark
+   state/public packages/power, preserve original auto1/user2 rotation values.
+2. Open code63 on PAGE1; change presentation to landscape using supported
+   system rotation settings only, not root/firmware/private writer state.
+3. Verify Auto RTL spread original PAGE1 right/PAGE2 left, exact page identity,
+   geometry/rotation and settled content before touches. Existing cover-paired
+   settings stay authoritative; no parity/direction changes.
+4. Existing logical Next→PAGE3/PAGE4 and Previous→PAGE1/PAGE2; inspect both halves.
+   Verify one observed internal link against its original source destination and
+   normal history Back without modifying source/annotations.
+5. Return portrait, verify correct active original page/single layout, restore
+   original system rotation values, normal Close/native page verification.
+6. Source/annotation/public-package/rotation integrity, exact owned scratch
+   cleanup/local retention and release. Stop on any mismatch/loader/model/cleanup
+   uncertainty; no retry, install, pen, original, other-plugin, private writer or
+   firmware action. Physical Bluetooth and supported Edit tests remain later
+   separately bounded gates; do not silently add them to H2.
+
+H2 approval is not yet received. Source25-file/same5notes publication also remains
+separately pending; do not infer code-upload authority from device approval.
+No speculative emulator/host-modeling prerequisite. Ink PARKED/timers PAUSED.
+
 ## Exp4/code63 next gate — exact package READY; new approval required
 
 Exact installation/test approval now RECEIVED. Setup-only6193636912 stopped at

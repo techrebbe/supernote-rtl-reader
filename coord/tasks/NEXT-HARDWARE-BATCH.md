@@ -1,5 +1,26 @@
 # Next useful hardware batch — no speculative test loop
 
+## Latest: H4 large-input admission FAIL — fix loading, not another unchanged trial
+
+Representative COPY A around62.1MiB was rejected BEFORE render on installed
+code64; B around60.3MiB actual test NOTPERFORMED. Fresh6197397865 consumed,
+normal Close/restore synthetic PAGE1/original+annotation+copy+public integrity/
+unchanged rotation preferences/20 exact scratch cleanup PASS. RELEASED6197631132.
+Private sources/captures/fingerprints remain local, unique device A retained.
+No device process or further hardware authority from that consumed trial.
+
+Earliest useful hardware gate is corrected streaming input, not emulation:
+fixed32KiB Java transfer into one immutable native snapshot,64MiB absolute cap,
+source/hash and existing raster/Close/drain/owner checks preserved. Localexp6/
+code65 focused tests/review/ARM64 compile pass; remaining standard gates and
+exact clean signed package, scoped publication/install approval and NEW exclusive
+reservation/preflight remain. Then ONE retained COPY A normal open/admission/
+render and normal Close/integrity. Continue portrait/spread/links/bookmarks/zoom
+only after that decisive gate passes and within an explicitly bounded scope.
+Do not silently raise limits, rewrite/compress user PDFs, include annotation
+sidecars in copies or claim B rejection/whole-book selectable text. Ink PARKED,
+timers PAUSED/no PR finalization/merge; unchanged source review loops unnecessary.
+
 ## Latest: H3 PASS — representative-copy and real-input acceptance next
 
 Same installed7d0aae7/exp5/code64 completed6196445111 selection/verified Copy,

@@ -6,6 +6,7 @@ final class PdfiumReaderCore {
     static native void bindEngine(int authenticatedFd, String loadLabel, String sha256);
     static native void releaseEngine();
     static native long open(byte[] immutableSource);
+    static native long openStream(java.io.InputStream source, long expectedBytes);
     static native String libraryPath();
     static native int count(long session);
     static native String outline(long session);

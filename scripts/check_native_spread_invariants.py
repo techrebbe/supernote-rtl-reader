@@ -1066,7 +1066,8 @@ def check(repo_root: Path) -> None:
             # T018I exp3 independently reviewed marker exp2 -> exp3 ONLY.
             # T018I exp4 independently reviewed marker exp3 -> exp4 ONLY.
             # T018I exp5 independently reviewed marker exp4 -> exp5 ONLY.
-            "0ef2636ecd0ae1e1f5b1b4e411a8d89fdb9aa78c6159ef238b0f61fe444b0751",
+            # T018I exp6 marker exp5 -> exp6 ONLY; native streaming separate.
+            "521737dbe8aae687d8dcb2d1a63fe2f6af1f1b00a48a7460c8be0577da5a8c1e",
             "Edit/Return activation and close authority",
         ),
         (
@@ -1094,7 +1095,8 @@ def check(repo_root: Path) -> None:
             # T018I exp4 independently reviewed artifact label ONLY.
             # T018I exp5 independent review: artifact label and actual-method
             # viewport raster regression command only. Signing/SDK unchanged.
-            "c1ce7ef96035b16ca947b4f46ae2ef0ee3db7c2123b36cf62ff3fc57185251cc",
+            # T018I exp6 artifact label and streaming-input suite only.
+            "a392ce0e2c6dd016ec58a9915cf1ac18e0a1d4a25efb5e13892d3b763f1f7f3d",
             "Native Spread companion-build workflow",
         ),
         (

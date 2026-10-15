@@ -56,8 +56,8 @@ class Boundary(unittest.TestCase):
                 verify_wrapper(fixture(imports=(name,)))
 
     def test_extra_export_and_missing_jni_rejected(self):
-        for exports in (JNI_EXPORTS | {'__emutls_get_address'}, JNI_EXPORTS - {min(JNI_EXPORTS)}):
-            with self.assertRaisesRegex(ValueError, 'twelve JNI'):
+        for exports in [JNI_EXPORTS | {'__emutls_get_address'}]+[JNI_EXPORTS - {name} for name in JNI_EXPORTS]:
+            with self.assertRaisesRegex(ValueError, 'thirteen JNI'):
                 verify_wrapper(fixture(exports=exports))
 
     def test_shared_cxx_missing_extra_duplicate_dependencies_rejected(self):

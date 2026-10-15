@@ -7,11 +7,13 @@ import java.io.File;
 import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.security.MessageDigest;
+import java.security.DigestInputStream;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /** One process FIFO and exact owner; closing an old mount cannot close a new one. */
 final class PdfiumSession {
+    static final long INPUT_LIMIT=64L*1024*1024;
     static final ExecutorService QUEUE=Executors.newSingleThreadExecutor();
     static final PdfiumRasterLedger RASTERS=new PdfiumRasterLedger(Runtime.getRuntime().maxMemory());
     private static volatile PdfiumSession active;
@@ -36,12 +38,23 @@ final class PdfiumSession {
         long token=0;
         try {
             PdfiumEngine.ensure();
-            Snapshot snapshot=read(path);
-            token=PdfiumReaderCore.open(snapshot.bytes);
-            if (token<=0 || token>9007199254740991L) throw new IllegalStateException("Session identity bound");
-            int pages=PdfiumReaderCore.count(token);
-            if (pages!=expectedPages) throw new IllegalStateException("SDK/PDF page-count mismatch");
-            PdfiumSession value=new PdfiumSession(token,path,snapshot.canonical,snapshot.sha,pages,snapshot.bytes.length);
+            String canonical=canonical(path);
+            FileDescriptor descriptor=Os.open(canonical,OsConstants.O_RDONLY|OsConstants.O_CLOEXEC|OsConstants.O_NOFOLLOW,0);
+            PdfiumSession value;
+            // Exactly one owner of the descriptor. JNI reads via this stream;
+            // it never retains the stream, closes it, or reopens the source.
+            try(FileInputStream input=new FileInputStream(descriptor)) {
+                StructStat before=bounded(descriptor);
+                MessageDigest digest=MessageDigest.getInstance("SHA-256");
+                token=PdfiumReaderCore.openStream(new DigestInputStream(input,digest),before.st_size);
+                if (token<=0 || token>9007199254740991L) throw new IllegalStateException("Session identity bound");
+                stable(path,canonical,before,descriptor);
+                String sha=hex(digest.digest());
+                int pages=PdfiumReaderCore.count(token);
+                if (pages!=expectedPages) throw new IllegalStateException("SDK/PDF page-count mismatch");
+                value=new PdfiumSession(token,path,canonical,sha,pages,before.st_size);
+            }
+            // Publish only after source validation AND descriptor close succeed.
             active=value; return value;
         } catch(Exception|LinkageError error) {
             try { if(token>0)PdfiumReaderCore.close(token); }
@@ -74,34 +87,49 @@ final class PdfiumSession {
         }
     }
     private static final class Snapshot {
-        final byte[] bytes; final String sha,canonical;
-        Snapshot(byte[] data,String hash,String name){bytes=data;sha=hash;canonical=name;}
+        final String sha,canonical;
+        Snapshot(String hash,String name){sha=hash;canonical=name;}
     }
     private static boolean same(StructStat a,StructStat b) {
         return a.st_dev==b.st_dev && a.st_ino==b.st_ino && a.st_size==b.st_size &&
             a.st_mtime==b.st_mtime && a.st_ctime==b.st_ctime;
     }
-    private static Snapshot read(String path) throws Exception {
+    private static String canonical(String path) throws Exception {
         if(path==null || !path.startsWith("/") || !path.toLowerCase(java.util.Locale.ROOT).endsWith(".pdf"))
             throw new IllegalArgumentException("Only an authorized original PDF path is accepted");
-        String canonical=new File(path).getCanonicalPath();
+        return new File(path).getCanonicalPath();
+    }
+    private static StructStat bounded(FileDescriptor descriptor) throws Exception {
+        StructStat before=Os.fstat(descriptor);
+        if(!OsConstants.S_ISREG(before.st_mode) || before.st_size<=0 || before.st_size>INPUT_LIMIT)
+            throw new IllegalArgumentException("PDF exceeds the bounded input budget or is not a regular file");
+        return before;
+    }
+    private static void stable(String path,String canonical,StructStat before,FileDescriptor descriptor) throws Exception {
+        if(!same(before,Os.fstat(descriptor)) || !same(before,Os.stat(canonical)) ||
+            !canonical.equals(new File(path).getCanonicalPath()))
+            throw new IllegalStateException("PDF identity changed during read");
+    }
+    private static String hex(byte[] digest) {
+        StringBuilder hex=new StringBuilder(64);
+        for(byte b:digest)hex.append(String.format(java.util.Locale.ROOT,"%02x",b&255));
+        return hex.toString();
+    }
+    private static Snapshot read(String path) throws Exception {
+        String canonical=canonical(path);
         FileDescriptor descriptor=Os.open(canonical,OsConstants.O_RDONLY|OsConstants.O_CLOEXEC|OsConstants.O_NOFOLLOW,0);
         // FileInputStream owns the descriptor exactly once, including failures.
         try(FileInputStream input=new FileInputStream(descriptor)) {
-            StructStat before=Os.fstat(descriptor);
-            long limit=Math.min(64L*1024*1024,Runtime.getRuntime().maxMemory()/8);
-            if(!OsConstants.S_ISREG(before.st_mode) || before.st_size<=0 || before.st_size>limit)
-                throw new IllegalArgumentException("PDF exceeds the bounded input budget or is not a regular file");
-            byte[] bytes=new byte[(int)before.st_size]; int offset=0;
-            while(offset<bytes.length) { int n=input.read(bytes,offset,bytes.length-offset);
-                if(n<=0)throw new IllegalStateException("PDF changed during read");offset+=n; }
-            if(input.read()!=-1 || !same(before,Os.fstat(descriptor)) ||
-                !same(before,Os.stat(canonical)) || !canonical.equals(new File(path).getCanonicalPath()))
-                throw new IllegalStateException("PDF identity changed during read");
-            byte[] digest=MessageDigest.getInstance("SHA-256").digest(bytes);
-            StringBuilder hex=new StringBuilder(64);
-            for(byte b:digest)hex.append(String.format(java.util.Locale.ROOT,"%02x",b&255));
-            return new Snapshot(bytes,hex.toString(),canonical);
+            StructStat before=bounded(descriptor);
+            MessageDigest digest=MessageDigest.getInstance("SHA-256");
+            byte[] block=new byte[32768];long offset=0;int n;
+            while((n=input.read(block))!=-1) {
+                if(n<=0 || n>before.st_size-offset)throw new IllegalStateException("PDF changed during read");
+                digest.update(block,0,n);offset+=n;
+            }
+            if(offset!=before.st_size)throw new IllegalStateException("PDF changed during read");
+            stable(path,canonical,before,descriptor);
+            return new Snapshot(hex(digest.digest()),canonical);
         }
     }
 }

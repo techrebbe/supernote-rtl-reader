@@ -196,7 +196,7 @@ final class PdfiumEngine {
 }
 final class PdfiumReaderCore {
  static int closes,releases;static RuntimeException closeFailure,releaseFailure;
- static long open(byte[] bytes){throw new AssertionError("unexpected Android input read");}
+ static long openStream(java.io.InputStream input,long bytes){throw new AssertionError("unexpected Android input read");}
  static int count(long token){throw new AssertionError();}
  static void close(long token){closes++;if(closeFailure!=null)throw closeFailure;}
  static void releaseEngine(){releases++;if(releaseFailure!=null)throw releaseFailure;}

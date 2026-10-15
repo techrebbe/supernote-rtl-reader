@@ -1,5 +1,42 @@
 # RTL Reader hardware regression
 
+## 2026-10-15 — H4 representative large-file admission FAIL; recovery PASS
+
+User approved disposable copies of two chosen PDFs, originals/annotations
+untouched. Fresh6197397865, unchanged exact7d0aae7ff09bda39a5360aeba369734b295cbfd7/
+exp5/code64/SDK0.1.65 on unrooted3.30.45/API30, ordinary shell/100percent USB.
+No build/install/root/pen/settings/firmware change. Distinct sources approximately
+62.1 and60.3MiB were copied byte-for-byte; private original names, paths, hashes,
+content and captures retained LOCAL ONLY. One unique device COPY A opened
+normally PAGE1, activated normal RTL. Explicit UI+runtime bounded-input-budget
+rejection before render: H4 FAIL. Regular/exact copy independently verified.
+Current input min(64MiB,maxJavaHeap/8) allocates whole Java byte[] then native
+vector. Pinned host no largeHeap; properties512m/192m are not actual maxMemory.
+B hardware and all later navigation/text/links/bookmarks/zoom/rotation trials
+NOTPERFORMED; do not claim a second observed failure or weaken budgets blindly.
+
+Normal Close entire COPY A native PNG byte-identical; initial synthetic fixture
+native PAGE1 restored normally. Both original PDFs and existing native annotation
+sidecar exact, all copies exact/retained, synthetic PDF+absent mark/public packages
+unchanged. Rotation prefs1/2 unchanged/no settings writes; initial synthetic
+display landscape/restored native portrait after reopen, no whole-frame restore
+claim.20 individually recorded regular/nonlink/hash/local-backed capture scratch
+files removed/absence verified, raw evidence/copies retained privately. Device
+COPY A retained for later approved gate. RELEASED6197631132, no device process,
+installed64 unchanged. Local tmp/t018ih4-exp5-6197397865-20261015/H4-RESULT.md.
+
+Focused offline correctionexp6/code65 uses fixed32KiB Java DigestInputStream and
+one native immutable snapshot,64MiB cap/source hash and source/stat/FD/Close/drain/
+owner plus existing raster budgets preserved. JNI87+Session51 assertions at
+-Xmx32m/3 compiled mutants, actual Android35 Java/ARM64/payload5/integration4 PASS;
+independent review's sole exact-JNI-inventory P2 CLOSED, no other streaming
+blocker. Ordinary gates/exact clean signed build pending; UNINSTALLED/no new
+hardware or source-publication approval inferred. Earliest next hardware is ONE
+retained disposable A admission/render/normal Close after exact candidate gates,
+not speculative emulator or repeat unchanged H4. Prior synthetic H2/H3 passes
+remain valid bounded evidence, not representative-file compatibility. Ink PARKED,
+timers PAUSED/no merge.
+
 ## 2026-10-15 — same-code64 H3 landscape selection/bookmark/zoom PASS
 
 User approved one fresh bounded interaction check on SAME installed exact

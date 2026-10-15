@@ -1,5 +1,24 @@
 # T018I — user-approved PDFium reader integration
 
+LATEST H4 FAIL6197397865: user-selected distinct byte-identical representative
+copies about62.1/60.3MiB; source fingerprints/content PRIVATE. ONE disposable A
+activation on unchanged7d0aae7/code64 rejects at bounded input admission before
+render. B actual hardware and all interactions NOTPERFORMED. Normal Close entire
+COPY A native frame byte-identical; synthetic native PAGE1 restored. Original
+PDFs/native annotation/copies/public/synthetic+absent mark intact, prefs1/2
+unchanged;20 owned captures cleaned/absence, raw/copies retained. RELEASED
+6197631132. No new install/pen/settings/root/firmware or no-data-loss inference
+from hashes alone: originals were never written/opened for editing.
+
+Next concrete correction locallyexp6/code65: one native immutable snapshot fed
+by fixed32KiB DigestInputStream, absolute64MiB cap/raster ledger and verified
+FD/path/hash/close ownership unchanged. JNI87+Session51 small-heap assertions,
+3 compiled mutants, actual Android35 compile/ARM64/payload5/integration4 PASS;
+independent streaming review no blocker after exact13-export P2 closure.
+Remaining standard gates and exact clean build/signing before fresh COPY A
+admission/render hardware. UNINSTALLED; new source publication/package approval
+not inferred. Detailed REGRESSION.md; no speculative emulator prerequisite.
+
 LATEST H3 PASS6196445111 on unchanged installed exact7d0aae7/exp5/code64: aligned
 English selection+own verified Copy, hierarchical Chapter-three bookmark/Back,
 one1.25zoom/Pan/Fit and portrait/original-rotation/normal Close/nativePAGE1 PASS.

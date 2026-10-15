@@ -1,5 +1,39 @@
 # STATE — RTL Reader (updated 2026-10-15 by codex)
 
+## Latest: H4 large-file admission FAIL; safe recovery complete, streaming fix offline
+
+User selected two representative original-PDF COPIES. Reservation6197397865 used
+unchanged installed7d0aae7/exp5/code64, no install/root/pen/settings writes. Two
+distinct roughly62.1/60.3MiB sources copied byte-for-byte; private source names,
+paths, hashes, metadata/content and captures stay LOCAL, not public evidence.
+ONE normal activation of unique disposable A rejected before rendering with
+explicit bounded-input-budget error. H4 FAIL; B hardware/links/text/bookmarks/
+zoom/rotation NOTPERFORMED rather than repeated policy failure. Do not label B
+as observed rejection or increase caps blindly. Current min(64MiB,maxHeap/8)
+whole-file Java buffer precedes native vector. Heap props512m/192m and no pinned
+PluginHost largeHeap request observed; not measured Runtime.maxMemory.
+
+Normal Close restores entire COPY A native PNG byte-identically. Original
+synthetic native PAGE1 restored; original PDFs/existing annotation sidecar/copies/
+synthetic+absent mark/public packages intact, rotation preferences1/2 unchanged.
+Initial synthetic landscape/restored native portrait after reopen, not whole-
+scene restoration equality.20 exact owned hash/nonlink/local-backed captures
+removed/absence verified, copies/raw local retained. RELEASED6197631132, no device
+process; installed64 unchanged. Private tmp/t018ih4-exp5-6197397865-20261015.
+
+Concrete correction OFFLINE: fixed32KiB Java DigestInputStream -> ONE native
+immutable64MiB-max snapshot; remove full-file Java allocation, preserve original
+FD/source/hash/close/drain/owner and raster budgets. New JNI+Session suites pass
+at-Xmx32m (87+51 assertions/3 compiled defect mutants), actual Android35 Java and
+fresh ARM64 compile/payload5/integration4 PASS. Independent narrow review found
+one exact-export assembly P2, now CLOSED with strict13-entry inventory/every-
+missing-export negatives; no additional streaming hazard. Candidateexp6/code65
+UNBUILT/UNINSTALLED pending remaining ordinary gates/exact clean signed build.
+No new source publication approval inferred from prior scoped code64 upload.
+Earliest hardware gate after exact package/review/approval/new reservation is
+retained COPY A admission/render/normal Close, not more speculative emulation.
+Ink PARKED/timers PAUSED/no merge. Prior H3/synthetic passes remain bounded.
+
 ## Latest: same-code64 H3 PASS — core landscape interaction gates complete
 
 User-approved6196445111 used SAME installed exact7d0aae7/exp5/code64, no install/

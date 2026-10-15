@@ -1,5 +1,31 @@
 # T018I loader correction — independent source-only review
 
+## Exp6 streaming-input review — focused, offline; not a new engine-loader design
+
+H4 code64 actual representative large COPY A admission failed before PDF render;
+safe normal Close/integrity/20-file cleanup PASS, RELEASED6197631132. No original
+mutation; private source data not published. The correction replaces whole-file
+Java byte[] with Java-owned readonly descriptor/DigestInputStream/fixed32KiB JNI
+transfer into one existing native vector. Absolute64MiB input/raster budgets and
+FD/path/stat/hash/owner/drain/Close checks retained. Probe/native engine API set,
+writer/save/navigation/geometry unchanged; no disk cache, writable mapping or
+deferred original reads. Existing filesystem metadata is NOT an atomic
+immutability/ABA proof; snapshot itself is native-owned after input completes.
+
+Independent source reviewer ran stream2 (JNI87/Session51 assertions at-Xmx32m,
+3 compiled mutants) and provider11/no skips (Java14/Session40/Module72/native26).
+Sole P2: new openStream JNI omitted from exact ELF allowlist. Fixed strictly13
+exports, negatives for omission of EACH and any extra; other ELF restrictions
+unchanged. Independent confirmation ELF9/no skips, actual fresh ARM64 accepted/
+old12-entry rejected, payload5/wiring6 PASS; P2 CLOSED, no additional substantive
+streaming issue. Final23-input aggregate
+9953d811148355ac28e502eb0efc16c43f06918a4750b775fff1f477968b8f0f.
+Index pin521737db...5a8c1e is marker-only; workflowa392ce0e...1f7f3d adds streaming
+suite and artifact version only. Candidate identity expectations65/exp6, not
+weakened invariants. Exact clean build/package/signing still pending; UNINSTALLED.
+These tests are NOT Android FD/PDFium parsing/total native memory/performance or
+hardware proof. No unreviewed lifetime/provider-security claim or source upload.
+
 ## Same-code64 H3 follow-up — landscape interaction PASS, no new source change
 
 Approved6196445111 on unchanged exact7d0aae7/code64 passed aligned English

@@ -2,6 +2,15 @@
 
 ## 2026-10-15 — code62 source correction reviewed (no new hardware)
 
+Exactd3e7142ceabc03d2e434cb9797a53abf63787173 identity-confirmed CLEAN; normal
+clean-archive full signed build exit0/75tasks/source+DEX+ELF+payload+notices PASS.
+Actual packaged-engine provider8/Java9 and compatible v2/v3 certificate PASS.
+Exp3/code62 SNPLG3fac0a9a67476b20ec2df47419e9d3a73b9c9f71305894d68798e9bf1a8167f3;
+full identity coord/reviews/T-018I-loader-correction.md. UNINSTALLED/runtime UNKNOWN,
+no corrected hardware PASS, no active process. Source24-file/notes/summary and
+exact-package H1 approvals requested/pending; Nomad remains RELEASED/code61 ON.
+Earlier build-pending wording below is historical, not a new offline prerequisite.
+
 Following the code61 provider-authentication failure, exp3/code62 source-only
 correction independently CLEAN/noP0/P1/P2. Authenticated unlinked read-only engine
 FD, explicit typed39-API handle and complete7-slot internal FPDF witness replace

@@ -2,6 +2,17 @@
 
 ## Current phase — approved PDFium integration (T018I)
 
+CURRENT2026-10-15: exactd3e7142ceabc03d2e434cb9797a53abf63787173 independently
+confirmed CLEAN, all23 production inputs match reviewed snapshot. Normal exact
+clean-archive exp3/code62 build exit0/75tasks/full package source+DEX+ELF+engine/
+notices PASS; actual packaged-engine provider8/Java9 and compatible v2/v3 signer
+PASS. SNPLG3fac0a9a67476b20ec2df47419e9d3a73b9c9f71305894d68798e9bf1a8167f3.
+Details reviews/T-018I-loader-correction.md. Candidate UNINSTALLED/runtime UNKNOWN;
+24-file public source/notes/issue23 and exact-package bounded H1 approvals pending.
+No active build/review/test/device process. Nomad RELEASED6186265230/code61 ON;
+safe disconnected. Fresh approval/free-connected/reservation/preflight next,
+not another offline modeling loop. Ink PARKED/timers PAUSED/no merge.
+
 CURRENT2026-10-15: exp3/code62 explicit authenticated-provider correction now
 independently CLEAN/noP0/P1/P2; fresh actual ARM64 compile/8provider+Java9/9ELF/
 5payload/3integration+Java14/13lifecycle/6wiring/native-v2 gates PASS. Owner also

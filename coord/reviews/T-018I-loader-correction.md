@@ -2,6 +2,39 @@
 
 ## Exp3 authenticated explicit-provider correction — 2026-10-15
 
+Exact executabled3e7142ceabc03d2e434cb9797a53abf63787173 independently identity-
+confirmed CLEAN: all23 production inputs equal the reviewed/compiled snapshot;
+only approved pins/comments and five notes added, no subsequent executable edits.
+All four invariants, provenance and packaging PASS after scoped pin application.
+Initial provenance rerun used an unwritable default sandbox temp and failed with
+PermissionError; workspace-TEMP rerun PASS, not a production code correction.
+
+One normal exact clean Git-archive build exit0/75tasks; final complete package/
+DEX/source-receipt/ELF/engine/notices and v2/v3 signing verification PASS. Postbuild
+provider suite against ACTUAL packaged app.npk PASS8/no skips, including9 Java
+authentication assertions. No claim of two-build byte reproducibility or actual
+Android FD execution from host tests.
+
+- SDK0.1.65; plug-in IDsnrtl20260726001,0.4.25-pdfium-exp3/code62.
+- Native packagecom.supernotertlreader, Android1.0/code1/min27/target35.
+- SNPLG11141001bytes/SHA256
+  3fac0a9a67476b20ec2df47419e9d3a73b9c9f71305894d68798e9bf1a8167f3.
+- Embedded app.npk11026295bytes/SHA256
+  063a0e7c495928cf03ae4c88f116d5c9f4a422e040d74f78dc27a504daaa2913.
+- Metro1180199bytes/SHA256
+  d480d249c5e403f53ff6ccaeefa8bd5d3dbbeed97cff30b2a34cb14f24797f92.
+- Certificate SHA256fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c,
+  same verified production identity as code61/60/59; v2/v3 verified.
+- Local tmp/t018i-exp3-d3e7142-build1/out/SupernoteRtlReader.snplg and raw build/
+  identity evidence retained locally. No binaries, credentials or raw upload.
+
+Candidate UNINSTALLED/runtime UNKNOWN.24-file reviewed source/build-result notes/
+issue23 publication and exact-code62 disposable H1 approvals requested, not yet
+received. No public push/new reservation/device action; installed61 remains ON,
+Nomad RELEASED6186265230. No active build/review/test/device process. Earliest gate
+is the approved exact-package H1/fresh exclusive reservation/preflight, not further
+unchanged emulation/modeling. Ink PARKED/timers PAUSED/no PR finalization or merge.
+
 Independent narrow review of the18-file correction against1357b87412468e9170a8c07670fe75d6335500b3
 is CLEAN/noP0/P1/P2. Reviewer read source and ran offline checks only; no source,
 Git metadata, device or publication changes. Candidate0.4.25-pdfium-exp3/code62,

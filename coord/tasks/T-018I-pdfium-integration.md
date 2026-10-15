@@ -1,5 +1,15 @@
 # T018I — user-approved PDFium reader integration
 
+CURRENT2026-10-15: exact executabled3e7142/code62 review/identity CLEAN. Normal
+clean-archive signed build exit0/75tasks/full packaged source/DEX/ELF/engine/notices
+and compatible certificate PASS, actual packaged-engine provider8/Java9 PASS.
+SNPLG3fac0a9a67476b20ec2df47419e9d3a73b9c9f71305894d68798e9bf1a8167f3,
+UNINSTALLED/runtime UNKNOWN. Detailed identity ../reviews/T-018I-loader-correction.md.
+24-file publication/notes/issue23 and exact-code62 H1 approvals requested/pending.
+No active process or new device access; Nomad RELEASED6186265230/code61 ON. Next
+is fresh approved exact-package H1/reservation/preflight; no more unchanged offline
+prerequisites, ink work, timer resume, PR finalization or merge.
+
 CURRENT2026-10-15: narrow exp3/code62 provider correction independently CLEAN;
 actual ARM64 compile, actual-engine/Java authentication, exported/internal binding
 inventory and focused retained suites PASS. Engine hash/bytes NOT repinned.

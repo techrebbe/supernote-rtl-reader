@@ -2,6 +2,15 @@
 
 ## Code62 source checkpoint — no new device authority
 
+Exactd3e7142/code62 clean-archive build/review/package source/DEX/ELF/payload/
+notices/compatible signer PASS, actual packaged-engine provider8/Java9 PASS.
+SNPLG3fac0a9a67476b20ec2df47419e9d3a73b9c9f71305894d68798e9bf1a8167f3,
+UNINSTALLED/runtime UNKNOWN. Publication and exact-package H1 approvals requested;
+no active process/device action. Once approved/free/connected, reserve anew and
+run the existing bounded portrait H1/normal Close/integrity/owned cleanup.
+Do not repeat completed source checks or use consumed6186104046. Code61 still ON;
+release6186265230 remains in force. Earlier build-next text below is historical.
+
 2026-10-15: exp3/code62 authenticated explicit-provider correction independently
 CLEAN; actual native/provider/Java/ELF/payload and retained regressions PASS.
 Reviewed pins applied, exact clean signed package next. Once exact package/source/

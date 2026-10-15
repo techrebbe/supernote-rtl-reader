@@ -2,6 +2,18 @@
 
 ## Current queue — interactive original PDF reading
 
+CURRENT2026-10-15: exact code61 installation/H1 retest approval RECEIVED. The
+14-file source/evidence publication and issue23 summary are complete at85c1d9a;
+approved executable1c85d06/SNPLGa57b0418...4fcd0f2 unchanged. No install or device
+access in this follow-up. Await fresh Nomad-free/connected/disposable-ready signal,
+then NEW exclusive reservation/exact preflight, normal same-ID upgrade and the
+same bounded portrait H1/normal Close/integrity/owned cleanup. Do not reuse old
+reservation6183673118, historical endpoint or released scratch namespace.
+Hosted CI38685640763 failed setup/current-package-test drift, not reader build;
+reviewed CI-only corrections awaiting extra-file publication/hosted rerun. All
+20 production inputs unchanged, no candidate rebuild or new offline prerequisite.
+Below is earlier checkpoint history, not a request for repeated approval/build.
+
 CURRENT2026-10-15: code61 exact executable1c85d066a5111b803ff41463372b80d349f6c6b8
 independently CLEAN/identity-confirmed; normal exact clean-archive signed package
 and complete verification PASS. Candidate0.4.25-pdfium-exp2/SNPLG

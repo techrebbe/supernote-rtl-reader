@@ -52,11 +52,14 @@ class WiringTests(unittest.TestCase):
                       (ROOT / "native/PdfPageViewManager.kt.template").read_text(encoding="utf-8"))
 
     def test_candidate_identity_and_ci_gates(self):
+        # Current package identity only, not saved-ink provenance or hardware
+        # authority. Preserved wiring/cleanup gates above and below still apply;
+        # the PDFium integration separately asserts savedInkProfile is disabled.
         config = json.loads((ROOT / "PluginConfig.json").read_text(encoding="utf-8"))
-        self.assertEqual(config["versionName"], "0.4.24-sdk-exp4")
-        self.assertEqual(config["versionCode"], "59")
+        self.assertEqual(config["versionName"], "0.4.25-pdfium-exp2")
+        self.assertEqual(config["versionCode"], "61")
         self.assertEqual(config["pluginID"], "snrtl20260726001")
-        self.assertIn("RTL_READER_OPEN v0.4.24-sdk-exp4-native-reader-v2",
+        self.assertIn("RTL_READER_OPEN v0.4.25-pdfium-exp2-native-reader-v2",
                       (ROOT / "overlay/index.js").read_text(encoding="utf-8"))
         workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
         for gate in ("test_saved_ink.js", "test_saved_ink_app.js",

@@ -1,5 +1,19 @@
 # RTL Reader hardware regression
 
+## 2026-10-15 — code61 approved; CI-only follow-up (no new hardware)
+
+User approved exact code61 H1 install/retest and reviewed14-file publication.
+Source/evidence85c1d9a remote verified/issue23 summaries posted; executable
+1c85d06/SNPLGa57b0418...4fcd0f2 unchanged. Still UNINSTALLED/runtime UNKNOWN,
+Nomad remains RELEASED6184589609; fresh free/connected/ready confirmation and
+reservation/preflight required. No device action or active observer here.
+Hosted run38685640763 FAIL before assembly: removed Android setup default tools
+and stale current-package code59 test pin. Independently reviewed CI/test-only
+correction CLEAN, relevant local gates/negative controls PASS, no production or
+saved-ink source change/rebuild. Extra test-file publication/hosted rerun pending.
+Details coord/reviews/T-018I-loader-correction.md. This is not a hardware PASS;
+prior code60 failure/cleanup remains authoritative. Ink PARKED/timers PAUSED.
+
 ## 2026-10-15 — T018I-H1 integrated code60 loader FAIL / cleanup PASS
 
 Software follow-up: exp2/code61 exact executable

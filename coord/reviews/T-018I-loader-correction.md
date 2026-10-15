@@ -1,5 +1,42 @@
 # T018I loader correction — independent source-only review
 
+## CI-only follow-up after approved publication
+
+User approved14-file source/evidence/issue23 publication and exact code61 retest.
+Pushed/remote verified85c1d9a4a807c15efb436cd5bd709804b1c525f1, executable1c85d06
+unchanged. Issue23 summaries6184950962/6184962529; no PR created/finalized/merged.
+No code61 installation or device access; hardware awaits fresh free/ready signal.
+
+Manual run38685640763 FAILED: pinned setup-android v3 default `tools platform-tools`
+calls sdkmanager tools, now removed; invariant job separately stops because
+test_saved_ink_wiring.py expects code59 despite reading CURRENT PluginConfig/index.
+This is not a saved-ink provenance receipt or saved annotation geometry authority.
+
+Independent final three-file correction review CLEAN/noP0/P1/P2:
+
+- Three v3 setup steps now explicitly request platform-tools. Pinned action
+  metadata/implementation checked: command-line tools/licenses/PATH setup and the
+  following unchanged platforms35/build-tools35 step remain intact.
+- New cross-layer gate rejects missing/malformed/empty/legacy-tools inputs for
+  all6 setup steps. Reviewer90 negative controls rejected, current YAML PASS.
+- Reviewed workflow-only normalized digest
+  4bbcffbc706b0be912c9c46884ffc5cdd80be4a685bf486ef29a77509df7dc64.
+- Saved-ink wiring test updates ONLY3 exact current candidate expectations to
+  reviewed0.4.25-pdfium-exp2/code61, with explanatory scope comment. Plugin ID,
+  existing wiring/cleanup/CI assertions unchanged.6 tests PASS; reviewer7 stale/
+  malformed identity negatives rejected. Seven saved-ink/controller/renderer
+  sources identical to code59bede435; actual PDFium savedInkProfile remains null
+  and its generated integration assertion remains intact. Ink stays PARKED.
+- Owner6 wiring/524 Fit checks/10 renderer/3 generated integration(+Java14),
+  all4 source invariants, provenance and packaging fail-closed PASS. Owner9 actual
+  identity/CI-gate and30 SDK-input negatives rejected.
+- All20 production PDFium source_inputs identical to1c85d06. Exact approved
+  signed code61 SNPLG remains unchanged; no new binary build warranted.
+
+This CI-only checkpoint is local pending explicit extra test-file publication
+approval and hosted rerun. Neither hosted-CI nor corrected hardware PASS claimed.
+The independent reviewer did not edit source/Git, publish or access the device.
+
 ## Exact candidate build checkpoint
 
 Executable1c85d066a5111b803ff41463372b80d349f6c6b8, independently confirmed

@@ -2,6 +2,27 @@
 
 ## Current phase — approved PDFium integration (T018I)
 
+CURRENT2026-10-15: user approved the14-file publication/issue23 summary and exact
+code61 installation/H1 retest. Source/evidence pushed and remote verified at
+85c1d9a4a807c15efb436cd5bd709804b1c525f1 (executable1c85d06 unchanged), summarized
+in issue23 comments6184950962/6184962529. Code61 remains UNINSTALLED; waiting only
+for fresh free/connected/disposable-ready confirmation, then a NEW reservation
+and exact preflight. No Nomad access/observer during this offline follow-up.
+
+Manual CI run38685640763 FAILED before package assembly: pinned Android setup
+default requested removed `tools`; a separate current-package identity test still
+expected code59. Minimal CI/test-only corrections independently CLEAN/noP0/P1/P2:
+explicit platform-tools for3 setup steps, fail-closed package-input gate/reviewed
+workflow-only digest, exact code61 identity expectation. All saved-ink behavioral
+sources/checks preserved, production PDFium savedInkProfile remains disabled.
+Local6 wiring/524 Fit checks/10 renderer/3 integration(+Java14)/four invariants/
+provenance/packaging PASS; owner9 identity/gate and30 SDK negatives rejected,
+reviewer90 SDK/7 identity negatives rejected. No20 production source-input
+changes; approved exact SNPLG/hash/signature remains unchanged, no rebuild needed.
+CI follow-up is local pending extra test-file publication approval and hosted
+rerun, NOT a hardware or hosted-CI PASS. Ink PARKED/timers PAUSED/no merge.
+Earlier checkpoints below are chronological, not current approval status.
+
 CURRENT2026-10-15: exact correction executable1c85d066a5111b803ff41463372b80d349f6c6b8
 independently review-confirmed CLEAN; scoped pins/all four invariants and package
 fail-closed PASS. Normal clean-archive build exit0/75tasks, final source/payload/

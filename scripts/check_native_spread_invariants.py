@@ -15,6 +15,20 @@ def fail(message: str) -> None:
     raise SystemExit(f"check_native_spread_invariants.py: {message}")
 
 
+def check_android_sdk_packages(jobs: dict) -> None:
+    """Never inherit setup-android's removed legacy `tools` package default."""
+    for name, job in jobs.items():
+        if not isinstance(job, dict):
+            continue  # The structural job checks below reject invalid jobs.
+        for step in job.get("steps", []):
+            if not isinstance(step, dict) or not str(step.get("uses", "")).startswith("android-actions/setup-android@"):
+                continue
+            inputs = step.get("with", {})
+            packages = inputs.get("packages") if isinstance(inputs, dict) else None
+            if not isinstance(packages, str) or not packages.split() or "tools" in packages.split():
+                fail(f"{name} Android SDK setup requires explicit non-legacy packages")
+
+
 def normalized_text_sha256(path: Path) -> str:
     """Hash canonical LF text so frozen review gates are checkout-independent."""
 
@@ -582,6 +596,7 @@ def check(repo_root: Path) -> None:
     jobs = parsed_workflow.get("jobs")
     if not isinstance(jobs, dict):
         fail("workflow jobs must decode to an object")
+    check_android_sdk_packages(jobs)
     native_assembly_job = jobs.get("native-spread-build")
     native_release_job = jobs.get("native-spread-upgrade-artifact")
     plugin_job_definition = jobs.get("build")
@@ -1069,7 +1084,9 @@ def check(repo_root: Path) -> None:
             # companion source, signing and verification steps are unchanged.
             # T018I exp2 independent review: ELF unit-test command and artifact
             # identity ONLY; no companion, signing, permission or native gate edit.
-            "2c6df6c2b6ed6555d8d6ed8d0370fbf4eb62ce7d6ed2aed5ed9355b54e93854e",
+            # CI follow-up review adds ONLY three explicit platform-tools inputs;
+            # pinned actions, subsequent SDK dependencies and signing unchanged.
+            "4bbcffbc706b0be912c9c46884ffc5cdd80be4a685bf486ef29a77509df7dc64",
             "Native Spread companion-build workflow",
         ),
         (

@@ -2,6 +2,15 @@
 
 ## Current exact checkpoint — 2026-10-15
 
+User subsequently APPROVED source/summary publication and defined exact code60
+H1 installation/test. Source31-file push verified atcaf81af. Fresh reservation
+6183424291 released6183436132 with H1 NOTPERFORMED: only local ADB inventory ran,
+Nomad absent; unrelated Android connection untouched. No target shell/UI/capture/
+config/source/stage/install/setting/pen or cleanup. No historical-IP reconnect.
+Fresh USB/current endpoint and device availability requested; then NEW issue23
+reservation/preflight. No new software defect or engine FAIL inferred. Exact
+build1 remains approved, source unchanged; source-ready hardware gate not rerun.
+
 Executable sourcea102cb9490af5fbdecff9a7e5c73f2965fa6779b on
 agent/page-turner-bridge; baseline969a471. All original five review findings and
 accepted transition-release follow-up CLOSED through independent correction

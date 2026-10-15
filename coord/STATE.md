@@ -2,6 +2,18 @@
 
 ## Current phase — approved PDFium integration (T018I)
 
+2026-10-15 user APPROVED publication and exact code60 H1 installation/test.
+31-file source push verified remotely atcaf81af2c288dc0e17b09fe82f4e417c961ef9fa.
+Fresh issue23 reservation6183424291 RELEASED6183436132 with H1 NOTPERFORMED:
+host ADB inventory had no Nomad; unrelated Android connection was not accessed.
+No target shell/UI/capture/config/PDF/stage/install/rotation/pen or scratch file.
+No cleanup required and no stored-address reconnect. Current blocker is ONLY
+fresh USB/debugging reconnect or CURRENT user-provided Wi-Fi endpoint plus free
+device confirmation, then NEW reservation/preflight. Approval is received, not
+pending; earlier wording below is historical. Exact reviewed code60 unchanged.
+Guarded local metadata preflight prepared/syntax checked, not device-executed.
+No process/observer remains; no more unchanged software-test/build prerequisites.
+
 Exact executablea102cb9490af5fbdecff9a7e5c73f2965fa6779b,
 0.4.25-pdfium-exp1/code60, locally committed, UNINSTALLED/UNPUSHED.
 All accepted integration review findings CLOSED; final independent exact-source
@@ -16,10 +28,9 @@ signature/ZIP metadata. No byte-determinism claim. Detailed exact evidence in
 reviews/T-018I-codex.md; source preserves portrait/RTL/Bluetooth/SDK Edit routes,
 integrated hardware behavior NOT yet proven.
 
-Real blockers: new explicit code60 installation/disposable-test approval and
-fresh exclusive issue23 reservation/preflight; 31-file source/summary publication
-approval also requested and pending. Do not install/access/push/post based on
-an earlier diagnostic approval, reuse consumed reservations, or resume timers.
+The defined code60 H1 approval does not permit reused reservations, historical
+endpoint guesses, unrelated device access, expanded tests or timer resumption.
+Fresh exclusive issue23 reservation/preflight remains mandatory after connection.
 No build/review/device observer left running. Ink PARKED, timers PAUSED, no merge.
 
 Historical source checkpoints below, not current blockers or package authority:

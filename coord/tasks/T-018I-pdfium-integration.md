@@ -1,9 +1,18 @@
 # T018I — user-approved PDFium reader integration
 
+Current2026-10-15: user APPROVED31-file publication and exact build1 code60 H1.
+Source pushcaf81af remote verified. Reservation6183424291 RELEASED6183436132:
+H1 NOTPERFORMED at local ADB inventory because Nomad absent. Only an unrelated
+Android transport was listed; no target read/input occurred. No stored-address
+reconnect, staging/install or target scratch/cleanup. Asked for USB/debugging or
+CURRENT Wi-Fi endpoint/free confirmation. New reservation/preflight required,
+not another unchanged build/review. Guarded local metadata preflight prepared and
+syntax PASS, not run on device. All prior source/packages/evidence preserved.
+
 2026-10-15: exact sourcea102cb9/code60 software/build/review checkpoint COMPLETE;
 details coord/reviews/T-018I-codex.md. UNINSTALLED/UNPUSHED, no active process.
 31-file reviewed publication and exact build1 disposable portrait install/test
-approvals requested and pending. No hardware authority inferred from source.
+approvals subsequently received above. No hardware authority inferred from source.
 
 H1 prepared: unchanged generated4page interactive-original-fixture-v2.pdf,
 sourceSHA7cf9de8fa7ed91f7746ac44f62aa63e0641f757f330cf7d83efec7584b213905,

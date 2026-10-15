@@ -1,5 +1,36 @@
 # RTL Reader hardware regression
 
+## 2026-10-15 — code66 H5 reading/navigation PASS; native toolbar restoration caveat
+
+Approved NEW6200007148, SAME installed c40127d/exp7/code66, no installation or
+executable change. Unrooted3.30.45/API30/shell2000/100percent/current synthetic/
+originals+annotation+copy+public+prefs preflight PASS. ONE normal COPY A activation.
+Portrait1->2->1; landscape RTL1right/2left ->3right/4left ->1right/2left; portrait1
+recovery PASS. Actual content independently matched LOCAL Poppler original-page
+renders1-4. Full chrome/viewports, READY1/2/3/5/6/7/9, no observed runtime failure;
+superseded intermediate rotation requests not extra turns. Portrait and spread
+round-trip PNGs each exactly restored. Early marker aged out of Android logs:
+host guard stopped input; preserved initial exact marker, same current reader PID
+and overlapping logs verified read-only, no reactivation. Initial host-only helper
+syntax error also stopped before ANY device command; corrected before preflight.
+
+Normal Close SDK-verified nativePAGE1, original prefs1/2 restored, syntheticPAGE1
+restored. Strict WHOLE native scene exactness NOTPASS:60 pixels differ in stock
+tool variant triangles within[280,79,694,94] on COPY A and synthetic; ALL document/
+footer pixels identical, native XML attributes differ only hierarchy rotation0->2
+(both portrait, recorded user_rotation2 restored). Physical/native tool state
+NOTTESTED; do not silently turn this into whole-scene/tool acceptance or an ink
+inference. No follow-on tool probe. Both originals/existing native annotation/
+copies/synthetic+absent mark/public unchanged.36 exact owned regular/nonlink/hash/
+local-backed capture files removed/absence verified, raw/private source renders/
+copies/rollback retained. RELEASED6200313035, installed66 ON/no active local process.
+Private evidence tmp/t018ih5-exp7-6200007148-20261015, not uploaded.
+
+Next proposed reading-only batch SAME66: A original bookmark/Back and modest
+zoom/Pan/Fit, then B first admission/portrait/RTL-spread navigation, each bounded
+with NEW reservation/preflight and cleanup. Approval SENT/PENDING; no extension
+of H5, installation, originals activation, pen/root/firmware/ink/timer/merge work.
+
 ## 2026-10-15 — code66 H4R3 large-copy admission/first-page render PASS
 
 Fresh6199667735 after user Connected; exact approved executable

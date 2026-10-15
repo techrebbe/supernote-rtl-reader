@@ -1,6 +1,25 @@
 # T018I — user-approved PDFium reader integration
 
-CURRENT H4R3 PASS: user Connected, NEW6199667735 exact approved c40127d/exp7/
+CURRENT H5 reading/navigation PASS, NEW6200007148 SAME c40127d/exp7/code66/no
+install: COPY A portrait1->2->1, RTL landscape12->34->12, portrait1 recovery;
+LOCAL independent Poppler page identities/full chrome/READY/exact round-trip
+PNGs PASS. Unrooted3.30.45/API30/100percent/preflight originals/native annotation/
+copies/public/prefs PASS. ONE activation, no runtime failure observed. Exact
+initial marker/current same reader PID/overlapping preserved logs establish
+identity after early-marker log rollover, no reactivation.
+
+Normal Close SDK-verified PAGE1 and original prefs1/2/syntheticPAGE1 restored.
+Whole native PNG exactness NOTPASS:60 stock-toolbar variant-triangle pixels
+different; document/footer identical, XML only rotation0->2 (both portrait).
+No physical tool-state/ink acceptance claim or extra probe. Originals/native
+annotation/copies/public intact;36 owned hash/nonlink/local-backed captures
+cleaned/absence, raw/renders/copies/rollback retained. RELEASED6200313035,
+installed66 ON/no active local process, no executable/build/review cycle.
+Next A bookmark/Back+zoom/Pan/Fit then B first loading/portrait/RTL spread bounded
+reading-only batch approval SENT/PENDING, NEW reservation per trial. No install,
+originals activation/pen/root/firmware/ink/timer/merge. Details REGRESSION.md.
+
+HISTORICAL H4R3 PASS: user Connected, NEW6199667735 exact approved c40127d/exp7/
 code66/package d326cfb7...5f297aa normal same-ID manager install/ON+runtime marker.
 Unrooted3.30.45/API30/shell2000/98percent/preflight originals/native annotation/
 copies/public/prefs PASS. ONE retained COPY A activation now visibly renders

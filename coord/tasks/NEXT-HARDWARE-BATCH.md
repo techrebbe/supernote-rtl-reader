@@ -1,6 +1,40 @@
 # Next useful hardware batch — no speculative test loop
 
-## Next H5: representative-copy page navigation and landscape RTL — approval pending
+## Next H6/H7 proposed reading-only batch — approval pending, unchanged installed66
+
+H5 NEW6200007148 reading PASS: COPY A portrait1->2->1, RTL landscape12->34->12,
+portrait1; independent LOCAL Poppler content/READY/full viewports and exact app
+round-trip PNGs. Close SDK-verified nativePAGE1/prefs1/2/syntheticPAGE1 restored.
+Originals/native annotation/copies/public intact;36 exact captures cleaned,
+RELEASED6200313035, installed c40127d/exp7/code66 unchanged/no local process.
+Native restoration caveat:60 toolbar-triangle pixels differ, document/footer
+identical, XML only rotation0->2/both portrait. Whole native/tool-state exactness
+NOTPASS, no pen/annotation conclusion or extra stock-tool investigation.
+
+User question SENT/PENDING for a batched reading-only scope: SAME66/no install;
+H6 COPY A original bookmark/Back and modest1.25zoom/one Pan/Fit. Prepare exact
+valid destination/unsupported entries from private source copy offline; never
+guess page0 for unresolved target. Observe disabled unsupported entries, select
+ONE valid original bookmark, independently verify destination, then Back. Exact
+Fit restores original view. No selectable-text/OCR or link claim from scanned
+pages; no external/script actions. Stop source/page/paint/model/cleanup ambiguity.
+
+After H6 record/normal Close/integrity/scratch cleanup/release, H7 NEW reservation/
+preflight: uniquely stage ONLY existing byte-identical disposable B (no annotation
+sidecar), ordinary library opens PAGE1, ONE activation. First admission/count/
+render PASS before one portrait Next/Previous and paired RTL landscape/one logical
+Next/Previous. Independently use LOCAL source page1-4 references. Restore portrait/
+original prefs/normal Close/starting synthetic/source+annotation+copies/public
+integrity/exact owned scratch cleanup/release. If B fails admission/render, stop
+before navigation; no ad-hoc loader workaround/second activation.
+
+Each trial needs scope approval and fresh exclusive reservation, exact source/
+power/current owner and preserved rollback/raw evidence. No original activation,
+pen/installation/firmware/root/other-plugin/global-hook/Edit/pairedBluetooth/ink/
+timer/PR finalization/merge. No extra speculative build/review/emulator gate.
+H5 is consumed; this plan does not authorize hardware while approval is pending.
+
+## Historical H5: representative-copy page navigation and landscape RTL
 
 H4R3 NEW6199667735 exact approved c40127d/exp7/code66/package d326cfb7...5f297aa
 normal same-ID install/ON+runtime and ONE retained COPY A first render PASS:

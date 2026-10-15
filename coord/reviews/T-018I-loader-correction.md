@@ -1,6 +1,23 @@
 # T018I loader correction — independent source-only review
 
-## Code66 bounded hardware evidence — H4R3 PASS; no new source review needed
+## Code66 H5 reading evidence — PASS with separate native-toolbar restoration caveat
+
+Approved NEW6200007148 SAME c40127d/exp7/code66/no install/source change:
+COPY A portrait1->2->1, RTL landscape12->34->12 and portrait1 PASS. Independent
+LOCAL Poppler content references, visible full chrome/READY/exact app round-trip
+PNGs; no runtime failure observed. One initial runtime marker preserved/current
+same reader PID/overlapping logs handle early-marker rollover; no reactivation.
+Normal Close SDK-verified nativePAGE1, original prefs1/2/syntheticPAGE1 restored.
+Strict WHOLE native scene NOTPASS:60 stock-toolbar variant-triangle pixels differ;
+document/footer identical, XML only rotation0->2/both portrait. Physical tool
+state NOTTESTED, not an annotation-safety inference; no extra tool investigation.
+Original PDFs/native annotation/copies/public intact,36 owned captures cleaned/
+absence, raw/renders/rollback retained, RELEASED6200313035/no active local process.
+Next remaining reading-only A bookmark/Back+zoom/Pan/Fit and B first loading/
+portrait/spread batch approval PENDING/new reservations; no speculative new
+source review/build needed for unchanged executable. No root/firmware/merge.
+
+## Historical code66 bounded hardware evidence — H4R3 PASS
 
 NEW6199667735 exact approved c40127d/exp7/code66/package d326cfb7...5f297aa normal
 same-ID install/ON+runtime PASS on unrooted3.30.45/API30/shell2000/98percent.

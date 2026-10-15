@@ -1,6 +1,30 @@
 # STATE — RTL Reader (updated 2026-10-15 by codex)
 
-## Latest: code66 H4R3 first large-copy page PASS; next bounded H5 awaits approval
+## Latest H5: representative reading/navigation PASS; toolbar caveat retained
+
+Approved NEW6200007148, SAME c40127d/exp7/code66/no install or executable change.
+Unrooted3.30.45/API30/100percent/ordinary shell/source+original annotation/public/
+prefs preflight PASS. ONE COPY A activation: portrait1->2->1; landscape RTL12->34
+->12; portrait1 restored. Independent LOCAL Poppler pages1-4 match content;
+full chrome/viewports/READY and exact portrait+spread round-trip PNGs PASS.
+No observed init/model/native-view/FATAL/cleanup error; preserved exact initial
+marker plus same current reader PID/overlapping logs handle buffer rollover.
+
+Close SDK-verified nativePAGE1; prefs1/2 restored, syntheticPAGE1 restored.
+Whole native scene NOT exactly restored:60 stock-toolbar triangle pixels only;
+document/footer identical, XML only rotation0->2, both portrait/user_rotation2.
+No physical tool-state or annotation conclusion, no extra probe. Originals/native
+annotation/copies/public intact,36 exact owned captures cleaned/absence verified;
+private raw/renders/copies/rollback retained. RELEASED6200313035, installed66 ON,
+no active local process. No new build/review/CI loop for unchanged executable.
+
+Next reading-only batch approval SENT/PENDING: SAME66 A bookmark/Back+modest
+zoom/Pan/Fit, then B first loading/portrait/RTL-spread navigation; NEW reservation
+and bounded hard stops/cleanup per trial. H5 authority consumed, no silent
+extension or firmware/root/pen/other-plugin/ink/timer/merge action. Prepare only
+concrete offline test references while waiting, no speculative modeling.
+
+## Historical H4R3: code66 first large-copy page PASS; next H5 was pending
 
 User Connected unblocked transport; NEW6199667735 exact approved c40127d/exp7/
 code66/SNPLGd326cfb7...5f297aa normal same-ID install/version ON/runtime marker

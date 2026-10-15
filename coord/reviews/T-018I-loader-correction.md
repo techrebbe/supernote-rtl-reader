@@ -2,6 +2,35 @@
 
 ## Exp4 installed-library correction — offline checkpoint 2026-10-15
 
+EXACT BUILD COMPLETE: f0adcd4220fed957c8972e28890c12c76fb76ffa identity/source
+independently confirmed CLEAN; all23 inputs match reviewed final checkpoint.
+One normal exact clean Git-archive build exit0/75tasks, complete package/DEX/
+receipts/ELF/engine/notices/provenance and signing verification PASS. Actual
+packaged-engine postbuild provider11/no skips PASS (Java14/Session40/Module72/
+controlled-native26). Initial build1 stopped before compilation because sandbox
+denied a Git Bash Windows runtime object; approved escalation used fresh build2
+and passed. No production edit or rejected-action bypass to address that failure.
+
+- Plug-in snrtl20260726001,0.4.25-pdfium-exp4/code63, SDK0.1.65.
+- Native com.supernotertlreader, Android1.0/code1/min27/target35.
+- SNPLG11141572bytes/SHA256
+  2c6aa7498fa7ecd9559220133036c4e167c8e559f47184209c92e145ddd3dbf5.
+- Embedded app.npk11026295bytes/SHA256
+  2a183cd7dd0cb14d3b34073c0c4b5de013c603382f17d2fcee9c6001d11ba9ee.
+- Metro1180739bytes/SHA256
+  8fb240bbb9e89331c504c2d5cf66d26abef59fed2272d171d3f3ece8ba4672ac.
+- Production signer SHA256
+  fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c,
+  v2/v3 verified; same reviewed identity as62/61/60/59.
+- Source archive SHA256
+  5b3ea03a1ef445a310ba72e2611e96586b75303d8225389eaac0ca88443f9031.
+- Local tmp/t018i-exp4-f0adcd4-build2/candidate-identity.json/log/package retained.
+
+UNINSTALLED/runtime UNKNOWN. New25-file reviewed publication plus build-result
+updates in these same5notes/issue23 summary and exact-package disposable H1
+approval required. No device process/access or new reservation. No two-build
+byte-reproducibility or runtime-PASS claim. Earlier build-next text is historical.
+
 Base6ab064d27e9943fecfbf7673b3faf2e2e3758f68. Candidate identity
 0.4.25-pdfium-exp4/code63, same plug-in ID/SDK0.1.65. Not installed or published.
 

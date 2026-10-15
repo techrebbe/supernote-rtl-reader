@@ -1,6 +1,15 @@
 # Next useful hardware batch — no speculative test loop
 
-## Exp4/code63 next gate — exact package/approval not yet available
+## Exp4/code63 next gate — exact package READY; new approval required
+
+Sourcef0adcd4220fed957c8972e28890c12c76fb76ffa independently CLEAN, normal clean
+signed build75tasks/full package checks/postbuild provider11 PASS. Exact SNPLG
+SHA2562c6aa7498fa7ecd9559220133036c4e167c8e559f47184209c92e145ddd3dbf5;
+local tmp/t018i-exp4-f0adcd4-build2/out/SupernoteRtlReader.snplg. New25-file source/
+notes/issue23 publication and exact-package H1 approval still required. No active
+build/review/test/device process; no more unchanged offline prerequisite. Existing
+62 remains installed/ON and reservation6188176283 remains consumed/released.
+Earlier review/build-next wording below is historical.
 
 Offline narrow installed-library-FD correction and per-document cleanup are under
 final review/build. Do not access the device or reuse6188176283. After exact

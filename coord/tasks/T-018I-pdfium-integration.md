@@ -1,5 +1,13 @@
 # T018I — user-approved PDFium reader integration
 
+EXACT exp4/code63 READY: sourcef0adcd4220fed957c8972e28890c12c76fb76ffa,
+independent exact-source CLEAN, normal clean-archive75task build/full package/
+source/DEX/ELF/engine/notices/compatible v2/v3 signer and postbuild provider11
+no skips PASS. SNPLG2c6aa7498fa7ecd9559220133036c4e167c8e559f47184209c92e145ddd3dbf5.
+UNINSTALLED; new25-file source/notes/issue23 publication and exact-package H1
+approval needed, then fresh exclusive reservation/preflight. No active process.
+Full identity/limits ../reviews/T-018I-loader-correction.md. Nomad still released.
+
 CURRENT exp4/code63 OFFLINE: installed physical engine FD replaces denied cache
 inode; hash/typed39/internal7 checks unchanged, per-document release on common
 FIFO/mutex. Cleanup error classification/terminal JS fence and duplicate/stale

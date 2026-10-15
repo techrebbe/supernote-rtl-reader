@@ -2,6 +2,14 @@
 
 ## 2026-10-15 — exp4/code63 offline correction; hardware UNKNOWN
 
+Exactsourcef0adcd4220fed957c8972e28890c12c76fb76ffa independently CLEAN,
+normal exact clean-archive75task build/full source+DEX+ELF+engine+notices/signing
+and postbuild provider11/no skips PASS. Exact SNPLG
+2c6aa7498fa7ecd9559220133036c4e167c8e559f47184209c92e145ddd3dbf5, compatible
+v2/v3 signer unchanged. Identity details coord/reviews/T-018I-loader-correction.md.
+UNINSTALLED; new reviewed-source publication/exact-package H1 approvals required.
+No new hardware PASS, device access or timer resume; normal build is complete.
+
 After code62 failure below, narrow installed-library FD/per-document release
 correction is local and source-tested. No new Nomad reservation/access/install.
 Focused tests/limits/review gates: coord/reviews/T-018I-loader-correction.md.

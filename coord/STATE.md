@@ -2,6 +2,20 @@
 
 ## Exp4/code63 offline correction checkpoint — not a hardware pass
 
+EXACT CANDIDATE READY: f0adcd4220fed957c8972e28890c12c76fb76ffa independently
+confirmed CLEAN/all23 production inputs match. Normal exact clean-archive build
+exit0/75tasks, complete package/DEX/source receipts/ELF/engine/notices/provenance
+and compatible v2/v3 signer PASS; postbuild actual packaged-engine provider11,
+no skips (Java14/Session40/Module72/controlled-native26) PASS. One initial Git Bash
+sandbox runtime-object denial occurred before compilation; approved escalation
+fresh build2 passed. No code fix/rejected-action bypass. SNPLG11141572bytes,
+SHA2562c6aa7498fa7ecd9559220133036c4e167c8e559f47184209c92e145ddd3dbf5.
+Local tmp/t018i-exp4-f0adcd4-build2/out/SupernoteRtlReader.snplg and identity/logs
+retained. UNINSTALLED/runtime UNKNOWN.25-file publication plus result notes in
+these same5notes/issue23 summary and exact-package H1 approval are now the gates.
+No build/review/test/device process remains; no speculative offline prerequisite.
+Earlier build-next wording below is chronological, not pending work.
+
 After code62's recorded cache executable-mapping failure/verified release, the
 narrow correction loads ONLY the installed physical sibling derived from the
 wrapper. It hashes/rechecks the same original read-only FD before/after binding;

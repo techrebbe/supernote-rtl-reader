@@ -2,6 +2,16 @@
 
 ## Exp4/code63 next gate — exact package READY; new approval required
 
+Exact installation/test approval now RECEIVED. Setup-only6193636912 stopped at
+DayWeave focused owner after exact target/firmware/API30/ordinary shell/98percent
+metadata PASS. No screen input/capture/stage/install/document/page/settings write,
+no remote scratch, RELEASED6193674815. Next user DIRECT Settings Apps Plugins
+ready/untouched, then NEW exclusive reservation/settings-specific preflight for
+same approved package. No public Settings-launcher loop, old reservation reuse,
+repeat build/review or repeated exact-package approval. Source publication is
+separately pending, not implied by installation approval. Earlier approval text
+below is historical. Installed62 unchanged by agent; no device process.
+
 Sourcef0adcd4220fed957c8972e28890c12c76fb76ffa independently CLEAN, normal clean
 signed build75tasks/full package checks/postbuild provider11 PASS. Exact SNPLG
 SHA2562c6aa7498fa7ecd9559220133036c4e167c8e559f47184209c92e145ddd3dbf5;

@@ -2,6 +2,15 @@
 
 ## Exp4 installed-library correction — offline checkpoint 2026-10-15
 
+HARDWARE APPROVAL RECEIVED for exact code63; no new review/build needed. Setup
+reservation6193636912 metadata exact target/firmware/API30/ordinary shell/power
+PASS, but DayWeave current owner stopped the trial before ANY UI input/capture/
+stage/install/document/settings mutation. No remote scratch created. Released
+6193674815; code63 UNINSTALLED/H1 NOTPERFORMED. Await user direct Plugins-ready,
+then fresh reservation/settings-specific preflight for retained approval. Public
+source upload approval remains separately pending; no code push. Source/package
+identities and previous source-review result unchanged. No device observer.
+
 EXACT BUILD COMPLETE: f0adcd4220fed957c8972e28890c12c76fb76ffa identity/source
 independently confirmed CLEAN; all23 inputs match reviewed final checkpoint.
 One normal exact clean Git-archive build exit0/75tasks, complete package/DEX/

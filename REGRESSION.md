@@ -1,5 +1,18 @@
 # RTL Reader hardware regression
 
+## 2026-10-15 — code63 approved; setup-only stop, H1 NOTPERFORMED
+
+User exact-package install/test approval/free confirmation received. New issue23
+reservation6193636912, candidate/rollback hashes verified. Observed Wi-Fi ADB
+exact target/firmware3.30.45/buildChauvet.E103.2610091001.2545_release/API30/
+UID2000/98percent metadata PASS. Focused DayWeave DailyWorkActivity outside
+expected setup; hard stop BEFORE any input, UI/screenshot capture, stage/install,
+document/page/settings change. No remote files created; no cleanup/rollback due.
+No source-integrity validation inferred. RELEASED6193674815, no observer. Existing
+installed62 untouched; code63 UNINSTALLED/runtime UNKNOWN. Same exact approval
+retained; direct user Settings Apps Plugins-ready then NEW reservation/preflight.
+No repeated offline gate or publication approval inferred; ink/timers unchanged.
+
 ## 2026-10-15 — exp4/code63 offline correction; hardware UNKNOWN
 
 Exactsourcef0adcd4220fed957c8972e28890c12c76fb76ffa independently CLEAN,

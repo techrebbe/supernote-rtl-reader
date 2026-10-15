@@ -2,6 +2,18 @@
 
 ## Exp4/code63 offline correction checkpoint — not a hardware pass
 
+LATEST: user explicitly APPROVED exact code63 installation/disposable H1 and
+confirmed Nomad free. Reservation6193636912 metadata passed exact target/
+unrooted3.30.45/API30/ordinary shell/98percent, observed Wi-Fi transport. Current
+focused owner is DayWeave DailyWorkActivity; stopped BEFORE any UI input/capture,
+stage/install/document/page/settings change. No remote files created/cleanup due,
+no source-integrity PASS inferred from metadata. RELEASED6193674815; code63
+UNINSTALLED/H1 NOTPERFORMED, installed62 unchanged by agent. User should directly
+open Settings Apps Plugins/leave device untouched; then NEW settings-specific
+reservation/preflight for SAME still-approved package. Do not ask exact-package
+approval again or repeat completed offline gates.25-file source/notes publication
+remains separately pending; no code push. No active process; ink/timers unchanged.
+
 EXACT CANDIDATE READY: f0adcd4220fed957c8972e28890c12c76fb76ffa independently
 confirmed CLEAN/all23 production inputs match. Normal exact clean-archive build
 exit0/75tasks, complete package/DEX/source receipts/ELF/engine/notices/provenance

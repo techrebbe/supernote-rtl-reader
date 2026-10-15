@@ -1,5 +1,12 @@
 # T018I — user-approved PDFium reader integration
 
+LATEST: exact code63 install/test approved. Setup6193636912 exact metadata PASS
+but DayWeave focused; stopped BEFORE input/capture/staging/installation or file/
+settings/page changes, no remote scratch. RELEASED6193674815, H1 NOTPERFORMED.
+Await direct Settings Apps Plugins-ready/untouched signal; NEW reservation/exact
+preflight, same approved package, no repeat permission/build/review. Publication
+approval remains separately pending. Installed62 unchanged; no active process.
+
 EXACT exp4/code63 READY: sourcef0adcd4220fed957c8972e28890c12c76fb76ffa,
 independent exact-source CLEAN, normal clean-archive75task build/full package/
 source/DEX/ELF/engine/notices/compatible v2/v3 signer and postbuild provider11

@@ -1,5 +1,31 @@
 # T018I loader correction — independent source-only review
 
+## Completed code66 remaining reading evidence — not a new source review
+
+H6 unsupported bookmark row affordance FAIL; unsupported destination not tapped.
+H6b valid original bookmark/Back PASS; zoom PARTIAL due explicit raster-budget
+error followed by later READY, Pan NOTPERFORMED, Fit restoration PASS. H7 second
+disposable copy first loading/portrait/RTL-spread navigation PASS with independent
+private source-render references and exact reader round-trip images. No new
+build/source/review identity, installation, pen or original activation.
+
+All originals/native annotations/copies/public/preferences preserved; normal
+Close and 86 exact capture cleanup/absence verified. Native toolbar-only image
+caveat remains, not a physical tool-state assertion. RELEASED6201638232/no device
+observer. Private metadata/raw retained locally; see REGRESSION.md for boundaries.
+Next narrow source changes must receive their own regression/review evidence;
+this historical CLEAN source review does not endorse unreviewed corrections.
+
+LOCAL correction diff is prepared for separate review: bookmark availability/UI,
+sticky render errors, and detached-frame/attachment ownership. Focused tests and
+existing safeguards PASS (REGRESSION.md); old failure paths reproduced first.
+Independent-review permission requested, review NOT STARTED. No new exact package
+identity/build/install/publication. JSX/controller normal-build wiring is added,
+with exact reverse-delta proof for the proposed build pin; independent scoped
+review remains before candidate. No Android lifetime/total-memory/zoom proof
+from controlled peers. Do not carry forward this file's prior CLEAN conclusion
+to the unreviewed local changes or call the hardware zoom/Pan gate closed.
+
 ## Code66 H5 reading evidence — PASS with separate native-toolbar restoration caveat
 
 Approved NEW6200007148 SAME c40127d/exp7/code66/no install/source change:

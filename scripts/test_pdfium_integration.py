@@ -201,6 +201,96 @@ System.out.println("14 actual shared-raster/Fit assertions PASS");}}
                 str(root/'PdfiumRasterLedger.java'),str(root/'PdfiumViewport.java'),str(root/'LedgerTest.java')],check=True)
             subprocess.run([str(home/('java'+suffix)),'-cp',temp,'test.LedgerTest'],check=True)
 
+    def test_detached_page_retires_only_its_actual_frame_budget(self):
+        # Real methods and ledger, controlled View/Bitmap peers. This establishes
+        # the detach-before-RN-drop lifetime, not its frequency or a device heap.
+        source=(ROOT/'native/PdfiumPageView.java.template').read_text(encoding='utf-8')
+        begin=source.index('    private boolean current(')
+        current=source[begin:source.index('    private void schedule()',begin)]
+        begin=source.index('    private void schedule(){')+len('    private void schedule(){')
+        admission=source[begin:source.index('        final JSONObject command=',begin)]
+        begin=source.index('    private void releaseFrame()')
+        lifecycle=source[begin:source.index('    @Override protected void onDraw',begin)]
+        harness=r'''package test;
+class Parent {
+ int detaches,attaches;
+ protected void onSizeChanged(int w,int h,int oldW,int oldH){}
+ protected void onDetachedFromWindow(){detaches++;}
+ protected void onAttachedToWindow(){attaches++;}
+}
+class Frame {int recycles;void recycle(){recycles++;}}
+class Request {
+ String optString(String name){return name.equals("sessionId")?"11":"stamp";}
+ boolean optBoolean(String name,boolean fallback){return false;}
+}
+class ActualPage extends Parent {
+ long revision=8;boolean disposed,attached=true,ready=true,pressed=true;Frame bitmap=new Frame();
+ Object model=new Object();Request request=new Request();PdfiumRasterLedger.Lease lease;
+ int schedules;int getWidth(){return 100;}int getHeight(){return 140;}
+ void schedule(){/*ACTUAL_SCHEDULE_ADMISSION*/ schedules++;}
+ boolean accepts(long ticket){return current(ticket,"11","stamp");}
+ /*ACTUAL_CURRENT*/
+ /*ACTUAL_LIFECYCLE*/
+}
+public class DetachTest {
+ static int assertions;static void ok(boolean b,String label){if(!b)throw new AssertionError(label);assertions++;}
+ public static void main(String[] args){
+  PdfiumRasterLedger ledger=new PdfiumRasterLedger(100000000);
+  PdfiumRasterLedger.Lease sibling=ledger.reserve(500000,0);sibling.installed();
+  ActualPage p=new ActualPage();p.lease=ledger.reserve(3000000,0);p.lease.installed();
+  Frame old=p.bitmap;ok(ledger.used()==14000000,"two actual frame owners charged");
+  ok(p.accepts(8),"old ticket initially current");
+  boolean refused=false;try{ledger.reserve(3000000,20000000);}catch(IllegalStateException e){refused=true;}
+  ok(refused,"retired frame can block a bounded replacement");
+  p.onDetachedFromWindow();
+  ok(!p.ready&&!p.pressed,"detach fences readiness and touch");
+  ok(!p.accepts(8),"detach rejects in-flight old completion");
+  ok(p.detaches==1,"parent detach still called");
+  ok(p.bitmap==null&&p.model==null&&p.lease==null,"detached frame/model/lease retired before RN drop");
+  ok(old.recycles==1,"owned bitmap recycled once");
+  ok(ledger.used()==2000000,"detach preserves sibling's live charge");
+  // A late RN property transaction must not rearm an off-window old view.
+  p.revision++;ok(!p.accepts(p.revision),"detached view rejects even a newly committed ticket");
+  p.schedule();ok(p.schedules==0,"off-window commit cannot allocate a replacement frame");
+  PdfiumRasterLedger.Lease replacement=ledger.reserve(3000000,20000000);
+  ok(ledger.used()==28097152,"same replacement fits without changing cap/source accounting");
+  replacement.release();p.onAttachedToWindow();
+  ok(p.attaches==1&&p.schedules==1,"reattach schedules a fresh frame");
+  ok(!p.ready&&p.bitmap==null,"reattach cannot resurrect retired pixels");
+  p.onDetachedFromWindow();p.dispose();p.dispose();
+  ok(ledger.used()==2000000&&old.recycles==1,"repeat detach/drop cannot double-free sibling or bitmap");
+  p.onAttachedToWindow();ok(p.schedules==1,"disposed view cannot rearm");
+  sibling.release();ok(ledger.used()==0,"all actual owners balanced");
+  System.out.println(assertions+" actual detach/current/frame/ledger assertions PASS (controlled peers)");
+ }
+}
+'''
+        home=Path(os.environ['JAVA_HOME'])/'bin';suffix='.exe' if os.name=='nt' else ''
+        with tempfile.TemporaryDirectory(prefix='pdfium-page-detach-') as temp:
+            root=Path(temp);java=root/'DetachTest.java'
+            ledger=root/'PdfiumRasterLedger.java'
+            ledger.write_text((ROOT/'native/PdfiumRasterLedger.java.template').read_text().replace('__PACKAGE__','test'),encoding='utf-8')
+            def run(body,guard=current,schedule=admission):
+                java.write_text(harness.replace('/*ACTUAL_CURRENT*/',guard).replace('/*ACTUAL_SCHEDULE_ADMISSION*/',schedule).replace('/*ACTUAL_LIFECYCLE*/',body),encoding='utf-8')
+                subprocess.run([str(home/('javac'+suffix)),'-encoding','UTF-8','-d',temp,str(ledger),str(java)],check=True)
+                return subprocess.run([str(home/('java'+suffix)),'-cp',temp,'test.DetachTest'],capture_output=True,text=True)
+            correct=run(lifecycle)
+            self.assertEqual(correct.returncode,0,correct.stderr)
+            print(correct.stdout.strip())
+            old='pressed=false;releaseFrame();super.onDetachedFromWindow();'
+            self.assertEqual(lifecycle.count(old),1)
+            broken=run(lifecycle.replace(old,'pressed=false;super.onDetachedFromWindow();',1))
+            self.assertNotEqual(broken.returncode,0)
+            self.assertIn('detached frame/model/lease retired before RN drop',broken.stderr)
+            for label,guard,schedule,failure in (
+                ('off-window completion',current.replace('attached && ',''),admission,'detached view rejects even a newly committed ticket'),
+                ('off-window scheduling',current,admission.replace('!attached || ',''),'off-window commit cannot allocate a replacement frame'),
+            ):
+                broken=run(lifecycle,guard,schedule)
+                self.assertNotEqual(broken.returncode,0,label)
+                self.assertIn(failure,broken.stderr,label)
+            print('3 compiled detach/frame/late-commit defect mutants rejected')
+
 
 if __name__=='__main__':
     if len(sys.argv)==3 and sys.argv[1]=='--emit':

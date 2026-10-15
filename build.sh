@@ -49,6 +49,11 @@ pushd "$PROJECT" >/dev/null
 npm ci --ignore-scripts --no-audit --no-fund
 popd >/dev/null
 node "$ROOT/scripts/test_plugin_sdk_runtime.js" "$PROJECT/node_modules/sn-plugin-lib"
+# Run the actual JSX/controller regressions with the already pinned toolchain.
+# Do not download a second Babel graph or silently skip absent dependencies.
+BABEL_MODULE_ROOT="$PROJECT/node_modules" node --test \
+  "$ROOT/scripts/test_interactive_pdf.js" "$ROOT/scripts/test_pdfium_lifecycle.js" \
+  "$ROOT/scripts/test_pdfium_bookmark_ui.js"
 
 cp "$ROOT/overlay/App.js" "$PROJECT/App.js"
 cp "$ROOT/overlay/index.js" "$PROJECT/index.js"

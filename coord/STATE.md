@@ -1,5 +1,44 @@
 # STATE — RTL Reader (updated 2026-10-15 by codex)
 
+## Current: approved remaining reading batch complete; device released
+
+Same installed c40127d/exp7/code66, no installation or executable change.
+H6 unsupported-bookmark UI affordance FAIL; no invalid row tapped and source
+navigation remains fail-closed. H6b valid original bookmark/Back PASS; modest
+zoom PARTIAL (raster-budget error, then later READY), Pan NOTPERFORMED, Fit and
+normal Close PASS. H7 second disposable copy first loading and portrait/RTL
+spread Next/Previous/portrait restoration PASS, with independent local source
+references and exact reader round-trip images. No whole-book acceptance claim.
+
+Original PDFs/native annotation/copies/public packages intact; rotation prefs
+restored. 86 exact owned capture files cleaned/absence verified across trials;
+raw, copies and rollback retained. Native toolbar-only restoration caveat remains
+separate from unchanged document/footer pixels and is not tool/ink acceptance.
+Final RELEASED6201638232; no device process. Wi-Fi request fulfilled, connection
+details local only. All reservations consumed; no further hardware authority
+inferred. Saved ink PARKED/timers PAUSED/no root/firmware/merge.
+
+Immediate work is OFFLINE, limited to concrete regressions/diagnosis for the two
+observed interaction issues. No speculative emulator prerequisite or blind cap
+increase. Any production correction requires focused checks/independent review
+and an exact new candidate before separately approved hardware validation.
+Details and trial boundaries: REGRESSION.md. Historical pending approvals below
+are superseded by this completed-batch record.
+
+LOCAL follow-up corrections now prepared: validated/disabled bookmark rows;
+sticky native errors until explicit Try Fit; detached-frame retirement plus
+attachment admission. 27 focused JS/actual JSX + 135 navigation/input/Edit tests,
+5 integration tests (59 draw/17 lifetime/14 ledger assertions and 6 compiled
+mutants), core85407/all271mutations/invariants/packaging/provenance PASS. Baseline
+failures reproduced before corrections. Still UNREVIEWED/UNBUILT/UNINSTALLED;
+installed66 and its exact candidate identity unchanged. No cap increase or claim
+that host lifetime evidence proves the device zoom root cause. Next required
+gate: narrow independent review permission (question sent, not started), including
+the added normal-build JSX/controller test wiring and scoped proposed build pin;
+exact reverse-delta digest proof/syntax/cross-layer/provenance PASS. Then a new
+exact candidate identity/build/signing, not a relabeled code66 package.
+Zoom/Pan device acceptance remains OPEN; no current device action/process.
+
 ## Latest H5: representative reading/navigation PASS; toolbar caveat retained
 
 Approved NEW6200007148, SAME c40127d/exp7/code66/no install or executable change.

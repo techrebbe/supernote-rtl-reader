@@ -122,15 +122,21 @@ export function useInteractivePdf(callbacks) {
     try{const items=flattenOutline(JSON.parse(owned.current.outline));setBookmarks(items);setModalValue(true);}
     catch(_){setNotice('PDF bookmarks could not be read');}
   }
+  function canChooseBookmark(action) {
+    if(!current()||!latest.current.canInteract())return false;
+    try{internalDestination(action,anchors.current.get(focusPage())??{},owned.current.pageCount);return true;}
+    catch(_){return false;}
+  }
   const publicOwner={close,sourceInvalid};
   useEffect(()=>{globalThis.RTL_PDFIUM_OWNER=publicOwner;return()=>{
     if(globalThis.RTL_PDFIUM_OWNER===publicOwner)globalThis.RTL_PDFIUM_OWNER=null;
   };},[]);
   return {owner,revision,mode,selection,notice,bookmarks,modal,modalRef,sourceInvalid,inputEpoch,fenceInput,syncInput,
     isRetired:()=>closing.current,open,close,bind,unbind,packet,
-    poses,changeMode,zoom,fit,recoverFit,back,copy,showBookmarks,history,
+    poses,changeMode,zoom,fit,recoverFit,back,copy,showBookmarks,history,canChooseBookmark,
     hideBookmarks:()=>{setBookmarks(null);setModalValue(false);},
-    chooseBookmark:action=>{setBookmarks(null);setModalValue(false);const page=focusPage();
+    chooseBookmark:action=>{if(!canChooseBookmark(action))return;
+      setBookmarks(null);setModalValue(false);const page=focusPage();
       const anchor=anchors.current.get(page);
       if(action?.mode==='XYZ'&&!anchor){setNotice('Bookmark needs a settled source viewport');return;}
       follow(action,anchor??{});}};
@@ -166,8 +172,13 @@ export function InteractivePdfBookmarks({reader}) {
   if(!reader.bookmarks)return null;
   return <View style={{position:'absolute',top:0,bottom:0,left:0,right:0,backgroundColor:'white',padding:20}}>
     <Pressable onPress={reader.hideBookmarks}><Text>Close bookmarks</Text></Pressable>
-    <ScrollView>{reader.bookmarks.map((item,index)=><Pressable key={index}
-      onPress={()=>reader.chooseBookmark(item.action)} style={{padding:14,paddingLeft:14+item.depth*16}}>
-      <Text>{item.title}</Text></Pressable>)}</ScrollView>
+    <ScrollView>{reader.bookmarks.map((item,index)=>{
+      const available=reader.canChooseBookmark(item.action);
+      return <Pressable key={index} disabled={!available} accessibilityState={{disabled:!available}}
+        onPress={()=>{if(reader.canChooseBookmark(item.action))reader.chooseBookmark(item.action);}}
+        style={{padding:14,paddingLeft:14+item.depth*16,opacity:available?1:0.45}}>
+        <Text>{item.title}</Text>{!available?<Text>Unavailable destination</Text>:null}
+      </Pressable>;
+    })}</ScrollView>
   </View>;
 }

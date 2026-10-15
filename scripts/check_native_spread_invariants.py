@@ -1107,7 +1107,11 @@ def check(repo_root: Path) -> None:
             # T017S3 copies the observer; SDK graph/native assembly unchanged.
             # T018I adds read-only PDFium UI/native assembly and exact public
             # dependency fetch; existing SDK graph/signing/legacy paths retained.
-            "62ccf6dda0d9ab5f7132d3e0375465d8fef6e18ba479a7ee8ab08aa941e31dcf",
+            # LOCAL interaction correction: only three JS/controller/actual-JSX
+            # regression commands using the existing pinned Babel graph. Exact
+            # removal restores 62ccf6dd...41e31dcf. Independent review PENDING;
+            # this expectation is not package/hardware/release authorization.
+            "e2744c4ea86e1b73cfd225b4590939d72c786ec0bf42dfc7def90341c2a210e3",
             "native plugin build entrypoint",
         ),
         (

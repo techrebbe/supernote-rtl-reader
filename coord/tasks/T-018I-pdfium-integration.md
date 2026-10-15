@@ -1,5 +1,34 @@
 # T018I — user-approved PDFium reader integration
 
+CURRENT remaining reading batch COMPLETE on unchanged c40127d/exp7/code66.
+H6 unsupported bookmark affordance FAIL/no invalid target activated. H6b valid
+original bookmark and exact Back PASS; one modest zoom emitted raster-budget
+error before later READY, so PARTIAL/Pan NOTPERFORMED; Fit exactly restored view.
+H7 second disposable copy admission/portrait/RTL-spread navigation and portrait
+restoration PASS with independent private source references. Normal Close,
+originals/native annotation/copies/public/preferences integrity and 86 owned
+capture cleanup/absence PASS across the three trials. Native toolbar-only image
+caveat retained; no physical tool/ink claim. Final RELEASED6201638232, no observer.
+
+Next concrete work is offline unsupported-bookmark UI and zoom resource-lifetime
+regressions/diagnosis, not more unchanged-build probes or speculative emulation.
+Do not weaken raster limits/source identity to force a pass. Any changed package
+needs focused checks/review/exact identity and new hardware approval/reservation.
+No reinstall/pen/original activation/root/firmware/timer/merge. Earlier pending
+batch text is historical and superseded; full results in REGRESSION.md.
+
+LOCAL unshipped correction checkpoint: actual bookmark UI/controller validation,
+explicit render-error recovery, and detached bitmap/lease/attachment ownership
+prepared. 27 focused JS/JSX + 135 navigation/input/Edit, integration5 (actual
+generated callbacks/draw59/lifetime17/ledger14 and 6 compiled mutants), core85407/
+271mutations/invariants/packaging/provenance PASS; old failures reproduced first.
+Independent source-review permission requested, not started. No new candidate
+version/build/install/publication; current66 identity stays authoritative only
+for installed evidence. New JSX/controller tests now wired into normal build;
+proposed build pin has exact reverse-delta proof and needs scoped independent
+review. Syntax/cross-layer/provenance PASS; no extra dependency download.
+No claim of actual Android lifetime/heap proof or clean zoom/Pan hardware pass.
+
 CURRENT H5 reading/navigation PASS, NEW6200007148 SAME c40127d/exp7/code66/no
 install: COPY A portrait1->2->1, RTL landscape12->34->12, portrait1 recovery;
 LOCAL independent Poppler page identities/full chrome/READY/exact round-trip

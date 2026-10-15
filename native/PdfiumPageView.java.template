@@ -24,7 +24,7 @@ public final class PdfiumPageView extends View {
     private String spec;
     private JSONObject request;
     private volatile long revision;
-    private volatile boolean disposed;
+    private volatile boolean disposed,attached;
     private boolean ready,pressed,dragged;
     private Bitmap bitmap;
     private JSONObject model;
@@ -64,11 +64,11 @@ public final class PdfiumPageView extends View {
         }catch(Exception error){fail(revision,"Viewport request rejected");}
     }
     private boolean current(long ticket,String owner,String stamp){
-        return !disposed && revision==ticket && request!=null &&
+        return !disposed && attached && revision==ticket && request!=null &&
             owner.equals(request.optString("sessionId")) && stamp.equals(request.optString("requestId"));
     }
     private void schedule(){
-        if(disposed || request==null || request.optBoolean("blocked",true) || getWidth()<=0 || getHeight()<=0)return;
+        if(disposed || !attached || request==null || request.optBoolean("blocked",true) || getWidth()<=0 || getHeight()<=0)return;
         final JSONObject command=request;final long ticket=++revision,started=SystemClock.elapsedRealtime();
         final String owner=command.optString("sessionId"),stamp=command.optString("requestId");
         final int viewW=getWidth(),viewH=getHeight();
@@ -158,10 +158,13 @@ public final class PdfiumPageView extends View {
         WritableMap event=packet("error");event.putString("message",message);emit(event);invalidate();
     }
     private void releaseFrame(){if(bitmap!=null){bitmap.recycle();bitmap=null;}if(lease!=null){lease.release();lease=null;}model=null;}
-    void dispose(){disposed=true;++revision;ready=false;pressed=false;releaseFrame();}
+    void dispose(){disposed=true;attached=false;++revision;ready=false;pressed=false;releaseFrame();}
     @Override protected void onSizeChanged(int w,int h,int oldW,int oldH){super.onSizeChanged(w,h,oldW,oldH);++revision;ready=false;pressed=false;}
-    @Override protected void onDetachedFromWindow(){++revision;ready=false;pressed=false;super.onDetachedFromWindow();}
-    @Override protected void onAttachedToWindow(){super.onAttachedToWindow();if(!disposed)schedule();}
+    // RN may detach a replaced keyed view before onDropViewInstance arrives.
+    // It is no longer drawable/current and reattach schedules a fresh render;
+    // do not retain its frame charge while the replacement needs peak budget.
+    @Override protected void onDetachedFromWindow(){attached=false;++revision;ready=false;pressed=false;releaseFrame();super.onDetachedFromWindow();}
+    @Override protected void onAttachedToWindow(){super.onAttachedToWindow();attached=true;if(!disposed)schedule();}
     @Override protected void onDraw(Canvas canvas){
         // React parents allow visible overflow. Neither drawColor nor a panned
         // bitmap may paint another page or the reader's chrome.

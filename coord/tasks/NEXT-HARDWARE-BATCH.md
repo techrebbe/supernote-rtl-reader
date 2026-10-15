@@ -1,5 +1,32 @@
 # Next useful hardware batch — no speculative test loop
 
+## Current: approved H6/H6b/H7 complete; no next device action yet
+
+Unchanged installed c40127d/exp7/code66: unsupported bookmark UI affordance FAIL
+(no invalid destination activated); valid bookmark/Back PASS; modest zoom PARTIAL
+after explicit raster-budget error, Pan NOTPERFORMED, safe Fit restoration PASS.
+Second disposable copy loading and portrait/RTL-spread navigation PASS. All
+originals/native annotations/copies/preferences intact, 86 exact capture files
+cleaned, final RELEASED6201638232. Wi-Fi request fulfilled; private transport and
+source metadata are not publication material. No active device process.
+
+Earliest useful next gate is a focused correction candidate for the actual UI/
+zoom findings, after deterministic regression and independent source review.
+Keep source-budget and raster caps fail-closed. A new exact package/build/signing
+receipt and user task approval plus fresh reservation are needed before changed
+code reaches hardware. Do not repeat completed reading trials on unchanged66,
+add speculative emulator loops, or expand into pen/saved ink/root/firmware.
+Historical approval-pending plans below are superseded. See REGRESSION.md.
+
+LOCAL source corrections and concrete regressions are now prepared/passing,
+but remain unreviewed, unbuilt and uninstalled. Independent narrow source-review
+permission question sent; no reviewer started. Normal-build wiring for the actual
+JSX/controller regressions is now included with an exact reverse-delta build-pin
+proof; scoped independent review remains before exact new candidate identity/
+clean build/signature verification. Installed66 is not
+silently reidentified. Controlled detached-frame evidence does not prove the
+H6b device root cause; modest zoom/Pan acceptance remains OPEN. No device process.
+
 ## Next H6/H7 proposed reading-only batch — approval pending, unchanged installed66
 
 H5 NEW6200007148 reading PASS: COPY A portrait1->2->1, RTL landscape12->34->12,

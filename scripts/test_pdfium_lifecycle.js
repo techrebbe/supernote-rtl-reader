@@ -73,6 +73,30 @@ test('nullable bookmark uses observed current source anchor, never guessed0',asy
   assert.equal(pose.fromLeft,44);assert.equal(pose.fromTop,738);assert.equal(pose.left,null);assert.equal(pose.zoom,null);
   assert.ok(h.calls.some(x=>Array.isArray(x)&&x[0]==='navigate'&&x[1]===2));await h.unmount();
 });
+
+test('bookmark availability uses validated original target and current source anchor',async()=>{
+  const h=harness();await h.reader.open(context);h.render();
+  const fit={kind:'internal',pageIndex:3,mode:'Fit'};
+  const xyz={kind:'internal',pageIndex:2,mode:'XYZ',left:null,top:738,zoom:null};
+  assert.equal(h.reader.canChooseBookmark(fit),true);
+  assert.equal(h.reader.canChooseBookmark(xyz),false); // No settled anchor yet.
+  for(const action of [null,{kind:'unsupported'},{kind:'external-blocked',uri:'https://example.com'},
+    {...fit,pageIndex:-1},{...fit,pageIndex:4},{...fit,pageIndex:1.5},
+    {...fit,mode:'FitH'},{...xyz,zoom:NaN}])assert.equal(h.reader.canChooseBookmark(action),false);
+  const spec=h.spec();h.bind(spec);h.packet(spec,{kind:'rendered',scale:2,fromLeft:44,fromTop:738});
+  assert.equal(h.reader.canChooseBookmark(xyz),true);
+  h.setPage(1);assert.equal(h.reader.canChooseBookmark(xyz),false); // Not another page's anchor.
+  await h.reader.close(true);assert.equal(h.reader.canChooseBookmark(fit),false);await h.unmount();
+});
+
+test('unavailable bookmark cannot dismiss modal, navigate, mutate history or mint a scene',async()=>{
+  const h=harness();await h.reader.open(context);h.render();h.reader.showBookmarks();h.render();
+  const revision=h.reader.revision,before=h.calls.length;
+  h.reader.chooseBookmark({kind:'unsupported'});h.render();
+  assert.equal(h.reader.modal,true);assert.ok(h.reader.bookmarks);
+  assert.equal(h.reader.revision,revision);assert.equal(h.reader.history.current.length,0);
+  assert.equal(h.calls.length,before);await h.unmount();
+});
 test('unmount during open drains old owner before next activation opens',async()=>{
   const gate=deferred(),global={},events=[];
   const a=harness({open:async()=>{events.push('old-open');return gate.promise;},

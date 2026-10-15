@@ -8,7 +8,7 @@ const geometry=slice('  const readerKeyPageGeometry =','  readerKeyUiRef.current
 const setter=slice('  const setPageIndex = value => {','  const displayRef =');
 const fence=slice('  const fenceReaderKeys =','  const readerTransitionLocked =');
 const calls=[];
-const s={filePathRef:{current:'/test.pdf'},pageIndex:0,effectiveMode:'spread',direction:'rtl',coverSeparate:false,
+const s={filePathRef:{current:'/test.pdf'},pageIndex:0,effectiveMode:'spread',direction:'rtl',coverSeparate:false,fatalError:null,
   totalPagesRef:{current:4},pageAreaWidthRef:{current:1000},renderTokenRef:{current:8},readerKeyPresentationRef:{current:null},
   pageIndexRef:{current:0},effectiveModeRef:{current:'spread'},coverSeparateRef:{current:false},directionRef:{current:'rtl'},
   readerKeyFenceEpochRef:{current:0},readerKeysRef:{current:{fence:()=>calls.push('key-fence')}},
@@ -60,7 +60,7 @@ vm.runInContext(rollback+'\nglobalThis.runRollback=rollback;',s);
   assert.ok(effectStart>=0&&effectEnd>effectStart);
   const effect=app.slice(effectStart,effectEnd);let deps;
   Object.assign(s,{preferencesReady:true,documentContext:{filePath:'/test.pdf'},pageAreaReady:true,
-    effectiveMode:'single',editBusy:false,pageAreaLayout:{height:700},
+    effectiveMode:'single',editBusy:false,fatalError:null,pageAreaLayout:{height:700},
     useEffect:(fn,next)=>{if(!deps||next.some((x,i)=>!Object.is(x,deps[i]))){deps=next;fn();}}});
   s.readerTransitionLocked=()=>s.editBusy;
   vm.runInContext(effect,s);assert.ok(renderCalls.some(x=>x[0]==='display'&&x[1].kind==='single'));
@@ -70,6 +70,25 @@ vm.runInContext(rollback+'\nglobalThis.runRollback=rollback;',s);
   assert.ok(renderCalls.some(x=>x[0]==='display'&&x[1].kind==='spread'));
   s.editBusy=true;vm.runInContext(effect,s);renderCalls.length=0;
   s.editBusy=false;vm.runInContext(effect,s);
+  assert.ok(renderCalls.some(x=>x[0]==='display'&&x[1].kind==='spread'));
+  // Real H6b path: native raster rejection removes chrome, which resizes the
+  // viewport. That layout must not clear the failure and silently retry zoom.
+  const errorCallback=slice('  const handleNativeError =','\n\n  const close =');
+  s.console={...console,error:()=>{}};
+  s.setFatalError=value=>{s.fatalError=value;renderCalls.push(['fatal',value]);};
+  vm.runInContext(errorCallback+'\nglobalThis.nativeError=handleNativeError;',s);
+  s.nativeRenderRef.current.expected=new Set([0,1]);
+  const failure='PDF page/zoom rejected: Zoom exceeds the shared raster budget; use Fit';
+  s.nativeError({nativeEvent:{pageIndex:0,message:failure}},s.nativeRenderRef.current.token);
+  assert.equal(s.fatalError,failure);renderCalls.length=0;
+  const failedToken=s.renderTokenRef.current;
+  vm.runInContext(effect,s);s.pageAreaLayout.height=750;vm.runInContext(effect,s);
+  s.pageAreaLayout.height=900;vm.runInContext(effect,s);
+  assert.deepEqual(renderCalls,[],'native failure survives chrome/layout changes');
+  assert.equal(s.fatalError,failure);assert.equal(s.renderTokenRef.current,failedToken);
+  // Explicit Try Fit (already independently hook-tested) changes revision,
+  // starts rendering, and clears the error. Only then may a scene be minted.
+  s.pdfium.revision++;s.fatalError=null;vm.runInContext(effect,s);
   assert.ok(renderCalls.some(x=>x[0]==='display'&&x[1].kind==='spread'));
   s.readerTransitionLocked=()=>false;s.pdfium.isRetired=()=>true;
   repair.length=0;s.editInFlightRef.current=true;s.savePreferences=async()=>{throw Error('disk repair failed');};

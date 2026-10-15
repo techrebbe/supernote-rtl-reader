@@ -1,5 +1,82 @@
 # RTL Reader hardware regression
 
+## 2026-10-15 — code66 remaining reading batch complete; two interaction findings
+
+Same installed c40127def19d515823890fdab57a256d36684530 /
+0.4.25-pdfium-exp7 / code66 throughout; no reinstall or executable change.
+The user's approved batch used fresh exclusive reservations for each trial.
+Private device/source metadata and raw evidence remain local.
+
+- H6 / 6201071116: unsupported bookmark rows appeared enabled and visually
+  indistinguishable from supported rows. FAIL (UI affordance); stopped without
+  tapping an unsupported destination. Source still rejects unsupported actions;
+  no guessed page or successful invalid-destination navigation is claimed.
+- H6b / 6201272146: one valid original bookmark reached independently verified
+  source content; Back exactly restored the initial reader image. PASS. One
+  modest zoom produced a shared-raster-budget error followed by a later READY
+  and visibly zoomed frame: PARTIAL, not a clean zoom pass. Pan NOTPERFORMED.
+  Known-safe Fit exactly restored the initial reader image, then normal Close.
+- H7 / 6201401331: second disposable copy first loading, portrait Next/Previous,
+  RTL landscape spread Next/Previous and portrait restoration PASS. Page content
+  matched independent local source renders; reader round-trip images matched
+  exactly. No observed runtime error in this trial. This is bounded first-page
+  navigation evidence, not whole-book or every-interaction acceptance.
+
+All trials completed normal Close, source/original-annotation/copy integrity,
+rotation-preference restoration and exact owned scratch cleanup: 24 + 28 + 34
+capture files removed, absence verified. Disposable copies/raw/rollback retained.
+The known native toolbar-triangle image difference remains separate from the
+unchanged document/footer pixels; no physical tool-state or ink inference.
+Final RELEASED6201638232; no active device observer/test. No originals activation,
+pen, root, firmware, timer resume or merge. Wi-Fi connection request fulfilled;
+transport details are deliberately not published.
+
+Next is narrow offline regression/diagnosis of unsupported-bookmark affordance
+and the zoom budget/lifetime transition. Do not raise the raster cap or treat a
+later READY as erasing the error. Changed code needs focused validation/review,
+an exact new candidate identity and separate hardware approval/reservation.
+
+### Subsequent LOCAL correction checkpoint — unreviewed, unbuilt, uninstalled
+
+Three bounded source corrections are prepared, not a new code66 candidate:
+
+- Bookmark rows validate the original destination and required settled anchor;
+  unsupported rows retain their titles/hierarchy but are disabled, visibly marked
+  and accessibility-disabled. Callback/controller rechecks prevent a stale/direct
+  disabled-row invocation from navigating or dismissing the modal.
+- A native render error survives viewport/chrome resizing. Only explicit existing
+  Try Fit recovery may clear it and mint a fresh scene; no silent zoom retry.
+- Detached page views release only their own bitmap/model/raster lease before
+  delayed RN drop. Attachment also fences scheduling/completion so late property
+  transactions cannot reacquire an off-window frame. Reattach requests fresh pixels;
+  repeated detach/drop does not release another live page's charge.
+
+Actual old JSX/controller and generated error/layout paths reproduced failures
+before correction; actual Java detached-frame baseline also failed before the
+change. Corrected focused JS/controller/JSX suite: 27 PASS; navigation/Bluetooth/
+Edit/Return/read-permission/SDK handoff suite: 135 PASS. Integration: 5 PASS,
+including actual generated callbacks, 59 actual onDraw assertions/3 compiled
+mutants, 17 actual detach/current/entry-guard/frame/ledger assertions/3 compiled
+mutants, and 14 unchanged aggregate ledger/Fit assertions. Native core 85,407
+assertions/all 271 mutations, native/v2/Edit/cross-layer invariants, packaging
+fail-closed, build-provenance and diff-whitespace checks PASS. One host attempt
+failed at sandbox temporary-file permissions, not reader execution; rerun using
+the owned workspace TEMP completed. No device access during correction work.
+
+LIMITS: controlled Java peers prove the lifetime boundary, not Android callback
+timing, actual heap size, total memory, or that it explains every H6b rejection.
+Raster/source limits are unchanged. Real modest zoom/Pan remains OPEN until an
+exact reviewed correction package passes a separately approved bounded test.
+Independent narrow review permission requested; not started. The new JSX test
+and existing controller tests are wired into the normal build immediately after
+SDK verification, using the existing pinned toolchain's Babel; no extra download
+or skip. Proposed build-source pin changes only for those five added lines:
+exact removal reproduces prior LF SHA256 62ccf6dd...41e31dcf; new e2744c4e...a210e3.
+That scoped expectation still needs independent review, not a self-approved pin.
+Bash syntax/cross-layer/provenance checks PASS; the read-only Bash check needed
+approved sandbox escalation because MSYS could not initialize inside sandbox.
+No version change, new package or build/hardware acceptance is implied here.
+
 ## 2026-10-15 — code66 H5 reading/navigation PASS; native toolbar restoration caveat
 
 Approved NEW6200007148, SAME installed c40127d/exp7/code66, no installation or

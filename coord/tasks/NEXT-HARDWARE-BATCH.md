@@ -9,9 +9,12 @@ access in this follow-up. Await fresh Nomad-free/connected/disposable-ready sign
 then NEW exclusive reservation/exact preflight, normal same-ID upgrade and the
 same bounded portrait H1/normal Close/integrity/owned cleanup. Do not reuse old
 reservation6183673118, historical endpoint or released scratch namespace.
-Hosted CI38685640763 failed setup/current-package-test drift, not reader build;
-reviewed CI-only corrections awaiting extra-file publication/hosted rerun. All
-20 production inputs unchanged, no candidate rebuild or new offline prerequisite.
+User approved the8-file CI-only follow-up; pushed/remote verified69dd4e3 and
+summarized issue23 comment6185105731. Hosted rerun38686685160 at that exact head
+SUCCESS:5 applicable jobs PASS,3 release-only jobs skipped by existing conditions.
+All20 production inputs unchanged, no candidate rebuild/artifact substitution or
+new offline prerequisite. User says Nomad NOT AVAILABLE YET; do not access or poll
+it. No active build/review/device process; wait for fresh availability confirmation.
 Below is earlier checkpoint history, not a request for repeated approval/build.
 
 CURRENT2026-10-15: code61 exact executable1c85d066a5111b803ff41463372b80d349f6c6b8

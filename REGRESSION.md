@@ -7,10 +7,13 @@ Source/evidence85c1d9a remote verified/issue23 summaries posted; executable
 1c85d06/SNPLGa57b0418...4fcd0f2 unchanged. Still UNINSTALLED/runtime UNKNOWN,
 Nomad remains RELEASED6184589609; fresh free/connected/ready confirmation and
 reservation/preflight required. No device action or active observer here.
-Hosted run38685640763 FAIL before assembly: removed Android setup default tools
-and stale current-package code59 test pin. Independently reviewed CI/test-only
-correction CLEAN, relevant local gates/negative controls PASS, no production or
-saved-ink source change/rebuild. Extra test-file publication/hosted rerun pending.
+Initial hosted run38685640763 failed before assembly: removed Android setup tools
+default and stale current-package code59 test pin. Independently CLEAN CI-only
+follow-up user-approved, pushed/remote verified69dd4e3/issue23 comment6185105731.
+Hosted rerun38686685160 at exact69dd4e3 SUCCESS:5 applicable jobs PASS,3 release-only
+jobs skipped by existing conditions. No production/saved-ink source change,
+candidate rebuild or CI-artifact substitution. User says Nomad NOT AVAILABLE YET;
+no access/reservation/process. Corrected hardware remains UNKNOWN/code61 uninstalled.
 Details coord/reviews/T-018I-loader-correction.md. This is not a hardware PASS;
 prior code60 failure/cleanup remains authoritative. Ink PARKED/timers PAUSED.
 

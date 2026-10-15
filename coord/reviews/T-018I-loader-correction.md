@@ -33,9 +33,15 @@ Independent final three-file correction review CLEAN/noP0/P1/P2:
 - All20 production PDFium source_inputs identical to1c85d06. Exact approved
   signed code61 SNPLG remains unchanged; no new binary build warranted.
 
-This CI-only checkpoint is local pending explicit extra test-file publication
-approval and hosted rerun. Neither hosted-CI nor corrected hardware PASS claimed.
-The independent reviewer did not edit source/Git, publish or access the device.
+User explicitly approved this8-file CI-only follow-up/issue23 summary and rerun.
+Pushed/remote verified69dd4e38a19a5c2987d16910f5a2e9d7747d2011, summarized issue23
+comment6185105731. Hosted rerun38686685160 exact69dd4e3 completed SUCCESS: trace
+helper39s, Virtual Spread65s, invariants92s, unsigned v2 assembly115s, final plug-in
+build/verification238s all PASS;3 release-only jobs skipped by existing conditions.
+No PR finalization/merge, no CI-artifact substitution for the approved local package.
+User says Nomad NOT AVAILABLE YET; no device access/reservation/process. Corrected
+hardware remains UNVERIFIED, code61 UNINSTALLED. Independent reviewer did not edit
+source/Git, publish or access the device. No further unchanged build/modeling gate.
 
 ## Exact candidate build checkpoint
 

@@ -4,13 +4,15 @@ CURRENT2026-10-15: user exact publication and code61 retest approvals received;
 source/evidence85c1d9a remote verified, summarized issue23. Candidate executable
 1c85d06/package hash/signature unchanged and UNINSTALLED. Hardware waits for fresh
 free/connected/disposable-ready confirmation/new reservation, not routine approval.
-Manual hosted run38685640763 FAIL: removed Android `tools` default and stale
-code59 CURRENT PACKAGE test expectation, before assembly. Independently CLEAN
-three-file CI/test-only correction prepared; all20 production inputs unchanged,
-no rebuild or saved-ink reactivation. Local relevant gates/negative controls PASS;
-extra test-file publication approval and hosted rerun still required. Full narrow
-review/check evidence ../reviews/T-018I-loader-correction.md. No Nomad access,
-hardware/hosted-CI PASS, PR finalization or merge. Earlier text is chronological.
+Initial manual hosted run38685640763 failed removed Android `tools` default and
+stale code59 CURRENT PACKAGE expectation, before assembly. Independently CLEAN
+CI-only correction user-approved, published/remote verified69dd4e3. Hosted rerun
+38686685160 at that exact head SUCCESS:5 applicable jobs PASS,3 release-only jobs
+skipped by existing conditions. All20 production inputs unchanged, no candidate
+rebuild/saved-ink reactivation/CI-artifact substitution. Full narrow review/check
+evidence ../reviews/T-018I-loader-correction.md. User says Nomad NOT AVAILABLE YET;
+no device access/process. Only hardware gate awaits fresh availability/reservation/
+preflight. No hardware PASS, PR finalization or merge. Earlier text is chronological.
 
 CURRENT2026-10-15: executable1c85d066a5111b803ff41463372b80d349f6c6b8 exact-head
 independent identity confirmation CLEAN; reviewed pins/source gates pass. One

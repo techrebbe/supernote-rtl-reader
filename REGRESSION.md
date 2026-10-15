@@ -1,5 +1,63 @@
 # RTL Reader hardware regression
 
+## 2026-10-15 — exp5/code64 paint correction OFFLINE; no hardware-fix claim
+
+After H2's consumed/released test below, source inspection and independent exact
+RN0.79.2 AAR audit identified an unbounded native draw path under overflow-visible
+React parents. Minimal onDraw owner clip/save/finally correction; no page/source/
+loader/pen/save/navigation-coordinate change. Actual old method fails the new
+two-sibling controlled raster regression; corrected59 assertions and3 compiled
+defect mutants pass/rejected respectively, including early returns/failure/pan/
+selection/header/footer. Independent focused review CLEAN; integration4/wiring6
+independently run. Owner provider11/ELF9/payload5/JS23/Core85407/all271mutations/
+native-v2-Edit-crosslayer/provenance/packaging PASS. New CI regression command and
+candidate marker/artifact/identity pin updates reviewed narrowly. Exact clean
+signed exp5/code64 package next, UNINSTALLED and hardware UNKNOWN. H2 remains FAIL
+until a separately approved exact-package test under a fresh reservation. No new
+Nomad action/source upload/ink/timer/merge authority inferred from host success.
+
+## 2026-10-15 — code63 landscape H2 FAIL; portrait recovery/cleanup PASS
+
+User approved one same-installed-code63 landscape/rotation trial, no install or
+pen. Fresh reservation6194483100. Exact sourcef0adcd4220fed957c8972e28890c12c76fb76ffa,
+version0.4.25-pdfium-exp4/code63, SDK0.1.65, SNPLG SHA256
+2c6aa7498fa7ecd9559220133036c4e167c8e559f47184209c92e145ddd3dbf5.
+Unrooted3.30.45/buildChauvet.E103.2610091001.2545_release/API30/UID2000/95percent,
+public package/source+absent mark/original auto1/user2/native PAGE1 preflight PASS.
+
+Normal activation opened portrait PAGE1 READY. Host helper initially expected
+a slash after PluginHost current-window package, although its token is normally
+slashless. Activation had already succeeded; corrected that local parser to the
+existing slash-or-closing-brace form and captured the already-open reader. No
+activation retry or production-code change.
+
+Supported auto0/user1 produced actual1872x1404/r1. UI reports RTL Auto Spread,
+Edit p.2 left/Edit p.1 right/footer2|1of4. Current runtime reports matching spread
+requests and READY token3/pages2,1. Actual screenshot shows original PAGE1 RIGHT
+but LEFT entirely gray/blank; header pixels also gray despite its controls in the
+UI tree. H2 FAIL at visible presentation, not a successful spread. No observed
+loader/model error. Exact cause requires source investigation; screenshot/state
+agreement is not assumed. Logical Next/Previous/link-Back NOTPERFORMED (hard stop).
+
+Only read-only evidence and preapproved recovery followed: portrait auto0/user0
+restores byte-identical initial RTL PAGE1 image; original auto1/user2 restored,
+normal Close reaches same disposable native PAGE1/1of4. Native full PNG differs
+by60 pixels only in tiny toolbar labels bbox(280,79)-(694,94); all PDF/footer
+pixels belowy100 identical. No whole-native-image equality claim. PDF SHA256
+7cf9de8fa7ed91f7746ac44f62aa63e0641f757f330cf7d83efec7584b213905 unchanged,
+.pdf.mark absent/public packages unchanged. Exactly14 owned regular nonlink
+hash-verified/local-backed XML/PNG captures removed/absence verified. Local raw
+tmp/t018ih2-exp4-6194483100-20261015 retained. Installed63 ON and disposable native
+PAGE1 retained; RELEASED6194697872, no device process, safe disconnected.
+No pen/original/annotation/root/firmware/other-plugin changes or new installation.
+
+Continue bounded OFFLINE paint/viewport diagnosis. New corrected candidate needs
+focused tests/independent review/exact signed package/scoped user approval/fresh
+reservation; no additional capture under this consumed test. Separately approved
+25-file source/notes throughc3ba6ee pushed/remote verified; hostedCI38752087594
+SUCCESS/all5 applicable jobs,3 release-only skipped. This CI result is not a
+hardware pass or merge approval. Ink PARKED/timers PAUSED.
+
 ## 2026-10-15 — code63 portrait H1 PASS; normal Close/reopen and cleanup PASS
 
 User exact-package install/test approval and request for agent-opened Settings.

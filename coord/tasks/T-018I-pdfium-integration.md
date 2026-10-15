@@ -1,5 +1,28 @@
 # T018I — user-approved PDFium reader integration
 
+OFFLINE exp5/code64: minimal owner-bounds clip/save/finally confines background,
+panned bitmap and selection. Independently confirmed RN0.79.2 overflow default
+explains concrete paint escape; no engine/geometry/navigation rewrite. Old actual
+onDraw fails new sibling-survival raster regression; fixed59 assertions/3 compiled
+mutants rejected. Independent focused review CLEAN. Integration4/provider11/
+ELF9/payload5/wiring6/JS23/Core85407/all271mutations and retained gates PASS.
+CI now runs this actual-method integration suite. Identity/pins scoped/reviewed.
+Exact clean signed package next, UNINSTALLED/hardware UNKNOWN; source publication
+and exact package retest approval still needed. H2 failure remains authoritative.
+
+LATEST H2 FAIL6194483100 on unchanged exactf0adcd4/code63: correct landscape
+left2/right1 state and complete-pair READY, but left page visually blank gray.
+Navigation/link phases NOTPERFORMED. Portrait recovery exact; normal Close native
+PAGE1/source+absent mark/public packages/original rotation PASS. Native PDF/footer
+pixels identical, only60 top-toolbar-label pixels differ.14 owned captures cleaned/
+absence verified/raw retained; RELEASED6194697872, no process. Narrow OFFLINE
+paint/viewport diagnosis next, not speculative device captures or loader rewrite.
+Full bounded evidence REGRESSION.md. New fix needs reviewed exact package and
+scoped publication/hardware approval/new reservation; installed63 retained.
+Approved25-file source+same5notes published/remotec3ba6ee verified; hosted run
+38752087594 SUCCESS/all5 applicable jobs,3 release-only skipped. No merge/ink/
+timer changes; previous publication/H2-approval holds below are historical.
+
 LATEST code63 H1 hardware PASS6193796307; normal agent-opened public Settings/
 same-ID install/version ON and original PDF interaction phases passed. Direct/
 named/bookmark navigation, English selection+own verified Copy, zoom/Pan/Fit and

@@ -1,5 +1,49 @@
 # T018I loader correction — independent source-only review
 
+## Exp5/code64 focused paint correction — independent source review CLEAN
+
+No loader or writer change. Independent reviewer inspected exact retained
+RN0.79.2 react-android AAR: ReactViewGroup init sets child clipping false and
+Overflow.VISIBLE; dispatchDraw clips padding only for non-visible overflow/filter.
+PdfiumPageView's unbounded drawColor/bitmap/selection therefore have no implicit
+owner clip. H2 pixels strongly support this failure mechanism, not sole-cause or
+corrected hardware proof. Outer save/clipRect(0,0,width,height)/finally restore
+encloses early returns and existing nested selection clip. Pan/hit-test/source
+coordinates unchanged. No new P0/P1/P2 found in focused correction.
+
+Reviewer independently ran integration4 including59 controlled-raster assertions/
+3 compiled mutants rejected and wiring6; independently verified old c3ba6ee
+method fails at left-page sibling survival. Tests execute the actual onDraw body
+on a controlled JDK Canvas, NOT Android hardware. New CI integration command
+reviewed with existing Node20/JDK17; only this command and artifact label change.
+Reviewed normalized index0ef2636ecd0ae1e1f5b1b4e411a8d89fdb9aa78c6159ef238b0f61fe444b0751,
+workflowc1ce7ef96035b16ca947b4f46ae2ef0ee3db7c2123b36cf62ff3fc57185251cc;
+only these scoped frozen pins updated. Identity expectations63/exp4->64/exp5
+updated, no invariant bypass. Paint snapshot normalized6253e8215dec790e39985d40f1619bb236e8bc1af07ca33b50a4bbce57964f13,
+testa7fae5d2c4881af4172f68c52fddff3458948457ab8abbc1814e75836438f952,
+23-production-input aggregate3d6a19b45cdc0ab2f8dd95c537311088e36363844609e5ef123032633d39d411.
+
+Owner focused checks: integration4/Java ledger14; provider11 no skips
+(Java14/Session40/Module72/controlled-native26); ELF9 no skips with retained bad
+and freshly compiled good ARM64; payload5/wiring6/JS23; Core85407/all271mutations;
+native/v2/Edit/cross-layer/provenance/packaging PASS. A private host-runner argument
+array error occurred AFTER Core/mutations; corrected helper only, remaining gates
+explicitly rerun PASS. No production edit to make tests pass. Exact clean signed
+package next, UNINSTALLED; new publication/package/device approval required.
+
+## H2 follow-up2026-10-15 — presentation FAIL, loader result not broadened
+
+Exactf0adcd4/code63 under6194483100 rendered portrait, then reported both
+landscape pages READY while actual left half remained gray/blank. Hard stop
+before navigation/link phases. No observed loader/model error, but no visual
+correctness inferred from READY or this earlier loader review. Portrait recovery/
+normal Close/native PAGE1/source+absent mark/public packages/rotation and14-file
+owned cleanup PASS, RELEASED6194697872. PDF/footer pixels identical;60 native
+toolbar-label pixels differ. Details REGRESSION.md; narrow paint-boundary review
+is separate from unchanged engine admission. No more hardware authorized.
+Approved25-file source+same5notes published/remotec3ba6ee verified; hosted exact
+run38752087594 SUCCESS/all5 applicable jobs,3 release-only skipped. No merge.
+
 ## Exp4 installed-library correction — offline checkpoint 2026-10-15
 
 HARDWARE FOLLOW-UP PASS: approved exactf0adcd4/code63 ran under6193796307,

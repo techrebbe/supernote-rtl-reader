@@ -163,13 +163,19 @@ public final class PdfiumPageView extends View {
     @Override protected void onDetachedFromWindow(){++revision;ready=false;pressed=false;super.onDetachedFromWindow();}
     @Override protected void onAttachedToWindow(){super.onAttachedToWindow();if(!disposed)schedule();}
     @Override protected void onDraw(Canvas canvas){
-        canvas.drawColor(Color.LTGRAY);if(bitmap==null)return;
-        paint.setColor(Color.BLACK);canvas.drawBitmap(bitmap,x,y,paint);
-        if(start<0 || end<0 || model==null)return;
-        int clip=canvas.save();canvas.clipRect(x,y,x+bitmap.getWidth(),y+bitmap.getHeight());paint.setColor(0x604060e0);
-        try{JSONArray chars=model.getJSONArray("chars");for(int i=Math.min(start,end);i<=Math.max(start,end);i++){
-            JSONArray r=chars.getJSONObject(i).getJSONArray("rect");canvas.drawRect((float)r.getDouble(0)+x,(float)r.getDouble(1)+y,(float)r.getDouble(2)+x,(float)r.getDouble(3)+y,paint);
-        }}catch(Exception error){fail(revision,"PDF selection model rejected");}finally{canvas.restoreToCount(clip);}
+        // React parents allow visible overflow. Neither drawColor nor a panned
+        // bitmap may paint another page or the reader's chrome.
+        int viewport=canvas.save();
+        try{
+            canvas.clipRect(0,0,getWidth(),getHeight());
+            canvas.drawColor(Color.LTGRAY);if(bitmap==null)return;
+            paint.setColor(Color.BLACK);canvas.drawBitmap(bitmap,x,y,paint);
+            if(start<0 || end<0 || model==null)return;
+            int clip=canvas.save();canvas.clipRect(x,y,x+bitmap.getWidth(),y+bitmap.getHeight());paint.setColor(0x604060e0);
+            try{JSONArray chars=model.getJSONArray("chars");for(int i=Math.min(start,end);i<=Math.max(start,end);i++){
+                JSONArray r=chars.getJSONObject(i).getJSONArray("rect");canvas.drawRect((float)r.getDouble(0)+x,(float)r.getDouble(1)+y,(float)r.getDouble(2)+x,(float)r.getDouble(3)+y,paint);
+            }}catch(Exception error){fail(revision,"PDF selection model rejected");}finally{canvas.restoreToCount(clip);}
+        }finally{canvas.restoreToCount(viewport);}
     }
     private int charAt(float px,float py)throws Exception{
         if(!Interaction.inside(px,py,bitmap.getWidth(),bitmap.getHeight()))return -1;

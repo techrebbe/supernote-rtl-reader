@@ -60,6 +60,116 @@ class Integration(unittest.TestCase):
             with self.assertRaises(ValueError):patch_app(app)
             with self.assertRaises(ValueError):patch_index(index)
 
+    def test_actual_page_draw_is_bounded_to_its_viewport(self):
+        # Execute the production method, not a second implementation of its
+        # clipping policy. The controlled Canvas uses JDK raster/clip semantics;
+        # it is not an Android/GPU/e-ink pass. RN's parent may allow overflow.
+        source=(ROOT/'native/PdfiumPageView.java.template').read_text(encoding='utf-8')
+        begin=source.index('    @Override protected void onDraw(Canvas canvas){')
+        end=source.index('    private int charAt(',begin)
+        method=source[begin:end].replace('@Override ','')
+        harness=r'''import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
+import java.util.ArrayDeque;
+import java.util.Deque;
+
+class Color {static final int LTGRAY=0xffcccccc,BLACK=0xff000000;}
+class Paint {int color;void setColor(int value){color=value;}}
+class Bitmap {
+ final BufferedImage image;
+ Bitmap(int w,int h,int color){image=new BufferedImage(w,h,BufferedImage.TYPE_INT_ARGB);
+  Graphics2D g=image.createGraphics();g.setColor(new java.awt.Color(color,true));g.fillRect(0,0,w,h);g.dispose();}
+ int getWidth(){return image.getWidth();}int getHeight(){return image.getHeight();}
+}
+class Canvas {
+ final BufferedImage image=new BufferedImage(280,220,BufferedImage.TYPE_INT_ARGB);
+ Graphics2D g=image.createGraphics();final Deque<Graphics2D> saved=new ArrayDeque<>();
+ Canvas(){g.setClip(0,0,280,220);drawColor(0xff00ff00);}
+ int save(){saved.push(g);g=(Graphics2D)g.create();return saved.size();}
+ void restoreToCount(int count){while(saved.size()>=count){g.dispose();g=saved.pop();}}
+ void clipRect(float l,float t,float r,float b){g.clip(new java.awt.geom.Rectangle2D.Float(l,t,r-l,b-t));}
+ void drawColor(int color){Paint p=new Paint();p.setColor(color);drawRect(-10000,-10000,10000,10000,p);}
+ void drawBitmap(Bitmap b,float x,float y,Paint p){g.drawImage(b.image,Math.round(x),Math.round(y),null);}
+ void drawRect(float l,float t,float r,float b,Paint p){g.setColor(new java.awt.Color(p.color,true));g.fill(new java.awt.geom.Rectangle2D.Float(l,t,r-l,b-t));}
+ void translate(int x,int y){g.translate(x,y);}int pixel(int x,int y){return image.getRGB(x,y);}
+}
+class JSONObject {
+ boolean broken;JSONObject(boolean fail){broken=fail;}
+ JSONArray getJSONArray(String name)throws Exception{if(broken)throw new Exception("selection fixture");return new JSONArray();}
+}
+class JSONArray {
+ JSONObject getJSONObject(int index){return new JSONObject(false);}
+ double getDouble(int index){return index<2?-50:250;}
+}
+class ActualPage {
+ Bitmap bitmap;JSONObject model;int start=-1,end=-1;long revision;int failures;
+ float x=10,y=10;final Paint paint=new Paint();
+ int getWidth(){return 100;}int getHeight(){return 140;}
+ void fail(long ticket,String message){failures++;}
+ /*ACTUAL_ON_DRAW*/
+}
+public class DrawTest {
+ static int assertions;static final int GREEN=0xff00ff00,BLUE=0xff0000ff,RED=0xffff0000;
+ static void ok(boolean value,String label){if(!value)throw new AssertionError(label);assertions++;}
+ static ActualPage page(int color){ActualPage p=new ActualPage();p.bitmap=new Bitmap(70,100,color);return p;}
+ static void draw(Canvas c,ActualPage p,int x,int y){int parent=c.save();c.translate(x,y);
+  int depth=c.saved.size();java.awt.Shape clip=c.g.getClip();p.onDraw(c);
+  ok(c.saved.size()==depth,"page restores save depth");
+  ok(c.g.getClip().getBounds().equals(clip.getBounds()),"page restores parent clip");c.restoreToCount(parent);}
+ static void untouched(Canvas c){ok(c.pixel(5,5)==GREEN,"header survives");ok(c.pixel(5,210)==GREEN,"footer survives");
+  ok(c.pixel(5,90)==GREEN,"outer margin survives");ok(c.pixel(121,90)==GREEN,"gutter survives");}
+ public static void main(String[] args){
+  for(boolean reverse:new boolean[]{false,true}){
+   Canvas c=new Canvas();ActualPage left=page(BLUE),right=page(RED);
+   if(reverse){draw(c,right,123,30);draw(c,left,20,30);}else{draw(c,left,20,30);draw(c,right,123,30);}
+   ok(c.pixel(45,65)==BLUE,"left original page survives sibling");ok(c.pixel(148,65)==RED,"right original page survives sibling");
+   ok(c.pixel(22,32)==Color.LTGRAY,"viewport background drawn");untouched(c);
+  }
+  Canvas empty=new Canvas();draw(empty,new ActualPage(),20,30);
+  ok(empty.pixel(22,32)==Color.LTGRAY,"empty viewport fills only itself");untouched(empty);
+  ActualPage panned=page(BLUE);panned.bitmap=new Bitmap(220,220,BLUE);panned.x=-40;panned.y=-35;
+  Canvas pan=new Canvas();draw(pan,panned,20,30);ok(pan.pixel(22,32)==BLUE,"negative pan retained");
+  ok(pan.pixel(119,169)==BLUE,"bitmap reaches viewport edge");untouched(pan);
+  ActualPage selected=page(RED);selected.bitmap=new Bitmap(220,220,RED);selected.x=-40;selected.y=-35;
+  selected.model=new JSONObject(false);selected.start=selected.end=0;
+  Canvas selection=new Canvas();draw(selection,selected,20,30);
+  ok(selection.pixel(45,65)!=RED,"selection actually painted");untouched(selection);
+  ActualPage small=page(RED);small.model=new JSONObject(false);small.start=small.end=0;
+  Canvas smallSelection=new Canvas();draw(smallSelection,small,20,30);
+  ok(smallSelection.pixel(22,32)==Color.LTGRAY,"selection is also bounded by bitmap");
+  ok(smallSelection.pixel(45,65)!=RED,"small selection actually painted");untouched(smallSelection);
+  selected.model=new JSONObject(true);Canvas failure=new Canvas();draw(failure,selected,20,30);
+  ok(selected.failures==1,"selection failure exercised");untouched(failure);
+  System.out.println(assertions+" actual onDraw controlled-raster assertions PASS (not Android hardware)");
+ }
+}
+'''
+        home=Path(os.environ['JAVA_HOME'])/'bin';suffix='.exe' if os.name=='nt' else ''
+        with tempfile.TemporaryDirectory(prefix='pdfium-page-paint-') as temp:
+            root=Path(temp);java=root/'DrawTest.java'
+            def run(body):
+                java.write_text(harness.replace('/*ACTUAL_ON_DRAW*/',body),encoding='utf-8')
+                subprocess.run([str(home/('javac'+suffix)),'-encoding','UTF-8','-d',temp,str(java)],check=True)
+                return subprocess.run([str(home/('java'+suffix)),'-Djava.awt.headless=true','-cp',temp,'DrawTest'],
+                    capture_output=True,text=True)
+            correct=run(method)
+            self.assertEqual(correct.returncode,0,correct.stderr)
+            print(correct.stdout.strip())
+            mutations=(
+                ('missing owner clip','canvas.clipRect(0,0,getWidth(),getHeight());','',
+                 'left original page survives sibling'),
+                ('missing owner restore','canvas.restoreToCount(viewport);','',
+                 'page restores save depth'),
+                ('missing bitmap selection clip','canvas.clipRect(x,y,x+bitmap.getWidth(),y+bitmap.getHeight());','',
+                 'selection is also bounded by bitmap'),
+            )
+            for label,old,new,failure in mutations:
+                self.assertEqual(method.count(old),1,label)
+                broken=run(method.replace(old,new,1))
+                self.assertNotEqual(broken.returncode,0,label)
+                self.assertIn(failure,broken.stderr,label)
+            print('3 compiled actual-onDraw defect mutants rejected')
+
     def test_aggregate_ledger_actual_java(self):
         home=Path(os.environ['JAVA_HOME'])/'bin'
         suffix='.exe' if os.name=='nt' else ''

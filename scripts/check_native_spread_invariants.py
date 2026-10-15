@@ -1065,7 +1065,8 @@ def check(repo_root: Path) -> None:
             # Exact reverse replacement reproduces the prior frozen source.
             # T018I exp3 independently reviewed marker exp2 -> exp3 ONLY.
             # T018I exp4 independently reviewed marker exp3 -> exp4 ONLY.
-            "8e05f74a20ea09811583a077e5a871b3fe1829048351c853863a5327a6d50492",
+            # T018I exp5 independently reviewed marker exp4 -> exp5 ONLY.
+            "0ef2636ecd0ae1e1f5b1b4e411a8d89fdb9aa78c6159ef238b0f61fe444b0751",
             "Edit/Return activation and close authority",
         ),
         (
@@ -1091,7 +1092,9 @@ def check(repo_root: Path) -> None:
             # T018I exp3 independent review: provider tests and artifact label
             # only; no action, SDK, signing, companion or permission change.
             # T018I exp4 independently reviewed artifact label ONLY.
-            "190b07b6459d071b91d6876a36c0763f3eddd6e0c0a72a84353a5d5a467f9f20",
+            # T018I exp5 independent review: artifact label and actual-method
+            # viewport raster regression command only. Signing/SDK unchanged.
+            "c1ce7ef96035b16ca947b4f46ae2ef0ee3db7c2123b36cf62ff3fc57185251cc",
             "Native Spread companion-build workflow",
         ),
         (

@@ -1,5 +1,44 @@
 # STATE — RTL Reader (updated 2026-10-15 by codex)
 
+## Exp5/code64 paint correction — OFFLINE, not installed or hardware-proven
+
+Concrete boundary: PdfiumPageView.onDraw had no owner-bounds clip. Independently
+inspected RN0.79.2 AAR confirms parent child clipping disabled/overflow visible;
+drawColor and panned bitmap could overwrite sibling/header. Local correction
+wraps the existing draw path in save/viewport clip/finally restore; inner bitmap
+selection clip retained, coordinates/session/loader/navigation unchanged.
+Actual-method controlled JDK-raster regression: old c3ba6ee method fails sibling
+survival; corrected59 assertions/3 compiled defect mutants rejected. This is not
+an Android/GPU/e-ink pass. Integration4/Java ledger14/provider11(Java14/Session40/
+Module72/native26)/ELF9 actual wrappers/payload5 fresh ARM64/wiring6/JS23 and
+Core85407/all271mutations/native-v2-Edit-crosslayer/provenance/packaging PASS.
+Independent focused paint/test review CLEAN. Scoped identity64/exp5 expectations
+and reviewed marker/artifact+new CI regression-command pins applied. Exact clean
+signed package is next; no new source publication/install/device authority.
+No loader/geometry redesign, saved-ink activation, timer resume, PR or merge.
+
+## Latest: code63 landscape H2 FAIL; recovery/cleanup PASS; device released
+
+Approved same-package H2 ran under6194483100 on unrooted3.30.45/API30.
+Exactf0adcd4/code63/package2c6aa749...dd3dbf5 unchanged. Portrait PAGE1 READY;
+supported landscape1872x1404/r1 reports RTL Auto Spread/left2/right1 and both
+READY, but actual pixels show PAGE1 right and blank gray left. H2 FAIL; logical
+Next/Previous/link-Back NOTPERFORMED (hard stop). Portrait recovery byte-identical
+to initial RTL PAGE1. Exact original auto1/user2 restored; normal Close native
+PAGE1. Final native PDF/footer belowy100 pixel-identical; only60 toolbar-label
+pixels differ, so no whole-image equality claim. Source unchanged/mark absent/
+public packages intact;14 exact owned local-backed/hash-verified captures removed,
+absence verified, raw retained. RELEASED6194697872; code63 ON/no device process.
+Continue narrow OFFLINE rendering-boundary diagnosis; no reservation reuse or
+new hardware until correction/review/exact package/approval/new reservation.
+
+User-approved25-file source and same5notes throughc3ba6ee were pushed to the
+explicit repository URL and exact remote head verified. HostedCI38752087594 at
+c3ba6ee SUCCESS: all5 applicable jobs PASS;3 release-only jobs skipped under
+existing conditions. This does not override the H2 visual failure. New production
+corrections are not covered by that scoped publication approval. Ink PARKED,
+timers PAUSED; no merge/PR finalization. Earlier pending text is chronological.
+
 ## Exp4/code63 offline correction checkpoint — not a hardware pass
 
 LATEST HARDWARE RESULT: code63 PORTRAIT H1 PASS under6193796307; normal public

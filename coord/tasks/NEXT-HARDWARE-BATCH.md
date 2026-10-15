@@ -1,5 +1,35 @@
 # Next useful hardware batch — no speculative test loop
 
+## Exp5/code64 next gate — smallest two-visible-page retest after exact package
+
+OFFLINE correction/review/regression ready: local onDraw owner clip/save/finally,
+old-method red/fixed59 assertions/3 compiled mutants rejected. No device evidence
+yet. Finish exact clean signed package/identity verification, obtain scoped new
+source publication and exact-package install/retest approval, reserve afresh.
+Earliest hardware question is whether PAGE1 right AND PAGE2 left plus chrome
+survive supported rotation on the SAME disposable T018IH1. Stop on any blank/
+identity/model/cleanup mismatch. Only if the settled-pair visual gate passes,
+perform the already-defined logical Next/Previous and one link/Back phases as
+explicitly approved for the new package, then portrait/rotation/Close/integrity/
+owned cleanup/release. No pen/original/root/firmware/other-plugin change.
+Do not add speculative emulator prerequisites. Physical Bluetooth/Edit remain
+separate later gates, ink PARKED/timers PAUSED/no merge.
+
+## Latest: approved code63 H2 consumed — FAIL; OFFLINE correction first
+
+Reservation6194483100 consumed/released6194697872. Actual landscape correctly
+reported left2/right1/READY but displayed PAGE1 right/gray blank left. Stopped
+before Next/Previous/link-Back. Portrait recovery/normal Close/native PAGE1/source/
+absent mark/public packages/original rotation/14 owned capture cleanup PASS;
+raw retained. Do not reuse the reservation or repeat this unchanged package.
+Next is narrow source-only paint/viewport correction with a realistic regression
+and independent review, then exact signed package/scoped approval and fresh
+reservation for the smallest decisive two-visible-pages gate. No device capture,
+install or pen is authorized by this offline step. Retain installed63/rollback.
+Approved source/notes throughc3ba6ee published; exact-head hostedCI38752087594
+SUCCESS/all5 applicable jobs. CI/READY do not establish visible spread correctness.
+Earlier H2 plan/approval text below is historical, not an outstanding permission.
+
 ## Latest: code63 portrait H1 PASS — next H2 landscape/rotation, not another build
 
 Exactf0adcd4/code63 installed/ON; original render/links/named-outline/English

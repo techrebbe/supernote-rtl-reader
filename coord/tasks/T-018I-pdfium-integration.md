@@ -1,5 +1,30 @@
 # T018I — user-approved PDFium reader integration
 
+NEWEST2026-10-15: independent loader-correction review CLEAN/noP0/P1/P2,
+including fresh actual ARM64 production compile and packaged receipt-consistent
+failed/incomplete wrapper negatives. Marker-only index and test/artifact-only
+workflow digest updates independently approved and applied, no other pin change.
+Owner native Core85407 PASS. Source review evidence
+../reviews/T-018I-loader-correction.md. Exact clean signed full exp2/code61 package
+is next, OFFLINE only; no device/installation/publication/merge authority inferred.
+
+LATEST2026-10-15: first integrated code60 H1 open FAIL (__emutls_get_address
+missing from wrapper runtime); page/links/text/bookmarks/zoom NOTPERFORMED.
+User-approved normal PAGE1 reset independently confirmed before opening. Normal
+Close/integrity/footer setting restoration/77 owned scratch-stage removals PASS;
+RELEASED6184589609, device safe to disconnect. Full bounded evidence REGRESSION.md.
+No additional hardware action queued or authorized from this failure.
+
+Narrow offline exp2/code61 correction staged locally: explicitly ordered private
+NDK static C++/ABI/unwind/compiler runtime; only nine JNI exports, no foreign
+C++/compiler runtime imports, exact shared dependency/SONAME inventory checked
+both before receipt and from packaged ELF. Upstream engine bytes/provider hash
+check unchanged, no renderer/navigation/Edit/writer/ink behavioral source change.
+Actual corrected production ARM64 payload and8 boundary/5payload/3integration+
+Java14/19JS PASS. Required independent correction and marker-only frozen-index
+digest review remains pending; cross-layer gate currently fails that named digest,
+not silently repinned. No exact full package yet, no upload/install/merge.
+
 Current2026-10-15: user APPROVED31-file publication and exact build1 code60 H1.
 Source pushcaf81af remote verified. Reservation6183424291 RELEASED6183436132:
 H1 NOTPERFORMED at local ADB inventory because Nomad absent. Only an unrelated

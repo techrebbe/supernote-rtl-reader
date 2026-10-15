@@ -2,6 +2,18 @@
 
 ## Current queue — interactive original PDF reading
 
+LATEST2026-10-15: integrated code60 H1 failed at native loader before rendering;
+normal Close/source/annotation/public package/rotation/owned cleanup PASS,
+RELEASED6184589609. Nomad NOT needed for current offline runtime-link correction.
+Exact failed candidate retained; code60 installed, generated fixture left native
+PAGE1, originals unchanged. New exp2/code61 source/payload and regression checks
+are local; independent review (including marker-only frozen-index digest), clean
+exact signed full package and fresh install/H1 approval/reservation come FIRST.
+Do not repeat code60, install unreviewed source, or add emulator/ink prerequisites.
+Then one earliest decisive disposable portrait original-PDF link/text/outline/
+zoom H1, inspect results phase-by-phase, normal Close/integrity/cleanup/release.
+Device need will be announced only when that corrected exact candidate is ready.
+
 User2026-10-14: links, selectable text, bookmarks and zoom take priority over
 saved-ink display. Preserve portrait, RTL landscape spreads and Bluetooth;
 reuse navigation/Edit/Return. T017S4 is finished and released6160004267, exact

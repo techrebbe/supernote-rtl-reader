@@ -1,5 +1,49 @@
 # RTL Reader hardware regression
 
+## 2026-10-15 — T018I-H1 integrated code60 loader FAIL / cleanup PASS
+
+User-approved source a102cb9490af5fbdecff9a7e5c73f2965fa6779b,
+RTL Reader 0.4.25-pdfium-exp1/code60/SDK0.1.65, selected signed build1 SNPLG
+dd8756df524cf3b02a410f25bde6516ded40772660e430b3d0c6244b85056003.
+Normal same-ID manager upgrade PASS; Settings exact version/ON and runtime
+RTL_READER_OPEN v0.4.25-pdfium-exp1-native-reader-v2 verified.
+Nomad SN078C10015092/unrooted Chauvet.E103.2610091001.2545_release (3.30.45),
+API30, verified Wi-Fi10.0.40.9:5555 after USB identity/address preflight.
+
+Reservation6183673118; generated disposable copy only. Footer initially hidden;
+one single tap and later normal double-tap did not expose it. Normal native
+More/Settings/Preferences/Display footer gesture ON-to-OFF exposed it; restored
+ON and verified. Native revealed PAGE3, earlier page authority UNKNOWN. Stopped;
+user explicitly approved normal PAGE1 reset/resume. Native selector GO changes
+the preview first; selecting its PAGE1 thumbnail confirmed actual native PAGE1,
+exact filename/1-of4 and source pixels before plug-in activation. No pen input.
+
+First integrated engine activation FAIL: visible dlopen error cannot locate
+__emutls_get_address referenced by librtlpdfiumreader.so; scoped PluginHost log
+confirms UnsatisfiedLinkError/RTL_READER_INIT_FAILED. No PDFium page rendered.
+Links/text/bookmarks/zoom and all subsequent feature gates NOTPERFORMED.
+No recovery/retry/extra install or inference that the separate diagnostic failed.
+
+Normal error-screen Close PASS to exact native disposable PAGE1. Public
+PluginHost f60ce483…d2aad and Document dd77ff2c…6f986 unchanged, rotation1/2
+unchanged. Generated PDF SHA2567cf9de8fa7ed91f7746ac44f62aa63e0641f757f330cf7d83efec7584b213905
+unchanged; .pdf.mark absent. Exact hash/nonlink/local-backed remote cleanup
+removed77 owned capture/staged-installer files and verified absence. Local raw
+evidence and code59 rollback retained; open disposable PDF intentionally retained.
+Code60 remains installed, but integrated reading is blocked. No uninstall,
+original PDF/annotations/root/firmware/other-plugin change. RELEASED6184589609,
+no observer/device process; user told safe to disconnect. Timers PAUSED/ink PARKED.
+
+Offline ELF audit: exact failed wrapper imports compiler/C++ runtime symbols
+despite static-libstdc++ and no-undefined; pinned engine has incidental weak
+runtime exports. Loader-scope cause is not fully proven from this evidence.
+Current narrow source correction explicitly links/hides the wrapper's private
+NDK C++/ABI/unwind/compiler archives before the engine; actual ARM64 compile
+PASS and new package verifier rejects failed wrapper, accepts corrected wrapper.
+This is NOT a corrected package/device PASS. Independent review, marker-only
+frozen-index digest review, clean exact signed package and fresh approved retest
+remain required. No new device test, merge or PR finalization authorized by this.
+
 ## 2026-10-14 — exp2 bounded hardware result and release
 
 User exact correction/summary publication and install/test/remove approvals

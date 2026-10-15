@@ -1046,7 +1046,9 @@ def check(repo_root: Path) -> None:
             # T017S4 runtime identity only; no SDK handoff change.
             # T018I changes only the canonical runtime marker to the code60
             # PDFium alpha; generated read-only drain is reviewed separately.
-            "448e250b0a998c174604ec09bffea74f15b37b08129cb6a289aae2a2164f64cd",
+            # T018I exp2 independent narrow review: marker exp1 -> exp2 ONLY.
+            # Exact reverse replacement reproduces the prior frozen source.
+            "76f1365dcc7bf2331c1653c5ef3efe9e62f01542a03d3fba787147dcc1030940",
             "Edit/Return activation and close authority",
         ),
         (
@@ -1065,7 +1067,9 @@ def check(repo_root: Path) -> None:
             # T017S4 changes candidate label only; existing suite includes new cases.
             # T018I candidate artifact label and pinned NDK for the plugin job;
             # companion source, signing and verification steps are unchanged.
-            "5082beb793573d66ee32c6d0b1a55d7a5201db3fc49acad28a93b2b89112e4ea",
+            # T018I exp2 independent review: ELF unit-test command and artifact
+            # identity ONLY; no companion, signing, permission or native gate edit.
+            "2c6df6c2b6ed6555d8d6ed8d0370fbf4eb62ce7d6ed2aed5ed9355b54e93854e",
             "Native Spread companion-build workflow",
         ),
         (

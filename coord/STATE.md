@@ -2,6 +2,32 @@
 
 ## Current phase — approved PDFium integration (T018I)
 
+NEWEST2026-10-15: user-approved independent narrow loader review CLEAN/noP0/P1/P2.
+Fresh reviewer ARM64 build and packaged failed/incomplete-wrapper negative
+controls passed; reviewed index/workflow-only pins now applied. Owner Java Core
+85407 PASS, no device access. Source eligible for exact clean signed exp2/code61
+package build; no corrected full package/hardware claim yet. Details in
+reviews/T-018I-loader-correction.md. Earlier pending-review text is historical.
+
+LATEST2026-10-15: code60 H1 first integrated open FAIL, missing native
+__emutls_get_address; no page rendered, later interactions NOTPERFORMED.
+Normal Close/native PAGE1/integrity and77 exact owned remote scratch/installer
+cleanup PASS. Footer display preference restored ON; disposable source unchanged,
+.pdf.mark absent; open generated copy intentionally retained. Code60 remains
+installed, code59 rollback/local raw evidence preserved. RELEASED6184589609 from
+6183673118; user told safe to disconnect. No device observer/process, no retry.
+See REGRESSION.md. Earlier connection/install-pending prose below is historical.
+
+Owned offline correction IN PROGRESS, UNCOMMITTED/UNPUSHED/uninstalled:
+0.4.25-pdfium-exp2/code61 proposed, private ordered NDK static runtime linkage
+plus mandatory shipped-ELF boundary gate. Actual corrected ARM64 payload build
+and8 boundary/5 real-payload/3 generated integration(+Java14)/19JS checks PASS.
+Native renderer/v2 invariants PASS. Cross-layer gate intentionally stops on the
+marker-only overlay/index.js frozen digest change: 448e250b…64cd ->76f1365d…0940.
+Do not blindly repin; independent correction/scoped digest review still required,
+then exact clean signed package and new approved bounded H1/reservation. No
+corrected full package or hardware success claimed. Ink PARKED/timers PAUSED.
+
 2026-10-15 user APPROVED publication and exact code60 H1 installation/test.
 31-file source push verified remotely atcaf81af2c288dc0e17b09fe82f4e417c961ef9fa.
 Fresh issue23 reservation6183424291 RELEASED6183436132 with H1 NOTPERFORMED:

@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from pdfium_elf import verify_wrapper
 
 JAVA = ('PdfiumReaderCore','PdfiumRasterLedger','PdfiumViewport','PdfiumSession','PdfiumReaderModule',
         'PdfiumPageView','PdfiumPageViewManager')
@@ -20,6 +21,7 @@ def source_inputs(root):
         source/'RenderBudget.java',source/'pdfium.lock.json',source/'package_inputs.py',
         root/'scripts/build_pdfium_reader.py',root/'scripts/patch_pdfium_reader.py',
         root/'scripts/verify_pdfium_reader.py',root/'provenance/pdfium-reader.json',
+        root/'scripts/pdfium_elf.py',
         root/'overlay/interactivePdf.js',root/'overlay/InteractivePdfReader.js']
 
 
@@ -45,6 +47,16 @@ def build(project, root, engine, sdk):
     tools=sdk/'ndk/27.0.12077973/toolchains/llvm/prebuilt'/host/'bin'
     compiler=tools/('clang++.exe' if os.name=='nt' else 'clang++')
     readelf=tools/('llvm-readelf.exe' if os.name=='nt' else 'llvm-readelf')
+    target='aarch64-linux-android23'
+    def runtime_archive(option):
+        path=Path(subprocess.run([str(compiler),'--target='+target,option],check=True,
+            capture_output=True,text=True).stdout.strip())
+        if not path.is_absolute() or not path.is_file() or path.suffix!='.a':
+            raise ValueError('Pinned NDK static runtime archive unavailable')
+        return str(path)
+    runtime=[runtime_archive('--print-file-name='+name) for name in
+             ('libc++_static.a','libc++abi.a','libunwind.a')]
+    runtime.append(runtime_archive('--print-libgcc-file-name'))
     output=project/'android/app/src/main'
     native=output/'jniLibs'
     if any(native.glob('*/libpdfium.so')) or any(native.glob('*/librtlpdfiumreader.so')):
@@ -58,11 +70,16 @@ def build(project, root, engine, sdk):
         destination=native/abi;destination.mkdir(parents=True,exist_ok=True)
         wrapper=destination/'librtlpdfiumreader.so';dep=authenticated/vendor
         command=[str(compiler),'--target='+target,'-std=c++17','-O2','-fPIC','-shared',
-            '-static-libstdc++','-fvisibility=hidden','-Wall','-Wextra','-Werror',
+            '-nostdlib++','-fvisibility=hidden','-Wall','-Wextra','-Werror',
             '-I'+str(dep/'include'),str(root/'native/pdfium_reader_core.cpp'),
-            '-L'+str(dep/'lib'),'-lpdfium','-ldl','-Wl,--no-undefined','-Wl,-soname,librtlpdfiumreader.so',
+            # Resolve the wrapper's C++/unwind/compiler runtime BEFORE the
+            # engine DSO can satisfy it through incidental weak exports.
+            '-Wl,--undefined=__emutls_get_address','-Wl,--start-group',*runtime,'-Wl,--end-group',
+            '-L'+str(dep/'lib'),'-lpdfium','-ldl','-lm','-Wl,--no-undefined',
+            '-Wl,--exclude-libs,ALL','-Wl,-soname,librtlpdfiumreader.so',
             '-o',str(wrapper)]
         subprocess.run(command,check=True)
+        verify_wrapper(wrapper.read_bytes())
         symbols=subprocess.run([str(readelf),'--dyn-syms','--wide',str(wrapper)],check=True,capture_output=True,text=True).stdout
         actual={line.split()[-1] for line in symbols.splitlines() if ' Java_' in line}
         if actual!=exports:raise ValueError('JNI export drift')

@@ -3,6 +3,7 @@ import hashlib
 import json
 import struct
 from build_pdfium_reader import JAVA,source_inputs
+from pdfium_elf import verify_wrapper
 
 
 def sha(data):return hashlib.sha256(data).hexdigest()
@@ -42,6 +43,8 @@ def verify(native, root, classes):
                 raise ValueError('PDFium native ABI mismatch')
             if name=='libpdfium.so' and sha(data)!=lock['extractedBinaries'][vendor+'/lib/libpdfium.so']:
                 raise ValueError('Bundled engine is not the pinned binary')
+            if name=='librtlpdfiumreader.so':
+                verify_wrapper(data)
     if set(payload)!=actual:raise ValueError('Incomplete/unexpected PDFium payload inventory')
     for name,value in payload.items():
         if sha(native.read(name))!=value:raise ValueError('PDFium payload hash mismatch: '+name)

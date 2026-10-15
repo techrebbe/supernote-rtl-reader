@@ -1,5 +1,17 @@
 # T018I — user-approved PDFium reader integration
 
+LATEST H3 PASS6196445111 on unchanged installed exact7d0aae7/exp5/code64: aligned
+English selection+own verified Copy, hierarchical Chapter-three bookmark/Back,
+one1.25zoom/Pan/Fit and portrait/original-rotation/normal Close/nativePAGE1 PASS.
+Fit full spread and forced portrait byte-identical baselines; zoom/Pan sibling/
+footer unchanged. Source/absent mark/public integrity and36 exact owned capture
+cleanup/absence PASS, raw retained. RELEASED6197276318; safe disconnected/no active
+process, code64 ON. No install/stage/rebuild or source correction in H3. Initial
+normal sleep/wake and host approval-timeout/freshness stops did not alter PDFs.
+REGRESSION.md records bounded results/limits. Next representative Hebrew PDF
+copies/file-choice question sent, then paired Bluetooth/supported Edit separate
+gates. No more unchanged build/modeling prerequisite; ink/timers/merge unchanged.
+
 LATEST hardware H2 PASS on exact7d0aae7/exp5/code64 under6196055836 after fresh
 user PAGE1/free confirmation. Normal same-ID install/exact version ON; actual
 landscape PAGE2left/PAGE1right/chrome, logical Next/Previous, named PAGE3XYZ/Back

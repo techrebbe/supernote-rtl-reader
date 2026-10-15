@@ -1,5 +1,32 @@
 # STATE — RTL Reader (updated 2026-10-15 by codex)
 
+## Latest: same-code64 H3 PASS — core landscape interaction gates complete
+
+User-approved6196445111 used SAME installed exact7d0aae7/exp5/code64, no install/
+stage/rebuild. Initial null focus was normal Asleep/native task retained; normal
+KEYCODE_WAKEUP, then fresh awake exact metadata/source+absent mark/public/native
+PAGE1/100percent/rotation PASS. English finger-selection aligned/own exact Copy
+receipt visible PASS. Original Chapter-three bookmark PAGE3/XYZ viewport matches
+prior named link; Back restores original page viewport. One1.25zoom/one Pan affect
+only right PAGE1, left sibling/footer pixel-identical; Fit restores byte-identical
+ENTIRE initial spread. Forced portrait byte-identical; original auto1/user2,
+normal Close SDK-verified native PAGE1/source/absent mark/public integrity PASS.
+Native source/footer pixels identical, only60 tiny toolbar-label pixels differ.
+36 exact owned regular/nonlink/hash/local-backed captures removed/absence verified;
+raw retained. RELEASED6197276318, installed64 ON/native PAGE1 retained, no active
+process, safe disconnected. Clipboard contains selected disposable text only.
+One auto-review timeout BEFORE CreateProcess and one stale-host-XML stop caused
+no Copy input; fresh capture then ONE actual Copy succeeded, no app/source fix.
+
+Current source branch includes only approved summarized evidence since075142a;
+executable/build/review/hostedCI source unchanged. Next useful gate: representative
+Hebrew PDF COPIES (user file-choice question sent), then paired Bluetooth and
+supported Edit/Return in separate bounded scopes. No new builds/emulator/modeling
+prerequisite. Do not touch originals or reuse H2/H3. Actual file choice/next scoped
+authority/physical input are remaining gates, not a claim that work is running.
+Hebrew extraction fidelity/broader formats/provider concurrent-update lifetime
+remain explicit limits. Ink PARKED/timers PAUSED/no PR finalization or merge.
+
 ## Latest: code64 landscape H2 PASS; safe Close/cleanup/release
 
 User APPROVED13-file correction+same5notes/issue summary publication and exact

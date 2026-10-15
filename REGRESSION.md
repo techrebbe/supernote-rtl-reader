@@ -1,5 +1,52 @@
 # RTL Reader hardware regression
 
+## 2026-10-15 — same-code64 H3 landscape selection/bookmark/zoom PASS
+
+User approved one fresh bounded interaction check on SAME installed exact
+7d0aae7ff09bda39a5360aeba369734b295cbfd7/0.4.25-pdfium-exp5/code64/SDK0.1.65/
+SNPLG5cbbdc9cbb250d42097eb3622de4cf010e8b9ed5143180430e03261a0e7c4993.
+Reservation6196445111, no install/stage/rebuild. Initial null focus was normal
+Asleep/native task retained; read-only power/focus confirmed, normal guarded
+KEYCODE_WAKEUP restored same task, no unlock bypass. Fresh awake unrooted3.30.45/
+buildChauvet.E103.2610091001.2545_release/API30/UID2000/100percent/public/source+
+absent mark/nativePAGE1/original rotation preflight PASS. Normal activation exact
+exp5 marker/portrait READY and supported landscape initial image byte-identical
+H2's passed spread; no speculative additional build or emulator prerequisite.
+
+English source-line finger selection visually aligns to RIGHT PAGE1 glyphs,
+Copy enabled. Automatic reviewer timed out before CreateProcess/no input; allowed
+retry stopped on stale local XML/no input. Fresh source/selection observation
+still valid, ONE actual Copy produced visible Copied text (verified), the app's
+own exact just-written label/text receipt. No unrelated clipboard read/restore.
+Selection is read-only presentation, not a saved PDF/native annotation. This
+does not prove Hebrew extraction or arbitrary-PDF Unicode fidelity.
+
+Original bookmarks modal retains hierarchy/Part one/indented Chapter three/
+Hebrew title/Appendix. Chapter three reaches original PAGE3/XYZ with PAGE4left;
+whole page viewport pixel-equivalent to prior H2 named-link destination. Normal
+history Back restores original PAGE2/PAGE1 viewport. Copy notice persists, so
+no whole-PNG Back equality claim. One1.25zoom and one small finger Pan change
+RIGHT PAGE1 only; whole left sibling viewport and footer pixel-identical to
+baseline in both. Fit restores byte-identical ENTIRE original landscape scene.
+
+Forced portrait returns byte-identical initial PAGE1; exact original auto1/user2
+restored. Normal Close SDK-verified PAGE1/native same disposable PAGE1/1of4 PASS.
+Native full PNG differs only60 small toolbar-label pixels bbox(280,79)-(694,94);
+ALL PDF/footer pixels belowy100 identical. Expected runtime generations retained,
+no observed init/model/cleanup/FATAL error. Source SHA256 unchanged, .pdf.mark
+absent/public packages unchanged/rotation exact.36 owned regular nonlink/hash-
+verified/local-backed XML/PNG captures removed/absence verified; no staged package.
+Raw local tmp/t018ih3-exp5-6196445111-20261015/rollback retained. RELEASED6197276318,
+no active observer/test/device process, safe disconnected; code64 ON/native PAGE1
+retained. Clipboard contains selected disposable source text, not restored.
+
+No pen/original/native annotation/root/firmware/other-plugin or live SDK update/
+re-extraction change; no merge/PR finalization/timer resume, ink PARKED. Code64
+now has bounded spread/navigation/landscape interaction evidence, not whole-
+product release readiness. Next representative Hebrew PDF COPIES await user file
+choice/scope; paired Bluetooth/supported Edit and broader formats/crops/Hebrew/
+provider lifetime remain separate gates. Do not reuse H2/H3 or rebuild unchanged.
+
 ## 2026-10-15 — code64 landscape H2 PASS; portrait/Close/integrity/cleanup PASS
 
 User explicitly approved13-file correction/same5notes/issue summary publication

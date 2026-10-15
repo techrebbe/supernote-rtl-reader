@@ -1,5 +1,20 @@
 # T018I loader correction — independent source-only review
 
+## Same-code64 H3 follow-up — landscape interaction PASS, no new source change
+
+Approved6196445111 on unchanged exact7d0aae7/code64 passed aligned English
+finger-selection/own verified clipboard receipt, original hierarchical bookmark
+PAGE3XYZ/Back and one1.25zoom/Pan/exact Fit. Both zoom/Pan leave entire sibling
+viewport/footer pixel-identical; Fit entire scene and forced portrait exactly
+restore baselines. Original rotation/normal Close SDK-verified PAGE1/native same
+source/integrity/36-file owned cleanup PASS; RELEASED6197276318, raw local.
+No install/stage/rebuild/production edit or expanded lifetime claim. Auto-review
+timeout before process launch and stale host observation prevented Copy input;
+fresh observation then one actual Copy passed. No rejected-action bypass or app
+failure. Native PDF/footer unchanged,60 tiny toolbar-label pixels differ only.
+Full result REGRESSION.md. Next representative-copy/paired-input gates remain,
+not another unchanged loader or emulator cycle. No active process or merge.
+
 ## Exp5 hardware follow-up — H2 PASS, bounded rather than full release readiness
 
 User-approved exact7d0aae7/code64/SNPLG5cbbdc9c...e7c4993 tested under6196055836.

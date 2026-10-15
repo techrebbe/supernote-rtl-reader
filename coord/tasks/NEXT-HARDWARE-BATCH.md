@@ -1,5 +1,25 @@
 # Next useful hardware batch — no speculative test loop
 
+## Latest: H3 PASS — representative-copy and real-input acceptance next
+
+Same installed7d0aae7/exp5/code64 completed6196445111 selection/verified Copy,
+original bookmark/Back, zoom/Pan/exact Fit, portrait/rotation/normal Close/native
+PAGE1/source+absent mark/public integrity/36-file owned cleanup PASS. RELEASED
+6197276318, no process, safe disconnected. H2/H3 are consumed; do not rerun them
+or their builds. Source/package/review/CI remain unchanged; no install in H3.
+
+Next useful batch requires user choice/authority: representative Hebrew original-
+PDF COPIES only, e.g. siddur.pdf and Siddur Kol Yaakob.pdf. File-choice question
+sent; do not read/copy/open personal documents under the earlier synthetic-only
+approval. Once selected/approved, resolve exact sources read-only, create uniquely
+named disposable copies without original/native annotation mutation, retain hashes
+and verify copies, then prepare smallest links/text/bookmarks/zoom/portrait/RTL
+spread trial with ordinary Close/cleanup under NEW exclusive reservation. Preserve
+native ink/sidecars; no inference that original annotations should be copied into
+or rewritten by PDFium. Physical paired Bluetooth and supported Edit/Return need
+their own later bounded gates/user availability. No root/firmware/new writer or
+speculative emulator prerequisites; ink PARKED/timers PAUSED/no merge.
+
 ## Latest: code64 H2 PASS — next H3 landscape interaction, same installed package
 
 6196055836 consumed/released6196361922 after user-confirmed PAGE1/free. Both

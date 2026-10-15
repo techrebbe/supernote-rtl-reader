@@ -27,10 +27,23 @@ FD/source/hash/close/drain/owner and raster budgets. New JNI+Session suites pass
 at-Xmx32m (87+51 assertions/3 compiled defect mutants), actual Android35 Java and
 fresh ARM64 compile/payload5/integration4 PASS. Independent narrow review found
 one exact-export assembly P2, now CLOSED with strict13-entry inventory/every-
-missing-export negatives; no additional streaming hazard. Candidateexp6/code65
-UNBUILT/UNINSTALLED pending remaining ordinary gates/exact clean signed build.
-No new source publication approval inferred from prior scoped code64 upload.
-Earliest hardware gate after exact package/review/approval/new reservation is
+missing-export negatives; no additional streaming hazard. Exact candidate source
+192dec536f9f755f3f12658458ad9e0f37e9b3a5/exp6/code65 normal clean-archive build
+exit0/75tasks; complete package/source/DEX/ELF/notices/provenance and compatible
+v2/v3 signer PASS. SNPLG11143375bytes/SHA256
+8f55ad02934d6f83a92f530cddb96e25fab64716fd1c0cce911fc988d64af7b3.
+Local tmp/t018i-exp6-192dec5-build1/candidate-identity.json. Standard core85407/
+all271mutations/native-v2-Edit-crosslayer/provenance/packaging, wiring6/JS101,
+exact-archive stream2 and postbuild actual-APK provider11/no skips PASS.
+Raw archive23-input aggregate4c162819...921110d normalizes CRLF->LF EXACTLY to
+independent reviewed9953d811...b8f0f; no executable text changes or reproducible-
+bytes claim. Private identity helper initially assumed wrong line normalization;
+proved exact23 byte-normalized comparisons before recording corrected identity,
+no rebuild/source repin. New candidate UNINSTALLED; installed64 unchanged.
+Scoped19-file publication+same5notes/issue summary and exact-package COPY A
+installation/admission/render/Close approval questions SENT/PENDING. No active
+build/test/review/device process; mandatory authority/reservation is next gate.
+Earliest hardware gate after approval/new reservation is
 retained COPY A admission/render/normal Close, not more speculative emulation.
 Ink PARKED/timers PAUSED/no merge. Prior H3/synthetic passes remain bounded.
 

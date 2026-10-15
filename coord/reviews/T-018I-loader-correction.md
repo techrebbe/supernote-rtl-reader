@@ -22,7 +22,33 @@ streaming issue. Final23-input aggregate
 9953d811148355ac28e502eb0efc16c43f06918a4750b775fff1f477968b8f0f.
 Index pin521737db...5a8c1e is marker-only; workflowa392ce0e...1f7f3d adds streaming
 suite and artifact version only. Candidate identity expectations65/exp6, not
-weakened invariants. Exact clean build/package/signing still pending; UNINSTALLED.
+weakened invariants. Independent final tiny identity-check confirmation CLOSED;
+no remaining source/assembly blocker. Exact clean source192dec536f9f755f3f12658458ad9e0f37e9b3a5
+normal build exit0/75tasks, complete package/source/DEX/ELF/engine/notices/bundle/
+APK-provenance and v2/v3 signature PASS, postbuild actual-APK provider11/no skips.
+Installed64 retained, code65 UNINSTALLED, scoped upload/install questions pending.
+
+- SNPLG11143375bytes/SHA256
+  8f55ad02934d6f83a92f530cddb96e25fab64716fd1c0cce911fc988d64af7b3.
+- app.npk11026295bytes/SHA256
+  77d5d7996f6ea0b833361386109e82ad291c3380846a9667f81cbd2261298f97.
+- Metro1180739bytes/SHA256
+  67bb600ee81264d99a0a7eae71bed3070f2dfbe166cc7f5c07b54135006f7b0b.
+- Certificate SHA256
+  fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c,
+  matches retained64/63/62/61/60/59; native com.supernotertlreader1.0/code1,
+  min27/target35, pluginexp6/code65/SDK0.1.65.
+- Archive SHA256
+  f36dcc9712a8984abf6c907a5e308083af656771a7ffa9e01145a669191ea0b7;
+  packaged23-source aggregate4c1628192c700de4ee9598e4c5dddcd20f98b8aa7f1edeb6d1e8aba7f921110d
+  normalizes CRLF->LF exactly to reviewed9953d811...b8f0f, each input compared;
+  no semantic source changes or byte-identical-build claim. Initial private
+  identity-helper line-ending assumption failed safely before writing identity;
+  corrected only after these exact-byte comparisons, no package/source rewrite.
+- Core85407/all271mutations/native-v2-Edit-crosslayer/provenance/packaging,
+  stream2 on exact archive (87+51/3mutants), integration4, ELF9/no skips,
+  payload5, wiring6, JS101 PASS. Local candidate identity/raw build retained.
+
 These tests are NOT Android FD/PDFium parsing/total native memory/performance or
 hardware proof. No unreviewed lifetime/provider-security claim or source upload.
 

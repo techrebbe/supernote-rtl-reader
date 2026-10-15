@@ -30,8 +30,20 @@ one native immutable snapshot,64MiB cap/source hash and source/stat/FD/Close/dra
 owner plus existing raster budgets preserved. JNI87+Session51 assertions at
 -Xmx32m/3 compiled mutants, actual Android35 Java/ARM64/payload5/integration4 PASS;
 independent review's sole exact-JNI-inventory P2 CLOSED, no other streaming
-blocker. Ordinary gates/exact clean signed build pending; UNINSTALLED/no new
-hardware or source-publication approval inferred. Earliest next hardware is ONE
+blocker. Ordinary core85407/all271mutations/native-v2-Edit-crosslayer/provenance/
+packaging, wiring6/JS101 PASS. Exact192dec536f9f755f3f12658458ad9e0f37e9b3a5
+clean-archive normal build exit0/75tasks, complete source/DEX/ELF/engine/notices/
+provenance and compatible same64 v2/v3 signing PASS. Exact-archive stream2 and
+postbuild actual-APK provider11/no skips PASS. Code65 SNPLG11143375bytes/SHA256
+8f55ad02934d6f83a92f530cddb96e25fab64716fd1c0cce911fc988d64af7b3,
+local tmp/t018i-exp6-192dec5-build1/candidate-identity.json. Source receipt23
+normalizes onlyCRLF->LF to independent reviewed9953d811...b8f0f; initial private
+identity helper assumption corrected after exact input comparison, no source/
+package change or reproducible-bytes claim. UNINSTALLED/no new hardware or
+publication authority inferred. Scoped19-file+same5notes/issue summary and exact
+package COPY A approval questions pending; no active build/test/device process.
+Sampled cover/body pages in both private copies are images/no extracted text;
+not a whole-book or PDFium fidelity conclusion, no OCR added. Earliest next hardware is ONE
 retained disposable A admission/render/normal Close after exact candidate gates,
 not speculative emulator or repeat unchanged H4. Prior synthetic H2/H3 passes
 remain valid bounded evidence, not representative-file compatibility. Ink PARKED,

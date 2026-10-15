@@ -15,9 +15,14 @@ by fixed32KiB DigestInputStream, absolute64MiB cap/raster ledger and verified
 FD/path/hash/close ownership unchanged. JNI87+Session51 small-heap assertions,
 3 compiled mutants, actual Android35 compile/ARM64/payload5/integration4 PASS;
 independent streaming review no blocker after exact13-export P2 closure.
-Remaining standard gates and exact clean build/signing before fresh COPY A
-admission/render hardware. UNINSTALLED; new source publication/package approval
-not inferred. Detailed REGRESSION.md; no speculative emulator prerequisite.
+Standard core85407/all271mutations/invariants/provenance/packaging/wiring6/JS101
+PASS. Exact clean-archive192dec536f9f755f3f12658458ad9e0f37e9b3a5 normal signed
+build exit0/75tasks and complete package/source/DEX/ELF/notices/signature PASS;
+SNPLG8f55ad02934d6f83a92f530cddb96e25fab64716fd1c0cce911fc988d64af7b3.
+Same v2/v3 certificate as64, exact-archive stream2/postbuild provider11 PASS.
+UNINSTALLED; scoped19-file publication and exact-package retained COPY A
+admission/render/Close approval questions pending, then NEW reservation/preflight.
+No active process or speculative emulator prerequisite. Details REGRESSION.md.
 
 LATEST H3 PASS6196445111 on unchanged installed exact7d0aae7/exp5/code64: aligned
 English selection+own verified Copy, hierarchical Chapter-three bookmark/Back,

@@ -11,10 +11,13 @@ No device process or further hardware authority from that consumed trial.
 
 Earliest useful hardware gate is corrected streaming input, not emulation:
 fixed32KiB Java transfer into one immutable native snapshot,64MiB absolute cap,
-source/hash and existing raster/Close/drain/owner checks preserved. Localexp6/
-code65 focused tests/review/ARM64 compile pass; remaining standard gates and
-exact clean signed package, scoped publication/install approval and NEW exclusive
-reservation/preflight remain. Then ONE retained COPY A normal open/admission/
+source/hash and existing raster/Close/drain/owner checks preserved. Exactexp6/
+code65 source192dec536f9f755f3f12658458ad9e0f37e9b3a5 has focused/full gates,
+independent review and normal clean signed build/package PASS. SNPLG
+8f55ad02934d6f83a92f530cddb96e25fab64716fd1c0cce911fc988d64af7b3;
+compatible signer with64. Scoped19-file publication and exact package install/
+COPY A test approval questions SENT/PENDING, then NEW exclusive reservation/
+preflight. No build/test/device process active. Then ONE retained COPY A open/admission/
 render and normal Close/integrity. Continue portrait/spread/links/bookmarks/zoom
 only after that decisive gate passes and within an explicitly bounded scope.
 Do not silently raise limits, rewrite/compress user PDFs, include annotation

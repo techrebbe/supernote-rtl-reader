@@ -1,5 +1,14 @@
 # RTL Reader hardware regression
 
+## 2026-10-15 — exp4/code63 offline correction; hardware UNKNOWN
+
+After code62 failure below, narrow installed-library FD/per-document release
+correction is local and source-tested. No new Nomad reservation/access/install.
+Focused tests/limits/review gates: coord/reviews/T-018I-loader-correction.md.
+Do not treat host compile/authentication/controlled dlclose callback tests as an
+Android loading PASS. Exact signed candidate and new approval still required.
+Installed62 ON, release6188589341, original files untouched; ink PARKED/timers PAUSED.
+
 ## 2026-10-15 — T018I-H1 code62 installed; cache-FD mapping FAIL / cleanup PASS
 
 Fresh user Plugins-ready confirmation/reservation6188176283. Exact metadata/

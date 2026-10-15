@@ -1,5 +1,22 @@
 # Next useful hardware batch — no speculative test loop
 
+## Exp4/code63 next gate — exact package/approval not yet available
+
+Offline narrow installed-library-FD correction and per-document cleanup are under
+final review/build. Do not access the device or reuse6188176283. After exact
+source/review/tests/signing/package verification, request NEW scoped publication
+and exact-package approval, then fresh exclusive issue23 reservation/preflight.
+Earliest decisive gate is installed-library activation on the SAME disposable
+T018IH1, portrait H1 interactions only if activation succeeds, normal Close and
+one explicitly predeclared same-document reopen/drain check. Expected: exact
+exp4/code63 marker, authenticated installed engine/render, H1 semantic outcomes,
+normal native return and unchanged PDF/absent mark/public packages/rotation.
+Stop immediately at any loader/provider/cleanup/owner/source mismatch; no retry,
+policy/root change or alternative probe. Preserve rollback; no concurrent SDK
+install/update/re-extraction while live. This is an alpha assumption, not proven
+inode immutability/unmapping. Other feature/rotation/physical Bluetooth tests
+remain later gates. Nomad RELEASED6188589341/code62 ON; ink PARKED/timers PAUSED.
+
 ## Code62 source checkpoint — no new device authority
 
 LATEST: code62 installed normally under6188176283; exact version/ON/runtime marker

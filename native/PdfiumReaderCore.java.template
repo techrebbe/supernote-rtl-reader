@@ -4,6 +4,7 @@ final class PdfiumReaderCore {
     static { System.loadLibrary("rtlpdfiumreader"); }
     static native String candidatePath();
     static native void bindEngine(int authenticatedFd, String loadLabel, String sha256);
+    static native void releaseEngine();
     static native long open(byte[] immutableSource);
     static native String libraryPath();
     static native int count(long session);

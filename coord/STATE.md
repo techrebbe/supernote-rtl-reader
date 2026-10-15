@@ -1,5 +1,28 @@
 # STATE — RTL Reader (updated 2026-10-15 by codex)
 
+## Exp4/code63 offline correction checkpoint — not a hardware pass
+
+After code62's recorded cache executable-mapping failure/verified release, the
+narrow correction loads ONLY the installed physical sibling derived from the
+wrapper. It hashes/rechecks the same original read-only FD before/after binding;
+no executable cache copy, APK fallback, chmod, root or policy change. Unchanged
+engine hash/39 typed APIs/7 internal relocation witnesses remain mandatory.
+Provider reference now drains per document on the common FIFO/native mutex.
+Failed release poisons rebind; SOURCE-only versus CLEANUP failure is explicit,
+and uncertain cleanup cannot become a JS empty-owner Close success across mounts.
+Independent review corrections and focused regression results are recorded in
+reviews/T-018I-loader-correction.md. Identity0.4.25-pdfium-exp4/code63, SDK0.1.65.
+Fresh native compile/provider11/ELF9/payload5/integration3/JS23/wiring6 and retained
+invariant/provenance/packaging/Core85407/all271mutation checks PASS. Independently
+reviewed marker/artifact-only pins applied; cross-layer gate PASS. Final independent
+correction review CLEAN/noP0/P1/P2; exact clean signed package next. Source is LOCAL ONLY;
+new scoped publication/exact-package installation approval required afterward.
+Nomad stays RELEASED6188589341, installed62 ON; no device access/timer/ink/merge.
+Installed-file immutability is NOT proved: trusted SDK install/update/re-extraction
+must be excluded during the live reference. This is an explicit disposable-alpha
+assumption, not a production guarantee or dlclose-unmaps proof. Actual loading,
+normal Close and next-open behavior require the later approved hardware trial.
+
 ## Current phase — approved PDFium integration (T018I)
 
 CURRENT2026-10-15: code62 normal upgrade/exact version ON/runtime marker PASS

@@ -9,6 +9,8 @@
 #include <atomic>
 #include <cstring>
 #include <limits>
+#include <limits.h>
+#include <cstdlib>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -21,6 +23,7 @@ static std::mutex bindMutex;
 static void* engineHandle=nullptr;
 static void* engineBase=nullptr;
 static std::string engineName;
+static bool poisoned=false;
 const Api& api(){
     if(!ready.load(std::memory_order_acquire))throw std::runtime_error("PDFium provider not authenticated/bound");
     return currentApi;
@@ -58,21 +61,29 @@ static void internalBindings(void* base,const std::string& name){
         provider(target,base,name,relocation.symbol);
     }
 }
+// bindMutex is already held. Keep uncertain failed-admission teardown terminal.
+static void discardRejectedReference(void* handle){
+    if(dlclose(handle)!=0){engineHandle=handle;poisoned=true;}
+}
 static void bind(int descriptor,const std::string& label,const std::string& digest){
     std::lock_guard<std::mutex> lock(bindMutex);
+    if(poisoned)throw std::runtime_error("PDFium provider teardown failed; no rebind");
     if(digest!=kEngineSha256)throw std::runtime_error("Unverified PDFium snapshot digest");
     struct stat status{};
     int flags=fcntl(descriptor,F_GETFL);
     if(flags<0 || (flags&O_ACCMODE)!=O_RDONLY || fstat(descriptor,&status)!=0 || !S_ISREG(status.st_mode) ||
-       status.st_size!=static_cast<off_t>(kEngineBytes) || status.st_nlink!=0)
-        throw std::runtime_error("PDFium requires an unlinked read-only exact snapshot FD");
+       status.st_size!=static_cast<off_t>(kEngineBytes) || status.st_nlink<=0)
+        throw std::runtime_error("PDFium requires the installed read-only exact library FD");
     if(label.empty() || label[0]!='/' || label.size()>4096 || label.find('\0')!=std::string::npos)
         throw std::runtime_error("Invalid private engine load label");
-    if(ready.load(std::memory_order_acquire)){
-        internalBindings(engineBase,engineName);return;
-    }
-    // This FD is the same immutable snapshot Java hashed, not a path reopened by
-    // the linker. FORCE_LOAD avoids name caching; it is not an isolation claim.
+    std::string sibling=candidatePath();char canonical[PATH_MAX];struct stat named{};
+    if(sibling.find("!/")!=std::string::npos || !realpath(sibling.c_str(),canonical) || label!=canonical ||
+       lstat(canonical,&named)!=0 || !S_ISREG(named.st_mode) || named.st_dev!=status.st_dev ||
+       named.st_ino!=status.st_ino || named.st_size!=status.st_size)
+        throw std::runtime_error("Installed PDFium sibling FD/path mismatch");
+    if(ready.load(std::memory_order_acquire))throw std::runtime_error("Previous engine mapping has not drained");
+    // Map the same installed FD Java hashed, not a reopened pathname or cache
+    // inode. FORCE_LOAD avoids name caching; it is not an isolation guarantee.
     android_dlextinfo extension{};
     extension.flags=ANDROID_DLEXT_USE_LIBRARY_FD|ANDROID_DLEXT_FORCE_LOAD;
     extension.library_fd=descriptor;
@@ -88,15 +99,30 @@ static void bind(int descriptor,const std::string& label,const std::string& dige
         Dl_info first{};
         if(!dladdr(reinterpret_cast<const void*>(proposed.fn_FPDF_InitLibrary),&first) || !first.dli_fbase || !first.dli_fname)
             throw std::runtime_error("Private PDFium image identity unavailable");
+        if(label!=first.dli_fname)throw std::runtime_error("Private PDFium loaded image path mismatch");
 #define RTL_CHECK(name) provider(reinterpret_cast<const void*>(proposed.fn_##name),first.dli_fbase,first.dli_fname,#name);
         RTL_PDFIUM_API_TABLE(RTL_CHECK)
 #undef RTL_CHECK
         internalBindings(first.dli_fbase,first.dli_fname);
         currentApi=proposed;engineBase=first.dli_fbase;engineName=first.dli_fname;engineHandle=handle;
         ready.store(true,std::memory_order_release);
-    }catch(...){dlclose(handle);throw;}
-    // One private mapping per loaded wrapper, retained until process teardown.
-    // Document/session close still destroys only our PDFium document/library state.
+    }catch(...){
+        // Failed admission still owns this dlopen reference. A failed release
+        // poisons the provider; never retry or silently lose that reference.
+        discardRejectedReference(handle);
+        throw;
+    }
+    // Installation/update/re-extraction is excluded while this mapping is live.
+    // Original-FD checks are not an ABA proof or same-process immutability seal.
+}
+// Caller holds the common native document mutex and proves no document/library
+// state is alive. Never unmap underneath queued rendering/selection operations.
+static void release(){
+    std::lock_guard<std::mutex> lock(bindMutex);
+    ready.store(false,std::memory_order_release);currentApi=Api{};
+    if(poisoned)throw std::runtime_error("PDFium provider teardown failed; no retry");
+    if(engineHandle && dlclose(engineHandle)!=0){poisoned=true;throw std::runtime_error("Private PDFium teardown failed");}
+    engineHandle=nullptr;engineBase=nullptr;engineName.clear();
 }
 }
 

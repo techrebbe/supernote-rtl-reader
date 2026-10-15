@@ -15,6 +15,13 @@
 
 // Verify the resolved API provider, not merely the similarly named APK entry.
 extern "C" JNIEXPORT jstring JNICALL Java_com_supernotertlreader_PdfiumReaderCore_libraryPath(JNIEnv* env,jclass){
+    std::lock_guard<std::mutex> guard(mutex);
     try{(void)rtl_provider::api();return env->NewStringUTF(rtl_provider::engineName.c_str());}
     catch(const std::exception& error){exception(env,error.what());return nullptr;}
+}
+
+extern "C" JNIEXPORT void JNICALL Java_com_supernotertlreader_PdfiumReaderCore_releaseEngine(JNIEnv* env,jclass){
+    std::lock_guard<std::mutex> guard(mutex);
+    try{require(!document && !initialized,"Cannot release an active PDFium document");rtl_provider::release();}
+    catch(const std::exception& error){exception(env,error.what());}
 }

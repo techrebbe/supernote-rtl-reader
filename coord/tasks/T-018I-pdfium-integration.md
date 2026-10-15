@@ -1,5 +1,17 @@
 # T018I — user-approved PDFium reader integration
 
+CURRENT exp4/code63 OFFLINE: installed physical engine FD replaces denied cache
+inode; hash/typed39/internal7 checks unchanged, per-document release on common
+FIFO/mutex. Cleanup error classification/terminal JS fence and duplicate/stale
+owner protections regression-tested. Details ../reviews/T-018I-loader-correction.md.
+Focused native/provider/ELF/payload/Java/JS/invariant/Core85407/all271mutations PASS;
+reviewed marker/artifact pins applied/cross-layer PASS. Final independent review
+CLEAN/noP0/P1/P2; clean signed package next. LOCAL
+ONLY, no new public upload/install authority. Installed62 and Nomad RELEASED
+6188589341 unchanged. Trusted SDK no-update/re-extraction during live mapping is
+an explicit alpha assumption, NOT immutability/ABA proof. New exact candidate
+approval/reservation precedes hardware. Ink PARKED/timers PAUSED/no merge.
+
 CURRENT2026-10-15: exactd3e7142/code62 installed/ON/runtime marker verified under
 6188176283. Normal native disposable PAGE1 setup PASS; first engine FAIL at
 deleted cache-FD executable mapping Permission denied, no render or interactions.

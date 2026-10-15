@@ -1064,7 +1064,8 @@ def check(repo_root: Path) -> None:
             # T018I exp2 independent narrow review: marker exp1 -> exp2 ONLY.
             # Exact reverse replacement reproduces the prior frozen source.
             # T018I exp3 independently reviewed marker exp2 -> exp3 ONLY.
-            "5a84de83d93c042d46509abb7c9962809a106e42695037d24e60e4b2473279df",
+            # T018I exp4 independently reviewed marker exp3 -> exp4 ONLY.
+            "8e05f74a20ea09811583a077e5a871b3fe1829048351c853863a5327a6d50492",
             "Edit/Return activation and close authority",
         ),
         (
@@ -1089,7 +1090,8 @@ def check(repo_root: Path) -> None:
             # pinned actions, subsequent SDK dependencies and signing unchanged.
             # T018I exp3 independent review: provider tests and artifact label
             # only; no action, SDK, signing, companion or permission change.
-            "741f832bc6fd82e47c4fa3706c4154f6aa9005dde430dd9895eb0ab0e2c8feec",
+            # T018I exp4 independently reviewed artifact label ONLY.
+            "190b07b6459d071b91d6876a36c0763f3eddd6e0c0a72a84353a5d5a467f9f20",
             "Native Spread companion-build workflow",
         ),
         (

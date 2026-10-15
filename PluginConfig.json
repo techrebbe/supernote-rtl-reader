@@ -4,8 +4,8 @@
   "pluginID": "snrtl20260726001",
   "iconPath": "assets/icon.png",
   "desc": "Right-to-left PDF reader for Supernote",
-  "versionCode": "62",
-  "versionName": "0.4.25-pdfium-exp3",
+  "versionCode": "63",
+  "versionName": "0.4.25-pdfium-exp4",
   "jsMainPath": "index",
   "author": "techrebbe",
   "uses-permissions": ["plugin.permission.FILE:READ"]

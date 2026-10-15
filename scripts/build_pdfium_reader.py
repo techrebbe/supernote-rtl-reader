@@ -65,7 +65,7 @@ def build(project, root, engine, sdk):
         raise ValueError('Pre-existing PDFium payload rejected')
     payload={}
     exports={f'Java_com_supernotertlreader_PdfiumReaderCore_{name}' for name in
-             ('open','close','count','outline','size','point','model','render','libraryPath','candidatePath','bindEngine')}
+             ('open','close','count','outline','size','point','model','render','libraryPath','candidatePath','bindEngine','releaseEngine')}
     # Supernote's production plug-in packager retains arm64-v8a only. Compile
     # and receipt precisely that shipped ABI; never receipt a removed payload.
     for abi,target,vendor in (('arm64-v8a','aarch64-linux-android23','android-arm64'),):

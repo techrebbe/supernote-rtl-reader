@@ -31,19 +31,25 @@ final class PdfiumSession {
     }
     boolean current() { return !closed && active==this; }
     // QUEUE only. Caller has already obtained supported SDK READ and exact path.
-    static PdfiumSession open(String path, int expectedPages, File engineCache) throws Exception {
+    static PdfiumSession open(String path, int expectedPages) throws Exception {
         if (active!=null) throw new IllegalStateException("Previous PDF session has not drained");
-        PdfiumEngine.ensure(engineCache);
-        Snapshot snapshot=read(path);
         long token=0;
         try {
+            PdfiumEngine.ensure();
+            Snapshot snapshot=read(path);
             token=PdfiumReaderCore.open(snapshot.bytes);
             if (token<=0 || token>9007199254740991L) throw new IllegalStateException("Session identity bound");
             int pages=PdfiumReaderCore.count(token);
             if (pages!=expectedPages) throw new IllegalStateException("SDK/PDF page-count mismatch");
             PdfiumSession value=new PdfiumSession(token,path,snapshot.canonical,snapshot.sha,pages,snapshot.bytes.length);
             active=value; return value;
-        } catch(Exception|LinkageError error) { if(token>0)PdfiumReaderCore.close(token); throw error; }
+        } catch(Exception|LinkageError error) {
+            try { if(token>0)PdfiumReaderCore.close(token); }
+            catch(RuntimeException|LinkageError cleanup) { error.addSuppressed(cleanup); }
+            try { PdfiumReaderCore.releaseEngine(); }
+            catch(RuntimeException|LinkageError cleanup) { error.addSuppressed(cleanup); }
+            throw error;
+        }
     }
     // Close admission synchronously, native drain on the common FIFO.
     void fence() { closed=true; }
@@ -54,7 +60,18 @@ final class PdfiumSession {
     }
     void close() {
         closed=true;
-        if(active==this) { PdfiumReaderCore.close(token); active=null; }
+        if(active==this) {
+            // Relinquish ownership before cleanup can throw. Module.close's
+            // catch->close path then remains idempotent and settles its Promise.
+            active=null;
+            try { PdfiumReaderCore.close(token); }
+            catch(RuntimeException|LinkageError error) {
+                try { PdfiumReaderCore.releaseEngine(); }
+                catch(RuntimeException|LinkageError cleanup) { error.addSuppressed(cleanup); }
+                throw error;
+            }
+            PdfiumReaderCore.releaseEngine();
+        }
     }
     private static final class Snapshot {
         final byte[] bytes; final String sha,canonical;

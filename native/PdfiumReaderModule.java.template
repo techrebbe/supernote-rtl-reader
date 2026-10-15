@@ -11,30 +11,39 @@ public final class PdfiumReaderModule extends ReactContextBaseJavaModule {
     private volatile PdfiumSession owned;
     private volatile boolean invalid;
     private volatile String lastClosed;
+    private volatile Throwable terminalCleanupFailure;
     public PdfiumReaderModule(ReactApplicationContext context){super(context);}
     @Override public String getName(){return "PdfiumReaderModule";}
     @ReactMethod public void open(String path, double expectedPageCount, Promise promise){
         if(!Double.isFinite(expectedPageCount) || expectedPageCount!=Math.rint(expectedPageCount) ||
             expectedPageCount<1 || expectedPageCount>10000){promise.reject("PDFIUM_INPUT","Invalid original page count");return;}
         PdfiumSession.QUEUE.execute(()->{
+            if(terminalCleanupFailure!=null){promise.reject("PDFIUM_CLEANUP",terminalCleanupFailure.getMessage(),terminalCleanupFailure);return;}
+            if(invalid || owned!=null){promise.reject("PDFIUM_OWNER","Reader session already open or retired");return;}
             try{
-                if(invalid || owned!=null)throw new IllegalStateException("Reader session already open or retired");
-                PdfiumSession value=PdfiumSession.open(path,(int)expectedPageCount,getReactApplicationContext().getCacheDir());
+                PdfiumSession value=PdfiumSession.open(path,(int)expectedPageCount);
                 owned=value;
-                if(invalid){value.close();owned=null;throw new IllegalStateException("Reader retired during open");}
+                if(invalid)throw new IllegalStateException("Reader retired during open");
                 WritableMap result=Arguments.createMap();result.putString("sessionId",value.id);
                 result.putString("filePath",value.path);result.putString("sourceSha256",value.sha256);
                 result.putInt("pageCount",value.pageCount);
                 result.putString("outline",PdfiumReaderCore.outline(value.token));
                 promise.resolve(result);
             }catch(Exception|LinkageError error){
+                boolean cleanupFailed=error.getSuppressed().length>0;
                 PdfiumSession value=owned;
-                if(value!=null){value.close();owned=null;}
-                promise.reject("PDFIUM_OPEN",error.getMessage(),error);
+                if(value!=null){
+                    try{value.close();}
+                    catch(RuntimeException|LinkageError cleanup){error.addSuppressed(cleanup);cleanupFailed=true;}
+                    finally{if(owned==value)owned=null;}
+                }
+                if(cleanupFailed)terminalCleanupFailure=error;
+                promise.reject(cleanupFailed?"PDFIUM_CLEANUP":"PDFIUM_OPEN",error.getMessage(),error);
             }
         });
     }
     @ReactMethod public void close(String id, boolean verifySource, Promise promise){
+        if(terminalCleanupFailure!=null){promise.reject("PDFIUM_CLEANUP",terminalCleanupFailure.getMessage(),terminalCleanupFailure);return;}
         PdfiumSession value=owned;
         if(value==null){
             if(id!=null && id.equals(lastClosed)){promise.resolve(true);return;}
@@ -43,19 +52,31 @@ public final class PdfiumReaderModule extends ReactContextBaseJavaModule {
         if(!value.id.equals(id)){promise.reject("PDFIUM_OWNER","Stale reader owner");return;}
         value.fence();
         PdfiumSession.QUEUE.execute(()->{
-            try{
-                if(verifySource)value.verifySource();
-                value.close();if(owned==value)owned=null;lastClosed=id;promise.resolve(true);
-            }catch(Exception|LinkageError error){
-                value.close();if(owned==value)owned=null;lastClosed=id;
-                promise.reject("PDFIUM_SOURCE",error.getMessage(),error);
+            if(terminalCleanupFailure!=null){promise.reject("PDFIUM_CLEANUP",terminalCleanupFailure.getMessage(),terminalCleanupFailure);return;}
+            Throwable failure=null;boolean cleanupFailed=false;
+            try{if(verifySource)value.verifySource();}
+            catch(Exception|LinkageError error){failure=error;}
+            try{value.close();}
+            catch(RuntimeException|LinkageError cleanup){
+                cleanupFailed=true;if(failure==null)failure=cleanup;else failure.addSuppressed(cleanup);
+            }finally{if(owned==value)owned=null;}
+            // SOURCE means verification failed AFTER a successful native drain.
+            // Cleanup failures must never enable JS's source-only Close bypass.
+            if(failure!=null){
+                if(cleanupFailed)terminalCleanupFailure=failure;
+                promise.reject(cleanupFailed?"PDFIUM_CLEANUP":"PDFIUM_SOURCE",failure.getMessage(),failure);
             }
+            else{lastClosed=id;promise.resolve(true);}
         });
     }
     @Override public void invalidate(){
         invalid=true;
         PdfiumSession value=owned;
-        if(value!=null){value.fence();PdfiumSession.QUEUE.execute(()->{value.close();if(owned==value)owned=null;});}
+        if(value!=null){value.fence();PdfiumSession.QUEUE.execute(()->{
+            try{value.close();}
+            catch(RuntimeException|LinkageError error){terminalCleanupFailure=error;}
+            finally{if(owned==value)owned=null;}
+        });}
         super.invalidate();
     }
 }

@@ -1,5 +1,73 @@
 # T018I loader correction — independent source-only review
 
+## Exp4 installed-library correction — offline checkpoint 2026-10-15
+
+Base6ab064d27e9943fecfbf7673b3faf2e2e3758f68. Candidate identity
+0.4.25-pdfium-exp4/code63, same plug-in ID/SDK0.1.65. Not installed or published.
+
+The observed code62 denial is for executable mapping of its deleted cache inode;
+it does not prove a specific SELinux policy/audit cause. Public NDK FD loading is
+retained, but executable-cache generation is removed. The only admitted input is
+the canonical physical libpdfium.so sibling derived from the loaded wrapper.
+Exact-size/hash/regular/O_RDONLY/nlink/FD-path identity are checked, the SAME FD
+is hashed before and after bind, with metadata revalidation. Embedded/compressed
+APK origins fail explicitly: the actual prior package engine is DEFLATE, not a
+supported uncompressed/aligned ZIP mapping. No root/security-policy alteration.
+Engine bytes/SHAe6b7257b3905152dab64c79f7a4a570693e11ccb740e92e4d3b89c28df6fcbbb,
+39 typed public calls and7 internal provider-image relocation checks unchanged.
+
+One native mutex covers document use/libraryPath/release. A Session owns the
+provider reference until document/library destruction, then releases on the same
+FIFO. Duplicate/stale owners cannot drain another owner. Cleanup relinquishes
+Java ownership before it can throw; native failed release poisons future bind
+and never retries uncertain dlclose. Failed-admission release retains/poisons its
+reference too. Successful dlclose releases OUR reference, not proof of unmapping.
+
+Accepted independent review findings are batch-corrected with regressions:
+Module open/invalidate cleanup could escape before clearing ownership/settling
+Promise; teardown poison could retry or be lost after failed admission; failed
+Close could mint lastClosed success; all errors labelled SOURCE let JS bypass
+cleanup uncertainty; duplicate open closed the healthy prior owner; invalidation
+during open could mislabel failed cleanup. A final owner-discovered direct-native
+duplicate-Close race could acknowledge the second queued close after the first
+failed; persistent Module terminal failure now fences queued/repeated close/open
+and invalidation too, with a deterministic two-close latch regression.
+SOURCE now means verification failure
+AFTER successful drain; CLEANUP remains terminal across JS mounts/pending opens,
+without adding a restart/writer/save route. Final correction review is independently
+CLEAN/no remaining actionable P0/P1/P2. The reviewer independently reran provider11
+without skips, and confirmed the exact final Module-only delta after its prior
+fresh ARM64/payload/source checkpoint. Final23-input reviewed aggregate
+09c308e96303f5febf91b1dd6940dc79e6f93a68708af9bb7feaf23ba8acb0fc;
+normalized Module7b6267dfdffe6e6dfa532ca3e65f3745843e0bc451d6d6569910a33ceba32410.
+Owner fresh native3 compile/receipt/payload5 matches these final source inputs.
+Exact clean signed package next; not an Android-runtime or production-release PASS.
+
+Focused owner results:11 provider tests, no skips, including14 actual Java engine
+authentication,40 actual Session ownership/release,72 actual Module Promise/
+receipt,26 actual extracted native teardown-function assertions with controlled
+dlclose callbacks. Native loading/dlclose itself remains Android-only. Actual
+fresh ARM64 compile/12 exact JNI exports PASS;9 ELF negatives (retained old11JNI
+wrapper rejected/current12JNI accepted),5 actual-payload controls,3 generated
+integration tests plus14 Java raster/Fit and actual callback checks PASS.
+23 interactive/lifecycle JS,6 wiring, native/v2/Edit invariants, provenance,
+packaging, JavaCore85407 and all271 mutation checks PASS. Reviewed normalized
+marker-only index pin8e05f74a20ea09811583a077e5a871b3fe1829048351c853863a5327a6d50492
+and artifact-only workflow pin190b07b6459d071b91d6876a36c0763f3eddd6e0c0a72a84353a5d5a467f9f20
+applied; cross-layer gate PASS. All other frozen source pins remain unchanged.
+One initial owner command incorrectly passed a positional dot to a unittest;
+correct standalone6-test rerun PASS, no production fix required for that error.
+
+Explicit alpha limit: original-FD hashing/stat checks do NOT seal in-place writes,
+prevent ABA/future truncation, or establish current SDK extractor immutability.
+Trusted SDK installation/update/re-extraction must be excluded while reference is
+live. The retained older extractor is not evidence of the current SDK guarantee.
+No install/update action is permitted during the future exclusive disposable
+trial. This must not be presented as a production release guarantee. Actual
+PluginHost permission/image binding and Close/reopen remain hardware UNKNOWN.
+Final exact review/clean signed package precede NEW
+publication/install approval and fresh reservation. No device action here.
+
 ## Exp3 authenticated explicit-provider correction — 2026-10-15
 
 Actual exact code62 H1 now performed under6188176283: normal upgrade/settings ON/

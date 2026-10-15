@@ -23,26 +23,39 @@ export function useInteractivePdf(callbacks) {
   const modalRef=useRef(false),history=useRef([]);
   const current=()=>live.current && !closing.current && owned.current!=null && latest.current.current();
   const mutate=fn=>{if(!current()||modalRef.current||!latest.current.canInteract())return;latest.current.fence();fn();setSelection(null);setRevision(x=>x+1);};
+  function cleanupFailed(error) {
+    // Preserve an uncertain drain across mounts in this existing JS session.
+    // No automatic retry/restart or empty-owner synthetic cleanup receipt.
+    globalThis.RTL_PDFIUM_CLEANUP_FAILURE=error;return error;
+  }
+  async function drain(id,verify) {
+    try{return await NativeModules.PdfiumReaderModule.close(id,verify);}
+    catch(error){if(error?.code==='PDFIUM_SOURCE')sourceInvalid.current=true;else cleanupFailed(error);throw error;}
+  }
   async function open(context) {
     if(closing.current)throw Error('PDF open cancelled');
     return serializeOperation(async()=>{
       if(!live.current||closing.current)throw Error('PDF open cancelled');
+      if(globalThis.RTL_PDFIUM_CLEANUP_FAILURE)throw globalThis.RTL_PDFIUM_CLEANUP_FAILURE;
       const module=NativeModules.PdfiumReaderModule;
       if(!module?.open||!module?.close)throw Error('Interactive PDF engine is not registered');
-      const result=await module.open(context.filePath,context.totalPages);
-      if(!live.current||closing.current){await module.close(result.sessionId,false);throw Error('PDF open cancelled');}
+      let result;
+      try{result=await module.open(context.filePath,context.totalPages);}
+      catch(error){if(error?.code==='PDFIUM_CLEANUP')cleanupFailed(error);throw error;}
+      if(!live.current||closing.current){await drain(result.sessionId,false);throw Error('PDF open cancelled');}
       let value;
-      try{value=validateOwner(result,context);}catch(error){await module.close(result.sessionId,false);throw error;}
+      try{value=validateOwner(result,context);}catch(error){await drain(result.sessionId,false);throw error;}
       owned.current=value;setOwner(value);setFocused(context.pageIndex);return value;
     });
   }
   function close(verify=true) {
     closing.current=true;setSelection(null);views.current.clear();
+    if(globalThis.RTL_PDFIUM_CLEANUP_FAILURE)return Promise.reject(globalThis.RTL_PDFIUM_CLEANUP_FAILURE);
     if(closePromise.current)return !verify&&sourceInvalid.current?Promise.resolve(true):closePromise.current;
     closePromise.current=serializeOperation(async()=>{
+      if(globalThis.RTL_PDFIUM_CLEANUP_FAILURE)throw globalThis.RTL_PDFIUM_CLEANUP_FAILURE;
       const value=owned.current;
-      if(value){try{await NativeModules.PdfiumReaderModule.close(value.sessionId,verify);}
-        catch(error){if(error?.code==='PDFIUM_SOURCE')sourceInvalid.current=true;throw error;}
+      if(value){try{await drain(value.sessionId,verify);}
         finally{owned.current=null;}}
       return true;
     });

@@ -89,6 +89,38 @@ test('source replacement error never downgrades Edit check; normal no-handoff cl
   assert.equal(h.reader.sourceInvalid.current,true);await assert.rejects(h.reader.close(true),/source changed/);
   assert.equal(await h.reader.close(false),true);await h.unmount();
 });
+
+test('provider cleanup failure never becomes source-only or empty-owner Close success',async()=>{
+  const failure=Object.assign(Error('provider release failed'),{code:'PDFIUM_CLEANUP'}),global={};let closes=0;
+  const h=harness({close:async()=>{closes++;throw failure;}},global);
+  await h.reader.open(context);h.render();await assert.rejects(h.reader.close(true),e=>e===failure);
+  assert.equal(h.reader.sourceInvalid.current,false);
+  await assert.rejects(h.reader.close(false),e=>e===failure);assert.equal(closes,1);await h.unmount();
+  let opens=0;const next=harness({open:async()=>{opens++;return opened;}},global);
+  await assert.rejects(next.reader.open(context),e=>e===failure);
+  await assert.rejects(next.reader.close(false),e=>e===failure);assert.equal(opens,0);await next.unmount();
+});
+
+test('open cleanup failure remains terminal even when JS never acquired an owner',async()=>{
+  const failure=Object.assign(Error('open drain failed'),{code:'PDFIUM_CLEANUP'});
+  const h=harness({open:async()=>{throw failure;}});
+  await assert.rejects(h.reader.open(context),e=>e===failure);
+  await assert.rejects(h.reader.close(false),e=>e===failure);await h.unmount();
+});
+
+test('queued Close cannot acknowledge a pending open that later fails cleanup',async()=>{
+  const gate=deferred(),failure=Object.assign(Error('pending drain failed'),{code:'PDFIUM_CLEANUP'});
+  const h=harness({open:()=>gate.promise});const opened=h.reader.open(context);await flush();
+  const closed=h.reader.close(false);gate.reject(failure);
+  await assert.rejects(opened,e=>e===failure);await assert.rejects(closed,e=>e===failure);await h.unmount();
+});
+
+test('failed drain of malformed returned owner is terminal, not ordinary input error',async()=>{
+  const failure=Object.assign(Error('invalid-owner drain failed'),{code:'PDFIUM_CLEANUP'});
+  const h=harness({open:async()=>({...opened,pageCount:3}),close:async()=>{throw failure;}});
+  await assert.rejects(h.reader.open(context),e=>e===failure);
+  await assert.rejects(h.reader.close(false),e=>e===failure);await h.unmount();
+});
 test('zoom after navigation uses authoritative original page, not old focused state',async()=>{
   const h=harness();await h.reader.open(context);h.render();h.setPage(2);const spec=h.spec(2);h.bind(spec);
   h.packet(spec,{kind:'rendered',scale:2,fromLeft:44,fromTop:738});h.reader.zoom(1.25);h.render();

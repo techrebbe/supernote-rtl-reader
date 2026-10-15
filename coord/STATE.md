@@ -12,9 +12,16 @@ survival; corrected59 assertions/3 compiled defect mutants rejected. This is not
 an Android/GPU/e-ink pass. Integration4/Java ledger14/provider11(Java14/Session40/
 Module72/native26)/ELF9 actual wrappers/payload5 fresh ARM64/wiring6/JS23 and
 Core85407/all271mutations/native-v2-Edit-crosslayer/provenance/packaging PASS.
-Independent focused paint/test review CLEAN. Scoped identity64/exp5 expectations
-and reviewed marker/artifact+new CI regression-command pins applied. Exact clean
-signed package is next; no new source publication/install/device authority.
+Independent exact-head review7d0aae7ff09bda39a5360aeba369734b295cbfd7 CLEAN/all23
+inputs match. Normal exact clean-archive build exit0/75tasks, complete package/
+source/DEX/ELF/engine/notices/provenance and compatible v2/v3 signing PASS;
+postbuild actual-package provider11/no skips PASS. Exp5/code64 SNPLG11141622bytes,
+SHA2565cbbdc9cbb250d42097eb3622de4cf010e8b9ed5143180430e03261a0e7c4993,
+local tmp/t018i-exp5-7d0aae7-build1/out/SupernoteRtlReader.snplg. UNINSTALLED;
+installed63 retained/Nomad RELEASED6194697872. Scoped13-file source+same5notes/
+issue23 publication and exact-package H2 approval questions sent/pending, then
+fresh exclusive reservation/preflight. No active build/review/device process,
+no speculative offline prerequisite. Old c3 CI PASS is NOT exp5 CI/hardware proof.
 No loader/geometry redesign, saved-ink activation, timer resume, PR or merge.
 
 ## Latest: code63 landscape H2 FAIL; recovery/cleanup PASS; device released

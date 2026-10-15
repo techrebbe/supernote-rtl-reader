@@ -2,10 +2,15 @@
 
 ## Exp5/code64 next gate — smallest two-visible-page retest after exact package
 
-OFFLINE correction/review/regression ready: local onDraw owner clip/save/finally,
-old-method red/fixed59 assertions/3 compiled mutants rejected. No device evidence
-yet. Finish exact clean signed package/identity verification, obtain scoped new
-source publication and exact-package install/retest approval, reserve afresh.
+Exact reviewed7d0aae7/exp5/code64 clean-archive signed build exit0/75tasks/full
+package/source/DEX/ELF/engine/notices/provenance/compatible v2-v3 signer and actual
+packaged provider11 PASS. SNPLGSHA256
+5cbbdc9cbb250d42097eb3622de4cf010e8b9ed5143180430e03261a0e7c4993,
+local tmp/t018i-exp5-7d0aae7-build1/out/SupernoteRtlReader.snplg, UNINSTALLED.
+Correction/regression: local onDraw owner clip/save/finally, old method red/
+fixed59 assertions/3 compiled mutants rejected. No corrected hardware evidence
+yet. Scoped13-file source/same5notes/issue23 and exact-package install/retest
+approval questions sent/pending. Once approved/free/connected, reserve afresh.
 Earliest hardware question is whether PAGE1 right AND PAGE2 left plus chrome
 survive supported rotation on the SAME disposable T018IH1. Stop on any blank/
 identity/model/cleanup mismatch. Only if the settled-pair visual gate passes,

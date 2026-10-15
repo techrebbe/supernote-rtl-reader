@@ -1,5 +1,37 @@
 # T018I loader correction — independent source-only review
 
+## Exact exp5/code64 candidate — reviewed build READY, UNINSTALLED
+
+Independent exact-head7d0aae7ff09bda39a5360aeba369734b295cbfd7 confirmation CLEAN;
+paint/test/index/workflow and23-input aggregate match the reviewed checkpoint
+below. Normal fresh clean Git-archive build exit0/75tasks and mandatory complete
+source receipts/DEX/ELF/engine/notices/bundle/APK-provenance gates PASS. Actual
+packaged-engine provider11/no skips PASS (Java14/Session40/Module72/native26).
+Local tmp/t018i-exp5-7d0aae7-build1 retains signed package/identity/log evidence.
+
+- Plug-in snrtl20260726001,0.4.25-pdfium-exp5/code64, SDK0.1.65.
+- Native com.supernotertlreader, Android1.0/code1/min27/target35.
+- SNPLG11141622bytes/SHA256
+  5cbbdc9cbb250d42097eb3622de4cf010e8b9ed5143180430e03261a0e7c4993.
+- Embedded app.npk11026295bytes/SHA256
+  5b1d6cbc6ec1d451eac64afd98e1de9594a5ce9dba19a114060d26649b34795d.
+- Metro1180739bytes/SHA256
+  47fb7749a6f8e67f30990a83cadadb33b2a8c0b8a51a8517a7d7034c60b68455.
+- Source archive SHA256
+  521a6638a70180eb5cc8a60f047c7a5caca0f8e01db302c3580eba557d9b909e.
+- v2/v3 verified, production certificate SHA256
+  fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c;
+  exact retained63 APK independently verified with same signer; compatible with
+  installed63/retained62/61/60/59. No byte-identical rebuild claim.
+
+Additional navigation/SDK/Edit checks PASS after supplying the bundled Python
+path to generated-source tests; initial missing-PYTHON_BIN failure was a host
+environment issue, no source change. No new hardware/persistence/production-SDK
+lifetime proof. UNINSTALLED, installed63 intact/Nomad RELEASED6194697872; no active
+process.13-file source plus same5notes/issue23 publication and exact-package H2
+approvals requested/pending. Existing hosted c3 CI is code63, not exp5. No further
+unchanged offline prerequisite, device access, timer resume, merge or PR.
+
 ## Exp5/code64 focused paint correction — independent source review CLEAN
 
 No loader or writer change. Independent reviewer inspected exact retained

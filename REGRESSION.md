@@ -11,8 +11,14 @@ defect mutants pass/rejected respectively, including early returns/failure/pan/
 selection/header/footer. Independent focused review CLEAN; integration4/wiring6
 independently run. Owner provider11/ELF9/payload5/JS23/Core85407/all271mutations/
 native-v2-Edit-crosslayer/provenance/packaging PASS. New CI regression command and
-candidate marker/artifact/identity pin updates reviewed narrowly. Exact clean
-signed exp5/code64 package next, UNINSTALLED and hardware UNKNOWN. H2 remains FAIL
+candidate marker/artifact/identity pin updates reviewed narrowly. Exact reviewed
+7d0aae7ff09bda39a5360aeba369734b295cbfd7 clean-archive signed build exit0/75tasks,
+complete source/DEX/ELF/engine/notices/provenance and compatible v2/v3 signer PASS;
+postbuild actual packaged provider11/no skips PASS. Exp5/code64 SNPLG SHA256
+5cbbdc9cbb250d42097eb3622de4cf010e8b9ed5143180430e03261a0e7c4993,
+local tmp/t018i-exp5-7d0aae7-build1 retained; UNINSTALLED/hardware UNKNOWN. Scoped
+13-file publication+same5notes/issue23 and exact-package H2 approvals requested/
+pending. Installed63 retained; no active build/review/device process. H2 remains FAIL
 until a separately approved exact-package test under a fresh reservation. No new
 Nomad action/source upload/ink/timer/merge authority inferred from host success.
 

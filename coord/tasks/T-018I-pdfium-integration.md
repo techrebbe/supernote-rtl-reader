@@ -7,8 +7,14 @@ onDraw fails new sibling-survival raster regression; fixed59 assertions/3 compil
 mutants rejected. Independent focused review CLEAN. Integration4/provider11/
 ELF9/payload5/wiring6/JS23/Core85407/all271mutations and retained gates PASS.
 CI now runs this actual-method integration suite. Identity/pins scoped/reviewed.
-Exact clean signed package next, UNINSTALLED/hardware UNKNOWN; source publication
-and exact package retest approval still needed. H2 failure remains authoritative.
+Exact reviewed7d0aae7 clean-archive build exit0/75tasks/full package/source/DEX/
+ELF/engine/notices/provenance and compatible v2/v3 signing PASS; actual packaged
+provider11/no skips PASS. Exp5/code64 SNPLG SHA256
+5cbbdc9cbb250d42097eb3622de4cf010e8b9ed5143180430e03261a0e7c4993, UNINSTALLED.
+13-file scoped source/same5notes/issue23 and exact-package retest approvals asked/
+pending; fresh reservation/preflight after approval. Installed63/device RELEASED
+6194697872 unchanged, no active process. H2 failure remains authoritative; no
+speculative additional test/build/review loop or exp5 hostedCI PASS inferred.
 
 LATEST H2 FAIL6194483100 on unchanged exactf0adcd4/code63: correct landscape
 left2/right1 state and complete-pair READY, but left page visually blank gray.

@@ -1,5 +1,38 @@
 # STATE — RTL Reader (updated 2026-10-15 by codex)
 
+## Latest: code64 landscape H2 PASS; safe Close/cleanup/release
+
+User APPROVED13-file correction+same5notes/issue summary publication and exact
+code64 install/retest. Published/remote-verifiede6f11b953cd209d2ef49cc10668723bc42bf2591.
+HostedCI38762006870 exacte6f11b9 SUCCESS/all5 applicable jobs;3 release-only skipped.
+Executable7d0aae7ff09bda39a5360aeba369734b295cbfd7/exp5/code64/SNPLG5cbbdc9c...e7c4993
+unchanged. Setup-only6195982561 stopped before UI input/stage/install on initial
+PAGE2/Add Keyword dialog;2 captures cleaned, source/absent mark/public packages/
+rotation preserved. User then confirmed PAGE1/free; fresh6196055836 ran fully.
+
+Normal public Settings/observed manager same-ID upgrade/exact exp5 ON PASS;
+portrait source PAGE1 and actual landscape1872x1404/r1 PAGE2 LEFT/PAGE1 RIGHT
+with visible header/tools/divider/footer PASS. Next PAGE4 LEFT/PAGE3 RIGHT PASS;
+Previous and named PAGE3/XYZ/history Back restore byte-identical first spread.
+Zoomed destination does not alter sibling viewport/footer pixels. Forced portrait
+PAGE1 returns byte-identical initial scene; exact original auto1/user2 restored,
+normal Close SDK-verified native PAGE1. Native PDF/footer pixels identical;60 tiny
+toolbar-label pixels differ. Rotated180 preclose differs only3150 vertical raster
+edge pixels(two columns), all PDF interior identical; no full-PNG equality there.
+PDF unchanged/mark absent/public hashes intact;48 exact owned local-backed/hash/
+nonlink captures+1 stage removed/absence verified, raw retained. RELEASED6196361922
+for6196055836; code64 ON/native disposable PAGE1 retained, no active process,
+safe disconnected. Private host parser correction occurred before rotation,
+not a production/hardware failure; detailed bounded evidence REGRESSION.md.
+
+Next prepared gate is SAME-code64 landscape text/Copy, bookmark/Back and modest
+zoom/Pan/Fit on SAME disposable. User explicitly APPROVED that H3 scope; new
+exclusive reservation/preflight still required, no H2 reuse or added actions.
+No new build/review loop.
+Physical Bluetooth/Edit/Hebrew fidelity/broader source formats/concurrent-SDK
+lifetime remain separate, not release claims. Ink PARKED/timers PAUSED/no merge.
+Earlier UNINSTALLED/publication-approval wording below is historical.
+
 ## Exp5/code64 paint correction — OFFLINE, not installed or hardware-proven
 
 Concrete boundary: PdfiumPageView.onDraw had no owner-bounds clip. Independently

@@ -1,5 +1,22 @@
 # T018I loader correction — independent source-only review
 
+## Exp5 hardware follow-up — H2 PASS, bounded rather than full release readiness
+
+User-approved exact7d0aae7/code64/SNPLG5cbbdc9c...e7c4993 tested under6196055836.
+Normal same-ID upgrade/exact exp5 ON; portrait and actual RTL landscape both
+source pages/chrome visibly PASS. Next/Previous and named PAGE3XYZ/Back PASS;
+restored spread/forced portrait byte-identical initial scenes. Zoomed right page
+leaves whole left sibling viewport/footer pixel-identical, concrete support for
+the reviewed owner-clip correction. Original rotation/normal Close/native source/
+PDF+absent mark/public integrity and49-file owned cleanup PASS, RELEASED6196361922.
+Full evidence REGRESSION.md, raw local. Only two edge columns differ at180degree
+preclose; native source/footer interior identical, no full-native-PNG claim.
+Private generated helper parse error was corrected before rotation/device input;
+no production fix/rebuild. Exact package/source review stands unchanged.
+Approved source/notes remotee6f11b9, hostedCI38762006870 SUCCESS/all5 applicable
+jobs. Code64 ON retained, no device process. H3 interaction approval RECEIVED;
+no unapproved follow-on. Lifetime/physical-input/full fidelity limits remain.
+
 ## Exact exp5/code64 candidate — reviewed build READY, UNINSTALLED
 
 Independent exact-head7d0aae7ff09bda39a5360aeba369734b295cbfd7 confirmation CLEAN;

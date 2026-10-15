@@ -1,5 +1,20 @@
 # T018I — user-approved PDFium reader integration
 
+LATEST hardware H2 PASS on exact7d0aae7/exp5/code64 under6196055836 after fresh
+user PAGE1/free confirmation. Normal same-ID install/exact version ON; actual
+landscape PAGE2left/PAGE1right/chrome, logical Next/Previous, named PAGE3XYZ/Back
+PASS. Previous/Back restore byte-identical initial spread; forced portrait restores
+byte-identical initial PAGE1. Original auto1/user2 restored; normal Close native
+PAGE1, source/absent mark/public packages/rotation integrity and49 owned capture/
+stage removals/absence PASS. Raw retained, RELEASED6196361922, no process, safe
+disconnected. Native source/footer identical except60 toolbar-label pixels;
+preclose180 only two bitmap-edge columns differ, no full-image equality claimed.
+First setup6195982561 separately NOTPERFORMED/PAGE2 keyword dialog/2 captures
+cleaned before user-ready signal; no retry of consumed reservation. Details
+REGRESSION.md. Publication remotee6f11b9 and exactCI38762006870 all5 jobs PASS.
+Installed64 retained. User APPROVED next same-package H3 interaction gate;
+fresh reservation required, no repeated build/offline prerequisites/merge/ink/timer.
+
 OFFLINE exp5/code64: minimal owner-bounds clip/save/finally confines background,
 panned bitmap and selection. Independently confirmed RN0.79.2 overflow default
 explains concrete paint escape; no engine/geometry/navigation rewrite. Old actual

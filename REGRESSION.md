@@ -1,5 +1,68 @@
 # RTL Reader hardware regression
 
+## 2026-10-15 — code64 landscape H2 PASS; portrait/Close/integrity/cleanup PASS
+
+User explicitly approved13-file correction/same5notes/issue summary publication
+and exact candidate install/retest. Publishede6f11b953cd209d2ef49cc10668723bc42bf2591;
+hostedCI38762006870 exact head SUCCESS/all5 applicable jobs,3 release-only skipped.
+Exact executable7d0aae7ff09bda39a5360aeba369734b295cbfd7,0.4.25-pdfium-exp5/code64,
+SDK0.1.65/SNPLGSHA2565cbbdc9cbb250d42097eb3622de4cf010e8b9ed5143180430e03261a0e7c4993.
+
+First fresh setup6195982561 found disposable PAGE2/Add Keyword dialog after
+metadata PASS. No UI input/stage/install/page/settings change;2 exact owned
+captures cleaned, source/absent mark/public packages/rotation unchanged. Released
+in6196055836 opening comment after user explicitly confirmed PAGE1/free. No
+annotation dialog dismissed by agent and no PAGE1 restoration claim for that stop.
+
+Fresh6196055836 exact unrooted3.30.45/buildChauvet.E103.2610091001.2545_release/
+API30/ordinary UID2000/97percent/source+absent mark/public packages/rotation/native
+PAGE1 preflight PASS. One normal publicly resolved Settings launch/observed Apps/
+Plugins same-ID upgrade PASS; unique staged hash/sole selected visible radio
+verified before Install. Exact exp5 ON confirmed. Normal picker owner was Inbox
+SelectFileActivity, not Settings; initial capture guard stopped with no capture
+or repeated input, read-only focus confirmed actual route, then observed picker.
+Ordinary library selected ONLY retained disposable; native PAGE1 after install
+byte-identical preflight. Exact runtime marker/portrait page and chrome PASS.
+
+Private host rotation/cleanup helper had replacement-string dollar expansion
+causing PowerShell parse errors before ANY rotation/device action. Mislabeled
+landscape-initial capture is byte-identical portrait. Corrected only that private
+helper from retained original using literal replacement callbacks and verified
+syntax before first actual landscape command. No production change/rebuild.
+
+Actual supported auto0/user1 rotation1872x1404/r1 PASS: original PAGE2 LEFT with
+its own90degree rotation/crop, PAGE1 RIGHT, header/tools/divider/footer visibly
+intact. Complete-pair READY agrees but is not sole visual proof. Next reaches
+original PAGE4 LEFT/PAGE3 RIGHT; Previous restores byte-identical initial spread.
+One observed PAGE1 named-link rectangle reaches original PAGE3/XYZ on RIGHT;
+PAGE4 still LEFT and chrome intact. Local pixel comparison proves ENTIRE left
+sibling viewport/footer equal preceding fit scene despite zoomed right page.
+Normal enabled history Back restores byte-identical original spread. Current
+runtime generations/source pages match, no observed loader/model/cleanup error.
+
+Forced portrait PAGE1 returns byte-identical initial portrait scene. Original
+auto1/user2 preferences restored; before Close at180degrees only3150 pixels in
+two vertical bitmap-edge columns(x93/x1310) differ, ALL PDF interior pixels
+identical. No full-preclose-PNG equality. Normal Close records SDK-verified PAGE1
+handoff and returns native same disposable PAGE1/1of4. Native PNG differs only60
+tiny toolbar-label pixels bbox(280,79)-(694,94); all PDF/footer pixels belowy100
+identical. No full-native-PNG equality or actual-unmapping/lifetime proof claimed.
+
+Postflight PDF SHA2567cf9de8fa7ed91f7746ac44f62aa63e0641f757f330cf7d83efec7584b213905
+unchanged/.pdf.mark absent/public PluginHost+Document hashes unchanged/original
+rotation restored. Exactly48 owned regular nonlink hash-verified/local-backed
+XML/PNG captures+1 unique staged installer removed/absence verified. Raw retained
+tmp/t018ih2-exp5-6196055836-20261015, retained rollback intact. RELEASED6196361922,
+no device/test observer process, safe disconnected. Code64 installed/ON and native
+disposable PAGE1 retained. No pen/original/annotation/root/firmware/other-plugin
+changes/live SDK update/ink activation/timer resume/PR finalization/merge.
+
+This establishes the bounded landscape paint/navigation gate, not full product
+readiness. User APPROVED next same-package landscape selection/Copy/bookmark/zoom
+interaction gate; fresh reservation required. Physical Bluetooth/
+supported Edit, broader PDFs/crops/link classes/Hebrew extraction and SDK concurrent
+update lifetime remain separate gates. Do not repeat completed source/build/H2.
+
 ## 2026-10-15 — exp5/code64 paint correction OFFLINE; no hardware-fix claim
 
 After H2's consumed/released test below, source inspection and independent exact

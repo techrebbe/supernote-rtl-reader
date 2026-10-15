@@ -1,5 +1,28 @@
 # Next useful hardware batch — no speculative test loop
 
+## Latest: code64 H2 PASS — next H3 landscape interaction, same installed package
+
+6196055836 consumed/released6196361922 after user-confirmed PAGE1/free. Both
+source pages/chrome, logical Next/Previous, named PAGE3XYZ/Back, portrait recovery,
+original rotation/normal Close/source+absent mark/public integrity/49-file owned
+cleanup PASS. Installed64 ON retained; no process. Do not repeat H2/build/review
+or reuse its reservation. Same exact7d0aae7/SNPLG5cbbdc9c...e7c4993 remains target.
+
+User explicitly APPROVED ONE H3; fresh reservation still required: fresh exclusive
+reservation/preflight/native disposable T018IH1 PAGE1/source+absent mark/power/
+packages/original rotation; normal code64 activation/landscape; select observed
+PAGE1 English text, verify aligned selection and app-owned exact clipboard Copy;
+one original Chapter-three bookmark/Back; modest1.25zoom/one small Pan/Fit and
+verify both viewport/chrome ownership. No external/script link or clipboard
+inspection beyond the app's own just-written label/text receipt. Return portrait,
+original rotation, normal Close/nativePAGE1/source/integrity/exact owned scratch
+cleanup/release. Stop immediately on wrong page/source, blank/escaped paint,
+stale input, render/model/source/cleanup failure; only known-safe recovery.
+No new install/pen/original/root/firmware/other-plugin change. Physical Bluetooth/
+Edit remain later separately approved gates; ink PARKED/timers PAUSED/no merge.
+HostedCI38762006870 exact publishede6f11b9 SUCCESS/all5 applicable jobs. No extra
+offline prerequisite before an approved device-dependent interaction check.
+
 ## Exp5/code64 next gate — smallest two-visible-page retest after exact package
 
 Exact reviewed7d0aae7/exp5/code64 clean-archive signed build exit0/75tasks/full

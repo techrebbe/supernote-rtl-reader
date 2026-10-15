@@ -1,5 +1,15 @@
 # Next useful hardware batch — no speculative test loop
 
+## Immediate unblock: reconnect for SAME approved code66
+
+Fresh6198902361 stopped on first readonly serial-not-found/empty ADB inventory;
+NOTPERFORMED before capture/input/stage/install/files, RELEASED6198931650. No cleanup
+targets, installed65 unchanged/66 uninstalled/no observer. User already APPROVED
+exact c40127d/exp7/code66 SNPLGd326cfb7...5f297aa. Need USB connected/free+awake or
+current Wi-Fi ADB address, then NEW reservation/exact preflight; don't ask package
+approval again, reuse reservation, poll empty transport or invent source work.
+BranchCI38782801578 started; no hosted PASS yet. Follow fixed one-copy gate below.
+
 ## Latest: code65 H4R metadata FAIL — no more device probes on code65
 
 User-approved code65 installed/ON/exact marker under6198368393. COPY A clears

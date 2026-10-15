@@ -1,5 +1,12 @@
 # T018I — user-approved PDFium reader integration
 
+CURRENT: exact66 retry APPROVED, but fresh6198902361 availability query failed
+before any UI/stage/install/file action; transport inventory empty. NOTPERFORMED,
+RELEASED6198931650,65 retained/66 UNINSTALLED/no observer. Reconnect/free+awake or
+current Wi-Fi address is exact unblock; SAME approved package then NEW reservation/
+preflight, no approval repeat or repeated polling. Source831d42f published;
+branchCI38782801578 running/unclaimed. No hardware pass/failure inferred.
+
 LATEST H4R6198368393 FAIL: user-approved exact192dec5/exp6/code65 installed normally,
 version ON/runtime verified. Former62MiB admission rejection passed, but eager
 outline initialization fails Invalid destination original page BEFORE render.

@@ -1,5 +1,20 @@
 # STATE — RTL Reader (updated 2026-10-15 by codex)
 
+## Current blocker: approved code66 retry NOTPERFORMED — transport unavailable
+
+User APPROVED exact c40127d/exp7/code66/package d326cfb7...5f297aa retry. Published
+same5build-result notes remote831d42feeb4cd5b06de941386601d60eb1237a53; branch-only
+hostedCI38782801578 started, result not yet claimed. Fresh6198902361 first readonly
+serial query returned Nomad not found; one transport inventory empty. STOP before
+preflight/source-integrity claim, UI capture/input, stage/install/document/page/
+rotation or remote file mutation. No cleanup targets; RELEASED6198931650. Installed
+65 unchanged by this attempt,66 UNINSTALLED, no active device observer. Exact
+unblock is USB reconnect/free+awake signal or current Wi-Fi ADB address, then NEW
+reservation/preflight for SAME approved package, no repeat approval. Syntax-checked
+private H4R2 helpers retained, consumed reservation not reusable. No repeated
+device polling or speculative source work; meaningful hostedCI can continue.
+No root/firmware/ink/timer resume/merge.
+
 ## Latest: code65 H4R reaches outline initialization, FAIL; recovery complete
 
 User approved19-file source publication and exact65 package/test. Remote verified

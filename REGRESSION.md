@@ -1,5 +1,18 @@
 # RTL Reader hardware regression
 
+## 2026-10-15 — approved code66 H4R2 NOTPERFORMED, missing ADB transport
+
+Exact c40127d/exp7/code66/package d326cfb7597925f1db2fbdf7f959ede2cb7fea2fd8dd86bad6415ee745f297aa
+retry user APPROVED. Fresh6198902361 only readonly serial availability returned
+device not found; one inventory empty. No preflight/integrity PASS, UI capture/
+input, stage/install/document/page/rotation/file change. No owned cleanup targets;
+RELEASED6198931650,65 unchanged by agent/66 UNINSTALLED, no observer. Reconnect/
+current Wi-Fi address question sent; SAME package approval retained, NEW reservation
+and exact preflight once transport available. Source/build notes published831d42f;
+branchCI38782801578 running, not a PASS claim. Never infer native rendering failure
+from transport absence or reuse reservation/poll repeatedly. Ink/timers parked,
+no originals/root/firmware/merge. Source evidence above/below remains bounded.
+
 ## 2026-10-15 — code65 H4R metadata initialization FAIL, normal recovery PASS
 
 Explicit user-approved publication19files+same5notes remotea025ebd verified and

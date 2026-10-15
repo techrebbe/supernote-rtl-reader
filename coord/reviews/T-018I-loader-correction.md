@@ -1,5 +1,15 @@
 # T018I loader correction — independent source-only review
 
+## Code66 hardware gate pending transport, not another source review
+
+Exact c40127d/exp7/code66 package retry APPROVED. Fresh6198902361 only serial
+availability failed/device absent, no input/stage/install/files; NOTPERFORMED/
+RELEASED6198931650, installed65 retained. No rendering/metadata conclusion from
+transport failure; no new review/build needed. Same reviewed/signed candidate
+after reconnect/current Wi-Fi address and NEW reservation/preflight. Branch-only
+hostedCI38782801578 started, not yet passed. All source/exact build evidence below
+unchanged; no hardware success or source-publication authority expansion inferred.
+
 ## Code65 H4R boundary — source input accepted, outline initialization fatal
 
 Explicitly approved code65 exact192dec5/package8f55ad02...4af7b3 normal install/

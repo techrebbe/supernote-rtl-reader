@@ -1,5 +1,19 @@
 # T018I — user-approved PDFium reader integration
 
+LATEST H4R6198368393 FAIL: user-approved exact192dec5/exp6/code65 installed normally,
+version ON/runtime verified. Former62MiB admission rejection passed, but eager
+outline initialization fails Invalid destination original page BEFORE render.
+No compatibility/render pass or second activation. Normal Close native COPY A
+whole PNG identical, initial synthetic PAGE1 restored, originals/native annotation/
+copies/public/prefs intact;46capture+1installer cleanup/absence PASS, raw retained.
+RELEASED6198589292,65 ON/no process. Published19-file correction+notes remotea025ebd.
+Next bounded source correction preserves unsupported destinations as non-navigable
+instead of document-fatal, no guessed pages/hidden valid children. Native28assert/
+3mutants red->green/ARM64/payload5/integration4 PASS, independent final review CLEAN;
+exp7/code66 UNBUILT/UNINSTALLED/new source publication not approved. Earliest
+hardware after exact candidate gates/approval/new reservation: retained COPY A
+admission/render/Close ONLY. No originals/pen/root/firmware/ink/timer/merge work.
+
 LATEST H4 FAIL6197397865: user-selected distinct byte-identical representative
 copies about62.1/60.3MiB; source fingerprints/content PRIVATE. ONE disposable A
 activation on unchanged7d0aae7/code64 rejects at bounded input admission before

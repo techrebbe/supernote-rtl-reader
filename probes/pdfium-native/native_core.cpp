@@ -69,7 +69,11 @@ std::string ascii(const std::string& input){
 std::string unsupported(const std::string& reason){return "{\"kind\":\"unsupported\",\"reason\":"+ascii(reason)+"}";}
 std::string destination(FPDF_DEST dest){
   if(!dest)return unsupported("No supported destination");
-  int page=FPDFDest_GetDestPageIndex(document,dest);require(page>=0 && page<pageCount,"Invalid destination original page");
+  int page=FPDFDest_GetDestPageIndex(document,dest);
+  // A non-null destination may contain a null/dangling page reference. Keep
+  // that item non-navigable without aborting the whole book/outline or hiding
+  // a heading's valid children. Never invent a fallback original page.
+  if(page<0 || page>=pageCount)return unsupported("Unresolved original page destination");
   unsigned long count=0;FS_FLOAT values[4]={};
   auto mode=FPDFDest_GetView(dest,&count,values);require(count<=4,"Destination parameter bound");
   std::string prefix="{\"kind\":\"internal\",\"pageIndex\":"+std::to_string(page);

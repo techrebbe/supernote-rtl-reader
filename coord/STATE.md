@@ -1,5 +1,34 @@
 # STATE — RTL Reader (updated 2026-10-15 by codex)
 
+## Latest: code65 H4R reaches outline initialization, FAIL; recovery complete
+
+User approved19-file source publication and exact65 package/test. Remote verified
+a025ebd; new6198368393 normal same-ID install/versionexp6 ON+runtime marker PASS.
+Former large-file admission no longer rejects retained COPY A; initialization
+instead FAILS Invalid destination original page before render, so NO reading/
+render PASS claimed. ONE actual activation; first offscreen-menu control guard
+prevented input, normal observed menu scroll then activation. No ad-hoc follow-on.
+Normal Close entire COPY A native PNG byte-identical; initial synthetic native
+PAGE1 restored, originals/native annotation/copies/public packages exact, rotation
+preferences1/2 unchanged/no settings writes.46 exact capture scratch+1 installer
+removed/hash/nonlink/local-backup/absence verified, raw/copies/rollback retained.
+RELEASED6198589292, installed65 ON, no device process. No new hardware authority
+from consumed6198368393. Private evidence tmp/t018ih4r-exp6-6198368393-20261015.
+
+Concrete source-only next boundary: document open eagerly enumerates outline;
+non-null destinations with unresolved page references throw globally. Private
+copy inspection consistent with unresolved outline targets; no PDF rewrite.
+Minimal correction returns existing unsupported/non-navigable action, never
+guesses page0, preserves valid heading children and all other bounds. Actual
+native destination/outline regression28 assertions, fatal baseline red->green/
+3compiled mutants and fresh ARM64/payload5/integration4 PASS. Independent review
+CLEAN including final identity/CI/pin assembly confirmation; candidateexp7/code66
+not built/installed/published or hardware-proven. Standard native/v2/Edit/cross-
+layer and wiring6 gates PASS; no extra unchanged emulator/modeling prerequisite.
+Earliest next gate remains exact reviewed/signed candidate then approved ONE
+retained COPY A admission/render/Close with NEW reservation, not speculative
+emulation or more code65 probes. Ink PARKED/timers PAUSED/no merge.
+
 ## Latest: H4 large-file admission FAIL; safe recovery complete, streaming fix offline
 
 User selected two representative original-PDF COPIES. Reservation6197397865 used

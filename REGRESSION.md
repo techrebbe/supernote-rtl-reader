@@ -1,5 +1,38 @@
 # RTL Reader hardware regression
 
+## 2026-10-15 — code65 H4R metadata initialization FAIL, normal recovery PASS
+
+Explicit user-approved publication19files+same5notes remotea025ebd verified and
+exact192dec5/exp6/code65/SNPLG8f55ad02934d6f83a92f530cddb96e25fab64716fd1c0cce911fc988d64af7b3
+normal same-ID install/versionexp6 ON/runtime marker PASS under fresh6198368393.
+Exact unrooted3.30.45/API30/ordinary shell/100percent/current synthetic/preflight
+source+copies+annotation+public/prefs PASS. Updated menu entry below visible rows;
+control guard prevented initial attempted tap, fresh observed scroll then ONE
+actual activation. No app activation retry/pen/page turn/rotation settings change.
+
+Retained representative COPY A progresses beyond old input budget into outline
+initialization, then explicit Invalid destination original page prevents render.
+H4R FAIL; not large-file rendering/interactive compatibility PASS. Other file
+and navigation/links/zoom/Bluetooth/Edit/pen NOTPERFORMED. Normal Close entire
+native COPY A PNG byte-identical; ordinary library restores initial synthetic
+native PAGE1. Both originals/native annotation/copies/public/synthetic+absent
+mark exact; prefs1/2 unchanged. Initial native landscape/restored portrait after
+reopen, no whole-scene restoration equality.46exact owned regular/nonlink/hash/
+local-backed captures+1 exact stage removed/absence, raw/copies/rollback retained.
+RELEASED6198589292, code65 ON/no active device process, safe disconnected. Private
+source names/paths/hashes/content and all raw evidence remain local. See private
+tmp/t018ih4r-exp6-6198368393-20261015. No firmware/root/other-plugin/live-SDK mutation.
+
+Source boundary diagnosed: eager native outline destination with unresolved page
+reference throws globally. Minimal offline fix leaves it unsupported/non-navigable
+without guessing a page or dropping valid children; actual-method regression28/
+3compiled mutants including fatal-baseline red->green PASS, ARM64/payload5/
+integration4 PASS. Independent review + final identity/CI/pin assembly CLEAN;
+native/v2/Edit/crosslayer/wiring6 PASS. Exp7/code66 UNBUILT/UNINSTALLED,
+no source upload/hardware authority inferred. Need exact candidate gates then
+fresh approved one-copy render check, not unchanged code65 repetition or broad
+emulation. Ink PARKED/timers PAUSED/no merge. H4 size failure retained separately.
+
 ## 2026-10-15 — H4 representative large-file admission FAIL; recovery PASS
 
 User approved disposable copies of two chosen PDFs, originals/annotations

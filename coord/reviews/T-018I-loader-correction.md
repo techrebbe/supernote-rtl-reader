@@ -1,5 +1,27 @@
 # T018I loader correction — independent source-only review
 
+## Code65 H4R boundary — source input accepted, outline initialization fatal
+
+Explicitly approved code65 exact192dec5/package8f55ad02...4af7b3 normal install/
+ON+runtime verified; former large input admission clears. One actual COPY A
+activation fails Invalid destination original page before render. Normal Close
+whole native COPY A PNG identical; original/copy/annotation/public/prefs intact,
+46capture+1stage owned cleanup PASS, RELEASED6198589292. No source-input/engine-
+loader redesign inferred or repeat hardware; private PDF data not published.
+Concrete eager-outline boundary: unresolved destination throws; minimal fix
+returns existing unsupported kind without navigable page authority, retains
+valid children. Actual native destination/outline28assertions/3compiled mutants
+and fatal-baseline red->green PASS; fresh ARM64/payload5/integration4 PASS.
+Independent narrow review+final identity/CI/pin assembly CLEAN/no P0/P1/P2.
+Native source43f76a160010b2ddb52775b2d41f7b5186ab99f2989fc2a922e44e7ba03990d7,
+destination test29bad5e4ee5d8bfeb388f251e4c2d04f7cbe0daadafb334bc80e94371f3e7246,
+23-input aggregatee15beeffccd6565cfcdbb8b285002bbd7410a31aa25d9a735cdb8f640b75fa80.
+Reviewer independently28asserts/3mutants and JS23 PASS; no personal data access.
+Index9f482372...6c6283b marker-only/workflow9a98a760...1e95c6 adds actual suite and
+artifact version only, strict unchanged source receipt/gates. Exp7/code66
+UNBUILT/UNINSTALLED. Source/
+receipt/gates remain fail-closed. No new total-memory/PDF parser/hardware claim.
+
 ## Exp6 streaming-input review — focused, offline; not a new engine-loader design
 
 H4 code64 actual representative large COPY A admission failed before PDF render;

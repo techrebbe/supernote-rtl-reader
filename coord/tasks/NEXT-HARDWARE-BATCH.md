@@ -1,5 +1,24 @@
 # Next useful hardware batch — no speculative test loop
 
+## Latest: code65 H4R metadata FAIL — no more device probes on code65
+
+User-approved code65 installed/ON/exact marker under6198368393. COPY A clears
+old size rejection, then Invalid destination original page during outline init;
+no page render/interaction performed. Normal Close/source/annotation/copy/public/
+prefs integrity and46capture+1stage cleanup PASS, RELEASED6198589292,65 retained.
+No device process; raw/private copy evidence retained, no source fingerprints
+published. Consumed reservation is not authority for another activation.
+
+Next source-only correction: retain unresolved destinations as unsupported,
+never guess a page or hide valid children. Native28assertions/3mutants/fatal
+baseline red->green and ARM64/payload5/integration4/native-v2-Edit-crosslayer PASS;
+independent source/final assembly review CLEAN, exp7/code66 unbuilt/uninstalled.
+Once exact signed
+package pass, request scoped upload/install authority then NEW reservation for
+ONE retained COPY A admission/render and normal Close/integrity, no speculative
+emulator prerequisite. Page/landscape/links/bookmarks/zoom follow only after pass
+under their own bounded scope. Ink PARKED/timers PAUSED/no PR finalization/merge.
+
 ## Latest: H4 large-input admission FAIL — fix loading, not another unchanged trial
 
 Representative COPY A around62.1MiB was rejected BEFORE render on installed

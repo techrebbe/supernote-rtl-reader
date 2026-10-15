@@ -1,5 +1,12 @@
 # T018I — user-approved PDFium reader integration
 
+CURRENT2026-10-15:24-file correction/notes/issue23 publication and exact code62
+bounded H1 retry approvals RECEIVED. Executabled3e7142/SNPLG3fac0a9a...a8167f3
+unchanged. Publish approved source, then new exclusive reservation/free-connected
+exact preflight before normal same-ID upgrade/disposable H1/Close/integrity/cleanup.
+No new install/PASS or authority to bypass safety gates. Earlier approval holds
+are historical, not reasons to pause.
+
 CURRENT2026-10-15: exact executabled3e7142/code62 review/identity CLEAN. Normal
 clean-archive signed build exit0/75tasks/full packaged source/DEX/ELF/engine/notices
 and compatible certificate PASS, actual packaged-engine provider8/Java9 PASS.

@@ -2,6 +2,11 @@
 
 ## Code62 source checkpoint — no new device authority
 
+Exact-package code62 H1 retry and24-file reviewed publication/notes/summary are
+now APPROVED by user. Run fresh reservation/free-connected exact preflight before
+normal upgrade and the existing bounded portrait H1. Prior approval-pending text
+is historical; no installation or corrected hardware PASS recorded yet.
+
 Exactd3e7142/code62 clean-archive build/review/package source/DEX/ELF/payload/
 notices/compatible signer PASS, actual packaged-engine provider8/Java9 PASS.
 SNPLG3fac0a9a67476b20ec2df47419e9d3a73b9c9f71305894d68798e9bf1a8167f3,

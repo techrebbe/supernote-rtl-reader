@@ -2,6 +2,11 @@
 
 ## Exp3 authenticated explicit-provider correction — 2026-10-15
 
+User now APPROVED publication of the24 reviewed files/build-result notes in these
+same five notes/issue23 summary, and exact code62 H1 retry. Prior pending-approval
+text below is historical. Exact reviewed executable/package unchanged; fresh
+exclusive reservation/free-connected preflight still mandatory, no hardware PASS.
+
 Exact executabled3e7142ceabc03d2e434cb9797a53abf63787173 independently identity-
 confirmed CLEAN: all23 production inputs equal the reviewed/compiled snapshot;
 only approved pins/comments and five notes added, no subsequent executable edits.

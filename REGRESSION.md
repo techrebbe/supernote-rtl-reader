@@ -2,6 +2,10 @@
 
 ## 2026-10-15 — code62 source correction reviewed (no new hardware)
 
+User24-file source/notes/summary publication and exact-code62 H1 retry approvals
+RECEIVED. Executable/package unchanged; publication/new reservation/preflight next.
+No new device result inferred; pending-approval language below is historical.
+
 Exactd3e7142ceabc03d2e434cb9797a53abf63787173 identity-confirmed CLEAN; normal
 clean-archive full signed build exit0/75tasks/source+DEX+ELF+payload+notices PASS.
 Actual packaged-engine provider8/Java9 and compatible v2/v3 certificate PASS.

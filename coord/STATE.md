@@ -2,6 +2,13 @@
 
 ## Current phase — approved PDFium integration (T018I)
 
+CURRENT2026-10-15: user APPROVED24-file reviewed correction/build-result notes/
+issue23 publication AND exact code62 disposable H1 retry. Exact executabled3e7142/
+SNPLG3fac0a9a...a8167f3 unchanged. Publication proceeds; new exclusive reservation
+and exact connection/free-state/preflight still required before any target access.
+No new installation or corrected hardware PASS yet. Earlier pending-approval
+wording is historical; approvals received, not a blocker.
+
 CURRENT2026-10-15: exactd3e7142ceabc03d2e434cb9797a53abf63787173 independently
 confirmed CLEAN, all23 production inputs match reviewed snapshot. Normal exact
 clean-archive exp3/code62 build exit0/75tasks/full package source+DEX+ELF+engine/

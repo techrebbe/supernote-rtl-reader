@@ -1,5 +1,37 @@
 # RTL Reader hardware regression
 
+## 2026-10-15 — T018I-H1 code61 provider authentication FAIL / cleanup PASS
+
+User exact package/H1 approval and fresh Plugins-ready signal; reservation
+6186104046. Exact executable1c85d066a5111b803ff41463372b80d349f6c6b8, selected
+SNPLGa57b04184fffc181b562d8cbbc61159bf396ec8ba6729b13d0511287d4fcd0f2,
+RTL Reader0.4.25-pdfium-exp2/code61/SDK0.1.65. Normal same-ID manager upgrade
+PASS; exact settings version/ON and RTL_READER_OPEN exp2-native-reader-v2 marker
+verified. Unrooted3.30.45/API30,86percent charging, public reader hashes unchanged.
+Used the publicly resolved MAIN/LAUNCHER library route, not the prior root-Back
+route that returned an underlying app. Only the existing generated disposable
+fixture was selected; native exact filename/1-of4/portrait and source pixels PASS.
+
+First engine open FAIL: visible “Resolved PDFium provider is not the pinned
+engine”; current scoped PluginHost INIT_FAILED corroborates it. No page rendered.
+Missing __emutls error not observed on this attempt; this is a new provider-identity
+boundary failure, not a reader PASS. No retry/ad-hoc provider acceptance. All
+links/selection/bookmarks/zoom and later gates NOTPERFORMED.
+
+Normal observed Close PASS to exact native PAGE1. Before/after native screenshots
+byte-identical; disposable SHA7cf9de8f...b213905 unchanged, .pdf.mark absent;
+public reader package hashes and rotation1/2 unchanged.37 exact owned nonlink/
+hash-verified/local-backed capture/staged-installer files removed and absence
+verified. Local evidence/rollback retained; open disposable intentionally retained.
+Code61 remains installed/enabled, not rolled back. No pen/original/root/firmware/
+other-plugin changes. RELEASED6186265230 from6186104046, safe to disconnect.
+
+Offline check of the exact packaged ARM64 engine agrees with receipt AND existing
+runtime accepted SHA256e6b7257b3905152dab64c79f7a4a570693e11ccb740e92e4d3b89c28df6fcbbb.
+Do not repin or bypass provider authentication. Investigate actual runtime API
+provider binding; precise resolved path/hash/cause not established by this trial.
+No further hardware probe, install, timer resume, PR finalization or merge.
+
 ## 2026-10-15 — code61 approved; CI-only follow-up (no new hardware)
 
 User approved exact code61 H1 install/retest and reviewed14-file publication.

@@ -2,6 +2,16 @@
 
 ## Current queue — interactive original PDF reading
 
+CURRENT2026-10-15: exact code61 H1 executed: upgrade/runtime marker PASS, engine
+provider authentication FAIL before render, subsequent interactions NOTPERFORMED.
+Normal Close/integrity/37 owned-file cleanup PASS, RELEASED6186265230; code61 left
+installed/ON, safe to disconnect. No current hardware queue or access authority.
+Investigate provider binding OFFLINE while preserving the valid existing engine
+pin; packaged bytes/receipt agree with that pin. New correction must pass focused
+checks/independent review/exact compatible package before requesting a fresh
+bounded H1 approval/reservation. Do not repeat code61, add ink/emulator prerequisites
+or infer this trial authorizes extra probes. Full evidence REGRESSION.md.
+
 CURRENT2026-10-15: exact code61 installation/H1 retest approval RECEIVED. The
 14-file source/evidence publication and issue23 summary are complete at85c1d9a;
 approved executable1c85d06/SNPLGa57b0418...4fcd0f2 unchanged. No install or device

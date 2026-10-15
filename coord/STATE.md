@@ -2,6 +2,18 @@
 
 ## Current phase — approved PDFium integration (T018I)
 
+CURRENT2026-10-15: approved code61 H1 ran under6186104046. Normal same-ID upgrade
+and exact exp2 runtime marker PASS; first engine activation FAIL at resolved
+provider authentication before rendering. Links/text/bookmarks/zoom NOTPERFORMED.
+Normal Close exact native PAGE1 and identical before/after screenshot PASS; source/
+absent mark/public packages/rotation unchanged,37 exact owned scratch-stage files
+removed/absence verified/local evidence retained. RELEASED6186265230, safe to
+disconnect. Code61 remains installed/enabled; no retry or rollback inferred.
+Details REGRESSION.md. Current blocker is runtime provider binding, not connection
+or package approval; source audit OFFLINE, no further device access authorized.
+Exact packaged engine hash ALREADY matches runtime accepted pin/receipt; do not
+repin or weaken guard. Prior connection/setup holds below are resolved/historical.
+
 CURRENT2026-10-15: user approved publication of the14-file loader correction AND
 the8-file CI-only follow-up/issue23 summaries. Source/evidence pushed and remote
 verified at69dd4e38a19a5c2987d16910f5a2e9d7747d2011, summarized in issue23

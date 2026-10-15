@@ -1,5 +1,18 @@
 # T018I loader correction — independent source-only review
 
+## Subsequent exact-package hardware result
+
+User-approved code61 normal upgrade/exact exp2 runtime marker PASS on unrooted
+3.30.45/API30, reservation6186104046. First engine activation failed the resolved
+provider-identity hash guard before rendering. No later interactions performed;
+this review/build success did not establish correct in-host provider binding.
+Normal Close/exact native PAGE1/screenshot equality/source+absent mark/public
+reader packages/rotation and37 owned-file cleanup PASS, RELEASED6186265230.
+Local raw only; full summarized evidence REGRESSION.md. Code61 remains installed.
+Offline exact packaged engine SHA matches the configured accepted ARM64 pin and
+receipt, so do not change the pin. Actual runtime provider path/hash/cause remains
+unproven; narrow source-only provider-boundary assessment next, no device probes.
+
 ## CI-only follow-up after approved publication
 
 User approved14-file source/evidence/issue23 publication and exact code61 retest.

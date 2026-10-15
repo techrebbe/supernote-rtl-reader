@@ -1,5 +1,16 @@
 # T018I — user-approved PDFium reader integration
 
+CURRENT2026-10-15: code61 installed/ON/exact runtime marker verified under fresh
+6186104046. Native disposable PAGE1 setup PASS, then engine initialization FAIL:
+resolved PDFium provider is not pinned engine. No render/interaction PASS; later
+H1 phases NOTPERFORMED. Normal Close/native before-after identical/source/absent
+mark/public packages/rotation PASS;37 owned scratch/stage files cleaned, evidence
+retained, RELEASED6186265230. Code61 remains installed; Nomad can disconnect.
+Offline packaged engine hash matches existing accepted pin/receipt. Next is a
+narrow authenticated-provider binding correction, not blind digest repinning,
+another hardware probe, ink work or unchanged-modeling loop. Full result
+REGRESSION.md; new reviewed exact candidate/approval/reservation needed afterward.
+
 CURRENT2026-10-15: user exact publication and code61 retest approvals received;
 source/evidence85c1d9a remote verified, summarized issue23. Candidate executable
 1c85d06/package hash/signature unchanged and UNINSTALLED. Hardware waits for fresh

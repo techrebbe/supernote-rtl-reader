@@ -2,6 +2,17 @@
 
 ## Current queue — interactive original PDF reading
 
+CURRENT2026-10-15: code61 exact executable1c85d066a5111b803ff41463372b80d349f6c6b8
+independently CLEAN/identity-confirmed; normal exact clean-archive signed package
+and complete verification PASS. Candidate0.4.25-pdfium-exp2/SNPLG
+a57b04184fffc181b562d8cbbc61159bf396ec8ba6729b13d0511287d4fcd0f2,
+same60/59 signer, UNINSTALLED. Requested exact installation/H1 retest approval
+and source/summary publication separately. Device remains RELEASED6184589609,
+safe disconnected. No active process; do not poll device/repeat code60/rebuild
+unchanged software. Once approved/free/connected: new exclusive issue23 reservation,
+exact preflight/normal same-ID upgrade and same portrait H1 with per-phase checks,
+normal Close/integrity/owned cleanup/release. No new pen/ink/root/merge.
+
 LATEST2026-10-15: integrated code60 H1 failed at native loader before rendering;
 normal Close/source/annotation/public package/rotation/owned cleanup PASS,
 RELEASED6184589609. Nomad NOT needed for current offline runtime-link correction.

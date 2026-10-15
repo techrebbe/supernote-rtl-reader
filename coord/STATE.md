@@ -2,6 +2,18 @@
 
 ## Current phase — approved PDFium integration (T018I)
 
+CURRENT2026-10-15: exact correction executable1c85d066a5111b803ff41463372b80d349f6c6b8
+independently review-confirmed CLEAN; scoped pins/all four invariants and package
+fail-closed PASS. Normal clean-archive build exit0/75tasks, final source/payload/
+packaged-ELF/signature verification PASS. Candidate0.4.25-pdfium-exp2/code61 SNPLG
+a57b04184fffc181b562d8cbbc61159bf396ec8ba6729b13d0511287d4fcd0f2,
+same production certificate as60/59. Detailed identity in loader-correction review.
+UNINSTALLED/runtime UNKNOWN, public push/summary and exact retest approvals
+requested. No active build/reviewer/device process; device RELEASED6184589609,
+safe disconnected. No new hardware use until exact approval/fresh reservation/
+preflight; no need more unchanged offline modeling. Ink PARKED/timers PAUSED.
+Below are chronological prior checkpoints, not renewed blockers/authority.
+
 NEWEST2026-10-15: user-approved independent narrow loader review CLEAN/noP0/P1/P2.
 Fresh reviewer ARM64 build and packaged failed/incomplete-wrapper negative
 controls passed; reviewed index/workflow-only pins now applied. Owner Java Core

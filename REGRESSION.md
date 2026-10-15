@@ -2,6 +2,17 @@
 
 ## 2026-10-15 — T018I-H1 integrated code60 loader FAIL / cleanup PASS
 
+Software follow-up: exp2/code61 exact executable
+1c85d066a5111b803ff41463372b80d349f6c6b8 independently review/identity-confirmed
+CLEAN, scoped marker/workflow digest updates/all invariants PASS. One normal
+clean-archive signed build exit0/75tasks and packaged ELF/source/payload/signature
+verification PASS. Candidate SNPLGSHA256
+a57b04184fffc181b562d8cbbc61159bf396ec8ba6729b13d0511287d4fcd0f2,
+same production signer60/59, UNINSTALLED/actual host loading UNKNOWN. Detailed
+review/build identity coord/reviews/T-018I-loader-correction.md. New exact
+publication/install/retest approvals requested; no corrected hardware PASS or
+public push claimed. The bounded failure/cleanup below remains authoritative.
+
 User-approved source a102cb9490af5fbdecff9a7e5c73f2965fa6779b,
 RTL Reader 0.4.25-pdfium-exp1/code60/SDK0.1.65, selected signed build1 SNPLG
 dd8756df524cf3b02a410f25bde6516ded40772660e430b3d0c6244b85056003.

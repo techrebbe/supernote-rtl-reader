@@ -1,5 +1,16 @@
 # T018I — user-approved PDFium reader integration
 
+CURRENT2026-10-15: executable1c85d066a5111b803ff41463372b80d349f6c6b8 exact-head
+independent identity confirmation CLEAN; reviewed pins/source gates pass. One
+normal exact clean-archive code61 build exit0/75tasks and mandatory complete
+packaged source/ELF/payload/v2-v3 signature gates PASS. SNPLG
+a57b04184fffc181b562d8cbbc61159bf396ec8ba6729b13d0511287d4fcd0f2,
+0.4.25-pdfium-exp2; same production signer as installed60/retained59. Full
+candidate evidence ../reviews/T-018I-loader-correction.md. UNINSTALLED, real
+PluginHost/H1 still UNKNOWN. Public14-file/summarized issue23 update and exact
+retest approvals requested, no push/install yet. No active process or device use.
+Next is fresh approved disposable H1/reservation, not another speculative cycle.
+
 NEWEST2026-10-15: independent loader-correction review CLEAN/noP0/P1/P2,
 including fresh actual ARM64 production compile and packaged receipt-consistent
 failed/incomplete wrapper negatives. Marker-only index and test/artifact-only

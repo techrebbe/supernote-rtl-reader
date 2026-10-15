@@ -1,5 +1,35 @@
 # T018I loader correction — independent source-only review
 
+## Exact candidate build checkpoint
+
+Executable1c85d066a5111b803ff41463372b80d349f6c6b8, independently confirmed
+after commit: correction source equals reviewed snapshot/compiled source receipt;
+both scoped pins exact, no extra behavioral change. Working tree was clean when
+the exact Git archive was created. Normal build1 exit0/75tasks, complete package
+verification including packaged ELF/source receipt/DEX/classes/engine/notices and
+v2/v3 compatible signature PASS. One normal full build, no byte-reproducibility
+claim. Separate reviewer fresh native compilation also passed, not a full APK.
+
+- Plug-in0.4.25-pdfium-exp2/code61, IDsnrtl20260726001, SDK0.1.65.
+- Native packagecom.supernotertlreader/Android1.0/code1/min27/target35 unchanged.
+- SNPLG11129263bytes/SHA256
+  a57b04184fffc181b562d8cbbc61159bf396ec8ba6729b13d0511287d4fcd0f2.
+- Embedded app.npk11014007bytes/SHA256
+  28cee99240652b6f9e8be5a9133e785180748ebaf5f7257fe2e8310de91ea449.
+- Metro1180199bytes/SHA256
+  21d725ce245acef39d121c195ec08ece77f69b417c887d35bc1f0ad09cebceec.
+- Certificate SHA256fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c,
+  matches retained code60/code59; v2/v3 verified. No keystore/credential upload.
+- Local artifact tmp/t018i-exp2-1c85d06-build1/out/SupernoteRtlReader.snplg;
+  raw build/provenance/identity retained locally, not for public upload.
+- All four source invariants and package fail-closed rerun PASS after the reviewed
+  pins. No new native-writer/core/ink source change; Java Core85407 PASS.
+
+Code61 UNINSTALLED, actual PluginHost loading and H1 interactions UNVERIFIED.
+Public14-file source/summary and exact-code61 bounded retest approvals requested,
+not assumed. No active build/review/device process; Nomad may remain disconnected.
+Fresh exclusive reservation/preflight required for any future approved retest.
+
 2026-10-15, user explicitly authorized a separate narrow reviewer. Reviewed the
 12-file uncommitted correction against94534ef13329d47e607232ac780ff0a90d06d27a.
 Reviewer read/ran offline checks only: no source/Git metadata/device/publication

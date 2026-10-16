@@ -1,5 +1,29 @@
 # STATE — RTL Reader (updated 2026-10-16 by codex)
 
+## Latest: code67 reviewed/built/verified, UNINSTALLED; H8 transport block
+
+Exact executable e53a86fd84abd8b5d475bd622a7551ac3702c824 / exp8/code67 independently
+correction-confirmed sole P2 CLOSED/no new blocker. Normal clean-archive build
+exit0/75 tasks, actual-JSX/controller28 and complete package/source/DEX/ELF/engine/
+notices/bundle/signature gates PASS; actual-APK provider11 PASS. Normalized23 input
+aggregate8366e49b...13da09d independently matched; v2/v3 signer same retained66.
+SNPLG11143596bytes SHA426d127bf6d7ee9d1748c740d74172bf158c235aa6e9432208933c6a7189e3dc.
+Full identity/hashes in REGRESSION and local tmp/t018i-exp8-e53a86f-build1.
+Core85407/all271 mutations/navigation-input-Edit135/invariants/provenance/packaging
+PASS. No speculative extra offline prerequisite; all useful candidate gates done.
+
+Approved NEW H8 reservation6208147302 NOTPERFORMED: first known transport connect
+timed out, exact target absent/one ADB inventory empty. Stopped BEFORE preflight,
+capture, source-integrity claim, stage/install/settings/page/pen. No cleanup target,
+no current device-state claim, installed66 unchanged by this attempt. RELEASED
+6208162829. No active build/review/test/device process. Do not poll or reuse ID.
+
+Exact unblock: user reconnects/unlocks/approves USB debugging or supplies reachable
+current Wi-Fi ADB address; question sent. SAME already-approved67 then NEW exclusive
+reservation/exact preflight/defined H8 test. No repeat package approval or unchanged
+build/review/emulator loop. Keep code67 UNINSTALLED until then. No source/binary
+publication; retained rollback/copies/raw intact. Ink PARKED/timers PAUSED/no merge.
+
 ## Current: independent interaction review, corrected code67 candidate preparation
 
 User APPROVED independent review, corrected build and remaining bounded Nomad

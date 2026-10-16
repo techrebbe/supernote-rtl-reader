@@ -1,5 +1,23 @@
 # Next useful hardware batch — no speculative test loop
 
+## Immediate unblock: reconnect for SAME approved, verified code67 H8
+
+Exact e53a86f/exp8/code67 source correction independently CLEAR, normal exact
+clean-archive build exit0/75 tasks, full package/source/DEX/ELF/notices/engine/
+bundle/signature verification and actual-APK provider11 PASS. Same retained66
+signer; SNPLG SHA426d127bf6d7ee9d1748c740d74172bf158c235aa6e9432208933c6a7189e3dc.
+Candidate UNINSTALLED; no new source/build/review prerequisite.
+
+Fresh6208147302 NOTPERFORMED at initial transport timeout/target absent/empty
+inventory, BEFORE preflight/capture/stage/install/input/source-integrity claim.
+No cleanup targets, installed66 unchanged by attempt/not live verified. RELEASED
+6208162829; no device observer/process or repeated polling. Current unblock is
+user reconnect/unlock/debug USB approval or a reachable current Wi-Fi ADB address.
+Connection question sent. Then NEW reservation and exact H8 preflight/sequence
+below for SAME already-approved package, not another routine permission request
+or speculative emulator/source loop. Private H8 helpers prepared; consumed ID is
+recorded NOTPERFORMED and must never be reused. Retain all evidence/copies/rollback.
+
 ## Approved continuation: exact code67 H8 correction gate, then remaining smoke
 
 User2026-10-16 approved independent review, corrected build and remaining Nomad

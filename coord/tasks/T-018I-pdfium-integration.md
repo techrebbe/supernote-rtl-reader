@@ -1,5 +1,17 @@
 # T018I — user-approved PDFium reader integration
 
+LATEST code67 exacte53a86f: independent correction confirmation sole P2 CLOSED/no
+new blocker; normal clean-archive build exit0/75 tasks/full package-source-DEX-ELF-
+engine-notices-bundle/signature PASS, actual-APK provider11 PASS. SNPLG426d127b...89e3dc,
+same66 signer; candidate UNINSTALLED. Core85407/all271mutations and relevant existing
+gates PASS. Exact receipts in REGRESSION and local candidate-identity.json.
+Fresh6208147302 H8 NOTPERFORMED at first transport timeout/target absent/empty ADB
+inventory; no preflight/capture/stage/install/input, no cleanup targets or live
+device-state claim. RELEASED6208162829, no running build/test/review/device process.
+Need user USB reconnect/unlock/debug approval or current reachable Wi-Fi address;
+question sent. SAME approved67 next under NEW reservation/preflight, no repeated
+review/build/approval/emulation. No source/binary publication or merge.
+
 CURRENT2026-10-16: user APPROVED independent review, corrected build and remaining
 bounded disposable Nomad tests. Read-only exact7dafc717 review found ONE P2 child-
 layout native retry behind fatal panel; no other concrete finding. Correction

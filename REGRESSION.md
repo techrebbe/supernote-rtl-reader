@@ -1,5 +1,46 @@
 # RTL Reader hardware regression
 
+## 2026-10-16 — exact code67 built/verified; H8 NOTPERFORMED, transport unavailable
+
+Independent correction confirmation at e53a86fd84abd8b5d475bd622a7551ac3702c824:
+sole P2 CLOSED/no new concrete blocker. Focused28/integration6/wiring6 independently
+rerun; fresh-mount/Try Fit, stale-ticket and scoped marker/build-pin boundaries
+confirmed. Independent normalized-LF 23-input aggregate:
+8366e49b15136292031c54fd0fde0f7637f41756db7209850ca8bf1ec13da09d.
+Main exact-head core85,407/all271 mutations, navigation/input/Edit135 and existing
+native/v2/Edit/cross-layer/provenance/packaging gates PASS.
+
+Normal clean-archive build of that exact commit completed exit0/75 tasks, including
+the newly wired actual-JSX/controller28 gate. Version0.4.25-pdfium-exp8/code67,
+same pluginID/SDK0.1.65/package com.supernotertlreader. Package/source receipt/DEX/
+ELF/pinned engine/notices/bundle verification PASS; actual finished-APK provider11
+PASS/no skips. Same retained66 v2/v3 signer verified:
+fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c.
+
+- SupernoteRtlReader.snplg: 11,143,596 bytes, SHA256
+  426d127bf6d7ee9d1748c740d74172bf158c235aa6e9432208933c6a7189e3dc.
+- app.npk: 11,026,295 bytes, SHA256
+  6e8edf2b578700f3fd6b4e345396d5b68b7c089f0f724ceaca8c9d35d3495e18.
+- Bundle: 1,181,183 bytes, SHA256
+  251050bc9a26a1c80a326960301aff6db62a9d3b9f52ebe698ba0822dd94a6d2.
+
+Exact archive/raw receipt source hashes differ from LF working-copy hashes only
+by CRLF normalization; all23 normalized inputs match the independent aggregate.
+No bit-identical rebuild, Android lifetime/total-memory or hardware zoom claim.
+Local package and candidate-identity.json retained under
+tmp/t018i-exp8-e53a86f-build1; no source/binary publication or installation.
+
+Fresh H8 reservation6208147302: first transport connection timed out, exact target
+not found, one ADB inventory empty. NOTPERFORMED before preflight/source-integrity
+assertions, captures, stage/install, document/page/rotation/pen or other screen
+action. No cleanup targets. Installed66 unchanged by this attempt, not freshly
+reverified; no current device-state assertion. RELEASED6208162829, no device or
+build/test process remains. User reconnect/unlock/USB-debug approval or current
+reachable Wi-Fi ADB address is the hardware unblock; connection request sent.
+Then SAME approved67 scope under NEW reservation/preflight, no repeat package
+consent/build/review/emulator loop. All existing rollback/copies/evidence retained;
+ink PARKED/timers PAUSED/no root/firmware/merge. Private metadata/raw stay local.
+
 ## 2026-10-16 — independent correction review and code67 candidate preparation
 
 User approved the independent source review, corrected build and remaining

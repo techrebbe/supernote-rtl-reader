@@ -1,5 +1,24 @@
 # T018I loader correction — independent source-only review
 
+## Exact code67 correction confirmed; package verification complete, hardware pending
+
+Independent read-only reviewer confirmed e53a86fd84abd8b5d475bd622a7551ac3702c824
+against7dafc717: P2 CLOSED/no new concrete blocker. Three-slot fatal blocking plus
+native failed-view latch preserve stale-ticket fences; explicit Try Fit creates
+a fresh keyed native mount. Independently rerun focused28/integration6/wiring6;
+exact scoped marker/artifact/build-pin reverse proofs PASS. Normalized23 source
+aggregate8366e49b15136292031c54fd0fde0f7637f41756db7209850ca8bf1ec13da09d.
+
+Normal exact clean-archive exp8/code67 build exit0/75 tasks, all23 normalized source
+inputs match that independently reviewed aggregate. Package/source receipt/DEX/
+ELF/engine/notices/bundle verification and same66 v2/v3 signer PASS; finished-APK
+provider11 PASS. SNPLG426d127b...89e3dc; complete identity in REGRESSION/local receipt.
+No new source/binary publication or installation. H8 reservation6208147302 was
+NOTPERFORMED at unavailable transport, before device preflight/capture/input/stage;
+RELEASED6208162829/no cleanup targets. Hardware zoom/Pan gate remains OPEN, not a
+review/build failure. Reconnect then NEW reservation for SAME approved67; no broad
+new architecture/emulator/review cycle. No active reviewer/device/build process.
+
 ## 2026-10-16 narrow interaction review — one P2, correction confirmation pending
 
 User explicitly approved independent review and continuation through corrected
